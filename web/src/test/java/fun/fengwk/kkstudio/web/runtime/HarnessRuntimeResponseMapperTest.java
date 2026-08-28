@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCode
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -637,8 +638,8 @@ class HarnessRuntimeResponseMapperTest {
             descriptor(),
             ToolVisibility.SELECTABLE,
             AgentToolBackend.ENVIRONMENT_CAPABILITY),
-        new EnvironmentBinding(new EnvironmentName("local"), "workspace"),
-        null);
+        new ContributorBinding("test", "bash", List.of()),
+        new EnvironmentBinding(new EnvironmentName("local"), "workspace"));
   }
 
   private static ToolBinding hostToolBinding() {
@@ -648,7 +649,7 @@ class HarnessRuntimeResponseMapperTest {
             descriptor(),
             ToolVisibility.SELECTABLE,
             AgentToolBackend.HOST),
-        null,
+        new ContributorBinding("test", "bash", List.of()),
         null);
   }
 

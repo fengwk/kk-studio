@@ -26,9 +26,9 @@ class ContributorIdTest {
     assertThrows(IllegalArgumentException.class, () -> new ContributorId(""));
     assertThrows(IllegalArgumentException.class, () -> new ContributorId("   "));
     assertThrows(IllegalArgumentException.class, () -> new ContributorId("Core"));
-    assertThrows(IllegalArgumentException.class, () -> new ContributorId("core_plugin"));
-    assertThrows(IllegalArgumentException.class, () -> new ContributorId("core..plugin"));
-    assertThrows(IllegalArgumentException.class, () -> new ContributorId("core--plugin"));
+    assertThrows(IllegalArgumentException.class, () -> new ContributorId("core_custom"));
+    assertThrows(IllegalArgumentException.class, () -> new ContributorId("core..custom"));
+    assertThrows(IllegalArgumentException.class, () -> new ContributorId("core--custom"));
     assertThrows(IllegalArgumentException.class, () -> new ContributorId(".core"));
     assertThrows(IllegalArgumentException.class, () -> new ContributorId("core."));
     assertThrows(IllegalArgumentException.class, () -> new ContributorId("-core"));

@@ -70,9 +70,7 @@ class DaemonModuleArchitectureTest {
         violations.isEmpty(), () -> "architecture violations:\n" + String.join("\n", violations));
   }
 
-  /**
-   * Daemon main 只通过 Environment Capability SPI 执行，不依赖模型 Tool execution 或 Environment tool catalog。
-   */
+  /** Daemon main 只通过 Environment Capability SPI 执行，不依赖模型 Tool execution。 */
   @Test
   void daemonMainUsesCapabilityExecutionBoundary() throws IOException {
     Path main = locateDaemonMainJava();
@@ -85,8 +83,7 @@ class DaemonModuleArchitectureTest {
               path -> {
                 try {
                   String source = Files.readString(path, StandardCharsets.UTF_8);
-                  if (source.contains("fun.fengwk.kkstudio.harness.tool.execution.")
-                      || source.contains("EnvironmentToolCatalog")) {
+                  if (source.contains("fun.fengwk.kkstudio.harness.tool.execution.")) {
                     violations.add(relative(main, path));
                   }
                 } catch (IOException error) {

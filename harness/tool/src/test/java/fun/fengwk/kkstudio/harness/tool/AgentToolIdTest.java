@@ -13,7 +13,7 @@ class AgentToolIdTest {
   void acceptsCanonicalExamples() {
     assertEquals("base.read", new AgentToolId("base.read").value());
     assertEquals("base.apply-patch", new AgentToolId("base.apply-patch").value());
-    assertEquals("plugin.goal.create", new AgentToolId("plugin.goal.create").value());
+    assertEquals("custom.goal.create", new AgentToolId("custom.goal.create").value());
     assertEquals("mcp.github.create-issue", new AgentToolId("mcp.github.create-issue").value());
 
     AgentToolId generated = new AgentToolId("studio.canvas.generate2");

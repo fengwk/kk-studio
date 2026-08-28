@@ -12,14 +12,12 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
 /** 覆盖 HOST、DECLARATIVE 与 ENVIRONMENT_CAPABILITY backend 的严格 ToolBinding wire。 */
 class ToolBindingJsonCodecTest {
 
   private final ToolBindingJsonCodec codec = new ToolBindingJsonCodec();
   private final AgentToolDefinitionJsonCodec definitionCodec = new AgentToolDefinitionJsonCodec();
-  private final ToolDescriptorJsonCodec descriptorCodec = new ToolDescriptorJsonCodec();
 
   /** 精确 JSON 既证明字段顺序 deterministic，又在 round-trip 时重新执行 backend 不变式。 */
   @Test
@@ -79,12 +77,11 @@ class ToolBindingJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /** 顶层字段必须恰好是 definition/contributor/environment，旧 plugin 形状必须拒绝。 */
+  /** 顶层字段必须恰好是 definition/contributor/environment。 */
   @Test
-  void rejectsUnknownMissingWrongTypeAndLegacyShape() {
+  void rejectsUnknownMissingAndWrongTypeTopLevelFields() {
     ToolBinding environment = binding(AgentToolBackend.ENVIRONMENT_CAPABILITY);
     String definition = definitionCodec.encode(environment.definition());
-    String descriptor = descriptorCodec.encode(environment.definition().descriptor());
     String valid =
         "{\"definition\":"
             + definition
@@ -133,42 +130,22 @@ class ToolBindingJsonCodecTest {
                 valid.replace(
                     "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}",
                     "null")));
-
-    // 旧 plugin 字段必须严格拒绝
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"definition\":"
-                    + definition
-                    + ",\"environment\":null,\"plugin\":{\"pluginId\":\"goal\",\"contributionLocalName\":\"create\",\"stateAccesses\":[]}}"));
-    // 旧 durable binding 的 descriptor/type 顶层形状不是新协议的合法输入，不能兼容恢复。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"descriptor\":"
-                    + descriptor
-                    + ",\"type\":\"ENVIRONMENT\",\"environment\":null,\"plugin\":null}"));
   }
 
-  /**
-   * Contributor 对象内部字段校验：必须是 contributorId/localName/stateAccesses，旧 pluginId/contributionLocalName
-   * 必须拒绝。
-   */
+  /** Contributor 对象内部字段校验：必须是 contributorId/localName/stateAccesses。 */
   @Test
-  void rejectsLegacyAndInvalidContributorFields() {
+  void rejectsInvalidContributorFields() {
     ToolBinding host = binding(AgentToolBackend.HOST);
     String definition = definitionCodec.encode(host.definition());
 
-    // 旧 pluginId / contributionLocalName 字段
+    // 未知字段
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"definition\":"
                     + definition
-                    + ",\"contributor\":{\"pluginId\":\"goal\",\"contributionLocalName\":\"create\",\"stateAccesses\":[]}"
+                    + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\",\"stateAccesses\":[],\"unknown\":true}"
                     + ",\"environment\":null}"));
 
     // 缺少 stateAccesses
