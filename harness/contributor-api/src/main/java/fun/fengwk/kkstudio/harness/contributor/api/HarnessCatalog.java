@@ -502,8 +502,7 @@ public final class HarnessCatalog {
         }
       }
       if (ready.isEmpty()) {
-        throw new IllegalArgumentException(
-            "contributor contribution requires graph contains a cycle");
+        throw new IllegalArgumentException("contributor requires graph contains a cycle");
       }
       ready.sort(readyOrder);
       T next = ready.get(0);

@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -210,6 +211,26 @@ class HarnessContractTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new DeclarativeToolContribution(id, hostDef, dummyDeclarative, List.of(), 0));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new DeclarativeToolContribution(
+                id,
+                declDef,
+                dummyDeclarative,
+                Arrays.asList(new StateDeclaration("state", StateMode.READ), null),
+                0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DeclarativeToolContribution(
+                id,
+                declDef,
+                dummyDeclarative,
+                List.of(
+                    new StateDeclaration("state", StateMode.READ),
+                    new StateDeclaration("state", StateMode.WRITE)),
+                0));
   }
 
   @Test
