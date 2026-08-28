@@ -10,15 +10,17 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 不可变分支视图：基于 root-to-head {@link EntryPath} 的只读投影，供读取自定义状态。
+ * 不可变分支视图：基于 root-to-head {@link EntryPath} 的只读状态投影。
  *
- * <p>视图不暴露 HarnessStore / gateway / transaction；只能按结构化键 {@code (contributorId, customType)} 匹配读取
- * CUSTOM Entry 的 payload 列表（root-to-head 顺序）。路径由调用方保证已通过 EntryPath 构造校验。
+ * <p>视图对扩展隐藏底层完整历史路径（不暴露 EntryPath / transcript），仅允许通过结构化键 {@code (contributorId, customType)} 查询
+ * CUSTOM Entry 的状态 payload。
  */
-public record BranchView(EntryPath path) {
+public final class BranchView {
 
-  public BranchView {
-    path = Objects.requireNonNull(path, "path");
+  private final EntryPath path;
+
+  public BranchView(EntryPath path) {
+    this.path = Objects.requireNonNull(path, "path");
   }
 
   /** 返回路径上 {@code (contributorId, customType)} 匹配的 CUSTOM Entry payload 列表（root-to-head 顺序）。 */
@@ -49,5 +51,27 @@ public record BranchView(EntryPath path) {
       }
     }
     return Optional.empty();
+  }
+
+  @Override
+  public boolean equals(Object obj) {
+    if (this == obj) {
+      return true;
+    }
+    if (obj == null || getClass() != obj.getClass()) {
+      return false;
+    }
+    BranchView other = (BranchView) obj;
+    return path.equals(other.path);
+  }
+
+  @Override
+  public int hashCode() {
+    return path.hashCode();
+  }
+
+  @Override
+  public String toString() {
+    return "BranchView[head=" + path.head().id() + ", size=" + path.entries().size() + "]";
   }
 }

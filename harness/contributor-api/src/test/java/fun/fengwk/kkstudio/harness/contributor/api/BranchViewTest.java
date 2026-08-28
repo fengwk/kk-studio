@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.contributor.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,12 +14,14 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/** {@link BranchView} 的不可变投影、精准结构化匹配与 head-recent 顺序测试。 */
+/** {@link BranchView} 的不可变投影、精准结构化匹配、封装性与 head-recent 顺序测试。 */
 class BranchViewTest {
 
   private static final UUID SESSION_ID = UUID.randomUUID();
@@ -67,6 +70,38 @@ class BranchViewTest {
     assertEquals(goalOther, view.latestCustomEntry(GOAL, "archive").orElseThrow());
     assertTrue(view.customEntries(new ContributorId("unknown"), "state").isEmpty());
     assertTrue(view.latestCustomEntry(new ContributorId("unknown"), "state").isEmpty());
+  }
+
+  /** 反射契约断言：BranchView 不是 record，不暴露 EntryPath、path() 或完整 transcript 访问。 */
+  @Test
+  void encapsulatesEntryPathWithoutPublicAccessors() {
+    assertFalse(BranchView.class.isRecord());
+    for (Method method : BranchView.class.getMethods()) {
+      assertFalse(
+          EntryPath.class.isAssignableFrom(method.getReturnType()),
+          () -> "BranchView must not expose EntryPath: " + method.getName());
+      assertFalse(
+          "path".equals(method.getName()), () -> "BranchView must not expose path() accessor");
+      assertFalse(
+          "entries".equals(method.getName()),
+          () -> "BranchView must not expose entries() accessor");
+    }
+    for (Field field : BranchView.class.getFields()) {
+      assertFalse(
+          EntryPath.class.isAssignableFrom(field.getType()),
+          () -> "BranchView must not have public EntryPath field: " + field.getName());
+    }
+  }
+
+  @Test
+  void supportsEqualsHashCodeAndToString() {
+    EntryPath path = rootOnlyPath();
+    BranchView first = new BranchView(path);
+    BranchView second = new BranchView(path);
+
+    assertEquals(first, second);
+    assertEquals(first.hashCode(), second.hashCode());
+    assertTrue(first.toString().contains("BranchView"));
   }
 
   /** 参数校验与不可变性。 */
