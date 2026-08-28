@@ -9,19 +9,16 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
+import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool;
+import fun.fengwk.kkstudio.harness.builtin.skill.SkillBodyLoader;
+import fun.fengwk.kkstudio.harness.builtin.skill.ThreadSelectedSkillLookup;
+import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
+import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
+import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunRegistry;
+import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
-import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
-import fun.fengwk.kkstudio.harness.runtime.skill.SkillBodyLoader;
-import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
-import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
-import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
-import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentRunRegistry;
-import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
-import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -33,13 +30,10 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-/**
- * 把普通 runtime 工具（当前为 {@code load_skill} 与 {@code task}）装配为 Spring {@code Tool} bean，并为 {@code
- * {@link ToolFactory} bean；普通 Tool 与插件 Tool 随后统一进入 {@link AgentToolRegistry}。
- */
+/** 装配第一方内置工具（{@code load_skill} 与 {@code task}）并暴露唯一 {@link BuiltinHarnessContributor} bean。 */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(HarnessExecutionAdmissionProperties.class)
-public class RuntimeToolsConfiguration {
+public class BuiltinHarnessContributorConfiguration {
 
   @Bean
   @ConditionalOnBean({ThreadSelectedSkillLookup.class, SkillBodyLoader.class})
@@ -53,14 +47,6 @@ public class RuntimeToolsConfiguration {
         skillLookup,
         skillBodyLoader,
         () -> Duration.ofMillis(systemSettingsSnapshot.get().tool().skillLoadTimeoutMillis()));
-  }
-
-  @Bean
-  @ConditionalOnBean(LoadSkillTool.class)
-  @ConditionalOnMissingBean(name = "loadSkillToolFactory")
-  public ToolFactory loadSkillToolFactory(LoadSkillTool loadSkillTool) {
-    return ToolFactory.singleton(
-        LoadSkillTool.AGENT_TOOL_ID, loadSkillTool, ToolVisibility.INTERNAL, 0);
   }
 
   /**
@@ -118,14 +104,9 @@ public class RuntimeToolsConfiguration {
   }
 
   @Bean
-  public ToolFactory taskToolFactory(TaskTool taskTool) {
-    return ToolFactory.singleton(TaskTool.AGENT_TOOL_ID, taskTool, ToolVisibility.INTERNAL, 0);
-  }
-
-  @Bean
-  public AgentToolRegistry agentToolRegistry(
-      ObjectProvider<ToolFactory> toolFactoryBeans, PluginCatalog pluginCatalog) {
-    return new AgentToolRegistry(
-        toolFactoryBeans.orderedStream().toList(), pluginCatalog, EnvironmentToolCatalog.entries());
+  @ConditionalOnBean({LoadSkillTool.class, TaskTool.class})
+  public BuiltinHarnessContributor builtinHarnessContributor(
+      LoadSkillTool loadSkillTool, TaskTool taskTool) {
+    return new BuiltinHarnessContributor(loadSkillTool, taskTool);
   }
 }

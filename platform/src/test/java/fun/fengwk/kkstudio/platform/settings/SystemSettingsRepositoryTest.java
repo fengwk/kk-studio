@@ -8,9 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
 import java.util.LinkedHashMap;
@@ -74,7 +74,7 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
     SystemSettings second =
         withPermission(
             Map.of(
-                BaseToolIds.WRITE.value(),
+                BuiltinToolIds.WRITE.value(),
                 List.of(new PermissionRule("*", PermissionAction.DENY))));
 
     CountDownLatch ready = new CountDownLatch(2);
@@ -109,7 +109,7 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
                       .settings()
                       .tool()
                       .permission()
-                      .get(BaseToolIds.WRITE.value())
+                      .get(BuiltinToolIds.WRITE.value())
                       .get(0)
                       .action(),
           "winner's config must be persisted");

@@ -36,7 +36,7 @@ class PlatformToolGatewayConstructionTest {
     properties.setWorkdir(Path.of("sub/./deep"));
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
+            ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             properties,
@@ -66,7 +66,7 @@ class PlatformToolGatewayConstructionTest {
               IllegalStateException.class,
               () ->
                   ToolGatewayTestSupport.gateway(
-                      ToolGatewayTestSupport.factories(),
+                      ToolGatewayTestSupport.defaultCatalog(),
                       new ToolGatewayTestSupport.FakeTransport(),
                       new ToolGatewayTestSupport.FakeResourceStore(),
                       executor));
@@ -91,7 +91,7 @@ class PlatformToolGatewayConstructionTest {
                 IllegalStateException.class,
                 () ->
                     ToolGatewayTestSupport.gateway(
-                        ToolGatewayTestSupport.factories(),
+                        ToolGatewayTestSupport.defaultCatalog(),
                         new ToolGatewayTestSupport.FakeTransport(),
                         new ToolGatewayTestSupport.FakeResourceStore(),
                         executor));
@@ -110,7 +110,7 @@ class PlatformToolGatewayConstructionTest {
             IllegalStateException.class,
             () ->
                 ToolGatewayTestSupport.gateway(
-                    ToolGatewayTestSupport.factories(),
+                    ToolGatewayTestSupport.defaultCatalog(),
                     new ToolGatewayTestSupport.FakeTransport(),
                     new ToolGatewayTestSupport.FakeResourceStore(),
                     executor));
@@ -125,7 +125,7 @@ class PlatformToolGatewayConstructionTest {
     try {
       PlatformToolGateway gateway =
           ToolGatewayTestSupport.gateway(
-              ToolGatewayTestSupport.factories(tool),
+              ToolGatewayTestSupport.defaultCatalog(tool),
               new ToolGatewayTestSupport.FakeTransport(),
               new ToolGatewayTestSupport.FakeResourceStore(),
               executor);

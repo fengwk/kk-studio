@@ -453,7 +453,7 @@ class PlatformToolGatewayCallbackTest {
     try {
       PlatformToolGateway gateway =
           ToolGatewayTestSupport.gateway(
-              ToolGatewayTestSupport.factories(tool),
+              ToolGatewayTestSupport.defaultCatalog(tool),
               new ToolGatewayTestSupport.FakeTransport(),
               new ToolGatewayTestSupport.FakeResourceStore(),
               executor);
@@ -496,7 +496,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             store,
             executor);
@@ -534,7 +534,7 @@ class PlatformToolGatewayCallbackTest {
     try {
       PlatformToolGateway gateway =
           ToolGatewayTestSupport.gateway(
-              ToolGatewayTestSupport.factories(tool),
+              ToolGatewayTestSupport.defaultCatalog(tool),
               new ToolGatewayTestSupport.FakeTransport(),
               new ToolGatewayTestSupport.FakeResourceStore(),
               executor);
@@ -570,7 +570,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor());
@@ -616,7 +616,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -655,7 +655,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             store,
             executor);
@@ -718,7 +718,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             store,
             executor);
@@ -780,7 +780,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             store,
             executor);
@@ -874,7 +874,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -901,7 +901,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -995,7 +995,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             store,
             new ToolGatewayTestSupport.ManualExecutor());
@@ -1032,7 +1032,7 @@ class PlatformToolGatewayCallbackTest {
     listener.store = store;
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             store,
             new ToolGatewayTestSupport.ManualExecutor());
@@ -1069,7 +1069,7 @@ class PlatformToolGatewayCallbackTest {
     listener.store = store;
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             store,
             new ToolGatewayTestSupport.ManualExecutor());
@@ -1102,7 +1102,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             store,
             new ToolGatewayTestSupport.ManualExecutor());
@@ -1169,7 +1169,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             store,
             executor);
@@ -1218,7 +1218,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             store,
             executor);
@@ -1332,7 +1332,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -1375,7 +1375,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -1425,7 +1425,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -1457,7 +1457,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -1492,7 +1492,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             store,
             executor,
@@ -1524,7 +1524,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             store,
             executor);
@@ -1549,7 +1549,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -1592,7 +1592,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             store,
             executor);

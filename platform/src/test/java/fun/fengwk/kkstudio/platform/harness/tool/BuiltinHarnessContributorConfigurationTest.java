@@ -9,20 +9,12 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.plugin.api.HarnessPlugin;
-import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
-import fun.fengwk.kkstudio.harness.plugin.api.PluginDescriptor;
-import fun.fengwk.kkstudio.harness.plugin.api.PluginId;
-import fun.fengwk.kkstudio.harness.plugin.api.PluginTool;
-import fun.fengwk.kkstudio.harness.plugin.api.PluginToolContext;
-import fun.fengwk.kkstudio.harness.plugin.api.PluginToolResult;
-import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
-import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool;
+import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
+import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -42,14 +34,11 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 验证 {@link RuntimeToolsConfiguration#subagentConfigProvider} 把 {@code SystemSettings.AiRuntime}
- * 的五个 subagent 字段完整映射为 {@link SubagentConfig}。纯 JUnit 单元测试：不启动 Spring/Postgres，直接构造 provider 现读。
+ * 验证 {@link BuiltinHarnessContributorConfiguration#subagentConfigProvider} 把 {@code
+ * SystemSettings.AiRuntime} 的五个 subagent 字段完整映射为 {@link SubagentConfig}，以及 executor 与 Contributor
+ * 装配。
  */
-class RuntimeToolsConfigurationTest {
-
-  private static final AgentToolId LOAD_SKILL_TOOL_ID = new AgentToolId("test.load-skill");
-  private static final AgentToolId TASK_TOOL_ID = new AgentToolId("test.task");
-  private static final AgentToolId PLUGIN_TOOL_ID = new AgentToolId("test.plugin-internal");
+class BuiltinHarnessContributorConfigurationTest {
 
   @Test
   void subagentConfigMapsAllFiveAiRuntimeFields() {
@@ -69,7 +58,7 @@ class RuntimeToolsConfigurationTest {
             89);
 
     SubagentConfig config =
-        new RuntimeToolsConfiguration()
+        new BuiltinHarnessContributorConfiguration()
             .subagentConfigProvider(new SystemSettingsSnapshot(customSettings(aiRuntime)))
             .subagentConfig();
 
@@ -84,7 +73,8 @@ class RuntimeToolsConfigurationTest {
   void subagentExecutorUsesFixedVirtualThreadsAndZeroQueue() throws Exception {
     HarnessExecutionAdmissionProperties properties = new HarnessExecutionAdmissionProperties();
     properties.setSubagent(2);
-    ExecutorService executor = new RuntimeToolsConfiguration().subagentTaskExecutor(properties);
+    ExecutorService executor =
+        new BuiltinHarnessContributorConfiguration().subagentTaskExecutor(properties);
     ThreadPoolExecutor pool = assertInstanceOf(ThreadPoolExecutor.class, executor);
     CountDownLatch entered = new CountDownLatch(2);
     CountDownLatch release = new CountDownLatch(1);
@@ -132,51 +122,25 @@ class RuntimeToolsConfigurationTest {
   }
 
   @Test
-  void agentToolRegistryKeepsInternalPluginContributionInternal() {
-    ToolDescriptor loadSkill = descriptor("load_skill");
-    ToolDescriptor task = descriptor("task");
-    ToolFactory loadSkillFactory = mock(ToolFactory.class);
-    when(loadSkillFactory.definition())
-        .thenReturn(
-            new AgentToolDefinition(
-                LOAD_SKILL_TOOL_ID, loadSkill, ToolVisibility.INTERNAL, AgentToolBackend.HOST));
-    when(loadSkillFactory.priority()).thenReturn(0);
-    ToolFactory taskFactory = mock(ToolFactory.class);
-    when(taskFactory.definition())
-        .thenReturn(
-            new AgentToolDefinition(
-                TASK_TOOL_ID, task, ToolVisibility.INTERNAL, AgentToolBackend.HOST));
-    when(taskFactory.priority()).thenReturn(0);
+  void builtinHarnessContributorRegistersInternalAndSelectableTools() {
+    LoadSkillTool loadSkill = mock(LoadSkillTool.class);
+    when(loadSkill.descriptor()).thenReturn(descriptor("load_skill"));
+    TaskTool task = mock(TaskTool.class);
+    when(task.descriptor()).thenReturn(descriptor("task"));
 
-    ToolDescriptor pluginDescriptor = descriptor("plugin-internal");
-    PluginTool pluginTool =
-        new PluginTool() {
-          @Override
-          public ToolDescriptor descriptor() {
-            return pluginDescriptor;
-          }
+    BuiltinHarnessContributor contributor =
+        new BuiltinHarnessContributorConfiguration().builtinHarnessContributor(loadSkill, task);
 
-          @Override
-          public PluginToolResult execute(PluginToolContext context, ToolCall call) {
-            return null;
-          }
-        };
-    HarnessPlugin plugin =
-        HarnessPlugin.of(
-            new PluginDescriptor(new PluginId("admission"), "Admission", "1", Set.of()),
-            registrar ->
-                registrar.registerTool(
-                    "plugin-internal", PLUGIN_TOOL_ID, pluginTool, ToolVisibility.INTERNAL));
-
-    AgentToolRegistry catalog =
-        new AgentToolRegistry(
-            List.of(loadSkillFactory, taskFactory),
-            PluginCatalog.from(List.of(plugin)),
-            EnvironmentToolCatalog.entries());
-
+    HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
     assertEquals(
         ToolVisibility.INTERNAL,
-        catalog.find(PLUGIN_TOOL_ID).orElseThrow().definition().visibility());
+        catalog.findTool(BuiltinToolIds.LOAD_SKILL).orElseThrow().definition().visibility());
+    assertEquals(
+        ToolVisibility.INTERNAL,
+        catalog.findTool(BuiltinToolIds.TASK).orElseThrow().definition().visibility());
+    assertEquals(
+        ToolVisibility.SELECTABLE,
+        catalog.findTool(BuiltinToolIds.READ).orElseThrow().definition().visibility());
   }
 
   private static ToolDescriptor descriptor(String name) {

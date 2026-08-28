@@ -3,13 +3,18 @@ package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
+import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -18,7 +23,6 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.time.Duration;
@@ -27,11 +31,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Agent 配置的静态校验：工具 ID 必须来自统一 AgentToolRegistry 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
+/** Agent 配置的静态校验：工具 ID 必须来自统一 HarnessCatalog 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
 class AgentDefinitionConfigValidatorTest {
 
   private static final AgentToolId CUSTOM_TOOL_ID = new AgentToolId("test.custom-tool");
-  private static final AgentToolId LOAD_SKILL_TOOL_ID = new AgentToolId("test.load-skill");
   private static final AgentToolId DUPLICATE_FIRST_TOOL_ID =
       new AgentToolId("test.duplicate-first");
   private static final AgentToolId DUPLICATE_SECOND_TOOL_ID =
@@ -39,9 +42,8 @@ class AgentDefinitionConfigValidatorTest {
 
   @Test
   void acceptsEnvironmentAndHostToolIds() {
-    String environmentToolId =
-        EnvironmentToolCatalog.entries().getFirst().definition().id().toString();
-    try (Fixture fixture = new Fixture(List.of(hostTool("create_goal", "1")))) {
+    String environmentToolId = BuiltinToolIds.READ.toString();
+    try (Fixture fixture = new Fixture(List.of(hostTool("custom_tool", "1")))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setToolIds(List.of(environmentToolId, CUSTOM_TOOL_ID.toString()));
       config.setSkills(List.of("dev", "ops"));
@@ -52,7 +54,7 @@ class AgentDefinitionConfigValidatorTest {
 
   @Test
   void rejectsUnknownToolId() {
-    try (Fixture fixture = new Fixture(List.of(hostTool("create_goal", "1")))) {
+    try (Fixture fixture = new Fixture(List.of())) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setToolIds(List.of("test.missing"));
       config.setSkills(List.of());
@@ -81,9 +83,9 @@ class AgentDefinitionConfigValidatorTest {
 
   @Test
   void rejectsInternalToolSelection() {
-    try (Fixture fixture = new Fixture(List.of(hostTool("create_goal", "1")))) {
+    try (Fixture fixture = new Fixture(List.of())) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setToolIds(List.of(LOAD_SKILL_TOOL_ID.toString()));
+      config.setToolIds(List.of(BuiltinToolIds.LOAD_SKILL.toString()));
       config.setSkills(List.of());
       config.setSubagents(List.of());
 
@@ -110,19 +112,32 @@ class AgentDefinitionConfigValidatorTest {
 
   @Test
   void rejectsDuplicateHostToolRegistration() {
-    // 两个不同工厂声明相同 model-visible name 会在统一 registry 构造边界被拒绝。
+    // 两个不同 contributor 声明相同 model-visible name 会在统一 catalog 构造边界被拒绝。
     ToolDescriptor descriptor = hostDescriptor("dup", "1");
+    HarnessContributor first =
+        HarnessContributor.of(
+            new ContributorDescriptor(new ContributorId("first"), "First", "1", Set.of()),
+            registrar ->
+                registrar.registerHostTool(
+                    "dup",
+                    DUPLICATE_FIRST_TOOL_ID,
+                    tool(descriptor),
+                    ToolVisibility.SELECTABLE,
+                    0));
+    HarnessContributor second =
+        HarnessContributor.of(
+            new ContributorDescriptor(new ContributorId("second"), "Second", "1", Set.of()),
+            registrar ->
+                registrar.registerHostTool(
+                    "dup",
+                    DUPLICATE_SECOND_TOOL_ID,
+                    tool(descriptor),
+                    ToolVisibility.SELECTABLE,
+                    0));
     IllegalArgumentException error =
         assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                new AgentToolRegistry(
-                    List.of(
-                        ToolFactory.singleton(DUPLICATE_FIRST_TOOL_ID, tool(descriptor)),
-                        ToolFactory.singleton(DUPLICATE_SECOND_TOOL_ID, tool(descriptor))),
-                    PluginCatalog.from(List.of()),
-                    EnvironmentToolCatalog.entries()));
-    assertTrue(error.getMessage().contains("duplicate Agent tool name"));
+            IllegalArgumentException.class, () -> HarnessCatalog.from(List.of(first, second)));
+    assertTrue(error.getMessage().contains("duplicate tool name"));
   }
 
   private static Tool hostTool(String name, String version) {
@@ -156,21 +171,35 @@ class AgentDefinitionConfigValidatorTest {
   }
 
   private static final class Fixture implements AutoCloseable {
-    private final AgentToolRegistry toolRegistry;
+    private final HarnessCatalog catalog;
     private final AgentDefinitionConfigValidator validator;
 
     private Fixture(List<Tool> tools) {
-      List<Tool> registeredTools = new ArrayList<>(tools);
-      Tool loadSkill = hostTool("load_skill", "1");
-      List<ToolFactory> factories = new ArrayList<>(registeredTools.size() + 1);
-      for (Tool tool : registeredTools) {
-        factories.add(ToolFactory.singleton(CUSTOM_TOOL_ID, tool));
+      List<HarnessContributor> contributors = new ArrayList<>();
+      Tool dummyLoadSkill = mock(Tool.class);
+      when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill", "1"));
+      Tool dummyTask = mock(Tool.class);
+      when(dummyTask.descriptor()).thenReturn(hostDescriptor("task", "1"));
+      contributors.add(new BuiltinHarnessContributor(dummyLoadSkill, dummyTask));
+
+      if (!tools.isEmpty()) {
+        contributors.add(
+            HarnessContributor.of(
+                new ContributorDescriptor(new ContributorId("test"), "Test", "1", Set.of()),
+                registrar -> {
+                  for (int i = 0; i < tools.size(); i++) {
+                    Tool tool = tools.get(i);
+                    registrar.registerHostTool(
+                        "custom-tool" + (i == 0 ? "" : "-" + i),
+                        i == 0 ? CUSTOM_TOOL_ID : new AgentToolId(CUSTOM_TOOL_ID.value() + "-" + i),
+                        tool,
+                        ToolVisibility.SELECTABLE,
+                        0);
+                  }
+                }));
       }
-      factories.add(ToolFactory.singleton(LOAD_SKILL_TOOL_ID, loadSkill, ToolVisibility.INTERNAL));
-      this.toolRegistry =
-          new AgentToolRegistry(
-              factories, PluginCatalog.from(List.of()), EnvironmentToolCatalog.entries());
-      this.validator = new AgentDefinitionConfigValidator(toolRegistry);
+      this.catalog = HarnessCatalog.from(contributors);
+      this.validator = new AgentDefinitionConfigValidator(catalog);
     }
 
     @Override

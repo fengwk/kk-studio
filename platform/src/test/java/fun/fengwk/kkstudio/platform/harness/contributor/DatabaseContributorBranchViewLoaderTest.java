@@ -1,6 +1,6 @@
-package fun.fengwk.kkstudio.platform.harness.plugin;
+package fun.fengwk.kkstudio.platform.harness.contributor;
 
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -9,7 +9,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.plugin.api.BranchView;
+import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -22,7 +22,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Function;
 
-class DatabasePluginBranchViewLoaderTest {
+/** 验证使用 Harness append-only Entry path 构造冻结 contributor branch view。 */
+class DatabaseContributorBranchViewLoaderTest {
 
   @Test
   void loadsTheFrozenEntryPathInsideAStoreTransaction() {
@@ -37,14 +38,14 @@ class DatabasePluginBranchViewLoaderTest {
               Function<HarnessStore.Transaction, ?> callback = invocation.getArgument(0);
               return callback.apply(transaction);
             });
-    DatabasePluginBranchViewLoader loader = new DatabasePluginBranchViewLoader(store);
+    DatabaseContributorBranchViewLoader loader = new DatabaseContributorBranchViewLoader(store);
 
     BranchView view = loader.load(entryId);
 
-    assertSame(path, view.path());
+    assertEquals(new BranchView(path), view);
     verify(transaction).loadEntryPath(entryId);
     assertThrows(NullPointerException.class, () -> loader.load(null));
-    assertThrows(NullPointerException.class, () -> new DatabasePluginBranchViewLoader(null));
+    assertThrows(NullPointerException.class, () -> new DatabaseContributorBranchViewLoader(null));
   }
 
   private static EntryPath rootPath() {

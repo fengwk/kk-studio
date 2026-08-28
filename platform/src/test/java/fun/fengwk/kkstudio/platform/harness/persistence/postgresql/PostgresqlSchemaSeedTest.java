@@ -12,9 +12,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 
@@ -134,7 +134,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
         SystemSettings settings = new SystemSettingsCodec().decode(rs.getString(1));
         assertEquals(
             List.of(new PermissionRule("*", PermissionAction.ASK)),
-            settings.tool().permission().get(BaseToolIds.READ.value()),
+            settings.tool().permission().get(BuiltinToolIds.READ.value()),
             "e2e seed must grant read -> ask in the effective DB settings");
         assertEquals(
             false, settings.tool().defaultYolo(), "e2e seed must keep defaultYolo disabled");

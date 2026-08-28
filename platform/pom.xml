@@ -47,12 +47,11 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-plugin-api</artifactId>
+            <artifactId>kk-studio-harness-contributor-api</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-plugin-goal</artifactId>
-            <scope>test</scope>
+            <artifactId>kk-studio-harness-builtin</artifactId>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
@@ -151,7 +150,7 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun/fengwk/kkstudio/platform/environment/gateway/EnvironmentDaemonGateway</include>
-                                        <include>fun/fengwk/kkstudio/platform/harness/tool/AgentToolRegistry</include>
+                                        <include>fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver</include>
                                         <include>fun/fengwk/kkstudio/platform/harness/tool/gateway/PlatformToolGateway</include>
                                     </includes>
                                     <limits>

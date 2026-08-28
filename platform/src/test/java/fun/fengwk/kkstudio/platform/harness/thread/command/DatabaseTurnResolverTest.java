@@ -12,8 +12,14 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
-import fun.fengwk.kkstudio.harness.plugins.goal.GoalPlugin;
+import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
+import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
@@ -69,17 +75,11 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
-import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
-import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -87,6 +87,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
@@ -100,7 +101,6 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
-import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
@@ -112,6 +112,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -379,15 +380,13 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void bindsEnvironmentToolsWithLatestNameEvenWhenBranchHasNoEnvironment() {
-    // 分支没有环境路由不再拒绝工具规划：ENVIRONMENT_CAPABILITY 工具仍按最新（null）名称绑定，实际执行时确定性失败。
+  void rejectsEnvironmentToolsWhenBranchHasNoEnvironment() {
+    // 分支没有环境路由时，ENVIRONMENT_CAPABILITY 工具无法绑定：确定性拒绝。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
-    ModelRequestSpec request = fixture.resolved(fixture.path(settings(null, "default")));
-    assertEquals(1, request.toolBindings().size());
+    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings(null, "default")));
     assertEquals(
-        AgentToolBackend.ENVIRONMENT_CAPABILITY,
-        request.toolBindings().getFirst().definition().backend());
-    assertNull(request.toolBindings().getFirst().environment());
+        "environment tool base.read requires an environment binding but the branch has no environment",
+        rejected.error().message());
 
     // Agent skills 要求最新选中的 Environment 提供 live descriptors：分支没有名称时精确拒绝。
     fixture = new Fixture(List.of(), List.of("dev"), List.of());
@@ -425,27 +424,22 @@ class DatabaseTurnResolverTest {
 
   @Test
   void latestSnapshotEnvironmentWinsOverOlderLiveEnvironment() {
-    // 历史 turn 绑定 live Environment，最新 turn 为 null/缺失名称：
-    // 请求只冻结最新快照的 route（null/名称），绝不选中更旧的 live Environment。
+    // 历史 turn 绑定 live Environment，最新 turn 为 null：
+    // 请求只按最新快照判定（null 拒绝），绝不回看更旧的 live Environment。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.readyEnvironment(ENV_A);
     BranchSettings firstTurn = settings(ENV_A, "default");
     BranchSettings latestTurn = settings(null, "default");
 
-    ModelRequestSpec request = fixture.resolved(multiTurnPath(firstTurn, latestTurn));
-
+    TurnResolver.Rejected rejected = fixture.rejected(multiTurnPath(firstTurn, latestTurn));
     assertEquals(
-        List.of("read"),
-        request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertEquals(
-        AgentToolBackend.ENVIRONMENT_CAPABILITY,
-        request.toolBindings().getFirst().definition().backend());
-    assertNull(request.toolBindings().getFirst().environment());
+        "environment tool base.read requires an environment binding but the branch has no environment",
+        rejected.error().message());
 
     // 最新为缺失名称：同样只冻结最新名称，绝不回看更旧 live Environment。
     fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.readyEnvironment(ENV_A);
-    request =
+    ModelRequestSpec request =
         fixture.resolved(
             multiTurnPath(settings(ENV_A, "default"), settings(ENV_MISSING, "default")));
     assertEquals(ENV_MISSING, request.toolBindings().getFirst().environment());
@@ -519,24 +513,28 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of(
             AgentToolBackend.ENVIRONMENT_CAPABILITY,
-            AgentToolBackend.HOST,
+            AgentToolBackend.DECLARATIVE,
             AgentToolBackend.ENVIRONMENT_CAPABILITY),
         request.toolBindings().stream().map(binding -> binding.definition().backend()).toList());
     // Provider tools 与 bindings 一一对应且顺序一致。
     assertEquals(List.of("bash", "create_goal", "read"), boundNames);
 
-    fixture = new Fixture(List.of("missing"), List.of(), List.of());
+    Fixture missingFixture =
+        new Fixture(List.of("missing"), List.of(), List.of(), HarnessCatalog.from(List.of()));
     assertEquals(
         "tool not found: missing",
-        fixture.rejected(fixture.path(settings(null, "default"))).error().message());
+        missingFixture.rejected(missingFixture.path(settings(null, "default"))).error().message());
   }
 
   @Test
-  void freezesPluginProvenanceAndProjectsBranchScopedGoalContext() {
-    PluginCatalog plugins = PluginCatalog.from(List.of(new GoalPlugin()));
-    List<ToolDescriptor> descriptors =
-        plugins.tools().stream().map(tool -> tool.definition().descriptor()).toList();
-    Fixture fixture = new Fixture(List.of("create_goal"), List.of(), descriptors, plugins);
+  void freezesContributorProvenanceAndProjectsBranchScopedGoalContext() {
+    Tool dummyLoadSkill = mock(Tool.class);
+    when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill"));
+    Tool dummyTask = mock(Tool.class);
+    when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
+    BuiltinHarnessContributor builtin = new BuiltinHarnessContributor(dummyLoadSkill, dummyTask);
+    HarnessCatalog catalog = HarnessCatalog.from(List.of(builtin));
+    Fixture fixture = new Fixture(List.of("create_goal"), List.of(), List.of(), catalog);
     BranchSettings settings = settings(null, "default");
     EntryPath path =
         new EntryPath(
@@ -547,8 +545,8 @@ class DatabaseTurnResolverTest {
                     SESSION_ID,
                     id(1),
                     new CustomEntryPayload(
-                        "goal",
-                        "state",
+                        "builtin",
+                        "goal.state",
                         1,
                         "{\"objective\":\"ship\",\"tokenBudget\":null,\"status\":\"active\","
                             + "\"reason\":null,\"createdAt\":\""
@@ -561,9 +559,9 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec request = fixture.resolved(path);
 
     ToolBinding binding = request.toolBindings().getFirst();
-    assertEquals("goal", binding.plugin().pluginId());
-    assertEquals("create", binding.plugin().contributionLocalName());
-    assertEquals("state", binding.plugin().stateAccesses().getFirst().customType());
+    assertEquals("builtin", binding.contributor().contributorId());
+    assertEquals("goal.create", binding.contributor().localName());
+    assertEquals("goal.state", binding.contributor().stateAccesses().getFirst().customType());
     assertTrue(
         materialized(path, request).stream()
             .map(DatabaseTurnResolverTest::textOf)
@@ -618,7 +616,8 @@ class DatabaseTurnResolverTest {
             ProviderType.OPENAI,
             ProviderType.OPENAI,
             PromptCacheCapability.unsupported(),
-            true);
+            true,
+            HarnessCatalog.from(List.of()));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
     assertEquals(
         "tool not found: base.load-skill",
@@ -719,9 +718,9 @@ class DatabaseTurnResolverTest {
         fixture.rejected(fixture.path(settings(null, "default"))).error().message());
   }
 
-  /** task 必须来自统一 registry；registry 快照缺少 task 时立即拒绝。 */
+  /** task 必须来自统一 catalog；catalog 缺少 task 时立即拒绝。 */
   @Test
-  void rejectsTaskWhenRegistrySnapshotOmitsTask() {
+  void rejectsTaskWhenCatalogOmitsTask() {
     Fixture fixture =
         new Fixture(
             List.of(),
@@ -731,7 +730,8 @@ class DatabaseTurnResolverTest {
             ProviderType.OPENAI,
             ProviderType.OPENAI,
             PromptCacheCapability.unsupported(),
-            true);
+            true,
+            HarnessCatalog.from(List.of()));
     fixture.agentConfig.setSubagents(List.of("reviewer"));
     fixture.subagent("reviewer", "Review");
     assertEquals(
@@ -1108,7 +1108,7 @@ class DatabaseTurnResolverTest {
                 SESSION_ID,
                 id(6),
                 new CustomMessagePayload(
-                    CustomMessagePayload.CORE_PLUGIN_ID,
+                    CustomMessagePayload.CORE_CONTRIBUTOR_ID,
                     CustomMessagePayload.CORE_CUSTOM_TYPE,
                     CustomMessagePayload.CORE_RENDERER_KEY,
                     new AgentMessage(
@@ -1189,21 +1189,23 @@ class DatabaseTurnResolverTest {
 
   private static AgentToolId toolId(String name) {
     return switch (name) {
-      case "read" -> BaseToolIds.READ;
-      case "write" -> BaseToolIds.WRITE;
-      case "edit" -> BaseToolIds.EDIT;
-      case "apply_patch" -> BaseToolIds.APPLY_PATCH;
-      case "bash" -> BaseToolIds.BASH;
-      case "grep" -> BaseToolIds.GREP;
-      case "find" -> BaseToolIds.FIND;
-      case "lsp_goto_definition" -> BaseToolIds.LSP_GOTO_DEFINITION;
-      case "lsp_workspace_symbols" -> BaseToolIds.LSP_WORKSPACE_SYMBOLS;
-      case "lsp_java_decompile" -> BaseToolIds.LSP_JAVA_DECOMPILE;
-      case "mcp_list_tools" -> BaseToolIds.MCP_LIST_TOOLS;
-      case "mcp_call_tool" -> BaseToolIds.MCP_CALL_TOOL;
-      case "load_skill" -> BaseToolIds.LOAD_SKILL;
-      case TaskTool.NAME -> BaseToolIds.TASK;
-      case "create_goal" -> GoalPlugin.CREATE_TOOL_ID;
+      case "read" -> BuiltinToolIds.READ;
+      case "write" -> BuiltinToolIds.WRITE;
+      case "edit" -> BuiltinToolIds.EDIT;
+      case "apply_patch" -> BuiltinToolIds.APPLY_PATCH;
+      case "bash" -> BuiltinToolIds.BASH;
+      case "grep" -> BuiltinToolIds.GREP;
+      case "find" -> BuiltinToolIds.FIND;
+      case "lsp_goto_definition" -> BuiltinToolIds.LSP_GOTO_DEFINITION;
+      case "lsp_workspace_symbols" -> BuiltinToolIds.LSP_WORKSPACE_SYMBOLS;
+      case "lsp_java_decompile" -> BuiltinToolIds.LSP_JAVA_DECOMPILE;
+      case "mcp_list_tools" -> BuiltinToolIds.MCP_LIST_TOOLS;
+      case "mcp_call_tool" -> BuiltinToolIds.MCP_CALL_TOOL;
+      case "load_skill" -> BuiltinToolIds.LOAD_SKILL;
+      case TaskTool.NAME -> BuiltinToolIds.TASK;
+      case "create_goal" -> BuiltinToolIds.GOAL_CREATE;
+      case "get_goal" -> BuiltinToolIds.GOAL_GET;
+      case "update_goal" -> BuiltinToolIds.GOAL_UPDATE;
       default -> new AgentToolId(name);
     };
   }
@@ -1647,7 +1649,7 @@ class DatabaseTurnResolverTest {
     private final DatabaseTurnResolver resolver;
 
     private Fixture(List<String> tools, List<String> skills, List<ToolDescriptor> hostDescriptors) {
-      this(tools, skills, hostDescriptors, PluginCatalog.from(List.of()));
+      this(tools, skills, hostDescriptors, (HarnessCatalog) null);
     }
 
     private Fixture(
@@ -1655,22 +1657,22 @@ class DatabaseTurnResolverTest {
         List<String> skills,
         List<ToolDescriptor> hostDescriptors,
         Clock clock) {
-      this(tools, skills, hostDescriptors, PluginCatalog.from(List.of()), clock);
+      this(tools, skills, hostDescriptors, (HarnessCatalog) null, clock);
     }
 
     private Fixture(
         List<String> tools,
         List<String> skills,
         List<ToolDescriptor> hostDescriptors,
-        PluginCatalog pluginCatalog) {
-      this(tools, skills, hostDescriptors, pluginCatalog, Clock.fixed(NOW, ZoneOffset.UTC));
+        HarnessCatalog catalog) {
+      this(tools, skills, hostDescriptors, catalog, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private Fixture(
         List<String> tools,
         List<String> skills,
         List<ToolDescriptor> hostDescriptors,
-        PluginCatalog pluginCatalog,
+        HarnessCatalog catalog,
         Clock clock) {
       this(
           tools,
@@ -1681,7 +1683,7 @@ class DatabaseTurnResolverTest {
           ProviderType.OPENAI,
           PromptCacheCapability.unsupported(),
           true,
-          pluginCatalog,
+          catalog,
           clock);
     }
 
@@ -1703,7 +1705,7 @@ class DatabaseTurnResolverTest {
           factoryType,
           cacheCapability,
           includeProviderFactory,
-          PluginCatalog.from(List.of()));
+          (HarnessCatalog) null);
     }
 
     private Fixture(
@@ -1715,7 +1717,7 @@ class DatabaseTurnResolverTest {
         ProviderType factoryType,
         PromptCacheCapability cacheCapability,
         boolean includeProviderFactory,
-        PluginCatalog pluginCatalog) {
+        HarnessCatalog catalog) {
       this(
           tools,
           skills,
@@ -1725,7 +1727,7 @@ class DatabaseTurnResolverTest {
           factoryType,
           cacheCapability,
           includeProviderFactory,
-          pluginCatalog,
+          catalog,
           Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -1738,7 +1740,7 @@ class DatabaseTurnResolverTest {
         ProviderType factoryType,
         PromptCacheCapability cacheCapability,
         boolean includeProviderFactory,
-        PluginCatalog pluginCatalog,
+        HarnessCatalog providedCatalog,
         Clock clock) {
       agent.setName("assistant");
       agent.setSystemPrompt("agent system prompt");
@@ -1770,6 +1772,56 @@ class DatabaseTurnResolverTest {
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
       SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, Duration.ZERO, 50);
+
+      HarnessCatalog catalog;
+      if (providedCatalog != null) {
+        catalog = providedCatalog;
+      } else {
+        List<HarnessContributor> contributors = new ArrayList<>();
+        Tool dummyLoadSkill = mock(Tool.class);
+        when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill"));
+        Tool dummyTask = mock(Tool.class);
+        when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
+        contributors.add(new BuiltinHarnessContributor(dummyLoadSkill, dummyTask));
+
+        if (!hostDescriptors.isEmpty()) {
+          contributors.add(
+              HarnessContributor.of(
+                  new ContributorDescriptor(new ContributorId("host"), "Host", "1", Set.of()),
+                  registrar -> {
+                    for (ToolDescriptor descriptor : hostDescriptors) {
+                      if (descriptor.name().equals("load_skill")
+                          || descriptor.name().equals("task")
+                          || descriptor.name().equals("create_goal")
+                          || descriptor.name().equals("get_goal")
+                          || descriptor.name().equals("update_goal")
+                          || descriptor.name().equals("bash")
+                          || descriptor.name().equals("read")
+                          || descriptor.name().equals("write")
+                          || descriptor.name().equals("edit")
+                          || descriptor.name().equals("apply_patch")
+                          || descriptor.name().equals("grep")
+                          || descriptor.name().equals("find")
+                          || descriptor.name().startsWith("lsp_")
+                          || descriptor.name().startsWith("mcp_")) {
+                        continue;
+                      }
+                      Tool tool = mock(Tool.class);
+                      when(tool.descriptor()).thenReturn(descriptor);
+                      registrar.registerHostTool(
+                          descriptor.name(),
+                          toolId(descriptor.name()),
+                          tool,
+                          internalHostToolNames.contains(descriptor.name())
+                              ? ToolVisibility.INTERNAL
+                              : ToolVisibility.SELECTABLE,
+                          0);
+                    }
+                  }));
+        }
+        catalog = HarnessCatalog.from(contributors);
+      }
+
       resolver =
           new DatabaseTurnResolver(
               agents,
@@ -1778,28 +1830,7 @@ class DatabaseTurnResolverTest {
               agentConfigCodec,
               modelConfigParser,
               new ProviderFactories(factories),
-              new AgentToolRegistry(
-                  hostDescriptors.stream()
-                      .filter(descriptor -> pluginCatalog.findTool(descriptor.name()).isEmpty())
-                      .map(
-                          descriptor -> {
-                            ToolFactory factory = mock(ToolFactory.class);
-                            when(factory.definition())
-                                .thenReturn(
-                                    new AgentToolDefinition(
-                                        toolId(descriptor.name()),
-                                        descriptor,
-                                        internalHostToolNames.contains(descriptor.name())
-                                            ? ToolVisibility.INTERNAL
-                                            : ToolVisibility.SELECTABLE,
-                                        AgentToolBackend.HOST));
-                            when(factory.priority()).thenReturn(0);
-                            return factory;
-                          })
-                      .toList(),
-                  pluginCatalog,
-                  EnvironmentToolCatalog.entries()),
-              pluginCatalog,
+              catalog,
               environmentRegistry,
               new SystemSettingsSnapshot(SystemSettings.DEFAULT),
               () -> new CompactionConfig(20_000, null),

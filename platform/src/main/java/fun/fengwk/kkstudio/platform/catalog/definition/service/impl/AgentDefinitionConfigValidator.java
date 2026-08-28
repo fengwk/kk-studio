@@ -2,9 +2,10 @@ package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.util.List;
@@ -14,10 +15,10 @@ import java.util.Objects;
 @Component
 final class AgentDefinitionConfigValidator {
 
-  private final AgentToolRegistry toolRegistry;
+  private final HarnessCatalog catalog;
 
-  AgentDefinitionConfigValidator(AgentToolRegistry toolRegistry) {
-    this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry");
+  AgentDefinitionConfigValidator(HarnessCatalog catalog) {
+    this.catalog = Objects.requireNonNull(catalog, "catalog");
   }
 
   void validate(AgentDefinitionConfigDTO config) {
@@ -35,11 +36,11 @@ final class AgentDefinitionConfigValidator {
       } catch (RuntimeException error) {
         throw new IllegalArgumentException("invalid agent tool id: " + value, error);
       }
-      AgentToolRegistry.Entry entry = toolRegistry.find(id).orElse(null);
-      if (entry == null) {
+      ToolContribution contribution = catalog.findTool(id).orElse(null);
+      if (contribution == null) {
         throw new IllegalArgumentException("unknown agent tool id: " + id);
       }
-      if (entry.definition().visibility() != ToolVisibility.SELECTABLE) {
+      if (contribution.definition().visibility() != ToolVisibility.SELECTABLE) {
         throw new IllegalArgumentException("internal tool cannot be selected by an Agent: " + id);
       }
     }

@@ -2,10 +2,13 @@ package fun.fengwk.kkstudio.platform.harness.thread.command;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.plugin.api.BranchView;
-import fun.fengwk.kkstudio.harness.plugin.api.ContextProjectorContribution;
-import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
-import fun.fengwk.kkstudio.harness.plugin.api.ToolContribution;
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
+import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
+import fun.fengwk.kkstudio.harness.contributor.api.ContextProjectorContribution;
+import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolContribution;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
@@ -18,9 +21,9 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -35,11 +38,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -60,7 +61,6 @@ import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
-import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
@@ -98,8 +98,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final AgentDefinitionConfigCodec agentConfigCodec;
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final ProviderFactories providerFactories;
-  private final AgentToolRegistry toolRegistry;
-  private final PluginCatalog pluginCatalog;
+  private final HarnessCatalog catalog;
   private final LiveEnvironmentRegistry environmentRegistry;
   private final SystemSettingsSnapshot snapshot;
   private final CompactionConfigProvider compactionConfigProvider;
@@ -117,8 +116,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       AgentDefinitionConfigCodec agentConfigCodec,
       AgentModelRuntimeConfigParser modelConfigParser,
       ProviderFactories providerFactories,
-      AgentToolRegistry toolRegistry,
-      PluginCatalog pluginCatalog,
+      HarnessCatalog catalog,
       LiveEnvironmentRegistry environmentRegistry,
       SystemSettingsSnapshot snapshot,
       CompactionConfigProvider compactionConfigProvider,
@@ -132,8 +130,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
     this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
-    this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry");
-    this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
+    this.catalog = Objects.requireNonNull(catalog, "catalog");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
     this.compactionConfigProvider =
@@ -258,8 +255,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   /**
    * 压缩 resolver 路径：只按 preparation 的 executionModel 查找 provider/model/variant 构造请求——不查 Agent system
-   * prompt、不查 plugins、零 tool/skill、不做 environment 可用性查找、不做 prompt-cache finalizer / cache 写入。切分事实由
-   * candidate path 的 compaction TURN_START 持有，不复制进 spec。
+   * prompt、不查 contributors、零 tool/skill、不做 environment 可用性查找、不做 prompt-cache finalizer / cache
+   * 写入。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec。
    */
   private Result resolveCompaction(EntryPath path, CompactionPreparation preparation) {
     ModelSelection selection = preparation.executionModel();
@@ -382,65 +379,69 @@ public final class DatabaseTurnResolver implements TurnResolver {
       } catch (RuntimeException error) {
         throw rejection("invalid agent tool id: " + value);
       }
-      AgentToolRegistry.Entry entry = toolRegistry.find(id).orElse(null);
-      if (entry == null) {
+      ToolContribution contribution = catalog.findTool(id).orElse(null);
+      if (contribution == null) {
         throw rejection("tool not found: " + id);
       }
-      if (entry.definition().visibility() != ToolVisibility.SELECTABLE) {
+      if (contribution.definition().visibility() != ToolVisibility.SELECTABLE) {
         throw rejection("internal tool cannot be selected by an Agent: " + id);
       }
       toolIds.add(id);
     }
     if (!config.getSkills().isEmpty()) {
-      toolIds.add(BaseToolIds.LOAD_SKILL);
+      toolIds.add(BuiltinToolIds.LOAD_SKILL);
     }
     if (!config.getSubagents().isEmpty()
         && sessionDepth(path) < subagentConfigProvider.subagentConfig().maxDepth()) {
-      toolIds.add(BaseToolIds.TASK);
+      toolIds.add(BuiltinToolIds.TASK);
     }
     return List.copyOf(toolIds);
   }
 
   /**
    * 按最新 Agent 配置派生的精确顺序逐一绑定。ENVIRONMENT_CAPABILITY 工具一律绑定最新 branch 的完整 {@code
-   * settings.environment()} binding（可为 null 或当前不可用——实际执行时确定性失败）；HOST/PLUGIN 工具冻结 registry entry 的完整
-   * definition。缺失能力仍立即拒绝，绝不静默跳过。
+   * settings.environment()} binding（可为 null 或当前不可用——实际执行时确定性失败）；所有 backend 冻结
+   * ContributorBinding。缺失能力仍立即拒绝，绝不静默跳过。
    */
   private List<ToolBinding> resolveTools(BranchSettings settings, List<AgentToolId> toolIds) {
     List<ToolBinding> bindings = new ArrayList<>(toolIds.size());
     for (AgentToolId id : toolIds) {
-      AgentToolRegistry.Entry entry = toolRegistry.find(id).orElse(null);
-      if (entry == null) {
+      ToolContribution contribution = catalog.findTool(id).orElse(null);
+      if (contribution == null) {
         throw rejection("tool not found: " + id);
       }
-      if (entry.definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY) {
-        bindings.add(new ToolBinding(entry.definition(), settings.environment(), null));
+      List<ContributorStateAccess> stateAccesses;
+      if (contribution instanceof DeclarativeToolContribution declarative) {
+        stateAccesses =
+            declarative.stateAccesses().stream()
+                .map(
+                    access ->
+                        new ContributorStateAccess(
+                            access.customType(),
+                            ContributorStateAccessMode.valueOf(access.mode().name())))
+                .toList();
       } else {
-        bindings.add(hostOrPluginBinding(entry));
+        stateAccesses = List.of();
       }
+      ContributorBinding contributor =
+          new ContributorBinding(
+              contribution.id().contributorId().value(),
+              contribution.id().localName(),
+              stateAccesses);
+      EnvironmentBinding environment =
+          contribution.definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY
+              ? settings.environment()
+              : null;
+      if (contribution.definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY
+          && environment == null) {
+        throw rejection(
+            "environment tool "
+                + id
+                + " requires an environment binding but the branch has no environment");
+      }
+      bindings.add(new ToolBinding(contribution.definition(), contributor, environment));
     }
     return List.copyOf(bindings);
-  }
-
-  private ToolBinding hostOrPluginBinding(AgentToolRegistry.Entry entry) {
-    if (entry.definition().backend() == AgentToolBackend.HOST) {
-      return new ToolBinding(entry.definition(), null, null);
-    }
-    if (entry.definition().backend() != AgentToolBackend.PLUGIN
-        || entry.pluginContribution() == null) {
-      throw rejection("host/plugin tool not found: " + entry.definition().descriptor().name());
-    }
-    ToolContribution contribution = entry.pluginContribution();
-    List<PluginStateAccess> stateAccesses = new ArrayList<>(contribution.stateAccesses().size());
-    for (var access : contribution.stateAccesses()) {
-      stateAccesses.add(
-          new PluginStateAccess(
-              access.customType(), PluginStateAccessMode.valueOf(access.mode().name())));
-    }
-    PluginToolBinding plugin =
-        new PluginToolBinding(
-            contribution.id().pluginId().value(), contribution.id().localName(), stateAccesses);
-    return new ToolBinding(entry.definition(), null, plugin);
   }
 
   /** Agent skills 只从最新 Agent config 读取，且必须由最新选中的 Environment 精确提供。 */
@@ -559,15 +560,16 @@ public final class DatabaseTurnResolver implements TurnResolver {
       preamble.add(AgentMessage.system(composedPrompt));
     }
     BranchView branch = new BranchView(path);
-    for (ContextProjectorContribution contribution : pluginCatalog.contextProjectors()) {
+    for (ContextProjectorContribution contribution : catalog.contextProjectors()) {
       List<AgentMessage> projected =
           Objects.requireNonNull(
               contribution.projector().project(branch),
-              "plugin context projector returned null: " + contribution.id());
+              "contributor context projector returned null: " + contribution.id());
       for (AgentMessage message : projected) {
         preamble.add(
             Objects.requireNonNull(
-                message, "plugin context projector returned a null message: " + contribution.id()));
+                message,
+                "contributor context projector returned a null message: " + contribution.id()));
       }
     }
     return List.copyOf(preamble);

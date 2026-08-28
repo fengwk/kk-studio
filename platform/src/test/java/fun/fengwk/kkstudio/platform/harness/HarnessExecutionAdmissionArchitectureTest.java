@@ -31,7 +31,7 @@ class HarnessExecutionAdmissionArchitectureTest {
     String runtime =
         Files.readString(
             root.resolve(
-                "platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/RuntimeToolsConfiguration.java"));
+                "platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/BuiltinHarnessContributorConfiguration.java"));
 
     assertTrue(
         model.contains("ConcurrencyAdmission"), "Model executor must have explicit admission");
