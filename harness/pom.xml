@@ -17,8 +17,8 @@
         <module>tool</module>
         <module>runtime</module>
         <module>contributor-api</module>
+        <module>builtin</module>
         <module>infra</module>
         <module>daemon</module>
-        <module>plugins/goal</module>
     </modules>
 </project>

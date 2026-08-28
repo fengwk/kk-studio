@@ -28,6 +28,7 @@ class RuntimeModuleArchitectureTest {
   private static final String JGIT_IMPORT_PREFIX = "org.eclipse.jgit.";
   private static final String CONCRETE_PLUGIN_IMPORT_PREFIX =
       "fun.fengwk.kkstudio.harness.plugins.";
+  private static final String BUILTIN_IMPORT_PREFIX = "fun.fengwk.kkstudio.harness.builtin.";
   private static final String JGIT_OWNER =
       "fun/fengwk/kkstudio/harness/runtime/permission/PermissionPathPattern.java";
 
@@ -83,9 +84,9 @@ class RuntimeModuleArchitectureTest {
     assertManagedInternalDependency(
         harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-contributor-api");
     assertManagedInternalDependency(
-        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-infra");
+        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-builtin");
     assertManagedInternalDependency(
-        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-plugin-goal");
+        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-infra");
     assertDirectProductionDependencies(
         harnessRoot.resolve("tool/pom.xml"), Set.of("com.fasterxml.jackson.core:jackson-databind"));
     assertDirectProductionDependencies(
@@ -98,6 +99,13 @@ class RuntimeModuleArchitectureTest {
     assertDirectProductionDependencies(
         harnessRoot.resolve("contributor-api/pom.xml"),
         Set.of(
+            "fun.fengwk.kk-studio:kk-studio-harness-runtime",
+            "fun.fengwk.kk-studio:kk-studio-harness-tool"));
+    assertDirectProductionDependencies(
+        harnessRoot.resolve("builtin/pom.xml"),
+        Set.of(
+            "com.fasterxml.jackson.core:jackson-databind",
+            "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
             "fun.fengwk.kk-studio:kk-studio-harness-runtime",
             "fun.fengwk.kk-studio:kk-studio-harness-tool"));
     assertDirectProductionDependencies(
@@ -115,12 +123,6 @@ class RuntimeModuleArchitectureTest {
             "dev.langchain4j:langchain4j-skills",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "org.eclipse.jgit:org.eclipse.jgit"));
-    assertDirectProductionDependencies(
-        harnessRoot.resolve("plugins/goal/pom.xml"),
-        Set.of(
-            "com.fasterxml.jackson.core:jackson-databind",
-            "fun.fengwk.kk-studio:kk-studio-harness-plugin-api",
-            "fun.fengwk.kk-studio:kk-studio-harness-runtime"));
 
     List<String> violations = scanViolations(main);
     assertTrue(
@@ -145,6 +147,11 @@ class RuntimeModuleArchitectureTest {
                         violations.add(
                             relative(main, path)
                                 + ": runtime must not depend on concrete plugin "
+                                + trimmed);
+                      } else if (imported.startsWith(BUILTIN_IMPORT_PREFIX)) {
+                        violations.add(
+                            relative(main, path)
+                                + ": runtime must not depend on builtin "
                                 + trimmed);
                       } else if (!isAllowedImport(imported)) {
                         violations.add(relative(main, path) + ": disallowed import " + trimmed);
@@ -185,10 +192,9 @@ class RuntimeModuleArchitectureTest {
       modules.add(matcher.group(1).trim());
     }
     assertTrue(
-        modules.equals(
-            List.of("tool", "runtime", "contributor-api", "infra", "daemon", "plugins/goal")),
+        modules.equals(List.of("tool", "runtime", "contributor-api", "builtin", "infra", "daemon")),
         () ->
-            "harness modules must be exactly tool/runtime/contributor-api/infra/daemon/plugins/goal, got "
+            "harness modules must be exactly tool/runtime/contributor-api/builtin/infra/daemon, got "
                 + modules);
   }
 
