@@ -8,11 +8,11 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsProvider;
 
@@ -34,11 +34,12 @@ class ToolSettingsProviderTest {
     ToolSettingsProvider provider = providerFor(SystemSettings.Tool.DEFAULT);
 
     ToolSettings settings = provider.get();
-    assertEquals(ASK_ALL, settings.rulesFor(BaseToolIds.WRITE));
-    assertEquals(ASK_ALL, settings.rulesFor(BaseToolIds.EDIT));
-    assertEquals(ASK_ALL, settings.rulesFor(BaseToolIds.BASH));
+    assertEquals(ASK_ALL, settings.rulesFor(BuiltinToolIds.WRITE));
+    assertEquals(ASK_ALL, settings.rulesFor(BuiltinToolIds.EDIT));
+    assertEquals(ASK_ALL, settings.rulesFor(BuiltinToolIds.BASH));
     assertTrue(
-        settings.rulesFor(BaseToolIds.READ).isEmpty(), "production default must not restrict read");
+        settings.rulesFor(BuiltinToolIds.READ).isEmpty(),
+        "production default must not restrict read");
     assertFalse(settings.defaultYolo());
   }
 
@@ -53,7 +54,7 @@ class ToolSettingsProviderTest {
             systemSettingsWithTool(
                 new SystemSettings.Tool(
                     Map.of(
-                        BaseToolIds.WRITE.value(),
+                        BuiltinToolIds.WRITE.value(),
                         List.of(new PermissionRule("*", PermissionAction.DENY))),
                     true,
                     5_000L,
@@ -62,15 +63,15 @@ class ToolSettingsProviderTest {
                     30_000L)));
     assertTrue(provider.get().defaultYolo());
     assertEquals(
-        PermissionAction.DENY, provider.get().rulesFor(BaseToolIds.WRITE).getFirst().action());
+        PermissionAction.DENY, provider.get().rulesFor(BuiltinToolIds.WRITE).getFirst().action());
 
     // 同一 provider 在数据库快照更新后无需重建即可读到新值。
     when(systemSettingsProvider.get())
         .thenReturn(systemSettingsWithTool(SystemSettings.Tool.DEFAULT));
     assertFalse(provider.get().defaultYolo());
     assertEquals(
-        PermissionAction.ASK, provider.get().rulesFor(BaseToolIds.BASH).getFirst().action());
-    assertTrue(provider.get().rulesFor(BaseToolIds.READ).isEmpty());
+        PermissionAction.ASK, provider.get().rulesFor(BuiltinToolIds.BASH).getFirst().action());
+    assertTrue(provider.get().rulesFor(BuiltinToolIds.READ).isEmpty());
   }
 
   /** ACCEPTANCE: 转换直接复用数据库已校验的 permission 规则类型，不引入第二套解码/默认。 */
@@ -80,8 +81,8 @@ class ToolSettingsProviderTest {
 
     // SystemSettings.Tool.permission 与 ToolSettings.permission 是同一规则模型；转换后规则完全等价。
     assertEquals(
-        SystemSettings.Tool.DEFAULT.permission().get(BaseToolIds.BASH.value()),
-        settings.rulesFor(BaseToolIds.BASH),
+        SystemSettings.Tool.DEFAULT.permission().get(BuiltinToolIds.BASH.value()),
+        settings.rulesFor(BuiltinToolIds.BASH),
         "permission rules must come from the DB aggregate, no second permission source");
   }
 

@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.platform.settings;
 
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -66,9 +66,11 @@ public record SystemSettings(
     public static final Tool DEFAULT =
         new Tool(
             Map.of(
-                BaseToolIds.WRITE.value(), List.of(new PermissionRule("*", PermissionAction.ASK)),
-                BaseToolIds.EDIT.value(), List.of(new PermissionRule("*", PermissionAction.ASK)),
-                BaseToolIds.BASH.value(), List.of(new PermissionRule("*", PermissionAction.ASK))),
+                BuiltinToolIds.WRITE.value(),
+                    List.of(new PermissionRule("*", PermissionAction.ASK)),
+                BuiltinToolIds.EDIT.value(), List.of(new PermissionRule("*", PermissionAction.ASK)),
+                BuiltinToolIds.BASH.value(),
+                    List.of(new PermissionRule("*", PermissionAction.ASK))),
             false,
             5_000L,
             1_000L,

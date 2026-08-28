@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.skill.ThreadSelectedSkillLookup;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
@@ -17,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 

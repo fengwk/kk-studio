@@ -6,10 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
@@ -29,13 +29,13 @@ class SystemSettingsTest {
 
     assertEquals(
         List.of(new PermissionRule("*", PermissionAction.ASK)),
-        defaults.tool().permission().get(BaseToolIds.WRITE.value()));
+        defaults.tool().permission().get(BuiltinToolIds.WRITE.value()));
     assertEquals(
         List.of(new PermissionRule("*", PermissionAction.ASK)),
-        defaults.tool().permission().get(BaseToolIds.EDIT.value()));
+        defaults.tool().permission().get(BuiltinToolIds.EDIT.value()));
     assertEquals(
         List.of(new PermissionRule("*", PermissionAction.ASK)),
-        defaults.tool().permission().get(BaseToolIds.BASH.value()));
+        defaults.tool().permission().get(BuiltinToolIds.BASH.value()));
     assertEquals(false, defaults.tool().defaultYolo());
     assertEquals(5_000L, defaults.tool().modelGatewayBusyRetryMillis());
     assertEquals(1_000L, defaults.tool().toolGatewayBusyRetryMillis());
@@ -123,12 +123,12 @@ class SystemSettingsTest {
           IllegalArgumentException.class,
           () ->
               toolWithRules(
-                  BaseToolIds.WRITE.value(), new PermissionRule(invalid, PermissionAction.DENY)),
+                  BuiltinToolIds.WRITE.value(), new PermissionRule(invalid, PermissionAction.DENY)),
           invalid);
     }
     // 转义后的 literal pattern 放行（语义交给匹配器）。
     toolWithRules(
-        BaseToolIds.WRITE.value(), new PermissionRule("\\!literal.txt", PermissionAction.DENY));
+        BuiltinToolIds.WRITE.value(), new PermissionRule("\\!literal.txt", PermissionAction.DENY));
   }
 
   /** AgentToolId 和 pattern 的首尾空白会制造不可见、不可命中的规则，持久化边界必须拒绝。 */
@@ -144,17 +144,17 @@ class SystemSettingsTest {
         IllegalArgumentException.class,
         () ->
             toolWithRules(
-                BaseToolIds.WRITE.value(),
+                BuiltinToolIds.WRITE.value(),
                 new PermissionRule("git status * ", PermissionAction.ASK)));
     toolWithRules(
-        BaseToolIds.BASH.value(), new PermissionRule("git status *", PermissionAction.ASK));
+        BuiltinToolIds.BASH.value(), new PermissionRule("git status *", PermissionAction.ASK));
   }
 
   @Test
   void preservesPermissionRuleOrder() {
     SystemSettings.Tool tool =
         toolWithRules(
-            BaseToolIds.WRITE.value(),
+            BuiltinToolIds.WRITE.value(),
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("*.txt", PermissionAction.ALLOW),
             new PermissionRule("secret/**", PermissionAction.DENY));
@@ -163,7 +163,7 @@ class SystemSettingsTest {
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("*.txt", PermissionAction.ALLOW),
             new PermissionRule("secret/**", PermissionAction.DENY)),
-        tool.permission().get(BaseToolIds.WRITE.value()));
+        tool.permission().get(BuiltinToolIds.WRITE.value()));
   }
 
   @Test

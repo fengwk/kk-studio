@@ -2,9 +2,9 @@ package fun.fengwk.kkstudio.platform.harness.skill;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.builtin.skill.ThreadSelectedSkillLookup;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
-import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
 
 import java.util.List;
 import java.util.Objects;

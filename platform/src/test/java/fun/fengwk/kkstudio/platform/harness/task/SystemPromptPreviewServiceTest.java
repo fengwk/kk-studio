@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -14,7 +15,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;

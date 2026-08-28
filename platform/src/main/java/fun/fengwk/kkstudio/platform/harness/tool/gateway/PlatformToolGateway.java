@@ -2,18 +2,23 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.plugin.api.AppendCustomEntry;
-import fun.fengwk.kkstudio.harness.plugin.api.ContributionId;
-import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
-import fun.fengwk.kkstudio.harness.plugin.api.PluginId;
-import fun.fengwk.kkstudio.harness.plugin.api.PluginStateMode;
-import fun.fengwk.kkstudio.harness.plugin.api.PluginToolContext;
-import fun.fengwk.kkstudio.harness.plugin.api.PluginToolResult;
-import fun.fengwk.kkstudio.harness.plugin.api.ToolContribution;
+import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolContext;
+import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolContribution;
+import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolResult;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentCapabilityToolContribution;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.HostToolContribution;
+import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
+import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
@@ -52,8 +57,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
-import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
+import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 
 import java.nio.file.Path;
 import java.time.Clock;
@@ -77,19 +81,19 @@ import java.util.function.Supplier;
 /**
  * Production {@link ToolGateway}：冻结 Tool request 的权限 preflight 与 admission 路由。
  *
- * <p>{@link #preflight} 是纯判定：先由 registry 按冻结 definition id 恢复 entry/AgentToolId，再用 {@link
+ * <p>{@link #preflight} 是纯判定：先由 catalog 按冻结 definition id 恢复 ToolContribution/AgentToolId，再用 {@link
  * PermissionEvaluator} + 部署 {@link ToolSettings} + 配置的 workdir/environmentRoot 评估冻结的
- * call/binding；缺失 entry 或 definition 漂移直接生成确定性 Deny，绝不进入 evaluator，也不改写 binding/arguments。YOLO 短路由由
- * Runtime 决定，本类不感知 YOLO 也不查询 HarnessStore。 {@link #start} 按冻结 binding 的 {@link AgentToolBackend}
- * 路由：HOST 走 {@link AgentToolRegistry} 的冻结本地 factory，PLUGIN 走冻结的 {@link
- * ToolContribution}，ENVIRONMENT_CAPABILITY 只按冻结的完整 binding 经 {@link EnvironmentCapabilityTransport}
- * 发送。missing capability / 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；同 Environment 已有 active
- * remote invocation 映射 Busy，由 Harness 按配置延迟重试并序列化 sibling；本地 executor 拒绝映射 Overloaded（正整毫秒延迟）；发送不确定
- * / 提交结果不确定映射 Indeterminate。
+ * call/binding；缺失 contribution 或 definition 漂移直接生成确定性 Deny，绝不进入 evaluator，也不改写
+ * binding/arguments。YOLO 短路由由 Runtime 决定，本类不感知 YOLO 也不查询 HarnessStore。 {@link #start} 按冻结 binding 的
+ * {@link AgentToolBackend} 路由：HOST 走 {@link HostToolContribution#tool()}，DECLARATIVE 走 {@link
+ * DeclarativeToolContribution}，ENVIRONMENT_CAPABILITY 只按冻结的完整 binding 经 {@link
+ * EnvironmentCapabilityTransport} 发送。missing capability / 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射
+ * Rejected；同 Environment 已有 active remote invocation 映射 Busy，由 Harness 按配置延迟重试并序列化 sibling；本地
+ * executor 拒绝映射 Overloaded（正整毫秒延迟）；发送不确定 / 提交结果不确定映射 Indeterminate。
  *
  * <p>回调桥（{@link GatedToolExecutionListener}）：两阶段激活——{@code start()} 绝不打开回调 gate（Tool 的同步回调只进缓冲），
  * {@link ToolGateway.Handle#activate()} 由 Processor 在 attach + durable markRunning 后调用，直接打开 gate +
- * 释放 HOST 等待任务 + 串行重放缓冲（HOST / PLUGIN / ENVIRONMENT_CAPABILITY 同一路径，绝不提交独立重放任务）；重放与直接转发都绝不发生在
+ * 释放 HOST 等待任务 + 串行重放缓冲（HOST / DECLARATIVE / ENVIRONMENT_CAPABILITY 同一路径，绝不提交独立重放任务）；重放与直接转发都绝不发生在
  * {@code start()} 调用栈上，且整个桥是单线程串行 FIFO + terminal-once：迟到 / 重复信号一律忽略，缓冲有界（≤{@value
  * #MAX_BUFFERED_SIGNALS}，溢出即清空缓冲并在激活/分发时确定性收敛恰好一次 UNKNOWN，绝不产生 resource 写入、绝不出现第二个 terminal），非法
  * partial 确定性 terminal 失败并阻止后续任何 resource 写入。terminal 回调 fire-once：listener 在 onSucceeded /
@@ -97,9 +101,9 @@ import java.util.function.Supplier;
  * 失败才会选择第一个 terminal UNKNOWN。terminal success 通过 {@link ToolResultExternalizer} 做 managed Resource
  * 外部化（all-or-nothing）；partial 拒绝 Binary/Resource 且零存储 I/O。错误映射只把 {@link
  * EnvironmentCapabilityFailedException} （daemon FAILED）当作非可重试已知失败；cancelled /
- * unavailable（retryable=true）/ uncertain 保留显式分类，其余未分类错误（含 HOST/PLUGIN {@code tool.execute}
+ * unavailable（retryable=true）/ uncertain 保留显式分类，其余未分类错误（含 HOST/DECLARATIVE {@code tool.execute}
  * 抛异常、onError(null)） 一律 UNKNOWN。等待任务在 release 前被中断（而非取消）时队列一个未分类失败，activate 时恰好一次
- * UNKNOWN；cancel-before- activate 保持静默。activate 抛异常即激活失败，Processor 收敛一次 UNKNOWN。
+ * UNKNOWN；cancel-before-activate 保持静默。activate 抛异常即激活失败，Processor 收敛一次 UNKNOWN。
  *
  * <p>本类不查询 HarnessStore：持久线程所有权由 {@link ToolGateway.Execution} 的 {@code invocationId/threadId}
  * 提供。构造时拒绝 inline executor 与静默丢弃策略的 executor（inline executor 会使 admission gate 死锁，静默丢弃 会让 Started
@@ -117,7 +121,7 @@ public final class PlatformToolGateway implements ToolGateway {
   static final String INVALID_REQUEST_KIND = "INVALID_REQUEST";
   static final String EXECUTION_FAILED_KIND = "EXECUTION_FAILED";
   static final String INVALID_PARTIAL_KIND = "INVALID_PARTIAL";
-  static final String PLUGIN_CONTRACT_VIOLATION_KIND = "PLUGIN_CONTRACT_VIOLATION";
+  static final String CONTRIBUTOR_CONTRACT_VIOLATION_KIND = "CONTRIBUTOR_CONTRACT_VIOLATION";
 
   /** Ask reason 的字符上限（ToolGateway.Ask 契约）。 */
   private static final int ASK_REASON_MAX_CHARACTERS = 1024;
@@ -127,9 +131,8 @@ public final class PlatformToolGateway implements ToolGateway {
 
   private static final String PERMISSION_DENIED_MESSAGE = "Tool permission was denied.";
 
-  private final AgentToolRegistry toolRegistry;
-  private final PluginCatalog pluginCatalog;
-  private final PluginBranchViewLoader pluginBranchViewLoader;
+  private final HarnessCatalog catalog;
+  private final ContributorBranchViewLoader contributorBranchViewLoader;
   private final EnvironmentCapabilityTransport capabilityTransport;
   private final PermissionEvaluator permissionEvaluator;
   private final ToolSettingsProvider toolSettingsProvider;
@@ -149,9 +152,8 @@ public final class PlatformToolGateway implements ToolGateway {
    * 必须由装配方或测试显式提供， 不允许以无界容量绕过执行上限。
    */
   PlatformToolGateway(
-      AgentToolRegistry toolRegistry,
-      PluginCatalog pluginCatalog,
-      PluginBranchViewLoader pluginBranchViewLoader,
+      HarnessCatalog catalog,
+      ContributorBranchViewLoader contributorBranchViewLoader,
       EnvironmentCapabilityTransport capabilityTransport,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
@@ -164,10 +166,9 @@ public final class PlatformToolGateway implements ToolGateway {
       Supplier<Duration> overloadRetryDelay,
       Clock clock,
       ConcurrencyAdmission admission) {
-    this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry");
-    this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
-    this.pluginBranchViewLoader =
-        Objects.requireNonNull(pluginBranchViewLoader, "pluginBranchViewLoader");
+    this.catalog = Objects.requireNonNull(catalog, "catalog");
+    this.contributorBranchViewLoader =
+        Objects.requireNonNull(contributorBranchViewLoader, "contributorBranchViewLoader");
     this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
     this.permissionEvaluator = Objects.requireNonNull(permissionEvaluator, "permissionEvaluator");
     this.toolSettingsProvider =
@@ -187,30 +188,97 @@ public final class PlatformToolGateway implements ToolGateway {
     rejectInlineExecutor(executor);
   }
 
-  @Override
-  public PreflightResult preflight(ToolInvocationRequest request) {
-    Objects.requireNonNull(request, "request");
-    AgentToolDefinition frozenDefinition = request.binding().definition();
-    AgentToolRegistry.Entry entry = toolRegistry.find(frozenDefinition.id()).orElse(null);
-    if (entry == null) {
-      return new ToolGateway.Deny(
+  private record ResolvedContribution(ToolContribution contribution, ToolInvocationError error) {}
+
+  private ResolvedContribution validateContribution(ToolBinding binding) {
+    AgentToolDefinition frozenDefinition = binding.definition();
+    ToolContribution contribution = catalog.findTool(frozenDefinition.id()).orElse(null);
+    if (contribution == null) {
+      return new ResolvedContribution(
+          null,
           new ToolInvocationError(
               TOOL_NOT_FOUND_KIND,
               "Frozen tool definition " + frozenDefinition.id() + " is not registered."));
     }
-    if (!entry.definition().equals(frozenDefinition)) {
-      return new ToolGateway.Deny(
+    if (!contribution.definition().equals(frozenDefinition)) {
+      return new ResolvedContribution(
+          null,
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
               "Frozen tool definition "
                   + frozenDefinition.id()
                   + " does not match its catalog definition."));
     }
+    ContributorBinding frozenContributor = binding.contributor();
+    ContributionId expectedContributionId =
+        new ContributionId(
+            new ContributorId(frozenContributor.contributorId()), frozenContributor.localName());
+    if (!contribution.id().equals(expectedContributionId)) {
+      return new ResolvedContribution(
+          null,
+          new ToolInvocationError(
+              TOOL_DEFINITION_MISMATCH_KIND,
+              "Frozen contributor binding "
+                  + frozenContributor.contributorId()
+                  + "/"
+                  + frozenContributor.localName()
+                  + " does not match the catalog contribution."));
+    }
+    if (contribution.definition().backend() != frozenDefinition.backend()) {
+      return new ResolvedContribution(
+          null,
+          new ToolInvocationError(
+              TOOL_DEFINITION_MISMATCH_KIND,
+              "Frozen tool definition backend "
+                  + frozenDefinition.backend()
+                  + " does not match the catalog contribution backend "
+                  + contribution.definition().backend()));
+    }
+    if (contribution instanceof DeclarativeToolContribution declarative) {
+      if (!declarativeBindingMatches(frozenContributor, declarative)) {
+        return new ResolvedContribution(
+            null,
+            new ToolInvocationError(
+                TOOL_DEFINITION_MISMATCH_KIND,
+                "Declarative tool definition "
+                    + frozenDefinition.id()
+                    + " no longer matches its frozen state access declaration."));
+      }
+    }
+    return new ResolvedContribution(contribution, null);
+  }
+
+  private static boolean declarativeBindingMatches(
+      ContributorBinding binding, DeclarativeToolContribution contribution) {
+    if (binding.stateAccesses().size() != contribution.stateAccesses().size()) {
+      return false;
+    }
+    for (int i = 0; i < binding.stateAccesses().size(); i++) {
+      ContributorStateAccess frozen = binding.stateAccesses().get(i);
+      StateDeclaration current = contribution.stateAccesses().get(i);
+      if (!frozen.customType().equals(current.customType())
+          || !frozen.mode().name().equals(current.mode().name())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @Override
+  public PreflightResult preflight(ToolInvocationRequest request) {
+    Objects.requireNonNull(request, "request");
+    ResolvedContribution resolved = validateContribution(request.binding());
+    if (resolved.error() != null) {
+      return new ToolGateway.Deny(resolved.error());
+    }
     ToolSettings settings = toolSettingsProvider.get();
     PermissionEvaluator.Evaluation evaluation =
         permissionEvaluator.evaluate(
             new PermissionEvaluationContext(
-                entry.id(), request.call().argumentsJson(), permissionWorkdir(request), settings));
+                resolved.contribution().definition().id(),
+                request.call().argumentsJson(),
+                permissionWorkdir(request),
+                settings));
     PermissionAction action = evaluation.action();
     return switch (action) {
       case ALLOW -> new ToolGateway.Allow();
@@ -223,8 +291,8 @@ public final class PlatformToolGateway implements ToolGateway {
   /**
    * ENVIRONMENT_CAPABILITY tool 的权限路径上下文体现冻结 binding 的 workspace：以现有 {@link #environmentRoot} 作为逻辑
    * root，把 canonical {@code workspacePath} 纯路径解析为 effective workdir（不查询 live registry、不做文件系统
-   * IO）；HOST、 PLUGIN 与 null Environment binding 保持 server 默认 workdir（null binding 的确定性拒绝仍发生在 {@link
-   * #start}）。
+   * IO）；HOST、 DECLARATIVE 与 null Environment binding 保持 server 默认 workdir（null binding 的确定性拒绝仍发生在
+   * {@link #start}）。
    */
   private Path permissionWorkdir(ToolInvocationRequest request) {
     if (request.binding().definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY
@@ -244,11 +312,18 @@ public final class PlatformToolGateway implements ToolGateway {
     }
     ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
     try {
+      ResolvedContribution resolved = validateContribution(execution.request().binding());
+      if (resolved.error() != null) {
+        lease.close();
+        return new ToolGateway.Rejected(resolved.error());
+      }
       StartResult result =
           switch (execution.request().binding().definition().backend()) {
-            case HOST -> startHost(execution, listener, lease);
-            case PLUGIN -> startPlugin(execution, listener, lease);
-            case ENVIRONMENT_CAPABILITY -> startEnvironment(execution, listener, lease);
+            case HOST -> startHost(execution, listener, lease, resolved.contribution());
+            case DECLARATIVE -> startDeclarative(
+                execution, listener, lease, resolved.contribution());
+            case ENVIRONMENT_CAPABILITY -> startEnvironment(
+                execution, listener, lease, resolved.contribution());
           };
       if (!(result instanceof ToolGateway.Started)) {
         lease.close();
@@ -261,36 +336,26 @@ public final class PlatformToolGateway implements ToolGateway {
     }
   }
 
-  /** HOST：按 frozen definition id 查找并精确匹配 definition，然后提交 executor 执行（拒绝即 Overloaded）。 */
+  /** HOST：按 frozen definition 校验并提交 executor 执行（拒绝即 Overloaded）。 */
   private StartResult startHost(
-      Execution execution, Listener listener, ConcurrencyAdmission.Lease lease) {
-    AgentToolDefinition frozenDefinition = execution.request().binding().definition();
-    AgentToolRegistry.Entry entry = toolRegistry.find(frozenDefinition.id()).orElse(null);
-    if (entry == null) {
-      return new ToolGateway.Rejected(
-          new ToolInvocationError(
-              TOOL_NOT_FOUND_KIND,
-              "Frozen tool definition " + frozenDefinition.id() + " is not registered."));
-    }
-    if (!entry.definition().equals(frozenDefinition)) {
+      Execution execution,
+      Listener listener,
+      ConcurrencyAdmission.Lease lease,
+      ToolContribution contribution) {
+    if (!(contribution instanceof HostToolContribution hostContribution)) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
-              "Frozen tool definition "
-                  + frozenDefinition.id()
-                  + " does not match its catalog definition."));
+              "Frozen host tool definition is not a HOST contribution: "
+                  + contribution.definition().id()));
     }
-    Tool tool;
-    try {
-      tool = toolRegistry.createHostTool(entry);
-    } catch (IllegalArgumentException invalid) {
+    Tool tool = hostContribution.tool();
+    if (!tool.descriptor().equals(execution.request().binding().definition().descriptor())) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
-              "Registered tool definition "
-                  + frozenDefinition.id()
-                  + " no longer matches its frozen definition: "
-                  + failureMessage(invalid, "definition mismatch")));
+              "Registered tool descriptor does not match frozen descriptor: "
+                  + contribution.definition().id()));
     }
     ToolExecutionRequest request = request(execution, tool.descriptor());
     GatedToolExecutionListener bridge =
@@ -345,115 +410,93 @@ public final class PlatformToolGateway implements ToolGateway {
     return new ToolGateway.Started(handle);
   }
 
-  /** PLUGIN Tool：按 frozen definition id 恢复 contribution，并在 externalize 前校验全部声明式 intents。 */
-  private StartResult startPlugin(
-      Execution execution, Listener listener, ConcurrencyAdmission.Lease lease) {
-    AgentToolDefinition frozenDefinition = execution.request().binding().definition();
-    AgentToolRegistry.Entry entry = toolRegistry.find(frozenDefinition.id()).orElse(null);
-    if (entry == null) {
-      return new ToolGateway.Rejected(
-          new ToolInvocationError(
-              TOOL_NOT_FOUND_KIND,
-              "Frozen tool definition " + frozenDefinition.id() + " is not registered."));
-    }
-    if (!entry.definition().equals(frozenDefinition)) {
+  /** DECLARATIVE Tool：恢复 contribution，并在 externalize 前校验全部声明式 intents 与 WRITE ownership。 */
+  private StartResult startDeclarative(
+      Execution execution,
+      Listener listener,
+      ConcurrencyAdmission.Lease lease,
+      ToolContribution contribution) {
+    if (!(contribution instanceof DeclarativeToolContribution declarativeContribution)) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
-              "Frozen tool definition "
-                  + frozenDefinition.id()
-                  + " does not match its catalog definition."));
-    }
-    PluginToolBinding binding = execution.request().binding().plugin();
-    ContributionId id =
-        new ContributionId(new PluginId(binding.pluginId()), binding.contributionLocalName());
-    if (entry.pluginContribution() == null || !id.equals(entry.contributionId())) {
-      return new ToolGateway.Rejected(
-          new ToolInvocationError(
-              TOOL_DEFINITION_MISMATCH_KIND,
-              "Frozen plugin tool definition "
-                  + frozenDefinition.id()
-                  + " does not match the catalog contribution."));
-    }
-    ToolContribution contribution = entry.pluginContribution();
-    if (!pluginBindingMatches(binding, contribution)) {
-      return new ToolGateway.Rejected(
-          new ToolInvocationError(
-              TOOL_DEFINITION_MISMATCH_KIND,
-              "Plugin tool definition "
-                  + frozenDefinition.id()
-                  + " no longer matches its frozen state access declaration."));
+              "Frozen declarative tool definition is not a DECLARATIVE contribution: "
+                  + contribution.definition().id()));
     }
     GatedToolExecutionListener bridge =
         new GatedToolExecutionListener(
             listener,
             externalizer,
-            frozenDefinition.descriptor().name(),
+            declarativeContribution.definition().descriptor().name(),
             execution.request().call().id(),
             lease);
     GatewayHandle handle = new GatewayHandle(bridge::activate, bridge::cancel, lease);
     return submitLocalExecution(
-        execution, bridge, handle, () -> runPlugin(execution, contribution, bridge));
+        execution,
+        bridge,
+        handle,
+        () -> runDeclarative(execution, declarativeContribution, bridge));
   }
 
-  private void runPlugin(
-      Execution execution, ToolContribution contribution, GatedToolExecutionListener bridge) {
-    PluginToolResult outcome;
+  private void runDeclarative(
+      Execution execution,
+      DeclarativeToolContribution contribution,
+      GatedToolExecutionListener bridge) {
+    DeclarativeToolResult outcome;
     try {
-      PluginToolContext context =
-          new PluginToolContext(
-              pluginBranchViewLoader.load(execution.assistantEntryId()), clock.instant());
+      DeclarativeToolContext context =
+          new DeclarativeToolContext(
+              contributorBranchViewLoader.load(execution.assistantEntryId()), clock.instant());
       outcome = contribution.tool().execute(context, execution.request().call());
     } catch (RuntimeException failure) {
       bridge.onError(failure);
       return;
     }
     if (outcome == null) {
-      bridge.onPluginFailure(
+      bridge.onDeclarativeFailure(
           new ToolInvocationError(
-              PLUGIN_CONTRACT_VIOLATION_KIND, "Plugin tool returned a null outcome."));
+              CONTRIBUTOR_CONTRACT_VIOLATION_KIND, "Declarative tool returned a null outcome."));
       return;
     }
     ToolEffectBatch effects;
     try {
-      effects = mapPluginEffects(contribution, outcome);
+      effects = mapDeclarativeEffects(contribution, outcome);
     } catch (RuntimeException invalid) {
-      bridge.onPluginFailure(
+      bridge.onDeclarativeFailure(
           new ToolInvocationError(
-              PLUGIN_CONTRACT_VIOLATION_KIND,
-              failureMessage(invalid, "Plugin tool returned invalid intents.")));
+              CONTRIBUTOR_CONTRACT_VIOLATION_KIND,
+              failureMessage(invalid, "Declarative tool returned invalid intents.")));
       return;
     }
-    bridge.onPluginComplete(outcome.result(), effects);
+    bridge.onDeclarativeComplete(outcome.result(), effects);
   }
 
-  private ToolEffectBatch mapPluginEffects(
-      ToolContribution contribution, PluginToolResult outcome) {
+  private ToolEffectBatch mapDeclarativeEffects(
+      DeclarativeToolContribution contribution, DeclarativeToolResult outcome) {
     List<CustomEntryPayload> payloads = new ArrayList<>();
     for (AppendCustomEntry append : outcome.intents()) {
       CustomEntryPayload payload = append.payload();
-      if (!payload.pluginId().equals(contribution.id().pluginId().value())) {
+      if (!payload.contributorId().equals(contribution.id().contributorId().value())) {
         throw new IllegalArgumentException(
-            "plugin Tool intent owner does not match its contribution");
+            "declarative Tool intent owner does not match its contribution");
       }
-      if (pluginCatalog
-          .findCustomEntryType(contribution.id().pluginId(), payload.customType())
+      if (catalog
+          .findCustomEntryType(contribution.id().contributorId(), payload.customType())
           .isEmpty()) {
         throw new IllegalArgumentException(
-            "plugin Tool intent targets an unregistered custom entry type: "
+            "declarative Tool intent targets an unregistered custom entry type: "
                 + payload.customType());
       }
       boolean declaredWrite = false;
-      for (var access : contribution.stateAccesses()) {
-        if (access.customType().equals(payload.customType())
-            && access.mode() == PluginStateMode.WRITE) {
+      for (StateDeclaration access : contribution.stateAccesses()) {
+        if (access.customType().equals(payload.customType()) && access.mode() == StateMode.WRITE) {
           declaredWrite = true;
           break;
         }
       }
       if (!declaredWrite) {
         throw new IllegalArgumentException(
-            "plugin Tool intent targets state without a declared WRITE access: "
+            "declarative Tool intent targets state without a declared WRITE access: "
                 + payload.customType());
       }
       payloads.add(payload);
@@ -461,45 +504,24 @@ public final class PlatformToolGateway implements ToolGateway {
     return new ToolEffectBatch(payloads);
   }
 
-  private static boolean pluginBindingMatches(
-      PluginToolBinding binding, ToolContribution contribution) {
-    if (binding.stateAccesses().size() != contribution.stateAccesses().size()) {
-      return false;
-    }
-    for (int i = 0; i < binding.stateAccesses().size(); i++) {
-      PluginStateAccess frozen = binding.stateAccesses().get(i);
-      var current = contribution.stateAccesses().get(i);
-      if (!frozen.customType().equals(current.customType())
-          || !frozen.mode().name().equals(current.mode().name())) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   /**
-   * ENVIRONMENT_CAPABILITY：从 registry 冻结 entry 的 capability descriptor 构造独立 capability request，再按完整
+   * ENVIRONMENT_CAPABILITY：从 contribution 的 capability descriptor 构造独立 capability request，再按完整
    * binding 路由。能力缺失 / descriptor 漂移 / 发送前目标不可用（离线、未 READY、心跳过期）都是确定性 Rejected；同 Environment
    * 的瞬时容量冲突是 Busy； 发送不确定 / 未知异常是 Indeterminate（可能已开始，绝不能抛）。
    */
   private StartResult startEnvironment(
-      Execution execution, Listener listener, ConcurrencyAdmission.Lease lease) {
-    AgentToolDefinition frozenDefinition = execution.request().binding().definition();
-    AgentToolRegistry.Entry entry = toolRegistry.find(frozenDefinition.id()).orElse(null);
-    if (entry == null) {
-      return new ToolGateway.Rejected(
-          new ToolInvocationError(
-              TOOL_NOT_FOUND_KIND,
-              "Frozen tool definition " + frozenDefinition.id() + " is not registered."));
-    }
-    if (!entry.definition().equals(frozenDefinition)) {
+      Execution execution,
+      Listener listener,
+      ConcurrencyAdmission.Lease lease,
+      ToolContribution contribution) {
+    if (!(contribution instanceof EnvironmentCapabilityToolContribution envContribution)) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
-              "Frozen tool definition "
-                  + frozenDefinition.id()
-                  + " does not match its catalog definition."));
+              "Frozen environment tool definition is not an ENVIRONMENT_CAPABILITY contribution: "
+                  + contribution.definition().id()));
     }
+    AgentToolDefinition frozenDefinition = execution.request().binding().definition();
     if (execution.request().binding().environment() == null) {
       // 冻结 binding 没有 Environment（分支最新 settings 未选中/被清空）：发送前确定性拒绝，
       // 绝不进入 transport（否则 null binding 会变成不确定结果）。
@@ -510,15 +532,7 @@ public final class PlatformToolGateway implements ToolGateway {
                   + frozenDefinition.id()
                   + " has no environment binding (the branch has no selected environment)."));
     }
-    if (entry.definition().backend() != AgentToolBackend.ENVIRONMENT_CAPABILITY) {
-      return new ToolGateway.Rejected(
-          new ToolInvocationError(
-              TOOL_DEFINITION_MISMATCH_KIND,
-              "Frozen environment tool definition "
-                  + frozenDefinition.id()
-                  + " is not an environment capability."));
-    }
-    EnvironmentCapabilityDescriptor capability = entry.capability();
+    EnvironmentCapabilityDescriptor capability = envContribution.capability();
     GatedToolExecutionListener bridge =
         new GatedToolExecutionListener(
             listener,
@@ -548,7 +562,7 @@ public final class PlatformToolGateway implements ToolGateway {
       bridge.cancel();
       return new ToolGateway.Busy(busyRetryDelay.get());
     } catch (EnvironmentCapabilityUnavailableException unavailable) {
-      // 发送前目标不可用（路由缺失/未注册/未 READY/心跳过期）：肯定未开始，且当前分支配置下重试不会改变结论——
+      // 发送前目标不可用（路由缺失/未 READY/心跳过期）：肯定未开始，且当前分支配置下重试不会改变结论——
       // 确定性拒绝，让模型看到 durable 错误结果并继续收敛。
       bridge.cancel();
       return new ToolGateway.Rejected(
@@ -811,7 +825,7 @@ public final class PlatformToolGateway implements ToolGateway {
    *
    * <p>两阶段激活：{@code start()} 绝不打开 gate（同步回调只进缓冲）；{@link #activate()} 由 {@code handle.activate()}
    * 直接调用（Processor 在 attach + durable markRunning 之后、start() 已返回），原子地打开 gate + 释放等待的 executor
-   * 任务（HOST 路径，之后任务才运行 Tool）+ 串行重放缓冲——不再提交任何独立重放任务，HOST / PLUGIN / ENVIRONMENT_CAPABILITY
+   * 任务（HOST 路径，之后任务才运行 Tool）+ 串行重放缓冲——不再提交任何独立重放任务，HOST / DECLARATIVE / ENVIRONMENT_CAPABILITY
    * 行为一致。重放与直接转发都绝不发生在 {@code start()} 的调用栈上。等待任务在 release 前被中断（而非取消）时队列一个未分类失败，activate 时恰好一次
    * UNKNOWN（绝不静默消失）；cancel-before-activate 则丢弃缓冲并中止任务。partial 先做与 Runtime 完全一致的校验（非空 / toolCallId
    * 精确匹配 / 拒绝 Binary+Resource / canonical JSON ≤ 256 KiB），terminal 在外部化前校验非空 / toolCallId
@@ -917,7 +931,7 @@ public final class PlatformToolGateway implements ToolGateway {
       deliver(new Signal(SignalKind.COMPLETE, null, result, ToolEffectBatch.EMPTY, null, null));
     }
 
-    void onPluginComplete(ToolResult result, ToolEffectBatch effects) {
+    void onDeclarativeComplete(ToolResult result, ToolEffectBatch effects) {
       deliver(
           new Signal(
               SignalKind.COMPLETE,
@@ -928,10 +942,10 @@ public final class PlatformToolGateway implements ToolGateway {
               null));
     }
 
-    void onPluginFailure(ToolInvocationError error) {
+    void onDeclarativeFailure(ToolInvocationError error) {
       deliver(
           new Signal(
-              SignalKind.PLUGIN_FAILURE,
+              SignalKind.DECLARATIVE_FAILURE,
               null,
               null,
               ToolEffectBatch.EMPTY,
@@ -1024,7 +1038,7 @@ public final class PlatformToolGateway implements ToolGateway {
         case PARTIAL -> processPartial(signal.partial);
         case COMPLETE -> processComplete(signal.result, signal.effects);
         case ERROR -> processError(signal.error);
-        case PLUGIN_FAILURE -> fail(signal.pluginFailure);
+        case DECLARATIVE_FAILURE -> fail(signal.declarativeFailure);
       };
     }
 
@@ -1101,7 +1115,7 @@ public final class PlatformToolGateway implements ToolGateway {
 
     /**
      * 错误分类：只有 {@link EnvironmentCapabilityFailedException}（daemon FAILED）是已确认的非可重试已知失败；cancelled /
-     * unavailable（retryable=true）/ uncertain 保留显式分类；其余未分类错误（含 HOST/PLUGIN {@code tool.execute}
+     * unavailable（retryable=true）/ uncertain 保留显式分类；其余未分类错误（含 HOST/DECLARATIVE {@code tool.execute}
      * 抛异常）一律 UNKNOWN。任何错误信号都使桥 terminal。
      */
     private boolean processError(Throwable error) {
@@ -1215,7 +1229,7 @@ public final class PlatformToolGateway implements ToolGateway {
     PARTIAL,
     COMPLETE,
     ERROR,
-    PLUGIN_FAILURE
+    DECLARATIVE_FAILURE
   }
 
   private record Signal(
@@ -1224,5 +1238,5 @@ public final class PlatformToolGateway implements ToolGateway {
       ToolResult result,
       ToolEffectBatch effects,
       Throwable error,
-      ToolInvocationError pluginFailure) {}
+      ToolInvocationError declarativeFailure) {}
 }

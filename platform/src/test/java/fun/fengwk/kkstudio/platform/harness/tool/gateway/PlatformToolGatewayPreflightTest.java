@@ -10,7 +10,11 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
@@ -21,10 +25,8 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -110,7 +112,7 @@ class PlatformToolGatewayPreflightTest {
             false);
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor(),
@@ -121,7 +123,7 @@ class PlatformToolGatewayPreflightTest {
             ToolGateway.Deny.class,
             gateway.preflight(ToolGatewayTestSupport.hostRequest("call-1", PREFLIGHT_DESCRIPTOR)));
 
-    // registry 中的 frozen entry 将 model-visible name demo 恢复为 test.host-tool；不能误用 name 规则。
+    // catalog 中的 frozen entry 将 model-visible name demo 恢复为 test.host-tool；不能误用 name 规则。
     assertEquals(PlatformToolGateway.PERMISSION_DENIED_KIND, deny.error().kind());
     assertEquals("Tool permission was denied.", deny.error().message());
   }
@@ -129,12 +131,13 @@ class PlatformToolGatewayPreflightTest {
   @Test
   void unknownAndMismatchedDescriptorsAreDeniedBeforePermissionEvaluation() {
     PermissionEvaluator evaluator = mock(PermissionEvaluator.class);
+    HarnessCatalog catalog =
+        ToolGatewayTestSupport.defaultCatalog(
+            new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR));
     PlatformToolGateway gateway =
         new PlatformToolGateway(
-            ToolGatewayTestSupport.factories(
-                new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR)),
-            ToolGatewayTestSupport.EMPTY_PLUGIN_CATALOG,
-            ToolGatewayTestSupport.FAILING_PLUGIN_BRANCH_LOADER,
+            catalog,
+            ToolGatewayTestSupport.FAILING_CONTRIBUTOR_BRANCH_LOADER,
             new ToolGatewayTestSupport.FakeTransport(),
             evaluator,
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
@@ -162,7 +165,7 @@ class PlatformToolGatewayPreflightTest {
                             unknown,
                             ToolVisibility.SELECTABLE,
                             AgentToolBackend.HOST),
-                        null,
+                        new ContributorBinding("test", "missing", List.of()),
                         null))));
     assertEquals(PlatformToolGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
     assertEquals(
@@ -175,7 +178,10 @@ class PlatformToolGatewayPreflightTest {
             gateway.preflight(
                 new ToolInvocationRequest(
                     new ToolCall("mismatch", "demo", "{}"),
-                    new ToolBinding(hostDefinition(mismatched), null, null))));
+                    new ToolBinding(
+                        hostDefinition(mismatched),
+                        new ContributorBinding("test", "host-tool", List.of()),
+                        null))));
     // 两个请求都在 evaluator 前收敛；mock 没有任何交互，证明未知/漂移 descriptor 不会产生评估副作用。
     assertEquals(PlatformToolGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
     assertEquals(
@@ -202,14 +208,14 @@ class PlatformToolGatewayPreflightTest {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    var factories = ToolGatewayTestSupport.factories(tool);
+    HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog(tool);
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
       PlatformToolGateway gateway =
-          ToolGatewayTestSupport.gateway(factories, transport, store, executor);
+          ToolGatewayTestSupport.gateway(catalog, transport, store, executor);
       ToolInvocationRequest request = ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR);
       gateway.preflight(request);
-      // preflight 不触碰 transport / factories / store；start 使用同一冻结 request 实例执行。
+      // preflight 不触碰 transport / contributors / store；start 使用同一冻结 request 实例执行。
       assertTrue(transport.invocations.isEmpty());
       assertTrue(store.puts.isEmpty());
       ToolGateway.StartResult started =
@@ -293,21 +299,24 @@ class PlatformToolGatewayPreflightTest {
 
   private static ToolGateway.PreflightResult environmentPreflight(
       EnvironmentBinding environment, String argumentsJson, ToolSettings settings) {
-    ToolDescriptor descriptor =
-        EnvironmentToolCatalog.require(BaseToolIds.READ).definition().descriptor();
+    ToolContribution contribution =
+        ToolGatewayTestSupport.defaultCatalog().findTool(BuiltinToolIds.READ).orElseThrow();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor(),
             settings,
             ToolGatewayTestSupport.WORKDIR,
             ToolGatewayTestSupport.ENVIRONMENT_ROOT);
+    ContributorBinding contributor =
+        new ContributorBinding(
+            contribution.id().contributorId().value(), contribution.id().localName(), List.of());
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "read", argumentsJson),
-            new ToolBinding(environmentDefinition(descriptor), environment, null));
+            new ToolBinding(contribution.definition(), contributor, environment));
     return gateway.preflight(request);
   }
 
@@ -315,7 +324,7 @@ class PlatformToolGatewayPreflightTest {
       PermissionAction action, Path workdir, Path environmentRoot) {
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(
+            ToolGatewayTestSupport.defaultCatalog(
                 new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
@@ -326,7 +335,10 @@ class PlatformToolGatewayPreflightTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "demo", "{\"path\":\"/tmp/x\"}"),
-            new ToolBinding(hostDefinition(PREFLIGHT_DESCRIPTOR), null, null));
+            new ToolBinding(
+                hostDefinition(PREFLIGHT_DESCRIPTOR),
+                new ContributorBinding("test", "host-tool", List.of()),
+                null));
     return gateway.preflight(request);
   }
 
@@ -351,7 +363,7 @@ class PlatformToolGatewayPreflightTest {
     ToolDescriptor descriptor = truncationDescriptor();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(new ToolGatewayTestSupport.FakeTool(descriptor)),
+            ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(descriptor)),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor(),
@@ -361,7 +373,10 @@ class PlatformToolGatewayPreflightTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "x", "{\"path\":\"/tmp/x\"}"),
-            new ToolBinding(hostDefinition(descriptor), null, null));
+            new ToolBinding(
+                hostDefinition(descriptor),
+                new ContributorBinding("test", "host-tool", List.of()),
+                null));
     return gateway.preflight(request);
   }
 
@@ -371,14 +386,6 @@ class PlatformToolGatewayPreflightTest {
         descriptor,
         ToolVisibility.SELECTABLE,
         AgentToolBackend.HOST);
-  }
-
-  private static AgentToolDefinition environmentDefinition(ToolDescriptor descriptor) {
-    return EnvironmentToolCatalog.entries().stream()
-        .filter(entry -> entry.definition().descriptor().equals(descriptor))
-        .findFirst()
-        .orElseThrow()
-        .definition();
   }
 
   /** 判断字符串是否包含未配对 surrogate（被劈开的代理对）。 */

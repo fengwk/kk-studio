@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.task;
 
+import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -7,7 +8,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;

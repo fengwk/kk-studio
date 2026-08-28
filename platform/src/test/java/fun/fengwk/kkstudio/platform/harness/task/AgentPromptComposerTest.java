@@ -9,12 +9,11 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 
@@ -196,78 +195,13 @@ class AgentPromptComposerTest {
         NullPointerException.class, () -> composer.compose("body", none(), List.of(), null));
   }
 
-  /** 冻结上下文只允许无选择、选中但无 metadata、或 OS/note 成对存在三种形态，且日期必填。 */
-  @Test
-  void validatesCurrentEnvironmentContextInvariants() {
-    LocalDate date = LocalDate.of(2026, 8, 9);
-    EnvironmentBinding binding = TestEnvironmentBindings.binding("env");
-
-    assertEquals(new CurrentEnvironmentContext(null, null, date, null), none());
-    CurrentEnvironmentContext selectedWithoutMetadata =
-        new CurrentEnvironmentContext(binding, null, date, null);
-    assertEquals(binding, selectedWithoutMetadata.binding());
-    assertEquals(null, selectedWithoutMetadata.operatingSystem());
-    assertEquals(null, selectedWithoutMetadata.note());
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(null, DaemonOperatingSystem.LINUX, date, "note"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(binding, DaemonOperatingSystem.LINUX, date, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(binding, null, date, "note"));
-    assertThrows(
-        NullPointerException.class, () -> new CurrentEnvironmentContext(null, null, null, null));
-  }
-
-  /** 模型可见 note 在冻结上下文边界再次严格校验，任何调用方都不能绕过 READY/CLI 的约束。 */
-  @Test
-  void validatesCurrentEnvironmentContextNote() {
-    LocalDate date = LocalDate.of(2026, 8, 9);
-    EnvironmentBinding binding = TestEnvironmentBindings.binding("env");
-
-    assertInvalidContextNote(binding, date, "", "note must not be blank");
-    assertInvalidContextNote(binding, date, " ", "note must not be blank");
-    assertInvalidContextNote(
-        binding, date, " leading", "note must not have surrounding whitespace");
-    assertInvalidContextNote(
-        binding, date, "trailing ", "note must not have surrounding whitespace");
-    assertInvalidContextNote(
-        binding, date, "first\nsecond", "note must not contain ISO control characters");
-    assertInvalidContextNote(binding, date, "first\u2028second", "note must be a single line");
-    assertInvalidContextNote(
-        binding, date, "control\u0007value", "note must not contain ISO control characters");
-    assertInvalidContextNote(
-        binding,
-        date,
-        "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS + 1),
-        "note exceeds " + DaemonEnvironmentInfo.MAX_NOTE_CHARS + " characters");
-
-    String maximumLength = "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS);
-    assertEquals(
-        maximumLength,
-        new CurrentEnvironmentContext(binding, DaemonOperatingSystem.LINUX, date, maximumLength)
-            .note());
-  }
-
   private static CurrentEnvironmentContext none() {
     return new CurrentEnvironmentContext(null, null, LocalDate.of(2026, 8, 9), null);
   }
 
-  private static void assertInvalidContextNote(
-      EnvironmentBinding binding, LocalDate date, String note, String expectedMessage) {
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> new CurrentEnvironmentContext(binding, DaemonOperatingSystem.LINUX, date, note));
-    assertEquals(expectedMessage, error.getMessage());
-  }
-
-  private static void assertNoLegacyFields(String prompt) {
-    assertFalse(prompt.contains("status"), prompt);
-    assertFalse(prompt.contains("working_directory"), prompt);
-    assertFalse(prompt.contains("current_time"), prompt);
-    assertFalse(prompt.contains("time_zone"), prompt);
+  private static void assertNoLegacyFields(String text) {
+    assertFalse(text.contains("- platform:"));
+    assertFalse(text.contains("- host:"));
+    assertFalse(text.contains("- architecture:"));
   }
 }

@@ -9,10 +9,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
 
@@ -115,7 +115,7 @@ class SystemSettingsCodecTest {
   void preservesPermissionRuleOrderThroughJsonRoundTrip() {
     Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
     permission.put(
-        BaseToolIds.BASH.value(),
+        BuiltinToolIds.BASH.value(),
         List.of(
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("git ?", PermissionAction.ALLOW),
@@ -128,7 +128,7 @@ class SystemSettingsCodecTest {
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("git ?", PermissionAction.ALLOW),
             new PermissionRule("secret/**", PermissionAction.DENY)),
-        decoded.tool().permission().get(BaseToolIds.BASH.value()));
+        decoded.tool().permission().get(BuiltinToolIds.BASH.value()));
   }
 
   @Test
@@ -136,7 +136,7 @@ class SystemSettingsCodecTest {
     Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
     permission.put("*", List.of(new PermissionRule("*", PermissionAction.ASK)));
     permission.put(
-        BaseToolIds.BASH.value(), List.of(new PermissionRule("git *", PermissionAction.ALLOW)));
+        BuiltinToolIds.BASH.value(), List.of(new PermissionRule("git *", PermissionAction.ALLOW)));
     SystemSettings settings = withToolPermission(permission);
 
     assertEquals(settings, codec.decode(codec.encode(settings)));
@@ -284,7 +284,7 @@ class SystemSettingsCodecTest {
         .getTool()
         .getPermission()
         .put(
-            BaseToolIds.WRITE.value(),
+            BuiltinToolIds.WRITE.value(),
             List.of(
                 new SystemSettingsToolDTO.PermissionRuleDTO() {
                   {

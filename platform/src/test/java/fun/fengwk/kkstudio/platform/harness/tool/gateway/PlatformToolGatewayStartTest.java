@@ -3,19 +3,24 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -23,11 +28,9 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
@@ -59,7 +62,7 @@ class PlatformToolGatewayStartTest {
     try {
       PlatformToolGateway gateway =
           ToolGatewayTestSupport.gateway(
-              ToolGatewayTestSupport.factories(tool), transport, store, executor);
+              ToolGatewayTestSupport.defaultCatalog(tool), transport, store, executor);
       ToolGateway.StartResult started =
           gateway.start(
               ToolGatewayTestSupport.execution(request),
@@ -91,7 +94,7 @@ class PlatformToolGatewayStartTest {
     try {
       PlatformToolGateway gateway =
           ToolGatewayTestSupport.gateway(
-              ToolGatewayTestSupport.factories(), transport, store, executor);
+              ToolGatewayTestSupport.defaultCatalog(), transport, store, executor);
       // 两个不同的 canonical 环境（display name 概念完全不进入 adapter 路由）。
       ToolInvocationRequest requestA =
           ToolGatewayTestSupport.environmentRequest("call-a", ToolGatewayTestSupport.ENV_A);
@@ -131,7 +134,7 @@ class PlatformToolGatewayStartTest {
   void missingHostToolIsRejected() {
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor());
@@ -157,7 +160,7 @@ class PlatformToolGatewayStartTest {
             Duration.ofMinutes(1));
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
+            ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor());
@@ -189,10 +192,13 @@ class PlatformToolGatewayStartTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "no_such_daemon_tool", "{}"),
-            new ToolBinding(unknownDefinition, ToolGatewayTestSupport.ENV_A, null));
+            new ToolBinding(
+                unknownDefinition,
+                new ContributorBinding("test", "missing", List.of()),
+                ToolGatewayTestSupport.ENV_A));
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor());
@@ -215,25 +221,26 @@ class PlatformToolGatewayStartTest {
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
-    AgentToolDefinition bashDefinition =
-        EnvironmentToolCatalog.entries().stream()
-            .filter(entry -> entry.definition().descriptor().name().equals("bash"))
-            .findFirst()
-            .orElseThrow()
-            .definition();
+    ToolContribution bashContribution =
+        ToolGatewayTestSupport.defaultCatalog().findTool(BuiltinToolIds.BASH).orElseThrow();
     AgentToolDefinition driftedDefinition =
         new AgentToolDefinition(
-            bashDefinition.id(),
+            bashContribution.definition().id(),
             driftedBash,
-            bashDefinition.visibility(),
-            bashDefinition.backend());
+            bashContribution.definition().visibility(),
+            bashContribution.definition().backend());
+    ContributorBinding contributor =
+        new ContributorBinding(
+            bashContribution.id().contributorId().value(),
+            bashContribution.id().localName(),
+            List.of());
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "bash", "{}"),
-            new ToolBinding(driftedDefinition, ToolGatewayTestSupport.ENV_A, null));
+            new ToolBinding(driftedDefinition, contributor, ToolGatewayTestSupport.ENV_A));
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor());
@@ -246,24 +253,11 @@ class PlatformToolGatewayStartTest {
   }
 
   @Test
-  void environmentToolWithoutRouteIsDeterministicRejectionWithoutTransport() {
-    // 冻结 binding 的 route 为 null（分支最新 settings 未选中/已清空）：发送前确定性拒绝，
-    // transport 绝不能收到 null route 调用（否则会变成不确定结果）。
-    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
-    PlatformToolGateway gateway =
-        ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
-            transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
-    ToolGateway.StartResult result =
-        gateway.start(
-            ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.environmentRequest("call-1", null)),
-            new ToolGatewayTestSupport.RecordingListener());
-    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
-    assertEquals("UNAVAILABLE", rejected.error().kind());
-    assertEquals(0, transport.invocations.size());
+  void environmentToolRequiresEnvironmentBinding() {
+    // ENVIRONMENT_CAPABILITY 工具必须携带 EnvironmentBinding，空 binding 在构造层 fail closed。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ToolGatewayTestSupport.environmentRequest("call-1", null));
   }
 
   @Test
@@ -272,7 +266,7 @@ class PlatformToolGatewayStartTest {
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_UNAVAILABLE;
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor());
@@ -294,7 +288,7 @@ class PlatformToolGatewayStartTest {
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_BUSY;
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor());
@@ -315,7 +309,7 @@ class PlatformToolGatewayStartTest {
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_UNCERTAIN;
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor());
@@ -335,7 +329,7 @@ class PlatformToolGatewayStartTest {
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_INVALID;
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor());
@@ -354,7 +348,7 @@ class PlatformToolGatewayStartTest {
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_GENERIC;
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor());
@@ -384,7 +378,7 @@ class PlatformToolGatewayStartTest {
     executor.reject = true;
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
+            ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -408,7 +402,7 @@ class PlatformToolGatewayStartTest {
             listener.onComplete(ToolGatewayTestSupport.result(request.call().id(), "done"));
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(tool),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -441,7 +435,7 @@ class PlatformToolGatewayStartTest {
     transport.syncResult = ToolGatewayTestSupport.result("call-1", "sync");
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -472,31 +466,22 @@ class PlatformToolGatewayStartTest {
   }
 
   @Test
-  void factoryCreatingMismatchedToolIsRejectedAsInvalidRequest() {
+  void catalogDriftedDescriptorIsRejectedAsMismatch() {
     ToolDescriptor drifted = hostDriftedDescriptor("2");
-    var factories =
-        new AgentToolRegistry(
-            List.of(
-                new ToolFactory() {
-                  @Override
-                  public AgentToolDefinition definition() {
-                    return new AgentToolDefinition(
-                        ToolGatewayTestSupport.TEST_TOOL_ID,
-                        DESCRIPTOR,
-                        ToolVisibility.SELECTABLE,
-                        AgentToolBackend.HOST);
-                  }
-
-                  @Override
-                  public Tool create() {
-                    return new ToolGatewayTestSupport.FakeTool(drifted);
-                  }
-                }),
-            PluginCatalog.from(List.of()),
-            EnvironmentToolCatalog.entries());
+    HarnessContributor contributor =
+        HarnessContributor.of(
+            new ContributorDescriptor(new ContributorId("test"), "Test", "1", Set.of()),
+            registrar ->
+                registrar.registerHostTool(
+                    "host-tool",
+                    ToolGatewayTestSupport.TEST_TOOL_ID,
+                    new ToolGatewayTestSupport.FakeTool(drifted),
+                    ToolVisibility.SELECTABLE,
+                    0));
+    HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            factories,
+            catalog,
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor());
@@ -505,7 +490,7 @@ class PlatformToolGatewayStartTest {
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             new ToolGatewayTestSupport.RecordingListener());
-    // create() 产物与冻结 definition 不匹配：统一映射为 definition mismatch。
+    // catalog 产物与冻结 definition 不匹配：统一映射为 definition mismatch。
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
     assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
   }
@@ -516,7 +501,7 @@ class PlatformToolGatewayStartTest {
     executor.executeFailure = new IllegalStateException("executor broken");
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
+            ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -543,7 +528,7 @@ class PlatformToolGatewayStartTest {
         new ToolGatewayTestSupport.RecordingListener();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -574,7 +559,7 @@ class PlatformToolGatewayStartTest {
         new ToolGatewayTestSupport.RecordingListener();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -601,7 +586,7 @@ class PlatformToolGatewayStartTest {
         new ToolGatewayTestSupport.RecordingListener();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -632,7 +617,7 @@ class PlatformToolGatewayStartTest {
         new ToolGatewayTestSupport.RecordingListener();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
@@ -678,7 +663,7 @@ class PlatformToolGatewayStartTest {
         new ToolGatewayTestSupport.RecordingListener();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor());

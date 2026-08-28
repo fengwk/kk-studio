@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
@@ -16,8 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
-import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
+import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.time.Clock;
@@ -32,7 +31,7 @@ import java.util.concurrent.Executors;
 public class HarnessToolGatewayConfiguration {
 
   /**
-   * admission 之后 HOST/PLUGIN Tool 执行与缓冲回调重放专用的 executor。 Java 21 虚拟线程天然适合阻塞的远程 Tool 发送；{@code
+   * admission 之后 HOST/DECLARATIVE Tool 执行与缓冲回调重放专用的 executor。 Java 21 虚拟线程天然适合阻塞的远程 Tool 发送；{@code
    * destroyMethod = "close"} 让在途任务由 Spring 生命周期持有，但不会等待它们。
    */
   @Bean(name = "toolGatewayExecutor", destroyMethod = "close")
@@ -58,9 +57,8 @@ public class HarnessToolGatewayConfiguration {
   @ConditionalOnBean(ResourceStore.class)
   @ConditionalOnMissingBean(ToolGateway.class)
   public PlatformToolGateway platformToolGateway(
-      AgentToolRegistry toolRegistry,
-      PluginCatalog pluginCatalog,
-      PluginBranchViewLoader pluginBranchViewLoader,
+      HarnessCatalog harnessCatalog,
+      ContributorBranchViewLoader contributorBranchViewLoader,
       EnvironmentCapabilityTransport capabilityTransport,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
@@ -76,9 +74,8 @@ public class HarnessToolGatewayConfiguration {
     int resourceMaxBytes =
         Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
     return new PlatformToolGateway(
-        toolRegistry,
-        pluginCatalog,
-        pluginBranchViewLoader,
+        harnessCatalog,
+        contributorBranchViewLoader,
         capabilityTransport,
         permissionEvaluator,
         toolSettingsProvider,

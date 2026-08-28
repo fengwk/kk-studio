@@ -4,8 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
+import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -18,13 +25,11 @@ import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -46,8 +51,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
-import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
+import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 
 import java.nio.file.Path;
@@ -79,7 +83,7 @@ import java.util.function.Supplier;
  * {@link PlatformToolGateway} 测试共享基座：可编程 Tool / Transport / ResourceStore / Listener 与请求 fixture。
  *
  * <p>HOST fixture 使用虚构 tool {@code demo}（绕过 bash 的 permission 分析路径）；ENVIRONMENT_CAPABILITY fixture
- * 使用 {@link EnvironmentToolCatalog} 的真实 {@code bash} definition（capability 校验需要与 catalog 精确相等）。
+ * 使用内置 contributor 的真实 {@code bash} definition（capability 校验需要与 catalog 精确相等）。
  */
 final class ToolGatewayTestSupport {
 
@@ -96,13 +100,10 @@ final class ToolGatewayTestSupport {
   /** 测试默认的 ResourceStore 单对象上限（与生产默认一致）。 */
   static final int RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
 
-  /** 测试默认空 PluginCatalog：非插件路径的 gateway 测试不装配插件。 */
-  static final PluginCatalog EMPTY_PLUGIN_CATALOG = PluginCatalog.from(List.of());
-
-  /** 测试默认明确失败的 PluginBranchViewLoader：任何插件路径都会暴露未装配。 */
-  static final PluginBranchViewLoader FAILING_PLUGIN_BRANCH_LOADER =
+  /** 测试默认明确失败的 ContributorBranchViewLoader：任何 declarative 路径都会暴露未装配。 */
+  static final ContributorBranchViewLoader FAILING_CONTRIBUTOR_BRANCH_LOADER =
       assistantEntryId -> {
-        throw new IllegalStateException("no plugin branch loader is configured");
+        throw new IllegalStateException("no contributor branch loader is configured");
       };
 
   /** 固定 busy/overload 延迟 supplier：语义与生产一致——每次 Busy/Overloaded 判定现读。 */
@@ -113,6 +114,40 @@ final class ToolGatewayTestSupport {
   static final Clock TEST_CLOCK = Clock.systemUTC();
 
   private ToolGatewayTestSupport() {}
+
+  static Tool dummyLoadSkillTool() {
+    return new FakeTool(hostDescriptor("load_skill"));
+  }
+
+  static Tool dummyTaskTool() {
+    return new FakeTool(hostDescriptor("task"));
+  }
+
+  static BuiltinHarnessContributor builtinContributor() {
+    return new BuiltinHarnessContributor(dummyLoadSkillTool(), dummyTaskTool());
+  }
+
+  static HarnessCatalog defaultCatalog(Tool... tools) {
+    List<HarnessContributor> list = new ArrayList<>();
+    list.add(builtinContributor());
+    if (tools.length > 0) {
+      list.add(
+          HarnessContributor.of(
+              new ContributorDescriptor(new ContributorId("test"), "Test", "1", Set.of()),
+              registrar -> {
+                for (int i = 0; i < tools.length; i++) {
+                  Tool tool = tools[i];
+                  registrar.registerHostTool(
+                      "host-tool" + (i == 0 ? "" : "-" + i),
+                      i == 0 ? TEST_TOOL_ID : new AgentToolId(TEST_TOOL_ID.value() + "-" + i),
+                      tool,
+                      ToolVisibility.SELECTABLE,
+                      0);
+                }
+              }));
+    }
+    return HarnessCatalog.from(list);
+  }
 
   static ToolDescriptor hostDescriptor(String name) {
     return new ToolDescriptor(
@@ -131,21 +166,22 @@ final class ToolGatewayTestSupport {
         new ToolBinding(
             new AgentToolDefinition(
                 TEST_TOOL_ID, descriptor, ToolVisibility.SELECTABLE, AgentToolBackend.HOST),
-            null,
+            new ContributorBinding("test", "host-tool", List.of()),
             null));
   }
 
   /** 真实 daemon capability 的 ENVIRONMENT 请求：绑定 {@code bash} 并路由到指定 canonical 环境。 */
   static ToolInvocationRequest environmentRequest(String callId, EnvironmentBinding environment) {
-    AgentToolDefinition definition =
-        EnvironmentToolCatalog.entries().stream()
-            .filter(entry -> entry.definition().descriptor().name().equals("bash"))
-            .findFirst()
-            .orElseThrow()
-            .definition();
+    HarnessCatalog catalog = defaultCatalog();
+    ToolContribution bashContribution = catalog.findTool(BuiltinToolIds.BASH).orElseThrow();
+    ContributorBinding contributor =
+        new ContributorBinding(
+            bashContribution.id().contributorId().value(),
+            bashContribution.id().localName(),
+            List.of());
     return new ToolInvocationRequest(
         new ToolCall(callId, "bash", "{\"command\":\"ls\"}"),
-        new ToolBinding(definition, environment, null));
+        new ToolBinding(bashContribution.definition(), contributor, environment));
   }
 
   static ToolGateway.Execution execution(ToolInvocationRequest request) {
@@ -153,61 +189,43 @@ final class ToolGatewayTestSupport {
         INVOCATION_ID, THREAD_ID, ASSISTANT_ENTRY_ID, PROPOSED_ATTEMPT, request);
   }
 
-  static AgentToolRegistry factories(Tool... tools) {
-    List<ToolFactory> factories = new ArrayList<>(tools.length);
-    for (Tool tool : tools) {
-      factories.add(ToolFactory.singleton(TEST_TOOL_ID, tool));
-    }
-    return new AgentToolRegistry(factories, EMPTY_PLUGIN_CATALOG, EnvironmentToolCatalog.entries());
-  }
-
   static PlatformToolGateway gateway(
-      AgentToolRegistry toolRegistry,
+      HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor) {
     return gateway(
-        toolRegistry,
-        transport,
-        store,
-        executor,
-        RESOURCE_MAX_BYTES,
-        settings(PermissionAction.ALLOW));
+        catalog, transport, store, executor, RESOURCE_MAX_BYTES, settings(PermissionAction.ALLOW));
   }
 
   static PlatformToolGateway gateway(
-      AgentToolRegistry toolRegistry,
+      HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor,
       int resourceMaxBytes) {
     return gateway(
-        toolRegistry,
-        transport,
-        store,
-        executor,
-        resourceMaxBytes,
-        settings(PermissionAction.ALLOW));
+        catalog, transport, store, executor, resourceMaxBytes, settings(PermissionAction.ALLOW));
   }
 
   static PlatformToolGateway gateway(
-      AgentToolRegistry toolRegistry,
+      HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor,
       ToolSettings settings) {
-    return gateway(toolRegistry, transport, store, executor, RESOURCE_MAX_BYTES, settings);
+    return gateway(catalog, transport, store, executor, RESOURCE_MAX_BYTES, settings);
   }
 
   static PlatformToolGateway gateway(
-      AgentToolRegistry toolRegistry,
+      HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor,
       int resourceMaxBytes,
       ToolSettings settings) {
     return gateway(
-        toolRegistry,
+        catalog,
         transport,
         store,
         executor,
@@ -217,42 +235,16 @@ final class ToolGatewayTestSupport {
   }
 
   static PlatformToolGateway gateway(
-      AgentToolRegistry toolRegistry,
+      HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor,
       int resourceMaxBytes,
       ToolSettings settings,
       ConcurrencyAdmission admission) {
-    return gateway(
-        toolRegistry,
-        EMPTY_PLUGIN_CATALOG,
-        transport,
-        store,
-        executor,
-        resourceMaxBytes,
-        settings,
-        admission);
-  }
-
-  static PlatformToolGateway gateway(
-      AgentToolRegistry toolRegistry,
-      PluginCatalog pluginCatalog,
-      FakeTransport transport,
-      FakeResourceStore store,
-      ExecutorService executor,
-      int resourceMaxBytes,
-      ToolSettings settings,
-      ConcurrencyAdmission admission) {
-    List<ToolFactory> localFactories =
-        toolRegistry.entries().stream()
-            .filter(entry -> entry.hostFactory() != null)
-            .map(AgentToolRegistry.Entry::hostFactory)
-            .toList();
     return new PlatformToolGateway(
-        new AgentToolRegistry(localFactories, pluginCatalog, EnvironmentToolCatalog.entries()),
-        pluginCatalog,
-        FAILING_PLUGIN_BRANCH_LOADER,
+        catalog,
+        FAILING_CONTRIBUTOR_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
@@ -268,7 +260,7 @@ final class ToolGatewayTestSupport {
   }
 
   static PlatformToolGateway gateway(
-      AgentToolRegistry toolRegistry,
+      HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor,
@@ -276,9 +268,8 @@ final class ToolGatewayTestSupport {
       Path workdir,
       Path environmentRoot) {
     return new PlatformToolGateway(
-        toolRegistry,
-        EMPTY_PLUGIN_CATALOG,
-        FAILING_PLUGIN_BRANCH_LOADER,
+        catalog,
+        FAILING_CONTRIBUTOR_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
@@ -294,16 +285,15 @@ final class ToolGatewayTestSupport {
   }
 
   static PlatformToolGateway gateway(
-      AgentToolRegistry toolRegistry,
+      HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
       HarnessRuntimeProperties properties,
       ExecutorService executor,
       ToolSettings settings) {
     return new PlatformToolGateway(
-        toolRegistry,
-        EMPTY_PLUGIN_CATALOG,
-        FAILING_PLUGIN_BRANCH_LOADER,
+        catalog,
+        FAILING_CONTRIBUTOR_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
