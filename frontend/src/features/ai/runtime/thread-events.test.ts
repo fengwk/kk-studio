@@ -754,8 +754,9 @@ describe('buildThreadEventTimeline', () => {
     expect(JSON.parse(events[1]!.summary)).toEqual(messagePayload('USER', [{ type: 'text', text: long }]))
   })
 
-  it('projects CUSTOM entry record correctly', () => {
-    // 意图：验证 CUSTOM entry 投影为 CUSTOM kind 且 details/rawJson 完整保真。
+  it('strictly handles CUSTOM entries using contributorId only and ignores legacy pluginId in semantic projection', () => {
+    // 意图：验证 CUSTOM entry 严格仅消费 contributorId / customType，不再支持旧 wire 字段 pluginId 作为语义来源；
+    // 旧 payload 中的 pluginId 绝不作为 contributorId / customType 兼容回退，但 rawJson 完整保真保留原样。
     const entries = [
       entry('custom-full', 'CUSTOM', {
         contributorId: 'goal-contributor',
@@ -772,10 +773,22 @@ describe('buildThreadEventTimeline', () => {
 
     const events = build(entries)
     expect(events).toHaveLength(2)
+
+    // 标准 Contributor CUSTOM Entry 正常投影
     expect(events[0]!.kind).toBe('CUSTOM')
     expect(events[0]!.title).toBe('CUSTOM')
     expect(events[0]!.rawJson).toContain('goal-contributor')
+    expect(events[0]!.rawJson).toContain('goal-status')
+
+    // 旧 wire 仅含 pluginId 时：仍然作为 CUSTOM entry 投影，rawJson 完整无损，但语义层不再做 pluginId 转换
     expect(events[1]!.kind).toBe('CUSTOM')
+    expect(events[1]!.title).toBe('CUSTOM')
+    expect(events[1]!.rawJson).toContain('legacy-plugin')
+    expect(JSON.parse(events[1]!.rawJson!)).toEqual({
+      pluginId: 'legacy-plugin',
+      schemaVersion: 1,
+      data: {},
+    })
   })
 
   it('projects tool invocation with DECLARATIVE backend correctly', () => {
