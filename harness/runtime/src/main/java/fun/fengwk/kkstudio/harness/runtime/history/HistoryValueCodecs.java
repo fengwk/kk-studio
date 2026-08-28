@@ -56,7 +56,7 @@ final class HistoryValueCodecs {
           "reasoning",
           "total");
 
-  /** canonical 小写 dotted/dashed 标识符（pluginId / customType / rendererKey）的最大字符数。 */
+  /** canonical 小写 dotted/dashed 标识符（contributorId / customType / rendererKey）的最大字符数。 */
   static final int MAX_IDENTIFIER_CHARS = 64;
 
   private static final Pattern CANONICAL_IDENTIFIER =
@@ -314,7 +314,7 @@ final class HistoryValueCodecs {
   }
 
   /**
-   * 校验 canonical 小写 dotted/dashed 标识符（pluginId / customType / rendererKey）：非 null、小写字母数字段以 单个
+   * 校验 canonical 小写 dotted/dashed 标识符（contributorId / customType / rendererKey）：非 null、小写字母数字段以 单个
    * {@code .} 或 {@code -} 分隔、无前导/尾随/连续分隔符、长度不超过 {@link #MAX_IDENTIFIER_CHARS}。
    */
   static String requireCanonicalIdentifier(String value, String field) {

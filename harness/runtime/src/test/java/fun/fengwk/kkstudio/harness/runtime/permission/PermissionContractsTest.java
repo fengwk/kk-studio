@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -17,6 +16,9 @@ import java.util.List;
 import java.util.Map;
 
 class PermissionContractsTest {
+  private static final AgentToolId BASH = new AgentToolId("base.bash");
+  private static final AgentToolId WRITE = new AgentToolId("base.write");
+
   private final ObjectMapper objectMapper = new ObjectMapper();
   private final ToolSettingsCodec codec = new ToolSettingsCodec(objectMapper);
   private final PermissionEvaluator evaluator =
@@ -30,8 +32,7 @@ class PermissionContractsTest {
             "{\"other\":1,\"permission\":{\"base.bash\":[{\"pattern\":\"git"
                 + " ?\",\"action\":\"allow\"}]}}");
     assertTrue(canonical.contains("\"other\":1"));
-    assertEquals(
-        PermissionAction.ALLOW, codec.decode(canonical).rulesFor(BaseToolIds.BASH).get(0).action());
+    assertEquals(PermissionAction.ALLOW, codec.decode(canonical).rulesFor(BASH).get(0).action());
     assertFalse(codec.decode("{\"permission\":null}").defaultYolo());
 
     for (String invalid :
@@ -64,12 +65,12 @@ class PermissionContractsTest {
     List<PermissionRule> toolRules = List.of(new PermissionRule("*", PermissionAction.DENY));
     Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
     permission.put(PermissionKeyValidator.GLOBAL_KEY, globalRules);
-    permission.put(BaseToolIds.BASH.value(), toolRules);
+    permission.put(BASH.value(), toolRules);
 
     ToolSettings settings = new ToolSettings(permission, false);
 
     assertEquals(globalRules, settings.globalRules());
-    assertEquals(toolRules, settings.rulesFor(BaseToolIds.BASH));
+    assertEquals(toolRules, settings.rulesFor(BASH));
 
     for (String invalid : new String[] {null, "", " ", " Base.bash", "Base.bash", "base.bash "}) {
       Map<String, List<PermissionRule>> invalidPermission = new LinkedHashMap<>();
@@ -86,7 +87,7 @@ class PermissionContractsTest {
   void evaluatesWildcardWorkdirRelativeAndEmptyTargets() {
     Map<String, List<PermissionRule>> rules = new LinkedHashMap<>();
     rules.put(
-        BaseToolIds.WRITE.value(),
+        WRITE.value(),
         List.of(
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("file?.txt", PermissionAction.ALLOW),
@@ -94,22 +95,18 @@ class PermissionContractsTest {
     ToolSettings settings = new ToolSettings(rules, false);
 
     assertEquals(
-        PermissionAction.ALLOW,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"file1.txt\"}", settings).action());
+        PermissionAction.ALLOW, evaluate(WRITE, "{\"path\":\"file1.txt\"}", settings).action());
     // 显式绝对 workdir 是该次调用的 effective workdir：`secret` 解析为其下相对目标并被该 workdir 相对规则命中。
     assertEquals(
         PermissionAction.DENY,
-        evaluate(BaseToolIds.WRITE, "{\"workdir\":\"/outside\",\"path\":\"secret\"}", settings)
-            .action());
+        evaluate(WRITE, "{\"workdir\":\"/outside\",\"path\":\"secret\"}", settings).action());
     assertEquals(
         PermissionAction.ASK,
         evaluate(
-                BaseToolIds.BASH,
+                BASH,
                 "{\"command\":\"\"}",
                 new ToolSettings(
-                    Map.of(
-                        BaseToolIds.BASH.value(),
-                        List.of(new PermissionRule("*", PermissionAction.ASK))),
+                    Map.of(BASH.value(), List.of(new PermissionRule("*", PermissionAction.ASK))),
                     false))
             .action());
   }
@@ -121,17 +118,13 @@ class PermissionContractsTest {
         IllegalArgumentException.class,
         () ->
             evaluator.evaluate(
-                new PermissionEvaluationContext(
-                    BaseToolIds.WRITE, "[]", Path.of("."), ToolSettings.DEFAULT)));
+                new PermissionEvaluationContext(WRITE, "[]", Path.of("."), ToolSettings.DEFAULT)));
     assertThrows(
         NullPointerException.class,
         () -> new PermissionEvaluationContext(null, "{}", Path.of("."), ToolSettings.DEFAULT));
     PermissionEvaluationContext invalidWorkdir =
         new PermissionEvaluationContext(
-            BaseToolIds.WRITE,
-            "{\"path\":\"x\",\"workdir\":\"@\"}",
-            Path.of("."),
-            ToolSettings.DEFAULT);
+            WRITE, "{\"path\":\"x\",\"workdir\":\"@\"}", Path.of("."), ToolSettings.DEFAULT);
     assertThrows(IllegalArgumentException.class, () -> evaluator.evaluate(invalidWorkdir));
     assertEquals("<invalid-workdir>", evaluator.preview(invalidWorkdir).workdir());
     assertThrows(IllegalArgumentException.class, () -> PermissionAction.fromValue("invalid"));
@@ -152,12 +145,12 @@ class PermissionContractsTest {
     for (String invalid : List.of("!logs/", "#comment", "[unclosed-class", "\\", "logs/\\")) {
       ToolSettings settings =
           settings(
-              BaseToolIds.WRITE,
+              WRITE,
               new PermissionRule("*", PermissionAction.ALLOW),
               new PermissionRule(invalid, PermissionAction.DENY));
       assertThrows(
           IllegalArgumentException.class,
-          () -> evaluate(BaseToolIds.WRITE, "{\"path\":\"logs/a.log\"}", settings),
+          () -> evaluate(WRITE, "{\"path\":\"logs/a.log\"}", settings),
           invalid);
     }
   }
@@ -168,18 +161,16 @@ class PermissionContractsTest {
     assertEquals(
         PermissionAction.DENY,
         evaluate(
-                BaseToolIds.WRITE,
+                WRITE,
                 "{\"path\":\"!literal.txt\"}",
-                settings(
-                    BaseToolIds.WRITE, new PermissionRule("\\!literal.txt", PermissionAction.DENY)))
+                settings(WRITE, new PermissionRule("\\!literal.txt", PermissionAction.DENY)))
             .action());
     assertEquals(
         PermissionAction.DENY,
         evaluate(
-                BaseToolIds.WRITE,
+                WRITE,
                 "{\"path\":\"#literal.txt\"}",
-                settings(
-                    BaseToolIds.WRITE, new PermissionRule("\\#literal.txt", PermissionAction.DENY)))
+                settings(WRITE, new PermissionRule("\\#literal.txt", PermissionAction.DENY)))
             .action());
   }
 

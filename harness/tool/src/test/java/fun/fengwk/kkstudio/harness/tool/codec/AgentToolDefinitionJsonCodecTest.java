@@ -42,8 +42,11 @@ class AgentToolDefinitionJsonCodecTest {
             definition("test.host-selectable", ToolVisibility.SELECTABLE, AgentToolBackend.HOST),
             definition("test.host-internal", ToolVisibility.INTERNAL, AgentToolBackend.HOST),
             definition(
-                "test.plugin-selectable", ToolVisibility.SELECTABLE, AgentToolBackend.PLUGIN),
-            definition("test.plugin-internal", ToolVisibility.INTERNAL, AgentToolBackend.PLUGIN),
+                "test.declarative-selectable",
+                ToolVisibility.SELECTABLE,
+                AgentToolBackend.DECLARATIVE),
+            definition(
+                "test.declarative-internal", ToolVisibility.INTERNAL, AgentToolBackend.DECLARATIVE),
             definition(
                 "test.environment-selectable",
                 ToolVisibility.SELECTABLE,

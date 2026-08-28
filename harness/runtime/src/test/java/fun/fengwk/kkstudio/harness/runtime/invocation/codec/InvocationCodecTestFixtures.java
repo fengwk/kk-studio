@@ -3,9 +3,9 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -58,17 +58,17 @@ final class InvocationCodecTestFixtures {
   }
 
   static ToolBinding binding(AgentToolBackend backend) {
-    PluginToolBinding plugin =
-        backend == AgentToolBackend.PLUGIN
-            ? new PluginToolBinding(
+    ContributorBinding contributor =
+        backend == AgentToolBackend.DECLARATIVE
+            ? new ContributorBinding(
                 "goal",
                 "create",
-                List.of(new PluginStateAccess("state", PluginStateAccessMode.WRITE)))
-            : null;
+                List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)))
+            : new ContributorBinding("core", "bash", List.of());
     return new ToolBinding(
         definition(backend),
-        backend == AgentToolBackend.ENVIRONMENT_CAPABILITY ? ENVIRONMENT_ID : null,
-        plugin);
+        contributor,
+        backend == AgentToolBackend.ENVIRONMENT_CAPABILITY ? ENVIRONMENT_ID : null);
   }
 
   private static AgentToolDefinition definition(AgentToolBackend backend) {

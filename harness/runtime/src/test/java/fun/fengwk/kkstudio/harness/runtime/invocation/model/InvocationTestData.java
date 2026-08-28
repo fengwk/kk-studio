@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -51,7 +52,10 @@ final class InvocationTestData {
   }
 
   static ToolBinding host(String name) {
-    return new ToolBinding(definition(name, AgentToolBackend.HOST), null, null);
+    return new ToolBinding(
+        definition(name, AgentToolBackend.HOST),
+        new ContributorBinding("core", name, List.of()),
+        null);
   }
 
   static ToolBinding environment(String name) {
@@ -60,7 +64,9 @@ final class InvocationTestData {
 
   static ToolBinding environment(String name, EnvironmentBinding environment) {
     return new ToolBinding(
-        definition(name, AgentToolBackend.ENVIRONMENT_CAPABILITY), environment, null);
+        definition(name, AgentToolBackend.ENVIRONMENT_CAPABILITY),
+        new ContributorBinding("base", name, List.of()),
+        environment);
   }
 
   private static AgentToolDefinition definition(String name, AgentToolBackend backend) {

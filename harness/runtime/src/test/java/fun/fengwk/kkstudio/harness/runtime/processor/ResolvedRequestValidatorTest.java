@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -203,23 +204,9 @@ class ResolvedRequestValidatorTest {
   @Test
   void checksEnvironmentCapabilityRoutesIncludingNullTransitions() {
     assertRouteMismatch(SETTINGS, environmentTool(EnvironmentBindings.binding("env-2")));
-    assertRouteMismatch(SETTINGS, environmentTool(null));
 
     BranchSettings unbound = SETTINGS.withEnvironment(null);
     assertRouteMismatch(unbound, environmentTool(SETTINGS.environment()));
-
-    // environment 与 binding 同时为 null 是合法的“未选择环境”状态，而不是半空 binding。
-    assertDoesNotThrow(
-        () ->
-            ResolvedRequestValidator.validate(
-                normalPlan(unbound),
-                resolved(
-                    normalSpec(
-                        unbound,
-                        List.of(environmentTool(null)),
-                        List.of(),
-                        List.of(),
-                        ProviderCacheControl.none()))));
   }
 
   @Test
@@ -428,11 +415,16 @@ class ResolvedRequestValidatorTest {
 
   private static ToolBinding environmentTool(EnvironmentBinding environment) {
     return new ToolBinding(
-        toolDefinition("test.fs", AgentToolBackend.ENVIRONMENT_CAPABILITY), environment, null);
+        toolDefinition("test.fs", AgentToolBackend.ENVIRONMENT_CAPABILITY),
+        new ContributorBinding("base", "fs", List.of()),
+        environment);
   }
 
   private static ToolBinding hostTool() {
-    return new ToolBinding(toolDefinition("test.bash", AgentToolBackend.HOST), null, null);
+    return new ToolBinding(
+        toolDefinition("test.bash", AgentToolBackend.HOST),
+        new ContributorBinding("core", "bash", List.of()),
+        null);
   }
 
   private static AgentToolDefinition toolDefinition(String id, AgentToolBackend backend) {

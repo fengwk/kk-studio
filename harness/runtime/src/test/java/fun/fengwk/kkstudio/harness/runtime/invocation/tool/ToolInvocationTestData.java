@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -36,11 +37,17 @@ final class ToolInvocationTestData {
   }
 
   static ToolBinding host(String name) {
-    return new ToolBinding(definition(name, AgentToolBackend.HOST), null, null);
+    return new ToolBinding(
+        definition(name, AgentToolBackend.HOST),
+        new ContributorBinding("core", name, List.of()),
+        null);
   }
 
   static ToolBinding environment(String name) {
-    return new ToolBinding(definition(name, AgentToolBackend.ENVIRONMENT_CAPABILITY), ENV_ID, null);
+    return new ToolBinding(
+        definition(name, AgentToolBackend.ENVIRONMENT_CAPABILITY),
+        new ContributorBinding("base", name, List.of()),
+        ENV_ID);
   }
 
   private static AgentToolDefinition definition(String name, AgentToolBackend backend) {

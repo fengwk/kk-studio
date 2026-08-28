@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -36,7 +35,7 @@ import java.util.function.Supplier;
 public final class LoadSkillTool implements Tool {
   public static final String NAME = "load_skill";
   public static final String VERSION = "1";
-  public static final AgentToolId AGENT_TOOL_ID = BaseToolIds.LOAD_SKILL;
+  public static final AgentToolId AGENT_TOOL_ID = new AgentToolId("base.load-skill");
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final ToolDescriptor DESCRIPTOR =

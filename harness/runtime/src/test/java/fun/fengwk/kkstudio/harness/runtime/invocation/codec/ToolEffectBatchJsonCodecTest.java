@@ -26,8 +26,8 @@ class ToolEffectBatchJsonCodecTest {
 
     String json =
         "{\"version\":1,\"customEntries\":["
-            + "{\"pluginId\":\"goal\",\"customType\":\"state\",\"schemaVersion\":1,\"data\":{\"n\":1}},"
-            + "{\"pluginId\":\"memory\",\"customType\":\"state\",\"schemaVersion\":2,\"data\":{\"n\":2}}]}";
+            + "{\"contributorId\":\"goal\",\"customType\":\"state\",\"schemaVersion\":1,\"data\":{\"n\":1}},"
+            + "{\"contributorId\":\"memory\",\"customType\":\"state\",\"schemaVersion\":2,\"data\":{\"n\":2}}]}";
     assertEquals(json, codec.encode(batch));
     assertEquals(batch, codec.decode(json));
     assertEquals(batch, codec.decodeNode(codec.encodeNode(batch)));
@@ -63,7 +63,7 @@ class ToolEffectBatchJsonCodecTest {
         () ->
             codec.decode(
                 "{\"version\":1,\"customEntries\":["
-                    + "{\"pluginId\":\"goal\",\"customType\":\"state\","
+                    + "{\"contributorId\":\"goal\",\"customType\":\"state\","
                     + "\"schemaVersion\":1,\"data\":null}]}"));
 
     List<CustomEntryPayload> entries = new ArrayList<>();

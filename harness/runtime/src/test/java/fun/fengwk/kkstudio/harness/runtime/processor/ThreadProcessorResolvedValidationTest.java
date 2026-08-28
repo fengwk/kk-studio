@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -133,8 +134,8 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE,
                 AgentToolBackend.ENVIRONMENT_CAPABILITY),
-            settings.environment(),
-            null);
+            new ContributorBinding("base", "fs", List.of()),
+            settings.environment());
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         new ModelDescriptor(

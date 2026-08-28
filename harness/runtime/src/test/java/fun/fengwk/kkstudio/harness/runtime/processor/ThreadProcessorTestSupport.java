@@ -23,8 +23,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -1065,18 +1065,18 @@ final class ThreadProcessorTestSupport {
   }
 
   private static ToolBinding hostBinding(String name) {
-    return new ToolBinding(toolDefinition(name, AgentToolBackend.HOST), null, null);
+    return new ToolBinding(
+        toolDefinition(name, AgentToolBackend.HOST),
+        new ContributorBinding("core", name, List.of()),
+        null);
   }
 
-  static ToolBinding pluginBinding(
-      String name,
-      String pluginId,
-      String contributionLocalName,
-      List<PluginStateAccess> accesses) {
+  static ToolBinding declarativeBinding(
+      String name, String contributorId, String localName, List<ContributorStateAccess> accesses) {
     return new ToolBinding(
-        toolDefinition(name, AgentToolBackend.PLUGIN),
-        null,
-        new PluginToolBinding(pluginId, contributionLocalName, accesses));
+        toolDefinition(name, AgentToolBackend.DECLARATIVE),
+        new ContributorBinding(contributorId, localName, accesses),
+        null);
   }
 
   private static ToolDescriptor toolDescriptor(String name) {

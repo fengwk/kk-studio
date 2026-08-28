@@ -4,11 +4,11 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.NOW;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimLosingStore;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.declarativeBinding;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.insertAssistantWithCalls;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.model;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.plainRequest;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.pluginBinding;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.requestThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.requestWithBindings;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCommand;
@@ -40,8 +40,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -246,56 +246,57 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
   }
 
   @Test
-  void pluginSiblingStateAccessRejectsOnlyCallsAfterAWriteToTheSameKey() {
+  void contributorSiblingStateAccessRejectsOnlyCallsAfterAWriteToTheSameKey() {
     assertSiblingStateAccesses(
         "goal",
-        new PluginStateAccess("state", PluginStateAccessMode.READ),
+        new ContributorStateAccess("state", ContributorStateAccessMode.READ),
         "goal",
-        new PluginStateAccess("state", PluginStateAccessMode.READ),
+        new ContributorStateAccess("state", ContributorStateAccessMode.READ),
         ToolInvocationStatus.READY);
     assertSiblingStateAccesses(
         "goal",
-        new PluginStateAccess("state", PluginStateAccessMode.READ),
+        new ContributorStateAccess("state", ContributorStateAccessMode.READ),
         "goal",
-        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
         ToolInvocationStatus.READY);
     assertSiblingStateAccesses(
         "goal",
-        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
         "goal",
-        new PluginStateAccess("state", PluginStateAccessMode.READ),
+        new ContributorStateAccess("state", ContributorStateAccessMode.READ),
         ToolInvocationStatus.FAILED);
     assertSiblingStateAccesses(
         "goal",
-        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
         "goal",
-        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
         ToolInvocationStatus.FAILED);
     assertSiblingStateAccesses(
         "goal",
-        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
         "goal",
-        new PluginStateAccess("other", PluginStateAccessMode.WRITE),
+        new ContributorStateAccess("other", ContributorStateAccessMode.WRITE),
         ToolInvocationStatus.READY);
     assertSiblingStateAccesses(
         "goal",
-        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
         "memory",
-        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        new ContributorStateAccess("state", ContributorStateAccessMode.WRITE),
         ToolInvocationStatus.READY);
   }
 
   private void assertSiblingStateAccesses(
-      String firstPlugin,
-      PluginStateAccess firstAccess,
-      String secondPlugin,
-      PluginStateAccess secondAccess,
+      String firstContributor,
+      ContributorStateAccess firstAccess,
+      String secondContributor,
+      ContributorStateAccess secondAccess,
       ToolInvocationStatus expectedSecondStatus) {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    ToolBinding first = pluginBinding("first_tool", firstPlugin, "first", List.of(firstAccess));
+    ToolBinding first =
+        declarativeBinding("first_tool", firstContributor, "first", List.of(firstAccess));
     ToolBinding second =
-        pluginBinding("second_tool", secondPlugin, "second", List.of(secondAccess));
+        declarativeBinding("second_tool", secondContributor, "second", List.of(secondAccess));
     UUID modelId =
         seedModelInvocation(
             fixture.store,

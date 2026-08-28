@@ -16,7 +16,7 @@
     <modules>
         <module>tool</module>
         <module>runtime</module>
-        <module>plugin-api</module>
+        <module>contributor-api</module>
         <module>infra</module>
         <module>daemon</module>
         <module>plugins/goal</module>

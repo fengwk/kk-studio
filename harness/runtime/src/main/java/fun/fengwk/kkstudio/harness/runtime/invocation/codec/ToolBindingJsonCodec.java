@@ -4,9 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -31,12 +31,8 @@ public final class ToolBindingJsonCodec {
     Objects.requireNonNull(binding, "binding");
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.set("definition", DEFINITION_CODEC.encodeNode(binding.definition()));
+    node.set("contributor", encodeContributor(binding.contributor()));
     InvocationJsonSupport.putNullable(node, "environment", binding.environment());
-    if (binding.plugin() == null) {
-      node.putNull("plugin");
-    } else {
-      node.set("plugin", encodePlugin(binding.plugin()));
-    }
     return node;
   }
 
@@ -46,22 +42,22 @@ public final class ToolBindingJsonCodec {
 
   public ToolBinding decodeNode(JsonNode value) {
     ObjectNode node = InvocationJsonSupport.object(value, CONTEXT);
-    InvocationJsonSupport.requireFields(node, CONTEXT, "definition", "environment", "plugin");
+    InvocationJsonSupport.requireFields(node, CONTEXT, "definition", "contributor", "environment");
     AgentToolDefinition definition =
         DEFINITION_CODEC.decodeNode(InvocationJsonSupport.required(node, "definition", CONTEXT));
+    ContributorBinding contributor =
+        decodeContributor(InvocationJsonSupport.required(node, "contributor", CONTEXT));
     EnvironmentBinding environment =
         InvocationJsonSupport.nullableEnvironmentBinding(node, "environment", CONTEXT);
-    PluginToolBinding plugin =
-        decodeNullablePlugin(InvocationJsonSupport.declared(node, "plugin", CONTEXT));
-    return new ToolBinding(definition, environment, plugin);
+    return new ToolBinding(definition, contributor, environment);
   }
 
-  private static ObjectNode encodePlugin(PluginToolBinding plugin) {
+  private static ObjectNode encodeContributor(ContributorBinding contributor) {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
-    node.put("pluginId", plugin.pluginId());
-    node.put("contributionLocalName", plugin.contributionLocalName());
+    node.put("contributorId", contributor.contributorId());
+    node.put("localName", contributor.localName());
     ArrayNode accesses = node.putArray("stateAccesses");
-    for (PluginStateAccess access : plugin.stateAccesses()) {
+    for (ContributorStateAccess access : contributor.stateAccesses()) {
       ObjectNode value = accesses.addObject();
       value.put("customType", access.customType());
       value.put("mode", access.mode().name());
@@ -69,32 +65,29 @@ public final class ToolBindingJsonCodec {
     return node;
   }
 
-  private static PluginToolBinding decodeNullablePlugin(JsonNode value) {
-    if (value.isNull()) {
-      return null;
-    }
-    String context = CONTEXT + ".plugin";
+  private static ContributorBinding decodeContributor(JsonNode value) {
+    String context = CONTEXT + ".contributor";
     ObjectNode node = InvocationJsonSupport.object(value, context);
     InvocationJsonSupport.requireFields(
-        node, context, "pluginId", "contributionLocalName", "stateAccesses");
+        node, context, "contributorId", "localName", "stateAccesses");
     ArrayNode accesses =
         InvocationJsonSupport.array(
             InvocationJsonSupport.required(node, "stateAccesses", context),
             context + ".stateAccesses");
-    List<PluginStateAccess> decoded = new ArrayList<>(accesses.size());
+    List<ContributorStateAccess> decoded = new ArrayList<>(accesses.size());
     for (JsonNode accessValue : accesses) {
       String accessContext = context + ".stateAccesses[]";
       ObjectNode accessNode = InvocationJsonSupport.object(accessValue, accessContext);
       InvocationJsonSupport.requireFields(accessNode, accessContext, "customType", "mode");
       decoded.add(
-          new PluginStateAccess(
+          new ContributorStateAccess(
               InvocationJsonSupport.text(accessNode, "customType", accessContext),
               InvocationJsonSupport.requiredEnum(
-                  accessNode, "mode", PluginStateAccessMode.class, accessContext)));
+                  accessNode, "mode", ContributorStateAccessMode.class, accessContext)));
     }
-    return new PluginToolBinding(
-        InvocationJsonSupport.text(node, "pluginId", context),
-        InvocationJsonSupport.text(node, "contributionLocalName", context),
+    return new ContributorBinding(
+        InvocationJsonSupport.text(node, "contributorId", context),
+        InvocationJsonSupport.text(node, "localName", context),
         decoded);
   }
 }

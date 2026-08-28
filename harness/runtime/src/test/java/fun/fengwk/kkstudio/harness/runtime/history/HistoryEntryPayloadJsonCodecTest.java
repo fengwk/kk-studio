@@ -67,7 +67,7 @@ class HistoryEntryPayloadJsonCodecTest {
             new ToolResultMetadata(id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null));
     EntryPayload custom =
         new CustomMessagePayload(
-            CustomMessagePayload.CORE_PLUGIN_ID,
+            CustomMessagePayload.CORE_CONTRIBUTOR_ID,
             CustomMessagePayload.CORE_CUSTOM_TYPE,
             CustomMessagePayload.CORE_RENDERER_KEY,
             system("system"),
@@ -144,18 +144,18 @@ class HistoryEntryPayloadJsonCodecTest {
             new TurnStartPayload(
                 TurnStartReason.INPUT, settings(null), OWNER_THREAD_ID, 4096, 1024, null)));
     assertEquals(
-        "{\"pluginId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
+        "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
             + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"sys\"}]},"
             + "\"details\":{}}",
         CODEC.encode(
             new CustomMessagePayload(
-                CustomMessagePayload.CORE_PLUGIN_ID,
+                CustomMessagePayload.CORE_CONTRIBUTOR_ID,
                 CustomMessagePayload.CORE_CUSTOM_TYPE,
                 CustomMessagePayload.CORE_RENDERER_KEY,
                 system("sys"),
                 CustomMessagePayload.CORE_DETAILS_JSON)));
     assertEquals(
-        "{\"pluginId\":\"com.example.goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
+        "{\"contributorId\":\"com.example.goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
             + "\"data\":{\"state\":\"open\"}}",
         CODEC.encode(
             new CustomEntryPayload("com.example.goal", "goal", 1, "{\"state\":\"open\"}")));
@@ -558,52 +558,53 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"pluginId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
+                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
                     + "\"data\":{},\"extra\":1}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.decode(EntryType.CUSTOM, "{\"pluginId\":\"goal\",\"customType\":\"goal\"}"));
+        () ->
+            CODEC.decode(EntryType.CUSTOM, "{\"contributorId\":\"goal\",\"customType\":\"goal\"}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"pluginId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
+                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
                     + "\"data\":[]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"pluginId\":\"Goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
+                "{\"contributorId\":\"Goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
                     + "\"data\":{}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"pluginId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":0,"
+                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":0,"
                     + "\"data\":{}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"pluginId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":-1,"
+                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":-1,"
                     + "\"data\":{}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"pluginId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":\"1\","
+                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":\"1\","
                     + "\"data\":{}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"pluginId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
+                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
                     + "\"data\":null}"));
   }
 
@@ -614,14 +615,14 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.CUSTOM_MESSAGE,
-                "{\"pluginId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
+                "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
                     + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.CUSTOM_MESSAGE,
-                "{\"pluginId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
+                "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
                     + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]},"
                     + "\"details\":[]}"));
     assertThrows(
@@ -629,7 +630,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.CUSTOM_MESSAGE,
-                "{\"pluginId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"Message\","
+                "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"Message\","
                     + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]},"
                     + "\"details\":{}}"));
     assertThrows(
@@ -637,7 +638,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.CUSTOM_MESSAGE,
-                "{\"pluginId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
+                "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
                     + "\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]},"
                     + "\"details\":{}}"));
     assertThrows(
@@ -645,7 +646,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.CUSTOM_MESSAGE,
-                "{\"pluginId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
+                "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
                     + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]},"
                     + "\"details\":{},\"old\":1}"));
   }

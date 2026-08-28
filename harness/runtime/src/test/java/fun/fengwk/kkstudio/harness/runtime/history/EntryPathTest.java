@@ -1123,7 +1123,7 @@ class EntryPathTest {
         SESSION_ID,
         parentId,
         new CustomMessagePayload(
-            CustomMessagePayload.CORE_PLUGIN_ID,
+            CustomMessagePayload.CORE_CONTRIBUTOR_ID,
             CustomMessagePayload.CORE_CUSTOM_TYPE,
             CustomMessagePayload.CORE_RENDERER_KEY,
             new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent("sys"))),

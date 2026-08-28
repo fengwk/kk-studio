@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
@@ -238,7 +239,7 @@ class ModelResponsePlannerTest {
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE,
             AgentToolBackend.HOST),
-        null,
+        new ContributorBinding("core", name, List.of()),
         null);
   }
 

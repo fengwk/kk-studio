@@ -902,14 +902,14 @@ class CompactionPlannerTest {
       return this;
     }
 
-    PathBuilder custom(String plugin, String customType) {
+    PathBuilder custom(String contributorId, String customType) {
       long cur = nextId++;
       entries.add(
           new Entry(
               id(cur),
               id(100L),
               parentId(),
-              new CustomEntryPayload(plugin, customType, 1, "{\"s\":1}"),
+              new CustomEntryPayload(contributorId, customType, 1, "{\"s\":1}"),
               BASE));
       return this;
     }

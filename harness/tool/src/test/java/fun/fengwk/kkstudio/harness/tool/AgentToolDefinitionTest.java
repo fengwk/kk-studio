@@ -29,7 +29,7 @@ class AgentToolDefinitionTest {
   @Test
   void supportsAllExecutionBackends() {
     assertEquals(AgentToolBackend.HOST, definition(AgentToolBackend.HOST).backend());
-    assertEquals(AgentToolBackend.PLUGIN, definition(AgentToolBackend.PLUGIN).backend());
+    assertEquals(AgentToolBackend.DECLARATIVE, definition(AgentToolBackend.DECLARATIVE).backend());
     assertEquals(
         AgentToolBackend.ENVIRONMENT_CAPABILITY,
         definition(AgentToolBackend.ENVIRONMENT_CAPABILITY).backend());
@@ -58,9 +58,11 @@ class AgentToolDefinitionTest {
   @Test
   void comparesDefinitionsByValue() {
     AgentToolDefinition first =
-        new AgentToolDefinition(ID, DESCRIPTOR, ToolVisibility.INTERNAL, AgentToolBackend.PLUGIN);
+        new AgentToolDefinition(
+            ID, DESCRIPTOR, ToolVisibility.INTERNAL, AgentToolBackend.DECLARATIVE);
     AgentToolDefinition second =
-        new AgentToolDefinition(ID, DESCRIPTOR, ToolVisibility.INTERNAL, AgentToolBackend.PLUGIN);
+        new AgentToolDefinition(
+            ID, DESCRIPTOR, ToolVisibility.INTERNAL, AgentToolBackend.DECLARATIVE);
 
     assertEquals(first, second);
     assertEquals(first.hashCode(), second.hashCode());
