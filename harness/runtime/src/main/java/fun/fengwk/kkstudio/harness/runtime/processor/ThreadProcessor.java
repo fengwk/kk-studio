@@ -32,9 +32,9 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -836,15 +836,15 @@ public final class ThreadProcessor {
           // active Tool phase：attach resultEntryId 并保留 parent，插入全部 sibling。
           tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
           List<ToolInvocation> materialized = new ArrayList<>(batch.tools().size());
-          Map<PluginStateKey, PluginStateAccessMode> seenStateAccesses = new HashMap<>();
+          Map<ContributorStateKey, ContributorStateAccessMode> seenStateAccesses = new HashMap<>();
           for (int ordinal = 0; ordinal < batch.tools().size(); ordinal++) {
             ModelResponsePlan.ToolSlot slot = batch.tools().get(ordinal);
             ToolInvocationStatus status = slot.status();
             ToolInvocationError error = slot.error();
             if (status == ToolInvocationStatus.READY) {
-              // READY 槽位的 binding 由 planner 保证非空；plugin sibling 状态冲突仍在 Thread 边界确定性拒绝。
+              // READY 槽位的 binding 由 planner 保证非空；contributor sibling 状态冲突仍在 Thread 边界确定性拒绝。
               ToolInvocationError conflict =
-                  siblingStateConflict(slot.binding().plugin(), seenStateAccesses);
+                  siblingStateConflict(slot.binding().contributor(), seenStateAccesses);
               if (conflict != null) {
                 status = ToolInvocationStatus.FAILED;
                 error = conflict;
@@ -1417,35 +1417,37 @@ public final class ThreadProcessor {
    * dispatch 前确定性拒绝；READ 后 WRITE 与不同 key 保持并发。
    */
   private static ToolInvocationError siblingStateConflict(
-      PluginToolBinding plugin, Map<PluginStateKey, PluginStateAccessMode> seen) {
-    if (plugin == null || plugin.stateAccesses().isEmpty()) {
+      ContributorBinding contributor, Map<ContributorStateKey, ContributorStateAccessMode> seen) {
+    if (contributor == null || contributor.stateAccesses().isEmpty()) {
       return null;
     }
-    for (PluginStateAccess access : plugin.stateAccesses()) {
-      PluginStateKey key = new PluginStateKey(plugin.pluginId(), access.customType());
-      if (seen.get(key) == PluginStateAccessMode.WRITE) {
+    for (ContributorStateAccess access : contributor.stateAccesses()) {
+      ContributorStateKey key =
+          new ContributorStateKey(contributor.contributorId(), access.customType());
+      if (seen.get(key) == ContributorStateAccessMode.WRITE) {
         return new ToolInvocationError(
             "SIBLING_STATE_CONFLICT",
-            "A previous sibling tool writes plugin state "
+            "A previous sibling tool writes contributor state "
                 + key
                 + "; call this tool in the next model turn.");
       }
     }
-    for (PluginStateAccess access : plugin.stateAccesses()) {
-      PluginStateKey key = new PluginStateKey(plugin.pluginId(), access.customType());
-      if (access.mode() == PluginStateAccessMode.WRITE) {
-        seen.put(key, PluginStateAccessMode.WRITE);
+    for (ContributorStateAccess access : contributor.stateAccesses()) {
+      ContributorStateKey key =
+          new ContributorStateKey(contributor.contributorId(), access.customType());
+      if (access.mode() == ContributorStateAccessMode.WRITE) {
+        seen.put(key, ContributorStateAccessMode.WRITE);
       } else {
-        seen.putIfAbsent(key, PluginStateAccessMode.READ);
+        seen.putIfAbsent(key, ContributorStateAccessMode.READ);
       }
     }
     return null;
   }
 
-  private record PluginStateKey(String pluginId, String customType) {
+  private record ContributorStateKey(String contributorId, String customType) {
     @Override
     public String toString() {
-      return pluginId + ":" + customType;
+      return contributorId + ":" + customType;
     }
   }
 

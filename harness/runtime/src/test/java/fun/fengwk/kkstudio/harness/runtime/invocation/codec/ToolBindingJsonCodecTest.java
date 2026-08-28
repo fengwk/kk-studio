@@ -14,7 +14,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
-/** 覆盖 HOST、PLUGIN 与 ENVIRONMENT_CAPABILITY backend 的严格 ToolBinding wire。 */
+/** 覆盖 HOST、DECLARATIVE 与 ENVIRONMENT_CAPABILITY backend 的严格 ToolBinding wire。 */
 class ToolBindingJsonCodecTest {
 
   private final ToolBindingJsonCodec codec = new ToolBindingJsonCodec();
@@ -28,9 +28,11 @@ class ToolBindingJsonCodecTest {
     String environmentJson =
         "{\"definition\":"
             + definitionCodec.encode(environment.definition())
+            + ",\"contributor\":"
+            + "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
             + ",\"environment\":"
             + environmentJson(ENVIRONMENT_ID)
-            + ",\"plugin\":null}";
+            + "}";
     assertEquals(environmentJson, codec.encode(environment));
     assertEquals(environment, codec.decode(environmentJson));
     assertEquals(environment, codec.decodeNode(codec.encodeNode(environment)));
@@ -39,20 +41,23 @@ class ToolBindingJsonCodecTest {
     String hostJson =
         "{\"definition\":"
             + definitionCodec.encode(host.definition())
-            + ",\"environment\":null,\"plugin\":null}";
+            + ",\"contributor\":"
+            + "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
+            + ",\"environment\":null}";
     assertEquals(hostJson, codec.encode(host));
     assertEquals(host, codec.decode(hostJson));
     assertNull(codec.decode(hostJson).environment());
 
-    ToolBinding plugin = binding(AgentToolBackend.PLUGIN);
-    String pluginJson =
+    ToolBinding declarative = binding(AgentToolBackend.DECLARATIVE);
+    String declarativeJson =
         "{\"definition\":"
-            + definitionCodec.encode(plugin.definition())
-            + ",\"environment\":null,\"plugin\":"
-            + "{\"pluginId\":\"goal\",\"contributionLocalName\":\"create\","
-            + "\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"WRITE\"}]}}";
-    assertEquals(pluginJson, codec.encode(plugin));
-    assertEquals(plugin, codec.decode(pluginJson));
+            + definitionCodec.encode(declarative.definition())
+            + ",\"contributor\":"
+            + "{\"contributorId\":\"goal\",\"localName\":\"create\","
+            + "\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"WRITE\"}]}"
+            + ",\"environment\":null}";
+    assertEquals(declarativeJson, codec.encode(declarative));
+    assertEquals(declarative, codec.decode(declarativeJson));
   }
 
   /** 字符串边界在任何领域值构造之前拒绝畸形文档。 */
@@ -74,7 +79,7 @@ class ToolBindingJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /** 顶层字段必须恰好是 definition/environment/plugin，旧 descriptor/type 形状必须拒绝。 */
+  /** 顶层字段必须恰好是 definition/contributor/environment，旧 plugin 形状必须拒绝。 */
   @Test
   void rejectsUnknownMissingWrongTypeAndLegacyShape() {
     ToolBinding environment = binding(AgentToolBackend.ENVIRONMENT_CAPABILITY);
@@ -83,9 +88,10 @@ class ToolBindingJsonCodecTest {
     String valid =
         "{\"definition\":"
             + definition
+            + ",\"contributor\":{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
             + ",\"environment\":"
             + environmentJson(ENVIRONMENT_ID)
-            + ",\"plugin\":null}";
+            + "}";
 
     assertThrows(
         IllegalArgumentException.class,
@@ -98,7 +104,12 @@ class ToolBindingJsonCodecTest {
         () ->
             codec.decode(valid.replace(",\"environment\":" + environmentJson(ENVIRONMENT_ID), "")));
     assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(valid.replace(",\"plugin\":null", "")));
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                valid.replace(
+                    ",\"contributor\":{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}",
+                    "")));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.replace("\"definition\":" + definition, "\"definition\":1")));
@@ -107,7 +118,11 @@ class ToolBindingJsonCodecTest {
         () -> codec.decode(valid.replace(environmentJson(ENVIRONMENT_ID), "1")));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(valid.replace(",\"plugin\":null", ",\"plugin\":1")));
+        () ->
+            codec.decode(
+                valid.replace(
+                    "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}",
+                    "1")));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.replace("\"definition\":" + definition, "\"definition\":null")));
@@ -116,11 +131,17 @@ class ToolBindingJsonCodecTest {
         () ->
             codec.decode(
                 valid.replace(
-                    "\"definition\":" + definition,
-                    "\"definition\":"
-                        + definition.substring(0, definition.length() - 1)
-                        + ",\"x\":1}")));
+                    "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}",
+                    "null")));
 
+    // 旧 plugin 字段必须严格拒绝
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"definition\":"
+                    + definition
+                    + ",\"environment\":null,\"plugin\":{\"pluginId\":\"goal\",\"contributionLocalName\":\"create\",\"stateAccesses\":[]}}"));
     // 旧 durable binding 的 descriptor/type 顶层形状不是新协议的合法输入，不能兼容恢复。
     assertThrows(
         IllegalArgumentException.class,
@@ -131,51 +152,105 @@ class ToolBindingJsonCodecTest {
                     + ",\"type\":\"ENVIRONMENT\",\"environment\":null,\"plugin\":null}"));
   }
 
+  /**
+   * Contributor 对象内部字段校验：必须是 contributorId/localName/stateAccesses，旧 pluginId/contributionLocalName
+   * 必须拒绝。
+   */
+  @Test
+  void rejectsLegacyAndInvalidContributorFields() {
+    ToolBinding host = binding(AgentToolBackend.HOST);
+    String definition = definitionCodec.encode(host.definition());
+
+    // 旧 pluginId / contributionLocalName 字段
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"definition\":"
+                    + definition
+                    + ",\"contributor\":{\"pluginId\":\"goal\",\"contributionLocalName\":\"create\",\"stateAccesses\":[]}"
+                    + ",\"environment\":null}"));
+
+    // 缺少 stateAccesses
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"definition\":"
+                    + definition
+                    + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\"}"
+                    + ",\"environment\":null}"));
+
+    // stateAccesses 元素格式非法
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"definition\":"
+                    + definition
+                    + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\",\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"INVALID\"}]}"
+                    + ",\"environment\":null}"));
+  }
+
   /** 构造器不变式必须在 codec 解码边界生效，而不是把非法 provenance 带入执行器。 */
   @Test
   void rejectsInvalidBackendPayloadCombinations() {
     ToolBinding host = binding(AgentToolBackend.HOST);
-    ToolBinding plugin = binding(AgentToolBackend.PLUGIN);
-    String pluginJson =
-        "{\"pluginId\":\"goal\",\"contributionLocalName\":\"create\","
+    ToolBinding declarative = binding(AgentToolBackend.DECLARATIVE);
+    String declarativeContributorJson =
+        "{\"contributorId\":\"goal\",\"localName\":\"create\","
             + "\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"WRITE\"}]}";
+    String emptyContributorJson =
+        "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}";
 
+    // HOST 携带 environment
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"definition\":"
                     + definitionCodec.encode(host.definition())
+                    + ",\"contributor\":"
+                    + emptyContributorJson
                     + ",\"environment\":"
                     + environmentJson(ENVIRONMENT_ID)
-                    + ",\"plugin\":null}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"definition\":"
-                    + definitionCodec.encode(plugin.definition())
-                    + ",\"environment\":"
-                    + environmentJson(ENVIRONMENT_ID)
-                    + ",\"plugin\":"
-                    + pluginJson
                     + "}"));
+
+    // DECLARATIVE 携带 environment
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"definition\":"
-                    + definitionCodec.encode(plugin.definition())
-                    + ",\"environment\":null,\"plugin\":null}"));
+                    + definitionCodec.encode(declarative.definition())
+                    + ",\"contributor\":"
+                    + declarativeContributorJson
+                    + ",\"environment\":"
+                    + environmentJson(ENVIRONMENT_ID)
+                    + "}"));
+
+    // ENVIRONMENT_CAPABILITY environment 为 null
+    ToolBinding env = binding(AgentToolBackend.ENVIRONMENT_CAPABILITY);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"definition\":"
+                    + definitionCodec.encode(env.definition())
+                    + ",\"contributor\":"
+                    + emptyContributorJson
+                    + ",\"environment\":null}"));
+
+    // HOST 声明 stateAccesses
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"definition\":"
                     + definitionCodec.encode(host.definition())
-                    + ",\"environment\":null,\"plugin\":"
-                    + pluginJson
-                    + "}"));
+                    + ",\"contributor\":"
+                    + declarativeContributorJson
+                    + ",\"environment\":null}"));
   }
 
   private static String environmentJson(EnvironmentBinding binding) {

@@ -81,7 +81,7 @@ class RuntimeModuleArchitectureTest {
     Path harnessRoot = moduleRoot.getParent();
     assertHarnessModules(harnessRoot.resolve("pom.xml"));
     assertManagedInternalDependency(
-        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-plugin-api");
+        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-contributor-api");
     assertManagedInternalDependency(
         harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-infra");
     assertManagedInternalDependency(
@@ -96,7 +96,7 @@ class RuntimeModuleArchitectureTest {
             "org.eclipse.jgit:org.eclipse.jgit",
             "org.slf4j:slf4j-api"));
     assertDirectProductionDependencies(
-        harnessRoot.resolve("plugin-api/pom.xml"),
+        harnessRoot.resolve("contributor-api/pom.xml"),
         Set.of(
             "fun.fengwk.kk-studio:kk-studio-harness-runtime",
             "fun.fengwk.kk-studio:kk-studio-harness-tool"));
@@ -185,9 +185,10 @@ class RuntimeModuleArchitectureTest {
       modules.add(matcher.group(1).trim());
     }
     assertTrue(
-        modules.equals(List.of("tool", "runtime", "plugin-api", "infra", "daemon", "plugins/goal")),
+        modules.equals(
+            List.of("tool", "runtime", "contributor-api", "infra", "daemon", "plugins/goal")),
         () ->
-            "harness modules must be exactly tool/runtime/plugin-api/infra/daemon/plugins/goal, got "
+            "harness modules must be exactly tool/runtime/contributor-api/infra/daemon/plugins/goal, got "
                 + modules);
   }
 

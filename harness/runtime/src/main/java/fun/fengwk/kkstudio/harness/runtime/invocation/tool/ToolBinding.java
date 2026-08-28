@@ -7,36 +7,45 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import java.util.Objects;
 
 /**
- * 单次 Tool invocation 的冻结 binding：完整 Agent tool definition、Environment binding 以及 plugin provenance。
+ * 单次 Tool invocation 的冻结 binding：完整 Agent tool definition、Contributor provenance 与可选 Environment
+ * binding。
  *
  * <p>{@link AgentToolDefinition#backend()} 是唯一 execution route；{@link
  * AgentToolDefinition#descriptor()} 是 model contract，{@link AgentToolDefinition#id()} 是 durable
- * registry 与 permission identity。HOST binding 不携带 environment 或 plugin；PLUGIN binding 必须携带 plugin
- * 且不携带 environment；ENVIRONMENT_CAPABILITY binding 不携带 plugin，environment 可为 null。创建 approval 的 YOLO
- * policy 在此被刻意省略。
+ * registry 与 permission identity。 Contributor 必须非空；Environment 仅在 ENVIRONMENT_CAPABILITY 时非空；state
+ * accesses 仅在 DECLARATIVE 时允许非空。
  */
 public record ToolBinding(
-    AgentToolDefinition definition, EnvironmentBinding environment, PluginToolBinding plugin) {
+    AgentToolDefinition definition,
+    ContributorBinding contributor,
+    EnvironmentBinding environment) {
 
   public ToolBinding {
     definition = Objects.requireNonNull(definition, "definition");
+    contributor = Objects.requireNonNull(contributor, "contributor");
     switch (definition.backend()) {
       case HOST -> {
-        if (environment != null || plugin != null) {
-          throw new IllegalArgumentException(
-              "HOST binding must not have environment or plugin provenance");
+        if (environment != null) {
+          throw new IllegalArgumentException("HOST binding must not have an environment binding");
+        }
+        if (!contributor.stateAccesses().isEmpty()) {
+          throw new IllegalArgumentException("HOST binding must not declare state accesses");
         }
       }
-      case PLUGIN -> {
-        if (environment != null || plugin == null) {
+      case DECLARATIVE -> {
+        if (environment != null) {
           throw new IllegalArgumentException(
-              "PLUGIN binding requires plugin provenance and must not have an environment binding");
+              "DECLARATIVE binding must not have an environment binding");
         }
       }
       case ENVIRONMENT_CAPABILITY -> {
-        if (plugin != null) {
+        if (environment == null) {
           throw new IllegalArgumentException(
-              "ENVIRONMENT_CAPABILITY binding must not have plugin provenance");
+              "ENVIRONMENT_CAPABILITY binding requires an environment binding");
+        }
+        if (!contributor.stateAccesses().isEmpty()) {
+          throw new IllegalArgumentException(
+              "ENVIRONMENT_CAPABILITY binding must not declare state accesses");
         }
       }
     }

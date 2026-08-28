@@ -141,7 +141,7 @@ class HistoryEntryPayloadTest {
     assertEquals(
         system,
         new CustomMessagePayload(
-                CustomMessagePayload.CORE_PLUGIN_ID,
+                CustomMessagePayload.CORE_CONTRIBUTOR_ID,
                 CustomMessagePayload.CORE_CUSTOM_TYPE,
                 CustomMessagePayload.CORE_RENDERER_KEY,
                 system,
@@ -156,7 +156,7 @@ class HistoryEntryPayloadTest {
         IllegalArgumentException.class,
         () ->
             new CustomMessagePayload(
-                CustomMessagePayload.CORE_PLUGIN_ID,
+                CustomMessagePayload.CORE_CONTRIBUTOR_ID,
                 CustomMessagePayload.CORE_CUSTOM_TYPE,
                 CustomMessagePayload.CORE_RENDERER_KEY,
                 assistant("a"),
@@ -165,7 +165,7 @@ class HistoryEntryPayloadTest {
         IllegalArgumentException.class,
         () ->
             new CustomMessagePayload(
-                CustomMessagePayload.CORE_PLUGIN_ID,
+                CustomMessagePayload.CORE_CONTRIBUTOR_ID,
                 CustomMessagePayload.CORE_CUSTOM_TYPE,
                 CustomMessagePayload.CORE_RENDERER_KEY,
                 toolMessage("c"),
@@ -174,7 +174,7 @@ class HistoryEntryPayloadTest {
         NullPointerException.class,
         () ->
             new CustomMessagePayload(
-                CustomMessagePayload.CORE_PLUGIN_ID,
+                CustomMessagePayload.CORE_CONTRIBUTOR_ID,
                 CustomMessagePayload.CORE_CUSTOM_TYPE,
                 CustomMessagePayload.CORE_RENDERER_KEY,
                 null,
@@ -185,7 +185,7 @@ class HistoryEntryPayloadTest {
   void customEntryPayloadValidatesIdentifiersSchemaVersionAndCanonicalDataJson() {
     CustomEntryPayload valid =
         new CustomEntryPayload("com.example.goal", "goal", 1, "{\"state\":\"open\"}");
-    assertEquals("com.example.goal", valid.pluginId());
+    assertEquals("com.example.goal", valid.contributorId());
     assertEquals("goal", valid.customType());
     assertEquals(1, valid.schemaVersion());
     assertEquals("{\"state\":\"open\"}", valid.dataJson());

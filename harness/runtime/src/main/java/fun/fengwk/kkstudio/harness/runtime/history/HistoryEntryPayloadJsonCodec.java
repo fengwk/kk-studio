@@ -50,11 +50,11 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final Set<String> MESSAGE_FIELDS =
       orderedSet("message", "assistantMetadata", "toolResultMetadata");
   private static final Set<String> CUSTOM_FIELDS =
-      orderedSet("pluginId", "customType", "schemaVersion", "data");
+      orderedSet("contributorId", "customType", "schemaVersion", "data");
   private static final Set<String> MODEL_ATTEMPT_FAILURE_FIELDS =
       orderedSet("attempt", "error", "retryAt");
   private static final Set<String> CUSTOM_MESSAGE_FIELDS =
-      orderedSet("pluginId", "customType", "rendererKey", "message", "details");
+      orderedSet("contributorId", "customType", "rendererKey", "message", "details");
   private static final Set<String> ASSISTANT_ERROR_FIELDS = orderedSet("error", "attempt");
   private static final Set<String> ATTEMPT_SNAPSHOT_FIELDS =
       orderedSet("attempt", "sequence", "text", "thinking");
@@ -200,7 +200,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static ObjectNode encodeCustomEntry(CustomEntryPayload value) {
     ObjectNode node = NODES.objectNode();
-    node.put("pluginId", value.pluginId());
+    node.put("contributorId", value.contributorId());
     node.put("customType", value.customType());
     node.put("schemaVersion", value.schemaVersion());
     node.set("data", JsonObjects.parseObject(value.dataJson(), "data"));
@@ -223,7 +223,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static ObjectNode encodeCustomMessage(CustomMessagePayload value) {
     ObjectNode node = NODES.objectNode();
-    node.put("pluginId", value.pluginId());
+    node.put("contributorId", value.contributorId());
     node.put("customType", value.customType());
     node.put("rendererKey", value.rendererKey());
     node.set("message", MESSAGE_CODEC.encodeNode(value.message()));
@@ -356,7 +356,7 @@ public final class HistoryEntryPayloadJsonCodec {
     HistoryValueCodecs.requireExactFields(node, CUSTOM_FIELDS, "CUSTOM");
     return new CustomEntryPayload(
         HistoryValueCodecs.requireCanonicalIdentifier(
-            HistoryValueCodecs.text(node, "pluginId"), "pluginId"),
+            HistoryValueCodecs.text(node, "contributorId"), "contributorId"),
         HistoryValueCodecs.requireCanonicalIdentifier(
             HistoryValueCodecs.text(node, "customType"), "customType"),
         HistoryValueCodecs.requiredNonNegativeInt(node, "schemaVersion", "CUSTOM"),
@@ -368,7 +368,7 @@ public final class HistoryEntryPayloadJsonCodec {
     HistoryValueCodecs.requireExactFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
     return new CustomMessagePayload(
         HistoryValueCodecs.requireCanonicalIdentifier(
-            HistoryValueCodecs.text(node, "pluginId"), "pluginId"),
+            HistoryValueCodecs.text(node, "contributorId"), "contributorId"),
         HistoryValueCodecs.requireCanonicalIdentifier(
             HistoryValueCodecs.text(node, "customType"), "customType"),
         HistoryValueCodecs.requireCanonicalIdentifier(

@@ -19,96 +19,124 @@ import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.List;
 
-/** ToolBinding 的 definition/backend/provenance 不变式；descriptor 只表示模型契约。 */
+/** ToolBinding 的 definition/contributor/environment 不变式；descriptor 只表示模型契约。 */
 class ToolBindingTest {
 
   private static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
 
   @Test
-  void exposesOnlyDefinitionEnvironmentAndPluginRecordComponents() {
-    // 反射契约锁定 durable binding 的三个组件，防止旧 type 字段或隐式路由状态回归。
+  void exposesOnlyDefinitionContributorAndEnvironmentRecordComponents() {
+    // 反射契约锁定 durable binding 的三个组件，防止旧 type/plugin 字段回归。
     assertTrue(ToolBinding.class.isRecord());
     RecordComponent[] components = ToolBinding.class.getRecordComponents();
     assertEquals(
-        List.of("definition", "environment", "plugin"),
+        List.of("definition", "contributor", "environment"),
         Arrays.stream(components).map(RecordComponent::getName).toList());
     assertEquals(AgentToolDefinition.class, components[0].getType());
-    assertEquals(EnvironmentBinding.class, components[1].getType());
-    assertEquals(PluginToolBinding.class, components[2].getType());
+    assertEquals(ContributorBinding.class, components[1].getType());
+    assertEquals(EnvironmentBinding.class, components[2].getType());
   }
 
   /** 三种 backend 都必须保留完整 definition，且 descriptor convenience accessor 不改变冻结对象。 */
   @Test
   void acceptsEveryBackendBindingShape() {
-    ToolBinding host = new ToolBinding(definition("bash", AgentToolBackend.HOST), null, null);
+    ToolBinding host =
+        new ToolBinding(
+            definition("bash", AgentToolBackend.HOST),
+            contributorProvenance("core", "bash", List.of()),
+            null);
     assertEquals(AgentToolBackend.HOST, host.definition().backend());
     assertEquals("bash", host.descriptor().name());
     assertNull(host.environment());
-    assertNull(host.plugin());
+    assertEquals("core", host.contributor().contributorId());
 
-    ToolBinding plugin =
+    ToolBinding declarative =
         new ToolBinding(
-            definition("create_goal", AgentToolBackend.PLUGIN), null, pluginProvenance());
-    assertEquals(AgentToolBackend.PLUGIN, plugin.definition().backend());
-    assertEquals("create_goal", plugin.descriptor().name());
-    assertEquals(pluginProvenance(), plugin.plugin());
+            definition("create_goal", AgentToolBackend.DECLARATIVE), declarativeProvenance(), null);
+    assertEquals(AgentToolBackend.DECLARATIVE, declarative.definition().backend());
+    assertEquals("create_goal", declarative.descriptor().name());
+    assertEquals(declarativeProvenance(), declarative.contributor());
+    assertNull(declarative.environment());
 
     ToolBinding environment =
-        new ToolBinding(definition("fs", AgentToolBackend.ENVIRONMENT_CAPABILITY), ENV_ID, null);
+        new ToolBinding(
+            definition("fs", AgentToolBackend.ENVIRONMENT_CAPABILITY),
+            contributorProvenance("base", "read", List.of()),
+            ENV_ID);
     assertEquals(AgentToolBackend.ENVIRONMENT_CAPABILITY, environment.definition().backend());
     assertEquals(ENV_ID, environment.environment());
-
-    // ENVIRONMENT_CAPABILITY 可以冻结 null：实际路由时再按 deterministic unavailable 收敛。
-    assertNull(
-        new ToolBinding(definition("fs-null", AgentToolBackend.ENVIRONMENT_CAPABILITY), null, null)
-            .environment());
+    assertEquals("base", environment.contributor().contributorId());
   }
 
   /** backend 是唯一 route，三个 backend 的 payload 组合必须在构造时 fail closed。 */
   @Test
   void enforcesBackendPayloadInvariants() {
-    PluginToolBinding plugin = pluginProvenance();
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolBinding(definition("host-env", AgentToolBackend.HOST), ENV_ID, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolBinding(definition("host-plugin", AgentToolBackend.HOST), null, plugin));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolBinding(definition("plugin-env", AgentToolBackend.PLUGIN), ENV_ID, plugin));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolBinding(definition("plugin-missing", AgentToolBackend.PLUGIN), null, null));
+    ContributorBinding emptyContributor = contributorProvenance("core", "bash", List.of());
+    ContributorBinding statefulContributor = declarativeProvenance();
+
+    // HOST 不允许 environment 或 stateAccesses
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolBinding(
-                definition("environment-plugin", AgentToolBackend.ENVIRONMENT_CAPABILITY),
-                ENV_ID,
-                plugin));
-    assertThrows(NullPointerException.class, () -> new ToolBinding(null, null, null));
-  }
-
-  @Test
-  void pluginBindingFreezesCanonicalOwnerAndUniqueStateAccesses() {
-    PluginToolBinding plugin =
-        new PluginToolBinding(
-            "goal", "create", List.of(new PluginStateAccess("state", PluginStateAccessMode.WRITE)));
-    ToolBinding binding =
-        new ToolBinding(definition("create_goal", AgentToolBackend.PLUGIN), null, plugin);
-    assertEquals(plugin, binding.plugin());
+                definition("host-env", AgentToolBackend.HOST), emptyContributor, ENV_ID));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new PluginToolBinding(
+            new ToolBinding(
+                definition("host-state", AgentToolBackend.HOST), statefulContributor, null));
+
+    // DECLARATIVE 不允许 environment
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolBinding(
+                definition("decl-env", AgentToolBackend.DECLARATIVE), statefulContributor, ENV_ID));
+
+    // ENVIRONMENT_CAPABILITY 必须有 environment，且不允许 stateAccesses
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolBinding(
+                definition("env-null", AgentToolBackend.ENVIRONMENT_CAPABILITY),
+                emptyContributor,
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolBinding(
+                definition("env-state", AgentToolBackend.ENVIRONMENT_CAPABILITY),
+                statefulContributor,
+                ENV_ID));
+
+    // definition 和 contributor 必须非空
+    assertThrows(NullPointerException.class, () -> new ToolBinding(null, emptyContributor, null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ToolBinding(definition("host", AgentToolBackend.HOST), null, null));
+  }
+
+  @Test
+  void contributorBindingFreezesCanonicalOwnerAndUniqueStateAccesses() {
+    ContributorBinding contributor =
+        new ContributorBinding(
+            "goal",
+            "create",
+            List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)));
+    ToolBinding binding =
+        new ToolBinding(definition("create_goal", AgentToolBackend.DECLARATIVE), contributor, null);
+    assertEquals(contributor, binding.contributor());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ContributorBinding(
                 "goal",
                 "create",
                 List.of(
-                    new PluginStateAccess("state", PluginStateAccessMode.READ),
-                    new PluginStateAccess("state", PluginStateAccessMode.WRITE))));
+                    new ContributorStateAccess("state", ContributorStateAccessMode.READ),
+                    new ContributorStateAccess("state", ContributorStateAccessMode.WRITE))));
     assertThrows(
-        IllegalArgumentException.class, () -> new PluginToolBinding("Goal", "create", List.of()));
+        IllegalArgumentException.class, () -> new ContributorBinding("Goal", "create", List.of()));
   }
 
   private static ToolDescriptor descriptor(String name) {
@@ -123,8 +151,15 @@ class ToolBindingTest {
         backend);
   }
 
-  private static PluginToolBinding pluginProvenance() {
-    return new PluginToolBinding(
-        "goal", "create", List.of(new PluginStateAccess("state", PluginStateAccessMode.WRITE)));
+  private static ContributorBinding contributorProvenance(
+      String contributorId, String localName, List<ContributorStateAccess> accesses) {
+    return new ContributorBinding(contributorId, localName, accesses);
+  }
+
+  private static ContributorBinding declarativeProvenance() {
+    return new ContributorBinding(
+        "goal",
+        "create",
+        List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)));
   }
 }

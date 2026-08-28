@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -75,7 +76,11 @@ class HistoryPayloadMapperTest {
             "{}");
     MessagePayload payload =
         MAPPER.assistantPayload(
-            response, List.of(binding(), new ToolBinding(definition("grep"), null, null)));
+            response,
+            List.of(
+                binding(),
+                new ToolBinding(
+                    definition("grep"), new ContributorBinding("core", "grep", List.of()), null)));
     assertEquals(4, payload.message().contents().size());
     assertEquals(
         "thinking here", ((ThinkingMessageContent) payload.message().contents().get(0)).text());
@@ -146,7 +151,11 @@ class HistoryPayloadMapperTest {
     assertEquals("shell-command", call.rendererKey());
     // 无匹配 binding（unknown tool 槽位）时 renderer fallback 固定为 "tool"。
     MessagePayload unbound =
-        MAPPER.assistantPayload(response, List.of(new ToolBinding(definition("grep"), null, null)));
+        MAPPER.assistantPayload(
+            response,
+            List.of(
+                new ToolBinding(
+                    definition("grep"), new ContributorBinding("core", "grep", List.of()), null)));
     ToolCallMessageContent unboundCall =
         (ToolCallMessageContent) unbound.message().contents().get(0);
     assertEquals(HistoryPayloadMapper.UNBOUND_RENDERER_KEY, unboundCall.rendererKey());
@@ -407,7 +416,8 @@ class HistoryPayloadMapperTest {
   }
 
   private static ToolBinding binding() {
-    return new ToolBinding(definition("bash"), null, null);
+    return new ToolBinding(
+        definition("bash"), new ContributorBinding("core", "bash", List.of()), null);
   }
 
   private static AgentToolDefinition definition(String name) {

@@ -8,17 +8,20 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
 class PermissionEvaluatorTest {
+  private static final AgentToolId BROWSER = new AgentToolId("browser");
+  private static final AgentToolId WRITE = new AgentToolId("base.write");
+  private static final AgentToolId BASH = new AgentToolId("base.bash");
+  private static final AgentToolId CUSTOM_EXEC = new AgentToolId("custom.exec");
+
   private final ObjectMapper objectMapper = new ObjectMapper();
   private final PermissionEvaluator evaluator =
       new PermissionEvaluator(objectMapper, new BashSurfaceAnalyzer());
-  private static final AgentToolId BROWSER = new AgentToolId("browser");
 
   /** 最后命中规则生效，且 tool-specific 必须在全局规则之后应用。 */
   @Test
@@ -28,17 +31,38 @@ class PermissionEvaluatorTest {
             Map.of(
                 "*",
                 List.of(new PermissionRule("*", PermissionAction.DENY)),
-                BaseToolIds.WRITE.value(),
+                WRITE.value(),
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("src/*.java", PermissionAction.ALLOW))));
 
     assertEquals(
+        PermissionAction.ALLOW, evaluate(WRITE, "{\"path\":\"src/Main.java\"}", settings).action());
+    assertEquals(
+        PermissionAction.ASK, evaluate(WRITE, "{\"path\":\"README.md\"}", settings).action());
+  }
+
+  /** 任何工具只要包含 textual command 字段，均应用通用 command-surface 分析。 */
+  @Test
+  void appliesCommandSurfaceAnalyzerForAnyToolWithCommandField() {
+    ToolSettings settings =
+        settings(
+            Map.of(
+                CUSTOM_EXEC.value(),
+                List.of(
+                    new PermissionRule("*", PermissionAction.ASK),
+                    new PermissionRule("rm *", PermissionAction.DENY),
+                    new PermissionRule("git *", PermissionAction.ALLOW))));
+
+    assertEquals(
         PermissionAction.ALLOW,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"src/Main.java\"}", settings).action());
+        evaluate(CUSTOM_EXEC, "{\"command\":\"git status\"}", settings).action());
+    assertEquals(
+        PermissionAction.DENY,
+        evaluate(CUSTOM_EXEC, "{\"command\":\"rm -rf target\"}", settings).action());
     assertEquals(
         PermissionAction.ASK,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"README.md\"}", settings).action());
+        evaluate(CUSTOM_EXEC, "{\"command\":\"npm install\"}", settings).action());
   }
 
   /** path target 只产生到 effective workdir 的单一规范相对 POSIX 路径；`@` 前缀、绝对输入与 trailing slash hint 归一。 */
@@ -73,7 +97,7 @@ class PermissionEvaluatorTest {
     ToolSettings settings =
         settings(
             Map.of(
-                BaseToolIds.WRITE.value(),
+                WRITE.value(),
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("src/Main.java", PermissionAction.ALLOW),
@@ -82,7 +106,7 @@ class PermissionEvaluatorTest {
     assertEquals(
         PermissionAction.ALLOW,
         evaluateAtWorkdir(
-                BaseToolIds.WRITE,
+                WRITE,
                 "{\"path\":\"/tmp/permission-environment/repo/src/Main.java\"}",
                 settings,
                 workdir)
@@ -90,10 +114,7 @@ class PermissionEvaluatorTest {
     // 工作目录为 /tmp/permission-environment 时，同一绝对路径的相对坐标是 repo/src/Main.java，规则按该基准命中。
     assertEquals(
         PermissionAction.DENY,
-        evaluate(
-                BaseToolIds.WRITE,
-                "{\"path\":\"/tmp/permission-environment/repo/src/Main.java\"}",
-                settings)
+        evaluate(WRITE, "{\"path\":\"/tmp/permission-environment/repo/src/Main.java\"}", settings)
             .action());
   }
 
@@ -103,7 +124,7 @@ class PermissionEvaluatorTest {
     ToolSettings settings =
         settings(
             Map.of(
-                BaseToolIds.WRITE.value(),
+                WRITE.value(),
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("src/*.java", PermissionAction.ALLOW)),
@@ -112,10 +133,9 @@ class PermissionEvaluatorTest {
 
     assertEquals(
         PermissionAction.ALLOW,
-        evaluate(BaseToolIds.WRITE, "{\"workdir\":\"repo\",\"path\":\"src/Main.java\"}", settings)
-            .action());
+        evaluate(WRITE, "{\"workdir\":\"repo\",\"path\":\"src/Main.java\"}", settings).action());
     PermissionEvaluator.Evaluation atPrefixed =
-        evaluate(BaseToolIds.WRITE, "{\"workdir\":\"@repo\",\"path\":\"src/Main.java\"}", settings);
+        evaluate(WRITE, "{\"workdir\":\"@repo\",\"path\":\"src/Main.java\"}", settings);
     assertEquals(PermissionAction.ALLOW, atPrefixed.action());
     assertEquals("repo", atPrefixed.promptPreview().workdir());
     assertEquals(PermissionAction.DENY, evaluate(BROWSER, "{}", settings).action());
@@ -128,24 +148,20 @@ class PermissionEvaluatorTest {
     ToolSettings settings =
         settings(
             Map.of(
-                BaseToolIds.WRITE.value(),
-                List.of(new PermissionRule("secret.txt", PermissionAction.DENY))));
+                WRITE.value(), List.of(new PermissionRule("secret.txt", PermissionAction.DENY))));
 
     assertEquals(
         new PermissionEvaluator.PathTarget("secret.txt", false),
         evaluator.describePathTarget("${HOME}/secret.txt", home));
     assertEquals(
         PermissionAction.DENY,
-        evaluateAtWorkdir(BaseToolIds.WRITE, "{\"path\":\"${HOME}/secret.txt\"}", settings, home)
-            .action());
+        evaluateAtWorkdir(WRITE, "{\"path\":\"${HOME}/secret.txt\"}", settings, home).action());
     assertEquals(
         PermissionAction.DENY,
-        evaluateAtWorkdir(BaseToolIds.WRITE, "{\"path\":\"~/secret.txt\"}", settings, home)
-            .action());
+        evaluateAtWorkdir(WRITE, "{\"path\":\"~/secret.txt\"}", settings, home).action());
     assertEquals(
         PermissionAction.DENY,
-        evaluateAtWorkdir(BaseToolIds.WRITE, "{\"path\":\"$HOME/secret.txt\"}", settings, home)
-            .action());
+        evaluateAtWorkdir(WRITE, "{\"path\":\"$HOME/secret.txt\"}", settings, home).action());
   }
 
   /**
@@ -156,40 +172,33 @@ class PermissionEvaluatorTest {
   void appliesJGitGitignorePathSemantics() {
     assertEquals(
         PermissionAction.ASK,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"docs/deep/a.md\"}", deny("docs/*.md")).action());
+        evaluate(WRITE, "{\"path\":\"docs/deep/a.md\"}", deny("docs/*.md")).action());
     assertEquals(
         PermissionAction.DENY,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"docs/a.md\"}", deny("docs/*.md")).action());
+        evaluate(WRITE, "{\"path\":\"docs/a.md\"}", deny("docs/*.md")).action());
     assertEquals(
         PermissionAction.DENY,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"docs/a.md\"}", deny("docs/**/*.md")).action());
+        evaluate(WRITE, "{\"path\":\"docs/a.md\"}", deny("docs/**/*.md")).action());
     assertEquals(
         PermissionAction.DENY,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"docs/deep/a.md\"}", deny("docs/**/*.md"))
-            .action());
+        evaluate(WRITE, "{\"path\":\"docs/deep/a.md\"}", deny("docs/**/*.md")).action());
+    assertEquals(
+        PermissionAction.DENY, evaluate(WRITE, "{\"path\":\"a/b.tmp\"}", deny("*.tmp")).action());
     assertEquals(
         PermissionAction.DENY,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"a/b.tmp\"}", deny("*.tmp")).action());
+        evaluate(WRITE, "{\"path\":\"sub/README.md\"}", deny("README.md")).action());
     assertEquals(
         PermissionAction.DENY,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"sub/README.md\"}", deny("README.md")).action());
-    assertEquals(
-        PermissionAction.DENY,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"root-only.txt\"}", deny("/root-only.txt"))
-            .action());
+        evaluate(WRITE, "{\"path\":\"root-only.txt\"}", deny("/root-only.txt")).action());
     assertEquals(
         PermissionAction.ASK,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"nested/root-only.txt\"}", deny("/root-only.txt"))
-            .action());
+        evaluate(WRITE, "{\"path\":\"nested/root-only.txt\"}", deny("/root-only.txt")).action());
     assertEquals(
-        PermissionAction.DENY,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"docs/a\"}", deny("docs/")).action());
+        PermissionAction.DENY, evaluate(WRITE, "{\"path\":\"docs/a\"}", deny("docs/")).action());
     assertEquals(
-        PermissionAction.ASK,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"docs\"}", deny("docs/")).action());
+        PermissionAction.ASK, evaluate(WRITE, "{\"path\":\"docs\"}", deny("docs/")).action());
     assertEquals(
-        PermissionAction.DENY,
-        evaluate(BaseToolIds.WRITE, "{\"path\":\"docs/\"}", deny("docs/")).action());
+        PermissionAction.DENY, evaluate(WRITE, "{\"path\":\"docs/\"}", deny("docs/")).action());
   }
 
   /** permission prompt 参数必须单行且最多 120 字符，无 UI 时可原样持久等待。 */
@@ -198,12 +207,9 @@ class PermissionEvaluatorTest {
     String command = "x".repeat(150) + "\nnext";
     PermissionEvaluator.Evaluation evaluation =
         evaluate(
-            BaseToolIds.BASH,
+            BASH,
             "{\"command\":\"" + command.replace("\n", "\\n") + "\"}",
-            settings(
-                Map.of(
-                    BaseToolIds.BASH.value(),
-                    List.of(new PermissionRule("*", PermissionAction.ASK)))));
+            settings(Map.of(BASH.value(), List.of(new PermissionRule("*", PermissionAction.ASK)))));
 
     assertEquals(PermissionAction.ASK, evaluation.action());
     assertTrue(evaluation.promptPreview().workdir().endsWith("(default)"));
@@ -212,12 +218,10 @@ class PermissionEvaluatorTest {
     assertEquals(
         "{\"path\":\"README.md\"}",
         evaluate(
-                BaseToolIds.WRITE,
+                WRITE,
                 " { \"path\" : \"README.md\" } ",
                 settings(
-                    Map.of(
-                        BaseToolIds.WRITE.value(),
-                        List.of(new PermissionRule("*", PermissionAction.ASK)))))
+                    Map.of(WRITE.value(), List.of(new PermissionRule("*", PermissionAction.ASK)))))
             .promptPreview()
             .arguments());
   }
@@ -237,8 +241,7 @@ class PermissionEvaluatorTest {
     assertEquals("*", root.path("permission").path("base.write").get(0).path("pattern").asText());
     assertEquals(
         "git *", root.path("permission").path("base.bash").get(1).path("pattern").asText());
-    assertEquals(
-        PermissionAction.ALLOW, codec.decode(canonical).rulesFor(BaseToolIds.BASH).get(1).action());
+    assertEquals(PermissionAction.ALLOW, codec.decode(canonical).rulesFor(BASH).get(1).action());
 
     JsonNode global = objectMapper.readTree(codec.canonicalize("{\"permission\":\"ask\"}"));
     assertEquals("*", global.path("permission").path("*").get(0).path("pattern").asText());
@@ -248,7 +251,7 @@ class PermissionEvaluatorTest {
   private static ToolSettings deny(String deniedPattern) {
     return settings(
         Map.of(
-            BaseToolIds.WRITE.value(),
+            WRITE.value(),
             List.of(
                 new PermissionRule("*", PermissionAction.ASK),
                 new PermissionRule(deniedPattern, PermissionAction.DENY))));

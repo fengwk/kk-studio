@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -33,7 +32,7 @@ public final class PermissionEvaluator {
   public Evaluation evaluate(PermissionEvaluationContext context) {
     JsonNode input = readArguments(context.argumentsJson());
     PermissionAction action;
-    if (BaseToolIds.BASH.equals(context.toolId()) && input.path("command").isTextual()) {
+    if (input.path("command").isTextual()) {
       action = evaluateBash(input.path("command").asText(), context.settings(), context.toolId());
     } else if (input.path("path").isTextual() && !input.path("path").asText().trim().isEmpty()) {
       Path targetWorkdir = resolveWorkdir(input, context.workdir());

@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -3137,7 +3138,7 @@ class ModelProcessorTest {
                 descriptor,
                 ToolVisibility.SELECTABLE,
                 AgentToolBackend.HOST),
-            null,
+            new ContributorBinding("core", "bash", List.of()),
             null);
     return spec(List.of(binding));
   }

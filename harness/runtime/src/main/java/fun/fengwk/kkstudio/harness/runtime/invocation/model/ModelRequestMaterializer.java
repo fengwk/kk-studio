@@ -33,9 +33,9 @@ import java.util.UUID;
 /**
  * 唯一请求重建边界：从不可变 {@link EntryPath} 与冻结 {@link ModelRequestSpec} 纯投影内存 {@link ProviderRequest}。
  *
- * <p>不访问 catalog、Environment registry 或 Plugin ContextProjector；也不持有事务。压缩摘要调用通过 basis EntryPath 末尾
- * owned {@code TURN_START.compaction}（{@link #compactionStartAtHead}）识别——closed Invocation 后仍可从
- * Entry 恢复 fallback / split 元数据，不再在请求内复制 compaction facts。
+ * <p>不访问 catalog、Environment registry 或 Contributor ContextProjector；也不持有事务。压缩摘要调用通过 basis
+ * EntryPath 末尾 owned {@code TURN_START.compaction}（{@link #compactionStartAtHead}）识别——closed
+ * Invocation 后仍可从 Entry 恢复 fallback / split 元数据，不再在请求内复制 compaction facts。
  */
 public final class ModelRequestMaterializer {
 

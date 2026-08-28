@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -858,7 +859,11 @@ final class HarnessRuntimeTestSupport {
   static ModelRequestSpec tooledModelRequest(List<String> toolNames) {
     List<ToolBinding> bindings = new ArrayList<>();
     for (String name : toolNames) {
-      bindings.add(new ToolBinding(toolDefinition(name, AgentToolBackend.HOST), null, null));
+      bindings.add(
+          new ToolBinding(
+              toolDefinition(name, AgentToolBackend.HOST),
+              new ContributorBinding("core", name, List.of()),
+              null));
     }
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -995,7 +1000,10 @@ final class HarnessRuntimeTestSupport {
   }
 
   private static ToolBinding hostBinding() {
-    return new ToolBinding(toolDefinition("bash", AgentToolBackend.HOST), null, null);
+    return new ToolBinding(
+        toolDefinition("bash", AgentToolBackend.HOST),
+        new ContributorBinding("core", "bash", List.of()),
+        null);
   }
 
   private static ToolDescriptor toolDescriptor(String name) {

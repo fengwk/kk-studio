@@ -43,7 +43,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -71,7 +70,7 @@ public final class TaskTool implements Tool {
   public static final String NAME = "task";
   public static final String VERSION = "1";
   public static final String RENDERER_KEY = "task";
-  public static final AgentToolId AGENT_TOOL_ID = BaseToolIds.TASK;
+  public static final AgentToolId AGENT_TOOL_ID = new AgentToolId("base.task");
 
   private static final int MAX_TURNS_REMINDER_INTERVAL = 5;
   private static final int REPORT_FALLBACK_MAX_CHARS = 8_000;

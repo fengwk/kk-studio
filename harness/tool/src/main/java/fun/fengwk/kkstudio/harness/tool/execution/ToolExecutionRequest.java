@@ -28,10 +28,7 @@ public record ToolExecutionRequest(
     this(descriptor, call, timeout, null, null);
   }
 
-  /**
-   * 带 durable execution context 的 HOST/PLUGIN transport 请求；不携带 invocation workspace（workdir
-   * 由执行端默认解析）。
-   */
+  /** 带 durable execution context 的 host transport 请求；不携带 invocation workspace（workdir 由执行端默认解析）。 */
   public ToolExecutionRequest(
       ToolDescriptor descriptor, ToolCall call, Duration timeout, ToolExecutionContext context) {
     this(descriptor, call, timeout, context, null);

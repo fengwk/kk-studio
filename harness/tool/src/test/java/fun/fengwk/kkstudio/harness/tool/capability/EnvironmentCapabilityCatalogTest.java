@@ -2,15 +2,14 @@ package fun.fengwk.kkstudio.harness.tool.capability;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
-
 import java.util.List;
 
-/** 固定 atomic capability ID、descriptor 顺序以及模型 catalog 映射的契约测试。 */
+/** 固定 atomic capability ID、descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
 
   /** 12 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
@@ -65,24 +64,19 @@ class EnvironmentCapabilityCatalogTest {
             .allMatch(descriptor -> "1".equals(descriptor.version())));
   }
 
-  /** descriptor 是 execution 的唯一事实源；模型 catalog 必须复用同一对象的 schema 和 timeout。 */
+  /** descriptor 是 execution 的唯一事实源；可通过 find 与 require 查询。 */
   @Test
-  void resolvesDescriptorsAndMatchesModelCatalog() {
+  void resolvesDescriptors() {
     assertSame(
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ),
         EnvironmentCapabilityCatalog.find(EnvironmentCapabilityIds.FS_READ).orElseThrow());
     assertTrue(
         EnvironmentCapabilityCatalog.find(new EnvironmentCapabilityId("unknown.capability"))
             .isEmpty());
-
-    assertEquals(
-        EnvironmentCapabilityCatalog.descriptors(),
-        EnvironmentToolCatalog.entries().stream()
-            .map(EnvironmentToolCatalog.Entry::capability)
-            .toList());
-    for (EnvironmentToolCatalog.Entry entry : EnvironmentToolCatalog.entries()) {
-      assertEquals(entry.capability().inputSchema(), entry.definition().descriptor().inputSchema());
-      assertEquals(entry.capability().timeout(), entry.definition().descriptor().timeout());
-    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            EnvironmentCapabilityCatalog.require(
+                new EnvironmentCapabilityId("unknown.capability")));
   }
 }
