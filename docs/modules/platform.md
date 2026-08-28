@@ -257,7 +257,7 @@ Declarative Tool 的 `AppendCustomEntry` intent 必须属于自身 Contributor�
 
 1. 当前 Agent、Model、Provider、Variant 和 ProviderFactory；
 2. 当前 Environment context；
-3. Agent config 中按 `AgentToolId` 声明的 selectable tools（从 `HarnessCatalog.selectableTools()` 解析）；
+3. Agent config 中的每个工具 ID 均通过 `HarnessCatalog.findTool(id)` 查找并校验 `tool.definition().visibility() == ToolVisibility.SELECTABLE`；若选中的工具后端为 `ENVIRONMENT_CAPABILITY` 但当前 branch 无 `EnvironmentBinding`，则在 planning 阶段被确定性拒绝并返回 `AssistantError.code=PLANNING_FAILED`；
 4. skills、subagents 和内部 `load_skill` / `task`；
 5. Contributor context projector、system prompt、cache control、context window 和 output budget。
 

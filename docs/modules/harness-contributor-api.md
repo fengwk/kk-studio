@@ -4,7 +4,7 @@
 
 `harness-contributor-api` 是受信任 Java Contributor 的 startup discovery 与 catalog freeze SPI 模块。组合根在启动时收集 Contributor 声明并冻结为单一不可变 `HarnessCatalog`，通过类型化的 `HOST`、`DECLARATIVE` 与 `ENVIRONMENT_CAPABILITY` 工具注册、`ContributorId` / `ContributionId`、`BranchView`、`DeclarativeTool`、`AppendCustomEntry` 和 `ContextProjector` 将 Contributor 限制在确定的扩展边界内。
 
-Contributor 是构建期与启动期的代码级受信任扩展单元，不接触 `HarnessStore`、gateway、transaction、lock 或 processor。DeclarativeTool 执行时读取由调用方冻结在所属 Assistant Entry 上的 `BranchView`，状态写入只返回声明式 intent，由 Harness Core 在 Tool terminal apply 事务中校验并原子追加 CUSTOM Entry。
+`harness-contributor-api` 与 `HarnessRegistrar` 绝不向 Contributor 暴露 `HarnessStore`、gateway、transaction 或 lock。其中 DeclarativeTool 限制在 `BranchView` + intent 声明式边界内；HOST 工具使用标准的 Tool SPI（`ToolExecutionRequest` / `ToolExecutionListener`）；ENVIRONMENT_CAPABILITY 工具则仅声明底层 Capability mapping。
 
 ## Goals / Non-goals
 
@@ -19,7 +19,7 @@ Contributor 是构建期与启动期的代码级受信任扩展单元，不接�
 ### Non-goals
 
 - 不提供 Contributor 的运行时安装、卸载、热加载、reload、classloader 管理或 HTTP install API。
-- 不把 Contributor 变成 Store repository、transaction participant、异步 executor 或独立调度器。
+- 不把 Contributor 变成 Store repository、transaction participant 或持久化锁持有者。
 - 不默认把 CUSTOM Entry 投影到 Provider 上下文；只有显式注册的 ContextProjector 会生成 model-visible messages。
 - 不允许 DeclarativeTool 直接执行底层 capability、直接写 Entry/Thread/Invocation/Work 或绕过 Core 的 permission/Resource materialization。
 
@@ -88,7 +88,7 @@ requires 图非法时，任何 contributor 的 `contribute` 都不会被调用�
 
 ### BranchView 与 state access
 
-[`BranchView`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 只持有已校验的 immutable `EntryPath`，提供：
+[`BranchView`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 对扩展隐藏内部 `EntryPath`、对话 transcript 与 Store 细节，只持有已校验的不可变路径，提供按 `(contributorId, customType)` 的状态回查：
 
 ```java
 List<CustomEntryPayload> customEntries(ContributorId contributorId, String customType);
@@ -123,7 +123,7 @@ DeclarativeToolResult execute(DeclarativeToolContext context, ToolCall call);
 
 [`AppendCustomEntry`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java) 持有最终 `CustomEntryPayload(contributorId, customType, schemaVersion, dataJson)`，payload 自身完成 schemaVersion、canonical identifier、JSON object 和大小校验。Core 还会验证 intent owner、custom type ownership、WRITE 声明、descriptor/provenance 和 effects 上限。
 
-[`ContextProjector`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContextProjector.java) 将 `BranchView` 纯投影为不可变 `List<AgentMessage>`。默认 CUSTOM Entry 对 Provider 不可见；只有调用方选中 projector 并把返回消息放入本 turn frozen preamble 时才可见。projector 不产生 state mutation。
+[`ContextProjector`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContextProjector.java) 将 `BranchView` 纯投影为不可变 `List<AgentMessage>`。目录中所有已注册的 ContextProjector 在每个 live turn 均按冻结目录拓扑/优先级/ID 顺序全部执行并依次拼接进 preamble；API 不提供动态选择或过滤。projector 不产生 state mutation。
 
 ## 执行 / 状态 trace
 
@@ -143,7 +143,7 @@ HarnessCatalog frozen at startup
 
 ```text
 candidate BranchView
-  -> selected ContextProjector(s)
+  -> all registered ContextProjector(s) in catalog order
   -> frozen AgentMessage preamble
   -> ModelRequestSpec
   -> ProviderRequest
@@ -154,7 +154,7 @@ DeclarativeTool 不在执行时重新解析 catalog、读取 Store 或重建 bra
 ## 不变量、failure / recovery
 
 - `HarnessCatalog.from` 先验证整个 DAG，再调用 contributor；任何 graph failure 都会导致构建失败，不产生半成品 catalog。
-- catalog 构建后 contributor 对象、descriptor、contribution list、state access 和 projector list 均冻结；外部修改不影响 catalog。
+- catalog 构建后不可变的 descriptor、ID、列表与 state declaration 均冻结；可执行的 Tool / DeclarativeTool / ContextProjector 实例对象引用保留在 Catalog 中。Platform 在每次执行前重新校验冻结的 AgentToolDefinition、provenance 与 descriptor，防止运行时定义漂移。
 - Tool descriptor 只包含模型契约；Tool name 全局唯一，backend 与 contribution provenance 共同确定执行路由。descriptor/version/ContributionId 漂移在 binding 恢复时确定性拒绝。
 - `AppendCustomEntry` 只能成为同 owner、已注册 customType、声明 WRITE 的 effect；违反时 Core 以 contributor contract violation 失败，effects 为空。
 - error ToolResult 与 intents 互斥，Resource externalization 和 durable `SUCCEEDED` 发生在 intent 校验之后；失败不留下部分 Entry。
