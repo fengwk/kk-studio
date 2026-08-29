@@ -44,14 +44,12 @@ function tool(
   name: string,
   description: string,
   version = '1',
-  backend: ToolCatalogEntryDTO['backend'] = 'HOST',
 ): ToolCatalogEntryDTO {
   return {
     id,
     name,
     version,
     description,
-    backend,
   }
 }
 
@@ -60,7 +58,7 @@ describe('agent-capability-candidates', () => {
     const tools = [
       tool('base.bash', 'bash', 'shell'),
       tool('base.bash-v2', 'bash', 'duplicate'),
-      tool('base.read', 'read', 'files', '1', 'ENVIRONMENT_CAPABILITY'),
+      tool('base.read', 'read', 'files'),
     ]
 
     expect(buildToolCandidates(tools)).toEqual([
@@ -74,14 +72,14 @@ describe('agent-capability-candidates', () => {
 
   it('keeps permission candidates keyed by stable tool ID', () => {
     const tools = [
-      tool('base.read', 'read', 'files', '1', 'ENVIRONMENT_CAPABILITY'),
-      tool('declarative.read', 'read', 'declarative files', '1', 'DECLARATIVE'),
+      tool('base.read', 'read', 'files'),
+      tool('custom.read', 'read', 'custom files'),
       tool('base.read', 'renamed read', 'duplicate ID'),
     ]
 
     expect(buildPermissionToolCandidates(tools).map((item) => item.name)).toEqual([
       'base.read',
-      'declarative.read',
+      'custom.read',
     ])
     expect(buildPermissionToolCandidates(tools)[0]).toEqual({
       value: 'base.read',

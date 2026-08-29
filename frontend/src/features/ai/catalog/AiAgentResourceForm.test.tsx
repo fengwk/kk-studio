@@ -102,14 +102,12 @@ describe('AgentForm current contracts', () => {
               name: 'bash',
               version: '1',
               description: longDescription,
-              backend: 'HOST',
             },
             {
               id: 'environment.lsp',
               name: 'lsp',
               version: '1',
               description: 'lsp',
-              backend: 'ENVIRONMENT_CAPABILITY',
             },
           ]}
           onChange={setDraft}
@@ -365,14 +363,12 @@ describe('AgentForm current contracts', () => {
             name: 'bash',
             version: '1',
             description: 'shell',
-            backend: 'HOST',
           },
           {
             id: 'base.read',
             name: 'read',
             version: '1',
             description: 'files',
-            backend: 'ENVIRONMENT_CAPABILITY',
           },
         ]}
         onChange={() => undefined}
@@ -410,14 +406,12 @@ describe('AgentForm current contracts', () => {
             name: 'bash',
             version: '1',
             description: 'shell',
-            backend: 'HOST',
           },
           {
             id: 'base.read',
             name: 'read',
             version: '1',
             description: 'files',
-            backend: 'ENVIRONMENT_CAPABILITY',
           },
         ]}
         onChange={() => undefined}

@@ -92,7 +92,6 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     toolVersion: '1',
     rendererKey: 'bash',
     toolId: 'base.bash',
-    toolBackend: 'HOST',
     environment: null,
     argumentsJson: '{"command":"ls"}',
     approvalJson: null,
@@ -781,22 +780,21 @@ describe('buildThreadEventTimeline', () => {
     })
   })
 
-  it('projects tool invocation with DECLARATIVE backend correctly', () => {
-    // 意图：验证 DECLARATIVE toolBackend 的 ToolInvocation 正常被 timeline/event 系统投影。
+  it('projects tool invocation with custom rendererKey correctly', () => {
+    // 意图：验证统一 ToolInvocation 正常被 timeline/event 系统投影。
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
     ]
     const invocation = toolInvocation({
-      id: 'inv-decl',
+      id: 'inv-custom',
       toolName: 'create_goal',
       toolId: 'base.goal.create',
-      toolBackend: 'DECLARATIVE',
       rendererKey: 'tool',
       status: 'RUNNING',
     })
 
     const events = build(entries, { toolInvocations: [invocation] })
-    const activeTool = events.find((e) => e.id === 'active:tool:inv-decl')
+    const activeTool = events.find((e) => e.id === 'active:tool:inv-custom')
     expect(activeTool).toBeDefined()
     expect(activeTool?.title).toBe('ACTIVE_TOOL_INVOCATION')
     expect(activeTool?.summary).toBe('create_goal · 运行中')

@@ -29,7 +29,6 @@ function tool(name: string): ToolCatalogEntryDTO {
     name,
     version: '1',
     description: `${name} tool`,
-    backend: 'HOST',
   }
 }
 
