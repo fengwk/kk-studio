@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
@@ -32,11 +33,9 @@ import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCancelledException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityFailedException;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -51,12 +50,12 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * {@link PlatformToolGateway} 回调桥：partial / terminal / error / cancel 语义与 managed Resource 外部化。
+ * {@link ToolExecutionGateway} 回调桥：partial / terminal / error / cancel 语义与 managed Resource 外部化。
  *
  * <p>HOST 路径由 FakeTool 的 handler 在 execute 内同步投递回调（gate 已打开，直达 listener）；ENVIRONMENT_CAPABILITY
  * 路径由测试直接驱动 FakeTransport 记录的 listener。
  */
-class PlatformToolGatewayCallbackTest {
+class ToolExecutionGatewayCallbackTest {
 
   private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
 
@@ -169,7 +168,7 @@ class PlatformToolGatewayCallbackTest {
         ResourceRef.utf8Length(
             ToolResultExternalizer.PREVIEW_TRUNCATION_MARKER, "preview truncation marker");
     int prefixBudget = ResourceRef.MAX_PREVIEW_UTF8_BYTES - markerBytes;
-    String text = "a".repeat(prefixBudget - 1) + "😀" + "tail".repeat(1024);
+    String text = "a".repeat(prefixBudget - 1) + "\uD83D\uDE00" + "tail".repeat(1024);
     String expected =
         "a".repeat(prefixBudget - 1) + ToolResultExternalizer.PREVIEW_TRUNCATION_MARKER;
 
@@ -226,8 +225,6 @@ class PlatformToolGatewayCallbackTest {
             Instant.EPOCH,
             Instant.EPOCH);
 
-    // 物化端口（全局 Blob 摄入）会把外部化文本映射为 durable ResourceMessageContent；9926 字节 ≤ 16 KiB，
-    // preview 完整保留正文，模型在 provider attempt 仍能看到全文。
     MessagePayload payload =
         new HistoryPayloadMapper()
             .toolResultPayload(
@@ -374,7 +371,6 @@ class PlatformToolGatewayCallbackTest {
             false,
             "{}");
     ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result);
-    // 全有或全无：第一个合法 put 之前就因非法 mediaType 拒绝，零存储副作用。
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
@@ -451,7 +447,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
-      PlatformToolGateway gateway =
+      ToolExecutionGateway gateway =
           ToolGatewayTestSupport.gateway(
               ToolGatewayTestSupport.defaultCatalog(tool),
               new ToolGatewayTestSupport.FakeTransport(),
@@ -463,7 +459,6 @@ class PlatformToolGatewayCallbackTest {
                   ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
               listener);
       ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-      // execute 抛异常无法确认是否产生副作用：UNKNOWN，绝不是已知 FAILED。
       startedResult.handle().activate();
       listener.awaitCount(1);
       ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
@@ -494,7 +489,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -508,7 +503,6 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
     executor.runAll();
-    // 桥 terminal-once：只有第一个 terminal 被投递并外部化，重复 complete / 迟到 error 一律忽略。
     listener.awaitCount(1);
     assertInstanceOf(
         ToolGatewayTestSupport.RecordingListener.Event.Succeeded.class, listener.events.get(0));
@@ -532,7 +526,7 @@ class PlatformToolGatewayCallbackTest {
         };
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
-      PlatformToolGateway gateway =
+      ToolExecutionGateway gateway =
           ToolGatewayTestSupport.gateway(
               ToolGatewayTestSupport.defaultCatalog(tool),
               new ToolGatewayTestSupport.FakeTransport(),
@@ -544,7 +538,6 @@ class PlatformToolGatewayCallbackTest {
                   ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
               new ToolGatewayTestSupport.RecordingListener());
       ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-      // 两阶段激活后 Tool 才运行；execute 尚未返回 handle：cancel 只记录意图。
       startedResult.handle().activate();
       assertTrue(entered.await(5, TimeUnit.SECONDS));
       startedResult.handle().cancel();
@@ -556,7 +549,6 @@ class PlatformToolGatewayCallbackTest {
         Thread.onSpinWait();
       }
       assertEquals(1, tool.handles.size());
-      // attach 后立即取消；重复 cancel 幂等。
       assertTrue(tool.handles.get(0).isCancelled());
     } finally {
       executor.shutdownNow();
@@ -568,19 +560,21 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
-    PlatformToolGateway gateway =
+    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
+            executor);
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-    // invoke 同步返回的 handle 已 attach：cancel 直达 transport handle，重复调用幂等。
+    startedResult.handle().activate();
+    executor.runAll();
     assertEquals(1, transport.returnedHandles.size());
     startedResult.handle().cancel();
     startedResult.handle().cancel();
@@ -614,7 +608,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -628,7 +622,6 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
     executor.runAll();
-    // execute 返回 null handle：已接受的执行结果无法确认，恰好一次 UNKNOWN。
     assertEquals(1, tool.requests.size());
     listener.awaitCount(1);
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
@@ -653,7 +646,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -667,7 +660,6 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
     executor.runAll();
-    // execute 内同步 terminal 先于 null-handle 失败入队：FIFO/terminal-once 下 terminal 获胜，null-handle 信号被丢弃。
     listener.awaitCount(1);
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
@@ -706,7 +698,6 @@ class PlatformToolGatewayCallbackTest {
         new ToolResult(
             "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
-    // 非法 partial 后 Tool 继续投递 terminal success：桥已 terminal，success 绝不外部化、绝不投递。
     tool.handler =
         (request, listener) -> {
           listener.onPartial(partial);
@@ -716,7 +707,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -778,7 +769,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -792,7 +783,6 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
     executor.runAll();
-    // 并发重复 terminal：串行 FIFO 下恰好一个 Succeeded（第一个被处理者），其余忽略。
     listener.awaitCount(1);
     assertInstanceOf(
         ToolGatewayTestSupport.RecordingListener.Event.Succeeded.class, listener.events.get(0));
@@ -855,7 +845,6 @@ class PlatformToolGatewayCallbackTest {
               new Thread(
                   () -> bridgeListener.onComplete(ToolGatewayTestSupport.result("call-1", "done")));
           completeThread.start();
-          // partial 仍在 listener 内阻塞：terminal 只能排队，绝不能超车先投递。
           long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
           while (order.size() > 1 && System.nanoTime() < deadline) {
             Thread.onSpinWait();
@@ -869,10 +858,8 @@ class PlatformToolGatewayCallbackTest {
             Thread.currentThread().interrupt();
           }
         };
-    ToolGatewayTestSupport.RecordingListener unused =
-        new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -886,7 +873,6 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
     executor.runAll();
-    // FIFO：partial 先于 terminal 投递；terminal 恰好一次。
     assertEquals(List.of("partial", "succeeded"), order);
   }
 
@@ -899,7 +885,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     listener.throwOnPartial = true;
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -913,7 +899,6 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
     executor.runAll();
-    // 已接受的 execution 上 listener 内部失败：结果无法确认，恰好一次 UNKNOWN terminal。
     listener.awaitCount(1);
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
@@ -933,7 +918,6 @@ class PlatformToolGatewayCallbackTest {
                         List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
                         false,
                         "{}")));
-    // terminal 选择（Succeeded）已经发生：恰好一次 terminal 调用；外部化照常完成；listener 拒绝只记录，绝不追加 UNKNOWN。
     assertEquals(1, run.listener.terminalInvocations.get());
     assertEquals(1, run.store.puts.size());
     assertTrue(
@@ -984,31 +968,27 @@ class PlatformToolGatewayCallbackTest {
     assertEquals(1, run.listener.terminalInvocations.get());
   }
 
-  /** Capability 重构不可退化的 fitness gate：Environment callback bridge 必须按到达顺序完整重放多个 PARTIAL。 */
   @Test
   void bufferedSignalsUpToLimitAreReplayedOnActivation() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_PARTIALS;
-    transport.syncPartialCount = PlatformToolGateway.MAX_BUFFERED_SIGNALS;
+    transport.syncPartialCount = ToolExecutionGateway.MAX_BUFFERED_SIGNALS;
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    PlatformToolGateway gateway =
+    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.defaultCatalog(),
-            transport,
-            store,
-            new ToolGatewayTestSupport.ManualExecutor());
+            ToolGatewayTestSupport.defaultCatalog(), transport, store, executor);
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-    assertTrue(listener.events.isEmpty(), "gate closed: nothing may be delivered during invoke");
-    // 恰好达到上限：activate 后全部按 FIFO 重放，无 terminal、无 store 写入。
     startedResult.handle().activate();
-    listener.awaitCount(PlatformToolGateway.MAX_BUFFERED_SIGNALS);
+    executor.runAll();
+    listener.awaitCount(ToolExecutionGateway.MAX_BUFFERED_SIGNALS);
     assertEquals(0, listener.terminalInvocations.get(), "partials are never terminals");
     for (int index = 0; index < listener.events.size(); index++) {
       ToolGatewayTestSupport.RecordingListener.Event.Partial partial =
@@ -1030,12 +1010,10 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     listener.store = store;
-    PlatformToolGateway gateway =
+    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.defaultCatalog(),
-            transport,
-            store,
-            new ToolGatewayTestSupport.ManualExecutor());
+            ToolGatewayTestSupport.defaultCatalog(), transport, store, executor);
 
     ToolGateway.Started started =
         assertInstanceOf(
@@ -1046,6 +1024,7 @@ class PlatformToolGatewayCallbackTest {
                         "call-1", ToolGatewayTestSupport.ENV_A)),
                 listener));
     started.handle().activate();
+    executor.runAll();
     listener.awaitCount(1);
 
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
@@ -1067,12 +1046,10 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     listener.store = store;
-    PlatformToolGateway gateway =
+    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.defaultCatalog(),
-            transport,
-            store,
-            new ToolGatewayTestSupport.ManualExecutor());
+            ToolGatewayTestSupport.defaultCatalog(), transport, store, executor);
 
     ToolGateway.Started started =
         assertInstanceOf(
@@ -1083,6 +1060,7 @@ class PlatformToolGatewayCallbackTest {
                         "call-1", ToolGatewayTestSupport.ENV_A)),
                 listener));
     started.handle().activate();
+    executor.runAll();
     listener.awaitCount(1);
 
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
@@ -1094,27 +1072,36 @@ class PlatformToolGatewayCallbackTest {
 
   @Test
   void bufferedOverflowSelectsExactlyOneUnknownAtActivationWithoutStoreWrites() {
-    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
-    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_PARTIALS;
-    transport.syncPartialCount = PlatformToolGateway.MAX_BUFFERED_SIGNALS + 1;
+    ToolDescriptor descriptor = ToolGatewayTestSupport.hostDescriptor("overflow");
+    ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(descriptor);
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    PlatformToolGateway gateway =
+    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.defaultCatalog(),
-            transport,
+            ToolGatewayTestSupport.defaultCatalog(tool),
+            new ToolGatewayTestSupport.FakeTransport(),
             store,
-            new ToolGatewayTestSupport.ManualExecutor());
+            executor);
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
+                ToolGatewayTestSupport.hostRequest("call-1", descriptor)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-    assertTrue(listener.events.isEmpty(), "gate closed: nothing may be delivered during invoke");
-    // 第 257 个信号溢出：缓冲被清空（有界），activate 时确定性选择恰好一次 UNKNOWN；绝无 partial 投递、绝无 store 写入。
+    assertTrue(listener.events.isEmpty(), "gate closed: nothing may be delivered before activate");
+
+    ToolExecutionGateway.GatewayHandle handle =
+        (ToolExecutionGateway.GatewayHandle) startedResult.handle();
+    for (int i = 0; i < ToolExecutionGateway.MAX_BUFFERED_SIGNALS + 1; i++) {
+      handle
+          .bridge()
+          .onPartial(new ToolResult("call-1", List.of(new TextToolContent("p-" + i)), false, "{}"));
+    }
+
     startedResult.handle().activate();
+    executor.runAll();
     listener.awaitCount(1);
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
@@ -1123,17 +1110,14 @@ class PlatformToolGatewayCallbackTest {
     assertTrue(unknown.error().message().contains("cannot be confirmed"));
     assertEquals(1, listener.terminalInvocations.get(), "overflow selects exactly one terminal");
     assertTrue(store.puts.isEmpty(), "overflow must never touch the resource store");
-    // 溢出后迟到信号一律丢弃，绝不出现第二个 terminal、绝不产生 store 副作用。
-    EnvironmentCapabilityExecutionListener bridge = transport.invocations.get(0).listener();
-    bridge.onComplete(ToolGatewayTestSupport.capabilityResult("call-1", "late done"));
-    bridge.onPartial(ToolGatewayTestSupport.capabilityResult("call-1", "later"));
+    handle.bridge().onComplete(ToolGatewayTestSupport.result("call-1", "late done"));
+    handle.bridge().onPartial(ToolGatewayTestSupport.result("call-1", "later"));
     assertEquals(1, listener.terminalInvocations.get());
     assertTrue(store.puts.isEmpty());
   }
 
   @Test
   void malformedSurrogateTextIsDeterministicInvalidWithZeroPuts() {
-    // 未配对高位代理项不是合法 Unicode：严格 Resource UTF-8 语义下确定性 INVALID_RESULT，零存储副作用。
     ToolResult result =
         new ToolResult(
             "call-1",
@@ -1157,7 +1141,6 @@ class PlatformToolGatewayCallbackTest {
         new ToolResult(
             "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
-    // 非法 partial 后 Tool 继续投递二进制 terminal：桥已 terminal，success 绝不外部化、绝不投递。
     tool.handler =
         (request, listener) -> {
           listener.onPartial(partial);
@@ -1167,7 +1150,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -1216,7 +1199,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -1262,8 +1245,6 @@ class PlatformToolGatewayCallbackTest {
 
   @Test
   void projectedResultExceedingOneMiBIsRejectedBeforeAnyPut() {
-    // 全部内联文本（63 × 8 KiB ≈ 504 KiB）+ 600 KiB detailsJson + 一个本会被外部化的二进制项：
-    // 投影结果（外部化后）超过 canonical JSON 上限，必须在第一个 put 之前确定性拒绝。
     List<ToolContent> contents = new ArrayList<>(64);
     for (int i = 0; i < 63; i++) {
       contents.add(new TextToolContent("x".repeat(8 * 1024)));
@@ -1282,7 +1263,6 @@ class PlatformToolGatewayCallbackTest {
         listener.store.puts.isEmpty(), "projected size rejection must happen before any put");
   }
 
-  /** 外部化 preview 必须计入 pre-write 投影上限；64 个 16 KiB preview 在任何 put 前整体拒绝。 */
   @Test
   void projectedPreviewBytesAreCheckedBeforeAnyPut() {
     List<ToolContent> contents = new ArrayList<>(ToolResult.MAX_CONTENT_ITEMS);
@@ -1314,7 +1294,6 @@ class PlatformToolGatewayCallbackTest {
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("RESOURCE_STORE_FAILED", unknown.error().kind());
     assertTrue(unknown.error().message().contains("cannot be confirmed"));
-    // put 已发生（副作用存在），契约违反按 UNKNOWN 收敛而不是伪装为确定性 INVALID_RESULT。
     assertEquals(1, store.puts.size(), "put side effect occurred before the contract mismatch");
   }
 
@@ -1330,7 +1309,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -1344,13 +1323,11 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
     executor.runAll();
-    // onError(null)：无法确认执行结果，恰好一次 UNKNOWN。
     listener.awaitCount(1);
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("EXECUTION_FAILED", unknown.error().kind());
     assertTrue(unknown.error().message().contains("cannot be confirmed"));
-    // 未 wedge：terminal 后的迟到信号立即被忽略，不阻塞、不产生新事件。
     bridge.get().onPartial(ToolGatewayTestSupport.result("call-1", "late"));
     assertEquals(1, listener.events.size());
   }
@@ -1373,7 +1350,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -1387,7 +1364,6 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
     executor.runAll();
-    // getMessage 抛异常的错误：分发循环收敛恰好一次 UNKNOWN（adversarial detail 不影响收敛），绝不 wedge dispatching。
     listener.awaitCount(1);
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
@@ -1412,7 +1388,6 @@ class PlatformToolGatewayCallbackTest {
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
     assertFalse(failed.failure().retryable());
-    // all-or-nothing：超限项在第一个 put 之前被确定性拒绝，零存储副作用。
     assertTrue(listener.store.puts.isEmpty(), "oversized item must be rejected before any put");
   }
 
@@ -1423,13 +1398,12 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.InterruptingExecutor();
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             executor);
-    // execute() 阻塞到任务线程在 gate release 前被中断：任务退出前队列一个未分类失败，绝不触碰 Tool、绝不投递回调。
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
@@ -1438,7 +1412,6 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     assertTrue(tool.requests.isEmpty(), "tool must not execute after interrupted waiting task");
     assertTrue(listener.events.isEmpty(), "no callback may fire before activation");
-    // 激活：等待期中断的执行结果无法确认，恰好一次 UNKNOWN；Tool 仍未被触碰。
     startedResult.handle().activate();
     listener.awaitCount(1);
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
@@ -1455,7 +1428,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolGatewayTestSupport.InterruptingExecutor();
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -1467,7 +1440,6 @@ class PlatformToolGatewayCallbackTest {
                 ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-    // 中断后 cancel-before-activate：缓冲的未分类失败被丢弃，保持静默（无 Tool、无回调、无泄漏）。
     startedResult.handle().cancel();
     startedResult.handle().activate();
     assertTrue(listener.events.isEmpty(), "cancel-before-activate must stay silent");
@@ -1490,7 +1462,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -1503,7 +1475,6 @@ class PlatformToolGatewayCallbackTest {
                 ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-    // 两阶段激活：activate 打开回调 gate 后 executor 任务才运行 Tool。
     startedResult.handle().activate();
     executor.runAll();
     listener.awaitCount(1);
@@ -1522,7 +1493,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -1547,7 +1518,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -1565,16 +1536,11 @@ class PlatformToolGatewayCallbackTest {
     return listener;
   }
 
-  /** 拒绝 terminal 回调的场景结果：记录器、store 与桥引用（用于迟到信号断言）。 */
   private record RejectedTerminalRun(
       ToolGatewayTestSupport.RecordingListener listener,
       ToolGatewayTestSupport.FakeResourceStore store,
       AtomicReference<ToolExecutionListener> bridge) {}
 
-  /**
-   * 运行一个 HOST 同步发射信号的场景：{@code configure} 先配置记录器（如置位某个 throwOn* 标志），{@code emit} 在 execute
-   * 内发射信号并捕获桥引用；activate + runAll 后所有分发已完成（同步），可直接断言 terminal 调用次数。
-   */
   private static RejectedTerminalRun runRejectedTerminal(
       Consumer<ToolGatewayTestSupport.RecordingListener> configure,
       Consumer<ToolExecutionListener> emit) {
@@ -1590,7 +1556,7 @@ class PlatformToolGatewayCallbackTest {
     configure.accept(listener);
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),

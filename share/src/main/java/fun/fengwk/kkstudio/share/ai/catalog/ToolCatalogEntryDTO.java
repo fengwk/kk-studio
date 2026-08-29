@@ -8,9 +8,6 @@ public class ToolCatalogEntryDTO {
   /** 全局稳定 Agent Tool ID。 */
   private String id;
 
-  /** 执行后端，取 {@code AgentToolBackend} 枚举名。 */
-  private String backend;
-
   /** 工具规范名：以字母开头，仅包含字母、数字、{@code _} 或 {@code -}。 */
   private String name;
 

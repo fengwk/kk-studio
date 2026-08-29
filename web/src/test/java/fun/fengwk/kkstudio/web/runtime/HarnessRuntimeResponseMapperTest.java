@@ -52,7 +52,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -245,7 +244,6 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals("1.0", boundDto.getToolVersion());
     assertEquals("bash", boundDto.getRendererKey());
     assertEquals("test.bash", boundDto.getToolId());
-    assertEquals("ENVIRONMENT_CAPABILITY", boundDto.getToolBackend());
     assertEquals("local", boundDto.getEnvironment().getName());
     assertEquals("workspace", boundDto.getEnvironment().getWorkspacePath());
     assertEquals(approval, new ToolApprovalJsonCodec().decode(boundDto.getApprovalJson()));
@@ -260,7 +258,6 @@ class HarnessRuntimeResponseMapperTest {
     assertNull(unboundDto.getToolVersion());
     assertEquals("tool", unboundDto.getRendererKey());
     assertNull(unboundDto.getToolId());
-    assertNull(unboundDto.getToolBackend());
     assertNull(unboundDto.getEnvironment());
     assertNull(unboundDto.getApprovalJson());
     assertNull(unboundDto.getResultJson());
@@ -634,22 +631,18 @@ class HarnessRuntimeResponseMapperTest {
   private static ToolBinding environmentToolBinding() {
     return new ToolBinding(
         new AgentToolDefinition(
-            new AgentToolId("test.bash"),
-            descriptor(),
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.ENVIRONMENT_CAPABILITY),
+            new AgentToolId("test.bash"), descriptor(), ToolVisibility.SELECTABLE),
         new ContributorBinding("test", "bash", List.of()),
+        true,
         new EnvironmentBinding(new EnvironmentName("local"), "workspace"));
   }
 
   private static ToolBinding hostToolBinding() {
     return new ToolBinding(
         new AgentToolDefinition(
-            new AgentToolId("test.bash"),
-            descriptor(),
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.HOST),
+            new AgentToolId("test.bash"), descriptor(), ToolVisibility.SELECTABLE),
         new ContributorBinding("test", "bash", List.of()),
+        false,
         null);
   }
 

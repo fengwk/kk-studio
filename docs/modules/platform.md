@@ -227,7 +227,7 @@ Provider callback 经 `BridgingHandler`进入单一 FIFO drainer，队列上限 
 迟到/重复信号全部丢弃；队列溢出、未知 transport 异常或非 terminal listener 异常统一以一次 `UNKNOWN`收敛；
 terminal listener 异常只记录日志，不发第二个 terminal。terminal、cancel 和提交失败共享幂等 permit release。
 
-### PlatformToolGateway、HarnessCatalog 与 Contributor 路由
+### ToolExecutionGateway、HarnessCatalog 与 Contributor 路由
 
 Platform 接收由 Web 组合根冻结的不可变 `HarnessCatalog`，不自建第二重目录，不直接读取本地目录或创建 classloader：
 
@@ -235,21 +235,20 @@ Platform 接收由 Web 组合根冻结的不可变 `HarnessCatalog`，不自建�
 - Platform 通过 `ToolCatalogQueryService` 消费 `HarnessCatalog.selectableTools()` 提供可选工具列表，向 Web 和前端暴露；
 - 冻结后的每个 `ToolContribution` 均携带所属 Contributor provenance（`ContributionId`）、优先级以及 `AgentToolDefinition`；
 - 全部工具的 `AgentToolId` 与模型可见的 Tool name 在 `HarnessCatalog` 冻结时保证全局唯一；
-- `DatabaseTurnResolver` 与 `PlatformToolGateway` 统一通过 `HarnessCatalog` 按稳定 `AgentToolId` 或模型工具名查找工具。
+- `DatabaseTurnResolver` 与 `ToolExecutionGateway` 统一通过 `HarnessCatalog` 按稳定 `AgentToolId` 或模型工具名查找工具。
 
-`PlatformToolGateway` 的 `preflight` 先用 frozen `AgentToolDefinition.id` 从 `HarnessCatalog` 恢复 ToolContribution，再要求目录中的完整 definition 与 frozen definition 相等；贡献缺失或 definition 漂移直接生成确定性的 `TOOL_NOT_FOUND` / `TOOL_DEFINITION_MISMATCH` Deny，不进入 permission evaluator。正常路径按 AgentToolId、arguments、Environment workspace 或 server workdir 生成 `ALLOW`、`ASK` 或 `DENY`，不改写 binding/arguments，也不感知 YOLO。`start` 先获取 tool admission（默认 `kk-studio.harness.execution-admission.tool=64`），再按 sealed contribution 类型路由：
+`ToolExecutionGateway` 的 `preflight` 先用 frozen `AgentToolDefinition.id` 从 `HarnessCatalog` 恢复 ToolContribution，再要求目录中的完整 definition、contributor provenance 与 requirements 相等；贡献缺失或 definition/requirements 漂移直接生成确定性的 `TOOL_NOT_FOUND` / `TOOL_DEFINITION_MISMATCH` Deny，不进入 permission evaluator。正常路径按 AgentToolId、arguments、Environment workspace 或 server workdir 生成 `ALLOW`、`ASK` 或 `DENY`，不改写 binding/arguments，也不感知 YOLO。`start` 先获取 tool admission（默认 `kk-studio.harness.execution-admission.tool=64`），再通过单一执行路径执行：
 
-| backend | admission / transport |
-| --- | --- |
-| `HOST` | 通过 `HostToolContribution` 匹配完整 definition 后提交 virtual-thread executor 执行 `Tool.execute` |
-| `DECLARATIVE` | 通过 `DeclarativeToolContribution` 构造 `DeclarativeToolContext(BranchView, executedAt)` 执行 `DeclarativeTool.execute`，严格校验 `AppendCustomEntry` intents 的 Contributor 归属、已注册 customType 及 WRITE 声明 |
-| `ENVIRONMENT_CAPABILITY` | 通过 `EnvironmentCapabilityToolContribution` 确认 READY 与 active slot 后，经 `EnvironmentCapabilityTransport` 发往目标 Environment Daemon |
+1. 完整校验冻结定义、Contributor 溯源与执行要求；
+2. 构建隔离所属 Contributor 的只读 `BranchView` 与可选 `BoundEnvironment` 适配器；
+3. 构造 `ToolExecutionContext` 与 `ToolExecutionRequest`，向底层 `Tool.execute` 提交异步执行并返回两阶段门控 Handle；
+4. 门控桥处理完成回调，校验 effects 归属、注册与 WRITE 声明，完成 managed Resource 外部化并一次性投递。
 
 local executor 明确拒绝返回 `Overloaded`，提交不确定返回 `Indeterminate(EXECUTION_FAILED)`。Environment 在发送前不可用返回 `Rejected(UNAVAILABLE)`，同 Environment active 返回 `Busy`，发送不确定返回 `Indeterminate(REMOTE_UNCERTAIN)`；这些分类决定 Harness 是否重试或终止。
 
 `GatedToolExecutionListener` 与 Model gateway 同样是两阶段 activation、FIFO single drainer、256 signal bounded buffer 和 terminal-once。partial 必须非空、toolCallId 精确匹配、不能携带 Binary/Resource，且 canonical JSON 不得超过 256 KiB；terminal result 在 externalize 前校验，成功结果采用 all-or-nothing Resource externalization。第一个 terminal 后任何迟到信号、其余 Resource 写入和第二个 terminal 都被禁止。
 
-Declarative Tool 的 `AppendCustomEntry` intent 必须属于自身 Contributor、命中已注册 custom type 且存在声明的 WRITE access；否则判定为 contract violation 拒绝。冻结 binding 的完整 definition、provenance 或 state access 与当前 contribution 不同则 `TOOL_DEFINITION_MISMATCH`。
+Tool 的 `AppendCustomEntry` intent 必须属于自身 Contributor、命中已注册 custom type 且存在声明的 WRITE access；否则判定为 contract violation 拒绝。冻结 binding 的完整 definition、provenance 或 state access 与当前 contribution 不同则 `TOOL_DEFINITION_MISMATCH`。
 
 ### DatabaseTurnResolver、skill 与 task materialization
 
@@ -347,12 +346,12 @@ ThreadProcessor
 
 ```text
 ToolProcessor
-  -> PlatformToolGateway.preflight
+  -> ToolExecutionGateway.preflight
        -> PermissionEvaluator + frozen workdir
   -> admission + exact catalog/binding route
   -> Started(handle), gate closed
   -> Runtime markRunning + handle.activate
-  -> local Tool / declarative Tool / Environment Daemon
+  -> unified Tool.execute (with BranchView / BoundEnvironment)
   -> bounded FIFO bridge
   -> partial realtime or terminal externalization
   -> Runtime terminal CAS + owning Thread Work
@@ -485,9 +484,9 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
   `SessionDeletionOrchestratorTest`、`ChatSessionRepositoryIntegrationTest`、`CanvasSessionRepositoryIntegrationTest`。
 - Model/Provider：`PlatformModelGatewayTest`、`DatabaseProviderResolutionServiceIntegrationTest`、
   `ProviderAdapterContractTest`、Provider error/stop-reason/terminal normalization tests。
-- Tool/gateway：`PlatformToolGatewayAdmissionTest`、`PlatformToolGatewayCallbackTest`、
-  `PlatformToolGatewayConstructionTest`、`PlatformToolGatewayPreflightTest`、
-  `PlatformToolGatewayStartTest`、`GlobalStorageToolResultHistoryMaterializerTest`。
+- Tool/gateway：`ToolExecutionGatewayAdmissionTest`、`ToolExecutionGatewayCallbackTest`、
+  `ToolExecutionGatewayConstructionTest`、`ToolExecutionGatewayEffectsTest`、`ToolExecutionGatewayPreflightTest`、
+  `ToolExecutionGatewayStartTest`、`GlobalStorageToolResultHistoryMaterializerTest`。
 - Resolver/materialization：`DatabaseTurnResolverTest`、`AgentBranchSettingsMaterializerTest`、
   `AgentPromptComposerTest`、`DatabaseThreadSelectedSkillLookupTest`、`EnvironmentSkillBodyLoaderTest`。
 - Canvas/ComfyUI：`PlatformCanvasCommandServiceTest`、`PlatformCanvasResourceLifecycleTest`、

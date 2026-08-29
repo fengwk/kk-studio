@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -42,13 +41,8 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * {@link PlatformToolGateway#preflight}：三个 permission 状态的映射，且不改写冻结 request。
- *
- * <p>使用虚构 HOST tool {@code demo} + {@code path} 参数（避开 bash command 分析路径），permission 规则按 {@code *}
- * 通配全量生效，因此断言确定。
- */
-class PlatformToolGatewayPreflightTest {
+/** {@link ToolExecutionGateway#preflight}：三个 permission 状态的映射，且不改写冻结 request。 */
+class ToolExecutionGatewayPreflightTest {
 
   private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
   private static final ToolDescriptor PREFLIGHT_DESCRIPTOR = preflightDescriptor();
@@ -78,7 +72,6 @@ class PlatformToolGatewayPreflightTest {
   void askWhenRulesAskWithBoundedPreviewReason() {
     ToolGateway.PreflightResult result = preflight(PermissionAction.ASK);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
-    // canonical 单行 reason 包含 tool 与 bounded arguments preview。
     assertTrue(
         ask.reason().startsWith(ToolGatewayTestSupport.TEST_TOOL_ID.value() + " requires approval"),
         ask.reason());
@@ -110,12 +103,12 @@ class PlatformToolGatewayPreflightTest {
                 ToolGatewayTestSupport.TEST_TOOL_ID.value(),
                 List.of(new PermissionRule("*", PermissionAction.DENY))),
             false);
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor(),
+            new ToolGatewayTestSupport.DirectQueueExecutor(),
             settings);
 
     ToolGateway.Deny deny =
@@ -123,8 +116,7 @@ class PlatformToolGatewayPreflightTest {
             ToolGateway.Deny.class,
             gateway.preflight(ToolGatewayTestSupport.hostRequest("call-1", PREFLIGHT_DESCRIPTOR)));
 
-    // catalog 中的 frozen entry 将 model-visible name demo 恢复为 test.host-tool；不能误用 name 规则。
-    assertEquals(PlatformToolGateway.PERMISSION_DENIED_KIND, deny.error().kind());
+    assertEquals(ToolExecutionGateway.PERMISSION_DENIED_KIND, deny.error().kind());
     assertEquals("Tool permission was denied.", deny.error().message());
   }
 
@@ -134,8 +126,8 @@ class PlatformToolGatewayPreflightTest {
     HarnessCatalog catalog =
         ToolGatewayTestSupport.defaultCatalog(
             new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR));
-    PlatformToolGateway gateway =
-        new PlatformToolGateway(
+    ToolExecutionGateway gateway =
+        new ToolExecutionGateway(
             catalog,
             ToolGatewayTestSupport.FAILING_CONTRIBUTOR_BRANCH_LOADER,
             new ToolGatewayTestSupport.FakeTransport(),
@@ -146,7 +138,7 @@ class PlatformToolGatewayPreflightTest {
             ToolGatewayTestSupport.WORKDIR,
             ToolGatewayTestSupport.ENVIRONMENT_ROOT,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
-            new ToolGatewayTestSupport.ManualExecutor(),
+            new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.BUSY_RETRY_DELAY,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
             ToolGatewayTestSupport.TEST_CLOCK,
@@ -161,13 +153,11 @@ class PlatformToolGatewayPreflightTest {
                     new ToolCall("unknown", "missing", "{}"),
                     new ToolBinding(
                         new AgentToolDefinition(
-                            new AgentToolId("test.missing"),
-                            unknown,
-                            ToolVisibility.SELECTABLE,
-                            AgentToolBackend.HOST),
+                            new AgentToolId("test.missing"), unknown, ToolVisibility.SELECTABLE),
                         new ContributorBinding("test", "missing", List.of()),
+                        false,
                         null))));
-    assertEquals(PlatformToolGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
+    assertEquals(ToolExecutionGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
     assertEquals(
         "Frozen tool definition test.missing is not registered.", unknownDeny.error().message());
 
@@ -181,9 +171,9 @@ class PlatformToolGatewayPreflightTest {
                     new ToolBinding(
                         hostDefinition(mismatched),
                         new ContributorBinding("test", "host-tool", List.of()),
+                        false,
                         null))));
-    // 两个请求都在 evaluator 前收敛；mock 没有任何交互，证明未知/漂移 descriptor 不会产生评估副作用。
-    assertEquals(PlatformToolGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
+    assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
     assertEquals(
         "Frozen tool definition test.host-tool does not match its catalog definition.",
         mismatchDeny.error().message());
@@ -192,8 +182,6 @@ class PlatformToolGatewayPreflightTest {
 
   @Test
   void askReasonLongerThan1024IsTruncatedAtCodePointBoundary() {
-    // workdir 内大量 surrogate pair（emoji）撑过 1024 字符上限；1 字符 tool 名使 emoji 段从偶数下标开始，
-    // 截断点必然落在代理对中间——截断必须回退到码点边界，绝不劈开代理对、绝不超长。
     Path hugeWorkdir = Path.of("/w/" + "\uD83D\uDE00".repeat(520) + "/deep");
     ToolGateway.PreflightResult result =
         preflightTruncation(PermissionAction.ASK, hugeWorkdir, Path.of("/env-root"));
@@ -211,11 +199,10 @@ class PlatformToolGatewayPreflightTest {
     HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog(tool);
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
-      PlatformToolGateway gateway =
+      ToolExecutionGateway gateway =
           ToolGatewayTestSupport.gateway(catalog, transport, store, executor);
       ToolInvocationRequest request = ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR);
       gateway.preflight(request);
-      // preflight 不触碰 transport / contributors / store；start 使用同一冻结 request 实例执行。
       assertTrue(transport.invocations.isEmpty());
       assertTrue(store.puts.isEmpty());
       ToolGateway.StartResult started =
@@ -238,8 +225,6 @@ class PlatformToolGatewayPreflightTest {
 
   @Test
   void environmentWorkspaceBecomesDefaultWorkdirForAskPreview() {
-    // ENVIRONMENT_CAPABILITY tool 的权限上下文必须体现冻结 binding 的 workspace：Ask reason 的默认 workdir 是
-    // environmentRoot 下的 canonical workspacePath，而不是 server 默认 workdir。
     EnvironmentBinding binding = new EnvironmentBinding(new EnvironmentName("env-1"), "repo/sub");
     ToolGateway.PreflightResult result =
         environmentPreflight(binding, "{\"path\":\"src/Main.java\"}", PermissionAction.ASK);
@@ -249,8 +234,6 @@ class PlatformToolGatewayPreflightTest {
 
   @Test
   void environmentWorkspaceIsTheOnlyPathRuleBase() {
-    // path 只相对冻结 binding 的 effective workdir（environmentRoot 下的 canonical workspacePath）解析，
-    // environmentRoot 不再作为 pattern 坐标：src/** 命中 DENY，而旧的环境相对坐标 repo/sub/** 不再命中。
     EnvironmentBinding binding = new EnvironmentBinding(new EnvironmentName("env-1"), "repo/sub");
     ToolSettings settings =
         new ToolSettings(
@@ -280,7 +263,6 @@ class PlatformToolGatewayPreflightTest {
 
   @Test
   void platformPreflightKeepsServerDefaultWorkdir() {
-    // HOST 行为不变：权限路径上下文仍使用 server 默认 workdir。
     ToolGateway.PreflightResult result = preflight(PermissionAction.ASK);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
     assertTrue(ask.reason().contains("/workspace (default)"), ask.reason());
@@ -301,12 +283,12 @@ class PlatformToolGatewayPreflightTest {
       EnvironmentBinding environment, String argumentsJson, ToolSettings settings) {
     ToolContribution contribution =
         ToolGatewayTestSupport.defaultCatalog().findTool(BuiltinToolIds.READ).orElseThrow();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor(),
+            new ToolGatewayTestSupport.DirectQueueExecutor(),
             settings,
             ToolGatewayTestSupport.WORKDIR,
             ToolGatewayTestSupport.ENVIRONMENT_ROOT);
@@ -316,19 +298,19 @@ class PlatformToolGatewayPreflightTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "read", argumentsJson),
-            new ToolBinding(contribution.definition(), contributor, environment));
+            new ToolBinding(contribution.definition(), contributor, true, environment));
     return gateway.preflight(request);
   }
 
   private static ToolGateway.PreflightResult preflight(
       PermissionAction action, Path workdir, Path environmentRoot) {
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(
                 new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor(),
+            new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.settings(action),
             workdir,
             environmentRoot);
@@ -338,11 +320,11 @@ class PlatformToolGatewayPreflightTest {
             new ToolBinding(
                 hostDefinition(PREFLIGHT_DESCRIPTOR),
                 new ContributorBinding("test", "host-tool", List.of()),
+                false,
                 null));
     return gateway.preflight(request);
   }
 
-  /** 单字符 tool 名 + path 参数的 preflight fixture：emoji workdir 从偶数下标开始，截断点劈开代理对。 */
   private static ToolDescriptor truncationDescriptor() {
     return new ToolDescriptor(
         "x",
@@ -361,12 +343,12 @@ class PlatformToolGatewayPreflightTest {
   private static ToolGateway.PreflightResult preflightTruncation(
       PermissionAction action, Path workdir, Path environmentRoot) {
     ToolDescriptor descriptor = truncationDescriptor();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(descriptor)),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor(),
+            new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.settings(action),
             workdir,
             environmentRoot);
@@ -376,19 +358,16 @@ class PlatformToolGatewayPreflightTest {
             new ToolBinding(
                 hostDefinition(descriptor),
                 new ContributorBinding("test", "host-tool", List.of()),
+                false,
                 null));
     return gateway.preflight(request);
   }
 
   private static AgentToolDefinition hostDefinition(ToolDescriptor descriptor) {
     return new AgentToolDefinition(
-        ToolGatewayTestSupport.TEST_TOOL_ID,
-        descriptor,
-        ToolVisibility.SELECTABLE,
-        AgentToolBackend.HOST);
+        ToolGatewayTestSupport.TEST_TOOL_ID, descriptor, ToolVisibility.SELECTABLE);
   }
 
-  /** 判断字符串是否包含未配对 surrogate（被劈开的代理对）。 */
   private static boolean hasLoneSurrogate(String value) {
     for (int i = 0; i < value.length(); i++) {
       char current = value.charAt(i);

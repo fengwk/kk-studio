@@ -20,6 +20,8 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
@@ -76,7 +78,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -87,7 +88,6 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
@@ -511,11 +511,8 @@ class DatabaseTurnResolverTest {
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList();
     assertEquals(List.of("bash", "create_goal", "read"), boundNames);
     assertEquals(
-        List.of(
-            AgentToolBackend.ENVIRONMENT_CAPABILITY,
-            AgentToolBackend.DECLARATIVE,
-            AgentToolBackend.ENVIRONMENT_CAPABILITY),
-        request.toolBindings().stream().map(binding -> binding.definition().backend()).toList());
+        List.of(true, false, true),
+        request.toolBindings().stream().map(ToolBinding::environmentRequired).toList());
     // Provider tools 与 bindings 一一对应且顺序一致。
     assertEquals(List.of("bash", "create_goal", "read"), boundNames);
 
@@ -530,8 +527,10 @@ class DatabaseTurnResolverTest {
   void freezesContributorProvenanceAndProjectsBranchScopedGoalContext() {
     Tool dummyLoadSkill = mock(Tool.class);
     when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill"));
+    when(dummyLoadSkill.requirements()).thenReturn(ToolRequirements.none());
     Tool dummyTask = mock(Tool.class);
     when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
+    when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
     BuiltinHarnessContributor builtin = new BuiltinHarnessContributor(dummyLoadSkill, dummyTask);
     HarnessCatalog catalog = HarnessCatalog.from(List.of(builtin));
     Fixture fixture = new Fixture(List.of("create_goal"), List.of(), List.of(), catalog);
@@ -592,7 +591,7 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of("load_skill"),
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertEquals(AgentToolBackend.HOST, request.toolBindings().getFirst().definition().backend());
+    assertFalse(request.toolBindings().getFirst().environmentRequired());
     assertEquals(
         List.of(new SkillBinding("dev", "dev description", ENV_A)), request.skillBindings());
 
@@ -657,7 +656,7 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of(TaskTool.NAME),
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertEquals(AgentToolBackend.HOST, request.toolBindings().getFirst().definition().backend());
+    assertFalse(request.toolBindings().getFirst().environmentRequired());
     String system = preambleText(request);
     assertTrue(system.contains("<available_subagents>"), system);
     assertTrue(system.contains("<name>reviewer</name>"), system);
@@ -1780,8 +1779,10 @@ class DatabaseTurnResolverTest {
         List<HarnessContributor> contributors = new ArrayList<>();
         Tool dummyLoadSkill = mock(Tool.class);
         when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill"));
+        when(dummyLoadSkill.requirements()).thenReturn(ToolRequirements.none());
         Tool dummyTask = mock(Tool.class);
         when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
+        when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
         contributors.add(new BuiltinHarnessContributor(dummyLoadSkill, dummyTask));
 
         if (!hostDescriptors.isEmpty()) {
@@ -1808,7 +1809,8 @@ class DatabaseTurnResolverTest {
                       }
                       Tool tool = mock(Tool.class);
                       when(tool.descriptor()).thenReturn(descriptor);
-                      registrar.registerHostTool(
+                      when(tool.requirements()).thenReturn(ToolRequirements.none());
+                      registrar.registerTool(
                           descriptor.name(),
                           toolId(descriptor.name()),
                           tool,

@@ -14,14 +14,15 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
@@ -118,7 +119,7 @@ class AgentDefinitionConfigValidatorTest {
         HarnessContributor.of(
             new ContributorDescriptor(new ContributorId("first"), "First", "1", Set.of()),
             registrar ->
-                registrar.registerHostTool(
+                registrar.registerTool(
                     "dup",
                     DUPLICATE_FIRST_TOOL_ID,
                     tool(descriptor),
@@ -128,7 +129,7 @@ class AgentDefinitionConfigValidatorTest {
         HarnessContributor.of(
             new ContributorDescriptor(new ContributorId("second"), "Second", "1", Set.of()),
             registrar ->
-                registrar.registerHostTool(
+                registrar.registerTool(
                     "dup",
                     DUPLICATE_SECOND_TOOL_ID,
                     tool(descriptor),
@@ -178,8 +179,10 @@ class AgentDefinitionConfigValidatorTest {
       List<HarnessContributor> contributors = new ArrayList<>();
       Tool dummyLoadSkill = mock(Tool.class);
       when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill", "1"));
+      when(dummyLoadSkill.requirements()).thenReturn(ToolRequirements.none());
       Tool dummyTask = mock(Tool.class);
       when(dummyTask.descriptor()).thenReturn(hostDescriptor("task", "1"));
+      when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
       contributors.add(new BuiltinHarnessContributor(dummyLoadSkill, dummyTask));
 
       if (!tools.isEmpty()) {
@@ -189,7 +192,7 @@ class AgentDefinitionConfigValidatorTest {
                 registrar -> {
                   for (int i = 0; i < tools.size(); i++) {
                     Tool tool = tools.get(i);
-                    registrar.registerHostTool(
+                    registrar.registerTool(
                         "custom-tool" + (i == 0 ? "" : "-" + i),
                         i == 0 ? CUSTOM_TOOL_ID : new AgentToolId(CUSTOM_TOOL_ID.value() + "-" + i),
                         tool,

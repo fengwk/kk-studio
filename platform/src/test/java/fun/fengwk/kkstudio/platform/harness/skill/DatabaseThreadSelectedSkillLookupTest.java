@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.skill.SelectedSkill;
 import fun.fengwk.kkstudio.harness.builtin.skill.ThreadSelectedSkillLookup;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
@@ -23,12 +24,13 @@ import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 /**
- * {@link DatabaseThreadSelectedSkillLookup}：用 invocation request codec 解码并直接返回冻结的 canonical skill
- * bindings。
+ * {@link DatabaseThreadSelectedSkillLookup}：用 invocation request codec 解码并按名称返回选中的 {@link
+ * SelectedSkill}。
  */
 class DatabaseThreadSelectedSkillLookupTest {
 
@@ -44,13 +46,15 @@ class DatabaseThreadSelectedSkillLookupTest {
     when(mapper.findModelRequest(INVOCATION_ID, THREAD_ID)).thenReturn(encodedRequest(ENV_ID));
 
     ThreadSelectedSkillLookup lookup = new DatabaseThreadSelectedSkillLookup(mapper);
-    var skills = lookup.selectedSkills(INVOCATION_ID, THREAD_ID);
+    Optional<SelectedSkill> result = lookup.findSelected(INVOCATION_ID, THREAD_ID, "review");
 
-    assertEquals(1, skills.size());
-    var skill = skills.get(0);
+    assertTrue(result.isPresent());
+    SelectedSkill skill = result.get();
     assertEquals("review", skill.name());
     assertEquals("Review code", skill.description());
     assertEquals(ENV_ID, skill.sourceEnvironment());
+
+    assertTrue(lookup.findSelected(INVOCATION_ID, THREAD_ID, "unknown").isEmpty());
   }
 
   @Test
@@ -59,7 +63,7 @@ class DatabaseThreadSelectedSkillLookupTest {
     when(mapper.findModelRequest(INVOCATION_ID, THREAD_ID)).thenReturn(null);
 
     ThreadSelectedSkillLookup lookup = new DatabaseThreadSelectedSkillLookup(mapper);
-    assertTrue(lookup.selectedSkills(INVOCATION_ID, THREAD_ID).isEmpty());
+    assertTrue(lookup.findSelected(INVOCATION_ID, THREAD_ID, "review").isEmpty());
   }
 
   @Test
@@ -68,9 +72,9 @@ class DatabaseThreadSelectedSkillLookupTest {
     when(mapper.findModelRequest(INVOCATION_ID, THREAD_ID)).thenReturn(encodedRequest(null));
 
     ThreadSelectedSkillLookup lookup = new DatabaseThreadSelectedSkillLookup(mapper);
-    var skills = lookup.selectedSkills(INVOCATION_ID, THREAD_ID);
-    assertEquals(1, skills.size());
-    assertNull(skills.getFirst().sourceEnvironment());
+    Optional<SelectedSkill> result = lookup.findSelected(INVOCATION_ID, THREAD_ID, "review");
+    assertTrue(result.isPresent());
+    assertNull(result.get().sourceEnvironment());
   }
 
   private static String encodedRequest(EnvironmentBinding sourceEnvironment) {

@@ -1,13 +1,14 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -175,6 +176,12 @@ final class NativeToolSmoke {
 
     @Override
     public void onPartial(ToolResult partial) {}
+
+    @Override
+    public void onComplete(ToolOutcome outcome) {
+      this.result = outcome.result();
+      completed.countDown();
+    }
 
     @Override
     public void onComplete(ToolResult result) {

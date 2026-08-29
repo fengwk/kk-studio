@@ -28,7 +28,6 @@ public class ToolCatalogQueryService {
     ToolDescriptor descriptor = contribution.definition().descriptor();
     ToolCatalogEntryDTO dto = new ToolCatalogEntryDTO();
     dto.setId(contribution.definition().id().value());
-    dto.setBackend(contribution.definition().backend().name());
     dto.setName(descriptor.name());
     dto.setVersion(descriptor.version());
     dto.setDescription(descriptor.description());

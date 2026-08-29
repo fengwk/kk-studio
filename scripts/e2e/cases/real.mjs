@@ -801,8 +801,8 @@ registerCase({
         `WAITING read invocation must identify base.read: ${JSON.stringify(readInvocation)}`,
       )
       assert(
-        readInvocation.toolBackend === 'ENVIRONMENT_CAPABILITY',
-        `WAITING read invocation must use ENVIRONMENT_CAPABILITY: ${JSON.stringify(readInvocation)}`,
+        !Object.hasOwn(readInvocation, 'toolBackend'),
+        `ToolInvocationDTO must not expose toolBackend: ${JSON.stringify(readInvocation)}`,
       )
       assert(
         JSON.stringify(readInvocation.environment) === JSON.stringify(environment),

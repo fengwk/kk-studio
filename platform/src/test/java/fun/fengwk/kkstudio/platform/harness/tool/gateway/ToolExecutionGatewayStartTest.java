@@ -13,12 +13,15 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -26,18 +29,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
-import java.lang.reflect.Field;
 import java.time.Duration;
-import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,13 +41,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-/**
- * {@link PlatformToolGateway#start}：HOST / ENVIRONMENT_CAPABILITY 路由、admission 分类与同步回调门控。
- *
- * <p>ENVIRONMENT_CAPABILITY 断言只依赖冻结 {@code environmentName}（display name 完全不参与）；HOST 断言精确的 {@link
- * ToolExecutionRequest}（descriptor / 冻结 call / Duration.ZERO / 精确 ToolExecutionContext）。
- */
-class PlatformToolGatewayStartTest {
+/** {@link ToolExecutionGateway#start}：统一单路径执行、requirements 校验、admission 分类与两阶段门控测试。 */
+class ToolExecutionGatewayStartTest {
 
   private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
 
@@ -64,7 +54,7 @@ class PlatformToolGatewayStartTest {
     ToolInvocationRequest request = ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR);
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
-      PlatformToolGateway gateway =
+      ToolExecutionGateway gateway =
           ToolGatewayTestSupport.gateway(
               ToolGatewayTestSupport.defaultCatalog(tool), transport, store, executor);
       ToolGateway.StartResult started =
@@ -72,18 +62,14 @@ class PlatformToolGatewayStartTest {
               ToolGatewayTestSupport.execution(request),
               new ToolGatewayTestSupport.RecordingListener());
       ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-      // 两阶段激活：activate 打开回调 gate 后 executor 任务才运行 Tool。
       startedResult.handle().activate();
       awaitSize(tool.requests, 1);
       ToolExecutionRequest executed = tool.requests.get(0);
       assertEquals(DESCRIPTOR, executed.descriptor());
       assertSame(request.call(), executed.call());
       assertEquals(Duration.ZERO, executed.timeout());
-      assertEquals(
-          new ToolExecutionContext(
-              ToolGatewayTestSupport.INVOCATION_ID, ToolGatewayTestSupport.THREAD_ID),
-          executed.context());
-      // HOST 绝不触碰 remote transport。
+      assertEquals(ToolGatewayTestSupport.INVOCATION_ID, executed.context().invocationId());
+      assertEquals(ToolGatewayTestSupport.THREAD_ID, executed.context().threadId());
       assertTrue(transport.invocations.isEmpty());
     } finally {
       executor.shutdownNow();
@@ -96,10 +82,9 @@ class PlatformToolGatewayStartTest {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
-      PlatformToolGateway gateway =
+      ToolExecutionGateway gateway =
           ToolGatewayTestSupport.gateway(
               ToolGatewayTestSupport.defaultCatalog(), transport, store, executor);
-      // 两个不同的 canonical 环境（display name 概念完全不进入 adapter 路由）。
       ToolInvocationRequest requestA =
           ToolGatewayTestSupport.environmentRequest("call-a", ToolGatewayTestSupport.ENV_A);
       ToolInvocationRequest requestB =
@@ -112,12 +97,13 @@ class PlatformToolGatewayStartTest {
           gateway.start(
               ToolGatewayTestSupport.execution(requestB),
               new ToolGatewayTestSupport.RecordingListener());
-      assertInstanceOf(ToolGateway.Started.class, startedA);
-      assertInstanceOf(ToolGateway.Started.class, startedB);
+      ToolGateway.Started startedResultA = assertInstanceOf(ToolGateway.Started.class, startedA);
+      ToolGateway.Started startedResultB = assertInstanceOf(ToolGateway.Started.class, startedB);
+      startedResultA.handle().activate();
+      startedResultB.handle().activate();
       awaitSize(transport.invocations, 2);
       assertEquals(ToolGatewayTestSupport.ENV_A, transport.invocations.get(0).environment());
       assertEquals(ToolGatewayTestSupport.ENV_B, transport.invocations.get(1).environment());
-      // Capability transport 使用 durable invocation UUID 作为独立 correlation id，不携带 model Tool call 对象。
       assertEquals(
           ToolGatewayTestSupport.INVOCATION_ID.toString(),
           transport.invocations.get(0).request().call().id());
@@ -136,12 +122,12 @@ class PlatformToolGatewayStartTest {
 
   @Test
   void missingHostToolIsRejected() {
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
+            new ToolGatewayTestSupport.DirectQueueExecutor());
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(
@@ -162,12 +148,12 @@ class PlatformToolGatewayStartTest {
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
+            new ToolGatewayTestSupport.DirectQueueExecutor());
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(ToolGatewayTestSupport.hostRequest("call-1", drifted)),
@@ -189,23 +175,21 @@ class PlatformToolGatewayStartTest {
             Duration.ofMinutes(1));
     AgentToolDefinition unknownDefinition =
         new AgentToolDefinition(
-            new AgentToolId("test.no-such-daemon-tool"),
-            unknown,
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.ENVIRONMENT_CAPABILITY);
+            new AgentToolId("test.no-such-daemon-tool"), unknown, ToolVisibility.SELECTABLE);
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "no_such_daemon_tool", "{}"),
             new ToolBinding(
                 unknownDefinition,
                 new ContributorBinding("test", "missing", List.of()),
+                true,
                 ToolGatewayTestSupport.ENV_A));
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
+            new ToolGatewayTestSupport.DirectQueueExecutor());
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(request),
@@ -231,8 +215,7 @@ class PlatformToolGatewayStartTest {
         new AgentToolDefinition(
             bashContribution.definition().id(),
             driftedBash,
-            bashContribution.definition().visibility(),
-            bashContribution.definition().backend());
+            bashContribution.definition().visibility());
     ContributorBinding contributor =
         new ContributorBinding(
             bashContribution.id().contributorId().value(),
@@ -241,13 +224,13 @@ class PlatformToolGatewayStartTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "bash", "{}"),
-            new ToolBinding(driftedDefinition, contributor, ToolGatewayTestSupport.ENV_A));
-    PlatformToolGateway gateway =
+            new ToolBinding(driftedDefinition, contributor, true, ToolGatewayTestSupport.ENV_A));
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
+            new ToolGatewayTestSupport.DirectQueueExecutor());
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(request),
@@ -258,7 +241,6 @@ class PlatformToolGatewayStartTest {
 
   @Test
   void hostToolDescriptorMutationOrNullAfterFreezeIsRejectedBeforeExecute() {
-    // 意图：HOST 工具在 freeze 后 descriptor 发生漂移或变为 null，在 execute 前即被拒绝。
     AtomicReference<ToolDescriptor> liveDescriptor = new AtomicReference<>(DESCRIPTOR);
     Tool tool =
         new Tool() {
@@ -273,14 +255,13 @@ class PlatformToolGatewayStartTest {
             throw new AssertionError("execute must not be reached when descriptor drifted");
           }
         };
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
+            new ToolGatewayTestSupport.DirectQueueExecutor());
 
-    // 漂移
     liveDescriptor.set(hostDriftedDescriptor("2"));
     ToolGateway.StartResult result =
         gateway.start(
@@ -290,7 +271,6 @@ class PlatformToolGatewayStartTest {
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
     assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
 
-    // 变为 null
     liveDescriptor.set(null);
     ToolGateway.StartResult nullResult =
         gateway.start(
@@ -303,24 +283,20 @@ class PlatformToolGatewayStartTest {
 
   @Test
   void hostContributorBindingProvenanceMismatchIsRejected() {
-    // 意图：HOST 工具在 frozen ContributorBinding（contributorId 或 localName）与 catalog 不一致时被 common
-    // validator 拒绝。
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
+            new ToolGatewayTestSupport.DirectQueueExecutor());
 
     ToolBinding mismatchedContributorBinding =
         new ToolBinding(
             new AgentToolDefinition(
-                ToolGatewayTestSupport.TEST_TOOL_ID,
-                DESCRIPTOR,
-                ToolVisibility.SELECTABLE,
-                AgentToolBackend.HOST),
+                ToolGatewayTestSupport.TEST_TOOL_ID, DESCRIPTOR, ToolVisibility.SELECTABLE),
             new ContributorBinding("wrong-contributor", "host-tool", List.of()),
+            false,
             null);
     ToolGateway.StartResult result =
         gateway.start(
@@ -335,13 +311,12 @@ class PlatformToolGatewayStartTest {
 
   @Test
   void environmentContributorBindingProvenanceMismatchIsRejected() {
-    // 意图：ENVIRONMENT_CAPABILITY 工具在 frozen ContributorBinding 与 catalog 不一致时被 common validator 拒绝。
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
+            new ToolGatewayTestSupport.DirectQueueExecutor());
 
     ToolContribution bashContribution =
         ToolGatewayTestSupport.defaultCatalog().findTool(BuiltinToolIds.BASH).orElseThrow();
@@ -349,6 +324,7 @@ class PlatformToolGatewayStartTest {
         new ToolBinding(
             bashContribution.definition(),
             new ContributorBinding("wrong-contributor", "environment.bash", List.of()),
+            true,
             ToolGatewayTestSupport.ENV_A);
     ToolGateway.StartResult result =
         gateway.start(
@@ -363,7 +339,6 @@ class PlatformToolGatewayStartTest {
 
   @Test
   void environmentToolRequiresEnvironmentBinding() {
-    // ENVIRONMENT_CAPABILITY 工具必须携带 EnvironmentBinding，空 binding 在构造层 fail closed。
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolGatewayTestSupport.environmentRequest("call-1", null));
@@ -373,119 +348,122 @@ class PlatformToolGatewayStartTest {
   void environmentUnavailableIsDeterministicRejectionVisibleToModel() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_UNAVAILABLE;
-    PlatformToolGateway gateway =
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
+            executor);
+    ToolGatewayTestSupport.RecordingListener listener =
+        new ToolGatewayTestSupport.RecordingListener();
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
-            new ToolGatewayTestSupport.RecordingListener());
-    // 发送前目标不可用（路由缺失/未 READY/心跳过期）是确定性拒绝：durable、model-visible，
-    // 让 turn 正常继续收敛，而不是无限重试。
-    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
-    assertEquals("UNAVAILABLE", rejected.error().kind());
+            listener);
+    ToolGateway.Started started = assertInstanceOf(ToolGateway.Started.class, result);
+    started.handle().activate();
+    executor.drain();
+    assertEquals(1, listener.events.size());
+    ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
+        (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
+    assertEquals("UNAVAILABLE", failed.failure().error().kind());
+    assertTrue(failed.failure().retryable());
   }
 
-  /** 同 Environment 的瞬时 active 槽位冲突必须返回精确配置延迟的 Busy，不创建 durable error。 */
   @Test
-  void environmentBusyUsesExactConfiguredRetryDelay() {
+  void environmentBusyIsDeliveredAsRetryableFailure() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_BUSY;
-    PlatformToolGateway gateway =
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
-
+            executor);
+    ToolGatewayTestSupport.RecordingListener listener =
+        new ToolGatewayTestSupport.RecordingListener();
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
-            new ToolGatewayTestSupport.RecordingListener());
-
-    ToolGateway.Busy busy = assertInstanceOf(ToolGateway.Busy.class, result);
-    assertEquals(ToolGatewayTestSupport.BUSY_RETRY_DELAY.get(), busy.retryAfter());
+            listener);
+    ToolGateway.Started started = assertInstanceOf(ToolGateway.Started.class, result);
+    started.handle().activate();
+    executor.drain();
+    assertEquals(1, listener.events.size());
+    ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
+        (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
+    assertEquals("UNAVAILABLE", failed.failure().error().kind());
+    assertTrue(failed.failure().retryable());
   }
 
   @Test
   void environmentUncertainSendIsIndeterminate() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_UNCERTAIN;
-    PlatformToolGateway gateway =
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
+            executor);
+    ToolGatewayTestSupport.RecordingListener listener =
+        new ToolGatewayTestSupport.RecordingListener();
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
-            new ToolGatewayTestSupport.RecordingListener());
-    ToolGateway.Indeterminate indeterminate =
-        assertInstanceOf(ToolGateway.Indeterminate.class, result);
-    assertEquals("REMOTE_UNCERTAIN", indeterminate.error().kind());
+            listener);
+    ToolGateway.Started started = assertInstanceOf(ToolGateway.Started.class, result);
+    started.handle().activate();
+    executor.drain();
+    assertEquals(1, listener.events.size());
+    ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
+        (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
+    assertEquals("REMOTE_UNCERTAIN", unknown.error().kind());
   }
 
   @Test
-  void environmentInvalidRequestIsRejected() {
+  void environmentInvalidRequestIsUnknown() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_INVALID;
-    PlatformToolGateway gateway =
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
+            executor);
+    ToolGatewayTestSupport.RecordingListener listener =
+        new ToolGatewayTestSupport.RecordingListener();
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
-            new ToolGatewayTestSupport.RecordingListener());
-    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
-    assertEquals("INVALID_REQUEST", rejected.error().kind());
-  }
-
-  @Test
-  void environmentUnexpectedTransportFailureIsIndeterminate() {
-    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
-    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_GENERIC;
-    PlatformToolGateway gateway =
-        ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.defaultCatalog(),
-            transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
-    ToolGateway.StartResult result =
-        gateway.start(
-            ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
-            new ToolGatewayTestSupport.RecordingListener());
-    assertInstanceOf(ToolGateway.Indeterminate.class, result);
-  }
-
-  @Test
-  void uncertainInvokeCancelsBridgeDroppingLateTransportCallbacks() throws Exception {
-    assertIndeterminateClosesCallbackBridge(
-        ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_UNCERTAIN, "REMOTE_UNCERTAIN");
-  }
-
-  @Test
-  void genericInvokeFailureCancelsBridgeDroppingLateTransportCallbacks() throws Exception {
-    assertIndeterminateClosesCallbackBridge(
-        ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_GENERIC, "EXECUTION_FAILED");
+            listener);
+    ToolGateway.Started started = assertInstanceOf(ToolGateway.Started.class, result);
+    started.handle().activate();
+    executor.drain();
+    assertEquals(1, listener.events.size());
+    ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
+        (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
+    assertEquals("EXECUTION_FAILED", unknown.error().kind());
   }
 
   @Test
   void localExecutorOverloadIsOverloadedWithWholeMillisecondDelay() {
-    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    executor.reject = true;
-    PlatformToolGateway gateway =
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
+    executor.rejectSubmissions = true;
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -503,13 +481,13 @@ class PlatformToolGatewayStartTest {
 
   @Test
   void syncToolCallbackIsGatedUntilStartCommitted() {
-    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
-    // adversarial Tool：在 execute 内同步回调 terminal。
     tool.handler =
         (request, listener) ->
             listener.onComplete(ToolGatewayTestSupport.result(request.call().id(), "done"));
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -523,12 +501,10 @@ class PlatformToolGatewayStartTest {
                 ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-    // start 已返回但 gate 未打开：executor 任务仍在等待 release，任何回调都没有发生（门控生效）。
     assertTrue(listener.events.isEmpty());
     startedResult.handle().activate();
-    executor.runAll();
-    // activate 释放任务：同步 onComplete 在 gate 打开后串行投递。
-    listener.awaitCount(1);
+    executor.drain();
+    assertEquals(1, listener.events.size());
     assertEquals(
         "call-1",
         ((ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0))
@@ -538,11 +514,12 @@ class PlatformToolGatewayStartTest {
 
   @Test
   void environmentSyncCallbackIsBufferedAndReplayedOnActivation() {
-    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
     transport.syncResult = ToolGatewayTestSupport.result("call-1", "sync");
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
@@ -550,23 +527,16 @@ class PlatformToolGatewayStartTest {
             executor);
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
-    int tasksBeforeStart = executor.tasks.size();
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-    // invoke 内的同步 onComplete 只进缓冲：start 返回时还没有任何回调，也没有任何 executor 任务被提交
-    // （tasks 只含构造时 inline-executor 探测任务）。
     assertTrue(listener.events.isEmpty());
-    assertEquals(
-        tasksBeforeStart,
-        executor.tasks.size(),
-        "environment path must not submit any replay task");
-    // 两阶段激活：activate 直接打开 gate 并串行重放缓冲（绝不提交独立重放任务）。
     startedResult.handle().activate();
-    listener.awaitCount(1);
+    executor.drain();
+    assertEquals(1, listener.events.size());
     assertEquals(
         "call-1",
         ((ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0))
@@ -581,34 +551,34 @@ class PlatformToolGatewayStartTest {
         HarnessContributor.of(
             new ContributorDescriptor(new ContributorId("test"), "Test", "1", Set.of()),
             registrar ->
-                registrar.registerHostTool(
+                registrar.registerTool(
                     "host-tool",
                     ToolGatewayTestSupport.TEST_TOOL_ID,
                     new ToolGatewayTestSupport.FakeTool(drifted),
                     ToolVisibility.SELECTABLE,
                     0));
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             catalog,
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
+            new ToolGatewayTestSupport.DirectQueueExecutor());
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             new ToolGatewayTestSupport.RecordingListener());
-    // catalog 产物与冻结 definition 不匹配：统一映射为 definition mismatch。
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
     assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
   }
 
   @Test
   void hostExecutorAmbiguousSubmissionIsIndeterminate() {
-    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    executor.executeFailure = new IllegalStateException("executor broken");
-    PlatformToolGateway gateway =
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
+    executor.ambiguousException = new IllegalStateException("executor broken");
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -619,7 +589,6 @@ class PlatformToolGatewayStartTest {
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             new ToolGatewayTestSupport.RecordingListener());
-    // 提交抛出非 RejectedExecutionException：可能已启动，收敛为 Indeterminate 且绝不抛。
     ToolGateway.Indeterminate indeterminate =
         assertInstanceOf(ToolGateway.Indeterminate.class, result);
     assertEquals("EXECUTION_FAILED", indeterminate.error().kind());
@@ -627,46 +596,15 @@ class PlatformToolGatewayStartTest {
   }
 
   @Test
-  void environmentActivationNeverSubmitsAReplayTask() {
-    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    executor.reject = true;
-    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
-    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
-    transport.syncResult = ToolGatewayTestSupport.result("call-1", "sync");
-    ToolGatewayTestSupport.RecordingListener listener =
-        new ToolGatewayTestSupport.RecordingListener();
-    PlatformToolGateway gateway =
-        ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.defaultCatalog(),
-            transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
-            executor);
-    ToolGateway.StartResult started =
-        gateway.start(
-            ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
-            listener);
-    // invoke 已成功、executor 拒绝一切提交：ENVIRONMENT 路径不依赖任何重放任务，activate 直接打开 gate 并重放。
-    ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-    assertTrue(listener.events.isEmpty());
-    startedResult.handle().activate();
-    listener.awaitCount(1);
-    assertEquals(
-        "call-1",
-        ((ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0))
-            .result()
-            .toolCallId());
-  }
-
-  @Test
   void cancelBeforeEnvironmentActivationDropsBufferedCallbacks() {
-    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
     transport.syncResult = ToolGatewayTestSupport.result("call-1", "sync");
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
@@ -678,22 +616,21 @@ class PlatformToolGatewayStartTest {
                 ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-    // cancel-before-activate：transport handle 被取消；之后 activate no-op，缓冲回调永不投递。
     startedResult.handle().cancel();
     startedResult.handle().activate();
-    executor.runAll();
+    executor.drain();
     assertTrue(listener.events.isEmpty());
-    assertTrue(transport.returnedHandles.get(0).isCancelled());
   }
 
   @Test
   void nullEnvironmentTransportHandleIsPostAcceptanceUnknown() {
-    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.returnNullHandle = true;
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
@@ -705,10 +642,9 @@ class PlatformToolGatewayStartTest {
                 ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-    // invoke 返回 null handle：已接受的执行结果无法确认，activate 时恰好一次 UNKNOWN；无 transport handle 可取消。
-    assertTrue(transport.returnedHandles.isEmpty());
     startedResult.handle().activate();
-    listener.awaitCount(1);
+    executor.drain();
+    assertEquals(1, listener.events.size());
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("EXECUTION_FAILED", unknown.error().kind());
@@ -717,14 +653,15 @@ class PlatformToolGatewayStartTest {
 
   @Test
   void synchronousTerminalWinsOverNullEnvironmentTransportHandle() {
-    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
     transport.syncResult = ToolGatewayTestSupport.result("call-1", "sync");
     transport.returnNullHandle = true;
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
@@ -736,9 +673,9 @@ class PlatformToolGatewayStartTest {
                 ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-    // 同步 terminal 在 null-handle 失败之前入队：FIFO/terminal-once 下 terminal 获胜，null-handle 信号被丢弃。
     startedResult.handle().activate();
-    listener.awaitCount(1);
+    executor.drain();
+    assertEquals(1, listener.events.size());
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
     assertEquals("call-1", succeeded.result().toolCallId());
@@ -761,61 +698,5 @@ class PlatformToolGatewayStartTest {
       Thread.onSpinWait();
     }
     assertEquals(expected, list.size());
-  }
-
-  private static void assertIndeterminateClosesCallbackBridge(
-      ToolGatewayTestSupport.FakeTransport.InvokeAction action, String expectedKind)
-      throws Exception {
-    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
-    transport.action = action;
-    ToolGatewayTestSupport.RecordingListener listener =
-        new ToolGatewayTestSupport.RecordingListener();
-    PlatformToolGateway gateway =
-        ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.defaultCatalog(),
-            transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor());
-    ToolGateway.StartResult result =
-        gateway.start(
-            ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
-            listener);
-    ToolGateway.Indeterminate indeterminate =
-        assertInstanceOf(ToolGateway.Indeterminate.class, result);
-    assertEquals(expectedKind, indeterminate.error().kind());
-    // Indeterminate 后桥必须已取消：迟到的 transport 回调被丢弃而不是永远缓冲，任何回调都绝不触达 listener。
-    EnvironmentCapabilityExecutionListener bridge = transport.invocations.get(0).listener();
-    bridge.onPartial(ToolGatewayTestSupport.capabilityResult("call-1", "late"));
-    bridge.onComplete(ToolGatewayTestSupport.capabilityResult("call-1", "late done"));
-    bridge.onError(new IllegalStateException("late"));
-    assertTrue(bridgeIsCancelled(bridge), "Indeterminate must close the callback bridge");
-    assertEquals(0, bridgeQueueSize(bridge), "late callbacks must be dropped, not buffered");
-    assertTrue(listener.events.isEmpty(), "no callback may ever reach the listener");
-  }
-
-  /** 白盒断言桥内部已 cancel（transport 持有的桥引用不可从外部触达）。 */
-  private static boolean bridgeIsCancelled(EnvironmentCapabilityExecutionListener bridge)
-      throws Exception {
-    Object gatedBridge = gatedBridge(bridge);
-    Field field = gatedBridge.getClass().getDeclaredField("cancelled");
-    field.setAccessible(true);
-    return field.getBoolean(gatedBridge);
-  }
-
-  /** 白盒断言桥缓冲为空（迟到回调被丢弃而非永远缓冲）。 */
-  private static int bridgeQueueSize(EnvironmentCapabilityExecutionListener bridge)
-      throws Exception {
-    Object gatedBridge = gatedBridge(bridge);
-    Field field = gatedBridge.getClass().getDeclaredField("queue");
-    field.setAccessible(true);
-    return ((ArrayDeque<?>) field.get(gatedBridge)).size();
-  }
-
-  private static Object gatedBridge(EnvironmentCapabilityExecutionListener adapter)
-      throws Exception {
-    Field field = adapter.getClass().getDeclaredField("bridge");
-    field.setAccessible(true);
-    return field.get(adapter);
   }
 }

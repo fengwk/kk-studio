@@ -68,7 +68,7 @@ ToolExecutionHandle execute(
     ToolExecutionListener listener);
 ```
 
-[`ToolExecutionRequest`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/execution/ToolExecutionRequest.java) 构造时执行 `ToolCall.validateFor`：要求参数是 JSON object，按 schema 做静默归一化，再做严格校验；因此执行器只能读取归一化后的 `argumentsJson`。`timeout=Duration.ZERO` 表示采用 descriptor 默认值，非零值是本次请求覆盖值；`workdir` 非空时必须是 absolute path。Listener 的 `onPartial`、`onComplete`、`onError` 中，完成和错误至多出现一次；[`ToolExecutionHandle`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/execution/ToolExecutionHandle.java) 的 `cancel()` 必须幂等。
+[`ToolExecutionRequest`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java) 构造时执行 `ToolCall.validateFor`：要求参数是 JSON object，按 schema 做静默归一化，再做严格校验；因此执行器只能读取归一化后的 `argumentsJson`。`timeout=Duration.ZERO` 表示采用 descriptor 默认值，非零值是本次请求覆盖值；`workdir` 非空时必须是 absolute path。Listener 的 `onPartial`、`onComplete`、`onError` 中，完成和错误至多出现一次；[`ToolExecutionHandle`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionHandle.java) 的 `cancel()` 必须幂等。
 
 ### ToolCall、ToolResult 与内容
 
@@ -126,11 +126,9 @@ EnvironmentCapabilityExecutionHandle invoke(
 id:          AgentToolId
 descriptor:  ToolDescriptor
 visibility:  ToolVisibility (SELECTABLE | INTERNAL)
-backend:     AgentToolBackend (HOST | DECLARATIVE | ENVIRONMENT_CAPABILITY)
 ```
 
 - [`AgentToolId`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/AgentToolId.java) 是全局稳定唯一的持久化工具标识；权限规则以精确 AgentToolId 为 key，`*` 为通配。
-- [`AgentToolBackend`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/AgentToolBackend.java) 确定唯一的执行路由与生命周期。
 - 上层工具目录由 `harness-builtin` 与外部 Contributor 统一向 `HarnessCatalog` 注册，`harness-tool` 仅维护通用的底层 definition 与 codec。
 
 ### Daemon wire 与 capabilities
@@ -222,7 +220,7 @@ EnvironmentCapabilityTransport
 ### 源码入口
 
 - [`ToolDescriptor.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolDescriptor.java)、[`ToolCall.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCall.java)、[`ToolResult.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolResult.java)
-- [`Tool.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/execution/Tool.java)、[`ToolExecutionRequest.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/execution/ToolExecutionRequest.java)
+- [`Tool.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/Tool.java)、[`ToolExecutionRequest.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java)
 - [`EnvironmentCapabilityCatalog.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/capability/EnvironmentCapabilityCatalog.java)、[`EnvironmentCapabilityTransport.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/capability/EnvironmentCapabilityTransport.java)
 - [`ResourceRef.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ResourceRef.java)、[`ResourceUriValidator.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ResourceUriValidator.java)
 - [`DaemonEnvelopeCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonEnvelopeCodec.java)、[`DaemonCapabilitiesCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilitiesCodec.java)、[`DaemonCapabilityResultCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilityResultCodec.java)
