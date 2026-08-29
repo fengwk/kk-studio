@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Canonical relative path from the environment root to list."
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

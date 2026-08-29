@@ -3,15 +3,13 @@ package fun.fengwk.kkstudio.harness.daemon.mcp;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -90,9 +88,7 @@ abstract class AbstractMcpBridgeCapability implements EnvironmentCapability {
   }
 
   static EnvironmentCapabilityResult error(String id, String message) {
-    String detail = message == null || message.isBlank() ? "capability execution failed" : message;
-    return new EnvironmentCapabilityResult(
-        id, List.of(new TextToolContent("Error: " + detail)), true, "{}");
+    return EnvironmentCapabilityResult.error(id, message);
   }
 
   /** 可变执行状态，其终态回调保证恰好执行一次。 */

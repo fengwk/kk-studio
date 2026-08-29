@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -18,16 +19,18 @@ import java.util.stream.Stream;
  * daemon 模块的轻量架构守卫。
  *
  * <p>Daemon 的 main 源码只允许依赖 JDK、Jackson、JGit（{@code org.eclipse.jgit.ignore.FastIgnoreRule}）、{@code
- * harness.tool} 以及本模块自身包。 禁止引入 runtime/platform/web、Spring/MyBatis/servlet/Redis 以及 Provider
- * SDK。LangChain4j 只允许出现在技能与 MCP 适配器包中： {@code dev.langchain4j.skills.*} 仅限 {@code
- * .../daemon/skill/}，{@code dev.langchain4j.*} 其余仅限 {@code .../daemon/mcp/langchain/}。
+ * harness.environment} 以及本模块自身包。 严禁直接依赖 {@code
+ * harness.tool}、runtime/platform/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK。LangChain4j
+ * 只允许出现在技能与 MCP 适配器包中： {@code dev.langchain4j.skills.*} 仅限 {@code .../daemon/skill/}，{@code
+ * dev.langchain4j.*} 其余仅限 {@code .../daemon/mcp/langchain/}。
  */
 class DaemonModuleArchitectureTest {
 
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
+          "fun.fengwk.kkstudio.harness.tool.",
           "fun.fengwk.kkstudio.harness.runtime.",
-          "fun.fengwk.kkstudio.harness.tool.execution.",
+          "fun.fengwk.kkstudio.harness.infra.",
           "fun.fengwk.kkstudio.harness.kernel.",
           "fun.fengwk.kkstudio.platform.",
           "fun.fengwk.kkstudio.web.",
@@ -41,7 +44,6 @@ class DaemonModuleArchitectureTest {
           "io.lettuce.",
           "redis.clients.",
           "org.redisson.",
-          "dev.langchain4j.",
           "com.openai.",
           "com.anthropic.",
           "com.google.genai.",
@@ -61,7 +63,7 @@ class DaemonModuleArchitectureTest {
           "\\bExecutors\\s*\\.|new\\s+(?:ScheduledThreadPoolExecutor|ThreadPoolExecutor)\\s*\\(");
 
   @Test
-  void daemonMainSourcesStayOnJdkJacksonToolAndOwnPackages() throws IOException {
+  void daemonMainSourcesStayOnJdkJacksonEnvironmentAndOwnPackages() throws IOException {
     Path main = locateDaemonMainJava();
     assertTrue(Files.isDirectory(main), "daemon main sources must exist: " + main);
 
@@ -83,7 +85,7 @@ class DaemonModuleArchitectureTest {
               path -> {
                 try {
                   String source = Files.readString(path, StandardCharsets.UTF_8);
-                  if (source.contains("fun.fengwk.kkstudio.harness.tool.execution.")) {
+                  if (source.contains("fun.fengwk.kkstudio.harness.tool.")) {
                     violations.add(relative(main, path));
                   }
                 } catch (IOException error) {
@@ -94,7 +96,7 @@ class DaemonModuleArchitectureTest {
     assertTrue(
         violations.isEmpty(),
         () ->
-            "daemon main must use Environment Capability execution only:\n"
+            "daemon main must use Environment contract only (no tool imports):\n"
                 + String.join("\n", violations));
   }
 
@@ -130,6 +132,27 @@ class DaemonModuleArchitectureTest {
     assertTrue(
         violations.isEmpty(),
         () -> "executor lifecycle violations:\n" + String.join("\n", violations));
+  }
+
+  @Test
+  void daemonPomDeclaresEnvironmentInsteadOfToolDependency() throws IOException {
+    Path moduleRoot = locateDaemonMainJava().getParent().getParent().getParent();
+    Path pom = moduleRoot.resolve("pom.xml");
+    String text = Files.readString(pom, StandardCharsets.UTF_8);
+    Matcher matcher =
+        Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL).matcher(text);
+    List<String> violations = new ArrayList<>();
+    while (matcher.find()) {
+      String dependency = matcher.group(1);
+      String coordinate =
+          requiredTag(dependency, "groupId") + ":" + requiredTag(dependency, "artifactId");
+      if ("fun.fengwk.kk-studio:kk-studio-harness-tool".equals(coordinate)) {
+        violations.add("daemon pom must not directly depend on kk-studio-harness-tool");
+      }
+    }
+    assertTrue(
+        violations.isEmpty(),
+        () -> "disallowed direct tool dependency in " + pom + ": " + violations);
   }
 
   private static List<String> scanViolations(Path main) throws IOException {
@@ -184,7 +207,7 @@ class DaemonModuleArchitectureTest {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
         || imported.startsWith("com.fasterxml.jackson.")
-        || imported.startsWith("fun.fengwk.kkstudio.harness.tool.")
+        || imported.startsWith("fun.fengwk.kkstudio.harness.environment.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.daemon.")
         || imported.equals(FastIgnoreRule.class.getName());
   }
@@ -224,5 +247,18 @@ class DaemonModuleArchitectureTest {
       }
     }
     throw new IllegalStateException("cannot locate daemon main sources from " + cwd);
+  }
+
+  private static String requiredTag(String block, String tag) {
+    String value = optionalTag(block, tag);
+    if (value == null || value.isBlank()) {
+      throw new IllegalStateException("dependency must declare " + tag);
+    }
+    return value;
+  }
+
+  private static String optionalTag(String block, String tag) {
+    Matcher matcher = Pattern.compile("<" + tag + ">\\s*([^<]+?)\\s*</" + tag + ">").matcher(block);
+    return matcher.find() ? matcher.group(1).trim() : null;
   }
 }

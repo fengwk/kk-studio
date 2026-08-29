@@ -10,7 +10,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryEntry;
+import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryListing;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -22,8 +23,6 @@ import java.util.List;
 
 /** Environment Root 单层目录浏览的路径边界、排序、上限与 git 分支契约。 */
 class EnvironmentDirectoryBrowserTest {
-
-  private static final String REQUEST_ID = "3f0c6b2e-8d1a-4f5e-9c2b-1a2b3c4d5e6f";
 
   @TempDir Path root;
 
@@ -39,7 +38,7 @@ class EnvironmentDirectoryBrowserTest {
     Files.writeString(root.resolve("README.md"), "x");
     Files.writeString(root.resolve("src/main/App.java"), "x");
 
-    DaemonDirectoryCodec.DirectoryListed listed = browser().list(REQUEST_ID, ".");
+    EnvironmentDirectoryListing listed = browser().list(".");
 
     assertEquals(".", listed.path());
     assertEquals(".", listed.displayPath());
@@ -48,24 +47,24 @@ class EnvironmentDirectoryBrowserTest {
     assertNull(listed.gitBranch());
     assertEquals(
         List.of("docs", "src"),
-        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::name).toList());
+        listed.entries().stream().map(EnvironmentDirectoryEntry::name).toList());
     assertEquals(
         List.of("docs", "src"),
-        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
+        listed.entries().stream().map(EnvironmentDirectoryEntry::path).toList());
 
-    DaemonDirectoryCodec.DirectoryListed nested = browser().list(REQUEST_ID, "src");
+    EnvironmentDirectoryListing nested = browser().list("src");
     assertEquals("src", nested.path());
     assertEquals("src", nested.displayPath());
     assertEquals(".", nested.parentPath());
     // 条目 path 是请求目录的直接子路径（wire），name 是目录名。
     assertEquals(
         List.of("src/main", "src/test"),
-        nested.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
+        nested.entries().stream().map(EnvironmentDirectoryEntry::path).toList());
     assertEquals(
         List.of("main", "test"),
-        nested.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::name).toList());
+        nested.entries().stream().map(EnvironmentDirectoryEntry::name).toList());
 
-    DaemonDirectoryCodec.DirectoryListed deep = browser().list(REQUEST_ID, "src/main");
+    EnvironmentDirectoryListing deep = browser().list("src/main");
     assertEquals("src/main", deep.path());
     assertEquals("main", deep.displayPath());
     assertEquals("src", deep.parentPath());
@@ -83,10 +82,9 @@ class EnvironmentDirectoryBrowserTest {
       Files.createSymbolicLink(root.resolve("out-link"), outside);
       Files.writeString(root.resolve("file.txt"), "x");
 
-      DaemonDirectoryCodec.DirectoryListed listed = browser().list(REQUEST_ID, ".");
+      EnvironmentDirectoryListing listed = browser().list(".");
       assertEquals(
-          List.of("real"),
-          listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
+          List.of("real"), listed.entries().stream().map(EnvironmentDirectoryEntry::path).toList());
     } finally {
       deleteRecursively(outside);
     }
@@ -99,7 +97,7 @@ class EnvironmentDirectoryBrowserTest {
     try {
       Files.createSymbolicLink(root.resolve("escape"), outside);
       IllegalArgumentException error =
-          assertThrows(IllegalArgumentException.class, () -> browser().list(REQUEST_ID, "escape"));
+          assertThrows(IllegalArgumentException.class, () -> browser().list("escape"));
       assertTrue(error.getMessage().contains("escapes environment root"));
     } finally {
       deleteRecursively(outside);
@@ -112,27 +110,26 @@ class EnvironmentDirectoryBrowserTest {
     Files.createDirectories(root.resolve("real/child"));
     Files.createSymbolicLink(root.resolve("alias"), root.resolve("real"));
 
-    DaemonDirectoryCodec.DirectoryListed listed = browser().list(REQUEST_ID, "alias");
+    EnvironmentDirectoryListing listed = browser().list("alias");
     assertEquals("alias", listed.path());
     assertEquals("alias", listed.displayPath());
     assertEquals(".", listed.parentPath());
     assertEquals(
         List.of("alias/child"),
-        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
+        listed.entries().stream().map(EnvironmentDirectoryEntry::path).toList());
     assertEquals(
-        List.of("child"),
-        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::name).toList());
+        List.of("child"), listed.entries().stream().map(EnvironmentDirectoryEntry::name).toList());
 
     // 嵌套 alias 的父路径与条目路径同样使用请求的 wire 路径。
     Files.createDirectories(root.resolve("src"));
     Files.createSymbolicLink(root.resolve("src/alias"), root.resolve("real"));
-    DaemonDirectoryCodec.DirectoryListed nestedAlias = browser().list(REQUEST_ID, "src/alias");
+    EnvironmentDirectoryListing nestedAlias = browser().list("src/alias");
     assertEquals("src/alias", nestedAlias.path());
     assertEquals("alias", nestedAlias.displayPath());
     assertEquals("src", nestedAlias.parentPath());
     assertEquals(
         List.of("src/alias/child"),
-        nestedAlias.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
+        nestedAlias.entries().stream().map(EnvironmentDirectoryEntry::path).toList());
   }
 
   /** 条目按名称稳定排序且最多 1000 条，超出置 truncated。 */
@@ -143,12 +140,11 @@ class EnvironmentDirectoryBrowserTest {
     }
     Files.createDirectories(root.resolve("aaa"));
 
-    DaemonDirectoryCodec.DirectoryListed listed = browser().list(REQUEST_ID, ".");
+    EnvironmentDirectoryListing listed = browser().list(".");
 
     assertTrue(listed.truncated());
-    assertEquals(DaemonDirectoryCodec.MAX_ENTRIES, listed.entries().size());
-    List<String> names =
-        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::name).toList();
+    assertEquals(EnvironmentDirectoryListing.MAX_ENTRIES, listed.entries().size());
+    List<String> names = listed.entries().stream().map(EnvironmentDirectoryEntry::name).toList();
     assertEquals(names.stream().sorted().toList(), names);
     assertEquals("aaa", names.getFirst());
     assertEquals("dir-0000", names.get(1));
@@ -157,9 +153,9 @@ class EnvironmentDirectoryBrowserTest {
   @Test
   void reportsNotFoundAndNotDirectory() throws Exception {
     Files.writeString(root.resolve("file.txt"), "x");
-    assertThrows(NoSuchFileException.class, () -> browser().list(REQUEST_ID, "missing"));
-    assertThrows(NoSuchFileException.class, () -> browser().list(REQUEST_ID, "missing/nested"));
-    assertThrows(NotDirectoryException.class, () -> browser().list(REQUEST_ID, "file.txt"));
+    assertThrows(NoSuchFileException.class, () -> browser().list("missing"));
+    assertThrows(NoSuchFileException.class, () -> browser().list("missing/nested"));
+    assertThrows(NotDirectoryException.class, () -> browser().list("file.txt"));
   }
 
   /** wire 形状契约在浏览器入口同样强制：absolute、反斜杠、空/点段、控制字符与越界路径拒绝。 */
@@ -169,14 +165,13 @@ class EnvironmentDirectoryBrowserTest {
         List.of("/abs", "a\\b", "a//b", "a/./b", "a/../b", "..", "a/", "a\u0000b")) {
       assertThrows(
           IllegalArgumentException.class,
-          () -> browser().list(REQUEST_ID, invalid),
+          () -> browser().list(invalid),
           "expected rejection for " + invalid);
     }
     Path outside = root.getParent().resolve("outside-" + System.nanoTime());
     IllegalArgumentException escaped =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> browser().list(REQUEST_ID, "../" + outside.getFileName()));
+            IllegalArgumentException.class, () -> browser().list("../" + outside.getFileName()));
     assertTrue(
         escaped.getMessage().contains("'..' segments") || escaped.getMessage().contains("escapes"));
   }
@@ -192,16 +187,15 @@ class EnvironmentDirectoryBrowserTest {
     }
     assumeTrue(Files.isDirectory(invalidChild), "host cannot retain a C: directory name");
     // C: 按名称排在 dir-0000 之前：若先按全部真实目录截断，会少返回一条合法条目。
-    for (int index = 0; index < DaemonDirectoryCodec.MAX_ENTRIES + 5; index++) {
+    for (int index = 0; index < EnvironmentDirectoryListing.MAX_ENTRIES + 5; index++) {
       Files.createDirectories(root.resolve("dir-" + String.format("%04d", index)));
     }
 
-    DaemonDirectoryCodec.DirectoryListed listed = browser().list(REQUEST_ID, ".");
+    EnvironmentDirectoryListing listed = browser().list(".");
 
     assertTrue(listed.truncated());
-    assertEquals(DaemonDirectoryCodec.MAX_ENTRIES, listed.entries().size());
-    List<String> names =
-        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::name).toList();
+    assertEquals(EnvironmentDirectoryListing.MAX_ENTRIES, listed.entries().size());
+    List<String> names = listed.entries().stream().map(EnvironmentDirectoryEntry::name).toList();
     assertEquals(names.stream().sorted().toList(), names);
     assertFalse(names.contains("C:"));
     assertEquals("dir-0000", names.getFirst());
@@ -216,12 +210,12 @@ class EnvironmentDirectoryBrowserTest {
     Files.createDirectories(root.resolve("repo/sub"));
     Files.createDirectories(root.resolve("no-git"));
 
-    assertEquals("main", browser().list(REQUEST_ID, "repo").gitBranch());
-    assertEquals("main", browser().list(REQUEST_ID, "repo/sub").gitBranch());
-    assertNull(browser().list(REQUEST_ID, "no-git").gitBranch());
+    assertEquals("main", browser().list("repo").gitBranch());
+    assertEquals("main", browser().list("repo/sub").gitBranch());
+    assertNull(browser().list("no-git").gitBranch());
 
     Files.writeString(root.resolve("repo/.git/HEAD"), "not-a-ref");
-    assertNull(browser().list(REQUEST_ID, "repo").gitBranch());
+    assertNull(browser().list("repo").gitBranch());
   }
 
   private static void deleteRecursively(Path dir) throws IOException {

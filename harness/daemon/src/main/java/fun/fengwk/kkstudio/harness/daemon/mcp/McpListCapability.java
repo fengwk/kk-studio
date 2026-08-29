@@ -4,13 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerStatus;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerStatus;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -43,11 +42,8 @@ public final class McpListCapability extends AbstractMcpBridgeCapability {
     for (DaemonMcpServerDescriptor summary : summaries) {
       servers.add(serverNode(summary));
     }
-    return new EnvironmentCapabilityResult(
-        request.call().id(),
-        List.of(new JsonToolContent(OBJECT_MAPPER.writeValueAsString(root))),
-        false,
-        "{}");
+    return EnvironmentCapabilityResult.json(
+        request.call().id(), OBJECT_MAPPER.writeValueAsString(root));
   }
 
   @Override

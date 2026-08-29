@@ -12,18 +12,18 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -198,46 +198,49 @@ class CodingCapabilitiesEdgeTest {
   void outputLimiterHonorsExactThresholdsUtf8AndResourceFailures() throws Exception {
     InMemoryResourceStore store = new InMemoryResourceStore();
     CodingToolsConfig exact = config(2, 4, store);
-    List<ToolContent> untruncated =
-        OutputLimiter.limit("ab\nc".getBytes(StandardCharsets.UTF_8), "text/plain", exact);
-    List<ToolContent> truncated =
+    EnvironmentCapabilityResult untruncated =
+        OutputLimiter.limit("c1", "ab\nc".getBytes(StandardCharsets.UTF_8), "text/plain", exact);
+    EnvironmentCapabilityResult truncated =
         OutputLimiter.limit(
-            "😀x".getBytes(StandardCharsets.UTF_8), "text/plain", config(2, 4, store));
-    List<ToolContent> ansi =
+            "c2", "😀x".getBytes(StandardCharsets.UTF_8), "text/plain", config(2, 4, store));
+    EnvironmentCapabilityResult ansi =
         OutputLimiter.limit(
+            "c3",
             "\u001b[31mpassed\u001b[0m".getBytes(StandardCharsets.UTF_8),
             "text/plain",
             config(2, 64, store));
-    List<ToolContent> binary =
-        OutputLimiter.limit(new byte[] {1, 0, 2}, "application/octet-stream", exact);
+    EnvironmentCapabilityResult binary =
+        OutputLimiter.limit("c4", new byte[] {1, 0, 2}, "application/octet-stream", exact);
 
-    assertEquals("ab\nc", text(untruncated));
-    assertTrue(text(truncated).contains("Output truncated"));
+    assertEquals("ab\nc", text(untruncated.contents()));
+    assertTrue(text(truncated.contents()).contains("Output truncated"));
     assertFalse(text(truncated).contains("�"));
-    assertEquals("\u001b[31mpassed\u001b[0m", text(ansi));
-    assertEquals(1, ansi.size());
-    ResourceToolContent resource = (ResourceToolContent) truncated.get(1);
+    assertEquals("\u001b[31mpassed\u001b[0m", text(ansi.contents()));
+    assertEquals(1, ansi.contents().size());
+    ResourceToolContent resource = (ResourceToolContent) truncated.contents().get(1);
     assertArrayEquals(
         "😀x".getBytes(StandardCharsets.UTF_8), store.get(resource.resource().sha256()));
-    assertTrue(binary.get(1) instanceof ResourceToolContent);
+    assertTrue(binary.contents().get(1) instanceof ResourceToolContent);
     CodingToolsConfig failing =
         config(
             1,
             1,
             new ResourceStore() {
               @Override
-              public ResourceRef store(byte[] bytes, String mediaType) throws IOException {
+              public DaemonResourceRef store(byte[] bytes, String mediaType) throws IOException {
                 throw new IOException("store down");
               }
 
               @Override
-              public byte[] read(ResourceRef ref) throws IOException {
+              public byte[] read(DaemonResourceRef ref) throws IOException {
                 throw new IOException("store down");
               }
             });
     assertThrows(
         IOException.class,
-        () -> OutputLimiter.limit("xx".getBytes(StandardCharsets.UTF_8), "text/plain", failing));
+        () ->
+            OutputLimiter.limit(
+                "c5", "xx".getBytes(StandardCharsets.UTF_8), "text/plain", failing));
   }
 
   @Test

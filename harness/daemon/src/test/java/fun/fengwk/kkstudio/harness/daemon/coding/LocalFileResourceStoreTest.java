@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 
 import java.io.IOException;
 import java.net.URI;
@@ -41,7 +41,7 @@ class LocalFileResourceStoreTest {
     LocalFileResourceStore store = new LocalFileResourceStore(directory);
     byte[] data = new byte[] {1, 2, 3, 4, 5};
 
-    ResourceRef ref = store.store(data, "application/octet-stream");
+    DaemonResourceRef ref = store.store(data, "application/octet-stream");
     assertEquals("file", URI.create(ref.uri()).getScheme());
     assertEquals(data.length, ref.size());
     assertEquals(64, ref.sha256().length());
@@ -51,16 +51,16 @@ class LocalFileResourceStoreTest {
     assertEquals(1, Files.list(directory).count());
 
     // 同内容重复 store 幂等：同一 digest 文件，不产生第二个文件。
-    ResourceRef again = store.store(data, "text/plain");
+    DaemonResourceRef again = store.store(data, "text/plain");
     assertEquals(ref.uri(), again.uri());
     assertEquals(1, Files.list(directory).count());
 
-    ResourceRef wrongSize =
-        new ResourceRef(ref.uri(), ref.mediaType(), null, ref.size() + 1, ref.sha256());
+    DaemonResourceRef wrongSize =
+        new DaemonResourceRef(ref.uri(), ref.mediaType(), null, ref.size() + 1, ref.sha256());
     assertThrows(IOException.class, () -> store.read(wrongSize));
 
-    ResourceRef wrongSha =
-        new ResourceRef(ref.uri(), ref.mediaType(), null, ref.size(), "0".repeat(63) + "a");
+    DaemonResourceRef wrongSha =
+        new DaemonResourceRef(ref.uri(), ref.mediaType(), null, ref.size(), "0".repeat(63) + "a");
     assertThrows(IOException.class, () -> store.read(wrongSha));
   }
 
@@ -68,8 +68,8 @@ class LocalFileResourceStoreTest {
   @Test
   void digestNamingDistinguishesContent() throws IOException {
     LocalFileResourceStore store = new LocalFileResourceStore(environmentRoot.resolve("export"));
-    ResourceRef first = store.store("a".getBytes(StandardCharsets.UTF_8), "text/plain");
-    ResourceRef second = store.store("b".getBytes(StandardCharsets.UTF_8), "text/plain");
+    DaemonResourceRef first = store.store("a".getBytes(StandardCharsets.UTF_8), "text/plain");
+    DaemonResourceRef second = store.store("b".getBytes(StandardCharsets.UTF_8), "text/plain");
 
     assertNotEquals(first.uri(), second.uri());
     assertEquals(2, Files.list(environmentRoot.resolve("export")).count());
@@ -89,16 +89,16 @@ class LocalFileResourceStoreTest {
     assertRejected(store, "file://" + directory.getParent() + "/outside/" + "0".repeat(64));
     assertRejected(store, "file://" + directory + "/" + "0".repeat(63) + "/nested");
     assertRejected(store, "https://example.com/a");
-    // 含 dot segment 或非空 authority 的 URI 在 ResourceRef 构造期即被协议校验拒绝，永远不会触达 store。
+    // 含 dot segment 或非空 authority 的 URI 在 DaemonResourceRef 构造期即被协议校验拒绝，永远不会触达 store。
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new ResourceRef(
+            new DaemonResourceRef(
                 "file://" + directory + "/../outside", "text/plain", null, 1L, "0".repeat(64)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new ResourceRef(
+            new DaemonResourceRef(
                 "file://host" + directory + "/" + "0".repeat(64),
                 "text/plain",
                 null,
@@ -107,7 +107,7 @@ class LocalFileResourceStoreTest {
   }
 
   private static void assertRejected(LocalFileResourceStore store, String uri) {
-    ResourceRef ref = new ResourceRef(uri, "text/plain", null, 1L, "0".repeat(64));
+    DaemonResourceRef ref = new DaemonResourceRef(uri, "text/plain", null, 1L, "0".repeat(64));
     assertThrows(IOException.class, () -> store.read(ref));
   }
 
@@ -117,12 +117,12 @@ class LocalFileResourceStoreTest {
     Path directory = environmentRoot.resolve("export");
     LocalFileResourceStore store = new LocalFileResourceStore(directory);
     byte[] data = "linked".getBytes(StandardCharsets.UTF_8);
-    ResourceRef ref = store.store(data, "text/plain");
+    DaemonResourceRef ref = store.store(data, "text/plain");
     Files.createSymbolicLink(
         directory.resolve("0".repeat(63) + "f"), directory.resolve(ref.sha256()));
 
-    ResourceRef symlink =
-        new ResourceRef(
+    DaemonResourceRef symlink =
+        new DaemonResourceRef(
             directory.resolve("0".repeat(63) + "f").toUri().toString(),
             "text/plain",
             null,
@@ -130,8 +130,8 @@ class LocalFileResourceStoreTest {
             ref.sha256());
     assertThrows(IOException.class, () -> store.read(symlink));
 
-    ResourceRef missing =
-        new ResourceRef(
+    DaemonResourceRef missing =
+        new DaemonResourceRef(
             directory.resolve("a".repeat(64)).toUri().toString(),
             "text/plain",
             null,
@@ -185,7 +185,7 @@ class LocalFileResourceStoreTest {
     CountDownLatch start = new CountDownLatch(1);
     ExecutorService executor = Executors.newFixedThreadPool(threads);
     try {
-      List<Future<ResourceRef>> futures = new ArrayList<>();
+      List<Future<DaemonResourceRef>> futures = new ArrayList<>();
       for (int i = 0; i < threads; i++) {
         futures.add(
             executor.submit(
@@ -196,7 +196,7 @@ class LocalFileResourceStoreTest {
       }
       start.countDown();
       Set<String> uris = new HashSet<>();
-      for (Future<ResourceRef> future : futures) {
+      for (Future<DaemonResourceRef> future : futures) {
         uris.add(future.get(10, TimeUnit.SECONDS).uri());
       }
       assertEquals(1, uris.size());
@@ -315,7 +315,7 @@ class LocalFileResourceStoreTest {
     Path directory = environmentRoot.resolve("export");
     LocalFileResourceStore store = new LocalFileResourceStore(directory);
     byte[] data = "root pin".getBytes(StandardCharsets.UTF_8);
-    ResourceRef ref = store.store(data, "text/plain");
+    DaemonResourceRef ref = store.store(data, "text/plain");
 
     // rename 保持原根 inode 存活，新目录必然不同 inode。
     Path replaced = environmentRoot.resolve("export-replaced");
@@ -334,7 +334,7 @@ class LocalFileResourceStoreTest {
     Path directory = environmentRoot.resolve("export");
     LocalFileResourceStore store = new LocalFileResourceStore(directory);
     byte[] data = "immutable".getBytes(StandardCharsets.UTF_8);
-    ResourceRef ref = store.store(data, "text/plain");
+    DaemonResourceRef ref = store.store(data, "text/plain");
 
     Files.write(directory.resolve(ref.sha256()), new byte[] {0x7F}, StandardOpenOption.APPEND);
     IOException error = assertThrows(IOException.class, () -> store.read(ref));
@@ -433,17 +433,18 @@ class LocalFileResourceStoreTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> store.store(new byte[] {1, 2, 3, 4, 5}, "text/plain"));
-    ResourceRef ref = store.store(new byte[] {1, 2, 3, 4}, "text/plain");
+    DaemonResourceRef ref = store.store(new byte[] {1, 2, 3, 4}, "text/plain");
     assertArrayEquals(new byte[] {1, 2, 3, 4}, store.read(ref));
 
     // 声明 size 超限：任何文件访问/分配前拒绝。
-    ResourceRef declaredTooBig =
-        new ResourceRef(ref.uri(), ref.mediaType(), null, 5L, ref.sha256());
+    DaemonResourceRef declaredTooBig =
+        new DaemonResourceRef(ref.uri(), ref.mediaType(), null, 5L, ref.sha256());
     assertThrows(IOException.class, () -> store.read(declaredTooBig));
 
     // 实际文件超限（声明 ≤ 上限但落盘内容更大）：打开后先取 size 再拒绝，不分配。
     Files.write(directory.resolve(ref.sha256()), new byte[] {1, 2, 3, 4, 5});
-    ResourceRef declaresSmall = new ResourceRef(ref.uri(), ref.mediaType(), null, 1L, ref.sha256());
+    DaemonResourceRef declaresSmall =
+        new DaemonResourceRef(ref.uri(), ref.mediaType(), null, 1L, ref.sha256());
     IOException actualTooBig = assertThrows(IOException.class, () -> store.read(declaresSmall));
     assertTrue(actualTooBig.getMessage().contains("exceeds the readable limit"));
   }
@@ -454,7 +455,7 @@ class LocalFileResourceStoreTest {
     Path directory = environmentRoot.resolve("export");
     LocalFileResourceStore store = new LocalFileResourceStore(directory);
     byte[] data = "original".getBytes(StandardCharsets.UTF_8);
-    ResourceRef ref = store.store(data, "text/plain");
+    DaemonResourceRef ref = store.store(data, "text/plain");
     Path digestFile = directory.resolve(ref.sha256());
 
     // 篡改为不同长度：size 校验拒绝。

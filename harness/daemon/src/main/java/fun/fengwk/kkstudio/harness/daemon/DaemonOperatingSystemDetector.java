@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 
 import java.io.IOException;
 import java.nio.file.Files;

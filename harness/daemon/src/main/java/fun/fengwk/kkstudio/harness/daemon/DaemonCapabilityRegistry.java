@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 
 import java.util.Collection;
 import java.util.LinkedHashMap;

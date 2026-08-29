@@ -27,6 +27,7 @@ public final class CodingCapabilities {
     registry.register(new BashCapability(config, executor, scheduler));
     registry.register(new GrepCapability(config, executor));
     registry.register(new FindCapability(config, executor));
+    registry.register(new ListDirectoryCapability(config, executor));
     registry.register(new LspGotoDefinitionCapability(config, executor));
     registry.register(new LspWorkspaceSymbolsCapability(config, executor));
     registry.register(new LspJavaDecompileCapability(config, executor));

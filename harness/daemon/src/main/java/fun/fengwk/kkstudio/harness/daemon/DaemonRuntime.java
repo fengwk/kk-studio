@@ -14,44 +14,39 @@ import fun.fengwk.kkstudio.harness.daemon.journal.DaemonTerminalMessage;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.mcp.McpBridgeCapabilities;
 import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerRegistry;
-import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkill;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
+import fun.fengwk.kkstudio.harness.daemon.skill.SkillLoadCapability;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentWorkspacePath;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityInvokeCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityResultCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonResourceStore;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentWorkspacePath;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityInvokeCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceStore;
 
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.NotDirectoryException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZoneId;
@@ -79,7 +74,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * invocationId，RUNNING/terminal journal 条目分别重放 STARTED/terminal。
  *
  * <p>Daemon 只拥有两个执行生命周期资源：单线程 scheduler 处理 heartbeat、reconnect 与 timeout，共享的
- * virtual-thread-per-task executor 处理 Coding/MCP 及目录浏览等阻塞调用。transport/JDK 内部线程不在该生命周期内。
+ * virtual-thread-per-task executor 处理 Coding/MCP 等阻塞调用。transport/JDK 内部线程不在该生命周期内。
  */
 public final class DaemonRuntime implements AutoCloseable {
 
@@ -102,9 +97,6 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonCapabilityInvokeCodec capabilityInvokeCodec =
       new DaemonCapabilityInvokeCodec();
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
-  private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
-  private final DaemonDirectoryCodec directoryCodec = new DaemonDirectoryCodec();
-  private final EnvironmentDirectoryBrowser directoryBrowser;
   private final AtomicLong outboundSequence = new AtomicLong();
   private final AtomicReference<ActiveConnection> activeConnection = new AtomicReference<>();
   private final AtomicLong connectionGeneration = new AtomicLong();
@@ -140,6 +132,7 @@ public final class DaemonRuntime implements AutoCloseable {
         (registry, executor, scheduler) -> {
           CodingCapabilities.registerAll(registry, toolsConfig, executor, scheduler);
           McpBridgeCapabilities.registerAll(registry, mcpRegistry, executor);
+          registry.register(new SkillLoadCapability(skillRegistry, executor));
         });
   }
 
@@ -282,7 +275,6 @@ public final class DaemonRuntime implements AutoCloseable {
             ZoneId.systemDefault().getId(),
             config.effectiveNote(operatingSystem),
             config.environmentRoot().toString());
-    this.directoryBrowser = new EnvironmentDirectoryBrowser(config.environmentRoot());
     this.nextReconnectDelay = config.initialReconnectDelay();
     if (requireFixedCapabilityCatalog
         && !List.copyOf(capabilityRegistry.descriptors())
@@ -330,9 +322,32 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
-  /** 返回当前连接生命周期状态，仅用于运行状态观测。 */
+  /** 阻塞等待 daemon 终止（由 close 或终态冲突触发）；返回终态。 */
+  public DaemonRuntimeState awaitTermination() throws InterruptedException {
+    termination.await();
+    return state;
+  }
+
+  /** 返回当前生命周期状态。 */
   public DaemonRuntimeState state() {
     return state;
+  }
+
+  /** 返回终态失败原因；非 FAILED 时为 {@code null}。 */
+  public String failureReason() {
+    return failureReason;
+  }
+
+  DaemonInvocationJournal journal() {
+    return journal;
+  }
+
+  DaemonEnvironmentInfo environmentInfo() {
+    return environmentInfo;
+  }
+
+  ActiveConnection activeConnection() {
+    return activeConnection.get();
   }
 
   private boolean scheduleReconnect(Duration delay) {
@@ -372,7 +387,10 @@ public final class DaemonRuntime implements AutoCloseable {
                   return;
                 }
                 if (!started.get() || generation != connectionGeneration.get()) {
-                  connection.close();
+                  try {
+                    connection.close();
+                  } catch (RuntimeException ignored) {
+                  }
                   return;
                 }
                 ActiveConnection active = new ActiveConnection(generation, connection);
@@ -386,6 +404,25 @@ public final class DaemonRuntime implements AutoCloseable {
               });
     } catch (RuntimeException error) {
       connecting.set(false);
+      handleDisconnected(generation);
+    }
+  }
+
+  private final class RuntimeTransportListener implements DaemonTransportListener {
+
+    private final long generation;
+
+    private RuntimeTransportListener(long generation) {
+      this.generation = generation;
+    }
+
+    @Override
+    public void onMessage(String message) {
+      DaemonRuntime.this.onMessage(generation, message);
+    }
+
+    @Override
+    public void onDisconnected(Throwable cause) {
       handleDisconnected(generation);
     }
   }
@@ -470,16 +507,6 @@ public final class DaemonRuntime implements AutoCloseable {
           connection.acceptInboundEnvelope(identity);
           processCancel(connection, envelope);
         }
-        case LOAD_SKILL -> {
-          requireInvocationId(envelope);
-          connection.acceptInboundEnvelope(identity);
-          processLoadSkill(connection, envelope);
-        }
-        case LIST_DIRECTORY -> {
-          requireNoInvocationId(envelope);
-          connection.acceptInboundEnvelope(identity);
-          processListDirectory(connection, envelope);
-        }
         case WELCOME -> {
           connection.acceptInboundEnvelope(identity);
           handleWelcome(connection, envelope);
@@ -525,7 +552,7 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
-  /** 处理 gateway ERROR。只有终态名称冲突错误会终止 daemon（停止重连、非零退出）；其余 ERROR 不改变 invocation 事实。 */
+  /** 处理 gateway ERROR。名称冲突错误是终态的；RETRY_LATER 触发退避重连；其余 ERROR 不改变 invocation 事实。 */
   private void handleError(ActiveConnection connection, DaemonEnvelope envelope) {
     ObjectNode payload = envelopeCodec.readPayload(envelope);
     List<String> unexpected = new ArrayList<>();
@@ -544,14 +571,22 @@ public final class DaemonRuntime implements AutoCloseable {
     if (code == null || code.isNull()) {
       return;
     }
-    if (!code.isTextual()
-        || !DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT.equals(code.textValue())) {
+    if (!code.isTextual()) {
       throw new DaemonProtocolException("ERROR payload.code is unknown: " + code);
     }
-    String message = payload.path("message").asText("");
-    failTerminal(
-        "environment name is held by another live daemon"
-            + (message.isBlank() ? "" : ": " + message));
+    String codeValue = code.textValue();
+    if (DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT.equals(codeValue)) {
+      String message = payload.path("message").asText("");
+      failTerminal(
+          "environment name is held by another live daemon"
+              + (message.isBlank() ? "" : ": " + message));
+      return;
+    }
+    if (DaemonProtocol.ERROR_CODE_RETRY_LATER.equals(codeValue)) {
+      handleDisconnected(connection.generation());
+      return;
+    }
+    throw new DaemonProtocolException("ERROR payload.code is unknown: " + code);
   }
 
   private void verifyScope(DaemonEnvelope envelope) {
@@ -632,129 +667,6 @@ public final class DaemonRuntime implements AutoCloseable {
     handleCancel(envelope);
   }
 
-  private void processLoadSkill(ActiveConnection connection, DaemonEnvelope envelope) {
-    sendAck(connection, envelope.sequence());
-    handleLoadSkill(connection, envelope);
-  }
-
-  private void processListDirectory(ActiveConnection connection, DaemonEnvelope envelope) {
-    sendAck(connection, envelope.sequence());
-    handleListDirectory(connection, envelope);
-  }
-
-  /** control-plane 目录浏览：与 invocation 并行，不进入 journal，不占 active tool slot。以 payload requestId 关联。 */
-  private void handleListDirectory(ActiveConnection connection, DaemonEnvelope envelope) {
-    DaemonDirectoryCodec.RawListDirectoryRequest raw;
-    try {
-      raw = directoryCodec.readRequest(envelope.payloadJson());
-    } catch (DaemonProtocolException error) {
-      sendOn(connection, DaemonMessageType.ERROR, envelope.invocationId(), errorPayload(error));
-      return;
-    }
-    DaemonDirectoryCodec.ListDirectoryRequest request;
-    try {
-      request = new DaemonDirectoryCodec.ListDirectoryRequest(raw.requestId(), raw.path());
-    } catch (IllegalArgumentException error) {
-      // 形状非法是确定性业务失败（INVALID_PATH），不是协议 ERROR；requestId 原样回显。
-      sendDirectoryListFailed(
-          connection,
-          envelope,
-          new DaemonDirectoryCodec.DirectoryListFailed(
-              raw.requestId(),
-              raw.path(),
-              DaemonDirectoryFailureCode.INVALID_PATH,
-              error.getMessage()));
-      return;
-    }
-    try {
-      taskExecutor.execute(() -> listDirectoryOnWorker(connection, envelope, request));
-    } catch (RejectedExecutionException error) {
-      sendDirectoryListFailed(
-          connection,
-          envelope,
-          new DaemonDirectoryCodec.DirectoryListFailed(
-              request.requestId(),
-              request.path(),
-              DaemonDirectoryFailureCode.IO_ERROR,
-              "directory listing executor is unavailable"));
-    }
-  }
-
-  private void listDirectoryOnWorker(
-      ActiveConnection connection,
-      DaemonEnvelope envelope,
-      DaemonDirectoryCodec.ListDirectoryRequest request) {
-    try {
-      DaemonDirectoryCodec.DirectoryListed listed =
-          directoryBrowser.list(request.requestId(), request.path());
-      sendOn(
-          connection,
-          DaemonMessageType.DIRECTORY_LISTED,
-          envelope.invocationId(),
-          directoryCodec.encodeListed(listed));
-    } catch (RuntimeException | IOException error) {
-      sendDirectoryListFailed(
-          connection, envelope, directoryFailure(request.requestId(), request.path(), error));
-    }
-  }
-
-  private void sendDirectoryListFailed(
-      ActiveConnection connection,
-      DaemonEnvelope envelope,
-      DaemonDirectoryCodec.DirectoryListFailed failed) {
-    sendOn(
-        connection,
-        DaemonMessageType.DIRECTORY_LIST_FAILED,
-        envelope.invocationId(),
-        directoryCodec.encodeFailed(failed));
-  }
-
-  private static DaemonDirectoryCodec.DirectoryListFailed directoryFailure(
-      String requestId, String path, Exception error) {
-    DaemonDirectoryFailureCode code;
-    if (error instanceof IllegalArgumentException) {
-      code = DaemonDirectoryFailureCode.INVALID_PATH;
-    } else if (error instanceof NoSuchFileException) {
-      code = DaemonDirectoryFailureCode.NOT_FOUND;
-    } else if (error instanceof NotDirectoryException) {
-      code = DaemonDirectoryFailureCode.NOT_DIRECTORY;
-    } else {
-      code = DaemonDirectoryFailureCode.IO_ERROR;
-    }
-    String message = error.getMessage();
-    if (message == null || message.isBlank()) {
-      message = error.getClass().getSimpleName();
-    }
-    return new DaemonDirectoryCodec.DirectoryListFailed(requestId, path, code, message);
-  }
-
-  private void handleLoadSkill(ActiveConnection connection, DaemonEnvelope envelope) {
-    DaemonSkillLoadCodec.LoadSkillRequest request;
-    try {
-      request = skillLoadCodec.decodeRequest(envelope.payloadJson());
-    } catch (DaemonProtocolException error) {
-      sendOn(connection, DaemonMessageType.ERROR, envelope.invocationId(), errorPayload(error));
-      return;
-    }
-    Optional<DaemonSkill> skill = skillRegistry.find(request.name());
-    if (skill.isEmpty()) {
-      sendOn(
-          connection,
-          DaemonMessageType.SKILL_LOAD_FAILED,
-          envelope.invocationId(),
-          skillLoadCodec.encodeFailed(
-              new DaemonSkillLoadCodec.SkillLoadFailed(
-                  request.name(), "unknown skill: " + request.name())));
-      return;
-    }
-    sendOn(
-        connection,
-        DaemonMessageType.SKILL_LOADED,
-        envelope.invocationId(),
-        skillLoadCodec.encodeLoaded(
-            new DaemonSkillLoadCodec.SkillLoaded(skill.get().name(), skill.get().body())));
-  }
-
   private void handleCancel(DaemonEnvelope envelope) {
     Optional<DaemonInvocationJournalEntry> entry = journal.find(envelope.invocationId());
     if (entry.isEmpty()) {
@@ -813,90 +725,32 @@ public final class DaemonRuntime implements AutoCloseable {
               timeout.toMillis(),
               TimeUnit.MILLISECONDS);
       invocation.setDeadline(deadline);
-    } catch (RejectedExecutionException ignored) {
-      // close() 已记录取消并停止 scheduler。
+    } catch (RuntimeException error) {
+      terminal(
+          invocation.invocationId(),
+          new DaemonTerminalMessage(
+              DaemonMessageType.FAILED,
+              "{\"message\":\"cannot schedule capability timeout: " + error.getMessage() + "\"}"),
+          true);
     }
   }
 
-  /**
-   * 0 timeoutMillis 表示不覆盖 descriptor；descriptor 未设置 deadline 时回退 daemon 默认值，确保每次 invocation 都有有效
-   * deadline。
-   */
-  private Duration resolveTimeout(
-      Duration requestedTimeout, EnvironmentCapabilityDescriptor descriptor) {
-    if (!requestedTimeout.isZero()) {
-      return requestedTimeout;
-    }
-    return descriptor.timeout().isZero() ? config.defaultToolTimeout() : descriptor.timeout();
-  }
-
-  /**
-   * INVOKE payload 由 capability codec 严格解码，字段为
-   * capabilityId/capabilityVersion/workspacePath/arguments/timeoutMillis；再把 canonical 相对 wire
-   * workspace path 解析为 Environment Root 内的 canonical 现存目录。
-   *
-   * <p>先经共享 workspace validator 做形状校验（{@code '.'} 表示 root、仅 {@code '/'} 分隔、拒绝 absolute/Windows
-   * drive/反斜杠/空段/{@code '.'}/{@code '..'} 段/控制字符），再相对 environment root 解析并 {@code toRealPath}：
-   * symlink 越界（real path 不在 root 内）、路径删除、非目录都是确定性 {@link IllegalArgumentException}（由调用方收敛为
-   * FAILED）；root 内 symlink alias 的 real path 仍在 root 内时允许。
-   */
-  private Path canonicalWorkspace(String workspacePath) {
-    EnvironmentWorkspacePath.requireCanonicalRelativePath(workspacePath);
-    Path candidate = config.environmentRoot().resolve(Path.of(workspacePath)).normalize();
-    Path canonical;
-    try {
-      canonical = candidate.toRealPath();
-    } catch (IOException error) {
-      throw new IllegalArgumentException(
-          "workspace does not resolve to an existing directory: " + workspacePath, error);
-    }
-    if (!canonical.startsWith(config.environmentRoot())) {
-      throw new IllegalArgumentException("workspace escapes environment root: " + workspacePath);
-    }
-    if (!Files.isDirectory(canonical)) {
-      throw new IllegalArgumentException("workspace is not a directory: " + workspacePath);
-    }
-    return canonical;
-  }
-
-  private InvokePayload readInvokePayload(DaemonEnvelope envelope) {
-    DaemonCapabilityInvokeCodec.InvokeRequest request =
-        capabilityInvokeCodec.decode(envelope.payloadJson());
-    return new InvokePayload(
-        request.capabilityId(),
-        request.capabilityVersion(),
-        request.workspacePath(),
-        request.argumentsJson(),
-        request.timeout());
-  }
-
-  private void requireInvocationId(DaemonEnvelope envelope) {
-    if (envelope.invocationId() == null || envelope.invocationId().isBlank()) {
-      throw new DaemonProtocolException(
-          envelope.messageType() + " requires a non-blank invocationId");
-    }
-  }
-
-  private void requireNoInvocationId(DaemonEnvelope envelope) {
-    if (envelope.invocationId() != null) {
-      throw new DaemonProtocolException(envelope.messageType() + " must not declare invocationId");
-    }
+  private boolean isRunning(String invocationId) {
+    return journal
+        .find(invocationId)
+        .map(entry -> entry.state() == DaemonInvocationState.RUNNING)
+        .orElse(false);
   }
 
   private void sendAck(ActiveConnection connection, long acknowledgedSequence) {
-    sendOn(
-        connection,
-        DaemonMessageType.ACK,
-        null,
-        "{\"acknowledgedSequence\":" + acknowledgedSequence + "}");
+    ObjectNode payload = envelopeCodec.createPayload();
+    payload.put("acknowledgedSequence", acknowledgedSequence);
+    sendOn(connection, DaemonMessageType.ACK, null, envelopeCodec.writeJson(payload));
   }
 
-  private void send(DaemonMessageType messageType, String invocationId, String payloadJson) {
+  private boolean send(DaemonMessageType messageType, String invocationId, String payloadJson) {
     ActiveConnection connection = activeConnection.get();
-    if (connection == null || !connection.isReady()) {
-      return;
-    }
-    sendOn(connection, messageType, invocationId, payloadJson);
+    return connection != null && sendOn(connection, messageType, invocationId, payloadJson);
   }
 
   private boolean sendOn(
@@ -953,26 +807,51 @@ public final class DaemonRuntime implements AutoCloseable {
     return envelopeCodec.writeJson(payload.get("value"));
   }
 
-  @Override
-  public void close() {
-    shutdown(DaemonRuntimeState.STOPPED, null);
+  private InvokePayload readInvokePayload(DaemonEnvelope envelope) {
+    DaemonCapabilityInvokeCodec.InvokeRequest request =
+        capabilityInvokeCodec.decode(envelope.payloadJson());
+    return new InvokePayload(
+        request.capabilityId(),
+        request.capabilityVersion(),
+        request.workspacePath(),
+        request.argumentsJson(),
+        request.timeout());
   }
 
-  /** 等待运行时进入终态（显式 {@link #close()} 或终态握手冲突失败）。返回最终 {@link DaemonRuntimeState}，供独立进程入口决定退出码。 */
-  public DaemonRuntimeState awaitTermination() throws InterruptedException {
-    termination.await();
-    return state;
+  private void requireInvocationId(DaemonEnvelope envelope) {
+    if (envelope.invocationId() == null) {
+      throw new DaemonProtocolException(envelope.messageType() + " requires non-null invocationId");
+    }
   }
 
-  /** 返回终态失败原因（仅 {@link DaemonRuntimeState#FAILED} 时非 null）。 */
-  public String failureReason() {
-    return failureReason;
+  private Path canonicalWorkspace(String workspacePath) {
+    EnvironmentWorkspacePath.requireCanonicalRelativePath(workspacePath);
+    Path candidate = config.environmentRoot().resolve(Path.of(workspacePath)).normalize();
+    Path canonical;
+    try {
+      canonical = candidate.toRealPath();
+    } catch (IOException error) {
+      throw new IllegalArgumentException(
+          "workspace does not resolve to an existing directory: " + workspacePath, error);
+    }
+    if (!canonical.startsWith(config.environmentRoot())) {
+      throw new IllegalArgumentException("workspace escapes environment root: " + workspacePath);
+    }
+    if (!Files.isDirectory(canonical)) {
+      throw new IllegalArgumentException("workspace is not a directory: " + workspacePath);
+    }
+    return canonical;
   }
 
-  /**
-   * 终态失败：停止重连、终止所有运行中 invocation 并释放终止闩。与 {@link #close()} 共享 shutdown 流程，但以 FAILED 状态结束，
-   * 使调用方可以非零退出。
-   */
+  private Duration resolveTimeout(
+      Duration requestedTimeout, EnvironmentCapabilityDescriptor descriptor) {
+    if (!requestedTimeout.isZero()) {
+      return requestedTimeout;
+    }
+    return descriptor.timeout().isZero() ? config.defaultToolTimeout() : descriptor.timeout();
+  }
+
+  /** 终态失败：停止重连、标记 FAILED 并释放资源。 */
   private void failTerminal(String reason) {
     shutdown(DaemonRuntimeState.FAILED, reason);
   }
@@ -1002,273 +881,64 @@ public final class DaemonRuntime implements AutoCloseable {
           .values()
           .forEach(
               invocation -> {
-                try {
-                  terminal(
-                      invocation.invocationId(),
-                      new DaemonTerminalMessage(
-                          DaemonMessageType.CANCELLED, "{\"reason\":\"daemon stopped\"}"),
-                      true);
-                } catch (RuntimeException ignored) {
-                  // 单个终态通知失败不得阻断其余 invocation 的清理。
-                }
+                invocation.cancel();
+                journal.complete(
+                    invocation.invocationId(),
+                    new DaemonTerminalMessage(
+                        DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"));
               });
       running.clear();
-      shutdownExecutors(scheduler, taskExecutor);
       closeQuietly(mcpRegistry);
+      shutdownExecutors(scheduler, taskExecutor);
     } finally {
       termination.countDown();
     }
   }
 
-  private static void shutdownExecutors(ExecutorService scheduler, ExecutorService taskExecutor) {
-    shutdownNowQuietly(scheduler);
-    shutdownNowQuietly(taskExecutor);
-    long deadline = System.nanoTime() + EXECUTOR_TERMINATION_TIMEOUT.toNanos();
-    boolean interrupted = awaitTermination(scheduler, deadline);
-    interrupted |= awaitTermination(taskExecutor, deadline);
-    if (interrupted) {
-      Thread.currentThread().interrupt();
-    }
+  @Override
+  public void close() {
+    shutdown(DaemonRuntimeState.STOPPED, null);
   }
 
-  private static void shutdownNowQuietly(ExecutorService executor) {
-    if (executor == null) {
-      return;
-    }
-    try {
-      executor.shutdownNow();
-    } catch (RuntimeException ignored) {
-      // 继续停止和等待另一个生命周期资源。
-    }
-  }
-
-  private static boolean awaitTermination(ExecutorService executor, long deadline) {
-    if (executor == null) {
-      return false;
-    }
-    boolean interrupted = false;
-    while (!executor.isTerminated()) {
-      long remaining = deadline - System.nanoTime();
-      if (remaining <= 0) {
-        break;
-      }
+  private static void shutdownExecutors(
+      ScheduledExecutorService scheduler, ExecutorService taskExecutor) {
+    if (taskExecutor != null) {
+      taskExecutor.shutdownNow();
       try {
-        if (executor.awaitTermination(remaining, TimeUnit.NANOSECONDS)) {
-          break;
-        }
-      } catch (InterruptedException ignored) {
-        interrupted = true;
-      } catch (RuntimeException ignored) {
-        break;
+        taskExecutor.awaitTermination(
+            EXECUTOR_TERMINATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
       }
     }
-    return interrupted;
+    if (scheduler != null) {
+      scheduler.shutdownNow();
+      try {
+        scheduler.awaitTermination(EXECUTOR_TERMINATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+      }
+    }
   }
 
   private static void closeQuietly(AutoCloseable closeable) {
-    if (closeable == null) {
-      return;
-    }
-    try {
-      closeable.close();
-    } catch (Exception ignored) {
-      // 生命周期清理必须继续收敛。
+    if (closeable != null) {
+      try {
+        closeable.close();
+      } catch (Exception ignored) {
+      }
     }
   }
 
   @FunctionalInterface
   interface CapabilityRegistrar {
-
     void register(
         DaemonCapabilityRegistry registry,
         ExecutorService taskExecutor,
         ScheduledExecutorService scheduler);
   }
 
-  private final class InvocationListener implements EnvironmentCapabilityExecutionListener {
-
-    private final RunningInvocation invocation;
-
-    private InvocationListener(RunningInvocation invocation) {
-      this.invocation = invocation;
-    }
-
-    @Override
-    public void onPartial(EnvironmentCapabilityResult partial) {
-      if (!isRunning(invocation.invocationId())
-          || !matchesInvocation(partial, invocation.invocationId())) {
-        return;
-      }
-      try {
-        send(
-            DaemonMessageType.PARTIAL,
-            invocation.invocationId(),
-            resultCodec.encodePartial(partial, resourceWriter()));
-      } catch (RuntimeException error) {
-        failResultEncoding(invocation.invocationId(), error, "partial");
-      }
-    }
-
-    @Override
-    public void onComplete(EnvironmentCapabilityResult result) {
-      if (!matchesInvocation(result, invocation.invocationId())) {
-        terminal(
-            invocation.invocationId(),
-            new DaemonTerminalMessage(
-                DaemonMessageType.FAILED,
-                "{\"message\":\"capability result callId does not match invocationId\"}"),
-            false);
-        return;
-      }
-      String payload;
-      try {
-        payload = resultCodec.encodeCompleted(result, resourceWriter());
-      } catch (RuntimeException error) {
-        failResultEncoding(invocation.invocationId(), error, "complete");
-        return;
-      }
-      terminal(
-          invocation.invocationId(),
-          new DaemonTerminalMessage(DaemonMessageType.COMPLETED, payload),
-          false);
-    }
-
-    @Override
-    public void onError(Throwable error) {
-      terminal(
-          invocation.invocationId(),
-          new DaemonTerminalMessage(DaemonMessageType.FAILED, errorPayload(error)),
-          false);
-    }
-  }
-
-  /** resource 读取/落盘或编码失败时，确定性收敛为 FAILED，避免让 callback 漏掉终态。允许已有 journal 记录为 RUNNING 时覆盖。 */
-  private void failResultEncoding(String invocationId, RuntimeException error, String phase) {
-    String message = "cannot " + phase + " capability result: " + safeFailureMessage(error);
-    terminal(
-        invocationId,
-        new DaemonTerminalMessage(
-            DaemonMessageType.FAILED, errorPayload(new IllegalStateException(message, error))),
-        false);
-  }
-
-  /** 提供给结果 codec 的 resource 读写 SPI；未配置 store 时对任何 resource/binary 内容确定性失败。 */
-  private DaemonResourceStore resourceWriter() {
-    ResourceStore store = this.resourceStore;
-    return new DaemonResourceStore() {
-      @Override
-      public ResourceRef store(byte[] bytes, String mediaType) throws IOException {
-        if (store == null) {
-          throw new IllegalStateException("resource store is not configured");
-        }
-        return store.store(bytes, mediaType);
-      }
-
-      @Override
-      public byte[] read(ResourceRef ref) throws IOException {
-        if (store == null) {
-          throw new IllegalStateException("resource store is not configured");
-        }
-        return store.read(ref);
-      }
-    };
-  }
-
-  private boolean isRunning(String invocationId) {
-    return journal
-        .find(invocationId)
-        .map(entry -> entry.state() == DaemonInvocationState.RUNNING)
-        .orElse(false);
-  }
-
-  private boolean matchesInvocation(EnvironmentCapabilityResult result, String invocationId) {
-    return result != null && invocationId.equals(result.callId());
-  }
-
-  private final class RuntimeTransportListener implements DaemonTransportListener {
-
-    private final long generation;
-
-    private RuntimeTransportListener(long generation) {
-      this.generation = generation;
-    }
-
-    @Override
-    public void onMessage(String message) {
-      DaemonRuntime.this.onMessage(generation, message);
-    }
-
-    @Override
-    public void onDisconnected(Throwable cause) {
-      handleDisconnected(generation);
-    }
-  }
-
-  private static final class RunningInvocation {
-
-    private final String invocationId;
-    private final AtomicBoolean cancelled = new AtomicBoolean();
-    private final AtomicBoolean begun = new AtomicBoolean();
-    private final AtomicBoolean terminal = new AtomicBoolean();
-    private final AtomicReference<EnvironmentCapabilityExecutionHandle> handle =
-        new AtomicReference<>();
-    private final AtomicReference<ScheduledFuture<?>> deadline = new AtomicReference<>();
-
-    private RunningInvocation(String invocationId) {
-      this.invocationId = invocationId;
-    }
-
-    private String invocationId() {
-      return invocationId;
-    }
-
-    private boolean begin() {
-      return !cancelled.get() && begun.compareAndSet(false, true);
-    }
-
-    private void setHandle(EnvironmentCapabilityExecutionHandle value) {
-      handle.set(value);
-      if (cancelled.get()) {
-        value.cancel();
-      }
-    }
-
-    private boolean claimTerminal(boolean cancelHandle) {
-      if (!terminal.compareAndSet(false, true)) {
-        return false;
-      }
-      ScheduledFuture<?> timeout = deadline.getAndSet(null);
-      if (timeout != null) {
-        timeout.cancel(false);
-      }
-      if (cancelHandle) {
-        cancel();
-      }
-      return true;
-    }
-
-    private boolean isTerminal() {
-      return terminal.get();
-    }
-
-    private void setDeadline(ScheduledFuture<?> value) {
-      if (!deadline.compareAndSet(null, value) || terminal.get()) {
-        value.cancel(false);
-      }
-    }
-
-    private void cancel() {
-      if (cancelled.compareAndSet(false, true)) {
-        EnvironmentCapabilityExecutionHandle value = handle.get();
-        if (value != null) {
-          value.cancel();
-        }
-      }
-    }
-  }
-
   private static final class ActiveConnection {
-
     private final long generation;
     private final DaemonConnection connection;
     private final AtomicBoolean helloSent = new AtomicBoolean();
@@ -1281,32 +951,12 @@ public final class DaemonRuntime implements AutoCloseable {
       this.connection = connection;
     }
 
-    private long generation() {
+    long generation() {
       return generation;
     }
 
-    private DaemonConnection connection() {
+    DaemonConnection connection() {
       return connection;
-    }
-
-    private void markReady() {
-      ready.set(true);
-    }
-
-    private void markHelloSent() {
-      helloSent.set(true);
-    }
-
-    private boolean helloSent() {
-      return helloSent.get();
-    }
-
-    private boolean markWelcomed() {
-      return welcomed.compareAndSet(false, true);
-    }
-
-    private boolean isReady() {
-      return ready.get() && connection.isOpen();
     }
 
     private synchronized void acceptInboundEnvelope(InboundEnvelopeIdentity identity) {
@@ -1331,6 +981,22 @@ public final class DaemonRuntime implements AutoCloseable {
               + lastInboundIdentity.sequence()
               + ": "
               + identity.sequence());
+    }
+
+    void markHelloSent() {
+      helloSent.set(true);
+    }
+
+    boolean helloSent() {
+      return helloSent.get();
+    }
+
+    boolean markWelcomed() {
+      return welcomed.compareAndSet(false, true);
+    }
+
+    void markReady() {
+      ready.set(true);
     }
   }
 
@@ -1359,4 +1025,163 @@ public final class DaemonRuntime implements AutoCloseable {
       String workspacePath,
       String argumentsJson,
       Duration timeout) {}
+
+  private static final class RunningInvocation {
+    private final String invocationId;
+    private final AtomicBoolean cancelled = new AtomicBoolean();
+    private final AtomicBoolean begun = new AtomicBoolean();
+    private final AtomicBoolean terminal = new AtomicBoolean();
+    private final AtomicReference<EnvironmentCapabilityExecutionHandle> handle =
+        new AtomicReference<>();
+    private final AtomicReference<ScheduledFuture<?>> deadline = new AtomicReference<>();
+
+    private RunningInvocation(String invocationId) {
+      this.invocationId = invocationId;
+    }
+
+    private String invocationId() {
+      return invocationId;
+    }
+
+    private boolean isTerminal() {
+      return terminal.get();
+    }
+
+    private boolean claimTerminal(boolean cancelHandle) {
+      if (!terminal.compareAndSet(false, true)) {
+        return false;
+      }
+      cancelDeadline();
+      if (cancelHandle) {
+        cancel();
+      }
+      return true;
+    }
+
+    private boolean begin() {
+      return begun.compareAndSet(false, true);
+    }
+
+    private void setHandle(EnvironmentCapabilityExecutionHandle handle) {
+      this.handle.set(handle);
+      if (cancelled.get()) {
+        handle.cancel();
+      }
+    }
+
+    private void setDeadline(ScheduledFuture<?> deadline) {
+      this.deadline.set(deadline);
+    }
+
+    private void cancel() {
+      if (cancelled.compareAndSet(false, true)) {
+        EnvironmentCapabilityExecutionHandle current = handle.get();
+        if (current != null) {
+          current.cancel();
+        }
+      }
+    }
+
+    private void cancelDeadline() {
+      ScheduledFuture<?> current = deadline.getAndSet(null);
+      if (current != null) {
+        current.cancel(false);
+      }
+    }
+  }
+
+  private void failResultEncoding(String invocationId, RuntimeException error, String phase) {
+    String message = "cannot " + phase + " capability result: " + safeFailureMessage(error);
+    terminal(
+        invocationId,
+        new DaemonTerminalMessage(
+            DaemonMessageType.FAILED, errorPayload(new IllegalStateException(message, error))),
+        false);
+  }
+
+  private DaemonResourceStore resourceWriter() {
+    ResourceStore store = this.resourceStore;
+    return new DaemonResourceStore() {
+      @Override
+      public DaemonResourceRef store(byte[] bytes, String mediaType) throws IOException {
+        if (store == null) {
+          throw new IllegalStateException("resource store is not configured");
+        }
+        return store.store(bytes, mediaType);
+      }
+
+      @Override
+      public byte[] read(DaemonResourceRef ref) throws IOException {
+        if (store == null) {
+          throw new IllegalStateException("resource store is not configured");
+        }
+        return store.read(ref);
+      }
+    };
+  }
+
+  private final class InvocationListener implements EnvironmentCapabilityExecutionListener {
+    private final RunningInvocation invocation;
+
+    private InvocationListener(RunningInvocation invocation) {
+      this.invocation = invocation;
+    }
+
+    private static boolean matchesInvocation(
+        EnvironmentCapabilityResult result, String invocationId) {
+      return result != null && invocationId.equals(result.callId());
+    }
+
+    @Override
+    public void onPartial(EnvironmentCapabilityResult partial) {
+      if (invocation.isTerminal() || !isRunning(invocation.invocationId())) {
+        return;
+      }
+      if (!matchesInvocation(partial, invocation.invocationId())) {
+        terminal(
+            invocation.invocationId(),
+            new DaemonTerminalMessage(
+                DaemonMessageType.FAILED,
+                "{\"message\":\"capability partial callId does not match invocationId\"}"),
+            true);
+        return;
+      }
+      try {
+        String payloadJson = resultCodec.encodePartial(partial, resourceWriter());
+        send(DaemonMessageType.PARTIAL, invocation.invocationId(), payloadJson);
+      } catch (RuntimeException error) {
+        failResultEncoding(invocation.invocationId(), error, "partial");
+      }
+    }
+
+    @Override
+    public void onComplete(EnvironmentCapabilityResult result) {
+      if (!matchesInvocation(result, invocation.invocationId())) {
+        terminal(
+            invocation.invocationId(),
+            new DaemonTerminalMessage(
+                DaemonMessageType.FAILED,
+                "{\"message\":\"capability result callId does not match invocationId\"}"),
+            false);
+        return;
+      }
+      try {
+        String payloadJson = resultCodec.encodeCompleted(result, resourceWriter());
+        terminal(
+            invocation.invocationId(),
+            new DaemonTerminalMessage(DaemonMessageType.COMPLETED, payloadJson),
+            false);
+      } catch (RuntimeException error) {
+        failResultEncoding(invocation.invocationId(), error, "complete");
+      }
+    }
+
+    @Override
+    public void onError(Throwable error) {
+      terminal(
+          invocation.invocationId(),
+          new DaemonTerminalMessage(DaemonMessageType.FAILED, errorPayload(error)),
+          false);
+    }
+  }
 }

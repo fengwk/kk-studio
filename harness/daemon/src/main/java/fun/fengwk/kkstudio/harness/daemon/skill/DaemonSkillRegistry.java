@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon.skill;
 import dev.langchain4j.skills.FileSystemSkill;
 import dev.langchain4j.skills.FileSystemSkillLoader;
 
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 
 import java.io.IOException;
 import java.nio.file.Files;

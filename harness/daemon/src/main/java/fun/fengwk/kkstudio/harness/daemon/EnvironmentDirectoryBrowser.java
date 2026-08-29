@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentWorkspacePath;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentWorkspacePath;
+import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryEntry;
+import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryListing;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -20,18 +21,9 @@ import java.util.Objects;
  * Environment Root 下的类型化单层目录浏览。
  *
  * <p>control-plane 只读操作，不经 Tool Invocation/Permission，不占 active tool slot。每次只列一层、只返回真实目录、按名称稳定排序、最多
- * {@link DaemonDirectoryCodec#MAX_ENTRIES} 条；列表默认不暴露 symlink 目录。请求 {@code path} 必须是 Environment
- * Root 下的 canonical 相对 wire 路径（{@code '.'} 表示 root），最终在 daemon 侧 canonicalize：越出 root 的 symlink
- * 穿越被拒绝。
- *
- * <p>成功响应中 {@code path}/{@code parentPath}/entry {@code path} 一律使用请求的 canonical wire 路径（显式请求 root 内
- * symlink alias 时也回显 alias 本身，内部只用 real path 校验与读取，绝不越过 root）；{@code parentPath} 是请求 {@code path} 的
- * lexical 父路径（root 与单段路径均为 {@code '.'}）；{@code displayPath} 是请求 {@code path} 的最后一段（root 为 {@code
- * '.'}，symlink alias 请求回显 alias 段），只作展示、绝不暴露 daemon 本地绝对路径。本地子目录名若无法编码为合法 wire 子路径（例如 Unix 上的
- * {@code C:}），该条目被跳过，不使整次列表失败。
- *
- * <p>失败分类：非法路径/越界 → {@link IllegalArgumentException}；不存在 → {@link NoSuchFileException}；非目录 → {@link
- * NotDirectoryException}；其余本地 IO 失败 → {@link IOException}。
+ * {@link EnvironmentDirectoryListing#MAX_ENTRIES} 条；列表默认不暴露 symlink 目录。请求 {@code path} 必须是
+ * Environment Root 下的 canonical 相对 wire 路径（{@code '.'} 表示 root），最终在 daemon 侧 canonicalize：越出 root 的
+ * symlink 穿越被拒绝。
  */
 public final class EnvironmentDirectoryBrowser {
 
@@ -49,26 +41,18 @@ public final class EnvironmentDirectoryBrowser {
     }
   }
 
-  /** 浏览 {@code requestId}/{@code path}（{@code '.'} 表示 root）的单层目录列表；{@code requestId} 是请求回显。 */
-  public DaemonDirectoryCodec.DirectoryListed list(String requestId, String path)
-      throws IOException {
-    DaemonDirectoryCodec.requireCanonicalRelativePath(path);
+  /** 浏览 {@code path}（{@code '.'} 表示 root）的单层目录列表。 */
+  public EnvironmentDirectoryListing list(String path) throws IOException {
+    EnvironmentWorkspacePath.requireCanonicalRelativePath(path);
     Path canonical = canonicalDirectory(path);
-    List<DaemonDirectoryCodec.DirectoryEntry> representable =
-        listRepresentableEntries(canonical, path);
-    boolean truncated = representable.size() > DaemonDirectoryCodec.MAX_ENTRIES;
-    List<DaemonDirectoryCodec.DirectoryEntry> entries =
+    List<EnvironmentDirectoryEntry> representable = listRepresentableEntries(canonical, path);
+    boolean truncated = representable.size() > EnvironmentDirectoryListing.MAX_ENTRIES;
+    List<EnvironmentDirectoryEntry> entries =
         List.copyOf(
             representable.subList(
-                0, Math.min(DaemonDirectoryCodec.MAX_ENTRIES, representable.size())));
-    return new DaemonDirectoryCodec.DirectoryListed(
-        requestId,
-        path,
-        displayPath(path),
-        parentWirePath(path),
-        truncated,
-        gitBranch(canonical),
-        entries);
+                0, Math.min(EnvironmentDirectoryListing.MAX_ENTRIES, representable.size())));
+    return new EnvironmentDirectoryListing(
+        path, displayPath(path), parentWirePath(path), truncated, gitBranch(canonical), entries);
   }
 
   private Path canonicalDirectory(String path) throws IOException {
@@ -92,9 +76,9 @@ public final class EnvironmentDirectoryBrowser {
   }
 
   /** 先收集可编码为 wire 的直属子目录，再按名称稳定排序；截断基于该集合，避免非法本地名挤掉后续合法条目。 */
-  private List<DaemonDirectoryCodec.DirectoryEntry> listRepresentableEntries(
+  private List<EnvironmentDirectoryEntry> listRepresentableEntries(
       Path directory, String requestPath) throws IOException {
-    List<DaemonDirectoryCodec.DirectoryEntry> entries = new ArrayList<>();
+    List<EnvironmentDirectoryEntry> entries = new ArrayList<>();
     try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
       for (Path child : stream) {
         if (Files.isSymbolicLink(child)) {
@@ -111,10 +95,10 @@ public final class EnvironmentDirectoryBrowser {
         if (!isWireRepresentableChild(childPath, name)) {
           continue;
         }
-        entries.add(new DaemonDirectoryCodec.DirectoryEntry(name, childPath));
+        entries.add(new EnvironmentDirectoryEntry(name, childPath));
       }
     }
-    entries.sort(Comparator.comparing(DaemonDirectoryCodec.DirectoryEntry::name));
+    entries.sort(Comparator.comparing(EnvironmentDirectoryEntry::name));
     return entries;
   }
 

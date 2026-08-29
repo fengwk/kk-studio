@@ -8,9 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerStatus;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpToolDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerStatus;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpToolDescriptor;
 
 import java.time.Duration;
 import java.util.ArrayList;

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.skill;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 
 /**
  * 选中的 Skill 描述元数据。

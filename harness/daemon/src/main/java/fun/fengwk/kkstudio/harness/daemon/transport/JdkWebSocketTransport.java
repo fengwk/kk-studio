@@ -4,6 +4,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -49,6 +50,7 @@ public final class JdkWebSocketTransport implements DaemonTransport {
   public CompletionStage<DaemonConnection> connect(DaemonTransportListener listener) {
     return httpClient
         .newWebSocketBuilder()
+        .connectTimeout(Duration.ofSeconds(2))
         .buildAsync(gatewayUri, new ListenerAdapter(listener, maxInboundTextChars))
         .thenApply(ConnectionAdapter::new);
   }

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 
 import java.io.IOException;
 import java.net.URI;
@@ -72,7 +72,7 @@ public final class LocalFileResourceStore implements ResourceStore {
     // 导出根必须能渲染为协议接受的规范 file URI（无空格/非 ASCII/需转义字符），否则 store 生成的 ref 永远无法通过 ResourceRef 校验。
     URI probe = this.directory.resolve("probe").toUri();
     try {
-      new ResourceRef(
+      new DaemonResourceRef(
           probe.toString(), "application/octet-stream", null, 0L, sha256Hex(new byte[0]));
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
@@ -154,7 +154,7 @@ public final class LocalFileResourceStore implements ResourceStore {
   }
 
   @Override
-  public ResourceRef store(byte[] bytes, String mediaType) throws IOException {
+  public DaemonResourceRef store(byte[] bytes, String mediaType) throws IOException {
     Objects.requireNonNull(bytes, "bytes");
     if (bytes.length > maxResourceBytes) {
       throw new IllegalArgumentException(
@@ -173,7 +173,7 @@ public final class LocalFileResourceStore implements ResourceStore {
       }
       // 复用前精确校验既有 digest 文件（size/sha），任何分配之前完成。
       verifyDigestFile(target, bytes.length, digest);
-      return new ResourceRef(
+      return new DaemonResourceRef(
           target.toUri().toString(), mediaType, null, (long) bytes.length, digest);
     }
     Path temp = writeOwnedTemp(directory, bytes);
@@ -194,11 +194,12 @@ public final class LocalFileResourceStore implements ResourceStore {
       // temp 保留到最终目标验证完成后再清理。
       Files.deleteIfExists(temp);
     }
-    return new ResourceRef(target.toUri().toString(), mediaType, null, (long) bytes.length, digest);
+    return new DaemonResourceRef(
+        target.toUri().toString(), mediaType, null, (long) bytes.length, digest);
   }
 
   @Override
-  public byte[] read(ResourceRef ref) throws IOException {
+  public byte[] read(DaemonResourceRef ref) throws IOException {
     Objects.requireNonNull(ref, "ref");
     verifyRootIdentity();
     if (ref.size() != null && ref.size() > maxResourceBytes) {
@@ -326,7 +327,7 @@ public final class LocalFileResourceStore implements ResourceStore {
    * <p>{@link ResourceRef} 构造期已保证 canonical {@code file:///}（无 authority/query/fragment、无 dot/空
    * segment），此处只校验 scheme 与所有权。导出根在构造期已创建并固定为真实路径，{@code toUri()} 必然以 {@code '/'} 结尾。
    */
-  private Path resolveOwned(ResourceRef ref) throws IOException {
+  private Path resolveOwned(DaemonResourceRef ref) throws IOException {
     URI uri = URI.create(ref.uri());
     if (!"file".equals(uri.getScheme())) {
       throw new IOException("resource is not a local file resource: " + ref.uri());

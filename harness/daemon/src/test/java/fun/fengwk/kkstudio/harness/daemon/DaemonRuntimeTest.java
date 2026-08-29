@@ -1,18 +1,17 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.ACK;
-import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.CANCELLED;
-import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.COMPLETED;
-import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.DIRECTORY_LISTED;
-import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.DIRECTORY_LIST_FAILED;
-import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.ERROR;
-import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.HELLO;
-import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.PARTIAL;
-import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.READY;
-import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.STARTED;
+import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.ACK;
+import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.CANCELLED;
+import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.COMPLETED;
+import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.ERROR;
+import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.HELLO;
+import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.PARTIAL;
+import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.READY;
+import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.STARTED;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,6 +21,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.daemon.coding.ApplyPatchCapability;
+import fun.fengwk.kkstudio.harness.daemon.coding.CodingCapabilities;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
@@ -37,36 +37,36 @@ import fun.fengwk.kkstudio.harness.daemon.mcp.McpToolRequest;
 import fun.fengwk.kkstudio.harness.daemon.mcp.McpToolSpec;
 import fun.fengwk.kkstudio.harness.daemon.mcp.McpTransportType;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
+import fun.fengwk.kkstudio.harness.daemon.skill.SkillLoadCapability;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerStatus;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityResultCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerStatus;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.io.IOException;
@@ -81,7 +81,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -107,6 +106,7 @@ class DaemonRuntimeTest {
   private static final Path ENVIRONMENT_ROOT = Path.of(System.getProperty("user.dir"));
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
+  private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
   private DaemonRuntime runtime;
   private FakeTransport handshakeTransport;
 
@@ -141,6 +141,31 @@ class DaemonRuntimeTest {
 
     // FAILED 后不得安排新的重连：连接计数保持现状，不会再有新的 HELLO。
     transport.awaitNoNewConnection(500);
+  }
+
+  /** ERROR RETRY_LATER 应主动关闭连接触发退避重连，不进入 FAILED 终态。 */
+  @Test
+  void retryLaterErrorClosesConnectionAndSchedulesReconnectWithoutTerminalFailure()
+      throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    transport.takeMessages(2);
+
+    transport.receiveRaw(
+        "{\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+            + "\"sequence\":1,\"payload\":{\"code\":\"RETRY_LATER\","
+            + "\"message\":\"server busy, retry later\"}}");
+
+    assertNotEquals(DaemonRuntimeState.FAILED, runtime.state());
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
   }
 
   /** 非冲突 ERROR（如普通协议提示）不终止 daemon。 */
@@ -637,7 +662,7 @@ class DaemonRuntimeTest {
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
     transport.receiveRaw(
-        "{\"protocolVersion\":5,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":1,"
             + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
             + "\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":1000}}");
@@ -753,175 +778,89 @@ class DaemonRuntimeTest {
     assertEquals(1, tool.executions.get());
   }
 
-  /** LIST_DIRECTORY 是 control-plane：ACK 后返回 DIRECTORY_LISTED，不进入 journal、不占 active tool slot。 */
+  /** fs.list-directory 作为标准 capability 执行，返回包含展示/父级/条目的标准 JSON。 */
   @Test
-  void listsDirectoryViaControlPlaneWithoutToolInvocation() throws Exception {
+  void listsDirectoryViaCapabilityInvocation() throws Exception {
     Path envRoot = Files.createTempDirectory("daemon-dir-listing");
     Files.createDirectories(envRoot.resolve("src/main"));
     Files.createDirectories(envRoot.resolve("docs"));
     Files.writeString(envRoot.resolve("README.md"), "x");
     try {
       FakeTransport transport = new FakeTransport();
-      TestCapability tool = new TestCapability();
-      runtime = runtime(transport, tool, envRoot);
+      CodingToolsConfig toolsConfig = CodingToolsConfig.fromSystemProperties(envRoot);
+      DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+      CodingCapabilities.registerAll(
+          registry,
+          toolsConfig,
+          Executors.newVirtualThreadPerTaskExecutor(),
+          Executors.newSingleThreadScheduledExecutor());
+      runtime = runtime(transport, registry, envRoot);
 
       runtime.start();
       transport.awaitConnections(1);
       completeHandshake(0);
       transport.takeMessages(2);
 
-      transport.receive(listDirectory(1, "."));
-      List<DaemonEnvelope> messages = transport.takeMessages(2);
-      assertMessageTypes(messages, ACK, DIRECTORY_LISTED);
-      DaemonDirectoryCodec.DirectoryListed listed =
-          new DaemonDirectoryCodec().decodeListed(messages.get(1).payloadJson());
-      assertEquals(".", listed.path());
-      assertEquals(".", listed.displayPath());
+      transport.receive(
+          invoke(
+              "list-1",
+              1,
+              EnvironmentCapabilityIds.FS_LIST_DIRECTORY,
+              "1",
+              ".",
+              "{\"path\":\".\"}"));
+      List<DaemonEnvelope> messages = transport.takeMessages(3);
+      assertMessageTypes(messages, ACK, STARTED, COMPLETED);
+      EnvironmentCapabilityResult result = resultCodec.decodeResult(messages.get(2).payloadJson());
+      assertFalse(result.error());
+      String json = ((JsonToolContent) result.contents().get(0)).json();
+      assertTrue(json.contains("\"displayPath\":\".\""));
+      assertTrue(json.contains("\"path\":\"docs\""));
+      assertTrue(json.contains("\"path\":\"src\""));
+    } finally {
+      deleteRecursively(envRoot);
+    }
+  }
+
+  /** skill.load 作为标准 capability 执行，成功返回指令正文。 */
+  @Test
+  void loadsSkillViaCapabilityInvocation() throws Exception {
+    Path skillRoot = Files.createTempDirectory("daemon-skill-root");
+    Path skillDir = skillRoot.resolve("my-skill");
+    Files.createDirectories(skillDir);
+    Files.writeString(
+        skillDir.resolve("SKILL.md"),
+        "---\nname: my-skill\ndescription: A test skill\n---\n# My Skill Body\nInstruction content.");
+    try {
+      DaemonSkillRegistry skillRegistry = DaemonSkillRegistry.discover(List.of(skillRoot));
+      FakeTransport transport = new FakeTransport();
+      DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+      registry.register(
+          new SkillLoadCapability(skillRegistry, Executors.newVirtualThreadPerTaskExecutor()));
+      runtime = runtime(transport, registry, skillRegistry);
+
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake(0);
+      transport.takeMessages(2);
+
+      transport.receive(
+          invoke(
+              "skill-1",
+              1,
+              EnvironmentCapabilityIds.SKILL_LOAD,
+              "1",
+              ".",
+              "{\"name\":\"my-skill\"}"));
+      List<DaemonEnvelope> messages = transport.takeMessages(3);
+      assertMessageTypes(messages, ACK, STARTED, COMPLETED);
+      EnvironmentCapabilityResult result = resultCodec.decodeResult(messages.get(2).payloadJson());
+      assertFalse(result.error());
       assertEquals(
-          List.of("docs", "src"),
-          listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
-      assertEquals(0, tool.executions.get());
-
-      // 与 active invocation 并行：invoke 之后仍可立即浏览，互不阻塞。
-      transport.receive(invoke("parallel-invocation", 2));
-      assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
-      transport.receive(listDirectory(3, "src"));
-      List<DaemonEnvelope> nestedMessages = transport.takeMessages(2);
-      assertMessageTypes(nestedMessages, ACK, DIRECTORY_LISTED);
-      DaemonDirectoryCodec.DirectoryListed nested =
-          new DaemonDirectoryCodec().decodeListed(nestedMessages.get(1).payloadJson());
-      assertEquals("src", nested.path());
-      assertEquals("src", nested.displayPath());
-      assertEquals(1, tool.executions.get());
+          "# My Skill Body\nInstruction content.",
+          ((TextToolContent) result.contents().get(0)).text());
     } finally {
-      deleteRecursively(envRoot);
-    }
-  }
-
-  /** 缺失/非法路径得到确定性的 DIRECTORY_LIST_FAILED 分类（requestId/path 原样回显），而不是协议 ERROR。 */
-  @Test
-  void directoryFailuresAreTypedOnTheWire() throws Exception {
-    Path envRoot = Files.createTempDirectory("daemon-dir-failure");
-    Files.writeString(envRoot.resolve("file.txt"), "x");
-    try {
-      FakeTransport transport = new FakeTransport();
-      runtime = runtime(transport, new TestCapability(), envRoot);
-
-      runtime.start();
-      transport.awaitConnections(1);
-      completeHandshake(0);
-      transport.takeMessages(2);
-
-      String missingRequestId = UUID.randomUUID().toString();
-      transport.receive(listDirectory(missingRequestId, 1, "missing"));
-      DaemonDirectoryCodec.DirectoryListFailed notFound =
-          new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
-      assertEquals(DaemonDirectoryFailureCode.NOT_FOUND, notFound.code());
-      assertEquals("missing", notFound.path());
-      assertEquals(missingRequestId, notFound.requestId());
-
-      transport.receive(listDirectory(2, "file.txt"));
-      DaemonDirectoryCodec.DirectoryListFailed notDirectory =
-          new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
-      assertEquals(DaemonDirectoryFailureCode.NOT_DIRECTORY, notDirectory.code());
-
-      transport.receive(listDirectory(3, "../escape"));
-      DaemonDirectoryCodec.DirectoryListFailed invalid =
-          new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
-      assertEquals(DaemonDirectoryFailureCode.INVALID_PATH, invalid.code());
-
-      // 目录浏览不进入 journal：每次请求使用独立 canonical UUID requestId 都能正常归因。
-      transport.receive(listDirectory(4, "missing"));
-      DaemonDirectoryCodec.DirectoryListFailed again =
-          new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
-      assertEquals(DaemonDirectoryFailureCode.NOT_FOUND, again.code());
-    } finally {
-      deleteRecursively(envRoot);
-    }
-  }
-
-  /** LIST_DIRECTORY 的文件系统 IO 不得阻塞 inbound 回调：ACK 先回，后续消息可继续处理，被拦住的目录任务之后才发 DIRECTORY_LISTED。 */
-  @Test
-  void listDirectoryAcknowledgesWithoutBlockingInboundThenListsOnWorker() throws Exception {
-    Path envRoot = Files.createTempDirectory("daemon-dir-async");
-    Files.createDirectories(envRoot.resolve("docs"));
-    CountDownLatch started = new CountDownLatch(1);
-    CountDownLatch release = new CountDownLatch(1);
-    ExecutorService directoryWorker = Executors.newSingleThreadExecutor();
-    directoryWorker.execute(
-        () -> {
-          started.countDown();
-          try {
-            if (!release.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-              throw new IllegalStateException("test did not release directory worker");
-            }
-          } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-          }
-        });
-    try {
-      FakeTransport transport = new FakeTransport();
-      TestCapability tool = new TestCapability();
-      runtime = runtime(transport, tool, envRoot, directoryWorker);
-
-      runtime.start();
-      transport.awaitConnections(1);
-      completeHandshake(0);
-      transport.takeMessages(2);
-
-      transport.receive(listDirectory(1, "."));
-      assertMessageTypes(transport.takeMessages(1), ACK);
-      assertTrue(started.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
-      assertFalse(transport.hasMessages());
-
-      transport.receive(invoke("after-list", 2));
-      assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
-      assertEquals(1, tool.executions.get());
-
-      release.countDown();
-      List<DaemonEnvelope> listed = transport.takeMessages(1);
-      assertMessageTypes(listed, DIRECTORY_LISTED);
-      assertEquals(
-          "docs",
-          new DaemonDirectoryCodec()
-              .decodeListed(listed.get(0).payloadJson())
-              .entries()
-              .get(0)
-              .path());
-    } finally {
-      release.countDown();
-      directoryWorker.shutdownNow();
-      deleteRecursively(envRoot);
-    }
-  }
-
-  /** 统一阻塞 executor 已停止时立即回 correlated DIRECTORY_LIST_FAILED，不悬挂目录请求。 */
-  @Test
-  void listDirectoryQueueRejectionReturnsTypedFailure() throws Exception {
-    Path envRoot = Files.createTempDirectory("daemon-dir-reject");
-    Files.createDirectories(envRoot.resolve("docs"));
-    ExecutorService directoryWorker = Executors.newSingleThreadExecutor();
-    directoryWorker.shutdownNow();
-    try {
-      FakeTransport transport = new FakeTransport();
-      runtime = runtime(transport, new TestCapability(), envRoot, directoryWorker);
-
-      runtime.start();
-      transport.awaitConnections(1);
-      completeHandshake(0);
-      transport.takeMessages(2);
-
-      String requestId = UUID.randomUUID().toString();
-      transport.receive(listDirectory(requestId, 1, "."));
-      List<DaemonEnvelope> messages = transport.takeMessages(2);
-      assertMessageTypes(messages, ACK, DIRECTORY_LIST_FAILED);
-      DaemonDirectoryCodec.DirectoryListFailed failed =
-          new DaemonDirectoryCodec().decodeFailed(messages.get(1).payloadJson());
-      assertEquals(requestId, failed.requestId());
-      assertEquals(".", failed.path());
-      assertEquals(DaemonDirectoryFailureCode.IO_ERROR, failed.code());
-    } finally {
-      deleteRecursively(envRoot);
+      deleteRecursively(skillRoot);
     }
   }
 
@@ -1221,7 +1160,7 @@ class DaemonRuntimeTest {
     FakeTransport transport = new FakeTransport();
     TestCapability tool = new TestCapability();
     InMemoryResourceStore store = new InMemoryResourceStore();
-    ResourceRef stored = store.store(new byte[] {1, 2}, "application/json");
+    DaemonResourceRef stored = store.store(new byte[] {1, 2}, "application/json");
     runtime = runtime(transport, tool, store);
 
     runtime.start();
@@ -1248,9 +1187,12 @@ class DaemonRuntimeTest {
     // PARTIAL 携带 resource → 编码在任何 store 访问前拒绝，收敛为 FAILED。
     transport.receive(invoke("structured-content-2", 2));
     transport.takeMessages(2);
+    ResourceRef storedRef =
+        new ResourceRef(
+            stored.uri(), stored.mediaType(), stored.name(), stored.size(), stored.sha256());
     tool.partial(
         new EnvironmentCapabilityResult(
-            "structured-content-2", List.of(new ResourceToolContent(stored)), false, "{}"));
+            "structured-content-2", List.of(new ResourceToolContent(storedRef)), false, "{}"));
     List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
     assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
     assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
@@ -1313,7 +1255,7 @@ class DaemonRuntimeTest {
     TestCapability tool = new TestCapability();
     InMemoryResourceStore store = new InMemoryResourceStore();
     byte[] data = new byte[] {(byte) 0xCA, (byte) 0xFE, (byte) 0xBA, (byte) 0xBE};
-    ResourceRef stored = store.store(data, "application/octet-stream");
+    DaemonResourceRef stored = store.store(data, "application/octet-stream");
     runtime = runtime(transport, tool, store);
 
     runtime.start();
@@ -1322,9 +1264,12 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     transport.receive(invoke("resource-rewrite", 1));
     transport.takeMessages(2);
+    ResourceRef ref =
+        new ResourceRef(
+            stored.uri(), stored.mediaType(), stored.name(), stored.size(), stored.sha256());
     tool.complete(
         new EnvironmentCapabilityResult(
-            "resource-rewrite", List.of(new ResourceToolContent(stored)), false, "{}"));
+            "resource-rewrite", List.of(new ResourceToolContent(ref)), false, "{}"));
 
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
     assertMessageTypes(terminal, COMPLETED);
@@ -1376,8 +1321,8 @@ class DaemonRuntimeTest {
     assertEquals("application/octet-stream", content.get("mediaType").asText());
     assertEquals(3, content.get("size").asLong());
     assertEquals(Base64.getEncoder().encodeToString(data), content.get("contentBase64").asText());
-    ResourceRef wireRef =
-        new ResourceRef(
+    DaemonResourceRef wireRef =
+        new DaemonResourceRef(
             content.get("uri").asText(),
             content.get("mediaType").asText(),
             null,
@@ -1394,18 +1339,19 @@ class DaemonRuntimeTest {
     ResourceStore failingStore =
         new ResourceStore() {
           @Override
-          public ResourceRef store(byte[] bytes, String mediaType) throws IOException {
+          public DaemonResourceRef store(byte[] bytes, String mediaType) throws IOException {
             throw new IOException("store down");
           }
 
           @Override
-          public byte[] read(ResourceRef ref) throws IOException {
+          public byte[] read(DaemonResourceRef ref) throws IOException {
             throw new IOException("missing resource: " + ref.uri());
           }
         };
     runtime = runtime(transport, tool, failingStore);
-    ResourceRef local =
-        new ResourceRef("file:///export/local-1", "application/json", null, 3L, "0".repeat(64));
+    DaemonResourceRef local =
+        new DaemonResourceRef(
+            "file:///export/local-1", "application/json", null, 3L, "0".repeat(64));
 
     runtime.start();
     transport.awaitConnections(1);
@@ -1414,10 +1360,12 @@ class DaemonRuntimeTest {
     transport.receive(invoke("resource-fail", 1));
     transport.takeMessages(2);
 
+    ResourceRef localRef =
+        new ResourceRef(local.uri(), local.mediaType(), local.name(), local.size(), local.sha256());
     // PARTIAL 失败必须收敛为 FAILED，且不再发出 PARTIAL 或 COMPLETED。
     tool.partial(
         new EnvironmentCapabilityResult(
-            "resource-fail", List.of(new ResourceToolContent(local)), false, "{}"));
+            "resource-fail", List.of(new ResourceToolContent(localRef)), false, "{}"));
     List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
     assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
     assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
@@ -1425,7 +1373,7 @@ class DaemonRuntimeTest {
     // FAILED 之后迟到的 COMPLETED 必须被忽略（由 journal 守卫）。
     tool.complete(
         new EnvironmentCapabilityResult(
-            "resource-fail", List.of(new ResourceToolContent(local)), false, "{}"));
+            "resource-fail", List.of(new ResourceToolContent(localRef)), false, "{}"));
     assertFalse(transport.hasMessages());
 
     // 现在一次带 COMPLETED 失败的独立 invocation 也必须收敛为 FAILED。
@@ -1538,12 +1486,12 @@ class DaemonRuntimeTest {
     ResourceStore adversarialStore =
         new ResourceStore() {
           @Override
-          public ResourceRef store(byte[] bytes, String mediaType) {
+          public DaemonResourceRef store(byte[] bytes, String mediaType) {
             throw new ExplodingMessageException();
           }
 
           @Override
-          public byte[] read(ResourceRef ref) {
+          public byte[] read(DaemonResourceRef ref) {
             throw new ExplodingMessageException();
           }
         };
@@ -1661,7 +1609,7 @@ class DaemonRuntimeTest {
 
       JsonNode payload = codec.readPayload(handshake.get(1));
       assertFalse(payload.has("tools"));
-      assertEquals(4, payload.path("version").asInt());
+      assertEquals(DaemonCapabilities.VERSION, payload.path("version").asInt());
       assertTrue(payload.path("environment").path("workingDirectory").isMissingNode());
       assertTrue(payload.path("environment").path("note").isTextual());
       assertTrue(payload.path("environment").path("rootPath").isTextual());
@@ -1683,74 +1631,6 @@ class DaemonRuntimeTest {
     } finally {
       deleteRecursively(skillRoot);
     }
-  }
-
-  /** LOAD_SKILL 通过 invocationId 关联，成功返回 skill 指令正文（SKILL.md 去除 front matter）。 */
-  @Test
-  void loadsSkillBodyByName() throws Exception {
-    Path skillRoot = Files.createTempDirectory("daemon-skills-load");
-    Path skillDir = skillRoot.resolve("demo");
-    Files.createDirectories(skillDir);
-    String body = "---\nname: demo\ndescription: Demo skill\n---\n# Demo\nfull body\n";
-    Files.writeString(skillDir.resolve("SKILL.md"), body);
-    try {
-      FakeTransport transport = new FakeTransport();
-      runtime =
-          runtime(
-              transport, new TestCapability(), DaemonSkillRegistry.discover(List.of(skillRoot)));
-      runtime.start();
-      transport.awaitConnections(1);
-      completeHandshake(0);
-      transport.takeMessages(2);
-
-      DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
-      transport.receive(
-          new DaemonEnvelope(
-              DaemonProtocol.VERSION,
-              DaemonMessageType.LOAD_SKILL,
-              ENVIRONMENT_NAME,
-              "skill-1",
-              1,
-              skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("demo"))));
-
-      List<DaemonEnvelope> messages = transport.takeMessages(2);
-      assertMessageTypes(messages, ACK, DaemonMessageType.SKILL_LOADED);
-      assertEquals("skill-1", messages.get(1).invocationId());
-      DaemonSkillLoadCodec.SkillLoaded loaded =
-          skillCodec.decodeLoaded(messages.get(1).payloadJson());
-      assertEquals("demo", loaded.name());
-      assertEquals("# Demo\nfull body", loaded.content());
-    } finally {
-      deleteRecursively(skillRoot);
-    }
-  }
-
-  /** 未知 skill 返回确定性 SKILL_LOAD_FAILED，不进入 tool journal。 */
-  @Test
-  void failsUnknownSkillLoadDeterministically() throws InterruptedException {
-    FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new TestCapability(), DaemonSkillRegistry.empty());
-    runtime.start();
-    transport.awaitConnections(1);
-    completeHandshake(0);
-    transport.takeMessages(2);
-
-    DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
-    transport.receive(
-        new DaemonEnvelope(
-            DaemonProtocol.VERSION,
-            DaemonMessageType.LOAD_SKILL,
-            ENVIRONMENT_NAME,
-            "skill-missing",
-            1,
-            skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("nope"))));
-
-    List<DaemonEnvelope> messages = transport.takeMessages(2);
-    assertMessageTypes(messages, ACK, DaemonMessageType.SKILL_LOAD_FAILED);
-    DaemonSkillLoadCodec.SkillLoadFailed failed =
-        skillCodec.decodeFailed(messages.get(1).payloadJson());
-    assertEquals("nope", failed.name());
-    assertTrue(failed.message().contains("unknown skill"));
   }
 
   /** transport 同步抛错和异步返回空连接都必须收敛为下一次重连。 */
@@ -1833,12 +1713,11 @@ class DaemonRuntimeTest {
     assertMessageTypes(transport.takeMessages(1), ACK);
   }
 
-  /** stale LOAD_SKILL 响应及其协议 ERROR 均不得被发送到 replacement connection。 */
+  /** stale INVOKE 响应及其协议 ERROR 均不得被发送到 replacement connection。 */
   @Test
-  void doesNotRouteStaleSkillOrMalformedInputResponsesToReplacementConnection()
+  void doesNotRouteStaleInvokeOrMalformedInputResponsesToReplacementConnection()
       throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
     runtime = runtime(transport, new TestCapability(), DaemonSkillRegistry.empty());
 
     runtime.start();
@@ -1850,15 +1729,7 @@ class DaemonRuntimeTest {
     completeHandshake(0);
     transport.takeMessages(2);
 
-    transport.receiveFromConnection(
-        0,
-        new DaemonEnvelope(
-            DaemonProtocol.VERSION,
-            DaemonMessageType.LOAD_SKILL,
-            ENVIRONMENT_NAME,
-            "stale-skill",
-            1,
-            skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("missing"))));
+    transport.receiveFromConnection(0, invoke("stale-invoke", 1));
     transport.receiveRawFromConnection(
         0,
         "{\"protocolVersion\":"
@@ -1867,15 +1738,8 @@ class DaemonRuntimeTest {
             + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{}}");
     assertFalse(transport.hasMessages());
 
-    transport.receive(
-        new DaemonEnvelope(
-            DaemonProtocol.VERSION,
-            DaemonMessageType.LOAD_SKILL,
-            ENVIRONMENT_NAME,
-            "current-skill",
-            1,
-            skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("missing"))));
-    assertMessageTypes(transport.takeMessages(2), ACK, DaemonMessageType.SKILL_LOAD_FAILED);
+    transport.receive(invoke("current-invoke", 1));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
   }
 
   /** 被提前关闭的 scheduler 不能让 runtime 停在 started=true 但永远不会连接的半启动状态。 */
@@ -1909,7 +1773,7 @@ class DaemonRuntimeTest {
     assertTrue(transport.closed.get());
   }
 
-  /** 未预期 platform 消息、未知取消和非法 skill payload 都必须只产生协议级响应。 */
+  /** 未预期 platform 消息、未知取消和非法 invoke payload 都必须只产生协议级响应。 */
   @Test
   void isolatesUnexpectedAndMalformedProtocolMessagesFromInvocationExecution()
       throws InterruptedException {
@@ -1933,12 +1797,12 @@ class DaemonRuntimeTest {
     transport.receive(
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
-            DaemonMessageType.LOAD_SKILL,
+            DaemonMessageType.INVOKE,
             ENVIRONMENT_NAME,
-            "invalid-skill-payload",
+            "invalid-invoke-payload",
             2,
             "{}"));
-    assertMessageTypes(transport.takeMessages(2), ACK, DaemonMessageType.ERROR);
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
   }
 
@@ -2211,13 +2075,8 @@ class DaemonRuntimeTest {
   }
 
   private DaemonRuntime runtime(
-      FakeTransport transport,
-      EnvironmentCapability capability,
-      Path environmentRoot,
-      ExecutorService directoryWorker) {
+      FakeTransport transport, DaemonCapabilityRegistry registry, Path environmentRoot) {
     handshakeTransport = transport;
-    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
-    registry.register(capability);
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
@@ -2237,7 +2096,36 @@ class DaemonRuntimeTest {
         DaemonSkillRegistry.empty(),
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
-        directoryWorker);
+        Executors.newVirtualThreadPerTaskExecutor(),
+        new InMemoryResourceStore());
+  }
+
+  private DaemonRuntime runtime(
+      FakeTransport transport,
+      DaemonCapabilityRegistry registry,
+      DaemonSkillRegistry skillRegistry) {
+    handshakeTransport = transport;
+    return new DaemonRuntime(
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            new EnvironmentName("environment"),
+            "daemon",
+            Duration.ofMinutes(1),
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(10),
+            "test-gateway-token",
+            null,
+            ENVIRONMENT_ROOT,
+            List.of(),
+            null),
+        transport,
+        registry,
+        skillRegistry,
+        new InMemoryDaemonInvocationJournal(),
+        Executors.newSingleThreadScheduledExecutor(),
+        Executors.newVirtualThreadPerTaskExecutor(),
+        new InMemoryResourceStore());
   }
 
   private DaemonRuntime runtime(
@@ -2612,18 +2500,28 @@ class DaemonRuntimeTest {
             + "\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":0}");
   }
 
-  private DaemonEnvelope listDirectory(long sequence, String path) {
-    return listDirectory(UUID.randomUUID().toString(), sequence, path);
-  }
-
-  private DaemonEnvelope listDirectory(String requestId, long sequence, String path) {
+  private DaemonEnvelope invoke(
+      String invocationId,
+      long sequence,
+      EnvironmentCapabilityId capabilityId,
+      String capabilityVersion,
+      String workspacePath,
+      String argumentsJson) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
-        DaemonMessageType.LIST_DIRECTORY,
+        DaemonMessageType.INVOKE,
         ENVIRONMENT_NAME,
-        null,
+        invocationId,
         sequence,
-        "{\"requestId\":\"" + requestId + "\",\"path\":\"" + path + "\"}");
+        "{\"capabilityId\":\""
+            + capabilityId.value()
+            + "\",\"capabilityVersion\":\""
+            + capabilityVersion
+            + "\",\"workspacePath\":\""
+            + workspacePath
+            + "\",\"arguments\":"
+            + argumentsJson
+            + ",\"timeoutMillis\":10000}");
   }
 
   private DaemonEnvelope platformMessage(DaemonMessageType messageType, long sequence) {

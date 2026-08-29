@@ -5,9 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
@@ -20,7 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Tool schema、执行与 Daemon wire 契约测试。 */
+/** Tool schema、执行与结果契约测试。 */
 class ToolContractTest {
 
   /** 递归 schema 校验必须拒绝缺失 required、未知字段和不匹配的数组元素。 */
@@ -121,43 +118,6 @@ class ToolContractTest {
     assertEquals("{}", new ToolResult("call-1", List.of(), false, null).detailsJson());
     assertThrows(
         IllegalArgumentException.class, () -> new ToolResult("call-1", List.of(), false, "[]"));
-  }
-
-  /** invocation 生命周期消息必须带 invocation ID，连接级消息则无需该字段。 */
-  @Test
-  void enforcesDaemonEnvelopeCorrelationAndJsonPayload() {
-    EnvironmentName environmentName = new EnvironmentName("environment");
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new DaemonEnvelope(
-                DaemonProtocol.VERSION, DaemonMessageType.INVOKE, environmentName, null, 1, "{}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new DaemonEnvelope(
-                DaemonProtocol.VERSION,
-                DaemonMessageType.LOAD_SKILL,
-                environmentName,
-                null,
-                1,
-                "{}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new DaemonEnvelope(
-                DaemonProtocol.VERSION,
-                DaemonMessageType.HELLO,
-                environmentName,
-                null,
-                0,
-                "not-json"));
-
-    DaemonEnvelope hello =
-        new DaemonEnvelope(
-            DaemonProtocol.VERSION, DaemonMessageType.HELLO, environmentName, null, 0, "{}");
-    assertEquals(DaemonMessageType.HELLO, hello.messageType());
-    assertEquals("environment", hello.environmentName().value());
   }
 
   private ToolDescriptor descriptor() {

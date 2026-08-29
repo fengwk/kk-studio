@@ -22,6 +22,7 @@ class ToolModuleArchitectureTest {
 
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
+          "fun.fengwk.kkstudio.harness.environment.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.daemon.",
           "fun.fengwk.kkstudio.harness.kernel.",

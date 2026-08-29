@@ -2,14 +2,11 @@ package fun.fengwk.kkstudio.harness.daemon.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
-import java.util.List;
 import java.util.concurrent.ExecutorService;
 
 /**
@@ -59,9 +56,9 @@ public final class McpCallCapability extends AbstractMcpBridgeCapability {
     String id = request.call().id();
     String text = outcome.text();
     if (isJsonValue(text)) {
-      return new EnvironmentCapabilityResult(id, List.of(new JsonToolContent(text)), false, "{}");
+      return EnvironmentCapabilityResult.json(id, text);
     }
-    return new EnvironmentCapabilityResult(id, List.of(new TextToolContent(text)), false, "{}");
+    return EnvironmentCapabilityResult.text(id, text);
   }
 
   private boolean isJsonValue(String text) {
@@ -71,5 +68,10 @@ public final class McpCallCapability extends AbstractMcpBridgeCapability {
     } catch (Exception error) {
       return false;
     }
+  }
+
+  @Override
+  protected String failureMessage(Exception error) {
+    return "MCP server call failed.";
   }
 }

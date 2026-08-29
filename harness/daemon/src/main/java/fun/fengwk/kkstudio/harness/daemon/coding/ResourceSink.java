@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 
 import java.io.IOException;
 
@@ -8,5 +8,5 @@ import java.io.IOException;
 public interface ResourceSink {
 
   /** 持久化字节并返回其稳定的 canonical 引用。 */
-  ResourceRef store(byte[] bytes, String mediaType) throws IOException;
+  DaemonResourceRef store(byte[] bytes, String mediaType) throws IOException;
 }
