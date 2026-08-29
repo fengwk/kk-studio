@@ -11,57 +11,18 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>kk-studio-harness-runtime</artifactId>
+    <artifactId>kk-studio-harness-prompt</artifactId>
 
     <dependencies>
         <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-prompt</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-tool</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jgit</groupId>
-            <artifactId>org.eclipse.jgit</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.mockito</groupId>
-            <artifactId>mockito-core</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
 
     <build>
         <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <version>3.4.2</version>
-                <executions>
-                    <execution>
-                        <id>store-test-contracts</id>
-                        <phase>process-test-classes</phase>
-                        <goals>
-                            <goal>test-jar</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -77,10 +38,8 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/processor/ResolvedRequestValidator</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestSpec</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/invocation/codec/ToolBindingJsonCodec</include>
+                                        <include>fun/fengwk/kkstudio/harness/prompt/PromptTemplate</include>
+                                        <include>fun/fengwk/kkstudio/harness/prompt/PromptTemplateLoader</include>
                                     </includes>
                                     <limits>
                                         <limit>

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.builtin;
+package fun.fengwk.kkstudio.harness.prompt;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,51 +10,40 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Builtin 模块的轻量级架构守卫。
+ * Prompt 模块的轻量级架构守卫。
  *
- * <p>Builtin 主源码只能依赖 JDK 与 {@code fun.fengwk.kkstudio.harness.contributor.api} / {@code
- * fun.fengwk.kkstudio.harness.prompt} / {@code fun.fengwk.kkstudio.harness.runtime} / {@code
- * fun.fengwk.kkstudio.harness.tool} / {@code fun.fengwk.kkstudio.harness.builtin} / {@code
- * com.fasterxml.jackson}；禁止依赖 Spring、infra、daemon、platform 与 web。
+ * <p>Prompt 模块是 pure JDK-only 基础原语模块：主源码只能依赖 JDK 与自身包 {@code fun.fengwk.kkstudio.harness.prompt}，
+ * 生产依赖必须为 0，严禁引入任何第三方依赖或其它模块。
  */
-class BuiltinModuleArchitectureTest {
+class PromptModuleArchitectureTest {
 
-  private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
-      List.of(
-          "fun.fengwk.kkstudio.harness.infra.",
-          "fun.fengwk.kkstudio.harness.daemon.",
-          "fun.fengwk.kkstudio.platform.",
-          "fun.fengwk.kkstudio.web.",
-          "org.springframework.",
-          "jakarta.",
-          "javax.sql.",
-          "org.mybatis.",
-          "org.apache.ibatis.");
+  private static final Pattern DEPENDENCY_PATTERN =
+      Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL);
 
+  /** 验证 prompt 模块主源码只允许导入 JDK 标准库（java.* / javax.*）与自身包内类型。 */
   @Test
-  void builtinMainSourcesStayOnAllowedPackages() throws IOException {
-    Path main = locateBuiltinMainJava();
-    assertTrue(Files.isDirectory(main), "builtin main sources must exist: " + main);
+  void promptMainSourcesStayOnJdkAndOwnPackage() throws IOException {
+    Path main = locatePromptMainJava();
+    assertTrue(Files.isDirectory(main), "prompt main sources must exist: " + main);
 
     List<String> violations = scanViolations(main);
     assertTrue(
         violations.isEmpty(), () -> "architecture violations:\n" + String.join("\n", violations));
   }
 
+  /** 验证 prompt 模块 POM 生产依赖数量必须为 0（仅允许 test scope 依赖）。 */
   @Test
-  void builtinPomDeclaresOnlyAllowedProductionDependencies() throws IOException {
-    Path moduleRoot = locateBuiltinMainJava().getParent().getParent().getParent();
+  void promptPomDeclaresZeroProductionDependencies() throws IOException {
+    Path moduleRoot = locatePromptMainJava().getParent().getParent().getParent();
     Path pom = moduleRoot.resolve("pom.xml");
     String text = Files.readString(pom, StandardCharsets.UTF_8);
-    Matcher matcher =
-        Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL).matcher(text);
-    List<String> violations = new ArrayList<>();
+    Matcher matcher = DEPENDENCY_PATTERN.matcher(text);
+    List<String> productionDependencies = new ArrayList<>();
     while (matcher.find()) {
       String dependency = matcher.group(1);
       String scope = optionalTag(dependency, "scope");
@@ -63,19 +52,13 @@ class BuiltinModuleArchitectureTest {
       }
       String coordinate =
           requiredTag(dependency, "groupId") + ":" + requiredTag(dependency, "artifactId");
-      if (!Set.of(
-              "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
-              "fun.fengwk.kk-studio:kk-studio-harness-prompt",
-              "fun.fengwk.kk-studio:kk-studio-harness-runtime",
-              "fun.fengwk.kk-studio:kk-studio-harness-tool",
-              "com.fasterxml.jackson.core:jackson-databind")
-          .contains(coordinate)) {
-        violations.add(coordinate + (scope == null ? "" : " [" + scope + "]"));
-      }
+      productionDependencies.add(coordinate + (scope == null ? "" : " [" + scope + "]"));
     }
     assertTrue(
-        violations.isEmpty(),
-        () -> "disallowed direct production dependencies in " + pom + ": " + violations);
+        productionDependencies.isEmpty(),
+        () ->
+            "prompt module must have 0 production dependencies, but found: "
+                + productionDependencies);
   }
 
   private static List<String> scanViolations(Path main) throws IOException {
@@ -94,10 +77,8 @@ class BuiltinModuleArchitectureTest {
                       continue;
                     }
                     String imported = normalizeImport(trimmed);
-                    for (String prefix : FORBIDDEN_IMPORT_PREFIXES) {
-                      if (imported.startsWith(prefix)) {
-                        violations.add(relative(main, path) + ": " + trimmed);
-                      }
+                    if (!isAllowedImport(imported)) {
+                      violations.add(relative(main, path) + ": disallowed import " + trimmed);
                     }
                   }
                 } catch (IOException error) {
@@ -108,17 +89,10 @@ class BuiltinModuleArchitectureTest {
     return violations;
   }
 
-  private static String requiredTag(String block, String tag) {
-    String value = optionalTag(block, tag);
-    if (value == null || value.isBlank()) {
-      throw new IllegalStateException("dependency must declare " + tag);
-    }
-    return value;
-  }
-
-  private static String optionalTag(String block, String tag) {
-    Matcher matcher = Pattern.compile("<" + tag + ">\\s*([^<]+?)\\s*</" + tag + ">").matcher(block);
-    return matcher.find() ? matcher.group(1).trim() : null;
+  private static boolean isAllowedImport(String imported) {
+    return imported.startsWith("java.")
+        || imported.startsWith("javax.")
+        || imported.startsWith("fun.fengwk.kkstudio.harness.prompt.");
   }
 
   private static String normalizeImport(String importLine) {
@@ -144,16 +118,29 @@ class BuiltinModuleArchitectureTest {
     }
   }
 
-  private static Path locateBuiltinMainJava() {
+  private static Path locatePromptMainJava() {
     Path cwd = Path.of("").toAbsolutePath().normalize();
     List<Path> candidates =
-        List.of(cwd.resolve("src/main/java"), cwd.resolve("harness/builtin/src/main/java"));
+        List.of(cwd.resolve("src/main/java"), cwd.resolve("harness/prompt/src/main/java"));
     for (Path candidate : candidates) {
       Path normalized = candidate.normalize();
       if (Files.isDirectory(normalized) && !isGeneratedOrTarget(normalized)) {
         return normalized;
       }
     }
-    throw new IllegalStateException("cannot locate builtin main sources from " + cwd);
+    throw new IllegalStateException("cannot locate prompt main sources from " + cwd);
+  }
+
+  private static String requiredTag(String block, String tag) {
+    String value = optionalTag(block, tag);
+    if (value == null || value.isBlank()) {
+      throw new IllegalStateException("dependency must declare " + tag);
+    }
+    return value;
+  }
+
+  private static String optionalTag(String block, String tag) {
+    Matcher matcher = Pattern.compile("<" + tag + ">\\s*([^<]+?)\\s*</" + tag + ">").matcher(block);
+    return matcher.find() ? matcher.group(1).trim() : null;
   }
 }

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.prompt;
+package fun.fengwk.kkstudio.harness.prompt;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;

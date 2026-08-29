@@ -36,6 +36,7 @@ class RuntimeModuleArchitectureTest {
           "javax.",
           "lombok.",
           "com.fasterxml.jackson.",
+          "fun.fengwk.kkstudio.harness.prompt.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.tool.",
           FastIgnoreRule.class.getName());
@@ -80,17 +81,21 @@ class RuntimeModuleArchitectureTest {
     Path harnessRoot = moduleRoot.getParent();
     assertHarnessModules(harnessRoot.resolve("pom.xml"));
     assertManagedInternalDependency(
+        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-prompt");
+    assertManagedInternalDependency(
         harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-contributor-api");
     assertManagedInternalDependency(
         harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-builtin");
     assertManagedInternalDependency(
         harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-infra");
+    assertDirectProductionDependencies(harnessRoot.resolve("prompt/pom.xml"), Set.of());
     assertDirectProductionDependencies(
         harnessRoot.resolve("tool/pom.xml"), Set.of("com.fasterxml.jackson.core:jackson-databind"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("runtime/pom.xml"),
         Set.of(
             "com.fasterxml.jackson.core:jackson-databind",
+            "fun.fengwk.kk-studio:kk-studio-harness-prompt",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "org.eclipse.jgit:org.eclipse.jgit",
             "org.slf4j:slf4j-api"));
@@ -104,6 +109,7 @@ class RuntimeModuleArchitectureTest {
         Set.of(
             "com.fasterxml.jackson.core:jackson-databind",
             "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
+            "fun.fengwk.kk-studio:kk-studio-harness-prompt",
             "fun.fengwk.kk-studio:kk-studio-harness-runtime",
             "fun.fengwk.kk-studio:kk-studio-harness-tool"));
     assertDirectProductionDependencies(
@@ -185,9 +191,10 @@ class RuntimeModuleArchitectureTest {
       modules.add(matcher.group(1).trim());
     }
     assertTrue(
-        modules.equals(List.of("tool", "runtime", "contributor-api", "builtin", "infra", "daemon")),
+        modules.equals(
+            List.of("prompt", "tool", "runtime", "contributor-api", "builtin", "infra", "daemon")),
         () ->
-            "harness modules must be exactly tool/runtime/contributor-api/builtin/infra/daemon, got "
+            "harness modules must be exactly prompt/tool/runtime/contributor-api/builtin/infra/daemon, got "
                 + modules);
   }
 
