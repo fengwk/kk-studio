@@ -47,9 +47,9 @@ flowchart LR
 
 ```text
 schema/src/main/resources/db/migration/V1__schema.sql
-schema/src/main/resources/db/seed/dev/V2__dev_seed.sql
-schema/src/main/resources/db/seed/e2e/V2__e2e_seed.sql
-schema/src/main/resources/db/seed/canvas-test/V3__canvas_test_system_settings.sql
+schema/src/main/resources/db/seed/dev/R__dev_seed.sql
+schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql
+schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql
 ```
 
 Web 以 runtime scope 依赖 `kk-studio-schema`、`flyway-core` 和
@@ -92,9 +92,9 @@ Web 以 runtime scope 依赖 `kk-studio-schema`、`flyway-core` 和
 
 | profile | 资源 | 内容 |
 | --- | --- | --- |
-| dev | `db/seed/dev/V2__dev_seed.sql` | stub Provider/Model/Agent |
-| e2e | `db/seed/e2e/V2__e2e_seed.sql` | Provider、Model、default Agent 与权限设置 |
-| canvas-test | `db/seed/canvas-test/V3__canvas_test_system_settings.sql` | S3、Canvas Function integration 的测试开关与时间预算 |
+| dev | `db/seed/dev/R__dev_seed.sql` | stub Provider/Model/Agent |
+| e2e | `db/seed/e2e/R__e2e_seed.sql` | Provider、Model、default Agent 与权限设置 |
+| canvas-test | `db/seed/canvas-test/R__canvas_test_seed.sql` | S3、Canvas Function integration 的测试开关与时间预算 |
 
 baseline 直接插入 `system_setting` 默认聚合；profile seed 只覆盖其 profile
 需要的事实，并使用明确的 SQL 条件保证重复执行结果稳定。
@@ -140,9 +140,9 @@ Flyway 位置由 Web runtime、测试 application 配置和
 
 - `schema/pom.xml`
 - `schema/src/main/resources/db/migration/V1__schema.sql`
-- `schema/src/main/resources/db/seed/dev/V2__dev_seed.sql`
-- `schema/src/main/resources/db/seed/e2e/V2__e2e_seed.sql`
-- `schema/src/main/resources/db/seed/canvas-test/V3__canvas_test_system_settings.sql`
+- `schema/src/main/resources/db/seed/dev/R__dev_seed.sql`
+- `schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql`
+- `schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql`
 
 架构与集成测试：
 

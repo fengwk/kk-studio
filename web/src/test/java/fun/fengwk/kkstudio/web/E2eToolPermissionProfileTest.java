@@ -49,7 +49,7 @@ class E2eToolPermissionProfileTest {
   }
 
   /**
-   * E2E profile 的 read 权限来自数据库 seed 的 system_setting 覆盖行（{@code db/seed/e2e/V2__e2e_seed.sql}），
+   * E2E profile 的 read 权限来自数据库 seed 的 system_setting 覆盖行（{@code db/seed/e2e/R__e2e_seed.sql}），
    * 而不是任何 profile 配置源；e2e 数据库应用该 seed 后 base.read/base.write/base.edit/base.bash 均为 {@code * ->
    * ask}。
    */
@@ -57,7 +57,7 @@ class E2eToolPermissionProfileTest {
   void e2eDbSeedGrantsReadApproval() throws IOException {
     String seed =
         new String(
-            new ClassPathResource("db/seed/e2e/V2__e2e_seed.sql").getInputStream().readAllBytes(),
+            new ClassPathResource("db/seed/e2e/R__e2e_seed.sql").getInputStream().readAllBytes(),
             StandardCharsets.UTF_8);
     assertTrue(
         seed.contains("system_setting") && seed.contains(E2E_READ_RULE),

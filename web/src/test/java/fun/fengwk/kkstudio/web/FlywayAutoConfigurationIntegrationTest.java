@@ -70,13 +70,20 @@ class FlywayAutoConfigurationIntegrationTest {
     // 启动真实 web 上下文走的是 Boot 自动配置，而不是直接操作 Flyway 测试基座。
     assertTrue(serverPort > 0);
     try (Connection conn = dataSource.getConnection();
-        Statement st = conn.createStatement();
-        ResultSet history =
-            st.executeQuery(
-                "select count(*) from flyway_schema_history"
-                    + " where success = true and version in ('1', '2')")) {
-      assertTrue(history.next());
-      assertEquals(2L, history.getLong(1), "baseline and dev seed must be recorded");
+        Statement st = conn.createStatement()) {
+      try (ResultSet history =
+          st.executeQuery(
+              "select count(*) from flyway_schema_history"
+                  + " where success = true and (version = '1' or (version is null and description = 'dev seed'))")) {
+        assertTrue(history.next());
+        assertEquals(2L, history.getLong(1), "baseline and dev seed must be recorded");
+      }
+      try (ResultSet noV2Plus =
+          st.executeQuery(
+              "select count(*) from flyway_schema_history where version is not null and version != '1'")) {
+        assertTrue(noV2Plus.next());
+        assertEquals(0L, noV2Plus.getLong(1), "no versioned migration beyond V1 must exist");
+      }
       try (ResultSet seed =
           st.executeQuery(
               "select count(*) from agent_definition where name = 'default-assistant'")) {

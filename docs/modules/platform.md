@@ -460,9 +460,9 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 - `platform/pom.xml`
 - `schema/pom.xml`
 - `schema/src/main/resources/db/migration/V1__schema.sql`
-- `schema/src/main/resources/db/seed/dev/V2__dev_seed.sql`
-- `schema/src/main/resources/db/seed/e2e/V2__e2e_seed.sql`
-- `schema/src/main/resources/db/seed/canvas-test/V3__canvas_test_system_settings.sql`
+- `schema/src/main/resources/db/seed/dev/R__dev_seed.sql`
+- `schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql`
+- `schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql`
 - Schema 重点表：`agent_provider`、`agent_model`、`agent_definition`、`comfyui_workflow_api`、`chat`、
   `chat_session`、`system_setting`、Canvas graph/function/resource 相关表、Harness 七张执行表、
   `canvas_session`、`storage_blob`、`storage_upload`、`session_blob_ref`。

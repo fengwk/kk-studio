@@ -27,9 +27,9 @@ class FlywayBootstrapArchitectureTest {
   private static final List<String> FLYWAY_RESOURCES =
       List.of(
           "schema/src/main/resources/db/migration/V1__schema.sql",
-          "schema/src/main/resources/db/seed/dev/V2__dev_seed.sql",
-          "schema/src/main/resources/db/seed/e2e/V2__e2e_seed.sql",
-          "schema/src/main/resources/db/seed/canvas-test/V3__canvas_test_system_settings.sql");
+          "schema/src/main/resources/db/seed/dev/R__dev_seed.sql",
+          "schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql",
+          "schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql");
   private static final String OLD_HARNESS_SCHEMA =
       "harness/infra/src/main/resources/fun/fengwk/kkstudio/harness/infra/"
           + "postgresql/harness-runtime-schema.sql";
@@ -46,7 +46,7 @@ class FlywayBootstrapArchitectureTest {
       Set.of(".git", ".workspace", "target", "node_modules", "dist", "coverage", "reports");
 
   @Test
-  void onlyFlywayMigrationResourcesExist() {
+  void onlyFlywayMigrationResourcesExist() throws IOException {
     Path root = repositoryRoot();
     assertTrue(Files.isDirectory(root.resolve("schema")), "schema module must exist");
     assertFalse(
@@ -62,6 +62,22 @@ class FlywayBootstrapArchitectureTest {
     assertFalse(
         Files.exists(root.resolve(OLD_HARNESS_SCHEMA)),
         "the old infra schema mirror must be gone: " + OLD_HARNESS_SCHEMA);
+
+    Path dbDir = root.resolve("schema/src/main/resources/db");
+    try (Stream<Path> stream = Files.walk(dbDir)) {
+      List<String> actualDbSqlFiles =
+          stream
+              .filter(Files::isRegularFile)
+              .filter(path -> path.getFileName().toString().endsWith(".sql"))
+              .map(root::relativize)
+              .map(Path::toString)
+              .sorted()
+              .toList();
+      assertEquals(
+          FLYWAY_RESOURCES.stream().sorted().toList(),
+          actualDbSqlFiles,
+          "db inventory must strictly contain only V1 baseline and the three repeatable seeds");
+    }
   }
 
   @Test
@@ -83,6 +99,24 @@ class FlywayBootstrapArchitectureTest {
         files.stream()
             .anyMatch(path -> path.getFileName().toString().equals("harness-runtime-schema.sql")),
         "no file in the repository may keep the old schema mirror");
+
+    List<String> forbiddenMigrations =
+        files.stream()
+            .map(Path::getFileName)
+            .map(Path::toString)
+            .filter(
+                name ->
+                    name.matches("^V[2-9]__.*\\.sql$")
+                        || name.matches("^V[1-9][0-9]+__.*\\.sql$")
+                        || name.equals("V2__dev_seed.sql")
+                        || name.equals("V2__e2e_seed.sql")
+                        || name.equals("V3__canvas_test_system_settings.sql"))
+            .toList();
+    assertTrue(
+        forbiddenMigrations.isEmpty(),
+        () ->
+            "no V2+ versioned migrations or legacy seed filenames are allowed: "
+                + forbiddenMigrations);
   }
 
   @Test
