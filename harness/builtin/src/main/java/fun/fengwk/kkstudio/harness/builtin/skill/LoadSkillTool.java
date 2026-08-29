@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
- * 由当前 Thread Agent 选中、用于加载完整 SKILL.md 正文的 HOST tool。
+ * 由当前 Thread Agent 选中、用于加载完整 SKILL.md 正文的 internal Tool。
  *
  * <p>仅解析已选中的 skill；source Environment 来自 invocation 持久化的 binding（binding-first）。 不暴露本地路径。
  */

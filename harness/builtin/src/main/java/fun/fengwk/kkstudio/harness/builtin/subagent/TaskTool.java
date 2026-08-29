@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
@@ -72,13 +73,13 @@ public final class TaskTool implements Tool {
               request.context().invocationId(), request.context().threadId(), request.call());
     } catch (TaskRejectedException rejected) {
       listener.onComplete(error(callId, rejected.getMessage()));
-      return new CompletedHandle();
+      return CompletedToolExecutionHandle.INSTANCE;
     }
     try {
       return runner.run(taskRequest, listener);
     } catch (RuntimeException error) {
       listener.onComplete(error(callId, message(error)));
-      return new CompletedHandle();
+      return CompletedToolExecutionHandle.INSTANCE;
     }
   }
 
@@ -105,7 +106,7 @@ public final class TaskTool implements Tool {
         throw reject("maxTurns must be a positive integer");
       }
     }
-    String sessionId = null;
+    UUID sessionId = null;
     JsonNode sessionNode = node.get("session_id");
     if (sessionNode != null && !sessionNode.isNull()) {
       if (!sessionNode.isTextual()) {
@@ -121,7 +122,7 @@ public final class TaskTool implements Tool {
       if (!parsed.toString().equals(raw)) {
         throw reject("session_id must be a canonical UUID string");
       }
-      sessionId = raw;
+      sessionId = parsed;
     }
     return new SubagentTaskRequest(
         invocationId, threadId, prompt, subagentType, maxTurns, sessionId);
@@ -156,16 +157,6 @@ public final class TaskTool implements Tool {
   private static final class TaskRejectedException extends RuntimeException {
     private TaskRejectedException(String message) {
       super(message);
-    }
-  }
-
-  private static final class CompletedHandle implements ToolExecutionHandle {
-    @Override
-    public void cancel() {}
-
-    @Override
-    public boolean isCancelled() {
-      return false;
     }
   }
 }

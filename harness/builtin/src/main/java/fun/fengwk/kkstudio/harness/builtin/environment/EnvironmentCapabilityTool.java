@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.environment;
 
+import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
@@ -63,18 +64,8 @@ public final class EnvironmentCapabilityTool implements Tool {
               List.of(new TextToolContent("No environment bound in execution context")),
               true,
               "{}"));
-      return new CompletedHandle();
+      return CompletedToolExecutionHandle.INSTANCE;
     }
     return environment.get().execute(capability, request, listener);
-  }
-
-  private static final class CompletedHandle implements ToolExecutionHandle {
-    @Override
-    public void cancel() {}
-
-    @Override
-    public boolean isCancelled() {
-      return false;
-    }
   }
 }

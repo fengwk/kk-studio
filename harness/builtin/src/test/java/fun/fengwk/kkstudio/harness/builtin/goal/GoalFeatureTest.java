@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Goal 特性的 branch snapshot、统一 Tool 执行、effects 产出与上下文投影测试。 */
@@ -245,6 +247,70 @@ class GoalFeatureTest {
             new UpdateGoalTool(), "call-3", "{\"status\":\"complete\",\"reason\":\"r\"}");
     assertTrue(updateOutcome.result().error());
     assertTrue(updateOutcome.customEntries().isEmpty());
+  }
+
+  /** 验证 terminal-at-most-once：若 listener 同步抛出 RuntimeException，工具不会在 catch 中再次触发 onComplete。 */
+  @Test
+  void listenerThrowingExceptionDoesNotTriggerSecondaryCallback() {
+    SimpleBranchView root = new SimpleBranchView();
+    AtomicInteger calls = new AtomicInteger();
+    ToolExecutionListener throwingListener =
+        new ToolExecutionListener() {
+          @Override
+          public void onPartial(ToolResult partial) {}
+
+          @Override
+          public void onComplete(ToolOutcome outcome) {
+            calls.incrementAndGet();
+            throw new RuntimeException("listener sync failure");
+          }
+
+          @Override
+          public void onError(Throwable error) {}
+        };
+
+    // 1. CreateGoalTool
+    ToolExecutionContext context1 =
+        new ToolExecutionContext(UUID.randomUUID(), UUID.randomUUID(), T1, root);
+    ToolExecutionRequest req1 =
+        new ToolExecutionRequest(
+            new CreateGoalTool().descriptor(),
+            new ToolCall("call-1", "create_goal", "{\"objective\":\"obj\"}"),
+            Duration.ZERO,
+            context1);
+    assertThrows(
+        RuntimeException.class, () -> new CreateGoalTool().execute(req1, throwingListener));
+    assertEquals(1, calls.get(), "create_goal must invoke onComplete exactly once");
+
+    // 2. GetGoalTool
+    calls.set(0);
+    ToolExecutionContext context2 =
+        new ToolExecutionContext(UUID.randomUUID(), UUID.randomUUID(), T1, root);
+    ToolExecutionRequest req2 =
+        new ToolExecutionRequest(
+            new GetGoalTool().descriptor(),
+            new ToolCall("call-2", "get_goal", "{}"),
+            Duration.ZERO,
+            context2);
+    assertThrows(RuntimeException.class, () -> new GetGoalTool().execute(req2, throwingListener));
+    assertEquals(1, calls.get(), "get_goal must invoke onComplete exactly once");
+
+    // 3. UpdateGoalTool
+    GoalState activeState = new GoalState("obj", null, GoalStatus.ACTIVE, null, T0, T1);
+    SimpleBranchView branchWithGoal =
+        root.withEntry(GoalStateCodec.SCHEMA_VERSION, codec.encode(activeState));
+    calls.set(0);
+    ToolExecutionContext context3 =
+        new ToolExecutionContext(UUID.randomUUID(), UUID.randomUUID(), T2, branchWithGoal);
+    ToolExecutionRequest req3 =
+        new ToolExecutionRequest(
+            new UpdateGoalTool().descriptor(),
+            new ToolCall("call-3", "update_goal", "{\"status\":\"complete\",\"reason\":\"done\"}"),
+            Duration.ZERO,
+            context3);
+    assertThrows(
+        RuntimeException.class, () -> new UpdateGoalTool().execute(req3, throwingListener));
+    assertEquals(1, calls.get(), "update_goal must invoke onComplete exactly once");
   }
 
   /** GoalContextProjector 仅对 ACTIVE 状态产生 ContextFragment 注入。 */

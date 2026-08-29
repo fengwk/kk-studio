@@ -85,7 +85,8 @@ class TaskToolTest {
         createRequest(
             tool,
             "call-1",
-            "{\"subagent_type\":\"coder\",\"prompt\":\"write code\",\"maxTurns\":5,\"session_id\":\"00000000-0000-0000-0000-000000000003\"}");
+            "{\"subagent_type\":\"coder\",\"prompt\":\"write"
+                + " code\",\"maxTurns\":5,\"session_id\":\"00000000-0000-0000-0000-000000000003\"}");
 
     ToolExecutionHandle handle = tool.execute(request, createListener(outcomeRef));
 
@@ -96,7 +97,8 @@ class TaskToolTest {
     assertEquals("coder", receivedRequest.get().subagentType());
     assertEquals("write code", receivedRequest.get().prompt());
     assertEquals(5, receivedRequest.get().maxTurns());
-    assertEquals("00000000-0000-0000-0000-000000000003", receivedRequest.get().sessionId());
+    assertEquals(
+        UUID.fromString("00000000-0000-0000-0000-000000000003"), receivedRequest.get().sessionId());
   }
 
   /** 可选参数缺省时正确传递 null。 */

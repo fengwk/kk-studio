@@ -40,7 +40,7 @@ import java.util.Set;
 /**
  * BuiltinHarnessContributor 的全面目录冻结与完整能力清单测试。
  *
- * <p>验证 exact inventory (17 tools: 12 environment + 2 host + 3 goal),
+ * <p>验证 exact inventory (17 tools: 12 environment + 2 internal + 3 goal),
  * visibility/requirements/capability 映射, stable IDs, goal state ownership/projector, 和全局唯一性。
  */
 class BuiltinHarnessContributorTest {
@@ -72,7 +72,7 @@ class BuiltinHarnessContributorTest {
   }
 
   @Test
-  void constructorRejectsIncorrectOrSwappedHostTools() {
+  void constructorRejectsIncorrectOrSwappedTools() {
     // Swapped tools
     assertThrows(
         IllegalArgumentException.class,
@@ -217,14 +217,15 @@ class BuiltinHarnessContributorTest {
         ToolSideEffect.NON_IDEMPOTENT,
         Duration.ofMinutes(5));
 
-    // 2 Host tools (INTERNAL visibility)
-    assertHostTool(
+    // 2 Internal tools (INTERNAL visibility)
+    assertInternalTool(
         catalog,
         "load_skill",
         BuiltinToolIds.LOAD_SKILL,
         "runtime.load-skill",
         ToolRequirements.environment());
-    assertHostTool(catalog, "task", BuiltinToolIds.TASK, "runtime.task", ToolRequirements.none());
+    assertInternalTool(
+        catalog, "task", BuiltinToolIds.TASK, "runtime.task", ToolRequirements.none());
 
     // 3 Goal tools (SELECTABLE visibility)
     assertGoalTool(
@@ -311,7 +312,7 @@ class BuiltinHarnessContributorTest {
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
   }
 
-  private static void assertHostTool(
+  private static void assertInternalTool(
       HarnessCatalog catalog,
       String toolName,
       AgentToolId agentToolId,
