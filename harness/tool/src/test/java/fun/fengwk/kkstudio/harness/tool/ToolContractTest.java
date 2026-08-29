@@ -8,14 +8,12 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.lang.reflect.RecordComponent;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -111,47 +109,6 @@ class ToolContractTest {
             ToolSideEffect.class,
             Duration.class),
         Arrays.stream(components).map(RecordComponent::getType).toList());
-  }
-
-  /** 执行请求必须复用 descriptor 校验，并在没有覆盖时使用 descriptor 超时。 */
-  @Test
-  void validatesExecutionCallAndResolvesDefaultTimeout() {
-    ToolExecutionRequest request =
-        new ToolExecutionRequest(
-            descriptor(),
-            new ToolCall("call-1", "search", "{\"query\":\"harness\"}"),
-            Duration.ZERO);
-
-    assertEquals(Duration.ofSeconds(10), request.effectiveTimeout());
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolExecutionRequest(
-                descriptor(), new ToolCall("call-1", "other", "{}"), Duration.ofSeconds(1)));
-  }
-
-  /** 5 参数 workdir 至少必须是 absolute path（canonical 化由 daemon 调用方完成，构造校验不做文件系统 IO）。 */
-  @Test
-  void requiresAbsoluteWorkdirWhenProvided() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolExecutionRequest(
-                descriptor(),
-                new ToolCall("call-1", "search", "{\"query\":\"harness\"}"),
-                Duration.ZERO,
-                null,
-                Path.of("relative/workdir")));
-
-    ToolExecutionRequest request =
-        new ToolExecutionRequest(
-            descriptor(),
-            new ToolCall("call-1", "search", "{\"query\":\"harness\"}"),
-            Duration.ZERO,
-            null,
-            Path.of("/absolute/workdir"));
-    assertEquals(Path.of("/absolute/workdir"), request.workdir());
-    assertEquals(Duration.ofSeconds(10), request.effectiveTimeout());
   }
 
   /** 结果 details 必须是 JSON object；空白 details 归一为 {}，非 object 拒绝。 */

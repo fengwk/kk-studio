@@ -7,15 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -24,27 +19,33 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
-/** Contributor API 各契约类、sealed ToolContribution 结构与验证测试。 */
+/** Contributor API 统一定义、Tool 契约、执行请求与上下文测试。 */
 class HarnessContractTest {
 
   private static final ContributorId CID = new ContributorId("goal");
   private static final ToolParamsSchema SCHEMA =
-      new ToolParamsSchema("Test schema", Map.of(), Set.of(), false);
+      new ToolParamsSchema(
+          "Test schema",
+          Map.of(
+              "path", new ToolStringSchema(null),
+              "offset", new ToolIntegerSchema(null)),
+          Set.of("path"),
+          false);
   private static final ToolDescriptor DESCRIPTOR =
       new ToolDescriptor(
           "test_tool",
@@ -55,6 +56,7 @@ class HarnessContractTest {
           ToolSideEffect.READ_ONLY,
           Duration.ofSeconds(30));
 
+  /** 验证 ContributionId 校验规则、字典序比较与字符串格式化。 */
   @Test
   void contributionIdValidatesAndCompares() {
     ContributionId c1 = new ContributionId(CID, "create");
@@ -71,8 +73,10 @@ class HarnessContractTest {
     assertThrows(NullPointerException.class, () -> new ContributionId(null, "create"));
     assertThrows(NullPointerException.class, () -> new ContributionId(CID, null));
     assertThrows(IllegalArgumentException.class, () -> new ContributionId(CID, "Create"));
+    assertThrows(IllegalArgumentException.class, () -> new ContributionId(CID, "create_goal"));
   }
 
+  /** 验证 ContributorDescriptor 依赖校验，包括拒绝自依赖与自动排序。 */
   @Test
   void contributorDescriptorValidatesRequires() {
     ContributorDescriptor desc =
@@ -96,6 +100,7 @@ class HarnessContractTest {
         () -> new ContributorDescriptor(CID, "Name", "1.0", Set.of(CID)));
   }
 
+  /** 验证 StateDeclaration 校验 canonical customType 与模式非空。 */
   @Test
   void stateDeclarationValidates() {
     StateDeclaration decl = new StateDeclaration("goal-state", StateMode.WRITE);
@@ -106,219 +111,335 @@ class HarnessContractTest {
     assertThrows(NullPointerException.class, () -> new StateDeclaration("state", null));
     assertThrows(
         IllegalArgumentException.class, () -> new StateDeclaration("State", StateMode.READ));
+    assertThrows(
+        IllegalArgumentException.class, () -> new StateDeclaration("goal_state", StateMode.READ));
   }
 
+  /** 验证 ToolRequirements 工厂方法、重复 customType 校验与不可变性。 */
   @Test
-  void declarativeToolResultValidatesErrorIntents() {
-    CustomEntryPayload payload = new CustomEntryPayload("goal", "state", 1, "{}");
-    AppendCustomEntry intent = new AppendCustomEntry(payload);
+  void toolRequirementsValidatesAndEnforcesUniqueness() {
+    ToolRequirements none = ToolRequirements.none();
+    assertFalse(none.environmentRequired());
+    assertTrue(none.stateAccesses().isEmpty());
+
+    ToolRequirements env = ToolRequirements.environment();
+    assertTrue(env.environmentRequired());
+    assertTrue(env.stateAccesses().isEmpty());
+
+    StateDeclaration read = new StateDeclaration("state.read", StateMode.READ);
+    StateDeclaration write = new StateDeclaration("state.write", StateMode.WRITE);
+    ToolRequirements custom = new ToolRequirements(true, List.of(read, write));
+    assertTrue(custom.environmentRequired());
+    assertEquals(List.of(read, write), custom.stateAccesses());
+
+    // 拒绝重复 customType
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolRequirements(
+                false,
+                List.of(
+                    new StateDeclaration("state", StateMode.READ),
+                    new StateDeclaration("state", StateMode.WRITE))));
+
+    // 拒绝 null
+    assertThrows(NullPointerException.class, () -> new ToolRequirements(false, null));
+  }
+
+  /** 验证 ToolOutcome 成功携带 effects、error 拒绝 effects、以及 withoutEffects 工厂。 */
+  @Test
+  void toolOutcomeValidatesErrorAndEffects() {
     ToolResult successResult =
         new ToolResult("call-1", List.of(new TextToolContent("done")), false, "{}");
     ToolResult errorResult = ToolResult.error("call-1", "failed");
+    AppendCustomEntry entry = new AppendCustomEntry("state", 1, "{}");
 
-    DeclarativeToolResult success = new DeclarativeToolResult(successResult, List.of(intent));
-    assertEquals(1, success.intents().size());
+    ToolOutcome outcomeWithEffects = new ToolOutcome(successResult, List.of(entry));
+    assertEquals(successResult, outcomeWithEffects.result());
+    assertEquals(List.of(entry), outcomeWithEffects.customEntries());
 
-    DeclarativeToolResult withoutIntents = DeclarativeToolResult.withoutIntents(successResult);
-    assertTrue(withoutIntents.intents().isEmpty());
+    ToolOutcome outcomeWithoutEffects = ToolOutcome.withoutEffects(successResult);
+    assertTrue(outcomeWithoutEffects.customEntries().isEmpty());
 
+    // error 结果不允许携带 custom entries effects
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new DeclarativeToolResult(errorResult, List.of(intent)));
-    assertThrows(NullPointerException.class, () -> new DeclarativeToolResult(null, List.of()));
-    assertThrows(NullPointerException.class, () -> new DeclarativeToolResult(successResult, null));
+        IllegalArgumentException.class, () -> new ToolOutcome(errorResult, List.of(entry)));
+
+    // error 结果在无 effects 时合法
+    ToolOutcome validError = ToolOutcome.withoutEffects(errorResult);
+    assertTrue(validError.result().error());
+    assertTrue(validError.customEntries().isEmpty());
+
+    assertThrows(NullPointerException.class, () -> new ToolOutcome(null, List.of()));
+    assertThrows(NullPointerException.class, () -> new ToolOutcome(successResult, null));
   }
 
+  /** 验证 ToolExecutionListener 默认方法将 onComplete(ToolResult) 委托为无 effects 的 ToolOutcome。 */
   @Test
-  void declarativeToolContextValidates() {
-    BranchView view = new BranchView(rootOnlyPath());
+  void toolExecutionListenerDelegatesOnCompleteByDefault() {
+    AtomicReference<ToolOutcome> received = new AtomicReference<>();
+    ToolExecutionListener listener =
+        new ToolExecutionListener() {
+          @Override
+          public void onPartial(ToolResult partial) {}
+
+          @Override
+          public void onComplete(ToolOutcome outcome) {
+            received.set(outcome);
+          }
+
+          @Override
+          public void onError(Throwable error) {}
+        };
+
+    ToolResult result = new ToolResult("call-1", List.of(new TextToolContent("ok")), false, "{}");
+    listener.onComplete(result);
+
+    assertEquals(result, received.get().result());
+    assertTrue(received.get().customEntries().isEmpty());
+  }
+
+  /** 验证 ToolExecutionHandle 取消契约。 */
+  @Test
+  void toolExecutionHandleContract() {
+    AtomicBoolean cancelled = new AtomicBoolean(false);
+    ToolExecutionHandle handle =
+        new ToolExecutionHandle() {
+          @Override
+          public void cancel() {
+            cancelled.set(true);
+          }
+
+          @Override
+          public boolean isCancelled() {
+            return cancelled.get();
+          }
+        };
+
+    assertFalse(handle.isCancelled());
+    handle.cancel();
+    assertTrue(handle.isCancelled());
+  }
+
+  /** 验证 ToolExecutionContext 构造、重载与完整非空校验。 */
+  @Test
+  void toolExecutionContextValidatesNonNull() {
+    UUID invocationId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
     Instant now = Instant.now();
-    DeclarativeToolContext context = new DeclarativeToolContext(view, now);
-    assertEquals(view, context.branch());
-    assertEquals(now, context.executedAt());
+    BranchView view = new DummyBranchView();
+    BoundEnvironment env = new DummyBoundEnvironment();
 
-    assertThrows(NullPointerException.class, () -> new DeclarativeToolContext(null, now));
-    assertThrows(NullPointerException.class, () -> new DeclarativeToolContext(view, null));
-  }
+    ToolExecutionContext ctxWithEnv =
+        new ToolExecutionContext(invocationId, threadId, now, view, env);
+    assertEquals(invocationId, ctxWithEnv.invocationId());
+    assertEquals(threadId, ctxWithEnv.threadId());
+    assertEquals(now, ctxWithEnv.executedAt());
+    assertEquals(view, ctxWithEnv.branch());
+    assertTrue(ctxWithEnv.environment().isPresent());
+    assertEquals(env, ctxWithEnv.environment().get());
 
-  @Test
-  void hostToolContributionValidates() {
-    ContributionId id = new ContributionId(CID, "local");
-    AgentToolDefinition hostDef =
-        new AgentToolDefinition(
-            new AgentToolId("test.host"),
-            DESCRIPTOR,
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.HOST);
-    AgentToolDefinition declDef =
-        new AgentToolDefinition(
-            new AgentToolId("test.decl"),
-            DESCRIPTOR,
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.DECLARATIVE);
-    Tool dummyTool = dummyTool(DESCRIPTOR);
+    ToolExecutionContext ctxWithoutEnv =
+        new ToolExecutionContext(invocationId, threadId, now, view);
+    assertFalse(ctxWithoutEnv.environment().isPresent());
 
-    HostToolContribution contrib = new HostToolContribution(id, hostDef, dummyTool, 5);
-    assertEquals(id, contrib.id());
-    assertEquals(hostDef, contrib.definition());
-    assertEquals(dummyTool, contrib.tool());
-    assertEquals(5, contrib.priority());
-
+    // 完整非空校验
     assertThrows(
-        IllegalArgumentException.class, () -> new HostToolContribution(id, declDef, dummyTool, 0));
+        NullPointerException.class,
+        () -> new ToolExecutionContext(null, threadId, now, view, Optional.empty()));
     assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new HostToolContribution(
-                id,
-                hostDef,
-                dummyTool(
-                    new ToolDescriptor(
-                        "other",
-                        "1.0",
-                        "diff",
-                        "other",
-                        SCHEMA,
-                        ToolSideEffect.READ_ONLY,
-                        Duration.ZERO)),
-                0));
-  }
-
-  @Test
-  void declarativeToolContributionValidates() {
-    ContributionId id = new ContributionId(CID, "local");
-    AgentToolDefinition declDef =
-        new AgentToolDefinition(
-            new AgentToolId("test.decl"),
-            DESCRIPTOR,
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.DECLARATIVE);
-    AgentToolDefinition hostDef =
-        new AgentToolDefinition(
-            new AgentToolId("test.host"),
-            DESCRIPTOR,
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.HOST);
-    DeclarativeTool dummyDeclarative = dummyDeclarativeTool(DESCRIPTOR);
-
-    DeclarativeToolContribution contrib =
-        new DeclarativeToolContribution(id, declDef, dummyDeclarative, List.of(), 3);
-    assertEquals(id, contrib.id());
-    assertEquals(declDef, contrib.definition());
-    assertEquals(dummyDeclarative, contrib.tool());
-    assertEquals(3, contrib.priority());
-
+        NullPointerException.class,
+        () -> new ToolExecutionContext(invocationId, null, now, view, Optional.empty()));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new DeclarativeToolContribution(id, hostDef, dummyDeclarative, List.of(), 0));
+        NullPointerException.class,
+        () -> new ToolExecutionContext(invocationId, threadId, null, view, Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ToolExecutionContext(invocationId, threadId, now, null, Optional.empty()));
     assertThrows(
         NullPointerException.class,
         () ->
-            new DeclarativeToolContribution(
-                id,
-                declDef,
-                dummyDeclarative,
-                Arrays.asList(new StateDeclaration("state", StateMode.READ), null),
-                0));
+            new ToolExecutionContext(
+                invocationId, threadId, now, view, (Optional<BoundEnvironment>) null));
+  }
+
+  /** 验证 BoundEnvironment 执行窄能力契约。 */
+  @Test
+  void boundEnvironmentContract() {
+    DummyBoundEnvironment env = new DummyBoundEnvironment();
+    assertEquals("test-env", env.binding().environmentName().value());
+    assertEquals(".", env.binding().workspacePath());
+
+    EnvironmentCapabilityDescriptor cap =
+        new EnvironmentCapabilityDescriptor(
+            new EnvironmentCapabilityId("fs.read"), "1.0", SCHEMA, Duration.ofSeconds(10));
+    ToolExecutionRequest req =
+        new ToolExecutionRequest(
+            DESCRIPTOR, new ToolCall("call-1", "test_tool", "{\"path\":\"a.txt\"}"), Duration.ZERO);
+    AtomicBoolean called = new AtomicBoolean(false);
+    ToolExecutionListener listener =
+        new ToolExecutionListener() {
+          @Override
+          public void onPartial(ToolResult partial) {}
+
+          @Override
+          public void onComplete(ToolOutcome outcome) {
+            called.set(true);
+          }
+
+          @Override
+          public void onError(Throwable error) {}
+        };
+
+    ToolExecutionHandle handle = env.execute(cap, req, listener);
+    assertFalse(handle.isCancelled());
+  }
+
+  /** 验证 ToolExecutionRequest 构造、有效超时以及参数静默归一化行为。 */
+  @Test
+  void toolExecutionRequestNormalizesAndResolvesTimeout() {
+    ToolCall rawCall =
+        new ToolCall("call-1", "test_tool", "{\"filePath\":\"README.md\",\"offset\":\"20\"}");
+    ToolExecutionRequest request = new ToolExecutionRequest(DESCRIPTOR, rawCall, Duration.ZERO);
+
+    // 校验 call 已被归一化：filePath 转为 path，整数字符串转为 integer
+    assertEquals("{\"offset\":20,\"path\":\"README.md\"}", request.call().argumentsJson());
+    // 请求超时为 ZERO 时使用 descriptor 的默认超时
+    assertEquals(Duration.ofSeconds(30), request.effectiveTimeout());
+
+    // 覆盖超时
+    ToolExecutionRequest customTimeoutReq =
+        new ToolExecutionRequest(DESCRIPTOR, rawCall, Duration.ofSeconds(5));
+    assertEquals(Duration.ofSeconds(5), customTimeoutReq.effectiveTimeout());
+
+    // 拒绝负数超时
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolExecutionRequest(DESCRIPTOR, rawCall, Duration.ofSeconds(-1)));
+
+    // 校验绝对路径 workdir
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new DeclarativeToolContribution(
-                id,
-                declDef,
-                dummyDeclarative,
-                List.of(
-                    new StateDeclaration("state", StateMode.READ),
-                    new StateDeclaration("state", StateMode.WRITE)),
-                0));
+            new ToolExecutionRequest(
+                DESCRIPTOR, rawCall, Duration.ZERO, null, Path.of("relative/path")));
+
+    ToolExecutionRequest absoluteReq =
+        new ToolExecutionRequest(
+            DESCRIPTOR, rawCall, Duration.ZERO, null, Path.of("/absolute/path"));
+    assertEquals(Path.of("/absolute/path"), absoluteReq.workdir());
   }
 
+  /** 验证 ToolContribution 单一 record 构造与契约校验（descriptor 与 requirements 一致性）。 */
   @Test
-  void environmentCapabilityToolContributionValidates() {
-    ContributionId id = new ContributionId(CID, "local");
-    AgentToolDefinition envDef =
+  void toolContributionValidatesDescriptorAndRequirements() {
+    ContributionId id = new ContributionId(CID, "my-tool");
+    AgentToolDefinition definition =
         new AgentToolDefinition(
-            new AgentToolId("test.env"),
-            DESCRIPTOR,
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.ENVIRONMENT_CAPABILITY);
-    AgentToolDefinition hostDef =
-        new AgentToolDefinition(
-            new AgentToolId("test.host"),
-            DESCRIPTOR,
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.HOST);
-    EnvironmentCapabilityDescriptor capDesc =
-        new EnvironmentCapabilityDescriptor(
-            new EnvironmentCapabilityId("fs.read"), "1", SCHEMA, Duration.ofSeconds(30));
+            new AgentToolId("base.tool"), DESCRIPTOR, ToolVisibility.SELECTABLE);
+    ToolRequirements requirements = ToolRequirements.none();
 
-    EnvironmentCapabilityToolContribution contrib =
-        new EnvironmentCapabilityToolContribution(id, envDef, capDesc, 1);
-    assertEquals(id, contrib.id());
-    assertEquals(envDef, contrib.definition());
-    assertEquals(capDesc, contrib.capability());
-    assertEquals(1, contrib.priority());
+    Tool matchingTool =
+        new Tool() {
+          @Override
+          public ToolDescriptor descriptor() {
+            return DESCRIPTOR;
+          }
+
+          @Override
+          public ToolRequirements requirements() {
+            return requirements;
+          }
+
+          @Override
+          public ToolExecutionHandle execute(
+              ToolExecutionRequest request, ToolExecutionListener listener) {
+            return dummyHandle();
+          }
+        };
+
+    ToolContribution contribution =
+        new ToolContribution(id, definition, matchingTool, requirements, 10);
+    assertEquals(id, contribution.id());
+    assertEquals(definition, contribution.definition());
+    assertEquals(matchingTool, contribution.tool());
+    assertEquals(requirements, contribution.requirements());
+    assertEquals(10, contribution.priority());
+
+    // descriptor 不匹配抛异常
+    Tool mismatchedDescriptorTool =
+        new Tool() {
+          @Override
+          public ToolDescriptor descriptor() {
+            return new ToolDescriptor(
+                "other",
+                "1.0",
+                "other tool",
+                "other",
+                SCHEMA,
+                ToolSideEffect.READ_ONLY,
+                Duration.ZERO);
+          }
+
+          @Override
+          public ToolRequirements requirements() {
+            return requirements;
+          }
+
+          @Override
+          public ToolExecutionHandle execute(
+              ToolExecutionRequest request, ToolExecutionListener listener) {
+            return dummyHandle();
+          }
+        };
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentCapabilityToolContribution(id, hostDef, capDesc, 0));
+        () -> new ToolContribution(id, definition, mismatchedDescriptorTool, requirements, 0));
 
-    EnvironmentCapabilityDescriptor mismatchCap =
-        new EnvironmentCapabilityDescriptor(
-            new EnvironmentCapabilityId("fs.read"), "1", SCHEMA, Duration.ofHours(1));
+    // requirements 不匹配抛异常
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentCapabilityToolContribution(id, envDef, mismatchCap, 0));
+        () ->
+            new ToolContribution(id, definition, matchingTool, ToolRequirements.environment(), 0));
   }
 
-  @Test
-  void harnessContributorFactoryWorks() {
-    ContributorDescriptor desc = new ContributorDescriptor(CID, "Goal", "1.0", Set.of());
-    AtomicBoolean contributed = new AtomicBoolean(false);
-    HarnessContributor contributor =
-        HarnessContributor.of(desc, registrar -> contributed.set(true));
-
-    assertEquals(desc, contributor.descriptor());
-    assertFalse(contributed.get());
-  }
-
-  private static Tool dummyTool(ToolDescriptor descriptor) {
-    return new Tool() {
+  private static ToolExecutionHandle dummyHandle() {
+    return new ToolExecutionHandle() {
       @Override
-      public ToolDescriptor descriptor() {
-        return descriptor;
-      }
+      public void cancel() {}
 
       @Override
-      public ToolExecutionHandle execute(
-          ToolExecutionRequest request, ToolExecutionListener listener) {
-        return null;
+      public boolean isCancelled() {
+        return false;
       }
     };
   }
 
-  private static DeclarativeTool dummyDeclarativeTool(ToolDescriptor descriptor) {
-    return new DeclarativeTool() {
-      @Override
-      public ToolDescriptor descriptor() {
-        return descriptor;
-      }
+  private static final class DummyBranchView implements BranchView {
+    @Override
+    public List<CustomStateSnapshot> customEntries(String customType) {
+      return List.of();
+    }
 
-      @Override
-      public DeclarativeToolResult execute(DeclarativeToolContext context, ToolCall call) {
-        return DeclarativeToolResult.withoutIntents(
-            new ToolResult("call-1", List.of(new TextToolContent("ok")), false, "{}"));
-      }
-    };
+    @Override
+    public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
+      return Optional.empty();
+    }
   }
 
-  private static EntryPath rootOnlyPath() {
-    UUID rootId = UUID.randomUUID();
-    BranchSettings settings =
-        new BranchSettings(null, "test", new ModelSelection("openai", "gpt-4", "default"));
-    return new EntryPath(
-        List.of(
-            new Entry(
-                rootId, UUID.randomUUID(), null, new RootPayload(settings, null), Instant.now())));
+  private static final class DummyBoundEnvironment implements BoundEnvironment {
+    @Override
+    public EnvironmentBinding binding() {
+      return new EnvironmentBinding(new EnvironmentName("test-env"), ".");
+    }
+
+    @Override
+    public ToolExecutionHandle execute(
+        EnvironmentCapabilityDescriptor capability,
+        ToolExecutionRequest request,
+        ToolExecutionListener listener) {
+      return dummyHandle();
+    }
   }
 }

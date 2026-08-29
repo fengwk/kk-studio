@@ -1,10 +1,7 @@
 package fun.fengwk.kkstudio.harness.contributor.api;
 
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 
 /**
  * Contributor 贡献的 scoped registrar：只允许声明能力，不暴露任何 store / gateway / transaction / lock。
@@ -16,57 +13,20 @@ import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 public interface HarnessRegistrar {
 
   /**
-   * 注册一个 HOST Tool 贡献。{@code localName} 是该贡献在本 contributor 内的稳定标识；model-visible Tool name
+   * 注册一个 Tool 贡献。{@code localName} 是该贡献在本 contributor 内的稳定标识；model-visible Tool name
    * 在全局唯一，descriptor 在冻结时读取并校验；{@code agentToolId} 是全局稳定的模型工具身份。
    */
-  void registerHostTool(
+  void registerTool(
       String localName,
       AgentToolId agentToolId,
       Tool tool,
       ToolVisibility visibility,
       int priority);
 
-  /** 注册 priority 为 0 的 HOST Tool 贡献。 */
-  default void registerHostTool(
+  /** 注册 priority 为 0 的 Tool 贡献。 */
+  default void registerTool(
       String localName, AgentToolId agentToolId, Tool tool, ToolVisibility visibility) {
-    registerHostTool(localName, agentToolId, tool, visibility, 0);
-  }
-
-  /**
-   * 注册一个 DECLARATIVE Tool 贡献。{@code localName} 是该贡献在本 contributor 内的稳定标识；model-visible Tool name
-   * 在全局唯一，descriptor 在冻结时读取并校验；{@code agentToolId} 是全局稳定的模型工具身份。
-   */
-  void registerDeclarativeTool(
-      String localName,
-      AgentToolId agentToolId,
-      DeclarativeTool tool,
-      ToolVisibility visibility,
-      int priority);
-
-  /** 注册 priority 为 0 的 DECLARATIVE Tool 贡献。 */
-  default void registerDeclarativeTool(
-      String localName, AgentToolId agentToolId, DeclarativeTool tool, ToolVisibility visibility) {
-    registerDeclarativeTool(localName, agentToolId, tool, visibility, 0);
-  }
-
-  /** 注册一个 ENVIRONMENT_CAPABILITY Tool 贡献。 */
-  void registerEnvironmentCapabilityTool(
-      String localName,
-      AgentToolId agentToolId,
-      ToolDescriptor descriptor,
-      EnvironmentCapabilityDescriptor capability,
-      ToolVisibility visibility,
-      int priority);
-
-  /** 注册 priority 为 0 的 ENVIRONMENT_CAPABILITY Tool 贡献。 */
-  default void registerEnvironmentCapabilityTool(
-      String localName,
-      AgentToolId agentToolId,
-      ToolDescriptor descriptor,
-      EnvironmentCapabilityDescriptor capability,
-      ToolVisibility visibility) {
-    registerEnvironmentCapabilityTool(
-        localName, agentToolId, descriptor, capability, visibility, 0);
+    registerTool(localName, agentToolId, tool, visibility, 0);
   }
 
   /**

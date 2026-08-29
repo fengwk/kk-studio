@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.tool.execution;
+package fun.fengwk.kkstudio.harness.contributor.api;
 
 /** 一次工具执行的取消句柄。 */
 public interface ToolExecutionHandle {
