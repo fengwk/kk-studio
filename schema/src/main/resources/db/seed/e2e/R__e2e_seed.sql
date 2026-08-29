@@ -1,10 +1,20 @@
 -- PostgreSQL e2e seed.
 --
--- Idempotent: re-application is a no-op via INSERT ... ON CONFLICT DO NOTHING,
--- so existing timestamps and versions remain unchanged. base_url and credential
--- are intentionally null; real values are injected via environment when the e2e
--- process actually authenticates.
+-- Deterministic replacement: seed-owned catalog rows and system settings are
+-- synchronized to the exact definitions in this file on every repeatable
+-- migration run. FK dependency order is preserved by cleaning dependent agents
+-- and models before updating providers.
+-- base_url and credential are intentionally null; real values are injected via
+-- environment when the e2e process actually authenticates.
 -- This file must never contain real secrets.
+
+delete from agent_definition where name = 'default-assistant';
+delete from agent_model where provider_name in (
+    'minimax', 'openai', 'xai', 'deepseek', 'google', 'anthropic', 'zai'
+);
+delete from agent_provider where name in (
+    'minimax', 'openai', 'xai', 'deepseek', 'google', 'anthropic', 'zai'
+);
 
 insert into agent_provider (
     name, description, provider_type, base_url, credential, config,
@@ -30,8 +40,7 @@ insert into agent_provider (
      current_timestamp, current_timestamp, 0),
     ('zai', 'ZAI (OpenAI Chat Completions).', 'openai', null, null,
      '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
-     current_timestamp, current_timestamp, 0)
-on conflict (name) do nothing;
+     current_timestamp, current_timestamp, 0);
 
 -- Effective Pi 0.82.1 model snapshot. `minimax-responses` is mapped to provider
 -- `minimax`; all other provider names match. Variants are Pi's supported thinking
@@ -100,8 +109,7 @@ select
     current_timestamp,
     current_timestamp,
     0
-from model_seed
-on conflict (provider_name, name) do nothing;
+from model_seed;
 
 insert into agent_definition (
     name, description, system_prompt, model_provider_name, model_name, variant, config,
@@ -112,8 +120,7 @@ insert into agent_definition (
     'minimax', 'MiniMax-M2.7', 'high',
     '{"toolIds":[],"skills":[],"subagents":[]}',
     current_timestamp, current_timestamp, 0
-)
-on conflict (name) do nothing;
+);
 
 -- Harness runtime policy rows are gone: retry and realtime stream policy are
 -- no longer database tables. The runtime owns execution state with

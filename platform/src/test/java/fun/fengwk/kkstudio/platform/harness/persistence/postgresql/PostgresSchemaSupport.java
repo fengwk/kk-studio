@@ -62,7 +62,7 @@ public abstract class PostgresSchemaSupport {
         conn, "classpath:db/migration", "classpath:db/seed/dev", "classpath:db/seed/canvas-test");
   }
 
-  private static void migrate(Connection conn, String... locations) {
+  public static void migrate(Connection conn, String... locations) {
     Flyway.configure()
         // suppressClose 保留调用方持有的连接生命周期。
         .dataSource(new SingleConnectionDataSource(conn, true))

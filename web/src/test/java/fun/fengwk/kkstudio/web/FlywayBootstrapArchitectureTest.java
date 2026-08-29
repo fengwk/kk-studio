@@ -84,39 +84,26 @@ class FlywayBootstrapArchitectureTest {
   void exactlyOneBaselineMigrationExistsAcrossTheWholeRepository() throws IOException {
     Path root = repositoryRoot();
     List<Path> files = repositoryFiles(root);
-    List<String> migrations =
+    List<String> allVersionedMigrations =
         files.stream()
-            .filter(path -> path.getFileName().toString().equals("V1__schema.sql"))
             .map(root::relativize)
             .map(Path::toString)
+            .filter(
+                path -> {
+                  String filename = Path.of(path).getFileName().toString();
+                  return filename.matches("^V.*__.*\\.sql$");
+                })
             .sorted()
             .toList();
     assertEquals(
         List.of("schema/src/main/resources/db/migration/V1__schema.sql"),
-        migrations,
-        "V1 baseline must exist exactly once across the whole repository, owned by the schema module");
+        allVersionedMigrations,
+        "V1 baseline must be the single versioned migration across the whole repository; no other"
+            + " versioned migrations (V2+, V1_1, legacy V2/V3 seeds, etc.) are allowed");
     assertFalse(
         files.stream()
             .anyMatch(path -> path.getFileName().toString().equals("harness-runtime-schema.sql")),
         "no file in the repository may keep the old schema mirror");
-
-    List<String> forbiddenMigrations =
-        files.stream()
-            .map(Path::getFileName)
-            .map(Path::toString)
-            .filter(
-                name ->
-                    name.matches("^V[2-9]__.*\\.sql$")
-                        || name.matches("^V[1-9][0-9]+__.*\\.sql$")
-                        || name.equals("V2__dev_seed.sql")
-                        || name.equals("V2__e2e_seed.sql")
-                        || name.equals("V3__canvas_test_system_settings.sql"))
-            .toList();
-    assertTrue(
-        forbiddenMigrations.isEmpty(),
-        () ->
-            "no V2+ versioned migrations or legacy seed filenames are allowed: "
-                + forbiddenMigrations);
   }
 
   @Test
