@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSourc
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.platform.environment.query.EnvironmentQueryCoordinator;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -66,6 +67,7 @@ public class ApplicationEventConfiguration {
       CanvasVersionHub canvasVersionHub,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
       PostgresqlRealtimeEventSource realtimeEventSource,
+      EnvironmentQueryCoordinator environmentQueryCoordinator,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new PostgresqlNotificationLoop(
@@ -92,7 +94,15 @@ public class ApplicationEventConfiguration {
             new PostgresqlNotificationHandler(
                 PostgresqlRealtimeEventSource.CHANNEL,
                 realtimeEventSource::onNotification,
-                realtimeEventSource::onResync)),
+                realtimeEventSource::onResync),
+            new PostgresqlNotificationHandler(
+                EnvironmentQueryCoordinator.REQUEST_CHANNEL,
+                environmentQueryCoordinator::onRequestNotification,
+                environmentQueryCoordinator::onResync),
+            new PostgresqlNotificationHandler(
+                EnvironmentQueryCoordinator.RESPONSE_CHANNEL,
+                environmentQueryCoordinator::onResponseNotification,
+                environmentQueryCoordinator::onResync)),
         Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
         Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
   }

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.environment.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +24,7 @@ class EnvironmentDaemonGatewaySettingsLiveTest {
     properties.setDaemonToken("test-token");
     EnvironmentDaemonGateway gateway =
         new EnvironmentDaemonGateway(
-            new LiveEnvironmentRegistry(),
+            mock(LiveEnvironmentRegistry.class),
             properties,
             snapshot,
             Clock.fixed(Instant.parse("2026-08-21T00:00:00Z"), ZoneOffset.UTC),

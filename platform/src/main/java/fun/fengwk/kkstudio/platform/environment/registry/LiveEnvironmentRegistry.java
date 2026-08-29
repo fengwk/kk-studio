@@ -1,164 +1,283 @@
 package fun.fengwk.kkstudio.platform.environment.registry;
 
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonConnection;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
- * 以 canonical {@link EnvironmentName} 为键的线程安全服务端内存 Environment registry。
+ * 基于 PostgreSQL 路由租约表 {@code live_environment} 的多节点 Live Environment 注册表。
  *
- * <p>名称是唯一路由身份，不持久化任何内容。占用语义：持有者连接打开且心跳未过期时，同名 HELLO 被拒绝（{@link
- * BindResult.Rejected}）；持有者连接已关闭或心跳超过配置超时（lastSeen 租约过期）时，registry 原子切换到新持有者 （{@link
- * BindResult.Replaced}，旧连接交还调用方恰好清理一次）。断开连接时只移除恰好拥有该名称的连接条目。
+ * <p>以 canonical {@link EnvironmentName} 为键。HELLO 认证时通过单条 PostgreSQL upsert 语句原子抢占租约： 缺少或过期路由以新
+ * {@code routeToken} 接管；同 daemonId 活跃路由返回 {@link BindResult.RetryLater}； 不同 daemonId 活跃路由返回 {@link
+ * BindResult.Conflict}（终态冲突）。断开连接时保留重连宽限期，允许同一 daemonId 重新认领。
+ *
+ * <p>READY、HEARTBEAT 与断开连接均以 {@code (environment_name, owner_node_id, route_token)} 为围栏更新，
+ * 保证只有当前持有该路由租约的本地连接能推进状态。
  */
 @Component
 public class LiveEnvironmentRegistry {
 
-  private final Map<EnvironmentName, LiveEnvironment> byName = new LinkedHashMap<>();
+  private static final String TRY_ACQUIRE_SQL =
+      """
+      with tried_upsert as (
+          insert into live_environment (
+              environment_name, daemon_id, owner_node_id, route_token,
+              status, capabilities, last_seen_at, lease_until
+          ) values (
+              ?, ?, ?, ?,
+              'CONNECTING', null, statement_timestamp(), statement_timestamp() + (? * interval '1 millisecond')
+          )
+          on conflict (environment_name) do update
+          set daemon_id = excluded.daemon_id,
+              owner_node_id = excluded.owner_node_id,
+              route_token = excluded.route_token,
+              status = 'CONNECTING',
+              capabilities = null,
+              last_seen_at = statement_timestamp(),
+              lease_until = statement_timestamp() + (? * interval '1 millisecond')
+          where live_environment.lease_until <= statement_timestamp()
+          returning live_environment.route_token, live_environment.daemon_id, true as acquired
+      )
+      select route_token, daemon_id, acquired from tried_upsert
+      union all
+      select route_token, daemon_id, false as acquired from live_environment
+      where environment_name = ? and not exists (select 1 from tried_upsert)
+      """;
 
-  public LiveEnvironmentRegistry() {}
+  private static final String MARK_READY_SQL =
+      """
+      update live_environment
+      set status = 'READY',
+          capabilities = ?::jsonb,
+          last_seen_at = statement_timestamp(),
+          lease_until = statement_timestamp() + (? * interval '1 millisecond')
+      where environment_name = ?
+        and owner_node_id = ?
+        and route_token = ?
+      """;
+
+  private static final String HEARTBEAT_SQL =
+      """
+      update live_environment
+      set last_seen_at = statement_timestamp(),
+          lease_until = statement_timestamp() + (? * interval '1 millisecond')
+      where environment_name = ?
+        and owner_node_id = ?
+        and route_token = ?
+      """;
+
+  private static final String DISCONNECT_SQL =
+      """
+      update live_environment
+      set status = 'CONNECTING',
+          capabilities = null,
+          last_seen_at = statement_timestamp(),
+          lease_until = statement_timestamp() + (? * interval '1 millisecond')
+      where environment_name = ?
+        and owner_node_id = ?
+        and route_token = ?
+      """;
+
+  private static final String FIND_SQL =
+      """
+      select environment_name, daemon_id, owner_node_id, route_token,
+             status, capabilities, last_seen_at, lease_until
+      from live_environment
+      where environment_name = ?
+      """;
+
+  private static final String LIST_SQL =
+      """
+      select environment_name, daemon_id, owner_node_id, route_token,
+             status, capabilities, last_seen_at, lease_until
+      from live_environment
+      order by environment_name asc
+      """;
+
+  private final JdbcTemplate jdbcTemplate;
+  private final UUID ownerNodeId;
+  private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
+
+  public LiveEnvironmentRegistry(
+      JdbcTemplate jdbcTemplate, @Qualifier("nodeInstanceId") UUID ownerNodeId) {
+    this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
+    this.ownerNodeId = Objects.requireNonNull(ownerNodeId, "ownerNodeId");
+  }
+
+  public UUID ownerNodeId() {
+    return ownerNodeId;
+  }
 
   /**
-   * 在 HELLO 认证后，尝试把 {@code environmentName} 绑定到 {@code connection}。
+   * 在 HELLO 认证后，尝试原子抢占 {@code environmentName} 的路由租约。
    *
-   * <p>原子判定：无现有条目或同连接幂等重绑 → {@link BindResult.Accepted}；现有持有者连接仍打开且心跳未过期 → {@link
-   * BindResult.Rejected}（typed 冲突，绝不挤占）；现有持有者连接已关闭或心跳超过 {@code heartbeatTimeout} 过期 →
-   * 条目原子替换为新持有者并返回 {@link BindResult.Replaced}（携带被替换的旧连接，调用方恰好清理一次）。 CONNECTING 的新鲜声明（打开 + 心跳未过期）与
-   * READY 同等受保护。
+   * @param environmentName 规范环境名
+   * @param daemonId daemon 实例 ID
+   * @param leaseDuration 租约时长
+   * @return 类型化绑定结果
    */
-  public synchronized BindResult tryBind(
-      EnvironmentName environmentName,
-      EnvironmentDaemonConnection connection,
-      Instant now,
-      Duration heartbeatTimeout) {
+  public BindResult tryAcquire(
+      EnvironmentName environmentName, String daemonId, Duration leaseDuration) {
     Objects.requireNonNull(environmentName, "environmentName");
-    Objects.requireNonNull(connection, "connection");
-    Objects.requireNonNull(now, "now");
-    Objects.requireNonNull(heartbeatTimeout, "heartbeatTimeout");
-    LiveEnvironment existing = byName.get(environmentName);
-    if (existing == null) {
-      byName.put(
-          environmentName,
-          new LiveEnvironment(
-              environmentName, LiveEnvironmentStatus.CONNECTING, connection, null, now));
-      return BindResult.accepted();
+    Objects.requireNonNull(daemonId, "daemonId");
+    Objects.requireNonNull(leaseDuration, "leaseDuration");
+    UUID newRouteToken = UUID.randomUUID();
+    long millis = leaseDuration.toMillis();
+    List<AcquireRow> rows =
+        jdbcTemplate.query(
+            TRY_ACQUIRE_SQL,
+            (rs, rowNum) ->
+                new AcquireRow(
+                    (UUID) rs.getObject("route_token"),
+                    rs.getString("daemon_id"),
+                    rs.getBoolean("acquired")),
+            environmentName.value(),
+            daemonId,
+            ownerNodeId,
+            newRouteToken,
+            millis,
+            millis,
+            environmentName.value());
+
+    if (rows.isEmpty()) {
+      return BindResult.retryLater("route acquisition returned no row: " + environmentName);
     }
-    if (existing.connection().connectionId().equals(connection.connectionId())) {
-      // 同连接幂等重绑：继续持有，不挤占自己。
-      return BindResult.accepted();
+    AcquireRow row = rows.get(0);
+    if (row.acquired) {
+      return BindResult.acquired(newRouteToken);
     }
-    if (existing.connection().isOpen()
-        && !existing.lastSeenAt().isBefore(now.minus(heartbeatTimeout))) {
-      // fresh/open holder：租约未过期，冲突。
-      return BindResult.rejected();
+    if (daemonId.equals(row.daemonId)) {
+      return BindResult.retryLater(
+          "environment " + environmentName + " is actively held by same daemonId " + daemonId);
     }
-    // 持有者已死（连接关闭或租约过期）：原子接管，旧连接交还调用方恰好清理一次。
-    byName.put(
-        environmentName,
-        new LiveEnvironment(
-            environmentName, LiveEnvironmentStatus.CONNECTING, connection, null, now));
-    return BindResult.replaced(existing.connection());
+    return BindResult.conflict(
+        "environment " + environmentName + " is actively held by another daemonId " + row.daemonId);
   }
 
-  /** 为 {@code connection} 拥有的已绑定名称替换 daemon 通告的版本化能力对象（skills + MCP server 摘要）。 */
-  public synchronized void updateCapabilities(
+  /**
+   * 将环境标记为 READY 并写入 daemon 版本化能力对象。
+   *
+   * @return 围栏校验成功且更新 1 行返回 true；若租约已被夺取（0 行）返回 false
+   */
+  public boolean markReady(
       EnvironmentName environmentName,
-      EnvironmentDaemonConnection connection,
+      UUID routeToken,
       DaemonCapabilities capabilities,
-      Instant now) {
-    LiveEnvironment current = requireOwned(environmentName, connection);
-    byName.put(
-        current.name(),
-        new LiveEnvironment(
-            current.name(),
-            current.status(),
-            current.connection(),
-            Objects.requireNonNull(capabilities, "capabilities"),
-            Objects.requireNonNull(now, "now")));
+      Duration leaseDuration) {
+    Objects.requireNonNull(environmentName, "environmentName");
+    Objects.requireNonNull(routeToken, "routeToken");
+    Objects.requireNonNull(capabilities, "capabilities");
+    Objects.requireNonNull(leaseDuration, "leaseDuration");
+    String capabilitiesJson = capabilitiesCodec.encode(capabilities);
+    int updated =
+        jdbcTemplate.update(
+            MARK_READY_SQL,
+            capabilitiesJson,
+            leaseDuration.toMillis(),
+            environmentName.value(),
+            ownerNodeId,
+            routeToken);
+    return updated > 0;
   }
 
-  /** 把已绑定名称标记为 READY，使 gateway worker 可以对其派发。capabilities-before-READY 的转换由调用方负责；空能力仍然有效。 */
-  public synchronized void markReady(
-      EnvironmentName environmentName, EnvironmentDaemonConnection connection, Instant now) {
-    LiveEnvironment current = requireOwned(environmentName, connection);
-    if (current.daemonCapabilities() == null) {
-      throw new IllegalStateException("environment cannot become READY before capabilities");
+  /**
+   * 刷新路由租约的 last_seen 与 lease_until。
+   *
+   * @return 围栏校验成功且更新 1 行返回 true；若租约已被夺取（0 行）返回 false
+   */
+  public boolean heartbeat(
+      EnvironmentName environmentName, UUID routeToken, Duration leaseDuration) {
+    Objects.requireNonNull(environmentName, "environmentName");
+    Objects.requireNonNull(routeToken, "routeToken");
+    Objects.requireNonNull(leaseDuration, "leaseDuration");
+    int updated =
+        jdbcTemplate.update(
+            HEARTBEAT_SQL,
+            leaseDuration.toMillis(),
+            environmentName.value(),
+            ownerNodeId,
+            routeToken);
+    return updated > 0;
+  }
+
+  /**
+   * 连接断开时，围栏式将状态回退为 CONNECTING，清空 capabilities 并保留重连宽限租约。
+   *
+   * @return 围栏校验成功返回 true
+   */
+  public boolean disconnect(
+      EnvironmentName environmentName, UUID routeToken, Duration graceDuration) {
+    if (environmentName == null || routeToken == null) {
+      return false;
     }
-    byName.put(
-        current.name(),
-        new LiveEnvironment(
-            current.name(),
-            LiveEnvironmentStatus.READY,
-            current.connection(),
-            current.daemonCapabilities(),
-            Objects.requireNonNull(now, "now")));
-  }
-
-  /** 刷新 {@code connection} 拥有的已绑定名称的 last-seen。 */
-  public synchronized void heartbeat(
-      EnvironmentName environmentName, EnvironmentDaemonConnection connection, Instant now) {
-    LiveEnvironment current = requireOwned(environmentName, connection);
-    byName.put(
-        current.name(),
-        new LiveEnvironment(
-            current.name(),
-            current.status(),
-            current.connection(),
-            current.daemonCapabilities(),
-            Objects.requireNonNull(now, "now")));
-  }
-
-  /** 仅当 {@code connection} 仍拥有 {@code environmentName} 时移除条目。可在任何断开路径安全调用。 */
-  public synchronized void unregister(
-      EnvironmentName environmentName, EnvironmentDaemonConnection connection) {
-    if (environmentName == null || connection == null) {
-      return;
-    }
-    LiveEnvironment current = byName.get(environmentName);
-    if (current != null && current.connection().connectionId().equals(connection.connectionId())) {
-      byName.remove(environmentName);
+    try {
+      int updated =
+          jdbcTemplate.update(
+              DISCONNECT_SQL,
+              graceDuration.toMillis(),
+              environmentName.value(),
+              ownerNodeId,
+              routeToken);
+      return updated > 0;
+    } catch (DataAccessException ignored) {
+      return false;
     }
   }
 
-  public synchronized Optional<LiveEnvironment> find(EnvironmentName environmentName) {
+  /** 查询数据库中指定环境的当前路由快照。 */
+  public Optional<LiveEnvironment> find(EnvironmentName environmentName) {
     if (environmentName == null) {
       return Optional.empty();
     }
-    return Optional.ofNullable(byName.get(environmentName));
+    List<LiveEnvironment> results =
+        jdbcTemplate.query(FIND_SQL, new LiveEnvironmentRowMapper(), environmentName.value());
+    return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
   }
 
-  public synchronized boolean isReady(
-      EnvironmentName environmentName, Instant now, Duration heartbeatTimeout) {
-    return find(environmentName)
-        .map(environment -> environment.isReady(now, heartbeatTimeout))
-        .orElse(false);
+  /** 查询当前数据库中所有活跃环境的路由快照列表。 */
+  public List<LiveEnvironment> list() {
+    return jdbcTemplate.query(LIST_SQL, new LiveEnvironmentRowMapper());
   }
 
-  /** 供只读 API 使用的紧凑快照列表，保持插入顺序。 */
-  public synchronized List<LiveEnvironment> list() {
-    return List.copyOf(new ArrayList<>(byName.values()));
+  /** 判定环境当前是否可用（READY 状态且租约未过期）。 */
+  public boolean isReady(EnvironmentName environmentName, Instant now, Duration heartbeatTimeout) {
+    return find(environmentName).map(env -> env.isReady(now, heartbeatTimeout)).orElse(false);
   }
 
-  private LiveEnvironment requireOwned(
-      EnvironmentName environmentName, EnvironmentDaemonConnection connection) {
-    Objects.requireNonNull(environmentName, "environmentName");
-    Objects.requireNonNull(connection, "connection");
-    LiveEnvironment current = byName.get(environmentName);
-    if (current == null || !current.connection().connectionId().equals(connection.connectionId())) {
-      throw new IllegalStateException(
-          "environment is not bound to this connection: " + environmentName);
+  private record AcquireRow(UUID routeToken, String daemonId, boolean acquired) {}
+
+  private final class LiveEnvironmentRowMapper implements RowMapper<LiveEnvironment> {
+    @Override
+    public LiveEnvironment mapRow(ResultSet rs, int rowNum) throws SQLException {
+      EnvironmentName name = new EnvironmentName(rs.getString("environment_name"));
+      String daemonId = rs.getString("daemon_id");
+      UUID owner = (UUID) rs.getObject("owner_node_id");
+      UUID routeToken = (UUID) rs.getObject("route_token");
+      LiveEnvironmentStatus status = LiveEnvironmentStatus.valueOf(rs.getString("status"));
+      String capabilitiesJson = rs.getString("capabilities");
+      DaemonCapabilities capabilities = null;
+      if (status == LiveEnvironmentStatus.READY && capabilitiesJson != null) {
+        capabilities = capabilitiesCodec.decode(capabilitiesJson);
+      }
+      Instant lastSeenAt = rs.getTimestamp("last_seen_at").toInstant();
+      Instant leaseUntil = rs.getTimestamp("lease_until").toInstant();
+      return new LiveEnvironment(
+          name, daemonId, owner, routeToken, status, capabilities, lastSeenAt, leaseUntil);
     }
-    return current;
   }
 }

@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.platform.environment.gateway;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -31,6 +33,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonNameConflictException;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
+import fun.fengwk.kkstudio.platform.environment.query.EnvironmentQueryCoordinator;
 import fun.fengwk.kkstudio.platform.environment.registry.BindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
@@ -48,10 +51,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -65,14 +68,11 @@ import java.util.concurrent.TimeoutException;
  * Environment daemon 的连接/协议 transport 与能力/技能适配器。
  *
  * <p>使用当前 Daemon wire 协议（VERSION=4）：每个 envelope 都由 HELLO 时绑定的 canonical {@link EnvironmentName}
- * 限定；名称就是唯一 路由身份，不存在独立展示名。HELLO 声称的名称被另一条 live 连接（打开 + 心跳未过期）持有时抛出 {@link
- * DaemonNameConflictException}（终态错误，daemon 收到后停止重连并非零退出）；持有者连接已关闭或心跳租约过期时，registry 原子接管（{@link
- * BindResult.Replaced}），本类把被替换的旧连接状态恰好清理一次（连接关闭、active capability invocation 按不确定收敛、 pending skill
- * load 失败），绝不触碰新持有者。不拥有持久的 ToolInvocation claim/lease/terminal/retry 生命周期。持久化执行 由 Runtime {@code
- * ToolProcessor} 负责；本类提供 platform 侧 {@link EnvironmentCapabilityTransport}，并把 daemon 回调转发给注册的
- * capability listener，严格校验 environment/connection/invocation 归属。每个 Environment 的单一 active
- * capability invocation 槽位只负责 wire ownership；同 Environment 的并发 sibling 在发送前返回 {@link
- * EnvironmentCapabilityBusyException}，由 Harness retry 序列化，不在本类排队。
+ * 限定；名称就是唯一 路由身份，不存在独立展示名。HELLO 认证时通过 PostgreSQL 路由租约原子抢占：同 daemonId 活跃路由返回 RETRY_LATER；不同 daemonId
+ * 活跃路由抛出 {@link DaemonNameConflictException}（终态错误，daemon 收到后停止重连并非零退出）；缺少或过期路由以新 routeToken 接管。
+ *
+ * <p>READY、HEARTBEAT 与断开连接均以 {@code (environmentName, ownerNodeId, routeToken)} 围栏更新；数据库不可用时
+ * fail-closed。只读目录查询支持本地直接派发与跨节点 {@code environment_query} 信箱协调。
  */
 @Service
 public class EnvironmentDaemonGateway
@@ -93,6 +93,7 @@ public class EnvironmentDaemonGateway
   private final SystemSettingsSnapshot snapshot;
   private final Clock clock;
   private final EnvironmentReadyListener environmentReadyListener;
+  private final EnvironmentQueryCoordinator queryCoordinator;
   private final Map<String, ConnectionState> connections = new HashMap<>();
   private final Map<EnvironmentName, ConnectionState> environmentConnections = new HashMap<>();
   private final Map<EnvironmentName, ActiveCapability> activeByEnvironment = new HashMap<>();
@@ -102,18 +103,34 @@ public class EnvironmentDaemonGateway
   /** 每个连接的目录请求超时 tombstone 上限；超过时 FIFO 淘汰最旧条目。 */
   static final int MAX_DIRECTORY_TOMBSTONES = 1024;
 
+  @Autowired
   public EnvironmentDaemonGateway(
       LiveEnvironmentRegistry environmentRegistry,
       EnvironmentGatewayProperties properties,
       SystemSettingsSnapshot snapshot,
       Clock clock,
-      EnvironmentReadyListener environmentReadyListener) {
+      EnvironmentReadyListener environmentReadyListener,
+      @Autowired(required = false) EnvironmentQueryCoordinator queryCoordinator) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.environmentReadyListener =
         Objects.requireNonNull(environmentReadyListener, "environmentReadyListener");
+    this.queryCoordinator = queryCoordinator;
+    if (queryCoordinator != null) {
+      queryCoordinator.registerLocalExecutor(
+          this::listDirectoryLocal, this::localReadyEnvironments);
+    }
+  }
+
+  public EnvironmentDaemonGateway(
+      LiveEnvironmentRegistry environmentRegistry,
+      EnvironmentGatewayProperties properties,
+      SystemSettingsSnapshot snapshot,
+      Clock clock,
+      EnvironmentReadyListener environmentReadyListener) {
+    this(environmentRegistry, properties, snapshot, clock, environmentReadyListener, null);
   }
 
   /** 心跳过期超时（毫秒）：环境按不可用处理的租约时长。 */
@@ -123,6 +140,16 @@ public class EnvironmentDaemonGateway
 
   private SystemSettings.Environment environment() {
     return snapshot.get().environment();
+  }
+
+  public synchronized Set<EnvironmentName> localReadyEnvironments() {
+    Set<EnvironmentName> ready = new HashSet<>();
+    for (Map.Entry<EnvironmentName, ConnectionState> entry : environmentConnections.entrySet()) {
+      if (entry.getValue().isReady()) {
+        ready.add(entry.getKey());
+      }
+    }
+    return Set.copyOf(ready);
   }
 
   @Override
@@ -152,7 +179,6 @@ public class EnvironmentDaemonGateway
     RuntimeException protocolError = null;
     EnvironmentName receivedEnvironmentName = null;
     synchronized (state) {
-      // close 先在 state 锁上立 cleaned 围栏；已清理连接上的迟到 HELLO 不得再绑定。
       if (state.cleaned) {
         return;
       }
@@ -220,20 +246,17 @@ public class EnvironmentDaemonGateway
         throw new EnvironmentCapabilityBusyException(
             environmentName + " already has an active capability invocation");
       }
-      // 完整编码在注册 active 之前完成；确定性 payload 失败不得留下永远占用 Environment 的幽灵 invocation。
       invokePayload = createInvokePayload(binding, request);
       active =
           new ActiveCapability(
               environmentName, state.connection.connectionId(), invocationId, listener);
       activeByEnvironment.put(environmentName, active);
     }
-    // 在 gateway monitor 之外发送，避免与 receive 路径产生 this->state 锁顺序反转。
     SendOutcome outcome =
         sendWithOutcome(state, DaemonMessageType.INVOKE, invocationId.toString(), invokePayload);
     if (outcome == SendOutcome.SENT) {
       return active;
     }
-    // 防止连接关闭通知与抛出的不确定（uncertain）路径双重触发。
     active.terminal = true;
     synchronized (this) {
       activeByEnvironment.remove(environmentName, active);
@@ -258,7 +281,6 @@ public class EnvironmentDaemonGateway
     ConnectionState state;
     synchronized (this) {
       state = environmentConnections.get(environmentName);
-      // 与 Tool invoke/查询完全相同的可用性规则：READY + 连接打开 + 心跳未过期。
       if (state == null
           || !state.isReady()
           || !environmentRegistry.isReady(environmentName, clock.instant(), heartbeatTimeout())) {
@@ -304,7 +326,6 @@ public class EnvironmentDaemonGateway
     try {
       directoryPath = DaemonDirectoryCodec.requireCanonicalRelativePath(path);
     } catch (IllegalArgumentException error) {
-      // wire 契约在发端即校验：非法路径立即失败，绝不发送 LIST_DIRECTORY。
       return CompletableFuture.completedFuture(
           new EnvironmentDirectoryListResult.Failed(
               EnvironmentDirectoryFailureCode.INVALID_PATH, error.getMessage()));
@@ -312,22 +333,68 @@ public class EnvironmentDaemonGateway
     if (timeout == null || timeout.isZero() || timeout.isNegative()) {
       throw new IllegalArgumentException("timeout must be positive");
     }
+
+    LiveEnvironment live;
+    try {
+      live = environmentRegistry.find(environmentName).orElse(null);
+    } catch (DataAccessException error) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentDirectoryListResult.Failed(
+              EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+              "database unavailable: " + error.getMessage()));
+    }
+    if (live == null) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentDirectoryListResult.Failed(
+              EnvironmentDirectoryFailureCode.ENVIRONMENT_NOT_FOUND,
+              "environment is not registered: " + environmentName));
+    }
+    if (!live.isReady(clock.instant(), heartbeatTimeout())) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentDirectoryListResult.Failed(
+              EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+              environmentName + " is not ready; directory listing is unavailable"));
+    }
+
+    ConnectionState localState;
+    synchronized (this) {
+      localState = environmentConnections.get(environmentName);
+    }
+    if (localState != null
+        && localState.isReady()
+        && localState.routeToken != null
+        && localState.routeToken.equals(live.routeToken())
+        && live.ownerNodeId().equals(environmentRegistry.ownerNodeId())) {
+      return listDirectoryLocal(environmentName, directoryPath, timeout);
+    }
+
+    if (queryCoordinator != null) {
+      return queryCoordinator.executeRemoteDirectoryQuery(environmentName, directoryPath, timeout);
+    }
+
+    return CompletableFuture.completedFuture(
+        new EnvironmentDirectoryListResult.Failed(
+            EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+            environmentName + " is not ready locally"));
+  }
+
+  public CompletableFuture<EnvironmentDirectoryListResult> listDirectoryLocal(
+      EnvironmentName environmentName, String path, Duration timeout) {
+    Objects.requireNonNull(environmentName, "environmentName");
+    String directoryPath;
+    try {
+      directoryPath = DaemonDirectoryCodec.requireCanonicalRelativePath(path);
+    } catch (IllegalArgumentException error) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentDirectoryListResult.Failed(
+              EnvironmentDirectoryFailureCode.INVALID_PATH, error.getMessage()));
+    }
+    if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+      throw new IllegalArgumentException("timeout must be positive");
+    }
+
     ConnectionState state;
     synchronized (this) {
-      // registry 是可用性事实源：find 区分「未知」（404）与「已注册但未 READY/不可用」（409）。
-      LiveEnvironment live = environmentRegistry.find(environmentName).orElse(null);
-      if (live == null) {
-        return CompletableFuture.completedFuture(
-            new EnvironmentDirectoryListResult.Failed(
-                EnvironmentDirectoryFailureCode.ENVIRONMENT_NOT_FOUND,
-                "environment is not registered: " + environmentName));
-      }
-      if (!live.isReady(clock.instant(), heartbeatTimeout())) {
-        return CompletableFuture.completedFuture(
-            new EnvironmentDirectoryListResult.Failed(
-                EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
-                environmentName + " is not ready; directory listing is unavailable"));
-      }
       state = environmentConnections.get(environmentName);
       if (state == null || !state.isReady()) {
         return CompletableFuture.completedFuture(
@@ -336,6 +403,7 @@ public class EnvironmentDaemonGateway
                 environmentName + " is not ready; directory listing is unavailable"));
       }
     }
+
     String requestId = UUID.randomUUID().toString();
     CompletableFuture<EnvironmentDirectoryListResult> future = new CompletableFuture<>();
     PendingDirectoryList pending =
@@ -347,7 +415,6 @@ public class EnvironmentDaemonGateway
     String payload =
         directoryCodec.encodeRequest(
             new DaemonDirectoryCodec.ListDirectoryRequest(requestId, directoryPath));
-    // 目录控制面不属于 invocation：envelope invocationId 恒为 null，关联 ID 只存在于 payload requestId。
     SendOutcome outcome = sendWithOutcome(state, DaemonMessageType.LIST_DIRECTORY, null, payload);
     if (outcome == SendOutcome.SENT) {
       return future
@@ -356,7 +423,6 @@ public class EnvironmentDaemonGateway
               error -> {
                 synchronized (this) {
                   if (pendingDirectoryLists.remove(requestId, pending)) {
-                    // pending -> tombstone：同连接迟到响应按 requestId/path 校验后静默丢弃，不当作 unsolicited。
                     state.directoryTombstones.addLast(
                         new DirectoryTombstone(
                             requestId,
@@ -384,7 +450,6 @@ public class EnvironmentDaemonGateway
       pendingDirectoryLists.remove(requestId, pending);
     }
     if (outcome == SendOutcome.UNCERTAIN) {
-      // transport 无法继续发送但清理尚未完成：与 invoke 相同，关闭连接让 closeConnectionState 恰好清理一次。
       close(state.connection.connectionId());
     }
     future.complete(
@@ -414,7 +479,6 @@ public class EnvironmentDaemonGateway
     if (!state.helloReceived && envelope.messageType() != DaemonMessageType.HELLO) {
       throw new DaemonProtocolException("HELLO must be the first daemon message");
     }
-    // HELLO 之后的 envelope 必须携带绑定的 canonical 名称；不匹配属于协议失败，绝不重新路由绑定。
     if (state.environmentName != null
         && !state.environmentName.equals(envelope.environmentName())) {
       throw new DaemonProtocolException(
@@ -451,7 +515,7 @@ public class EnvironmentDaemonGateway
         payload,
         Set.of("daemonId", "protocolVersion", "gatewayToken", "capabilityCatalogVersion"),
         "HELLO payload");
-    requiredText(payload, "daemonId", "HELLO payload");
+    String daemonId = requiredText(payload, "daemonId", "HELLO payload");
     if (envelope.protocolVersion() != DaemonProtocol.VERSION
         || requiredLong(payload, "protocolVersion", "HELLO payload") != DaemonProtocol.VERSION) {
       throw new DaemonProtocolException("HELLO protocolVersion must be " + DaemonProtocol.VERSION);
@@ -462,41 +526,31 @@ public class EnvironmentDaemonGateway
           "HELLO capabilityCatalogVersion does not match server catalog");
     }
     verifyGatewayToken(requiredText(payload, "gatewayToken", "HELLO payload"));
-    // HELLO 在 token/version/catalog 校验后绑定 canonical envelope 名称。
     EnvironmentName environmentName = envelope.environmentName();
-    Instant now = clock.instant();
-    BindResult bind =
-        environmentRegistry.tryBind(environmentName, state.connection, now, heartbeatTimeout());
-    if (bind instanceof BindResult.Rejected) {
-      throw new DaemonNameConflictException(
-          "environmentName is already held by another live daemon: " + environmentName);
-    }
-    if (bind instanceof BindResult.Replaced replaced) {
-      // 旧持有者已死（连接关闭或心跳租约过期）：registry 已原子切换到本连接；只清理旧连接的
-      // gateway 侧状态（恰好一次），registry 条目/新 holder 不受影响，也不泄漏 active capability invocation
-      // 或 pending skill work。
-      displace(replaced.displacedConnection());
-    }
-    state.environmentName = environmentName;
-    state.helloReceived = true;
-    synchronized (this) {
-      environmentConnections.put(environmentName, state);
-    }
-    send(state, DaemonMessageType.WELCOME, null, "{}");
-  }
 
-  /**
-   * 清理被替换的旧连接状态，恰好一次。registry 条目已是新 holder，因此 {@code closeConnectionState} 内的 {@code unregister} /
-   * {@code environmentConnections.remove} 都是 owner 不匹配的 no-op；active capability invocation 与
-   * pending skill load 只会按旧连接的 connectionId 清理，绝不会碰到新持有者。
-   */
-  private void displace(EnvironmentDaemonConnection displacedConnection) {
-    ConnectionState displacedState;
-    synchronized (this) {
-      displacedState = connections.get(displacedConnection.connectionId());
+    BindResult bind = environmentRegistry.tryAcquire(environmentName, daemonId, heartbeatTimeout());
+    if (bind instanceof BindResult.Conflict conflict) {
+      throw new DaemonNameConflictException(conflict.message());
     }
-    if (displacedState != null) {
-      closeConnectionState(displacedState);
+    if (bind instanceof BindResult.RetryLater retryLater) {
+      throw new DaemonRetryLaterException(retryLater.message());
+    }
+    if (bind instanceof BindResult.Acquired acquired) {
+      ConnectionState previousState;
+      synchronized (this) {
+        previousState = environmentConnections.get(environmentName);
+      }
+      if (previousState != null && previousState != state) {
+        closeConnectionState(previousState);
+      }
+      state.routeToken = acquired.routeToken();
+      state.daemonId = daemonId;
+      state.environmentName = environmentName;
+      state.helloReceived = true;
+      synchronized (this) {
+        environmentConnections.put(environmentName, state);
+      }
+      send(state, DaemonMessageType.WELCOME, null, "{}");
     }
   }
 
@@ -507,11 +561,17 @@ public class EnvironmentDaemonGateway
     if (state.ready) {
       throw new DaemonProtocolException("READY may only be sent once per connection");
     }
+    if (state.routeToken == null) {
+      throw new DaemonProtocolException("routeToken missing on READY");
+    }
     DaemonCapabilities capabilities = capabilitiesCodec.decode(envelope.payloadJson());
-    environmentRegistry.updateCapabilities(
-        state.environmentName, state.connection, capabilities, clock.instant());
-    Instant now = clock.instant();
-    environmentRegistry.markReady(state.environmentName, state.connection, now);
+    boolean ok =
+        environmentRegistry.markReady(
+            state.environmentName, state.routeToken, capabilities, heartbeatTimeout());
+    if (!ok) {
+      throw new DaemonProtocolException(
+          "route fence lost for environment " + state.environmentName);
+    }
     state.ready = true;
     EnvironmentName environmentName = state.environmentName;
     deferred.add(() -> notifyEnvironmentReady(environmentName));
@@ -521,7 +581,15 @@ public class EnvironmentDaemonGateway
     requireReady(state);
     requireNoInvocationId(envelope);
     rejectUnexpectedFields(envelopeCodec.readPayload(envelope), Set.of(), "HEARTBEAT payload");
-    environmentRegistry.heartbeat(state.environmentName, state.connection, clock.instant());
+    if (state.routeToken == null) {
+      throw new DaemonProtocolException("routeToken missing on HEARTBEAT");
+    }
+    boolean ok =
+        environmentRegistry.heartbeat(state.environmentName, state.routeToken, heartbeatTimeout());
+    if (!ok) {
+      throw new DaemonProtocolException(
+          "route fence lost for environment " + state.environmentName);
+    }
   }
 
   private void handleAck(ConnectionState state, DaemonEnvelope envelope) {
@@ -557,7 +625,6 @@ public class EnvironmentDaemonGateway
   private void handlePartial(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     ActiveCapability active = requireActive(state, envelope);
-    // PARTIAL 拒绝 resource content：partial 结果必须只能是 text/json。
     EnvironmentCapabilityResult result =
         resultCodec.decodePartialForInvocation(
             envelope.payloadJson(), wireInvocationId(active), environment().maxResourceBytes());
@@ -567,8 +634,6 @@ public class EnvironmentDaemonGateway
   private void handleCompleted(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     ActiveCapability active = takeActive(state, envelope);
-    // COMPLETED 把 resource 段解码为瞬态内存 BinaryToolContent；持久化外部化属于 ToolGateway，
-    // 绝不属于 transport gateway。
     EnvironmentCapabilityResult result =
         resultCodec.decodeCompletedForInvocation(
             envelope.payloadJson(), wireInvocationId(active), environment().maxResourceBytes());
@@ -580,7 +645,6 @@ public class EnvironmentDaemonGateway
     ActiveCapability active = takeActive(state, envelope);
     String message =
         requiredSingleText(envelopeCodec.readPayload(envelope), "message", "FAILED payload");
-    // daemon FAILED 是已确认的已知失败：typed 异常让 ToolGateway 映射为非可重试 durable FAILED（其余未分类错误是 UNKNOWN）。
     deferred.add(() -> active.listener.onError(new EnvironmentCapabilityFailedException(message)));
   }
 
@@ -643,14 +707,11 @@ public class EnvironmentDaemonGateway
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     requireReady(state);
     requireNoInvocationId(envelope);
-    // 先严格 decode（失败则 pending 留在 map，closeConnectionState 立即以 ENVIRONMENT_UNAVAILABLE 完成），
-    // 再 peek+ownership，最后 identity remove 并完成。
     DaemonDirectoryCodec.DirectoryListed listed =
         directoryCodec.decodeListed(envelope.payloadJson());
     PendingDirectoryList pending = peekPendingDirectoryList(state, listed.requestId());
     if (pending == null) {
       if (matchesDirectoryTombstone(state, listed.requestId(), listed.path())) {
-        // 超时后的合法迟到响应：严格 decode/校验通过后静默丢弃，不是 unsolicited。
         return;
       }
       throw new DaemonProtocolException(
@@ -661,7 +722,6 @@ public class EnvironmentDaemonGateway
           "DIRECTORY_LISTED path does not match request: " + listed.path());
     }
     if (!removePendingDirectoryList(state, listed.requestId(), pending)) {
-      // 超时恰好抢先：pending 已被 orTimeout 移除并完成，tombstone 在同一临界区内落盘，按迟到响应静默丢弃。
       return;
     }
     deferred.add(
@@ -696,7 +756,6 @@ public class EnvironmentDaemonGateway
                 new EnvironmentDirectoryListResult.Failed(code, failed.message())));
   }
 
-  /** 只读查找请求的 pending 并校验 ownership（不移动条目：decode/校验失败时 pending 必须留在 map 供断线清理完成）。 */
   private PendingDirectoryList peekPendingDirectoryList(ConnectionState state, String requestId) {
     synchronized (this) {
       PendingDirectoryList pending = pendingDirectoryLists.get(requestId);
@@ -712,7 +771,6 @@ public class EnvironmentDaemonGateway
     }
   }
 
-  /** identity remove：pending 已被并发移除（超时/断线）时返回 false，调用方按迟到响应静默丢弃。 */
   private boolean removePendingDirectoryList(
       ConnectionState state, String requestId, PendingDirectoryList pending) {
     synchronized (this) {
@@ -720,7 +778,6 @@ public class EnvironmentDaemonGateway
     }
   }
 
-  /** 超时 tombstone 是否覆盖该 requestId/path（同一连接、同一环境、同一请求路径）。 */
   private boolean matchesDirectoryTombstone(ConnectionState state, String requestId, String path) {
     synchronized (this) {
       for (DirectoryTombstone tombstone : state.directoryTombstones) {
@@ -735,14 +792,12 @@ public class EnvironmentDaemonGateway
     }
   }
 
-  /** FIFO 有界淘汰：超过 {@link #MAX_DIRECTORY_TOMBSTONES} 时移除最旧条目。调用方必须持有 gateway monitor。 */
   private static void evictDirectoryTombstones(ConnectionState state) {
     while (state.directoryTombstones.size() > MAX_DIRECTORY_TOMBSTONES) {
       state.directoryTombstones.removeFirst();
     }
   }
 
-  /** wire 失败分类原样投影为应用结果分类（wire 只有四种确定性 code）。 */
   private static EnvironmentDirectoryFailureCode toApplicationCode(
       DaemonDirectoryFailureCode wireCode) {
     return switch (wireCode) {
@@ -753,7 +808,6 @@ public class EnvironmentDaemonGateway
     };
   }
 
-  /** wire {@code DIRECTORY_LISTED} → 应用读模型；条目顺序/截断标记原样保留。 */
   private static EnvironmentDirectoryDTO toDto(DaemonDirectoryCodec.DirectoryListed listed) {
     EnvironmentDirectoryDTO dto = new EnvironmentDirectoryDTO();
     dto.setPath(listed.path());
@@ -812,7 +866,8 @@ public class EnvironmentDaemonGateway
       if (state.cleaned
           || state.sendFailed
           || !state.connection.isOpen()
-          || state.environmentName == null) {
+          || state.environmentName == null
+          || state.routeToken == null) {
         return SendOutcome.NOT_SENT;
       }
       DaemonEnvelope envelope =
@@ -827,11 +882,9 @@ public class EnvironmentDaemonGateway
         if (state.connection.sendText(envelopeCodec.encode(envelope))) {
           return SendOutcome.SENT;
         }
-        // 有界队列拒绝意味着该连接不能可靠传递当前帧；连接必须整体失败，不能跳过序号继续发送后续帧。
         state.sendFailed = true;
         return SendOutcome.UNCERTAIN;
       } catch (RuntimeException error) {
-        // transport enqueue 契约异常同样使连接整体不可用。
         state.sendFailed = true;
         return SendOutcome.UNCERTAIN;
       }
@@ -844,8 +897,9 @@ public class EnvironmentDaemonGateway
     ObjectNode payload = envelopeCodec.createPayload();
     payload.put("message", message);
     if (error instanceof DaemonNameConflictException) {
-      // 终态名称冲突：daemon 必须据此停止重连并以非零状态退出。
       payload.put("code", DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT);
+    } else if (error instanceof DaemonRetryLaterException) {
+      payload.put("code", "RETRY_LATER");
     }
     enqueueProtocolError(state, receivedEnvironmentName, envelopeCodec.writeJson(payload));
     close(state.connection.connectionId());
@@ -872,7 +926,6 @@ public class EnvironmentDaemonGateway
               payloadJson);
       try {
         if (state.connection.sendText(envelopeCodec.encode(envelope))) {
-          // ERROR 已被 transport 接受后必须先 drain 再 close，尤其名称冲突 code 要送达 daemon。
           state.closeAfterFlush = true;
         } else {
           state.sendFailed = true;
@@ -888,23 +941,23 @@ public class EnvironmentDaemonGateway
     List<PendingSkillLoad> doomedSkills = List.of();
     List<PendingDirectoryList> doomedDirectoryLists = List.of();
     EnvironmentName environmentName;
+    UUID routeToken;
     boolean closeAfterFlush;
-    // 锁序固定为 state → this：先在 state 上立 cleaned/sendFailed，再清理 map/registry。
-    // 这样 in-flight receive（含 HELLO tryBind）会先完成绑定，close 才能看见并摘掉条目；
-    // 已 cleaned 的迟到 receive 直接忽略，不会留下幽灵 registry 占用。
     synchronized (state) {
       if (state.cleaned) {
         return;
       }
-      // cleaned 是完成清理的围栏；sendFailed 只表示 transport 不可用。
       state.cleaned = true;
       state.sendFailed = true;
       environmentName = state.environmentName;
+      routeToken = state.routeToken;
       closeAfterFlush = state.closeAfterFlush;
     }
     synchronized (this) {
       if (environmentName != null) {
-        environmentRegistry.unregister(environmentName, state.connection);
+        if (routeToken != null) {
+          environmentRegistry.disconnect(environmentName, routeToken, heartbeatTimeout());
+        }
         environmentConnections.remove(environmentName, state);
         ActiveCapability active = activeByEnvironment.get(environmentName);
         if (active != null && active.connectionId.equals(state.connection.connectionId())) {
@@ -918,7 +971,6 @@ public class EnvironmentDaemonGateway
         doomedSkills = takePendingSkillLoads(environmentName);
         doomedDirectoryLists = takePendingDirectoryLists(environmentName);
       }
-      // 断线清理同时清掉该连接的目录请求 tombstone：晚响应不可能再出现在已清理的连接上。
       state.directoryTombstones.clear();
       connections.remove(state.connection.connectionId(), state);
     }
@@ -929,7 +981,6 @@ public class EnvironmentDaemonGateway
         state.connection.close();
       }
     } catch (RuntimeException ignored) {
-      // transport 关闭失败不得触碰持久状态。
     }
     if (lostCapability != null) {
       ActiveCapability capability = lostCapability;
@@ -1007,7 +1058,6 @@ public class EnvironmentDaemonGateway
     try {
       environmentReadyListener.onEnvironmentReady(environmentName);
     } catch (RuntimeException ignored) {
-      // listener 失败不得重新进入协议状态。
     }
   }
 
@@ -1016,7 +1066,6 @@ public class EnvironmentDaemonGateway
       try {
         action.run();
       } catch (RuntimeException ignored) {
-        // listener/投影失败不得重新进入协议状态。
       }
     }
   }
@@ -1149,8 +1198,6 @@ public class EnvironmentDaemonGateway
 
     @Override
     public void cancel() {
-      // 幂等 EnvironmentCapabilityExecutionHandle.cancel：成功 start 后至多发送一次 CANCEL，且绝不在
-      // terminal COMPLETED/FAILED/CANCELLED 回调之后发送。
       synchronized (this) {
         if (cancelled || terminal || cancelSent) {
           cancelled = true;
@@ -1210,28 +1257,20 @@ public class EnvironmentDaemonGateway
     }
   }
 
-  /** 目录请求超时 tombstone：同连接迟到响应（requestId/path 均匹配）静默丢弃；FIFO 有界，断线清理时清除。 */
   private record DirectoryTombstone(
       String requestId, EnvironmentName environmentName, String connectionId, String path) {}
 
   private static final class ConnectionState {
     private final EnvironmentDaemonConnection connection;
+    private volatile UUID routeToken;
+    private volatile String daemonId;
     private volatile EnvironmentName environmentName;
     private volatile boolean helloReceived;
     private volatile boolean ready;
-
-    /** transport 无法继续发送（发送失败或已开始清理）。 */
     private volatile boolean sendFailed;
-
-    /** registry/connection 映射已恰好清理一次。 */
     private volatile boolean cleaned;
-
-    /** protocol ERROR 已成功入队，清理后需 drain 已接受帧再关闭。 */
     private boolean closeAfterFlush;
-
-    /** 已超时的目录请求 tombstone（FIFO，{@link #MAX_DIRECTORY_TOMBSTONES} 上限）；仅 gateway monitor 下访问。 */
     private final ArrayDeque<DirectoryTombstone> directoryTombstones = new ArrayDeque<>();
-
     private long outboundSequence;
     private InboundEnvelopeIdentity lastInbound;
 
@@ -1240,7 +1279,12 @@ public class EnvironmentDaemonGateway
     }
 
     private boolean isReady() {
-      return !cleaned && !sendFailed && ready && connection.isOpen() && environmentName != null;
+      return !cleaned
+          && !sendFailed
+          && ready
+          && connection.isOpen()
+          && environmentName != null
+          && routeToken != null;
     }
 
     private boolean acceptInbound(DaemonEnvelope envelope, JsonNode payload) {
