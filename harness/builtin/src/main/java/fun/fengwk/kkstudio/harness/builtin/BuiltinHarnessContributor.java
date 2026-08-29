@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin;
 
+import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentPrompts;
 import fun.fengwk.kkstudio.harness.builtin.goal.CreateGoalTool;
 import fun.fengwk.kkstudio.harness.builtin.goal.GetGoalTool;
@@ -9,6 +10,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -17,7 +19,6 @@ import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 
 import java.util.Objects;
 import java.util.Set;
@@ -26,7 +27,7 @@ import java.util.Set;
  * 第一方内置功能包 Contributor。
  *
  * <p>注册 12 个模型可见 Environment capability 工具、{@code load_skill} 与 {@code task} 内部 HOST 工具、 Goal
- * 声明式工具、{@code goal.state} 自定义 Entry 类型与上下文投影器。
+ * 工具、{@code goal.state} 自定义 Entry 类型与上下文投影器。
  */
 public final class BuiltinHarnessContributor implements HarnessContributor {
 
@@ -154,22 +155,22 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
         ToolSideEffect.NON_IDEMPOTENT);
 
     // Host tools
-    registrar.registerHostTool(
+    registrar.registerTool(
         "runtime.load-skill", BuiltinToolIds.LOAD_SKILL, loadSkillTool, ToolVisibility.INTERNAL, 0);
-    registrar.registerHostTool(
+    registrar.registerTool(
         "runtime.task", BuiltinToolIds.TASK, taskTool, ToolVisibility.INTERNAL, 0);
 
-    // Goal declarative tools & custom entry
+    // Goal tools & custom entry
     registrar.registerCustomEntryType("goal.state-type", GOAL_STATE_TYPE, 0);
-    registrar.registerDeclarativeTool(
+    registrar.registerTool(
         "goal.create",
         BuiltinToolIds.GOAL_CREATE,
         new CreateGoalTool(),
         ToolVisibility.SELECTABLE,
         0);
-    registrar.registerDeclarativeTool(
+    registrar.registerTool(
         "goal.get", BuiltinToolIds.GOAL_GET, new GetGoalTool(), ToolVisibility.SELECTABLE, 0);
-    registrar.registerDeclarativeTool(
+    registrar.registerTool(
         "goal.update",
         BuiltinToolIds.GOAL_UPDATE,
         new UpdateGoalTool(),
@@ -195,7 +196,7 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
             capability.inputSchema(),
             sideEffect,
             capability.timeout());
-    registrar.registerEnvironmentCapabilityTool(
-        localName, agentToolId, descriptor, capability, ToolVisibility.SELECTABLE, 0);
+    Tool tool = new EnvironmentCapabilityTool(descriptor, capability);
+    registrar.registerTool(localName, agentToolId, tool, ToolVisibility.SELECTABLE, 0);
   }
 }

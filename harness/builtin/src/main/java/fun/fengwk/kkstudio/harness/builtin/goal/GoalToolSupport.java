@@ -5,8 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
-import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolResult;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -35,9 +34,10 @@ final class GoalToolSupport {
   }
 
   static Optional<GoalState> latest(BranchView branch) {
-    return branch
-        .latestCustomEntry(GoalFeature.CONTRIBUTOR_ID, GoalFeature.STATE_TYPE)
-        .map(CODEC::decode);
+    if (branch == null) {
+      return Optional.empty();
+    }
+    return branch.latestCustomEntry(GoalFeature.STATE_TYPE).map(CODEC::decode);
   }
 
   static String requiredNonBlankText(ObjectNode arguments, String field) {
@@ -63,34 +63,31 @@ final class GoalToolSupport {
     return value.truncatedTo(ChronoUnit.MILLIS);
   }
 
-  static DeclarativeToolResult stateChange(ToolCall call, GoalState state) {
-    CustomEntryPayload payload =
-        new CustomEntryPayload(
-            GoalFeature.CONTRIBUTOR_ID.value(),
-            GoalFeature.STATE_TYPE,
-            GoalStateCodec.SCHEMA_VERSION,
-            CODEC.encode(state));
-    return new DeclarativeToolResult(
-        success(call.id(), CODEC.envelope(state)), List.of(new AppendCustomEntry(payload)));
+  static ToolOutcome stateChange(ToolCall call, GoalState state) {
+    AppendCustomEntry entry =
+        new AppendCustomEntry(
+            GoalFeature.STATE_TYPE, GoalStateCodec.SCHEMA_VERSION, CODEC.encode(state));
+    return new ToolOutcome(successResult(call.id(), CODEC.envelope(state)), List.of(entry));
   }
 
-  static DeclarativeToolResult success(ToolCall call, String text) {
-    return DeclarativeToolResult.withoutIntents(success(call.id(), text));
+  static ToolOutcome success(ToolCall call, String text) {
+    return ToolOutcome.withoutEffects(successResult(call.id(), text));
   }
 
-  static DeclarativeToolResult error(ToolCall call, RuntimeException error) {
+  static ToolOutcome error(ToolCall call, RuntimeException error) {
     String message = error.getMessage();
-    return DeclarativeToolResult.withoutIntents(
+    ToolResult errorResult =
         ToolResult.error(
             call.id(),
-            message == null || message.isBlank() ? error.getClass().getSimpleName() : message));
+            message == null || message.isBlank() ? error.getClass().getSimpleName() : message);
+    return ToolOutcome.withoutEffects(errorResult);
   }
 
   static String envelope(GoalState state) {
     return CODEC.envelope(state);
   }
 
-  private static ToolResult success(String callId, String text) {
+  private static ToolResult successResult(String callId, String text) {
     return new ToolResult(callId, List.of(new TextToolContent(text)), false, "{}");
   }
 }

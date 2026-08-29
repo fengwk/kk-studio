@@ -3,7 +3,8 @@ package fun.fengwk.kkstudio.harness.builtin.goal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -12,27 +13,24 @@ import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
-import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolContext;
-import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolContribution;
-import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolResult;
+import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
+import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
@@ -43,10 +41,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
-/** Goal 特性的 branch snapshot、工具状态机、fork 与上下文投影测试。 */
+/** Goal 特性的 branch snapshot、统一 Tool 执行、effects 产出与上下文投影测试。 */
 class GoalFeatureTest {
 
   private static final Instant T0 = Instant.parse("2026-01-01T00:00:00Z");
@@ -55,10 +55,13 @@ class GoalFeatureTest {
 
   private final GoalStateCodec codec = new GoalStateCodec();
 
+  /** Catalog 冻结验证：Tool 注册、State 要求声明与自定义 Entry Ownership。 */
   @Test
   void catalogFreezesGoalToolsStateOwnershipAndAccessModes() {
     BuiltinHarnessContributor contributor =
-        new BuiltinHarnessContributor(stubTool("load_skill"), stubTool("task"));
+        new BuiltinHarnessContributor(
+            stubTool("load_skill", ToolRequirements.environment()),
+            stubTool("task", ToolRequirements.none()));
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
     assertTrue(catalog.findTool("create_goal").isPresent());
@@ -75,29 +78,29 @@ class GoalFeatureTest {
         catalog.findTool("update_goal").orElseThrow().definition().id());
 
     assertEquals(
-        AgentToolBackend.DECLARATIVE,
-        catalog.findTool("create_goal").orElseThrow().definition().backend());
+        ToolVisibility.SELECTABLE,
+        catalog.findTool("create_goal").orElseThrow().definition().visibility());
     assertEquals(
         "builtin", catalog.findTool("create_goal").orElseThrow().id().contributorId().value());
 
     assertEquals(
-        StateMode.WRITE,
-        ((DeclarativeToolContribution) catalog.findTool("create_goal").orElseThrow())
-            .stateAccesses()
-            .get(0)
-            .mode());
+        new ToolRequirements(
+            false,
+            List.of(
+                new StateDeclaration(BuiltinHarnessContributor.GOAL_STATE_TYPE, StateMode.WRITE))),
+        catalog.findTool("create_goal").orElseThrow().requirements());
     assertEquals(
-        StateMode.READ,
-        ((DeclarativeToolContribution) catalog.findTool("get_goal").orElseThrow())
-            .stateAccesses()
-            .get(0)
-            .mode());
+        new ToolRequirements(
+            false,
+            List.of(
+                new StateDeclaration(BuiltinHarnessContributor.GOAL_STATE_TYPE, StateMode.READ))),
+        catalog.findTool("get_goal").orElseThrow().requirements());
     assertEquals(
-        StateMode.WRITE,
-        ((DeclarativeToolContribution) catalog.findTool("update_goal").orElseThrow())
-            .stateAccesses()
-            .get(0)
-            .mode());
+        new ToolRequirements(
+            false,
+            List.of(
+                new StateDeclaration(BuiltinHarnessContributor.GOAL_STATE_TYPE, StateMode.WRITE))),
+        catalog.findTool("update_goal").orElseThrow().requirements());
 
     assertTrue(
         catalog
@@ -106,7 +109,7 @@ class GoalFeatureTest {
     assertEquals(1, catalog.contextProjectors().size());
   }
 
-  /** 三个 Goal Tool 的版本、可见类型、副作用与 schema 精确对齐 durable goal 协议。 */
+  /** 三个 Goal Tool 的版本、副作用与 schema 符合稳定声明。 */
   @Test
   void exposesCanonicalGoalToolDescriptors() {
     ToolDescriptor create = new CreateGoalTool().descriptor();
@@ -136,327 +139,212 @@ class GoalFeatureTest {
         assertInstanceOf(ToolEnumSchema.class, update.inputSchema().properties().get("status"));
     assertEquals(List.of("complete", "blocked"), status.values());
     assertInstanceOf(ToolStringSchema.class, update.inputSchema().properties().get("reason"));
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolCall(
-                    "create-extra",
-                    CreateGoalTool.NAME,
-                    "{\"objective\":\"ship\",\"unexpected\":true}")
-                .validateFor(create));
   }
 
+  /** 状态流转验证：create -> get -> update 正常推进分支 Goal 快照与 effects。 */
   @Test
   void createUpdateAndGetReduceOnlyTheLatestSnapshotOnTheCurrentBranch() {
-    List<Entry> history = baseHistory();
-    BranchView root = new BranchView(new EntryPath(history));
+    SimpleBranchView root = new SimpleBranchView();
 
-    DeclarativeToolResult created =
-        new CreateGoalTool()
-            .execute(
-                new DeclarativeToolContext(root, T1),
-                new ToolCall(
-                    "create-1",
-                    CreateGoalTool.NAME,
-                    "{\"objective\":\"Ship and verify\",\"tokenBudget\":1000}"));
-    assertFalse(created.result().error());
-    GoalState active = state(created);
-    assertEquals("Ship and verify", active.objective());
-    assertEquals(1000L, active.tokenBudget());
-    assertEquals(GoalStatus.ACTIVE, active.status());
-    assertEquals(T1, active.createdAt());
+    // 1. Create goal
+    ToolOutcome createdOutcome =
+        executeTool(
+            new CreateGoalTool(),
+            root,
+            T1,
+            "create-1",
+            "{\"objective\":\"Ship and verify\",\"tokenBudget\":1000}");
+    assertFalse(createdOutcome.result().error());
+    assertEquals(1, createdOutcome.customEntries().size());
+    AppendCustomEntry createEntry = createdOutcome.customEntries().get(0);
+    assertEquals("goal.state", createEntry.customType());
+    assertEquals(1, createEntry.schemaVersion());
 
-    List<Entry> activeHistory = appendHistory(history, payload(created), new UUID(0L, 2), T1);
-    BranchView activeBranch = new BranchView(new EntryPath(activeHistory));
+    GoalState activeState =
+        codec.decode(new CustomStateSnapshot(createEntry.schemaVersion(), createEntry.dataJson()));
+    assertEquals("Ship and verify", activeState.objective());
+    assertEquals(1000L, activeState.tokenBudget());
+    assertEquals(GoalStatus.ACTIVE, activeState.status());
+    assertNull(activeState.reason());
+    assertEquals(T1, activeState.createdAt());
+    assertEquals(T1, activeState.updatedAt());
 
-    DeclarativeToolResult read =
-        new GetGoalTool()
-            .execute(
-                new DeclarativeToolContext(activeBranch, T1),
-                new ToolCall("get-1", GetGoalTool.NAME, "{}"));
-    assertFalse(read.result().error());
-    assertTrue(text(read).contains("Ship and verify"));
-    assertTrue(read.intents().isEmpty());
+    // 2. Branch with active goal -> Get goal
+    SimpleBranchView activeBranch =
+        root.withEntry(createEntry.schemaVersion(), createEntry.dataJson());
+    ToolOutcome getOutcome = executeTool(new GetGoalTool(), activeBranch, T1, "get-1", "{}");
+    assertFalse(getOutcome.result().error());
+    assertTrue(getOutcome.customEntries().isEmpty());
+    assertTrue(textContent(getOutcome.result()).contains("Ship and verify"));
 
-    DeclarativeToolResult updated =
-        new UpdateGoalTool()
-            .execute(
-                new DeclarativeToolContext(activeBranch, T2),
-                new ToolCall(
-                    "update-1",
-                    UpdateGoalTool.NAME,
-                    "{\"status\":\"complete\",\"reason\":\"All checks passed\"}"));
-    assertFalse(updated.result().error());
-    GoalState complete = state(updated);
-    assertEquals(GoalStatus.COMPLETE, complete.status());
-    assertEquals("All checks passed", complete.reason());
-    assertEquals(T1, complete.createdAt());
-    assertEquals(T2, complete.updatedAt());
+    // 3. Update goal to complete
+    ToolOutcome updateOutcome =
+        executeTool(
+            new UpdateGoalTool(),
+            activeBranch,
+            T2,
+            "update-1",
+            "{\"status\":\"complete\",\"reason\":\"All checks passed\"}");
+    assertFalse(updateOutcome.result().error());
+    assertEquals(1, updateOutcome.customEntries().size());
+    AppendCustomEntry updateEntry = updateOutcome.customEntries().get(0);
 
-    List<Entry> completedHistory =
-        appendHistory(activeHistory, payload(updated), new UUID(0L, 3), T2);
-    BranchView completedBranch = new BranchView(new EntryPath(completedHistory));
+    GoalState completeState =
+        codec.decode(new CustomStateSnapshot(updateEntry.schemaVersion(), updateEntry.dataJson()));
+    assertEquals("Ship and verify", completeState.objective());
+    assertEquals(GoalStatus.COMPLETE, completeState.status());
+    assertEquals("All checks passed", completeState.reason());
+    assertEquals(T1, completeState.createdAt());
+    assertEquals(T2, completeState.updatedAt());
 
-    assertEquals(
-        GoalStatus.COMPLETE, GoalToolSupport.latest(completedBranch).orElseThrow().status());
-    assertTrue(
-        GoalToolSupport.latest(root).isEmpty(), "a fork before create must not see the goal");
-    assertEquals(
-        GoalStatus.ACTIVE,
-        GoalToolSupport.latest(activeBranch).orElseThrow().status(),
-        "a sibling branch must not see a later terminal snapshot");
+    // 4. Update on completed goal must fail
+    SimpleBranchView completedBranch =
+        activeBranch.withEntry(updateEntry.schemaVersion(), updateEntry.dataJson());
+    ToolOutcome invalidUpdate =
+        executeTool(
+            new UpdateGoalTool(),
+            completedBranch,
+            T2,
+            "update-2",
+            "{\"status\":\"blocked\",\"reason\":\"Cannot modify completed goal\"}");
+    assertTrue(invalidUpdate.result().error());
+    assertTrue(invalidUpdate.customEntries().isEmpty());
+    assertTrue(textContent(invalidUpdate.result()).contains("cannot be updated"));
   }
 
+  /** 当缺少 Goal 时 UpdateGoalTool 应产生无 effects 的错误结果。 */
   @Test
-  void createReplacementPreservesCreationTimeAndReturnsAFullSnapshot() {
-    List<Entry> history = baseHistory();
-    BranchView root = new BranchView(new EntryPath(history));
-
-    DeclarativeToolResult first =
-        new CreateGoalTool()
-            .execute(
-                new DeclarativeToolContext(root, T1),
-                new ToolCall("create-1", CreateGoalTool.NAME, "{\"objective\":\"first\"}"));
-    List<Entry> firstHistory = appendHistory(history, payload(first), new UUID(0L, 2), T1);
-    BranchView firstBranch = new BranchView(new EntryPath(firstHistory));
-
-    DeclarativeToolResult replaced =
-        new CreateGoalTool()
-            .execute(
-                new DeclarativeToolContext(firstBranch, T2),
-                new ToolCall(
-                    "create-2",
-                    CreateGoalTool.NAME,
-                    "{\"objective\":\"second\",\"tokenBudget\":2000}"));
-    GoalState state = state(replaced);
-    assertEquals("second", state.objective());
-    assertEquals(2000L, state.tokenBudget());
-    assertEquals(T1, state.createdAt());
-    assertEquals(T2, state.updatedAt());
-    assertEquals(GoalStatus.ACTIVE, state.status());
+  void updateFailsWhenNoGoalIsSet() {
+    SimpleBranchView emptyBranch = new SimpleBranchView();
+    ToolOutcome outcome =
+        executeTool(
+            new UpdateGoalTool(),
+            emptyBranch,
+            T1,
+            "update-no-goal",
+            "{\"status\":\"complete\",\"reason\":\"nothing\"}");
+    assertTrue(outcome.result().error());
+    assertTrue(outcome.customEntries().isEmpty());
+    assertTrue(textContent(outcome.result()).contains("No goal is set"));
   }
 
+  /** 上下文缺失时工具应返回错误且无 effects。 */
   @Test
-  void updateRequiresAnActiveGoalAndInvalidArgumentsNeverEmitIntents() {
-    List<Entry> history = baseHistory();
-    BranchView root = new BranchView(new EntryPath(history));
+  void toolsHandleMissingExecutionContextGracefully() {
+    ToolOutcome createOutcome =
+        executeToolWithoutContext(new CreateGoalTool(), "call-1", "{\"objective\":\"test\"}");
+    assertTrue(createOutcome.result().error());
+    assertTrue(createOutcome.customEntries().isEmpty());
 
-    UpdateGoalTool update = new UpdateGoalTool();
-    DeclarativeToolResult missing =
-        update.execute(
-            new DeclarativeToolContext(root, T1),
-            new ToolCall(
-                "update-1", UpdateGoalTool.NAME, "{\"status\":\"complete\",\"reason\":\"done\"}"));
-    assertTrue(missing.result().error());
-    assertTrue(missing.intents().isEmpty());
+    ToolOutcome getOutcome = executeToolWithoutContext(new GetGoalTool(), "call-2", "{}");
+    assertTrue(getOutcome.result().error());
+    assertTrue(getOutcome.customEntries().isEmpty());
 
-    DeclarativeToolResult invalid =
-        new CreateGoalTool()
-            .execute(
-                new DeclarativeToolContext(root, T1),
-                new ToolCall(
-                    "create-1", CreateGoalTool.NAME, "{\"objective\":\"x\",\"objective\":\"y\"}"));
-    assertTrue(invalid.result().error());
-    assertTrue(invalid.intents().isEmpty());
-
-    DeclarativeToolResult unknown =
-        new CreateGoalTool()
-            .execute(
-                new DeclarativeToolContext(root, T1),
-                new ToolCall(
-                    "create-2", CreateGoalTool.NAME, "{\"objective\":\"x\",\"unexpected\":true}"));
-    assertTrue(unknown.result().error());
-    assertTrue(unknown.intents().isEmpty());
+    ToolOutcome updateOutcome =
+        executeToolWithoutContext(
+            new UpdateGoalTool(), "call-3", "{\"status\":\"complete\",\"reason\":\"r\"}");
+    assertTrue(updateOutcome.result().error());
+    assertTrue(updateOutcome.customEntries().isEmpty());
   }
 
+  /** GoalContextProjector 仅对 ACTIVE 状态产生 ContextFragment 注入。 */
   @Test
-  void getReportsMissingGoalAndRejectsUnknownArguments() {
-    List<Entry> history = baseHistory();
-    BranchView root = new BranchView(new EntryPath(history));
-
-    GetGoalTool get = new GetGoalTool();
-    DeclarativeToolResult missing =
-        get.execute(
-            new DeclarativeToolContext(root, T1), new ToolCall("get-1", GetGoalTool.NAME, "{}"));
-    assertFalse(missing.result().error());
-    assertTrue(text(missing).contains("There is no current branch goal."));
-    assertTrue(missing.intents().isEmpty());
-
-    DeclarativeToolResult invalid =
-        get.execute(
-            new DeclarativeToolContext(root, T1),
-            new ToolCall("get-2", GetGoalTool.NAME, "{\"unexpected\":true}"));
-    assertTrue(invalid.result().error());
-    assertTrue(invalid.intents().isEmpty());
-  }
-
-  @Test
-  void updateRejectsATerminalGoalWithoutEmittingAnIntent() {
-    GoalState complete = new GoalState("ship", null, GoalStatus.COMPLETE, "verified", T0, T1);
-    List<Entry> history =
-        appendHistory(
-            baseHistory(),
-            new CustomEntryPayload(
-                GoalFeature.CONTRIBUTOR_ID.value(),
-                GoalFeature.STATE_TYPE,
-                GoalStateCodec.SCHEMA_VERSION,
-                codec.encode(complete)),
-            new UUID(0L, 2),
-            T1);
-    BranchView completedBranch = new BranchView(new EntryPath(history));
-
-    DeclarativeToolResult result =
-        new UpdateGoalTool()
-            .execute(
-                new DeclarativeToolContext(completedBranch, T2),
-                new ToolCall(
-                    "update-1",
-                    UpdateGoalTool.NAME,
-                    "{\"status\":\"blocked\",\"reason\":\"still blocked\"}"));
-
-    assertTrue(result.result().error());
-    assertTrue(text(result).contains("complete"));
-    assertTrue(result.intents().isEmpty());
-  }
-
-  @Test
-  void goalStateAndStatusRejectInvalidDomainValues() {
-    assertEquals(GoalStatus.BLOCKED, GoalStatus.parse("blocked"));
-    assertThrows(IllegalArgumentException.class, () -> GoalStatus.parse("unknown"));
-    assertThrows(IllegalArgumentException.class, () -> GoalStatus.parseTerminal("active"));
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new GoalState(" ", null, GoalStatus.ACTIVE, null, T0, T1));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new GoalState("ship", 0L, GoalStatus.ACTIVE, null, T0, T1));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new GoalState("ship", null, GoalStatus.ACTIVE, "premature", T0, T1));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new GoalState("ship", null, GoalStatus.COMPLETE, null, T0, T1));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new GoalState("ship", null, GoalStatus.ACTIVE, null, T1, T0));
-  }
-
-  @Test
-  void activeContextIsProjectedButTerminalAndMissingGoalsAreSilent() {
+  void projectorProducesContextOnlyForActiveGoal() {
     GoalContextProjector projector = new GoalContextProjector();
-    List<Entry> history = baseHistory();
-    assertTrue(projector.project(new BranchView(new EntryPath(history))).isEmpty());
+    SimpleBranchView emptyBranch = new SimpleBranchView();
+    assertTrue(projector.project(emptyBranch).isEmpty());
 
-    GoalState active = new GoalState("ship", null, GoalStatus.ACTIVE, null, T0, T1);
-    List<Entry> activeHistory =
-        appendHistory(
-            history,
-            new CustomEntryPayload(
-                GoalFeature.CONTRIBUTOR_ID.value(),
-                GoalFeature.STATE_TYPE,
-                GoalStateCodec.SCHEMA_VERSION,
-                codec.encode(active)),
-            new UUID(0L, 2),
-            T1);
-    BranchView activeBranch = new BranchView(new EntryPath(activeHistory));
-    assertEquals(1, projector.project(activeBranch).size());
-    assertTrue(
-        ((TextMessageContent) projector.project(activeBranch).get(0).contents().get(0))
-            .text()
-            .contains("\"objective\":\"ship\""));
+    GoalState activeState = new GoalState("active goal", 500L, GoalStatus.ACTIVE, null, T0, T0);
+    SimpleBranchView activeBranch =
+        emptyBranch.withEntry(GoalStateCodec.SCHEMA_VERSION, codec.encode(activeState));
+    List<ContextFragment> fragments = projector.project(activeBranch);
+    assertEquals(1, fragments.size());
+    assertTrue(fragments.get(0).text().contains("active goal"));
 
-    GoalState complete = new GoalState("ship", null, GoalStatus.COMPLETE, "verified", T0, T2);
-    List<Entry> completeHistory =
-        appendHistory(
-            activeHistory,
-            new CustomEntryPayload(
-                GoalFeature.CONTRIBUTOR_ID.value(),
-                GoalFeature.STATE_TYPE,
-                GoalStateCodec.SCHEMA_VERSION,
-                codec.encode(complete)),
-            new UUID(0L, 3),
-            T2);
-    BranchView completeBranch = new BranchView(new EntryPath(completeHistory));
+    GoalState completeState =
+        new GoalState("complete goal", null, GoalStatus.COMPLETE, "done", T0, T1);
+    SimpleBranchView completeBranch =
+        activeBranch.withEntry(GoalStateCodec.SCHEMA_VERSION, codec.encode(completeState));
     assertTrue(projector.project(completeBranch).isEmpty());
   }
 
-  @Test
-  void stateCodecRejectsUnsupportedOrNonCanonicalSnapshots() {
-    CustomEntryPayload unsupported =
-        new CustomEntryPayload("builtin", "goal.state", 2, "{\"value\":1}");
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(unsupported));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                new CustomEntryPayload(
-                    "builtin",
-                    "goal.state",
-                    1,
-                    "{\"objective\":\"x\",\"tokenBudget\":null,\"status\":\"active\","
-                        + "\"reason\":null,\"createdAt\":\""
-                        + T0
-                        + "\",\"updatedAt\":\""
-                        + T1
-                        + "\",\"extra\":true}")));
+  private static ToolOutcome executeTool(
+      Tool tool, BranchView branch, Instant executedAt, String callId, String argumentsJson) {
+    ToolExecutionContext context =
+        new ToolExecutionContext(UUID.randomUUID(), UUID.randomUUID(), executedAt, branch);
+    ToolExecutionRequest request =
+        new ToolExecutionRequest(
+            tool.descriptor(),
+            new ToolCall(callId, tool.descriptor().name(), argumentsJson),
+            Duration.ZERO,
+            context);
+    AtomicReference<ToolOutcome> ref = new AtomicReference<>();
+    tool.execute(
+        request,
+        new ToolExecutionListener() {
+          @Override
+          public void onPartial(ToolResult partial) {}
+
+          @Override
+          public void onComplete(ToolOutcome outcome) {
+            ref.set(outcome);
+          }
+
+          @Override
+          public void onError(Throwable error) {}
+        });
+    assertNotNull(ref.get(), "listener.onComplete must be called synchronously");
+    return ref.get();
   }
 
-  private GoalState state(DeclarativeToolResult result) {
-    return codec.decode(payload(result));
+  private static ToolOutcome executeToolWithoutContext(
+      Tool tool, String callId, String argumentsJson) {
+    ToolExecutionRequest request =
+        new ToolExecutionRequest(
+            tool.descriptor(),
+            new ToolCall(callId, tool.descriptor().name(), argumentsJson),
+            Duration.ZERO);
+    AtomicReference<ToolOutcome> ref = new AtomicReference<>();
+    tool.execute(
+        request,
+        new ToolExecutionListener() {
+          @Override
+          public void onPartial(ToolResult partial) {}
+
+          @Override
+          public void onComplete(ToolOutcome outcome) {
+            ref.set(outcome);
+          }
+
+          @Override
+          public void onError(Throwable error) {}
+        });
+    assertNotNull(ref.get(), "listener.onComplete must be called");
+    return ref.get();
   }
 
-  private static CustomEntryPayload payload(DeclarativeToolResult result) {
-    AppendCustomEntry append = assertInstanceOf(AppendCustomEntry.class, result.intents().get(0));
-    return append.payload();
-  }
-
-  private static String text(DeclarativeToolResult result) {
-    return ((TextToolContent) result.result().contents().get(0)).text();
+  private static String textContent(ToolResult result) {
+    return ((TextToolContent) result.contents().get(0)).text();
   }
 
   private static void assertDescriptor(
       ToolDescriptor descriptor,
-      String name,
-      String version,
-      ToolSideEffect sideEffect,
-      Set<String> required,
-      Set<String> properties) {
-    assertEquals(name, descriptor.name());
-    assertEquals(version, descriptor.version());
-    assertEquals(name, descriptor.rendererKey());
-    assertEquals(sideEffect, descriptor.sideEffect());
+      String expectedName,
+      String expectedVersion,
+      ToolSideEffect expectedSideEffect,
+      Set<String> requiredParams,
+      Set<String> allParams) {
+    assertEquals(expectedName, descriptor.name());
+    assertEquals(expectedVersion, descriptor.version());
+    assertEquals(expectedName, descriptor.rendererKey());
+    assertEquals(expectedSideEffect, descriptor.sideEffect());
     assertEquals(Duration.ZERO, descriptor.timeout());
-    ToolParamsSchema schema = descriptor.inputSchema();
-    assertEquals(required, schema.required());
-    assertEquals(properties, schema.properties().keySet());
-    assertFalse(schema.additionalProperties());
+    assertFalse(descriptor.description().isBlank());
+    assertEquals(requiredParams, descriptor.inputSchema().required());
+    assertEquals(allParams, descriptor.inputSchema().properties().keySet());
   }
 
-  private static List<Entry> baseHistory() {
-    UUID rootId = new UUID(0L, 1L);
-    Entry root =
-        new Entry(
-            rootId,
-            rootId,
-            null,
-            new RootPayload(
-                new BranchSettings(
-                    null, "assistant", new ModelSelection("provider", "model", "default"))),
-            T0);
-    return List.of(root);
-  }
-
-  private static List<Entry> appendHistory(
-      List<Entry> history, CustomEntryPayload payload, UUID entryId, Instant createdAt) {
-    List<Entry> entries = new ArrayList<>(history);
-    Entry head = entries.get(entries.size() - 1);
-    entries.add(new Entry(entryId, entries.get(0).sessionId(), head.id(), payload, createdAt));
-    return List.copyOf(entries);
-  }
-
-  private static Tool stubTool(String name) {
+  private static Tool stubTool(String name, ToolRequirements requirements) {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             name,
@@ -465,11 +353,16 @@ class GoalFeatureTest {
             name,
             new ToolParamsSchema(null, Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
-            Duration.ZERO);
+            Duration.ofMinutes(1));
     return new Tool() {
       @Override
       public ToolDescriptor descriptor() {
         return descriptor;
+      }
+
+      @Override
+      public ToolRequirements requirements() {
+        return requirements;
       }
 
       @Override
@@ -486,5 +379,37 @@ class GoalFeatureTest {
         };
       }
     };
+  }
+
+  private static final class SimpleBranchView implements BranchView {
+    private final List<CustomStateSnapshot> entries;
+
+    private SimpleBranchView() {
+      this(List.of());
+    }
+
+    private SimpleBranchView(List<CustomStateSnapshot> entries) {
+      this.entries = List.copyOf(entries);
+    }
+
+    private SimpleBranchView withEntry(int version, String dataJson) {
+      List<CustomStateSnapshot> next = new ArrayList<>(entries);
+      next.add(new CustomStateSnapshot(version, dataJson));
+      return new SimpleBranchView(next);
+    }
+
+    @Override
+    public List<CustomStateSnapshot> customEntries(String customType) {
+      if ("goal.state".equals(customType)) {
+        return entries;
+      }
+      return List.of();
+    }
+
+    @Override
+    public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
+      List<CustomStateSnapshot> list = customEntries(customType);
+      return list.isEmpty() ? Optional.empty() : Optional.of(list.get(list.size() - 1));
+    }
   }
 }

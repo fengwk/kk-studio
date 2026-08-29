@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 
 import java.time.Instant;
 
@@ -28,9 +28,8 @@ class GoalStateCodecTest {
     String json = codec.encode(state);
     assertNotNull(json);
 
-    CustomEntryPayload payload =
-        new CustomEntryPayload("builtin", "goal.state", GoalStateCodec.SCHEMA_VERSION, json);
-    GoalState decoded = codec.decode(payload);
+    CustomStateSnapshot snapshot = new CustomStateSnapshot(GoalStateCodec.SCHEMA_VERSION, json);
+    GoalState decoded = codec.decode(snapshot);
 
     assertEquals(state.objective(), decoded.objective());
     assertEquals(state.tokenBudget(), decoded.tokenBudget());
@@ -47,9 +46,8 @@ class GoalStateCodecTest {
     String json = codec.encode(state);
     assertNotNull(json);
 
-    CustomEntryPayload payload =
-        new CustomEntryPayload("builtin", "goal.state", GoalStateCodec.SCHEMA_VERSION, json);
-    GoalState decoded = codec.decode(payload);
+    CustomStateSnapshot snapshot = new CustomStateSnapshot(GoalStateCodec.SCHEMA_VERSION, json);
+    GoalState decoded = codec.decode(snapshot);
 
     assertEquals(state.objective(), decoded.objective());
     assertNull(decoded.tokenBudget());
@@ -72,8 +70,8 @@ class GoalStateCodecTest {
 
   @Test
   void decodeRejectsInvalidSchemaVersion() {
-    CustomEntryPayload payload = new CustomEntryPayload("builtin", "goal.state", 99, "{}");
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(payload));
+    CustomStateSnapshot snapshot = new CustomStateSnapshot(99, "{}");
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(snapshot));
   }
 
   @Test
@@ -85,9 +83,8 @@ class GoalStateCodecTest {
   @Test
   void decodeRejectsMissingOrExtraFields() {
     // Missing fields
-    CustomEntryPayload missing =
-        new CustomEntryPayload(
-            "builtin", "goal.state", GoalStateCodec.SCHEMA_VERSION, "{\"objective\":\"x\"}");
+    CustomStateSnapshot missing =
+        new CustomStateSnapshot(GoalStateCodec.SCHEMA_VERSION, "{\"objective\":\"x\"}");
     assertThrows(IllegalArgumentException.class, () -> codec.decode(missing));
 
     // Extra field
@@ -98,8 +95,7 @@ class GoalStateCodecTest {
             + "\",\"updatedAt\":\""
             + T1
             + "\",\"extra\":\"value\"}";
-    CustomEntryPayload extra =
-        new CustomEntryPayload("builtin", "goal.state", GoalStateCodec.SCHEMA_VERSION, extraJson);
+    CustomStateSnapshot extra = new CustomStateSnapshot(GoalStateCodec.SCHEMA_VERSION, extraJson);
     assertThrows(IllegalArgumentException.class, () -> codec.decode(extra));
   }
 
@@ -115,10 +111,7 @@ class GoalStateCodecTest {
             + "\"}";
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                new CustomEntryPayload(
-                    "builtin", "goal.state", GoalStateCodec.SCHEMA_VERSION, badObjective)));
+        () -> codec.decode(new CustomStateSnapshot(GoalStateCodec.SCHEMA_VERSION, badObjective)));
 
     // TokenBudget negative or non-integer
     String badBudget =
@@ -130,10 +123,7 @@ class GoalStateCodecTest {
             + "\"}";
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                new CustomEntryPayload(
-                    "builtin", "goal.state", GoalStateCodec.SCHEMA_VERSION, badBudget)));
+        () -> codec.decode(new CustomStateSnapshot(GoalStateCodec.SCHEMA_VERSION, badBudget)));
 
     // Reason not text or null
     String badReason =
@@ -145,10 +135,7 @@ class GoalStateCodecTest {
             + "\"}";
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                new CustomEntryPayload(
-                    "builtin", "goal.state", GoalStateCodec.SCHEMA_VERSION, badReason)));
+        () -> codec.decode(new CustomStateSnapshot(GoalStateCodec.SCHEMA_VERSION, badReason)));
 
     // CreatedAt invalid instant
     String badCreatedAt =
@@ -158,10 +145,7 @@ class GoalStateCodecTest {
             + "\"}";
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                new CustomEntryPayload(
-                    "builtin", "goal.state", GoalStateCodec.SCHEMA_VERSION, badCreatedAt)));
+        () -> codec.decode(new CustomStateSnapshot(GoalStateCodec.SCHEMA_VERSION, badCreatedAt)));
   }
 
   @Test
