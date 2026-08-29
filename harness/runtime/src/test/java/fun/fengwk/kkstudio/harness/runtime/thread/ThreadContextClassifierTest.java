@@ -49,7 +49,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
@@ -858,9 +857,9 @@ class ThreadContextClassifierTest {
                 new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(30)),
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.HOST),
+            ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
+        false,
         null);
   }
 

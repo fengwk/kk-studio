@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -19,112 +19,92 @@ import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.List;
 
-/** ToolBinding 的 definition/contributor/environment 不变式；descriptor 只表示模型契约。 */
+/** ToolBinding 的 definition/contributor/environmentRequired/environment 契约与不变式。 */
 class ToolBindingTest {
 
   private static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
 
   @Test
-  void exposesOnlyDefinitionContributorAndEnvironmentRecordComponents() {
-    // 反射契约锁定 durable binding 的三个组件。
+  void exposesOnlyDefinitionContributorEnvironmentRequiredAndEnvironmentComponents() {
+    // 反射契约锁定 durable binding 的四个组件。
     assertTrue(ToolBinding.class.isRecord());
     RecordComponent[] components = ToolBinding.class.getRecordComponents();
     assertEquals(
-        List.of("definition", "contributor", "environment"),
+        List.of("definition", "contributor", "environmentRequired", "environment"),
         Arrays.stream(components).map(RecordComponent::getName).toList());
     assertEquals(AgentToolDefinition.class, components[0].getType());
     assertEquals(ContributorBinding.class, components[1].getType());
-    assertEquals(EnvironmentBinding.class, components[2].getType());
+    assertEquals(boolean.class, components[2].getType());
+    assertEquals(EnvironmentBinding.class, components[3].getType());
   }
 
-  /** 三种 backend 都必须保留完整 definition，且 descriptor convenience accessor 不改变冻结对象。 */
   @Test
-  void acceptsEveryBackendBindingShape() {
+  void acceptsValidEnvironmentRequiredAndUnrequiredBindingShapes() {
+    // 验证 environmentRequired=false 与 environmentRequired=true 两种合法形态均能正确构造。
     ToolBinding host =
         new ToolBinding(
-            definition("bash", AgentToolBackend.HOST),
-            contributorProvenance("core", "bash", List.of()),
-            null);
-    assertEquals(AgentToolBackend.HOST, host.definition().backend());
+            definition("bash"), contributorProvenance("core", "bash", List.of()), false, null);
     assertEquals("bash", host.descriptor().name());
+    assertFalse(host.environmentRequired());
     assertNull(host.environment());
     assertEquals("core", host.contributor().contributorId());
 
-    ToolBinding declarative =
-        new ToolBinding(
-            definition("create_goal", AgentToolBackend.DECLARATIVE), declarativeProvenance(), null);
-    assertEquals(AgentToolBackend.DECLARATIVE, declarative.definition().backend());
-    assertEquals("create_goal", declarative.descriptor().name());
-    assertEquals(declarativeProvenance(), declarative.contributor());
-    assertNull(declarative.environment());
-
     ToolBinding environment =
         new ToolBinding(
-            definition("fs", AgentToolBackend.ENVIRONMENT_CAPABILITY),
-            contributorProvenance("base", "read", List.of()),
-            ENV_ID);
-    assertEquals(AgentToolBackend.ENVIRONMENT_CAPABILITY, environment.definition().backend());
+            definition("fs"), contributorProvenance("base", "read", List.of()), true, ENV_ID);
+    assertEquals("fs", environment.descriptor().name());
+    assertTrue(environment.environmentRequired());
     assertEquals(ENV_ID, environment.environment());
     assertEquals("base", environment.contributor().contributorId());
   }
 
-  /** backend 是唯一 route，三个 backend 的 payload 组合必须在构造时 fail closed。 */
   @Test
-  void enforcesBackendPayloadInvariants() {
-    ContributorBinding emptyContributor = contributorProvenance("core", "bash", List.of());
+  void permitsCoexistenceOfStateAccessesAndEnvironment() {
+    // 允许 stateAccesses 与 environment 在同一 binding 中并存。
     ContributorBinding statefulContributor = declarativeProvenance();
+    ToolBinding combined =
+        new ToolBinding(definition("state_tool"), statefulContributor, true, ENV_ID);
+    assertTrue(combined.environmentRequired());
+    assertEquals(ENV_ID, combined.environment());
+    assertEquals(statefulContributor, combined.contributor());
+    assertFalse(combined.contributor().stateAccesses().isEmpty());
 
-    // HOST 不允许 environment 或 stateAccesses
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolBinding(
-                definition("host-env", AgentToolBackend.HOST), emptyContributor, ENV_ID));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolBinding(
-                definition("host-state", AgentToolBackend.HOST), statefulContributor, null));
+    ToolBinding stateWithoutEnv =
+        new ToolBinding(definition("state_tool"), statefulContributor, false, null);
+    assertFalse(stateWithoutEnv.environmentRequired());
+    assertNull(stateWithoutEnv.environment());
+    assertEquals(statefulContributor, stateWithoutEnv.contributor());
+  }
 
-    // DECLARATIVE 不允许 environment
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolBinding(
-                definition("decl-env", AgentToolBackend.DECLARATIVE), statefulContributor, ENV_ID));
+  @Test
+  void enforcesEnvironmentRequiredInvariant() {
+    ContributorBinding contributor = contributorProvenance("core", "bash", List.of());
 
-    // ENVIRONMENT_CAPABILITY 必须有 environment，且不允许 stateAccesses
+    // environmentRequired 为 true 时 environment 必须非 null
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ToolBinding(
-                definition("env-null", AgentToolBackend.ENVIRONMENT_CAPABILITY),
-                emptyContributor,
-                null));
+        () -> new ToolBinding(definition("env-null"), contributor, true, null));
+
+    // environmentRequired 为 false 时 environment 必须为 null
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ToolBinding(
-                definition("env-state", AgentToolBackend.ENVIRONMENT_CAPABILITY),
-                statefulContributor,
-                ENV_ID));
+        () -> new ToolBinding(definition("host-env"), contributor, false, ENV_ID));
 
     // definition 和 contributor 必须非空
-    assertThrows(NullPointerException.class, () -> new ToolBinding(null, emptyContributor, null));
+    assertThrows(NullPointerException.class, () -> new ToolBinding(null, contributor, false, null));
     assertThrows(
-        NullPointerException.class,
-        () -> new ToolBinding(definition("host", AgentToolBackend.HOST), null, null));
+        NullPointerException.class, () -> new ToolBinding(definition("bash"), null, false, null));
   }
 
   @Test
   void contributorBindingFreezesCanonicalOwnerAndUniqueStateAccesses() {
+    // ContributorBinding 校验规范标识符与唯一的 stateAccess customType。
     ContributorBinding contributor =
         new ContributorBinding(
             "goal",
             "create",
             List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)));
-    ToolBinding binding =
-        new ToolBinding(definition("create_goal", AgentToolBackend.DECLARATIVE), contributor, null);
+    ToolBinding binding = new ToolBinding(definition("create_goal"), contributor, false, null);
     assertEquals(contributor, binding.contributor());
     assertThrows(
         IllegalArgumentException.class,
@@ -143,12 +123,11 @@ class ToolBindingTest {
     return ToolInvocationTestData.descriptor(name);
   }
 
-  private static AgentToolDefinition definition(String name, AgentToolBackend backend) {
+  private static AgentToolDefinition definition(String name) {
     return new AgentToolDefinition(
         new AgentToolId("test." + name.replace('_', '-').toLowerCase()),
         descriptor(name),
-        ToolVisibility.SELECTABLE,
-        backend);
+        ToolVisibility.SELECTABLE);
   }
 
   private static ContributorBinding contributorProvenance(

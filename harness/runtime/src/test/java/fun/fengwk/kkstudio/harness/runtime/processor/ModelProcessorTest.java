@@ -71,7 +71,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -3134,11 +3133,9 @@ class ModelProcessorTest {
     ToolBinding binding =
         new ToolBinding(
             new AgentToolDefinition(
-                new AgentToolId("test.bash"),
-                descriptor,
-                ToolVisibility.SELECTABLE,
-                AgentToolBackend.HOST),
+                new AgentToolId("test.bash"), descriptor, ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "bash", List.of()),
+            false,
             null);
     return spec(List.of(binding));
   }

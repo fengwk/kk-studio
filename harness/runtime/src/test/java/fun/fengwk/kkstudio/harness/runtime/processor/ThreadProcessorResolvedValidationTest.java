@@ -38,7 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -132,9 +131,9 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
                     new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
                     ToolSideEffect.READ_ONLY,
                     Duration.ofSeconds(30)),
-                ToolVisibility.SELECTABLE,
-                AgentToolBackend.ENVIRONMENT_CAPABILITY),
+                ToolVisibility.SELECTABLE),
             new ContributorBinding("base", "fs", List.of()),
+            settings.environment() != null,
             settings.environment());
     return new ModelRequestSpec(
         ProviderType.OPENAI,

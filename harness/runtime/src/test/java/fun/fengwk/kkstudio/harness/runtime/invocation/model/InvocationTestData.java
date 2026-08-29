@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -53,9 +52,7 @@ final class InvocationTestData {
 
   static ToolBinding host(String name) {
     return new ToolBinding(
-        definition(name, AgentToolBackend.HOST),
-        new ContributorBinding("core", name, List.of()),
-        null);
+        definition(name), new ContributorBinding("core", name, List.of()), false, null);
   }
 
   static ToolBinding environment(String name) {
@@ -64,17 +61,14 @@ final class InvocationTestData {
 
   static ToolBinding environment(String name, EnvironmentBinding environment) {
     return new ToolBinding(
-        definition(name, AgentToolBackend.ENVIRONMENT_CAPABILITY),
-        new ContributorBinding("base", name, List.of()),
-        environment);
+        definition(name), new ContributorBinding("base", name, List.of()), true, environment);
   }
 
-  private static AgentToolDefinition definition(String name, AgentToolBackend backend) {
+  private static AgentToolDefinition definition(String name) {
     return new AgentToolDefinition(
         new AgentToolId("test." + name.replace('_', '-').toLowerCase(Locale.ROOT)),
         toolDescriptor(name),
-        ToolVisibility.SELECTABLE,
-        backend);
+        ToolVisibility.SELECTABLE);
   }
 
   static ModelDescriptor modelDescriptor() {

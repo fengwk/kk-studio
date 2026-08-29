@@ -7,46 +7,30 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import java.util.Objects;
 
 /**
- * 单次 Tool invocation 的冻结 binding：完整 Agent tool definition、Contributor provenance 与可选 Environment
- * binding。
+ * 单次 Tool invocation 的冻结 binding：完整 Agent tool definition、Contributor provenance、环境需求标志与可选
+ * Environment binding。
  *
- * <p>{@link AgentToolDefinition#backend()} 是唯一 execution route；{@link
- * AgentToolDefinition#descriptor()} 是 model contract，{@link AgentToolDefinition#id()} 是 durable
- * registry 与 permission identity。 Contributor 必须非空；Environment 仅在 ENVIRONMENT_CAPABILITY 时非空；state
- * accesses 仅在 DECLARATIVE 时允许非空。
+ * <p>{@link AgentToolDefinition#descriptor()} 是 model contract，{@link AgentToolDefinition#id()} 是
+ * durable registry 与 permission identity。 Contributor 必须非空；当且仅当 {@code environmentRequired == true}
+ * 时 {@code environment} 必须非空。
  */
 public record ToolBinding(
     AgentToolDefinition definition,
     ContributorBinding contributor,
+    boolean environmentRequired,
     EnvironmentBinding environment) {
 
   public ToolBinding {
     definition = Objects.requireNonNull(definition, "definition");
     contributor = Objects.requireNonNull(contributor, "contributor");
-    switch (definition.backend()) {
-      case HOST -> {
-        if (environment != null) {
-          throw new IllegalArgumentException("HOST binding must not have an environment binding");
-        }
-        if (!contributor.stateAccesses().isEmpty()) {
-          throw new IllegalArgumentException("HOST binding must not declare state accesses");
-        }
+    if (environmentRequired) {
+      if (environment == null) {
+        throw new IllegalArgumentException("environmentRequired is true but environment is null");
       }
-      case DECLARATIVE -> {
-        if (environment != null) {
-          throw new IllegalArgumentException(
-              "DECLARATIVE binding must not have an environment binding");
-        }
-      }
-      case ENVIRONMENT_CAPABILITY -> {
-        if (environment == null) {
-          throw new IllegalArgumentException(
-              "ENVIRONMENT_CAPABILITY binding requires an environment binding");
-        }
-        if (!contributor.stateAccesses().isEmpty()) {
-          throw new IllegalArgumentException(
-              "ENVIRONMENT_CAPABILITY binding must not declare state accesses");
-        }
+    } else {
+      if (environment != null) {
+        throw new IllegalArgumentException(
+            "environmentRequired is false but environment is not null");
       }
     }
   }

@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -38,24 +37,19 @@ final class ToolInvocationTestData {
 
   static ToolBinding host(String name) {
     return new ToolBinding(
-        definition(name, AgentToolBackend.HOST),
-        new ContributorBinding("core", name, List.of()),
-        null);
+        definition(name), new ContributorBinding("core", name, List.of()), false, null);
   }
 
   static ToolBinding environment(String name) {
     return new ToolBinding(
-        definition(name, AgentToolBackend.ENVIRONMENT_CAPABILITY),
-        new ContributorBinding("base", name, List.of()),
-        ENV_ID);
+        definition(name), new ContributorBinding("base", name, List.of()), true, ENV_ID);
   }
 
-  private static AgentToolDefinition definition(String name, AgentToolBackend backend) {
+  private static AgentToolDefinition definition(String name) {
     return new AgentToolDefinition(
         new AgentToolId("test." + name.replace('_', '-').toLowerCase(Locale.ROOT)),
         descriptor(name),
-        ToolVisibility.SELECTABLE,
-        backend);
+        ToolVisibility.SELECTABLE);
   }
 
   static ToolCall call(String name, String argumentsJson) {

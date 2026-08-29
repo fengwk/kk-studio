@@ -11,17 +11,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
-/** ModelRequestSpec 的冻结、唯一名称与 environment 一致性检查。 */
+/** ModelRequestSpec 的冻结、唯一名称/ID 与 environment 一致性检查。 */
 class ModelRequestSpecTest {
 
   @Test
@@ -75,11 +85,50 @@ class ModelRequestSpecTest {
   }
 
   @Test
-  void rejectsDuplicateNames() {
-    // 每类 binding 名称都是其调用内身份，重复名称必须在构造时失败。
+  void rejectsDuplicateNamesAndIds() {
+    // 每类 binding 名称与工具 ID 都是其调用内身份，重复名称或重复 ID 必须在构造时失败。
     assertThrows(
         IllegalArgumentException.class,
         () -> spec(List.of(host("bash"), environment("bash")), List.of(), List.of()));
+    // 同名不同 ID 同样拒绝
+    ToolBinding tool1 =
+        new ToolBinding(
+            new AgentToolDefinition(
+                new AgentToolId("test.first"), toolDescriptor("bash"), ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "bash", List.of()),
+            false,
+            null);
+    ToolBinding tool2 =
+        new ToolBinding(
+            new AgentToolDefinition(
+                new AgentToolId("test.second"), toolDescriptor("bash"), ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "bash", List.of()),
+            false,
+            null);
+    assertThrows(
+        IllegalArgumentException.class, () -> spec(List.of(tool1, tool2), List.of(), List.of()));
+    // 同 ID 不同名也必须拒绝
+    ToolBinding tool3 =
+        new ToolBinding(
+            new AgentToolDefinition(
+                new AgentToolId("test.same-id"),
+                toolDescriptor("bash-a"),
+                ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "bash", List.of()),
+            false,
+            null);
+    ToolBinding tool4 =
+        new ToolBinding(
+            new AgentToolDefinition(
+                new AgentToolId("test.same-id"),
+                toolDescriptor("bash-b"),
+                ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "bash", List.of()),
+            false,
+            null);
+    assertThrows(
+        IllegalArgumentException.class, () -> spec(List.of(tool3, tool4), List.of(), List.of()));
+
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -121,29 +170,15 @@ class ModelRequestSpecTest {
   }
 
   @Test
-  void rejectsMixedNullAndNonNullEnvironmentBindings() {
-    // null 也是冻结事实：首个环境工具为 null 时，后续非 null 不能被误判为首个绑定。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            spec(
-                List.of(environment("first", null), environment("second", ENV_ID)),
-                List.of(),
-                List.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            spec(
-                List.of(environment("first", ENV_ID), environment("second", null)),
-                List.of(),
-                List.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            spec(
-                List.of(environment("first", null)),
-                List.of(new SkillBinding("web", "Web search", ENV_ID)),
-                List.of()));
+  void permitsUnrequiredToolsAlongsideEnvironmentRequiredTools() {
+    // 无环境需求的工具（environmentRequired=false）不影响有环境工具的一致性检查。
+    ModelRequestSpec spec =
+        spec(
+            List.of(host("bash"), environment("fs", ENV_ID)),
+            List.of(new SkillBinding("web", "Web search", ENV_ID)),
+            List.of());
+    assertEquals(2, spec.toolBindings().size());
+    assertEquals(1, spec.skillBindings().size());
   }
 
   @Test
@@ -198,6 +233,17 @@ class ModelRequestSpecTest {
         skills,
         subagents,
         ProviderCacheControl.none());
+  }
+
+  private static ToolDescriptor toolDescriptor(String name) {
+    return new ToolDescriptor(
+        name,
+        "1.0",
+        "desc",
+        name,
+        new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+        ToolSideEffect.READ_ONLY,
+        Duration.ofSeconds(30));
   }
 
   private static ModelVariant variant() {

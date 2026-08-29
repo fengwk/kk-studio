@@ -32,6 +32,7 @@ public final class ToolBindingJsonCodec {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.set("definition", DEFINITION_CODEC.encodeNode(binding.definition()));
     node.set("contributor", encodeContributor(binding.contributor()));
+    node.put("environmentRequired", binding.environmentRequired());
     InvocationJsonSupport.putNullable(node, "environment", binding.environment());
     return node;
   }
@@ -42,14 +43,16 @@ public final class ToolBindingJsonCodec {
 
   public ToolBinding decodeNode(JsonNode value) {
     ObjectNode node = InvocationJsonSupport.object(value, CONTEXT);
-    InvocationJsonSupport.requireFields(node, CONTEXT, "definition", "contributor", "environment");
+    InvocationJsonSupport.requireFields(
+        node, CONTEXT, "definition", "contributor", "environmentRequired", "environment");
     AgentToolDefinition definition =
         DEFINITION_CODEC.decodeNode(InvocationJsonSupport.required(node, "definition", CONTEXT));
     ContributorBinding contributor =
         decodeContributor(InvocationJsonSupport.required(node, "contributor", CONTEXT));
+    boolean environmentRequired = InvocationJsonSupport.bool(node, "environmentRequired", CONTEXT);
     EnvironmentBinding environment =
         InvocationJsonSupport.nullableEnvironmentBinding(node, "environment", CONTEXT);
-    return new ToolBinding(definition, contributor, environment);
+    return new ToolBinding(definition, contributor, environmentRequired, environment);
   }
 
   private static ObjectNode encodeContributor(ContributorBinding contributor) {

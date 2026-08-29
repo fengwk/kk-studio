@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 
 import java.util.Objects;
 
@@ -17,8 +16,8 @@ import java.util.Objects;
  * Resolved 请求与 candidate branch 事实的机械一致性校验（Harness 边界）。
  *
  * <p>可直接对照 candidate {@link TurnPlan#candidatePath()} 最新 {@link BranchSettings} 的字段只有
- * provider/model/variant 选择（压缩 fallback 对照 preparation 的 executionModel），以及 environment-bound
- * tool/skill 的 route。YOLO 不进入 spec，也不参与校验。
+ * provider/model/variant 选择（压缩 fallback 对照 preparation 的 executionModel），以及 environment-required
+ * tool/skill 的 environment。YOLO 不进入 spec，也不参与校验。
  *
  * <p>压缩 turn 必须零 tool/skill binding，model/variant 等于 {@code preparation.executionModel()}，且
  * Resolved 的 model/variant 必须匹配 executionModel；实际 contextWindow / maxOutputTokens 由该 execution
@@ -59,7 +58,7 @@ final class ResolvedRequestValidator {
     ModelSelection expectedModel =
         preparation == null ? settings.model() : preparation.executionModel();
     for (ToolBinding binding : spec.toolBindings()) {
-      if (binding.definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY
+      if (binding.environmentRequired()
           && !Objects.equals(binding.environment(), settings.environment())) {
         throw new IllegalStateException(
             "resolved tool environment="
