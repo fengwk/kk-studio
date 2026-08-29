@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
 import java.sql.ResultSet;
@@ -140,7 +141,8 @@ final class PostgresqlHarnessRows {
               instant(resultSet, "available_at"),
               resultSet.getLong("wake_version"),
               resultSet.getString("lease_token"),
-              nullableInstant(resultSet, "lease_until"));
+              nullableInstant(resultSet, "lease_until"),
+              decodeNullableEnvironmentName(resultSet.getString("required_environment_name")));
 
   private PostgresqlHarnessRows() {}
 
@@ -150,6 +152,10 @@ final class PostgresqlHarnessRows {
 
   static Instant requireMillisecondPrecision(Instant instant) {
     return HarnessStoreTime.requireMillisecondPrecision(instant);
+  }
+
+  private static EnvironmentName decodeNullableEnvironmentName(String value) {
+    return value == null ? null : new EnvironmentName(value);
   }
 
   private static Instant instant(ResultSet resultSet, String column) throws SQLException {

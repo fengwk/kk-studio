@@ -36,7 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -236,7 +235,8 @@ final class DispatcherTestSupport {
                       null,
                       NOW,
                       NOW)));
-          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), NOW);
+          tx.requestWork(
+              new WorkTarget(WorkTargetType.TOOL, toolId), NOW, ENV_NAME.environmentName());
           return new ToolSeed(threadId, modelId, toolId);
         });
   }
@@ -698,9 +698,9 @@ final class DispatcherTestSupport {
                     new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
                     ToolSideEffect.READ_ONLY,
                     Duration.ofSeconds(30)),
-                ToolVisibility.SELECTABLE,
-                AgentToolBackend.HOST),
+                ToolVisibility.SELECTABLE),
             new ContributorBinding("test", "bash", List.of()),
-            null));
+            true,
+            ENV_NAME));
   }
 }

@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+
 import java.time.Instant;
 import java.util.Optional;
 
@@ -229,5 +231,73 @@ class WorkTest {
     assertThrows(IllegalArgumentException.class, () -> new Work(TARGET, T0, 1L, " t", T0));
     assertThrows(
         IllegalArgumentException.class, () -> new Work(TARGET, T0, 1L, "t".repeat(129), T0));
+  }
+
+  @Test
+  void requiredEnvironmentNameMustBeNullForNonToolTarget() {
+    EnvironmentName env = new EnvironmentName("env-1");
+    WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, id(1L));
+    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, id(2L));
+    WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, id(3L));
+
+    assertThrows(
+        IllegalArgumentException.class, () -> new Work(threadTarget, T0, 1L, null, null, env));
+    assertThrows(
+        IllegalArgumentException.class, () -> new Work(modelTarget, T0, 1L, null, null, env));
+    assertThrows(IllegalArgumentException.class, () -> Work.initial(threadTarget, T0, env));
+    assertThrows(IllegalArgumentException.class, () -> Work.initial(modelTarget, T0, env));
+
+    Work toolWork = Work.initial(toolTarget, T0, env);
+    assertEquals(env, toolWork.requiredEnvironmentName());
+  }
+
+  @Test
+  void requestPreservesEnvironmentAffinityAndRejectsConflictingRequirements() {
+    EnvironmentName env1 = new EnvironmentName("env-1");
+    EnvironmentName env2 = new EnvironmentName("env-2");
+    WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, id(3L));
+
+    Work initial = Work.initial(toolTarget, T0, env1);
+    assertEquals(env1, initial.requiredEnvironmentName());
+
+    // 1. 无参 request 保留亲和性
+    Work next = initial.request(T0.plusSeconds(10));
+    assertEquals(env1, next.requiredEnvironmentName());
+    assertEquals(2L, next.wakeVersion());
+
+    // 2. 带相同 env 的 request 正常递增
+    Work same = initial.request(T0.plusSeconds(10), env1);
+    assertEquals(env1, same.requiredEnvironmentName());
+    assertEquals(2L, same.wakeVersion());
+
+    // 3. 冲突的 env request 抛错
+    assertThrows(IllegalArgumentException.class, () -> initial.request(T0.plusSeconds(10), env2));
+
+    // 4. 原本为 null affinity 的 work，后续带非 null env request 抛错
+    Work nullAffinity = Work.initial(toolTarget, T0);
+    assertNull(nullAffinity.requiredEnvironmentName());
+    assertThrows(
+        IllegalArgumentException.class, () -> nullAffinity.request(T0.plusSeconds(10), env1));
+  }
+
+  @Test
+  void claimRenewCompleteReschedulePreserveEnvironmentAffinity() {
+    EnvironmentName env = new EnvironmentName("env-1");
+    WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, id(3L));
+    Work work = Work.initial(toolTarget, T0, env);
+
+    Work claimed = work.claim(T0, "token-1", T0.plusSeconds(30));
+    assertEquals(env, claimed.requiredEnvironmentName());
+
+    Work renewed = claimed.renew("token-1", T0.plusSeconds(10), T0.plusSeconds(120));
+    assertEquals(env, renewed.requiredEnvironmentName());
+
+    Work requestedWhileClaimed = claimed.request(T0.plusSeconds(60));
+    Optional<Work> kept = requestedWhileClaimed.complete("token-1", 1L, T0.plusSeconds(10));
+    assertTrue(kept.isPresent());
+    assertEquals(env, kept.get().requiredEnvironmentName());
+
+    Work rescheduled = claimed.reschedule("token-1", 1L, T0.plusSeconds(10), T0.plusSeconds(60));
+    assertEquals(env, rescheduled.requiredEnvironmentName());
   }
 }

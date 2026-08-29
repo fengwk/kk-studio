@@ -602,15 +602,9 @@ public final class ToolProcessor implements AutoCloseable {
     }
     return switch (result) {
       case ToolGateway.Started started -> execution.activate(started.handle());
-      case ToolGateway.Busy busy -> {
+      case ToolGateway.RetryLater retryLater -> {
         execution.abandon();
-        yield bounceDispatch(claim, dispatched, busy.retryAfter())
-            ? ProcessResult.RESCHEDULED
-            : ProcessResult.LOST_OWNERSHIP;
-      }
-      case ToolGateway.Overloaded overloaded -> {
-        execution.abandon();
-        yield bounceDispatch(claim, dispatched, overloaded.retryAfter())
+        yield bounceDispatch(claim, dispatched, retryLater.retryAfter())
             ? ProcessResult.RESCHEDULED
             : ProcessResult.LOST_OWNERSHIP;
       }

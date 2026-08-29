@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
@@ -54,8 +55,19 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           select target_type, target_id
           from harness_work
           where target_type = ?
-            and available_at <= ?
-            and (lease_until is null or lease_until <= ?)
+            and available_at <= statement_timestamp()
+            and (lease_until is null or lease_until <= statement_timestamp())
+            and (
+                required_environment_name is null
+                or exists (
+                    select 1
+                    from live_environment le
+                    where le.environment_name = harness_work.required_environment_name
+                      and le.node_instance_id = ?
+                      and le.status = 'READY'
+                      and le.lease_until > statement_timestamp()
+                )
+            )
           order by available_at, target_id
           for update skip locked
           limit 1
@@ -71,11 +83,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   private static final String REQUEST_WORK =
       """
       insert into harness_work (
-          target_type, target_id, available_at, wake_version, lease_token, lease_until
-      ) values (?, ?, ?, 1, null, null)
+          target_type, target_id, available_at, wake_version, lease_token, lease_until, required_environment_name
+      ) values (?, ?, ?, 1, null, null, ?)
       on conflict (target_type, target_id) do update
       set available_at = least(harness_work.available_at, excluded.available_at),
           wake_version = harness_work.wake_version + 1
+      where (harness_work.required_environment_name is not distinct from excluded.required_environment_name
+             or excluded.required_environment_name is null)
       returning *
       """;
 
@@ -1119,9 +1133,20 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   @Override
   public void requestWork(WorkTarget target, Instant requestedAt) {
+    requestWork(target, requestedAt, null);
+  }
+
+  @Override
+  public void requestWork(
+      WorkTarget target, Instant requestedAt, EnvironmentName requiredEnvironmentName) {
     checkOpen();
     Objects.requireNonNull(target, "target");
     Objects.requireNonNull(requestedAt, "requestedAt");
+    PostgresqlHarnessRows.requireMillisecondPrecision(requestedAt);
+    if (requiredEnvironmentName != null && target.type() != WorkTargetType.TOOL) {
+      throw new IllegalArgumentException(
+          "requiredEnvironmentName must be null for target type " + target.type());
+    }
     requireWorkOwnerLocked(target);
     requireCanLockWork(target);
     Work work =
@@ -1130,8 +1155,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 PostgresqlHarnessRows.WORK,
                 target.type().name(),
                 target.id(),
-                PostgresqlHarnessRows.timestamp(requestedAt))
-            .orElseThrow(() -> new IllegalStateException("work upsert returned no row"));
+                PostgresqlHarnessRows.timestamp(requestedAt),
+                requiredEnvironmentName == null ? null : requiredEnvironmentName.value())
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "conflicting requiredEnvironmentName for work target " + target));
     recordWorkLock(work.target());
     notifyWorkAvailable();
   }
@@ -1139,11 +1168,23 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   @Override
   public Optional<ClaimedWork> claimNextWork(
       WorkTargetType targetType, Instant now, String leaseToken, Instant leaseUntil) {
+    return claimNextWork(targetType, now, leaseToken, leaseUntil, null);
+  }
+
+  @Override
+  public Optional<ClaimedWork> claimNextWork(
+      WorkTargetType targetType,
+      Instant now,
+      String leaseToken,
+      Instant leaseUntil,
+      UUID nodeInstanceId) {
     checkOpen();
     Objects.requireNonNull(targetType, "targetType");
     Objects.requireNonNull(now, "now");
     Objects.requireNonNull(leaseToken, "leaseToken");
     Objects.requireNonNull(leaseUntil, "leaseUntil");
+    PostgresqlHarnessRows.requireMillisecondPrecision(now);
+    PostgresqlHarnessRows.requireMillisecondPrecision(leaseUntil);
     Work.initial(new WorkTarget(targetType, new UUID(0L, 0L)), now)
         .claim(now, leaseToken, leaseUntil);
     requireCanClaimWork();
@@ -1152,8 +1193,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             CLAIM_NEXT_WORK,
             PostgresqlHarnessRows.WORK,
             targetType.name(),
-            PostgresqlHarnessRows.timestamp(now),
-            PostgresqlHarnessRows.timestamp(now),
+            nodeInstanceId,
             leaseToken,
             PostgresqlHarnessRows.timestamp(leaseUntil));
     if (claimed.isEmpty()) {
@@ -1163,7 +1203,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     requireTargetExists(work.target());
     recordWorkLock(work.target());
     return Optional.of(
-        new ClaimedWork(work.target(), work.wakeVersion(), work.leaseToken(), work.leaseUntil()));
+        new ClaimedWork(
+            work.target(),
+            work.wakeVersion(),
+            work.leaseToken(),
+            work.leaseUntil(),
+            work.requiredEnvironmentName()));
   }
 
   @Override

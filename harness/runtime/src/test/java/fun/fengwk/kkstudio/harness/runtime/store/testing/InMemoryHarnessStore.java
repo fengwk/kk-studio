@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 
 import java.time.Instant;
@@ -89,18 +90,38 @@ public final class InMemoryHarnessStore implements HarnessStore {
   private final Object monitor = new Object();
   private State committed;
   private boolean inTransaction;
+  private volatile RouteReadyPredicate routeReadyPredicate;
+
+  /** Route-ready 判定谓词接口，供契约测试注入环境就绪状态与 lease 有效性。 */
+  @FunctionalInterface
+  public interface RouteReadyPredicate {
+    boolean isRouteReady(UUID nodeInstanceId, EnvironmentName environmentName, Instant now);
+  }
 
   public InMemoryHarnessStore() {
-    this.committed = new State();
+    this(0L, null);
+  }
+
+  public InMemoryHarnessStore(RouteReadyPredicate routeReadyPredicate) {
+    this(0L, routeReadyPredicate);
   }
 
   /** 仅用于测试的构造函数，用于播种全局 id 序列；下一个分配的 id 为 {@code initialNextId + 1}。 */
   InMemoryHarnessStore(long initialNextId) {
+    this(initialNextId, null);
+  }
+
+  InMemoryHarnessStore(long initialNextId, RouteReadyPredicate routeReadyPredicate) {
     if (initialNextId < 0) {
       throw new IllegalArgumentException("initialNextId must not be negative");
     }
     this.committed = new State();
     this.committed.nextId = initialNextId;
+    this.routeReadyPredicate = routeReadyPredicate;
+  }
+
+  public void setRouteReadyPredicate(RouteReadyPredicate routeReadyPredicate) {
+    this.routeReadyPredicate = routeReadyPredicate;
   }
 
   private static void requireMillisecondPrecision(Instant instant) {
@@ -1347,15 +1368,27 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
     @Override
     public void requestWork(WorkTarget target, Instant requestedAt) {
+      requestWork(target, requestedAt, null);
+    }
+
+    @Override
+    public void requestWork(
+        WorkTarget target, Instant requestedAt, EnvironmentName requiredEnvironmentName) {
       checkOpen();
       Objects.requireNonNull(target, "target");
       Objects.requireNonNull(requestedAt, "requestedAt");
       requireMillisecondPrecision(requestedAt);
+      if (requiredEnvironmentName != null && target.type() != WorkTargetType.TOOL) {
+        throw new IllegalArgumentException(
+            "requiredEnvironmentName must be null for target type " + target.type());
+      }
       requireWorkOwnerLocked(target);
       requireCanLockWork(target);
       Work existing = state.works.get(target);
       Work next =
-          existing == null ? Work.initial(target, requestedAt) : existing.request(requestedAt);
+          existing == null
+              ? Work.initial(target, requestedAt, requiredEnvironmentName)
+              : existing.request(requestedAt, requiredEnvironmentName);
       state.works.put(target, next);
       recordWorkLock(target);
     }
@@ -1410,6 +1443,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
     @Override
     public Optional<ClaimedWork> claimNextWork(
         WorkTargetType targetType, Instant now, String leaseToken, Instant leaseUntil) {
+      return claimNextWork(targetType, now, leaseToken, leaseUntil, null);
+    }
+
+    @Override
+    public Optional<ClaimedWork> claimNextWork(
+        WorkTargetType targetType,
+        Instant now,
+        String leaseToken,
+        Instant leaseUntil,
+        UUID nodeInstanceId) {
       checkOpen();
       Objects.requireNonNull(targetType, "targetType");
       Objects.requireNonNull(now, "now");
@@ -1423,6 +1466,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
               .filter(work -> work.target().type() == targetType)
               .filter(work -> !work.availableAt().isAfter(now))
               .filter(work -> work.leaseToken() == null || !work.leaseUntil().isAfter(now))
+              .filter(
+                  work ->
+                      work.requiredEnvironmentName() == null
+                          || isRouteReady(nodeInstanceId, work.requiredEnvironmentName(), now))
               .sorted(
                   Comparator.comparing(Work::availableAt)
                       .thenComparing(work -> work.target().id(), UuidOrder.COMPARATOR))
@@ -1438,7 +1485,20 @@ public final class InMemoryHarnessStore implements HarnessStore {
       recordWorkLock(claimed.target());
       return Optional.of(
           new ClaimedWork(
-              claimed.target(), claimed.wakeVersion(), claimed.leaseToken(), claimed.leaseUntil()));
+              claimed.target(),
+              claimed.wakeVersion(),
+              claimed.leaseToken(),
+              claimed.leaseUntil(),
+              claimed.requiredEnvironmentName()));
+    }
+
+    private boolean isRouteReady(
+        UUID nodeInstanceId, EnvironmentName environmentName, Instant now) {
+      if (routeReadyPredicate == null) {
+        return true;
+      }
+      return nodeInstanceId != null
+          && routeReadyPredicate.isRouteReady(nodeInstanceId, environmentName, now);
     }
 
     @Override
