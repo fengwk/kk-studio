@@ -47,11 +47,19 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-prompt</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-contributor-api</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-builtin</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
@@ -151,7 +159,7 @@
                                     <includes>
                                         <include>fun/fengwk/kkstudio/platform/environment/gateway/EnvironmentDaemonGateway</include>
                                         <include>fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver</include>
-                                        <include>fun/fengwk/kkstudio/platform/harness/tool/gateway/PlatformToolGateway</include>
+                                        <include>fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway</include>
                                     </includes>
                                     <limits>
                                         <limit>

@@ -5,8 +5,8 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
+import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
 import fun.fengwk.kkstudio.harness.contributor.api.ContextProjectorContribution;
-import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -59,6 +58,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepositor
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.harness.contributor.ScopedBranchView;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -80,8 +80,8 @@ import java.util.UUID;
  * <p>输入事实只有 candidate path 的 {@link BranchSettings}（environment binding / agentName / {@link
  * ModelSelection}）；实现按这些精确引用读取最新 catalog / environment 事实，Agent 的 toolIds/skills/subagents 每个新 turn
  * 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。environment 是完整 binding（路由名 + workspace path），为最新
- * branch 的不可变事实：ENVIRONMENT 工具一律按最新 {@code settings.environment()} 绑定（未选定环境时确定性拒绝规划）；Agent skills
- * 要求最新 Environment 提供 live descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的 branch settings。配置或 Environment
+ * branch 的不可变事实：要求环境的工具一律按最新 {@code settings.environment()} 绑定（未选定环境时确定性拒绝规划）；Agent skills 要求最新
+ * Environment 提供 live descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的 branch settings。配置或 Environment
  * 不满足一律返回 {@link Result.Rejected}（稳定 error code {@value #REJECTION_CODE}）；只有 repository / registry
  * 等基础设施异常向上传播，由 ThreadProcessor reschedule。YOLO 不进入 spec。
  */
@@ -398,9 +398,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * 按最新 Agent 配置派生的精确顺序逐一绑定。ENVIRONMENT_CAPABILITY 工具一律绑定最新 branch 的完整 {@code
-   * settings.environment()} binding（分支未选定环境时确定性拒绝规划）；所有 backend 冻结
-   * ContributorBinding。缺失能力仍立即拒绝，绝不静默跳过。
+   * 按最新 Agent 配置派生的精确顺序逐一绑定。声明环境需求的工具一律绑定最新 branch 的完整 {@code settings.environment()}
+   * binding（分支未选定环境时确定性拒绝规划）；所有工具冻结 ContributorBinding 与 state accesses。 缺失能力仍立即拒绝，绝不静默跳过。
    */
   private List<ToolBinding> resolveTools(BranchSettings settings, List<AgentToolId> toolIds) {
     List<ToolBinding> bindings = new ArrayList<>(toolIds.size());
@@ -409,36 +408,30 @@ public final class DatabaseTurnResolver implements TurnResolver {
       if (contribution == null) {
         throw rejection("tool not found: " + id);
       }
-      List<ContributorStateAccess> stateAccesses;
-      if (contribution instanceof DeclarativeToolContribution declarative) {
-        stateAccesses =
-            declarative.stateAccesses().stream()
-                .map(
-                    access ->
-                        new ContributorStateAccess(
-                            access.customType(),
-                            ContributorStateAccessMode.valueOf(access.mode().name())))
-                .toList();
-      } else {
-        stateAccesses = List.of();
-      }
+      List<ContributorStateAccess> stateAccesses =
+          contribution.requirements().stateAccesses().stream()
+              .map(
+                  access ->
+                      new ContributorStateAccess(
+                          access.customType(),
+                          ContributorStateAccessMode.valueOf(access.mode().name())))
+              .toList();
       ContributorBinding contributor =
           new ContributorBinding(
               contribution.id().contributorId().value(),
               contribution.id().localName(),
               stateAccesses);
-      EnvironmentBinding environment =
-          contribution.definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY
-              ? settings.environment()
-              : null;
-      if (contribution.definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY
-          && environment == null) {
+      boolean environmentRequired = contribution.requirements().environmentRequired();
+      EnvironmentBinding environment = environmentRequired ? settings.environment() : null;
+      if (environmentRequired && environment == null) {
         throw rejection(
             "environment tool "
                 + id
                 + " requires an environment binding but the branch has no environment");
       }
-      bindings.add(new ToolBinding(contribution.definition(), contributor, environment));
+      bindings.add(
+          new ToolBinding(
+              contribution.definition(), contributor, environmentRequired, environment));
     }
     return List.copyOf(bindings);
   }
@@ -558,17 +551,18 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (!composedPrompt.isBlank()) {
       preamble.add(AgentMessage.system(composedPrompt));
     }
-    BranchView branch = new BranchView(path);
     for (ContextProjectorContribution contribution : catalog.contextProjectors()) {
-      List<AgentMessage> projected =
+      String contributorId = contribution.id().contributorId().value();
+      BranchView branch = new ScopedBranchView(path.entries(), contributorId);
+      List<ContextFragment> projected =
           Objects.requireNonNull(
               contribution.projector().project(branch),
               "contributor context projector returned null: " + contribution.id());
-      for (AgentMessage message : projected) {
-        preamble.add(
-            Objects.requireNonNull(
-                message,
-                "contributor context projector returned a null message: " + contribution.id()));
+      for (ContextFragment fragment : projected) {
+        Objects.requireNonNull(
+            fragment,
+            "contributor context projector returned a null fragment: " + contribution.id());
+        preamble.add(AgentMessage.system(fragment.text()));
       }
     }
     return List.copyOf(preamble);

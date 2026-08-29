@@ -23,7 +23,7 @@ class StudioToolCatalogControllerTest extends WebPostgresTestSupport {
         .perform(get("/api/ai/catalog/tools"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[?(@.name == 'read')].id").value("base.read"))
-        .andExpect(jsonPath("$.data[?(@.name == 'read')].backend").value("ENVIRONMENT_CAPABILITY"))
+        .andExpect(jsonPath("$.data[?(@.name == 'read')].backend").doesNotExist())
         .andExpect(jsonPath("$.data[?(@.name == 'read')].version").value("1"))
         .andExpect(jsonPath("$.data[?(@.name == 'read')].description").isNotEmpty())
         .andExpect(jsonPath("$.data[?(@.name == 'read')].type").doesNotExist())

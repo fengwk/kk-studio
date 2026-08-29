@@ -109,17 +109,17 @@ WRITE -> WRITE     SIBLING_STATE_CONFLICT
 
 不同 customType 或不同 contributorId 不冲突。
 
-### DeclarativeTool、intent 与 projector
+### Tool、ToolOutcome 与 projector
 
-[`DeclarativeTool`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/DeclarativeTool.java) 是同步纯函数：
+[`Tool`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/Tool.java) 是统一的工具执行 SPI：
 
 ```java
 ToolDescriptor descriptor();
-List<StateDeclaration> stateAccesses();
-DeclarativeToolResult execute(DeclarativeToolContext context, ToolCall call);
+default ToolRequirements requirements() { return ToolRequirements.none(); }
+ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener);
 ```
 
-[`DeclarativeToolContext`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/DeclarativeToolContext.java) 只包含 `BranchView branch` 和 `Instant executedAt`。[`DeclarativeToolResult`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/DeclarativeToolResult.java) 包含模型可见 `ToolResult` 和有序 `List<AppendCustomEntry> intents`；error ToolResult 严禁携带 intents。
+[`ToolExecutionContext`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionContext.java) 包含 `invocationId`、`threadId`、`executedAt`、`BranchView branch` 与 `Optional<BoundEnvironment> environment`。[`ToolOutcome`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolOutcome.java) 包含模型可见 `ToolResult` 和有序 `List<AppendCustomEntry> customEntries`；error ToolResult 严禁携带 effects。
 
 [`AppendCustomEntry`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java) 持有最终 `CustomEntryPayload(contributorId, customType, schemaVersion, dataJson)`，payload 自身完成 schemaVersion、canonical identifier、JSON object 和大小校验。Core 还会验证 intent owner、custom type ownership、WRITE 声明、descriptor/provenance 和 effects 上限。
 
@@ -177,7 +177,7 @@ Contributor API 没有“热更新后继续运行”的状态转换。Catalog �
 
 - [`HarnessContributor.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContributor.java)、[`ContributorDescriptor.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContributorDescriptor.java)、[`HarnessCatalog.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalog.java)
 - [`HarnessRegistrar.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java)、[`ContributorId.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContributorId.java)、[`ContributionId.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContributionId.java)
-- [`ToolContribution.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolContribution.java)、[`DeclarativeTool.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/DeclarativeTool.java)、[`DeclarativeToolResult.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/DeclarativeToolResult.java)
+- [`ToolContribution.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolContribution.java)、[`Tool.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/Tool.java)、[`ToolOutcome.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolOutcome.java)、[`ToolExecutionContext.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionContext.java)
 - [`AppendCustomEntry.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java)、[`StateDeclaration.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/StateDeclaration.java)、[`StateMode.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/StateMode.java)
 - [`BranchView.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java)、[`ContextProjector.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContextProjector.java)
 

@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -201,11 +200,9 @@ public final class HarnessRuntimeTestFixtures {
             new ToolCall("call-1", "web_search", "{}"),
             new ToolBinding(
                 new AgentToolDefinition(
-                    new AgentToolId("test.web-search"),
-                    descriptor,
-                    ToolVisibility.SELECTABLE,
-                    AgentToolBackend.HOST),
+                    new AgentToolId("test.web-search"), descriptor, ToolVisibility.SELECTABLE),
                 new ContributorBinding("test", "web-search", List.of()),
+                false,
                 null));
     return new ToolInvocation(
         id(100),

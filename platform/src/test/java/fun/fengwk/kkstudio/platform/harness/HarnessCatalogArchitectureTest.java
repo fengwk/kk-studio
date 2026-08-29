@@ -13,7 +13,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * 架构守卫：验证 Platform 关键消费方（{@code DatabaseTurnResolver}、{@code PlatformToolGateway}、 {@code
+ * 架构守卫：验证 Platform 关键消费方（{@code DatabaseTurnResolver}、{@code ToolExecutionGateway}、 {@code
  * ToolCatalogQueryService}、{@code AgentDefinitionConfigValidator}）均直接使用 {@code HarnessCatalog}，
  * 且仅通过 Contributor API 访问冻结目录。
  */
@@ -27,7 +27,7 @@ class HarnessCatalogArchitectureTest {
             main.resolve(
                 "fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver.java"),
             main.resolve(
-                "fun/fengwk/kkstudio/platform/harness/tool/gateway/PlatformToolGateway.java"),
+                "fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java"),
             main.resolve(
                 "fun/fengwk/kkstudio/platform/catalog/definition/service/impl/"
                     + "AgentDefinitionConfigValidator.java"),

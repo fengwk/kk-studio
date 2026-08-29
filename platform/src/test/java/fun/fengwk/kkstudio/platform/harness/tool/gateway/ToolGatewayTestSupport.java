@@ -6,11 +6,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -26,7 +32,6 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -45,10 +50,6 @@ import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
@@ -64,6 +65,7 @@ import java.util.Collection;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
@@ -80,10 +82,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /**
- * {@link PlatformToolGateway} 测试共享基座：可编程 Tool / Transport / ResourceStore / Listener 与请求 fixture。
- *
- * <p>HOST fixture 使用虚构 tool {@code demo}（绕过 bash 的 permission 分析路径）；ENVIRONMENT_CAPABILITY fixture
- * 使用内置 contributor 的真实 {@code bash} definition（capability 校验需要与 catalog 精确相等）。
+ * {@link ToolExecutionGateway} 测试共享基座：可编程 Tool / Transport / ResourceStore / Listener 与请求 fixture。
  */
 final class ToolGatewayTestSupport {
 
@@ -100,13 +99,31 @@ final class ToolGatewayTestSupport {
   /** 测试默认的 ResourceStore 单对象上限（与生产默认一致）。 */
   static final int RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
 
-  /** 测试默认明确失败的 ContributorBranchViewLoader：任何 declarative 路径都会暴露未装配。 */
+  /** 测试默认的空 BranchView。 */
+  static final BranchView EMPTY_BRANCH_VIEW =
+      new BranchView() {
+        @Override
+        public List<CustomStateSnapshot> customEntries(String customType) {
+          return List.of();
+        }
+
+        @Override
+        public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
+          return Optional.empty();
+        }
+      };
+
+  /** 测试默认的 ContributorBranchViewLoader。 */
+  static final ContributorBranchViewLoader DEFAULT_CONTRIBUTOR_BRANCH_LOADER =
+      (assistantEntryId, contributorId) -> EMPTY_BRANCH_VIEW;
+
+  /** 测试默认明确失败的 ContributorBranchViewLoader。 */
   static final ContributorBranchViewLoader FAILING_CONTRIBUTOR_BRANCH_LOADER =
-      assistantEntryId -> {
+      (assistantEntryId, contributorId) -> {
         throw new IllegalStateException("no contributor branch loader is configured");
       };
 
-  /** 固定 busy/overload 延迟 supplier：语义与生产一致——每次 Busy/Overloaded 判定现读。 */
+  /** 固定 busy/overload 延迟 supplier。 */
   static final Supplier<Duration> BUSY_RETRY_DELAY = () -> Duration.ofSeconds(2);
 
   static final Supplier<Duration> OVERLOAD_RETRY_DELAY = () -> Duration.ofSeconds(7);
@@ -137,7 +154,7 @@ final class ToolGatewayTestSupport {
               registrar -> {
                 for (int i = 0; i < tools.length; i++) {
                   Tool tool = tools[i];
-                  registrar.registerHostTool(
+                  registrar.registerTool(
                       "host-tool" + (i == 0 ? "" : "-" + i),
                       i == 0 ? TEST_TOOL_ID : new AgentToolId(TEST_TOOL_ID.value() + "-" + i),
                       tool,
@@ -164,9 +181,9 @@ final class ToolGatewayTestSupport {
     return new ToolInvocationRequest(
         new ToolCall(callId, descriptor.name(), "{}"),
         new ToolBinding(
-            new AgentToolDefinition(
-                TEST_TOOL_ID, descriptor, ToolVisibility.SELECTABLE, AgentToolBackend.HOST),
+            new AgentToolDefinition(TEST_TOOL_ID, descriptor, ToolVisibility.SELECTABLE),
             new ContributorBinding("test", "host-tool", List.of()),
+            false,
             null));
   }
 
@@ -181,7 +198,7 @@ final class ToolGatewayTestSupport {
             List.of());
     return new ToolInvocationRequest(
         new ToolCall(callId, "bash", "{\"command\":\"ls\"}"),
-        new ToolBinding(bashContribution.definition(), contributor, environment));
+        new ToolBinding(bashContribution.definition(), contributor, true, environment));
   }
 
   static ToolGateway.Execution execution(ToolInvocationRequest request) {
@@ -189,7 +206,7 @@ final class ToolGatewayTestSupport {
         INVOCATION_ID, THREAD_ID, ASSISTANT_ENTRY_ID, PROPOSED_ATTEMPT, request);
   }
 
-  static PlatformToolGateway gateway(
+  static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
@@ -198,7 +215,7 @@ final class ToolGatewayTestSupport {
         catalog, transport, store, executor, RESOURCE_MAX_BYTES, settings(PermissionAction.ALLOW));
   }
 
-  static PlatformToolGateway gateway(
+  static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
@@ -208,7 +225,7 @@ final class ToolGatewayTestSupport {
         catalog, transport, store, executor, resourceMaxBytes, settings(PermissionAction.ALLOW));
   }
 
-  static PlatformToolGateway gateway(
+  static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
@@ -217,7 +234,7 @@ final class ToolGatewayTestSupport {
     return gateway(catalog, transport, store, executor, RESOURCE_MAX_BYTES, settings);
   }
 
-  static PlatformToolGateway gateway(
+  static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
@@ -234,7 +251,7 @@ final class ToolGatewayTestSupport {
         new ConcurrencyAdmission(Integer.MAX_VALUE));
   }
 
-  static PlatformToolGateway gateway(
+  static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
@@ -242,9 +259,9 @@ final class ToolGatewayTestSupport {
       int resourceMaxBytes,
       ToolSettings settings,
       ConcurrencyAdmission admission) {
-    return new PlatformToolGateway(
+    return new ToolExecutionGateway(
         catalog,
-        FAILING_CONTRIBUTOR_BRANCH_LOADER,
+        DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
@@ -259,7 +276,7 @@ final class ToolGatewayTestSupport {
         admission);
   }
 
-  static PlatformToolGateway gateway(
+  static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
@@ -267,9 +284,9 @@ final class ToolGatewayTestSupport {
       ToolSettings settings,
       Path workdir,
       Path environmentRoot) {
-    return new PlatformToolGateway(
+    return new ToolExecutionGateway(
         catalog,
-        FAILING_CONTRIBUTOR_BRANCH_LOADER,
+        DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
@@ -284,16 +301,16 @@ final class ToolGatewayTestSupport {
         new ConcurrencyAdmission(Integer.MAX_VALUE));
   }
 
-  static PlatformToolGateway gateway(
+  static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStore store,
       HarnessRuntimeProperties properties,
       ExecutorService executor,
       ToolSettings settings) {
-    return new PlatformToolGateway(
+    return new ToolExecutionGateway(
         catalog,
-        FAILING_CONTRIBUTOR_BRANCH_LOADER,
+        DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
@@ -333,7 +350,7 @@ final class ToolGatewayTestSupport {
     }
   }
 
-  /** 可编程 HOST Tool：记录 execution request，按 handler 执行并返回可观察 handle。 */
+  /** 可编程 Tool：记录 execution request，按 handler 执行并返回可观察 handle。 */
   static final class FakeTool implements Tool {
     private final ToolDescriptor descriptor;
     final List<ToolExecutionRequest> requests = new CopyOnWriteArrayList<>();
@@ -485,7 +502,6 @@ final class ToolGatewayTestSupport {
       puts.add(new PutRecord(mediaType, name, payload));
       ResourceRef planned = reference(mediaType, name, payload.length, sha);
       if (mismatchReturnedRef) {
-        // 契约违反注入：put 返回与计划不一致的引用（已产生存储副作用）。
         return new ResourceRef(
             planned.uri() + "-mismatch",
             planned.mediaType(),
@@ -531,8 +547,6 @@ final class ToolGatewayTestSupport {
     final List<Event> events = new CopyOnWriteArrayList<>();
     final AtomicInteger inFlight = new AtomicInteger();
     final AtomicInteger maxConcurrency = new AtomicInteger();
-
-    /** 全部 terminal 回调（onSucceeded/onFailed/onCancelled/onUnknown）的总调用次数：即使抛异常也先计数。 */
     final AtomicInteger terminalInvocations = new AtomicInteger();
 
     volatile boolean throwOnPartial;
@@ -634,7 +648,6 @@ final class ToolGatewayTestSupport {
       inFlight.decrementAndGet();
     }
 
-    /** 轮询等待至少 {@code count} 个事件；超时以断言失败。 */
     void awaitCount(int count) {
       long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
       while (events.size() < count && System.nanoTime() < deadline) {
@@ -644,7 +657,54 @@ final class ToolGatewayTestSupport {
     }
   }
 
-  /** 手动 executor：任务排队直到测试显式 runAll / runFirst；可切换为拒绝或抛出任意提交异常。 */
+  static final class DirectQueueExecutor extends AbstractExecutorService {
+    final List<Runnable> queued = new CopyOnWriteArrayList<>();
+    volatile boolean rejectSubmissions;
+    volatile RuntimeException ambiguousException;
+
+    @Override
+    public void shutdown() {}
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      return List.of();
+    }
+
+    @Override
+    public boolean isShutdown() {
+      return false;
+    }
+
+    @Override
+    public boolean isTerminated() {
+      return false;
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) {
+      return true;
+    }
+
+    @Override
+    public void execute(Runnable command) {
+      if (rejectSubmissions) {
+        throw new RejectedExecutionException("test executor rejected");
+      }
+      if (ambiguousException != null) {
+        throw ambiguousException;
+      }
+      queued.add(command);
+    }
+
+    void drain() {
+      List<Runnable> copy = new ArrayList<>(queued);
+      queued.clear();
+      for (Runnable task : copy) {
+        task.run();
+      }
+    }
+  }
+
   static final class ManualExecutor implements ExecutorService {
     final List<Runnable> tasks = new CopyOnWriteArrayList<>();
     volatile boolean reject;
@@ -740,9 +800,7 @@ final class ToolGatewayTestSupport {
     }
   }
 
-  /** 调用线程直接执行任务的 executor：用于验证构造时 inline executor 被拒绝。 */
   static final class InlineExecutor extends AbstractExecutorService {
-
     @Override
     public void execute(Runnable command) {
       command.run();
@@ -772,12 +830,7 @@ final class ToolGatewayTestSupport {
     }
   }
 
-  /**
-   * 每个任务启动独立线程并阻塞 execute 直到任务线程进入 WAITING 后中断它；用于确定性触发 {@code awaitRelease} 的中断路径（任务在 gate release
-   * 前被中断，必须中止且不触碰 Tool）。
-   */
   static final class InterruptingExecutor extends AbstractExecutorService {
-
     @Override
     public void execute(Runnable command) {
       Thread thread = new Thread(command, "gateway-interrupting-executor");
@@ -817,6 +870,66 @@ final class ToolGatewayTestSupport {
     @Override
     public boolean awaitTermination(long timeout, TimeUnit unit) {
       return false;
+    }
+  }
+
+  static final class ImmediateExecutor extends AbstractExecutorService {
+    @Override
+    public void shutdown() {}
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      return List.of();
+    }
+
+    @Override
+    public boolean isShutdown() {
+      return false;
+    }
+
+    @Override
+    public boolean isTerminated() {
+      return false;
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) {
+      return true;
+    }
+
+    @Override
+    public void execute(Runnable command) {
+      command.run();
+    }
+  }
+
+  static final class UnsafeRejectingExecutor extends AbstractExecutorService {
+    @Override
+    public void shutdown() {}
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      return List.of();
+    }
+
+    @Override
+    public boolean isShutdown() {
+      return false;
+    }
+
+    @Override
+    public boolean isTerminated() {
+      return false;
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) {
+      return true;
+    }
+
+    @Override
+    public void execute(Runnable command) {
+      throw new RejectedExecutionException("rejected");
     }
   }
 }

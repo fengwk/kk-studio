@@ -171,7 +171,7 @@ find . -path '*/target/site/jacoco/index.html' -print
 - `fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec`
 - `fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec`
 - `fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway`
-- `fun.fengwk.kkstudio.platform.harness.tool.gateway.PlatformToolGateway`
+- `fun.fengwk.kkstudio.platform.harness.tool.gateway.ToolExecutionGateway`
 - `fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper`
 
 因此普通 `mvn test` 仍只生成报告；对上述关键类低于 90% line coverage

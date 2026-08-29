@@ -14,12 +14,14 @@ import fun.fengwk.kkstudio.harness.builtin.skill.SkillBodyLoader;
 import fun.fengwk.kkstudio.harness.builtin.skill.ThreadSelectedSkillLookup;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunRegistry;
+import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
+import fun.fengwk.kkstudio.platform.harness.subagent.SubagentRunRegistry;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
+import fun.fengwk.kkstudio.platform.harness.task.DatabaseSubagentRunner;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
@@ -91,7 +93,7 @@ public class BuiltinHarnessContributorConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public TaskTool taskTool(
+  public SubagentRunner subagentRunner(
       ObjectProvider<HarnessRuntime> runtimeProvider,
       AgentBranchSettingsMaterializer settingsMaterializer,
       SubagentConfigProvider subagentConfigProvider,
@@ -99,14 +101,20 @@ public class BuiltinHarnessContributorConfiguration {
       HarnessThreadChangeSource changeSource,
       @Qualifier("subagentTaskExecutor") ExecutorService executor,
       ObjectMapper objectMapper) {
-    return new TaskTool(
-        () -> runtimeProvider.getIfAvailable(),
+    return new DatabaseSubagentRunner(
+        runtimeProvider::getIfAvailable,
         settingsMaterializer,
         subagentConfigProvider,
         runRegistry,
         changeSource,
         executor,
         objectMapper);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public TaskTool taskTool(SubagentRunner subagentRunner, ObjectMapper objectMapper) {
+    return new TaskTool(subagentRunner, objectMapper);
   }
 
   @Bean

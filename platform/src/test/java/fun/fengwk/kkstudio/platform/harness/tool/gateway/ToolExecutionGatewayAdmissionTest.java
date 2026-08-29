@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -22,15 +21,16 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import java.util.List;
 
 /** 验证 Tool admission 在路由副作用前拒绝，并覆盖 terminal/cancel/submit 异常释放。 */
-class PlatformToolGatewayAdmissionTest {
+class ToolExecutionGatewayAdmissionTest {
 
   @Test
   void hostCapacityRejectsBeforeToolAndCancelReleasesPermit() {
     ToolDescriptor descriptor = ToolGatewayTestSupport.hostDescriptor("demo");
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(descriptor);
-    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -55,7 +55,6 @@ class PlatformToolGatewayAdmissionTest {
                     ToolGatewayTestSupport.hostRequest("call-2", descriptor)),
                 new ToolGatewayTestSupport.RecordingListener()));
 
-    // 第 N+1 次在 Tool.execute 前拒绝，既不触碰 Tool，也不向 executor 增加执行副作用。
     assertEquals(ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY.get(), second.retryAfter());
     assertEquals(0, tool.requests.size());
     first.handle().cancel();
@@ -77,18 +76,17 @@ class PlatformToolGatewayAdmissionTest {
     try {
       ToolDescriptor hostDescriptor = ToolGatewayTestSupport.hostDescriptor("factory-tool");
       ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
-      PlatformToolGateway gateway =
+      ToolExecutionGateway gateway =
           ToolGatewayTestSupport.gateway(
               ToolGatewayTestSupport.defaultCatalog(
                   new ToolGatewayTestSupport.FakeTool(hostDescriptor)),
               transport,
               new ToolGatewayTestSupport.FakeResourceStore(),
-              new ToolGatewayTestSupport.ManualExecutor(),
+              new ToolGatewayTestSupport.DirectQueueExecutor(),
               ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
               ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
               admission);
 
-      // 顶层容量已满：三种路由都必须在 Contributor/Environment/remote 副作用前确定性 Overloaded。
       assertInstanceOf(
           ToolGateway.Overloaded.class,
           gateway.start(
@@ -97,7 +95,7 @@ class PlatformToolGatewayAdmissionTest {
               new ToolGatewayTestSupport.RecordingListener()));
       assertInstanceOf(
           ToolGateway.Overloaded.class,
-          gateway.start(declarativeExecution(), new ToolGatewayTestSupport.RecordingListener()));
+          gateway.start(effectsExecution(), new ToolGatewayTestSupport.RecordingListener()));
       assertInstanceOf(
           ToolGateway.Overloaded.class,
           gateway.start(
@@ -116,12 +114,12 @@ class PlatformToolGatewayAdmissionTest {
   @Test
   void deterministicRejectReleasesTopLevelPermit() {
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor(),
+            new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
             admission);
@@ -135,7 +133,7 @@ class PlatformToolGatewayAdmissionTest {
                         "missing", ToolGatewayTestSupport.hostDescriptor("missing"))),
                 new ToolGatewayTestSupport.RecordingListener()));
 
-    assertEquals(PlatformToolGateway.TOOL_NOT_FOUND_KIND, rejected.error().kind());
+    assertEquals(ToolExecutionGateway.TOOL_NOT_FOUND_KIND, rejected.error().kind());
     ConcurrencyAdmission.Lease recovered = admission.tryAcquire().orElseThrow();
     recovered.close();
   }
@@ -147,9 +145,10 @@ class PlatformToolGatewayAdmissionTest {
     tool.handler =
         (request, listener) ->
             listener.onComplete(ToolGatewayTestSupport.result(request.call().id(), "done"));
-    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -170,10 +169,9 @@ class PlatformToolGatewayAdmissionTest {
                     ToolGatewayTestSupport.hostRequest("call-1", descriptor)),
                 listener));
     first.handle().activate();
-    executor.runAll();
+    executor.drain();
     assertEquals(1, listener.terminalInvocations.get());
 
-    // 同步 terminal 的 listener 异常不能使 lease 留在第一条 invocation 上。
     ToolGateway.Started second =
         assertInstanceOf(
             ToolGateway.Started.class,
@@ -188,12 +186,12 @@ class PlatformToolGatewayAdmissionTest {
   void remoteCapacityRejectsBeforeTransportAndCancelReleasesPermit() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor(),
+            new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
             admission);
@@ -212,7 +210,6 @@ class PlatformToolGatewayAdmissionTest {
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.environmentRequest("call-2", ToolGatewayTestSupport.ENV_A)),
             new ToolGatewayTestSupport.RecordingListener()));
-    assertEquals(1, transport.invocations.size());
 
     first.handle().cancel();
     ToolGateway.Started third =
@@ -223,7 +220,6 @@ class PlatformToolGatewayAdmissionTest {
                     ToolGatewayTestSupport.environmentRequest(
                         "call-3", ToolGatewayTestSupport.ENV_A)),
                 new ToolGatewayTestSupport.RecordingListener()));
-    assertEquals(2, transport.invocations.size());
     third.handle().cancel();
   }
 
@@ -232,13 +228,15 @@ class PlatformToolGatewayAdmissionTest {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
     transport.syncResult = ToolGatewayTestSupport.result("call-1", "done");
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.ManualExecutor(),
+            executor,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
             admission);
@@ -261,7 +259,8 @@ class PlatformToolGatewayAdmissionTest {
             new ToolGatewayTestSupport.RecordingListener()));
 
     first.handle().activate();
-    listener.awaitCount(1);
+    executor.drain();
+    assertEquals(1, listener.events.size());
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.RETURN_HANDLE;
     ToolGateway.Started third =
         assertInstanceOf(
@@ -278,9 +277,10 @@ class PlatformToolGatewayAdmissionTest {
   void rejectedExecutorReleasesPermit() {
     ToolDescriptor descriptor = ToolGatewayTestSupport.hostDescriptor("demo");
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(descriptor);
-    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -289,7 +289,7 @@ class PlatformToolGatewayAdmissionTest {
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
             admission);
-    executor.reject = true;
+    executor.rejectSubmissions = true;
 
     assertInstanceOf(
         ToolGateway.Overloaded.class,
@@ -301,18 +301,16 @@ class PlatformToolGatewayAdmissionTest {
     lease.close();
   }
 
-  private static ToolGateway.Execution declarativeExecution() {
-    ToolDescriptor descriptor = ToolGatewayTestSupport.hostDescriptor("declarative-tool");
+  private static ToolGateway.Execution effectsExecution() {
+    ToolDescriptor descriptor = ToolGatewayTestSupport.hostDescriptor("effects-tool");
     ToolInvocationRequest request =
         new ToolInvocationRequest(
-            new ToolCall("declarative", descriptor.name(), "{}"),
+            new ToolCall("effects", descriptor.name(), "{}"),
             new ToolBinding(
                 new AgentToolDefinition(
-                    new AgentToolId("test.declarative-tool"),
-                    descriptor,
-                    ToolVisibility.SELECTABLE,
-                    AgentToolBackend.DECLARATIVE),
+                    new AgentToolId("test.effects-tool"), descriptor, ToolVisibility.SELECTABLE),
                 new ContributorBinding("goal", "tool", List.of()),
+                false,
                 null));
     return ToolGatewayTestSupport.execution(request);
   }

@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -125,8 +126,10 @@ class BuiltinHarnessContributorConfigurationTest {
   void builtinHarnessContributorRegistersInternalAndSelectableTools() {
     LoadSkillTool loadSkill = mock(LoadSkillTool.class);
     when(loadSkill.descriptor()).thenReturn(descriptor("load_skill"));
+    when(loadSkill.requirements()).thenReturn(ToolRequirements.none());
     TaskTool task = mock(TaskTool.class);
     when(task.descriptor()).thenReturn(descriptor("task"));
+    when(task.requirements()).thenReturn(ToolRequirements.none());
 
     BuiltinHarnessContributor contributor =
         new BuiltinHarnessContributorConfiguration().builtinHarnessContributor(loadSkill, task);

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.task;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -17,7 +16,7 @@ import java.util.Objects;
 
 /** 按最新 Agent/Model catalog 为新建或恢复的子 Agent 物化路由 branch settings。 */
 @Component
-public final class AgentBranchSettingsMaterializer implements SubagentBranchSettingsMaterializer {
+public final class AgentBranchSettingsMaterializer {
 
   private final AgentDefinitionRepository agentRepository;
   private final AgentModelRepository modelRepository;

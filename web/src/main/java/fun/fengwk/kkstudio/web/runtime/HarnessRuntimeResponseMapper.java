@@ -186,7 +186,6 @@ public final class HarnessRuntimeResponseMapper {
       dto.setToolId(binding.definition().id().value());
       dto.setToolVersion(binding.descriptor().version());
       dto.setRendererKey(binding.descriptor().rendererKey());
-      dto.setToolBackend(binding.definition().backend().name());
       dto.setEnvironment(toEnvironmentBindingDto(binding.environment()));
     }
     dto.setApprovalJson(

@@ -21,10 +21,10 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * {@link PlatformToolGateway} 构造：生产 {@link HarnessRuntimeProperties} 构造器与路径解析、unsafe executor
+ * {@link ToolExecutionGateway} 构造：生产 {@link HarnessRuntimeProperties} 构造器与路径解析、unsafe executor
  * 策略（inline / CallerRuns / 静默丢弃）的拒绝。
  */
-class PlatformToolGatewayConstructionTest {
+class ToolExecutionGatewayConstructionTest {
 
   private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
 
@@ -32,17 +32,15 @@ class PlatformToolGatewayConstructionTest {
   void productionPropertiesConstructorResolvesAndNormalizesWorkdir() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
     properties.setEnvironmentRoot(Path.of("/env-root"));
-    // 相对 workdir 按 environmentRoot 解析；"./deep" 中间冗余段被 normalize 折叠。
     properties.setWorkdir(Path.of("sub/./deep"));
-    PlatformToolGateway gateway =
+    ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             properties,
-            new ToolGatewayTestSupport.ManualExecutor(),
+            new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.settings(PermissionAction.ASK));
-    // ASK preview 的 workdir 暴露了 gateway 实际使用的解析后路径。
     ToolGateway.Ask ask =
         assertInstanceOf(
             ToolGateway.Ask.class,
@@ -104,7 +102,8 @@ class PlatformToolGatewayConstructionTest {
 
   @Test
   void inlineExecutorIsRejectedAtConstruction() {
-    ToolGatewayTestSupport.InlineExecutor executor = new ToolGatewayTestSupport.InlineExecutor();
+    ToolGatewayTestSupport.ImmediateExecutor executor =
+        new ToolGatewayTestSupport.ImmediateExecutor();
     IllegalStateException error =
         assertThrows(
             IllegalStateException.class,
@@ -123,7 +122,7 @@ class PlatformToolGatewayConstructionTest {
     ExecutorService executor =
         new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
     try {
-      PlatformToolGateway gateway =
+      ToolExecutionGateway gateway =
           ToolGatewayTestSupport.gateway(
               ToolGatewayTestSupport.defaultCatalog(tool),
               new ToolGatewayTestSupport.FakeTransport(),
