@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -47,36 +46,44 @@ final class InvocationCodecTestFixtures {
   private InvocationCodecTestFixtures() {}
 
   static ToolDescriptor descriptor() {
+    return descriptor("bash");
+  }
+
+  static ToolDescriptor descriptor(String name) {
     return new ToolDescriptor(
-        "bash",
+        name,
         "1.0",
-        "Run a command",
-        "bash",
+        "Run " + name,
+        name,
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
   }
 
-  static ToolBinding binding(AgentToolBackend backend) {
+  static ToolBinding binding(boolean environmentRequired) {
+    return binding(environmentRequired, false);
+  }
+
+  static ToolBinding binding(boolean environmentRequired, boolean withStateAccesses) {
     ContributorBinding contributor =
-        backend == AgentToolBackend.DECLARATIVE
+        withStateAccesses
             ? new ContributorBinding(
                 "goal",
                 "create",
                 List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)))
             : new ContributorBinding("core", "bash", List.of());
     return new ToolBinding(
-        definition(backend),
+        definition(environmentRequired ? "fs" : "bash"),
         contributor,
-        backend == AgentToolBackend.ENVIRONMENT_CAPABILITY ? ENVIRONMENT_ID : null);
+        environmentRequired,
+        environmentRequired ? ENVIRONMENT_ID : null);
   }
 
-  private static AgentToolDefinition definition(AgentToolBackend backend) {
+  private static AgentToolDefinition definition(String name) {
     return new AgentToolDefinition(
-        new AgentToolId("test.bash-" + backend.name().toLowerCase(Locale.ROOT).replace('_', '-')),
-        descriptor(),
-        ToolVisibility.SELECTABLE,
-        backend);
+        new AgentToolId("test." + name.toLowerCase(Locale.ROOT).replace('_', '-')),
+        descriptor(name),
+        ToolVisibility.SELECTABLE);
   }
 
   static ProviderRequest providerRequest(ToolDescriptor... tools) {
@@ -103,7 +110,7 @@ final class InvocationCodecTestFixtures {
   }
 
   static ModelRequestSpec environmentModelRequest() {
-    ToolBinding binding = binding(AgentToolBackend.ENVIRONMENT_CAPABILITY);
+    ToolBinding binding = binding(true);
     ProviderRequest provider = providerRequest(binding.descriptor());
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -117,7 +124,7 @@ final class InvocationCodecTestFixtures {
   }
 
   static ModelRequestSpec hostModelRequest() {
-    ToolBinding binding = binding(AgentToolBackend.HOST);
+    ToolBinding binding = binding(false);
     ProviderRequest provider = providerRequest(binding.descriptor());
     return new ModelRequestSpec(
         ProviderType.OPENAI,

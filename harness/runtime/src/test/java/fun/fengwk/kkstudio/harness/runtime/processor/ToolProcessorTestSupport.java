@@ -49,7 +49,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -437,11 +436,9 @@ final class ToolProcessorTestSupport {
   private static ToolBinding hostBinding(ToolSideEffect sideEffect) {
     return new ToolBinding(
         new AgentToolDefinition(
-            new AgentToolId("test.bash"),
-            toolDescriptor(sideEffect),
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.HOST),
+            new AgentToolId("test.bash"), toolDescriptor(sideEffect), ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
+        false,
         null);
   }
 

@@ -56,7 +56,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -861,9 +860,7 @@ final class HarnessRuntimeTestSupport {
     for (String name : toolNames) {
       bindings.add(
           new ToolBinding(
-              toolDefinition(name, AgentToolBackend.HOST),
-              new ContributorBinding("core", name, List.of()),
-              null));
+              toolDefinition(name), new ContributorBinding("core", name, List.of()), false, null));
     }
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -1001,9 +998,7 @@ final class HarnessRuntimeTestSupport {
 
   private static ToolBinding hostBinding() {
     return new ToolBinding(
-        toolDefinition("bash", AgentToolBackend.HOST),
-        new ContributorBinding("core", "bash", List.of()),
-        null);
+        toolDefinition("bash"), new ContributorBinding("core", "bash", List.of()), false, null);
   }
 
   private static ToolDescriptor toolDescriptor(String name) {
@@ -1017,12 +1012,11 @@ final class HarnessRuntimeTestSupport {
         Duration.ofSeconds(30));
   }
 
-  private static AgentToolDefinition toolDefinition(String name, AgentToolBackend backend) {
+  private static AgentToolDefinition toolDefinition(String name) {
     return new AgentToolDefinition(
         new AgentToolId("test." + name.replace('_', '-').toLowerCase(Locale.ROOT)),
         toolDescriptor(name),
-        ToolVisibility.SELECTABLE,
-        backend);
+        ToolVisibility.SELECTABLE);
   }
 
   /** 在 in-memory store 上运行 void 事务体的辅助方法。 */

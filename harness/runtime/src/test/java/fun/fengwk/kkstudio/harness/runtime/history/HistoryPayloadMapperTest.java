@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
@@ -80,7 +79,10 @@ class HistoryPayloadMapperTest {
             List.of(
                 binding(),
                 new ToolBinding(
-                    definition("grep"), new ContributorBinding("core", "grep", List.of()), null)));
+                    definition("grep"),
+                    new ContributorBinding("core", "grep", List.of()),
+                    false,
+                    null)));
     assertEquals(4, payload.message().contents().size());
     assertEquals(
         "thinking here", ((ThinkingMessageContent) payload.message().contents().get(0)).text());
@@ -155,7 +157,10 @@ class HistoryPayloadMapperTest {
             response,
             List.of(
                 new ToolBinding(
-                    definition("grep"), new ContributorBinding("core", "grep", List.of()), null)));
+                    definition("grep"),
+                    new ContributorBinding("core", "grep", List.of()),
+                    false,
+                    null)));
     ToolCallMessageContent unboundCall =
         (ToolCallMessageContent) unbound.message().contents().get(0);
     assertEquals(HistoryPayloadMapper.UNBOUND_RENDERER_KEY, unboundCall.rendererKey());
@@ -417,15 +422,14 @@ class HistoryPayloadMapperTest {
 
   private static ToolBinding binding() {
     return new ToolBinding(
-        definition("bash"), new ContributorBinding("core", "bash", List.of()), null);
+        definition("bash"), new ContributorBinding("core", "bash", List.of()), false, null);
   }
 
   private static AgentToolDefinition definition(String name) {
     return new AgentToolDefinition(
         new AgentToolId("test." + name.replace('_', '-')),
         descriptor(name),
-        ToolVisibility.SELECTABLE,
-        AgentToolBackend.HOST);
+        ToolVisibility.SELECTABLE);
   }
 
   private static ToolDescriptor descriptor(String name) {

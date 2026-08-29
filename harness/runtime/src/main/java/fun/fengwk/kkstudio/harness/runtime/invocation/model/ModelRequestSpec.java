@@ -6,11 +6,13 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 一次 Model invocation 的紧凑冻结请求。
@@ -60,51 +62,55 @@ public record ModelRequestSpec(
     skillBindings = List.copyOf(Objects.requireNonNull(skillBindings, "skillBindings"));
     subagentBindings = List.copyOf(Objects.requireNonNull(subagentBindings, "subagentBindings"));
     cacheControl = Objects.requireNonNull(cacheControl, "cacheControl");
-    requireUniqueToolNames(toolBindings);
+    requireUniqueToolBindings(toolBindings);
     requireUniqueSkillNames(skillBindings);
     requireUniqueSubagentNames(subagentBindings);
-    requireConsistentRoutes(toolBindings, skillBindings);
+    requireConsistentEnvironments(toolBindings, skillBindings);
   }
 
-  private static void requireUniqueToolNames(List<ToolBinding> toolBindings) {
-    for (int i = 0; i < toolBindings.size(); i++) {
-      String name = toolBindings.get(i).descriptor().name();
-      for (int j = i + 1; j < toolBindings.size(); j++) {
-        if (name.equals(toolBindings.get(j).descriptor().name())) {
-          throw new IllegalArgumentException("tool binding names must not repeat: " + name);
-        }
+  private static void requireUniqueToolBindings(List<ToolBinding> toolBindings) {
+    Set<String> names = new HashSet<>();
+    Set<AgentToolId> ids = new HashSet<>();
+    for (ToolBinding binding : toolBindings) {
+      Objects.requireNonNull(binding, "toolBindings[]");
+      String name = binding.descriptor().name();
+      if (!names.add(name)) {
+        throw new IllegalArgumentException("tool binding names must not repeat: " + name);
+      }
+      AgentToolId id = binding.definition().id();
+      if (!ids.add(id)) {
+        throw new IllegalArgumentException("tool binding ids must not repeat: " + id.value());
       }
     }
   }
 
   private static void requireUniqueSkillNames(List<SkillBinding> skillBindings) {
-    for (int i = 0; i < skillBindings.size(); i++) {
-      String name = skillBindings.get(i).name();
-      for (int j = i + 1; j < skillBindings.size(); j++) {
-        if (name.equals(skillBindings.get(j).name())) {
-          throw new IllegalArgumentException("skill binding names must not repeat: " + name);
-        }
+    Set<String> names = new HashSet<>();
+    for (SkillBinding skill : skillBindings) {
+      Objects.requireNonNull(skill, "skillBindings[]");
+      if (!names.add(skill.name())) {
+        throw new IllegalArgumentException("skill binding names must not repeat: " + skill.name());
       }
     }
   }
 
   private static void requireUniqueSubagentNames(List<SubagentBinding> subagentBindings) {
-    for (int i = 0; i < subagentBindings.size(); i++) {
-      String name = subagentBindings.get(i).name();
-      for (int j = i + 1; j < subagentBindings.size(); j++) {
-        if (name.equals(subagentBindings.get(j).name())) {
-          throw new IllegalArgumentException("subagent binding names must not repeat: " + name);
-        }
+    Set<String> names = new HashSet<>();
+    for (SubagentBinding subagent : subagentBindings) {
+      Objects.requireNonNull(subagent, "subagentBindings[]");
+      if (!names.add(subagent.name())) {
+        throw new IllegalArgumentException(
+            "subagent binding names must not repeat: " + subagent.name());
       }
     }
   }
 
-  private static void requireConsistentRoutes(
+  private static void requireConsistentEnvironments(
       List<ToolBinding> toolBindings, List<SkillBinding> skillBindings) {
     EnvironmentBinding environment = null;
     boolean environmentSeen = false;
     for (ToolBinding binding : toolBindings) {
-      if (binding.definition().backend() != AgentToolBackend.ENVIRONMENT_CAPABILITY) {
+      if (!binding.environmentRequired()) {
         continue;
       }
       if (!environmentSeen) {

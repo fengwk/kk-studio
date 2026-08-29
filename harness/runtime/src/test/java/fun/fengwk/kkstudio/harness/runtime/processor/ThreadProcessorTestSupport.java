@@ -65,7 +65,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -1066,16 +1065,15 @@ final class ThreadProcessorTestSupport {
 
   private static ToolBinding hostBinding(String name) {
     return new ToolBinding(
-        toolDefinition(name, AgentToolBackend.HOST),
-        new ContributorBinding("core", name, List.of()),
-        null);
+        toolDefinition(name), new ContributorBinding("core", name, List.of()), false, null);
   }
 
   static ToolBinding declarativeBinding(
       String name, String contributorId, String localName, List<ContributorStateAccess> accesses) {
     return new ToolBinding(
-        toolDefinition(name, AgentToolBackend.DECLARATIVE),
+        toolDefinition(name),
         new ContributorBinding(contributorId, localName, accesses),
+        false,
         null);
   }
 
@@ -1090,12 +1088,11 @@ final class ThreadProcessorTestSupport {
         Duration.ofSeconds(30));
   }
 
-  private static AgentToolDefinition toolDefinition(String name, AgentToolBackend backend) {
+  private static AgentToolDefinition toolDefinition(String name) {
     return new AgentToolDefinition(
         new AgentToolId("test." + name.replace('_', '-').toLowerCase(Locale.ROOT)),
         toolDescriptor(name),
-        ToolVisibility.SELECTABLE,
-        backend);
+        ToolVisibility.SELECTABLE);
   }
 
   // -----------------------------------------------------------------------------------------------

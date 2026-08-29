@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -49,7 +48,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** 直接校验 Resolver 结果与 candidate path 的机械契约，覆盖正常 turn、压缩 turn 和路由边界。 */
+/** 直接校验 Resolver 结果与 candidate path 的机械契约，覆盖正常 turn、压缩 turn 和环境边界。 */
 class ResolvedRequestValidatorTest {
   private static final BranchSettings SETTINGS =
       new BranchSettings(
@@ -202,7 +201,8 @@ class ResolvedRequestValidatorTest {
   }
 
   @Test
-  void checksEnvironmentCapabilityRoutesIncludingNullTransitions() {
+  void checksEnvironmentRoutesIncludingNullTransitions() {
+    // 校验 environment-required 工具的 environment 与 branch environment 的一致性。
     assertRouteMismatch(SETTINGS, environmentTool(EnvironmentBindings.binding("env-2")));
 
     BranchSettings unbound = SETTINGS.withEnvironment(null);
@@ -415,19 +415,21 @@ class ResolvedRequestValidatorTest {
 
   private static ToolBinding environmentTool(EnvironmentBinding environment) {
     return new ToolBinding(
-        toolDefinition("test.fs", AgentToolBackend.ENVIRONMENT_CAPABILITY),
+        toolDefinition("test.fs"),
         new ContributorBinding("base", "fs", List.of()),
+        true,
         environment);
   }
 
   private static ToolBinding hostTool() {
     return new ToolBinding(
-        toolDefinition("test.bash", AgentToolBackend.HOST),
+        toolDefinition("test.bash"),
         new ContributorBinding("core", "bash", List.of()),
+        false,
         null);
   }
 
-  private static AgentToolDefinition toolDefinition(String id, AgentToolBackend backend) {
+  private static AgentToolDefinition toolDefinition(String id) {
     return new AgentToolDefinition(
         new AgentToolId(id),
         new ToolDescriptor(
@@ -438,7 +440,6 @@ class ResolvedRequestValidatorTest {
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(30)),
-        ToolVisibility.SELECTABLE,
-        backend);
+        ToolVisibility.SELECTABLE);
   }
 }

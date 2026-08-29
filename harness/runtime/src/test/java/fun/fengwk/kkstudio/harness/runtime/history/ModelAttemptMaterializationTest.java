@@ -41,7 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -869,9 +868,9 @@ class ModelAttemptMaterializationTest {
                     new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
                     ToolSideEffect.READ_ONLY,
                     Duration.ofSeconds(30)),
-                ToolVisibility.SELECTABLE,
-                AgentToolBackend.HOST),
+                ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "bash", List.of()),
+            false,
             null);
     return new ModelRequestSpec(
         ProviderType.OPENAI,

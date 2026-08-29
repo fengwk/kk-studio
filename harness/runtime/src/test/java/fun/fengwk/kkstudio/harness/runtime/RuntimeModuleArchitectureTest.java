@@ -101,9 +101,7 @@ class RuntimeModuleArchitectureTest {
             "org.slf4j:slf4j-api"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("contributor-api/pom.xml"),
-        Set.of(
-            "fun.fengwk.kk-studio:kk-studio-harness-runtime",
-            "fun.fengwk.kk-studio:kk-studio-harness-tool"));
+        Set.of("fun.fengwk.kk-studio:kk-studio-harness-tool"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("builtin/pom.xml"),
         Set.of(

@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -237,9 +236,9 @@ class ModelResponsePlannerTest {
                 new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(30)),
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.HOST),
+            ToolVisibility.SELECTABLE),
         new ContributorBinding("core", name, List.of()),
+        false,
         null);
   }
 

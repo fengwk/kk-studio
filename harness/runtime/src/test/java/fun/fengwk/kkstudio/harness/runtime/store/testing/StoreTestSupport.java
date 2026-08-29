@@ -51,7 +51,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -493,9 +492,9 @@ final class StoreTestSupport {
                     descriptor.inputSchema(),
                     descriptor.sideEffect(),
                     descriptor.timeout()),
-                definition.visibility(),
-                definition.backend()),
+                definition.visibility()),
             invocation.binding().contributor(),
+            invocation.binding().environmentRequired(),
             invocation.binding().environment());
     return new ToolInvocation(
         invocation.id(),
@@ -614,11 +613,9 @@ final class StoreTestSupport {
   static ToolBinding hostBinding() {
     return new ToolBinding(
         new AgentToolDefinition(
-            new AgentToolId("test.bash"),
-            toolDescriptor("bash"),
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.HOST),
+            new AgentToolId("test.bash"), toolDescriptor("bash"), ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
+        false,
         null);
   }
 
