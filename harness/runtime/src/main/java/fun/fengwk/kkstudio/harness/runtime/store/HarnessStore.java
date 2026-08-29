@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Instant;
 import java.util.List;
@@ -263,12 +264,31 @@ public interface HarnessStore {
     void requestWork(WorkTarget target, Instant requestedAt);
 
     /**
-     * 领取 targetType 中下一个 due 的 Work：候选为 availableAt {@code <= now} 且 lease 为空或已过期 （leaseUntil
-     * {@code <= now}）的行，按 (availableAt, targetId) 升序确定性选取第一条并写入给定 leaseToken / leaseUntil。该
-     * dispatcher primitive 必须是本事务首个 Work 锁操作；无候选返回 {@link Optional#empty()}。
+     * 请求一次带环境亲和性的 wake（TOOL 专用）：新 target 冻结 requiredEnvironmentName，已有行校验亲和性一致并保留当前 lease。 non-null
+     * 仅允许 TOOL 类型；要求 owning Thread 已在本事务锁定；target 不存在或亲和性冲突抛 {@link IllegalArgumentException}。
+     */
+    void requestWork(
+        WorkTarget target, Instant requestedAt, EnvironmentName requiredEnvironmentName);
+
+    /**
+     * 领取 targetType 中下一个 due 的 Work（无 node 亲和性）：候选为 availableAt {@code <= now} 且 lease 为空或已过期
+     * （leaseUntil {@code <= now}）且无环境亲和性限制的行。
      */
     Optional<ClaimedWork> claimNextWork(
         WorkTargetType targetType, Instant now, String leaseToken, Instant leaseUntil);
+
+    /**
+     * 领取 targetType 中下一个 due 的 Work：候选为 availableAt {@code <= now} 且 lease 为空或已过期 （leaseUntil
+     * {@code <= now}）且满足环境亲和性（requiredEnvironmentName 为空或当前 nodeInstanceId 持有有效 READY 路由）的行， 按
+     * (availableAt, targetId) 升序确定性选取第一条并写入给定 leaseToken / leaseUntil。该 dispatcher primitive
+     * 必须是本事务首个 Work 锁操作；无候选返回 {@link Optional#empty()}。
+     */
+    Optional<ClaimedWork> claimNextWork(
+        WorkTargetType targetType,
+        Instant now,
+        String leaseToken,
+        Instant leaseUntil,
+        UUID nodeInstanceId);
 
     /**
      * 延长 claim 的 lease：内部先锁定 Work 行（行不存在抛 {@link IllegalStateException}），再按 {@link Work#renew} 校验

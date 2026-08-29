@@ -29,12 +29,11 @@ class ToolGatewayTest {
   }
 
   @Test
-  void startResultIsSealedWithExactlyFiveAdmissionOutcomes() {
+  void startResultIsSealedWithExactlyFourAdmissionOutcomes() {
     List<Class<?>> permitted = List.of(ToolGateway.StartResult.class.getPermittedSubclasses());
-    assertEquals(5, permitted.size());
+    assertEquals(4, permitted.size());
     assertTrue(permitted.contains(ToolGateway.Started.class));
-    assertTrue(permitted.contains(ToolGateway.Busy.class));
-    assertTrue(permitted.contains(ToolGateway.Overloaded.class));
+    assertTrue(permitted.contains(ToolGateway.RetryLater.class));
     assertTrue(permitted.contains(ToolGateway.Rejected.class));
     assertTrue(permitted.contains(ToolGateway.Indeterminate.class));
   }
@@ -92,25 +91,21 @@ class ToolGatewayTest {
   }
 
   @Test
-  void startedAndBusyOverloadedRejectedIndeterminateValidateTheirFacts() {
+  void startedAndRetryLaterRejectedIndeterminateValidateTheirFacts() {
     ToolGateway.Handle handle = noopHandle();
     ToolGateway.Started started = new ToolGateway.Started(handle);
     assertNotNull(started.handle());
     assertThrows(NullPointerException.class, () -> new ToolGateway.Started(null));
     ToolInvocationError error = new ToolInvocationError("BUSY", "busy");
-    assertThrows(NullPointerException.class, () -> new ToolGateway.Busy(null));
-    assertThrows(IllegalArgumentException.class, () -> new ToolGateway.Busy(Duration.ZERO));
+    assertThrows(NullPointerException.class, () -> new ToolGateway.RetryLater(null));
+    assertThrows(IllegalArgumentException.class, () -> new ToolGateway.RetryLater(Duration.ZERO));
     assertThrows(
-        IllegalArgumentException.class, () -> new ToolGateway.Busy(Duration.ofSeconds(-1)));
-    assertThrows(
-        IllegalArgumentException.class, () -> new ToolGateway.Busy(Duration.ofNanos(1_500_000)));
-    assertThrows(NullPointerException.class, () -> new ToolGateway.Overloaded(null));
-    assertThrows(IllegalArgumentException.class, () -> new ToolGateway.Overloaded(Duration.ZERO));
+        IllegalArgumentException.class, () -> new ToolGateway.RetryLater(Duration.ofSeconds(-1)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolGateway.Overloaded(Duration.ofNanos(1_500_000)));
+        () -> new ToolGateway.RetryLater(Duration.ofNanos(1_500_000)));
     assertEquals(
-        Duration.ofSeconds(3), new ToolGateway.Overloaded(Duration.ofSeconds(3)).retryAfter());
+        Duration.ofSeconds(3), new ToolGateway.RetryLater(Duration.ofSeconds(3)).retryAfter());
     assertThrows(NullPointerException.class, () -> new ToolGateway.Rejected(null));
     assertEquals(error, new ToolGateway.Rejected(error).error());
     assertThrows(NullPointerException.class, () -> new ToolGateway.Indeterminate(null));

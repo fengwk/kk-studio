@@ -60,6 +60,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -912,7 +913,12 @@ public final class ThreadProcessor {
       for (ToolInvocation invocation : ordered) {
         if (invocation.status() == ToolInvocationStatus.READY) {
           readyRequested = true;
-          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, invocation.id()), now);
+          EnvironmentName environmentName =
+              invocation.binding() == null || invocation.binding().environment() == null
+                  ? null
+                  : invocation.binding().environment().environmentName();
+          tx.requestWork(
+              new WorkTarget(WorkTargetType.TOOL, invocation.id()), now, environmentName);
         }
       }
       if (!readyRequested) {

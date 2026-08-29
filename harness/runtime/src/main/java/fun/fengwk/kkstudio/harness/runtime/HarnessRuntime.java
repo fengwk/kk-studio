@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -935,11 +936,15 @@ public final class HarnessRuntime {
             mutationNow);
     tx.updateToolInvocations(List.of(updated));
     tx.updateThread(thread.touchVersion(mutationNow));
-    WorkTarget wake =
-        command.decision() == ToolApprovalDecision.ALLOWED
-            ? new WorkTarget(WorkTargetType.TOOL, tool.id())
-            : new WorkTarget(WorkTargetType.THREAD, thread.id());
-    tx.requestWork(wake, workNow);
+    if (command.decision() == ToolApprovalDecision.ALLOWED) {
+      EnvironmentName environmentName =
+          tool.binding() == null || tool.binding().environment() == null
+              ? null
+              : tool.binding().environment().environmentName();
+      tx.requestWork(new WorkTarget(WorkTargetType.TOOL, tool.id()), workNow, environmentName);
+    } else {
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), workNow);
+    }
     return updated;
   }
 

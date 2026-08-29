@@ -79,8 +79,7 @@ public interface ToolGateway {
   /** admission 结果；每个结果对应唯一确定的 durable 后续 transition。 */
   sealed interface StartResult
       permits ToolGateway.Started,
-          ToolGateway.Busy,
-          ToolGateway.Overloaded,
+          ToolGateway.RetryLater,
           ToolGateway.Rejected,
           ToolGateway.Indeterminate {}
 
@@ -91,16 +90,9 @@ public interface ToolGateway {
     }
   }
 
-  /** 肯定未开始；调用方应稍后按 {@code retryAfter} 重新 dispatch（attempt 不变）。 */
-  record Busy(Duration retryAfter) implements StartResult {
-    public Busy {
-      retryAfter = HarnessStoreTime.requireWholeMillisecondDuration(retryAfter, "retryAfter");
-    }
-  }
-
-  /** 肯定未开始；Gateway 过载，调用方按 {@code retryAfter} 重新 dispatch（attempt 不变）。 */
-  record Overloaded(Duration retryAfter) implements StartResult {
-    public Overloaded {
+  /** 肯定未开始（如 Busy / Overloaded）；调用方按 {@code retryAfter} 重新 dispatch（attempt 不变）。 */
+  record RetryLater(Duration retryAfter) implements StartResult {
+    public RetryLater {
       retryAfter = HarnessStoreTime.requireWholeMillisecondDuration(retryAfter, "retryAfter");
     }
   }

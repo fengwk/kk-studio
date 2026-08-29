@@ -66,6 +66,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
   private static final List<WorkTargetType> ROUND_ROBIN_TYPES =
       List.of(WorkTargetType.THREAD, WorkTargetType.MODEL, WorkTargetType.TOOL);
 
+  private final UUID nodeInstanceId;
   private final HarnessStore store;
   private final HarnessWorkDispatcherConfig config;
   private final Clock clock;
@@ -84,7 +85,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
 
   /**
    * 生产 wiring 构造：按 {@link WorkTargetType} 把 claim 路由给对应 Processor 的 {@code process}；返回值
-   * 被有意忽略（dispatcher 绝不解释 typed 结果）。
+   * 被有意忽略（dispatcher 绝不解释 typed 结果）。自动分配随机 nodeInstanceId。
    */
   public HarnessWorkDispatcher(
       HarnessStore store,
@@ -97,6 +98,32 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       ModelProcessor modelProcessor,
       ToolProcessor toolProcessor) {
     this(
+        UUID.randomUUID(),
+        store,
+        config,
+        clock,
+        drainExecutor,
+        workerExecutor,
+        pollScheduler,
+        threadProcessor,
+        modelProcessor,
+        toolProcessor);
+  }
+
+  /** 显式指定 nodeInstanceId 的生产 wiring 构造。 */
+  public HarnessWorkDispatcher(
+      UUID nodeInstanceId,
+      HarnessStore store,
+      HarnessWorkDispatcherConfig config,
+      Clock clock,
+      Executor drainExecutor,
+      Executor workerExecutor,
+      ScheduledExecutorService pollScheduler,
+      ThreadProcessor threadProcessor,
+      ModelProcessor modelProcessor,
+      ToolProcessor toolProcessor) {
+    this(
+        nodeInstanceId,
         store,
         config,
         clock,
@@ -109,7 +136,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
             Objects.requireNonNull(toolProcessor, "toolProcessor")::process));
   }
 
-  /** 包级组合 / 测试构造：直接把 claim handoff 给三个显式 consumer（全部 fail-fast non-null）。 */
+  /** 包级组合 / 测试构造：直接把 claim handoff 给三个显式 consumer（全部 fail-fast non-null）。自动分配随机 nodeInstanceId。 */
   HarnessWorkDispatcher(
       HarnessStore store,
       HarnessWorkDispatcherConfig config,
@@ -121,6 +148,32 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       Consumer<ClaimedWork> modelHandler,
       Consumer<ClaimedWork> toolHandler) {
     this(
+        UUID.randomUUID(),
+        store,
+        config,
+        clock,
+        drainExecutor,
+        workerExecutor,
+        pollScheduler,
+        threadHandler,
+        modelHandler,
+        toolHandler);
+  }
+
+  /** 显式指定 nodeInstanceId 的包级组合 / 测试构造。 */
+  HarnessWorkDispatcher(
+      UUID nodeInstanceId,
+      HarnessStore store,
+      HarnessWorkDispatcherConfig config,
+      Clock clock,
+      Executor drainExecutor,
+      Executor workerExecutor,
+      ScheduledExecutorService pollScheduler,
+      Consumer<ClaimedWork> threadHandler,
+      Consumer<ClaimedWork> modelHandler,
+      Consumer<ClaimedWork> toolHandler) {
+    this(
+        nodeInstanceId,
         store,
         config,
         clock,
@@ -134,6 +187,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
   }
 
   private HarnessWorkDispatcher(
+      UUID nodeInstanceId,
       HarnessStore store,
       HarnessWorkDispatcherConfig config,
       Clock clock,
@@ -141,6 +195,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler,
       Map<WorkTargetType, Consumer<ClaimedWork>> handlers) {
+    this.nodeInstanceId = Objects.requireNonNull(nodeInstanceId, "nodeInstanceId");
     this.store = Objects.requireNonNull(store, "store");
     this.config = Objects.requireNonNull(config, "config");
     this.clock = HarnessStoreTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
@@ -148,6 +203,10 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     this.workerExecutor = requireFailFastExecutor(workerExecutor, "workerExecutor");
     this.pollScheduler = Objects.requireNonNull(pollScheduler, "pollScheduler");
     this.handlers = handlers;
+  }
+
+  public UUID nodeInstanceId() {
+    return nodeInstanceId;
   }
 
   private static Map<WorkTargetType, Consumer<ClaimedWork>> routing(
@@ -295,7 +354,8 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     Instant now = clock.instant();
     String token = UUID.randomUUID().toString();
     Instant leaseUntil = now.plus(config.leaseDuration(type));
-    return store.transaction(tx -> tx.claimNextWork(type, now, token, leaseUntil).orElse(null));
+    return store.transaction(
+        tx -> tx.claimNextWork(type, now, token, leaseUntil, nodeInstanceId).orElse(null));
   }
 
   private boolean handoff(ClaimedWork claim) {

@@ -7,10 +7,13 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T4;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.mappedAssistant;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.succeededRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.thread;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolInvocation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -21,7 +24,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
@@ -29,15 +38,17 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 /** Work mailbox 协议：target 存在性、lost wake、due 排序、lease fence 与 rollback。 */
 public abstract class HarnessStoreWorkContract {
 
-  private HarnessStore store;
+  protected HarnessStore store;
 
   @BeforeEach
   void setUp() {
@@ -46,18 +57,82 @@ public abstract class HarnessStoreWorkContract {
 
   abstract HarnessStore createStore();
 
-  private ClaimedWork claimNext(WorkTargetType type, Instant now) {
+  protected ClaimedWork claimNext(WorkTargetType type, Instant now) {
     return store
         .transaction(tx -> tx.claimNextWork(type, now, "lease-token", now.plusSeconds(60)))
         .orElseThrow();
   }
 
   private void requestWork(WorkTarget target, Instant requestedAt) {
+    requestWork(target, requestedAt, null);
+  }
+
+  private void requestWork(
+      WorkTarget target, Instant requestedAt, EnvironmentName requiredEnvironmentName) {
     inTransaction(
         store,
         tx -> {
           lockWorkOwner(tx, target);
-          tx.requestWork(target, requestedAt);
+          tx.requestWork(target, requestedAt, requiredEnvironmentName);
+        });
+  }
+
+  protected record SeededTool(UUID threadId, UUID modelId, UUID toolId) {}
+
+  protected SeededTool seedTool(HarnessStore store) {
+    TurnBaseline baseline = seedTurnBaseline(store);
+    ModelRequestSpec request = succeededRequest();
+    ProviderResponse response = StoreTestSupport.assistantResponse("call-1");
+    return store.transaction(
+        tx -> {
+          UUID modelId = tx.nextId();
+          UUID toolId = tx.nextId();
+          UUID userEntryId = tx.nextId();
+          UUID assistantEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  userEntryId,
+                  baseline.sessionId(),
+                  baseline.turnStartEntryId(),
+                  StoreTestSupport.userMessagePayload(),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  assistantEntryId,
+                  baseline.sessionId(),
+                  userEntryId,
+                  mappedAssistant(request, response),
+                  T1));
+          tx.lockThread(baseline.threadId()).orElseThrow();
+          tx.insertModelInvocation(
+              new ModelInvocation(
+                  modelId,
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  request,
+                  ModelInvocationStatus.READY,
+                  0,
+                  null,
+                  null,
+                  null,
+                  null,
+                  List.of(),
+                  T1,
+                  T1));
+          ModelInvocation model = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(model.beginDispatch(T1));
+          model = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(model.markRunning(T1));
+          model = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(model.succeed(response, T1));
+          model = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
+          ToolInvocation tool =
+              toolInvocation(
+                  toolId, modelId, assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, T1);
+          tx.insertToolInvocations(List.of(tool));
+          return new SeededTool(baseline.threadId(), modelId, toolId);
         });
   }
 
@@ -674,5 +749,50 @@ public abstract class HarnessStoreWorkContract {
                 }));
     // 失败事务中的删除不可见
     assertTrue(store.<Boolean>transaction(tx -> tx.findWork(target).isPresent()));
+  }
+
+  @Test
+  void requestWorkFreezesAndPreservesEnvironmentAffinity() {
+    SeededTool seeded = seedTool(store);
+    WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
+    EnvironmentName env1 = new EnvironmentName("env-1");
+    EnvironmentName env2 = new EnvironmentName("env-2");
+
+    // 1. TOOL target 初始化冻结亲和性
+    requestWork(toolTarget, T1, env1);
+    Work work = store.transaction(tx -> tx.findWork(toolTarget)).orElseThrow();
+    assertEquals(env1, work.requiredEnvironmentName());
+    assertEquals(1L, work.wakeVersion());
+
+    // 2. 无参 requestWork 保留已冻结亲和性
+    requestWork(toolTarget, T2);
+    work = store.transaction(tx -> tx.findWork(toolTarget)).orElseThrow();
+    assertEquals(env1, work.requiredEnvironmentName());
+    assertEquals(2L, work.wakeVersion());
+
+    // 3. 带相同环境名 requestWork 保留亲和性
+    requestWork(toolTarget, T3, env1);
+    work = store.transaction(tx -> tx.findWork(toolTarget)).orElseThrow();
+    assertEquals(env1, work.requiredEnvironmentName());
+    assertEquals(3L, work.wakeVersion());
+
+    // 4. 冲突的环境名被拒绝
+    assertThrows(IllegalArgumentException.class, () -> requestWork(toolTarget, T4, env2));
+
+    // 5. 非 TOOL target 拒绝非空环境亲和性
+    WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, seeded.threadId());
+    assertThrows(IllegalArgumentException.class, () -> requestWork(threadTarget, T1, env1));
+  }
+
+  @Test
+  void claimNextWorkReturnsClaimedWorkWithEnvironmentAffinity() {
+    SeededTool seeded = seedTool(store);
+    WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
+    EnvironmentName env = new EnvironmentName("env-1");
+    requestWork(toolTarget, T1, env);
+
+    ClaimedWork claimed = claimNext(WorkTargetType.TOOL, T2);
+    assertEquals(toolTarget, claimed.target());
+    assertEquals(env, claimed.requiredEnvironmentName());
   }
 }

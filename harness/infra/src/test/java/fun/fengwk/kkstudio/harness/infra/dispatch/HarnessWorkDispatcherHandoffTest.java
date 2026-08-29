@@ -664,7 +664,7 @@ class HarnessWorkDispatcherHandoffTest {
     @Override
     public StartResult start(Execution execution, Listener listener) {
       started.add(execution.invocationId());
-      return new ToolGateway.Busy(Duration.ofSeconds(9));
+      return new ToolGateway.RetryLater(Duration.ofSeconds(9));
     }
   }
 }

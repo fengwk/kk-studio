@@ -112,11 +112,11 @@ class ToolProcessorAdmissionTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** Busy：DISPATCHING -&gt; READY + version+1，按 retryAfter reschedule，attempt 不变。 */
+  /** RetryLater：DISPATCHING -&gt; READY + version+1，按 retryAfter reschedule，attempt 不变。 */
   @Test
-  void busyBouncesToReadyWithoutAdvancingAttempt() {
+  void retryLaterBouncesToReadyWithoutAdvancingAttempt() {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
-    fixture.gateway.queueStart(new ToolGateway.Busy(Duration.ofSeconds(5)));
+    fixture.gateway.queueStart(new ToolGateway.RetryLater(Duration.ofSeconds(5)));
 
     assertEquals(
         ProcessResult.RESCHEDULED,
@@ -136,11 +136,11 @@ class ToolProcessorAdmissionTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** Overloaded：与 Busy 相同的 bounce 语义，使用自己的 retryAfter。 */
+  /** RetryLater：使用传入的 retryAfter。 */
   @Test
-  void overloadedBouncesWithItsOwnRetryAfter() {
+  void retryLaterCustomDurationBouncesWithItsOwnRetryAfter() {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
-    fixture.gateway.queueStart(new ToolGateway.Overloaded(Duration.ofSeconds(6)));
+    fixture.gateway.queueStart(new ToolGateway.RetryLater(Duration.ofSeconds(6)));
 
     assertEquals(
         ProcessResult.RESCHEDULED,
@@ -257,13 +257,13 @@ class ToolProcessorAdmissionTest {
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
   }
 
-  /** Busy 且期间 ownership 丢失（work 行被删）：LOST_OWNERSHIP，无 mutation。 */
+  /** RetryLater 且期间 ownership 丢失（work 行被删）：LOST_OWNERSHIP，无 mutation。 */
   @Test
-  void busyWithLostWorkReturnsLostOwnership() {
+  void retryLaterWithLostWorkReturnsLostOwnership() {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
     fixture.gateway.beforeStartReturn =
         listener -> ToolProcessorTestSupport.deleteToolWork(fixture);
-    fixture.gateway.queueStart(new ToolGateway.Busy(Duration.ofSeconds(5)));
+    fixture.gateway.queueStart(new ToolGateway.RetryLater(Duration.ofSeconds(5)));
 
     assertEquals(
         ProcessResult.LOST_OWNERSHIP,
@@ -516,13 +516,13 @@ class ToolProcessorAdmissionTest {
   }
 
   /**
-   * Stop 的 durable 终止在 admission 期间获胜（Busy 返回前 tool 已被并发的另一组件收敛为 UNKNOWN）：bounce 二次校验失败，
+   * Stop 的 durable 终止在 admission 期间获胜（RetryLater 返回前 tool 已被并发的另一组件收敛为 UNKNOWN）：bounce 二次校验失败，
    * LOST_OWNERSHIP 且无 mutation。
    */
   @Test
-  void stopRacingBusyAdmissionIsLostWithoutMutation() throws Exception {
+  void stopRacingRetryLaterAdmissionIsLostWithoutMutation() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
-    fixture.gateway.queueStart(new ToolGateway.Busy(Duration.ofSeconds(5)));
+    fixture.gateway.queueStart(new ToolGateway.RetryLater(Duration.ofSeconds(5)));
 
     ProcessResult result =
         processWithBlockedStart(

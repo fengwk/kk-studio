@@ -88,6 +88,7 @@ class HarnessStoreContractTest {
   void transactionHandleExposesExactlyTheTypedPersistencePrimitives() {
     Set<String> actual =
         Arrays.stream(HarnessStore.Transaction.class.getDeclaredMethods())
+            .filter(method -> !method.isSynthetic())
             .map(Method::getName)
             .collect(Collectors.toSet());
     assertEquals(ALLOWED_PRIMITIVES, actual);
@@ -96,6 +97,9 @@ class HarnessStoreContractTest {
   @Test
   void allReadsReturnOptionalOrImmutableListOrEntryPath() {
     for (Method method : HarnessStore.Transaction.class.getDeclaredMethods()) {
+      if (method.isSynthetic()) {
+        continue;
+      }
       Class<?> returnType = method.getReturnType();
       if (returnType == void.class
           || returnType == long.class

@@ -31,10 +31,12 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
@@ -424,5 +426,62 @@ class HarnessWorkDispatcherDrainTest {
     assertEquals(NOW, untouched.availableAt());
     assertEquals(1L, untouched.wakeVersion());
     assertTrue(claims.isEmpty());
+  }
+
+  @Test
+  void nodeInstanceIdIsForwardedAndFiltersAffinityClaim() {
+    UUID allowedNodeId = UUID.randomUUID();
+    UUID otherNodeId = UUID.randomUUID();
+    EnvironmentName env = new EnvironmentName("env-1");
+
+    InMemoryHarnessStore store =
+        new InMemoryHarnessStore(
+            (nodeInstanceId, environmentName, now) ->
+                allowedNodeId.equals(nodeInstanceId) && env.equals(environmentName));
+
+    ToolSeed toolSeed = seedTool(store);
+
+    CopyOnWriteArrayList<ClaimedWork> otherClaims = new CopyOnWriteArrayList<>();
+    HarnessWorkDispatcher otherDispatcher =
+        new HarnessWorkDispatcher(
+            otherNodeId,
+            store,
+            config(1),
+            clock(),
+            singleThread(),
+            singleThread(),
+            new RecordingScheduler(),
+            otherClaims::add,
+            otherClaims::add,
+            otherClaims::add);
+
+    otherDispatcher.start();
+    // otherDispatcher should not claim the tool work because its nodeInstanceId does not match the
+    // route
+    assertNull(
+        work(store, new WorkTarget(WorkTargetType.TOOL, toolSeed.toolInvocationId())).leaseToken());
+    assertTrue(otherClaims.isEmpty());
+    otherDispatcher.stop();
+
+    CopyOnWriteArrayList<ClaimedWork> allowedClaims = new CopyOnWriteArrayList<>();
+    HarnessWorkDispatcher allowedDispatcher =
+        new HarnessWorkDispatcher(
+            allowedNodeId,
+            store,
+            config(1),
+            clock(),
+            singleThread(),
+            singleThread(),
+            new RecordingScheduler(),
+            allowedClaims::add,
+            allowedClaims::add,
+            allowedClaims::add);
+
+    allowedDispatcher.start();
+    awaitTrue(() -> !allowedClaims.isEmpty());
+    assertEquals(1, allowedClaims.size());
+    assertEquals(toolSeed.toolInvocationId(), allowedClaims.get(0).target().id());
+    assertEquals(env, allowedClaims.get(0).requiredEnvironmentName());
+    allowedDispatcher.stop();
   }
 }
