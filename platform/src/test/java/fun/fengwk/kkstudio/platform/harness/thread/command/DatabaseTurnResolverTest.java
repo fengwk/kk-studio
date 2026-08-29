@@ -98,8 +98,9 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonConnection;
+import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -115,6 +116,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -1641,7 +1643,7 @@ class DatabaseTurnResolverTest {
         mock(AgentDefinitionConfigCodec.class);
     private final AgentModelRuntimeConfigParser modelConfigParser =
         mock(AgentModelRuntimeConfigParser.class);
-    private final LiveEnvironmentRegistry environmentRegistry = new LiveEnvironmentRegistry();
+    private final LiveEnvironmentRegistry environmentRegistry = mock(LiveEnvironmentRegistry.class);
     private final AgentDefinition agent = new AgentDefinition();
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private final AgentProvider provider = new AgentProvider();
@@ -1985,11 +1987,17 @@ class DatabaseTurnResolverTest {
     }
 
     private void connectingEnvironment(EnvironmentBinding environment) {
-      EnvironmentDaemonConnection connection = mock(EnvironmentDaemonConnection.class);
-      when(connection.connectionId()).thenReturn("connection");
-      when(connection.isOpen()).thenReturn(true);
-      environmentRegistry.tryBind(
-          environment.environmentName(), connection, NOW, Duration.ofSeconds(60));
+      LiveEnvironment env =
+          new LiveEnvironment(
+              environment.environmentName(),
+              "daemon",
+              UUID.randomUUID(),
+              UUID.randomUUID(),
+              LiveEnvironmentStatus.CONNECTING,
+              null,
+              NOW,
+              NOW.plusSeconds(60));
+      when(environmentRegistry.find(environment.environmentName())).thenReturn(Optional.of(env));
     }
 
     private void readyEnvironment(EnvironmentBinding environment) {
@@ -2038,17 +2046,18 @@ class DatabaseTurnResolverTest {
         List<DaemonSkillDescriptor> skills,
         DaemonEnvironmentInfo environmentInfo,
         Instant lastSeenAt) {
-      EnvironmentDaemonConnection connection = mock(EnvironmentDaemonConnection.class);
-      when(connection.connectionId()).thenReturn("connection");
-      when(connection.isOpen()).thenReturn(true);
-      environmentRegistry.tryBind(
-          environment.environmentName(), connection, lastSeenAt, Duration.ofSeconds(60));
-      environmentRegistry.updateCapabilities(
-          environment.environmentName(),
-          connection,
-          new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo, skills, List.of()),
-          lastSeenAt);
-      environmentRegistry.markReady(environment.environmentName(), connection, lastSeenAt);
+      LiveEnvironment env =
+          new LiveEnvironment(
+              environment.environmentName(),
+              "daemon",
+              UUID.randomUUID(),
+              UUID.randomUUID(),
+              LiveEnvironmentStatus.READY,
+              new DaemonCapabilities(
+                  DaemonCapabilities.VERSION, environmentInfo, skills, List.of()),
+              lastSeenAt,
+              lastSeenAt.plusSeconds(60));
+      when(environmentRegistry.find(environment.environmentName())).thenReturn(Optional.of(env));
     }
   }
 }

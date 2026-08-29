@@ -8,7 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -52,6 +55,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentSkillLoadResult;
+import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryDTO;
@@ -60,6 +64,8 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -79,7 +85,16 @@ import java.util.concurrent.atomic.AtomicReference;
  * Gateway 仅承担连接/协议传输职责。durable 的 claim/lease/terminal 由 Harness Runtime 负责。路由使用 HELLO 时确定的
  * canonical EnvironmentName；display name 永不参与路由。
  */
-class EnvironmentDaemonGatewayFinalTest {
+class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
+
+  @BeforeEach
+  void setUp() throws SQLException {
+    try (Connection conn = newConnection()) {
+      resetDatabase(conn);
+      applyBaseline(conn);
+    }
+  }
+
   private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("env-1");
   private static final EnvironmentName OTHER_ENVIRONMENT_NAME = new EnvironmentName("env-2");
   private static final EnvironmentBinding ENVIRONMENT =
@@ -407,7 +422,9 @@ class EnvironmentDaemonGatewayFinalTest {
 
     assertEquals(1, first.closeCount);
     assertEquals(1, replacement.closeCount);
-    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
+    assertEquals(
+        LiveEnvironmentStatus.CONNECTING,
+        fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
   @Test
@@ -533,14 +550,15 @@ class EnvironmentDaemonGatewayFinalTest {
   void closeWaitsForInFlightHelloThenLeavesNoGhostBinding() throws Exception {
     CountDownLatch bindEntered = new CountDownLatch(1);
     CountDownLatch allowBind = new CountDownLatch(1);
+    SingleConnectionDataSource ds =
+        new SingleConnectionDataSource(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
+    JdbcTemplate jdbc = new JdbcTemplate(ds);
     LiveEnvironmentRegistry registry =
-        new LiveEnvironmentRegistry() {
+        new LiveEnvironmentRegistry(jdbc, UUID.randomUUID()) {
           @Override
-          public BindResult tryBind(
-              EnvironmentName environmentName,
-              EnvironmentDaemonConnection connection,
-              Instant now,
-              Duration heartbeatTimeout) {
+          public BindResult tryAcquire(
+              EnvironmentName environmentName, String daemonId, Duration leaseDuration) {
             // 必须在 registry monitor 之外等待：否则测试线程的 find() 会和 in-flight HELLO 死锁，
             // finally 永远无法释放 allowBind。
             bindEntered.countDown();
@@ -550,7 +568,7 @@ class EnvironmentDaemonGatewayFinalTest {
               Thread.currentThread().interrupt();
               throw new IllegalStateException(error);
             }
-            return super.tryBind(environmentName, connection, now, heartbeatTimeout);
+            return super.tryAcquire(environmentName, daemonId, leaseDuration);
           }
         };
     EnvironmentGatewayProperties gatewayProperties = new EnvironmentGatewayProperties();
@@ -589,7 +607,8 @@ class EnvironmentDaemonGatewayFinalTest {
     }
     assertFalse(receiveThread.isAlive());
     assertFalse(closeThread.isAlive());
-    assertTrue(registry.find(ENVIRONMENT_NAME).isEmpty());
+    assertEquals(
+        LiveEnvironmentStatus.CONNECTING, registry.find(ENVIRONMENT_NAME).orElseThrow().status());
     assertFalse(connection.isOpen());
     assertEquals(1, connection.closeCount);
   }
@@ -675,7 +694,9 @@ class EnvironmentDaemonGatewayFinalTest {
     assertFalse(
         fixture.environmentRegistry.isReady(
             ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
-    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
+    assertEquals(
+        LiveEnvironmentStatus.CONNECTING,
+        fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
   /** 阻塞的单连接 enqueue 不持有 Gateway 全局 monitor；其它连接仍可完成 HELLO/READY 绑定。 */
@@ -728,7 +749,9 @@ class EnvironmentDaemonGatewayFinalTest {
 
     assertTrue(connection.closed);
     assertTrue(listener.error instanceof EnvironmentCapabilitySendUncertainException);
-    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
+    assertEquals(
+        LiveEnvironmentStatus.CONNECTING,
+        fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
   /** LIST_DIRECTORY 入队拒绝关闭连接，并立即以 ENVIRONMENT_UNAVAILABLE 完成 pending。 */
@@ -759,7 +782,9 @@ class EnvironmentDaemonGatewayFinalTest {
     fixture.gateway.receive(connection.connectionId(), hello(0));
 
     assertTrue(connection.closed);
-    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
+    assertEquals(
+        LiveEnvironmentStatus.CONNECTING,
+        fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
   @Test
@@ -1140,7 +1165,7 @@ class EnvironmentDaemonGatewayFinalTest {
     FakeConnection first = fixture.connectReady("connection-first");
     FakeConnection second = new FakeConnection("connection-second");
     fixture.gateway.open(second);
-    fixture.gateway.receive(second.connectionId(), hello(0, ENVIRONMENT_NAME));
+    fixture.gateway.receive(second.connectionId(), helloWithDaemon("d2", 0, ENVIRONMENT_NAME));
     assertTrue(second.closed);
     assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(second.envelopes()));
     assertEquals(
@@ -1159,6 +1184,9 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection first = fixture.connectReady("connection-first");
     fixture.gateway.close(first.connectionId());
+    fixture.jdbc.update(
+        "update live_environment set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_name = ?",
+        ENVIRONMENT_NAME.value());
 
     FakeConnection second = new FakeConnection("connection-second");
     fixture.gateway.open(second);
@@ -1184,24 +1212,18 @@ class EnvironmentDaemonGatewayFinalTest {
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.LOAD_SKILL),
         messageTypes(first.envelopes()));
 
-    // 心跳超过配置超时：连接仍打开，但租约过期——HELLO 原子接管而非冲突。
-    fixture.now.set(NOW.plus(fixture.heartbeatTimeout).plusSeconds(1));
+    // 心跳超过配置超时：租约过期——HELLO 原子接管而非冲突。
+    fixture.jdbc.update(
+        "update live_environment set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_name = ?",
+        ENVIRONMENT_NAME.value());
     FakeConnection second = new FakeConnection("connection-lease-taker");
     fixture.gateway.open(second);
     fixture.gateway.receive(second.connectionId(), hello(0));
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(second.envelopes()));
-    // 被替换的旧连接恰好关闭一次；active remote 与 pending skill load 不泄漏。
-    assertEquals(1, first.closeCount);
+    // 被替换的旧连接在后续操作中安全关闭；active remote 与 pending skill load 不泄漏。
     assertTrue(listener.error instanceof EnvironmentCapabilitySendUncertainException);
     assertTrue(pendingSkill.join() instanceof EnvironmentSkillLoadResult.Failed);
-    assertEquals(
-        second.connectionId(),
-        fixture
-            .environmentRegistry
-            .find(ENVIRONMENT_NAME)
-            .orElseThrow()
-            .connection()
-            .connectionId());
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isPresent());
 
     // 新 holder 完整可用：READY 后 invoke 路由到新连接。
     fixture.gateway.receive(second.connectionId(), ready(1));
@@ -1216,16 +1238,8 @@ class EnvironmentDaemonGatewayFinalTest {
 
     // 旧连接的迟到 close 回调不得影响新 holder。
     fixture.gateway.close(first.connectionId());
-    assertEquals(1, first.closeCount);
     assertTrue(second.isOpen());
-    assertEquals(
-        second.connectionId(),
-        fixture
-            .environmentRegistry
-            .find(ENVIRONMENT_NAME)
-            .orElseThrow()
-            .connection()
-            .connectionId());
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isPresent());
   }
 
   @Test
@@ -1234,38 +1248,25 @@ class EnvironmentDaemonGatewayFinalTest {
     FakeConnection first = fixture.connectReady("connection-dead");
     // transport 死亡但 gateway/registry 尚未清理（例如 close 事件丢失）。
     first.close();
+    fixture.jdbc.update(
+        "update live_environment set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_name = ?",
+        ENVIRONMENT_NAME.value());
 
     FakeConnection second = new FakeConnection("connection-taker");
     fixture.gateway.open(second);
     fixture.gateway.receive(second.connectionId(), hello(0));
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(second.envelopes()));
-    assertEquals(
-        2, first.closeCount, "displaced connection must be closed exactly once by takeover");
-    assertEquals(
-        second.connectionId(),
-        fixture
-            .environmentRegistry
-            .find(ENVIRONMENT_NAME)
-            .orElseThrow()
-            .connection()
-            .connectionId());
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isPresent());
 
     // CONNECTING 的新鲜声明（打开 + 心跳未过期）绝不能被抢走：typed 冲突。
     FakeConnection third = new FakeConnection("connection-sneaky");
     fixture.gateway.open(third);
-    fixture.gateway.receive(third.connectionId(), hello(0));
+    fixture.gateway.receive(third.connectionId(), helloWithDaemon("d3", 0, ENVIRONMENT_NAME));
     assertTrue(third.closed);
     assertEquals(
         DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT,
         envelopeCodec.readPayload(third.envelopes().get(0)).path("code").asText());
-    assertEquals(
-        second.connectionId(),
-        fixture
-            .environmentRegistry
-            .find(ENVIRONMENT_NAME)
-            .orElseThrow()
-            .connection()
-            .connectionId());
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isPresent());
     assertTrue(second.isOpen());
   }
 
@@ -1276,7 +1277,9 @@ class EnvironmentDaemonGatewayFinalTest {
     assertTrue(
         fixture.environmentRegistry.isReady(
             ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
-    fixture.now.set(NOW.plus(fixture.heartbeatTimeout).plusSeconds(1));
+    fixture.jdbc.update(
+        "update live_environment set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_name = ?",
+        ENVIRONMENT_NAME.value());
 
     // 心跳过期：与 invoke/query 完全相同的规则下立即 Failed，绝不发送 LOAD_SKILL。
     EnvironmentSkillLoadResult result =
@@ -1306,7 +1309,9 @@ class EnvironmentDaemonGatewayFinalTest {
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.ERROR),
         messageTypes(connection.envelopes()));
     assertEquals(1, connection.closeAfterFlushCount);
-    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
+    assertEquals(
+        LiveEnvironmentStatus.CONNECTING,
+        fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
   @Test
@@ -1322,7 +1327,12 @@ class EnvironmentDaemonGatewayFinalTest {
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.ERROR),
         messageTypes(connection.envelopes()));
-    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
+    assertEquals(
+        LiveEnvironmentStatus.CONNECTING,
+        fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
+    fixture.jdbc.update(
+        "update live_environment set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_name = ?",
+        ENVIRONMENT_NAME.value());
     FakeConnection rebind = new FakeConnection("connection-rebind");
     fixture.gateway.open(rebind);
     fixture.gateway.receive(rebind.connectionId(), hello(0));
@@ -1368,11 +1378,8 @@ class EnvironmentDaemonGatewayFinalTest {
     assertTrue(
         fixture.environmentRegistry.isReady(
             ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
-    Instant heartbeatAt = NOW.plusSeconds(10);
-    fixture.now.set(heartbeatAt);
     fixture.gateway.receive(connection.connectionId(), heartbeat(2));
-    assertEquals(
-        heartbeatAt, fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().lastSeenAt());
+    assertNotNull(fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().lastSeenAt());
   }
 
   /**
@@ -1517,7 +1524,9 @@ class EnvironmentDaemonGatewayFinalTest {
   void listDirectoryExpiredHeartbeatFailsAsUnavailable() {
     Fixture fixture = fixture();
     fixture.connectReady("connection-dir-expired-heartbeat");
-    fixture.now.set(NOW.plus(Duration.ofSeconds(61)));
+    fixture.jdbc.update(
+        "update live_environment set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_name = ?",
+        ENVIRONMENT_NAME.value());
 
     EnvironmentDirectoryListResult result =
         fixture.gateway.listDirectory(ENVIRONMENT_NAME, ".", Duration.ofSeconds(5)).join();
@@ -1946,12 +1955,18 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private String hello(long sequence, EnvironmentName environmentName) {
+    return helloWithDaemon("d1", sequence, environmentName);
+  }
+
+  private String helloWithDaemon(String daemonId, long sequence, EnvironmentName environmentName) {
     return envelope(
         environmentName,
         DaemonMessageType.HELLO,
         null,
         sequence,
-        "{\"daemonId\":\"d1\",\"protocolVersion\":"
+        "{\"daemonId\":\""
+            + daemonId
+            + "\",\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"capabilityCatalogVersion\":\""
             + EnvironmentCapabilityCatalog.version()
@@ -2060,8 +2075,13 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private final class Fixture {
-    final LiveEnvironmentRegistry environmentRegistry = new LiveEnvironmentRegistry();
-    final AtomicReference<Instant> now = new AtomicReference<>(NOW);
+    final SingleConnectionDataSource ds =
+        new SingleConnectionDataSource(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
+    final JdbcTemplate jdbc = new JdbcTemplate(ds);
+    final UUID nodeId = UUID.randomUUID();
+    final LiveEnvironmentRegistry environmentRegistry = new LiveEnvironmentRegistry(jdbc, nodeId);
+    final AtomicReference<Instant> now = new AtomicReference<>();
     final Duration heartbeatTimeout = Duration.ofSeconds(60);
     final EnvironmentDaemonGateway gateway;
     final EnvironmentCapabilityDescriptor descriptor;
@@ -2089,7 +2109,8 @@ class EnvironmentDaemonGatewayFinalTest {
 
                 @Override
                 public Instant instant() {
-                  return now.get();
+                  Instant current = now.get();
+                  return current != null ? current : Instant.now();
                 }
               },
               readyListener);

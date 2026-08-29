@@ -383,6 +383,116 @@ create table chat (
 create index idx_chat_modified on chat (updated_at, created_at);
 
 ------------------------------------------------------------------------------
+-- 1c. Live environment routes and cross-node queries
+------------------------------------------------------------------------------
+
+create table live_environment (
+    environment_name    varchar(128)   primary key,
+    daemon_id           varchar(128)   not null,
+    owner_node_id       uuid           not null,
+    route_token         uuid           not null,
+    status              varchar(32)    not null,
+    capabilities        jsonb,
+    last_seen_at        timestamptz(3) not null,
+    lease_until         timestamptz(3) not null,
+    constraint ck_live_environment_daemon_id_nonblank check (
+        btrim(daemon_id) <> ''
+    ),
+    constraint ck_live_environment_status check (
+        status in ('CONNECTING', 'READY')
+    ),
+    constraint ck_live_environment_capabilities check (
+        status not in ('CONNECTING', 'READY')
+        or (status = 'CONNECTING' and capabilities is null)
+        or (status = 'READY' and capabilities is not null and jsonb_typeof(capabilities) = 'object')
+    ),
+    constraint ck_live_environment_lease check (
+        lease_until > last_seen_at
+    )
+);
+
+comment on table live_environment is '多节点 Live Environment 路由租约：每个活跃 Environment 由持有租约的节点（owner_node_id + route_token）独占路由';
+comment on column live_environment.environment_name is 'Environment 规范路由名称（PK）';
+comment on column live_environment.daemon_id is 'Daemon 实例唯一标识';
+comment on column live_environment.owner_node_id is '当前持有该路由的 App 节点实例 UUID';
+comment on column live_environment.route_token is '当前路由租约代币 UUID（每次接管/重绑生成新 token）';
+comment on column live_environment.status is '路由状态：CONNECTING / READY';
+comment on column live_environment.capabilities is 'READY 状态下 daemon 通告的 JSON 能力对象；CONNECTING 为 null';
+comment on column live_environment.last_seen_at is '最后活跃时间（毫秒精度）';
+comment on column live_environment.lease_until is '租约到期时间（毫秒精度），必须晚于 last_seen_at';
+
+create index idx_live_environment_lease_until
+    on live_environment (lease_until);
+
+create table environment_query (
+    id                  uuid           primary key,
+    environment_name    varchar(128)   not null,
+    capability_id       varchar(128)   not null,
+    arguments           jsonb          not null,
+    status              varchar(32)    not null,
+    result              jsonb,
+    error               jsonb,
+    available_at        timestamptz(3),
+    lease_token         uuid,
+    lease_until         timestamptz(3),
+    expires_at          timestamptz(3) not null,
+    created_at          timestamptz(3) not null default current_timestamp,
+    updated_at          timestamptz(3) not null default current_timestamp,
+    constraint ck_environment_query_capability check (
+        capability_id in ('fs.list-directory')
+    ),
+    constraint ck_environment_query_arguments check (
+        jsonb_typeof(arguments) = 'object'
+    ),
+    constraint ck_environment_query_status check (
+        status in ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'EXPIRED')
+    ),
+    constraint ck_environment_query_lease_pair check (
+        (lease_token is null) = (lease_until is null)
+    ),
+    constraint ck_environment_query_state check (
+        status not in ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'EXPIRED')
+        or (status = 'PENDING' and available_at is not null and lease_token is null and result is null and error is null)
+        or (status = 'RUNNING' and available_at is null and lease_token is not null and result is null and error is null)
+        or (status = 'COMPLETED' and available_at is null and lease_token is null and result is not null and error is null)
+        or (status = 'FAILED' and available_at is null and lease_token is null and result is null and error is not null)
+        or (status = 'EXPIRED' and available_at is null and lease_token is null and result is null)
+    ),
+    constraint ck_environment_query_result check (
+        result is null or jsonb_typeof(result) = 'object'
+    ),
+    constraint ck_environment_query_error check (
+        error is null or jsonb_typeof(error) = 'object'
+    ),
+    constraint ck_environment_query_expires check (
+        expires_at >= created_at
+    )
+);
+
+comment on table environment_query is '跨节点只读 Environment 查询信箱：非持有节点提交查询，持有节点 claim 后调用 daemon 完成回填';
+comment on column environment_query.id is '查询请求 UUID（调用方生成）';
+comment on column environment_query.environment_name is '目标 Environment 路由名称';
+comment on column environment_query.capability_id is '只读能力标识（仅白名单 fs.list-directory）';
+comment on column environment_query.arguments is '调用参数（JSON object）';
+comment on column environment_query.status is '查询生命周期：PENDING / RUNNING / COMPLETED / FAILED / EXPIRED';
+comment on column environment_query.result is '成功返回载荷（JSON object）';
+comment on column environment_query.error is '失败错误载荷（JSON object）';
+comment on column environment_query.available_at is 'PENDING 可领取时间（毫秒精度）';
+comment on column environment_query.lease_token is 'RUNNING 执行租约代币 UUID';
+comment on column environment_query.lease_until is 'RUNNING 租约截止时间（毫秒精度）';
+comment on column environment_query.expires_at is '全局过期时间（毫秒精度）';
+comment on column environment_query.created_at is '创建时间（毫秒精度）';
+comment on column environment_query.updated_at is '最后更新时间（毫秒精度）';
+
+create index idx_environment_query_claim
+    on environment_query (environment_name, status, available_at, lease_until)
+    where status in ('PENDING', 'RUNNING');
+
+create index idx_environment_query_expires
+    on environment_query (expires_at)
+    where status in ('PENDING', 'RUNNING');
+
+------------------------------------------------------------------------------
 -- 1b. Singleton system settings (id=1)
 --
 -- system_setting 是全局强类型配置聚合的权威存储：恒为一行（id=1），config 保存完整
