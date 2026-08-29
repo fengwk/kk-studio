@@ -18,15 +18,16 @@ import java.util.stream.Stream;
 /**
  * Builtin 模块的轻量级架构守卫。
  *
- * <p>Builtin 主源码只能依赖 JDK 与 {@code fun.fengwk.kkstudio.harness.contributor.api} / {@code
- * fun.fengwk.kkstudio.harness.prompt} / {@code fun.fengwk.kkstudio.harness.runtime} / {@code
- * fun.fengwk.kkstudio.harness.tool} / {@code fun.fengwk.kkstudio.harness.builtin} / {@code
- * com.fasterxml.jackson}；禁止依赖 Spring、infra、daemon、platform 与 web。
+ * <p>Builtin 源码只能依赖 JDK 与 {@code fun.fengwk.kkstudio.harness.contributor.api} / {@code
+ * fun.fengwk.kkstudio.harness.prompt} / {@code fun.fengwk.kkstudio.harness.tool} / {@code
+ * fun.fengwk.kkstudio.harness.builtin} / {@code com.fasterxml.jackson}；禁止依赖
+ * runtime、Spring、infra、daemon、platform 与 web。
  */
 class BuiltinModuleArchitectureTest {
 
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
+          "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.infra.",
           "fun.fengwk.kkstudio.harness.daemon.",
           "fun.fengwk.kkstudio.platform.",
@@ -38,17 +39,26 @@ class BuiltinModuleArchitectureTest {
           "org.apache.ibatis.");
 
   @Test
-  void builtinMainSourcesStayOnAllowedPackages() throws IOException {
+  void builtinMainAndTestSourcesStayOnAllowedPackages() throws IOException {
     Path main = locateBuiltinMainJava();
     assertTrue(Files.isDirectory(main), "builtin main sources must exist: " + main);
 
     List<String> violations = scanViolations(main);
     assertTrue(
-        violations.isEmpty(), () -> "architecture violations:\n" + String.join("\n", violations));
+        violations.isEmpty(),
+        () -> "main architecture violations:\n" + String.join("\n", violations));
+
+    Path test = locateBuiltinTestJava();
+    assertTrue(Files.isDirectory(test), "builtin test sources must exist: " + test);
+
+    List<String> testViolations = scanViolations(test);
+    assertTrue(
+        testViolations.isEmpty(),
+        () -> "test architecture violations:\n" + String.join("\n", testViolations));
   }
 
   @Test
-  void builtinPomDeclaresOnlyAllowedProductionDependencies() throws IOException {
+  void builtinPomDeclaresOnlyAllowedDependencies() throws IOException {
     Path moduleRoot = locateBuiltinMainJava().getParent().getParent().getParent();
     Path pom = moduleRoot.resolve("pom.xml");
     String text = Files.readString(pom, StandardCharsets.UTF_8);
@@ -58,29 +68,30 @@ class BuiltinModuleArchitectureTest {
     while (matcher.find()) {
       String dependency = matcher.group(1);
       String scope = optionalTag(dependency, "scope");
-      if ("test".equals(scope)) {
-        continue;
-      }
       String coordinate =
           requiredTag(dependency, "groupId") + ":" + requiredTag(dependency, "artifactId");
+      if ("test".equals(scope)) {
+        if (!Set.of("org.junit.jupiter:junit-jupiter", "org.mockito:mockito-core")
+            .contains(coordinate)) {
+          violations.add(coordinate + " [test]");
+        }
+        continue;
+      }
       if (!Set.of(
               "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
               "fun.fengwk.kk-studio:kk-studio-harness-prompt",
-              "fun.fengwk.kk-studio:kk-studio-harness-runtime",
               "fun.fengwk.kk-studio:kk-studio-harness-tool",
               "com.fasterxml.jackson.core:jackson-databind")
           .contains(coordinate)) {
         violations.add(coordinate + (scope == null ? "" : " [" + scope + "]"));
       }
     }
-    assertTrue(
-        violations.isEmpty(),
-        () -> "disallowed direct production dependencies in " + pom + ": " + violations);
+    assertTrue(violations.isEmpty(), () -> "disallowed dependencies in " + pom + ": " + violations);
   }
 
-  private static List<String> scanViolations(Path main) throws IOException {
+  private static List<String> scanViolations(Path root) throws IOException {
     List<String> violations = new ArrayList<>();
-    try (Stream<Path> stream = Files.walk(main)) {
+    try (Stream<Path> stream = Files.walk(root)) {
       stream
           .filter(path -> path.toString().endsWith(".java"))
           .filter(path -> !isGeneratedOrTarget(path))
@@ -96,7 +107,7 @@ class BuiltinModuleArchitectureTest {
                     String imported = normalizeImport(trimmed);
                     for (String prefix : FORBIDDEN_IMPORT_PREFIXES) {
                       if (imported.startsWith(prefix)) {
-                        violations.add(relative(main, path) + ": " + trimmed);
+                        violations.add(relative(root, path) + ": " + trimmed);
                       }
                     }
                   }
@@ -136,9 +147,9 @@ class BuiltinModuleArchitectureTest {
         || normalized.contains("/generated-test-sources/");
   }
 
-  private static String relative(Path main, Path path) {
+  private static String relative(Path root, Path path) {
     try {
-      return main.relativize(path).toString();
+      return root.relativize(path).toString();
     } catch (IllegalArgumentException ignored) {
       return path.getFileName().toString();
     }
@@ -155,5 +166,18 @@ class BuiltinModuleArchitectureTest {
       }
     }
     throw new IllegalStateException("cannot locate builtin main sources from " + cwd);
+  }
+
+  private static Path locateBuiltinTestJava() {
+    Path cwd = Path.of("").toAbsolutePath().normalize();
+    List<Path> candidates =
+        List.of(cwd.resolve("src/test/java"), cwd.resolve("harness/builtin/src/test/java"));
+    for (Path candidate : candidates) {
+      Path normalized = candidate.normalize();
+      if (Files.isDirectory(normalized) && !isGeneratedOrTarget(normalized)) {
+        return normalized;
+      }
+    }
+    throw new IllegalStateException("cannot locate builtin test sources from " + cwd);
   }
 }

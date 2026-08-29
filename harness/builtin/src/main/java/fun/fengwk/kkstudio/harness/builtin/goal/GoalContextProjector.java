@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.builtin.goal;
 
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
+import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
 import fun.fengwk.kkstudio.harness.contributor.api.ContextProjector;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 
 import java.util.List;
 import java.util.Map;
@@ -11,7 +11,7 @@ import java.util.Map;
 public final class GoalContextProjector implements ContextProjector {
 
   @Override
-  public List<AgentMessage> project(BranchView view) {
+  public List<ContextFragment> project(BranchView view) {
     GoalState state = GoalToolSupport.latest(view).orElse(null);
     if (state == null || state.status() != GoalStatus.ACTIVE) {
       return List.of();
@@ -19,6 +19,6 @@ public final class GoalContextProjector implements ContextProjector {
     String prompt =
         GoalPrompts.template("active-goal-context.md")
             .render(Map.of("goalJson", GoalToolSupport.envelope(state)));
-    return List.of(AgentMessage.system(prompt));
+    return List.of(new ContextFragment(prompt));
   }
 }

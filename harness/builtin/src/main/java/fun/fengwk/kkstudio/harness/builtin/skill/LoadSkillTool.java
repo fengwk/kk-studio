@@ -5,16 +5,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
+import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.time.Duration;
 import java.util.Iterator;
@@ -76,26 +78,47 @@ public final class LoadSkillTool implements Tool {
   }
 
   @Override
+  public ToolRequirements requirements() {
+    return ToolRequirements.environment();
+  }
+
+  @Override
   public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(listener, "listener");
     String callId = request.call().id();
     Handle handle = new Handle(listener, callId);
     try {
-      if (request.context() == null) {
+      ToolExecutionContext context = request.context();
+      if (context == null) {
         throw new IllegalArgumentException("load_skill requires a durable execution context");
       }
+      Optional<BoundEnvironment> environment = context.environment();
+      if (environment.isEmpty()) {
+        throw new IllegalArgumentException("No environment bound in execution context");
+      }
+      BoundEnvironment boundEnv = environment.get();
       String skillName = parseName(request.call().argumentsJson());
-      Optional<SkillBinding> selected =
-          skillLookup.findSelected(
-              request.context().invocationId(), request.context().threadId(), skillName);
+      Optional<SelectedSkill> selected =
+          skillLookup.findSelected(context.invocationId(), context.threadId(), skillName);
       if (selected.isEmpty()) {
         complete(handle, error(callId, "unknown or unselected skill: " + skillName));
         return handle;
       }
-      SkillBinding skill = selected.get();
+      SelectedSkill skill = selected.get();
       if (skill.sourceEnvironment() == null) {
         complete(handle, error(callId, "skill has no Environment body: " + skill.name()));
+        return handle;
+      }
+      if (!Objects.equals(skill.sourceEnvironment(), boundEnv.binding())) {
+        complete(
+            handle,
+            error(
+                callId,
+                "skill source environment mismatch: expected "
+                    + skill.sourceEnvironment().environmentName().value()
+                    + " but got "
+                    + boundEnv.binding().environmentName().value()));
         return handle;
       }
       CompletableFuture<SkillBodyLoader.SkillBodyLoadResult> future =

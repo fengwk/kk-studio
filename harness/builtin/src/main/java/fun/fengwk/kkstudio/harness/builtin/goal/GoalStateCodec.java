@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -48,13 +48,13 @@ final class GoalStateCodec {
     return write(node);
   }
 
-  GoalState decode(CustomEntryPayload payload) {
-    Objects.requireNonNull(payload, "payload");
-    if (payload.schemaVersion() != SCHEMA_VERSION) {
+  GoalState decode(CustomStateSnapshot snapshot) {
+    Objects.requireNonNull(snapshot, "snapshot");
+    if (snapshot.schemaVersion() != SCHEMA_VERSION) {
       throw new IllegalArgumentException(
-          "unsupported goal state schemaVersion: " + payload.schemaVersion());
+          "unsupported goal state schemaVersion: " + snapshot.schemaVersion());
     }
-    JsonNode parsed = parse(payload.dataJson(), "goal state");
+    JsonNode parsed = parse(snapshot.dataJson(), "goal state");
     if (!(parsed instanceof ObjectNode node)) {
       throw new IllegalArgumentException("goal state must be an object");
     }

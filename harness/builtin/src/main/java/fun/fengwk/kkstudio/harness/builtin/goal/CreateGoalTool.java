@@ -2,21 +2,23 @@ package fun.fengwk.kkstudio.harness.builtin.goal;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeTool;
-import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolContext;
-import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolResult;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 
 /** 创建或替换当前 branch Goal 全量快照。 */
-public final class CreateGoalTool implements DeclarativeTool {
+public final class CreateGoalTool implements Tool {
 
   public static final String NAME = "create_goal";
   public static final String VERSION = "2";
@@ -31,24 +33,37 @@ public final class CreateGoalTool implements DeclarativeTool {
           ToolSideEffect.IDEMPOTENT,
           Duration.ZERO);
 
+  private static final ToolRequirements REQUIREMENTS =
+      new ToolRequirements(
+          false, List.of(new StateDeclaration(GoalFeature.STATE_TYPE, StateMode.WRITE)));
+
   @Override
   public ToolDescriptor descriptor() {
     return DESCRIPTOR;
   }
 
   @Override
-  public List<StateDeclaration> stateAccesses() {
-    return List.of(new StateDeclaration(GoalFeature.STATE_TYPE, StateMode.WRITE));
+  public ToolRequirements requirements() {
+    return REQUIREMENTS;
   }
 
   @Override
-  public DeclarativeToolResult execute(DeclarativeToolContext context, ToolCall call) {
+  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+    Objects.requireNonNull(request, "request");
+    Objects.requireNonNull(listener, "listener");
+    if (request.context() == null) {
+      listener.onComplete(
+          GoalToolSupport.error(
+              request.call(),
+              new IllegalArgumentException("create_goal requires durable ToolExecutionContext")));
+      return new CompletedHandle();
+    }
     try {
-      ObjectNode arguments = GoalToolSupport.arguments(call, DESCRIPTOR);
+      ObjectNode arguments = GoalToolSupport.arguments(request.call(), DESCRIPTOR);
       String objective = GoalToolSupport.requiredNonBlankText(arguments, "objective");
       Long tokenBudget = GoalToolSupport.optionalPositiveLong(arguments, "tokenBudget");
-      GoalState current = GoalToolSupport.latest(context.branch()).orElse(null);
-      Instant now = GoalToolSupport.timestamp(context.executedAt());
+      GoalState current = GoalToolSupport.latest(request.context().branch()).orElse(null);
+      Instant now = GoalToolSupport.timestamp(request.context().executedAt());
       GoalState state =
           new GoalState(
               objective,
@@ -57,9 +72,20 @@ public final class CreateGoalTool implements DeclarativeTool {
               null,
               current == null ? now : current.createdAt(),
               now);
-      return GoalToolSupport.stateChange(call, state);
+      listener.onComplete(GoalToolSupport.stateChange(request.call(), state));
     } catch (RuntimeException error) {
-      return GoalToolSupport.error(call, error);
+      listener.onComplete(GoalToolSupport.error(request.call(), error));
+    }
+    return new CompletedHandle();
+  }
+
+  private static final class CompletedHandle implements ToolExecutionHandle {
+    @Override
+    public void cancel() {}
+
+    @Override
+    public boolean isCancelled() {
+      return false;
     }
   }
 }

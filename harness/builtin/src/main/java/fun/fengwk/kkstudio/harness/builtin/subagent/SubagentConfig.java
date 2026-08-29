@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.builtin.subagent;
 
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
-
 import java.time.Duration;
 import java.util.Objects;
 
@@ -22,7 +20,12 @@ public record SubagentConfig(
       throw new IllegalArgumentException("subagent idleTimeout must not be negative");
     }
     if (!idleTimeout.isZero()) {
-      idleTimeout = HarnessStoreTime.requireWholeMillisecondDuration(idleTimeout, "idleTimeout");
+      if (idleTimeout.toMillis() <= 0) {
+        throw new IllegalArgumentException("idleTimeout must be at least one millisecond");
+      }
+      if (idleTimeout.getNano() % 1_000_000 != 0) {
+        throw new IllegalArgumentException("idleTimeout must use whole milliseconds");
+      }
     }
   }
 }
