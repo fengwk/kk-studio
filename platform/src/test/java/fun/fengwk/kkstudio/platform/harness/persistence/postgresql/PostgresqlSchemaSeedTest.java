@@ -77,13 +77,13 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       applyE2eDatabase(conn);
       assertE2eSeedContent(conn);
-      assertProfileMigrationRecorded(conn, "2", "e2e seed");
+      assertRepeatableMigrationRecorded(conn, "e2e seed");
       // 重新运行 profile migration，并断言确定性列不发生变化。
       String before = e2eFingerprint();
       applyE2eDatabase(conn);
       assertEquals(before, e2eFingerprint(), "e2e seed must be idempotent");
       assertE2eSeedContent(conn);
-      assertProfileMigrationRecorded(conn, "2", "e2e seed");
+      assertRepeatableMigrationRecorded(conn, "e2e seed");
     }
     // Catalog 标识就是名称；任何 seed 行都不会消耗业务序列。
     // 后续插入必须不会与确定性 seed id 冲突。
@@ -164,7 +164,84 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       assertEquals(30_000L, settings.integrations().seedance().maxWaitMillis());
       assertTrue(!settings.integrations().comfyui().enabled());
       assertTrue(!settings.integrations().minimaxH3().enabled());
-      assertProfileMigrationRecorded(conn, "3", "canvas test system settings");
+      assertRepeatableMigrationRecorded(conn, "canvas test seed");
+      assertRepeatableMigrationRecorded(conn, "dev seed");
+
+      // 重新执行 canvas-test 迁移，断言 repeatable migration 二次运行幂等且设置保持正确。
+      applyCanvasTestDatabase(conn);
+      try (Statement st = conn.createStatement();
+          ResultSet rs = st.executeQuery("select config from system_setting where id = 1")) {
+        assertTrue(rs.next());
+        SystemSettings reloaded = new SystemSettingsCodec().decode(rs.getString(1));
+        assertEquals(
+            settings, reloaded, "canvas test settings must remain identical after re-migration");
+      }
+    }
+  }
+
+  /**
+   * 验证从空库执行 Flyway bootstrap（包含 V1 baseline 与各 profile 的 repeatable seed）， 以及在已迁移库上二次/多次执行 migrate
+   * 时，repeatable seed 能够安全重跑且保持幂等最终状态， 且 flyway_schema_history 中不存在任何 V2+ 历史记录。
+   */
+  @Test
+  void cleanSlateBootstrapAndRepeatableSeedMigrationReplay() throws Exception {
+    // 1. 空库 bootstrap dev profile
+    try (Connection conn = newConnection()) {
+      resetDatabase(conn);
+      applyDevDatabase(conn);
+      assertSingleLong(
+          conn,
+          "select count(*) from flyway_schema_history where version = '1' and success = true",
+          1L);
+      assertRepeatableMigrationRecorded(conn, "dev seed");
+      assertSingleLong(
+          conn,
+          "select count(*) from flyway_schema_history where version is not null and version != '1'",
+          0L);
+
+      // 二次 migrate
+      applyDevDatabase(conn);
+      assertDevSeedPresent(conn);
+    }
+
+    // 2. 空库 bootstrap e2e profile
+    try (Connection conn = newConnection()) {
+      resetDatabase(conn);
+      applyE2eDatabase(conn);
+      assertSingleLong(
+          conn,
+          "select count(*) from flyway_schema_history where version = '1' and success = true",
+          1L);
+      assertRepeatableMigrationRecorded(conn, "e2e seed");
+      assertSingleLong(
+          conn,
+          "select count(*) from flyway_schema_history where version is not null and version != '1'",
+          0L);
+
+      // 二次 migrate
+      applyE2eDatabase(conn);
+      assertE2eSeedContent(conn);
+    }
+
+    // 3. 空库 bootstrap canvas-test profile (dev seed + canvas-test seed)
+    try (Connection conn = newConnection()) {
+      resetDatabase(conn);
+      applyCanvasTestDatabase(conn);
+      assertSingleLong(
+          conn,
+          "select count(*) from flyway_schema_history where version = '1' and success = true",
+          1L);
+      assertRepeatableMigrationRecorded(conn, "canvas test seed");
+      assertRepeatableMigrationRecorded(conn, "dev seed");
+      assertSingleLong(
+          conn,
+          "select count(*) from flyway_schema_history where version is not null and version != '1'",
+          0L);
+
+      // 二次 migrate
+      applyCanvasTestDatabase(conn);
+      assertDevSeedPresent(conn);
+      assertSingleLong(conn, "select count(*) from system_setting where id = 1", 1L);
     }
   }
 
@@ -172,7 +249,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       applyDevDatabase(conn);
       assertDevSeedPresent(conn);
-      assertProfileMigrationRecorded(conn, "2", "dev seed");
+      assertRepeatableMigrationRecorded(conn, "dev seed");
     }
   }
 
@@ -363,14 +440,12 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     }
   }
 
-  private static void assertProfileMigrationRecorded(
-      Connection conn, String version, String description) throws Exception {
+  private static void assertRepeatableMigrationRecorded(Connection conn, String description)
+      throws Exception {
     assertSingleLong(
         conn,
         "select count(*) from flyway_schema_history"
-            + " where version = '"
-            + version
-            + "' and description = '"
+            + " where version is null and description = '"
             + description
             + "' and success = true",
         1L);

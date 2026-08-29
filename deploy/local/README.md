@@ -11,7 +11,7 @@
 - `postgres:17-alpine` —— 唯一 durable 数据库，命名为 `kk_studio`，默认用户
   `kk_studio`。空库由 app 在 `dev` profile 通过 Flyway 执行
   [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 和
-  [`V2__dev_seed.sql`](../../schema/src/main/resources/db/seed/dev/V2__dev_seed.sql)；
+  [`R__dev_seed.sql`](../../schema/src/main/resources/db/seed/dev/R__dev_seed.sql)；
   已执行版本由 `flyway_schema_history` 记录。Harness Work、version 与 realtime 的低延迟
   提示也复用 PostgreSQL `LISTEN/NOTIFY`；通知丢失时由 durable snapshot 与 periodic poll 恢复。
 
@@ -95,15 +95,15 @@ Compose 和 app 不注入、传递或读取任何真实 Provider 凭证。真实
 
 E2E profile 通过 Flyway 执行
 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 和
-[`V2__e2e_seed.sql`](../../schema/src/main/resources/db/seed/e2e/V2__e2e_seed.sql)。seed 仍保留
+[`R__e2e_seed.sql`](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql)。seed 仍保留
 7 个 Provider 和 19 个 Pi 模型 catalog，但不包含真实凭证；真实凭证不会写入镜像、SQL
 seed 或仓库。
 
 数据库首次初始化的约束：
 
-- `V1__schema.sql` 和 `V2__dev_seed.sql` 是 `dev` profile 的唯一 bootstrap 来源；
+- `V1__schema.sql` 和 `R__dev_seed.sql` 是 `dev` profile 的唯一 bootstrap 来源；
   Flyway 仅执行 `flyway_schema_history` 尚未记录的版本。
-- `V2__dev_seed.sql` 写入的是 local-only 的 stub provider（`stub-key`），
+- `R__dev_seed.sql` 写入的是 local-only 的 stub provider（`stub-key`），
   不携带任何真实凭证。
 - 真实 E2E credential 仅由宿主 runner 的 MiniMax 同步器在运行时注入，绝不写入镜像、
   SQL seed 或仓库。
