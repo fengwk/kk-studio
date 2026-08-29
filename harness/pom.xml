@@ -14,6 +14,7 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>prompt</module>
         <module>tool</module>
         <module>runtime</module>
         <module>contributor-api</module>

@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.goal;
 
-import fun.fengwk.kkstudio.harness.runtime.prompt.PromptTemplate;
-import fun.fengwk.kkstudio.harness.runtime.prompt.PromptTemplateLoader;
+import fun.fengwk.kkstudio.harness.prompt.PromptTemplate;
+import fun.fengwk.kkstudio.harness.prompt.PromptTemplateLoader;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
