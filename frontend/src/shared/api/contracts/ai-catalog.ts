@@ -1,5 +1,4 @@
 import type { BackendLong, CatalogVersion, InstantTimestamp } from '@/shared/api/contracts/base'
-import type { AgentToolBackend } from '@/shared/api/contracts/agent-tool'
 
 /** Provider Catalog / HTTP 使用的稳定 wire 值。 */
 export type AgentProviderType = 'openai' | 'openai_response' | 'anthropic' | 'google'
@@ -138,7 +137,6 @@ export interface ToolCatalogEntryDTO {
   name: string
   version: string
   description: string
-  backend: AgentToolBackend
 }
 
 /** 公开的全局 Agent definition；model/variant 与 config 是 Thread 运行时的输入。 */

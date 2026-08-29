@@ -436,7 +436,6 @@ describe('thread timeline edge branches', () => {
       toolVersion: '1',
       rendererKey: 'bash',
       toolId: 'base.bash',
-      toolBackend: 'HOST',
       environment: null,
       argumentsJson: '{"command":"ls"}',
       approvalJson: null,
