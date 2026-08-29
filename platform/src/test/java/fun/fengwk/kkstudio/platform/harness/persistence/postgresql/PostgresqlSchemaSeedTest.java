@@ -18,7 +18,14 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -180,11 +187,11 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
   }
 
   /**
-   * 验证从空库执行 Flyway bootstrap（包含 V1 baseline 与各 profile 的 repeatable seed）， 以及在已迁移库上二次/多次执行 migrate
-   * 时，repeatable seed 能够安全重跑且保持幂等最终状态， 且 flyway_schema_history 中不存在任何 V2+ 历史记录。
+   * 验证从空库执行 Flyway bootstrap 时，各 profile 仅应用 V1 baseline 与对应的 repeatable seeds， 且
+   * flyway_schema_history 中不存在任何 V2+ 历史记录。
    */
   @Test
-  void cleanSlateBootstrapAndRepeatableSeedMigrationReplay() throws Exception {
+  void cleanSlateBootstrapAcrossAllProfiles() throws Exception {
     // 1. 空库 bootstrap dev profile
     try (Connection conn = newConnection()) {
       resetDatabase(conn);
@@ -198,9 +205,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           conn,
           "select count(*) from flyway_schema_history where version is not null and version != '1'",
           0L);
-
-      // 二次 migrate
-      applyDevDatabase(conn);
       assertDevSeedPresent(conn);
     }
 
@@ -217,9 +221,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           conn,
           "select count(*) from flyway_schema_history where version is not null and version != '1'",
           0L);
-
-      // 二次 migrate
-      applyE2eDatabase(conn);
       assertE2eSeedContent(conn);
     }
 
@@ -237,11 +238,124 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           conn,
           "select count(*) from flyway_schema_history where version is not null and version != '1'",
           0L);
-
-      // 二次 migrate
-      applyCanvasTestDatabase(conn);
       assertDevSeedPresent(conn);
       assertSingleLong(conn, "select count(*) from system_setting where id = 1", 1L);
+    }
+  }
+
+  /**
+   * 验证当 repeatable migration 文件 checksum 发生变化时，Flyway 能够真实重跑该 repeatable migration 并记录第二次 成功执行历史，同时
+   * seed 的确定性 replacement 能够将被人为篡改的数据（包括多余行和被修改的属性）彻底收敛恢复为 SQL 最新期望值。
+   */
+  @Test
+  void repeatableMigrationReplaysAndConvergesOnChecksumChange() throws Exception {
+    Path tempDir = Files.createTempDirectory("flyway-repeatable-replay-test");
+    try {
+      Path migrationDir = Files.createDirectories(tempDir.resolve("migration"));
+      Path seedDir = Files.createDirectories(tempDir.resolve("seed"));
+
+      String v1Content =
+          new String(
+              Objects.requireNonNull(
+                      PostgresqlSchemaSeedTest.class
+                          .getClassLoader()
+                          .getResourceAsStream("db/migration/V1__schema.sql"))
+                  .readAllBytes(),
+              StandardCharsets.UTF_8);
+      String rDevContent =
+          new String(
+              Objects.requireNonNull(
+                      PostgresqlSchemaSeedTest.class
+                          .getClassLoader()
+                          .getResourceAsStream("db/seed/dev/R__dev_seed.sql"))
+                  .readAllBytes(),
+              StandardCharsets.UTF_8);
+
+      Path v1File = migrationDir.resolve("V1__schema.sql");
+      Path rDevFile = seedDir.resolve("R__dev_seed.sql");
+      Files.writeString(v1File, v1Content, StandardCharsets.UTF_8);
+      Files.writeString(rDevFile, rDevContent, StandardCharsets.UTF_8);
+
+      String migrationLoc = "filesystem:" + migrationDir.toAbsolutePath();
+      String seedLoc = "filesystem:" + seedDir.toAbsolutePath();
+
+      try (Connection conn = newConnection()) {
+        resetDatabase(conn);
+
+        // 1. 首次 migrate：应用 V1 baseline 与初始 R__dev_seed
+        migrate(conn, migrationLoc, seedLoc);
+        assertSingleLong(
+            conn,
+            "select count(*) from flyway_schema_history where version = '1' and success = true",
+            1L);
+        assertSingleLong(
+            conn,
+            "select count(*) from flyway_schema_history where version is null and description ="
+                + " 'dev seed' and success = true",
+            1L);
+        assertDevSeedPresent(conn);
+
+        // 2. 人为篡改 seed-owned 数据：修改属性并插入陈旧/多余行
+        try (Statement st = conn.createStatement()) {
+          st.executeUpdate(
+              "update agent_provider set credential = 'tampered-key' where name = 'stub'");
+          st.executeUpdate(
+              "update agent_definition set system_prompt = 'tampered-prompt' where name ="
+                  + " 'default-assistant'");
+          st.executeUpdate(
+              "insert into agent_model (provider_name, name, description, config) "
+                  + "values ('stub', 'obsolete-stub-model', 'obsolete', '{}'::jsonb)");
+        }
+        assertSingleLong(
+            conn,
+            "select count(*) from agent_provider where name = 'stub' and credential ="
+                + " 'tampered-key'",
+            1L);
+        assertSingleLong(conn, "select count(*) from agent_model where provider_name = 'stub'", 2L);
+
+        // 3. 修改 R__dev_seed.sql 内容，触发 checksum 变化
+        String updatedRDevContent =
+            rDevContent + "\n-- modified checksum for repeatable migration replay verification\n";
+        Files.writeString(rDevFile, updatedRDevContent, StandardCharsets.UTF_8);
+
+        // 4. 再次执行 migrate：Flyway 必须识别 checksum 变化并重跑 repeatable seed
+        migrate(conn, migrationLoc, seedLoc);
+
+        // 5. 断言产生了第二次 repeatable dev seed 执行记录
+        assertSingleLong(
+            conn,
+            "select count(*) from flyway_schema_history where version is null and description ="
+                + " 'dev seed' and success = true",
+            2L);
+
+        // 6. 断言 seed 数据被确定性收敛恢复：tampered 属性恢复，多余的 obsolete model 被清除
+        assertDevSeedPresent(conn);
+        assertSingleLong(conn, "select count(*) from agent_model where provider_name = 'stub'", 1L);
+      }
+    } finally {
+      deleteRecursively(tempDir);
+    }
+  }
+
+  private static void deleteRecursively(Path root) throws IOException {
+    if (Files.exists(root)) {
+      Files.walkFileTree(
+          root,
+          new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+                throws IOException {
+              Files.delete(file);
+              return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc)
+                throws IOException {
+              Files.delete(dir);
+              return FileVisitResult.CONTINUE;
+            }
+          });
     }
   }
 

@@ -1,12 +1,12 @@
 -- PostgreSQL dev seed.
 --
--- Idempotent: re-application is a no-op via INSERT ... ON CONFLICT DO NOTHING,
--- so existing timestamps and versions remain unchanged. No real credentials;
--- the stub provider holds a local-only stub key for offline dev profiles.
---
--- The stub base_url uses a local-only hostname. The isolated deploy/test stack
--- maps that hostname to its deterministic HTTP mock; other local stacks can
--- provide the same alias or update the provider through the catalog API.
+-- Deterministic replacement: seed-owned catalog rows are synchronized to the
+-- exact definitions in this file on every repeatable migration run.
+-- FK dependency order is preserved by cleaning dependent agents and models first.
+
+delete from agent_definition where name = 'default-assistant';
+delete from agent_model where provider_name = 'stub';
+delete from agent_provider where name = 'stub';
 
 insert into agent_provider (
     name, description, provider_type, base_url, credential, config,
@@ -16,8 +16,7 @@ insert into agent_provider (
     'openai', 'http://stub.local:8080/v1', 'stub-key',
     '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
     current_timestamp, current_timestamp, 0
-)
-on conflict (name) do nothing;
+);
 
 insert into agent_model (
     provider_name, name, description, config,
@@ -27,8 +26,7 @@ insert into agent_model (
     'Local deterministic model for development and acceptance tests.',
     '{"limit":{"context":32768,"output":4096},"abilities":{"tools":true,"reasoning":false,"inputModalities":["TEXT"]},"defaultVariant":"default","variants":[{"id":"default"}],"pricing":{"currency":"USD","pricingTier":"acceptance","serviceTier":"default","serviceTierMultiplier":1,"version":"acceptance-v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}',
     current_timestamp, current_timestamp, 0
-)
-on conflict (provider_name, name) do nothing;
+);
 
 insert into agent_definition (
     name, description, system_prompt, model_provider_name, model_name, variant, config,
@@ -39,8 +37,7 @@ insert into agent_definition (
     'stub', 'acceptance-stub', 'default',
     '{"toolIds":[],"skills":[],"subagents":[]}',
     current_timestamp, current_timestamp, 0
-)
-on conflict (name) do nothing;
+);
 
 -- Harness runtime policy rows are gone: retry and realtime stream policy are
 -- no longer database tables. The runtime owns execution state with
