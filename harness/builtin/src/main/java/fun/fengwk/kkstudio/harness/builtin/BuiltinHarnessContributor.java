@@ -26,7 +26,7 @@ import java.util.Set;
 /**
  * 第一方内置功能包 Contributor。
  *
- * <p>注册 12 个模型可见 Environment capability 工具、{@code load_skill} 与 {@code task} 内部 HOST 工具、 Goal
+ * <p>注册 12 个模型可见 Environment capability 工具、{@code load_skill} 与 {@code task} internal 工具、Goal
  * 工具、{@code goal.state} 自定义 Entry 类型与上下文投影器。
  */
 public final class BuiltinHarnessContributor implements HarnessContributor {
@@ -154,7 +154,7 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
         EnvironmentCapabilityIds.MCP_CALL,
         ToolSideEffect.NON_IDEMPOTENT);
 
-    // Host tools
+    // Internal server-side tools
     registrar.registerTool(
         "runtime.load-skill", BuiltinToolIds.LOAD_SKILL, loadSkillTool, ToolVisibility.INTERNAL, 0);
     registrar.registerTool(

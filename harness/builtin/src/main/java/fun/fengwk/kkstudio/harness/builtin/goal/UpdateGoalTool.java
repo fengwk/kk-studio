@@ -2,12 +2,14 @@ package fun.fengwk.kkstudio.harness.builtin.goal;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -56,8 +58,9 @@ public final class UpdateGoalTool implements Tool {
           GoalToolSupport.error(
               request.call(),
               new IllegalArgumentException("update_goal requires durable ToolExecutionContext")));
-      return new CompletedHandle();
+      return CompletedToolExecutionHandle.INSTANCE;
     }
+    ToolOutcome outcome;
     try {
       ObjectNode arguments = GoalToolSupport.arguments(request.call(), DESCRIPTOR);
       GoalStatus status =
@@ -76,20 +79,11 @@ public final class UpdateGoalTool implements Tool {
       GoalState state =
           new GoalState(
               current.objective(), current.tokenBudget(), status, reason, current.createdAt(), now);
-      listener.onComplete(GoalToolSupport.stateChange(request.call(), state));
+      outcome = GoalToolSupport.stateChange(request.call(), state);
     } catch (RuntimeException error) {
-      listener.onComplete(GoalToolSupport.error(request.call(), error));
+      outcome = GoalToolSupport.error(request.call(), error);
     }
-    return new CompletedHandle();
-  }
-
-  private static final class CompletedHandle implements ToolExecutionHandle {
-    @Override
-    public void cancel() {}
-
-    @Override
-    public boolean isCancelled() {
-      return false;
-    }
+    listener.onComplete(outcome);
+    return CompletedToolExecutionHandle.INSTANCE;
   }
 }

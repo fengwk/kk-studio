@@ -7,10 +7,9 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * 按已 claim 的 Model invocation binding 异步加载 Environment skill 正文的窄端口。
+ * 按已 claim 的 Model invocation binding 异步加载 Environment skill 正文的窄端口，不直接依赖宿主 lifecycle。
  *
- * <p>在 Core 的 Environment skill loader 之上做的轻量 Runtime port，使 HOST tool 不直接依赖 Host lifecycle
- * bean。路由只使用冻结 binding 的 {@code environmentName}，workspace path 不参与 skill 加载。
+ * <p>路由只使用冻结 binding 的 {@code environmentName}，workspace path 不参与 skill 加载。
  */
 public interface SkillBodyLoader {
 

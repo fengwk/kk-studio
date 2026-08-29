@@ -1,11 +1,13 @@
 package fun.fengwk.kkstudio.harness.builtin.goal;
 
+import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -53,8 +55,9 @@ public final class GetGoalTool implements Tool {
           GoalToolSupport.error(
               request.call(),
               new IllegalArgumentException("get_goal requires durable ToolExecutionContext")));
-      return new CompletedHandle();
+      return CompletedToolExecutionHandle.INSTANCE;
     }
+    ToolOutcome outcome;
     try {
       GoalToolSupport.arguments(request.call(), DESCRIPTOR);
       GoalState state = GoalToolSupport.latest(request.context().branch()).orElse(null);
@@ -62,22 +65,13 @@ public final class GetGoalTool implements Tool {
           state == null
               ? "There is no current branch goal."
               : "This is the current branch goal. Use it to advance or verify the objective.";
-      listener.onComplete(
+      outcome =
           GoalToolSupport.success(
-              request.call(), prefix + "\n\n" + GoalToolSupport.envelope(state)));
+              request.call(), prefix + "\n\n" + GoalToolSupport.envelope(state));
     } catch (RuntimeException error) {
-      listener.onComplete(GoalToolSupport.error(request.call(), error));
+      outcome = GoalToolSupport.error(request.call(), error);
     }
-    return new CompletedHandle();
-  }
-
-  private static final class CompletedHandle implements ToolExecutionHandle {
-    @Override
-    public void cancel() {}
-
-    @Override
-    public boolean isCancelled() {
-      return false;
-    }
+    listener.onComplete(outcome);
+    return CompletedToolExecutionHandle.INSTANCE;
   }
 }

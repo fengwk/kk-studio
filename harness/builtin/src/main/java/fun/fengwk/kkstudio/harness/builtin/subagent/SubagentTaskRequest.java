@@ -19,7 +19,7 @@ public record SubagentTaskRequest(
     String prompt,
     String subagentType,
     Integer maxTurns,
-    String sessionId) {
+    UUID sessionId) {
 
   public SubagentTaskRequest {
     Objects.requireNonNull(invocationId, "invocationId");
@@ -34,12 +34,6 @@ public record SubagentTaskRequest(
     subagentType = subagentType.strip();
     if (maxTurns != null && maxTurns <= 0) {
       throw new IllegalArgumentException("maxTurns must be positive when provided");
-    }
-    if (sessionId != null) {
-      if (sessionId.isBlank()) {
-        throw new IllegalArgumentException("sessionId must not be blank when provided");
-      }
-      sessionId = sessionId.strip();
     }
   }
 }
