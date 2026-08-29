@@ -1,15 +1,15 @@
 package fun.fengwk.kkstudio.harness.contributor.api;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 
-/** 执行上下文中的窄环境能力，不暴露底层 Platform 或 Store。 */
+/** 供需要 Environment 绑定的 Tool 执行期访问的窄接口。 */
 public interface BoundEnvironment {
 
-  /** 返回当前绑定的环境信息。 */
+  /** 返回当前 Thread/Invocation 冻结的 Environment 路由与工作区绑定。 */
   EnvironmentBinding binding();
 
-  /** 在绑定的环境中执行指定能力。 */
+  /** 执行绑定的 Capability；此能力由外部实现提供。 */
   ToolExecutionHandle execute(
       EnvironmentCapabilityDescriptor capability,
       ToolExecutionRequest request,

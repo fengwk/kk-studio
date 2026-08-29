@@ -64,7 +64,10 @@ class ContributorApiModuleArchitectureTest {
       }
       String coordinate =
           requiredTag(dependency, "groupId") + ":" + requiredTag(dependency, "artifactId");
-      if (!Set.of("fun.fengwk.kk-studio:kk-studio-harness-tool").contains(coordinate)) {
+      if (!Set.of(
+              "fun.fengwk.kk-studio:kk-studio-harness-tool",
+              "fun.fengwk.kk-studio:kk-studio-harness-environment")
+          .contains(coordinate)) {
         violations.add(coordinate + (scope == null ? "" : " [" + scope + "]"));
       }
     }
@@ -110,7 +113,8 @@ class ContributorApiModuleArchitectureTest {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.contributor.api.")
-        || imported.startsWith("fun.fengwk.kkstudio.harness.tool.");
+        || imported.startsWith("fun.fengwk.kkstudio.harness.tool.")
+        || imported.startsWith("fun.fengwk.kkstudio.harness.environment.");
   }
 
   private static String normalizeImport(String importLine) {

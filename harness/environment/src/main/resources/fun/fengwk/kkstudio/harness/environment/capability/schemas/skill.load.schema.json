@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Name of the skill to load."
+    }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}

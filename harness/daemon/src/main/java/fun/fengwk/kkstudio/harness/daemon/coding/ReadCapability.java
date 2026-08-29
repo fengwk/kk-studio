@@ -2,10 +2,10 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -43,15 +43,12 @@ public final class ReadCapability extends AbstractCodingCapability {
                 .sorted(Comparator.naturalOrder())
                 .toList();
       }
-      return new EnvironmentCapabilityResult(
+      return OutputLimiter.limit(
           request.call().id(),
-          OutputLimiter.limit(
-              String.join("\n", prepend("path: " + rawPath, "kind: directory", "", names))
-                  .getBytes(StandardCharsets.UTF_8),
-              "text/plain",
-              config),
-          false,
-          "{}");
+          String.join("\n", prepend("path: " + rawPath, "kind: directory", "", names))
+              .getBytes(StandardCharsets.UTF_8),
+          "text/plain",
+          config);
     }
     byte[] bytes = Files.readAllBytes(path);
     TextFileCodec.Decoded decoded;
@@ -59,11 +56,7 @@ public final class ReadCapability extends AbstractCodingCapability {
       decoded = TextFileCodec.decode(bytes);
     } catch (IllegalArgumentException error) {
       if ("file appears to be binary".equals(error.getMessage())) {
-        return new EnvironmentCapabilityResult(
-            request.call().id(),
-            OutputLimiter.limit(bytes, "application/octet-stream", config),
-            false,
-            "{}");
+        return OutputLimiter.limit(request.call().id(), bytes, "application/octet-stream", config);
       }
       throw error;
     }
@@ -104,12 +97,11 @@ public final class ReadCapability extends AbstractCodingCapability {
               + (end + 1)
               + " to continue.]");
     }
-    return new EnvironmentCapabilityResult(
+    return OutputLimiter.limit(
         request.call().id(),
-        OutputLimiter.limit(
-            String.join("\n", output).getBytes(StandardCharsets.UTF_8), "text/plain", config),
-        false,
-        "{}");
+        String.join("\n", output).getBytes(StandardCharsets.UTF_8),
+        "text/plain",
+        config);
   }
 
   private static String directoryEntryName(Path entry) {

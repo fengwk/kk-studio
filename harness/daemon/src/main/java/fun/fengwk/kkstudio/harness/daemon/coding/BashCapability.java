@@ -2,23 +2,20 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -129,14 +126,23 @@ public final class BashCapability implements EnvironmentCapability {
             listener, AbstractCodingCapability.error(request.call().id(), "Command timed out"));
       } else {
         boolean failed = exitCode != 0;
-        List<ToolContent> contents =
-            OutputLimiter.limit(output.toByteArray(), "text/plain", config);
+        byte[] bytes = output.toByteArray();
         if (failed) {
-          contents = new ArrayList<>(contents);
-          contents.add(new TextToolContent("\nCommand exited with code " + exitCode));
+          byte[] exitBytes =
+              ("\nCommand exited with code " + exitCode).getBytes(StandardCharsets.UTF_8);
+          byte[] combined = new byte[bytes.length + exitBytes.length];
+          System.arraycopy(bytes, 0, combined, 0, bytes.length);
+          System.arraycopy(exitBytes, 0, combined, bytes.length, exitBytes.length);
+          bytes = combined;
         }
-        handle.complete(
-            listener, new EnvironmentCapabilityResult(request.call().id(), contents, failed, "{}"));
+        EnvironmentCapabilityResult res =
+            OutputLimiter.limit(request.call().id(), bytes, "text/plain", config);
+        if (failed) {
+          res =
+              new EnvironmentCapabilityResult(
+                  res.callId(), res.contents(), true, res.detailsJson());
+        }
+        handle.complete(listener, res);
       }
     } catch (Exception error) {
       handle.complete(
@@ -163,8 +169,7 @@ public final class BashCapability implements EnvironmentCapability {
       BashHandle handle,
       String text) {
     if (!text.isEmpty() && !handle.cancelled.get() && !handle.timedOut.get()) {
-      listener.onPartial(
-          new EnvironmentCapabilityResult(callId, List.of(new TextToolContent(text)), false, "{}"));
+      listener.onPartial(EnvironmentCapabilityResult.text(callId, text));
     }
   }
 

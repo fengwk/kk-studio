@@ -153,7 +153,7 @@ class JdkWebSocketTransportTest {
   /** 公共构造器与真实 JDK connect 装配：对不可达地址的握手必须异步失败而不是同步抛出。 */
   @Test
   void publicConstructorsAndRealConnectWiring() {
-    URI unreachable = URI.create("ws://127.0.0.1:1/");
+    URI unreachable = URI.create("ws://127.0.0.1:59999/");
     JdkWebSocketTransport defaultTransport = new JdkWebSocketTransport(unreachable);
     JdkWebSocketTransport boundedTransport = new JdkWebSocketTransport(unreachable, 1024);
 

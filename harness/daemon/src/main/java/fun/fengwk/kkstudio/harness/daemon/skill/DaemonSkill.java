@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.skill;
 
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 
 import java.util.Objects;
 

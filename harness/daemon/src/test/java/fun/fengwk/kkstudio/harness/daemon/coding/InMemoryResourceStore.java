@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -19,16 +19,16 @@ public final class InMemoryResourceStore implements ResourceStore {
   private final Map<String, byte[]> resources = new ConcurrentHashMap<>();
 
   @Override
-  public ResourceRef store(byte[] bytes, String mediaType) {
+  public DaemonResourceRef store(byte[] bytes, String mediaType) {
     Objects.requireNonNull(bytes, "bytes");
     String digest = sha256Hex(bytes);
     resources.put(digest, Arrays.copyOf(bytes, bytes.length));
-    return new ResourceRef(
+    return new DaemonResourceRef(
         "file:///export/" + digest, mediaType, null, (long) bytes.length, digest);
   }
 
   @Override
-  public byte[] read(ResourceRef ref) throws IOException {
+  public byte[] read(DaemonResourceRef ref) throws IOException {
     Objects.requireNonNull(ref, "ref");
     byte[] bytes = resources.get(ref.sha256());
     if (bytes == null) {

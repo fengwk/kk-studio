@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.skill;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 
 import java.time.Duration;
 import java.util.Objects;

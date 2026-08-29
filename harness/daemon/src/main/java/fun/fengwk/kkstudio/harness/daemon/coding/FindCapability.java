@@ -2,13 +2,11 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -79,14 +77,11 @@ public final class FindCapability extends AbstractCodingCapability {
       previewLines.add("[" + limit + " results limit reached. Refine the pattern or raise limit.]");
     }
     if (!limited) {
-      return new EnvironmentCapabilityResult(
+      return OutputLimiter.limit(
           callId,
-          OutputLimiter.limit(
-              String.join("\n", previewLines).getBytes(StandardCharsets.UTF_8),
-              "text/plain",
-              config),
-          false,
-          "{}");
+          String.join("\n", previewLines).getBytes(StandardCharsets.UTF_8),
+          "text/plain",
+          config);
     }
     String preview = String.join("\n", previewLines);
     byte[] previewBytes = preview.getBytes(StandardCharsets.UTF_8);
@@ -95,15 +90,10 @@ public final class FindCapability extends AbstractCodingCapability {
           OutputLimiter.preview(preview, config)
               + "\n\n[Output truncated to the configured preview limits.]";
     }
-    List<ToolContent> contents = new ArrayList<>();
-    contents.add(new TextToolContent(preview));
-    contents.add(
-        new ResourceToolContent(
-            config
-                .resourceStore()
-                .store(
-                    String.join("\n", completeLines).getBytes(StandardCharsets.UTF_8),
-                    "text/plain")));
-    return new EnvironmentCapabilityResult(callId, contents, false, "{}");
+    DaemonResourceRef ref =
+        config
+            .resourceStore()
+            .store(String.join("\n", completeLines).getBytes(StandardCharsets.UTF_8), "text/plain");
+    return EnvironmentCapabilityResult.resource(callId, preview, ref);
   }
 }

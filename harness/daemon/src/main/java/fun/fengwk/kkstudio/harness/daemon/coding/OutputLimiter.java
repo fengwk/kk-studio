@@ -1,34 +1,29 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
 
 /** 对 tool 输出应用共享的有界预览 + 完整 resource 策略。 */
 final class OutputLimiter {
 
   private OutputLimiter() {}
 
-  static List<ToolContent> limit(byte[] bytes, String mediaType, CodingToolsConfig config)
-      throws IOException {
+  static EnvironmentCapabilityResult limit(
+      String callId, byte[] bytes, String mediaType, CodingToolsConfig config) throws IOException {
     boolean binary = isBinary(bytes);
     String text =
         binary
             ? "[Binary output; complete bytes are attached as a resource.]"
             : new String(bytes, StandardCharsets.UTF_8);
     if (binary || exceeds(text, bytes.length, config)) {
-      List<ToolContent> contents = new ArrayList<>();
-      contents.add(
-          new TextToolContent(binary ? text : preview(text, config) + truncationHint(bytes, text)));
-      contents.add(new ResourceToolContent(config.resourceStore().store(bytes, mediaType)));
-      return contents;
+      DaemonResourceRef ref = config.resourceStore().store(bytes, mediaType);
+      return EnvironmentCapabilityResult.resource(
+          callId, binary ? text : preview(text, config) + truncationHint(bytes, text), ref);
     }
-    return List.of(new TextToolContent(text));
+    return EnvironmentCapabilityResult.text(callId, text);
   }
 
   static boolean isBinary(byte[] bytes) {

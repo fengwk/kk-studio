@@ -81,6 +81,7 @@ class BuiltinModuleArchitectureTest {
               "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
               "fun.fengwk.kk-studio:kk-studio-harness-prompt",
               "fun.fengwk.kk-studio:kk-studio-harness-tool",
+              "fun.fengwk.kk-studio:kk-studio-harness-environment",
               "com.fasterxml.jackson.core:jackson-databind")
           .contains(coordinate)) {
         violations.add(coordinate + (scope == null ? "" : " [" + scope + "]"));

@@ -2,13 +2,11 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -170,13 +168,11 @@ public final class GrepCapability extends AbstractCodingCapability {
     }
     byte[] completeBytes = String.join("\n", completeLines).getBytes(StandardCharsets.UTF_8);
     boolean truncated = lineLimited || resultLimited || outputLimited;
-    List<ToolContent> contents = new ArrayList<>();
-    contents.add(new TextToolContent(preview));
     if (truncated) {
-      contents.add(
-          new ResourceToolContent(config.resourceStore().store(completeBytes, "text/plain")));
+      DaemonResourceRef ref = config.resourceStore().store(completeBytes, "text/plain");
+      return EnvironmentCapabilityResult.resource(callId, preview, ref);
     }
-    return new EnvironmentCapabilityResult(callId, contents, false, "{}");
+    return EnvironmentCapabilityResult.text(callId, preview);
   }
 
   private static Pattern compilePattern(
