@@ -1,12 +1,9 @@
 package fun.fengwk.kkstudio.harness.contributor.api;
 
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -225,17 +222,11 @@ public final class HarnessCatalog {
       List<ContributorDescriptor> descriptors =
           orderedContributors.stream().map(ContributorRegistration::descriptor).toList();
       for (ToolContribution tool : tools) {
-        if (tool instanceof DeclarativeToolContribution declarative) {
-          for (StateDeclaration access : declarative.stateAccesses()) {
-            CustomTypeKey key =
-                new CustomTypeKey(declarative.id().contributorId(), access.customType());
-            if (!customEntryTypes.containsKey(key)) {
-              throw new IllegalArgumentException(
-                  "declarative tool "
-                      + tool.id()
-                      + " accesses unregistered custom entry type "
-                      + key);
-            }
+        for (StateDeclaration access : tool.requirements().stateAccesses()) {
+          CustomTypeKey key = new CustomTypeKey(tool.id().contributorId(), access.customType());
+          if (!customEntryTypes.containsKey(key)) {
+            throw new IllegalArgumentException(
+                "tool " + tool.id() + " accesses unregistered custom entry type " + key);
           }
         }
       }
@@ -259,7 +250,7 @@ public final class HarnessCatalog {
     }
 
     @Override
-    public void registerHostTool(
+    public void registerTool(
         String localName,
         AgentToolId agentToolId,
         Tool tool,
@@ -270,6 +261,8 @@ public final class HarnessCatalog {
       Objects.requireNonNull(visibility, "visibility");
       ContributionId id = requireNewContributionId(localName);
       ToolDescriptor descriptor = Objects.requireNonNull(tool.descriptor(), "tool.descriptor");
+      ToolRequirements requirements =
+          Objects.requireNonNull(tool.requirements(), "tool.requirements");
       String name = descriptor.name();
       ContributionId previousTool = toolOwners.putIfAbsent(name, id);
       if (previousTool != null) {
@@ -285,91 +278,8 @@ public final class HarnessCatalog {
                 + previousAgentTool
                 + ")");
       }
-      AgentToolDefinition definition =
-          new AgentToolDefinition(agentToolId, descriptor, visibility, AgentToolBackend.HOST);
-      tools.add(new HostToolContribution(id, definition, tool, priority));
-    }
-
-    @Override
-    public void registerDeclarativeTool(
-        String localName,
-        AgentToolId agentToolId,
-        DeclarativeTool tool,
-        ToolVisibility visibility,
-        int priority) {
-      Objects.requireNonNull(agentToolId, "agentToolId");
-      Objects.requireNonNull(tool, "tool");
-      Objects.requireNonNull(visibility, "visibility");
-      ContributionId id = requireNewContributionId(localName);
-      ToolDescriptor descriptor = Objects.requireNonNull(tool.descriptor(), "tool.descriptor");
-      List<StateDeclaration> stateAccesses =
-          List.copyOf(Objects.requireNonNull(tool.stateAccesses(), "tool.stateAccesses"));
-      Set<String> stateAccessTypes = new HashSet<>();
-      for (StateDeclaration access : stateAccesses) {
-        Objects.requireNonNull(access, "tool.stateAccesses[]");
-        if (!stateAccessTypes.add(access.customType())) {
-          throw new IllegalArgumentException(
-              "duplicate state access " + access.customType() + " on declarative tool " + id);
-        }
-      }
-      String name = descriptor.name();
-      ContributionId previousTool = toolOwners.putIfAbsent(name, id);
-      if (previousTool != null) {
-        throw new IllegalArgumentException(
-            "duplicate tool name " + name + " (already owned by " + previousTool + ")");
-      }
-      ContributionId previousAgentTool = agentToolOwners.putIfAbsent(agentToolId, id);
-      if (previousAgentTool != null) {
-        throw new IllegalArgumentException(
-            "duplicate AgentToolId "
-                + agentToolId
-                + " (already owned by "
-                + previousAgentTool
-                + ")");
-      }
-      AgentToolDefinition definition =
-          new AgentToolDefinition(
-              agentToolId, descriptor, visibility, AgentToolBackend.DECLARATIVE);
-      tools.add(new DeclarativeToolContribution(id, definition, tool, stateAccesses, priority));
-    }
-
-    @Override
-    public void registerEnvironmentCapabilityTool(
-        String localName,
-        AgentToolId agentToolId,
-        ToolDescriptor descriptor,
-        EnvironmentCapabilityDescriptor capability,
-        ToolVisibility visibility,
-        int priority) {
-      Objects.requireNonNull(agentToolId, "agentToolId");
-      Objects.requireNonNull(descriptor, "descriptor");
-      Objects.requireNonNull(capability, "capability");
-      Objects.requireNonNull(visibility, "visibility");
-      if (!descriptor.inputSchema().equals(capability.inputSchema())
-          || !descriptor.timeout().equals(capability.timeout())) {
-        throw new IllegalArgumentException(
-            "environment capability tool descriptor schema and timeout must match capability");
-      }
-      ContributionId id = requireNewContributionId(localName);
-      String name = descriptor.name();
-      ContributionId previousTool = toolOwners.putIfAbsent(name, id);
-      if (previousTool != null) {
-        throw new IllegalArgumentException(
-            "duplicate tool name " + name + " (already owned by " + previousTool + ")");
-      }
-      ContributionId previousAgentTool = agentToolOwners.putIfAbsent(agentToolId, id);
-      if (previousAgentTool != null) {
-        throw new IllegalArgumentException(
-            "duplicate AgentToolId "
-                + agentToolId
-                + " (already owned by "
-                + previousAgentTool
-                + ")");
-      }
-      AgentToolDefinition definition =
-          new AgentToolDefinition(
-              agentToolId, descriptor, visibility, AgentToolBackend.ENVIRONMENT_CAPABILITY);
-      tools.add(new EnvironmentCapabilityToolContribution(id, definition, capability, priority));
+      AgentToolDefinition definition = new AgentToolDefinition(agentToolId, descriptor, visibility);
+      tools.add(new ToolContribution(id, definition, tool, requirements, priority));
     }
 
     @Override

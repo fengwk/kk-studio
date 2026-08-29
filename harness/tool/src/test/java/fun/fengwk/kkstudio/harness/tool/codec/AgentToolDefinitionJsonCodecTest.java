@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -34,27 +33,13 @@ class AgentToolDefinitionJsonCodecTest {
   private final AgentToolDefinitionJsonCodec codec = new AgentToolDefinitionJsonCodec();
   private final ToolDescriptorJsonCodec descriptorCodec = new ToolDescriptorJsonCodec();
 
-  /** 三种 backend 与两种 visibility 都必须保留完整值，且编码字段顺序固定。 */
+  /** 两种 visibility 都必须保留完整值，且编码字段顺序固定为 id/descriptor/visibility。 */
   @Test
   void roundTripsEveryDefinitionCombination() {
     List<AgentToolDefinition> definitions =
         List.of(
-            definition("test.host-selectable", ToolVisibility.SELECTABLE, AgentToolBackend.HOST),
-            definition("test.host-internal", ToolVisibility.INTERNAL, AgentToolBackend.HOST),
-            definition(
-                "test.declarative-selectable",
-                ToolVisibility.SELECTABLE,
-                AgentToolBackend.DECLARATIVE),
-            definition(
-                "test.declarative-internal", ToolVisibility.INTERNAL, AgentToolBackend.DECLARATIVE),
-            definition(
-                "test.environment-selectable",
-                ToolVisibility.SELECTABLE,
-                AgentToolBackend.ENVIRONMENT_CAPABILITY),
-            definition(
-                "test.environment-internal",
-                ToolVisibility.INTERNAL,
-                AgentToolBackend.ENVIRONMENT_CAPABILITY));
+            definition("test.read-selectable", ToolVisibility.SELECTABLE),
+            definition("test.read-internal", ToolVisibility.INTERNAL));
 
     for (AgentToolDefinition original : definitions) {
       String encoded = codec.encode(original);
@@ -65,8 +50,6 @@ class AgentToolDefinitionJsonCodecTest {
               + descriptorCodec.encode(DESCRIPTOR)
               + ",\"visibility\":\""
               + original.visibility().name()
-              + "\",\"backend\":\""
-              + original.backend().name()
               + "\"}";
       assertEquals(expected, encoded);
       assertEquals(original, codec.decode(encoded));
@@ -77,8 +60,7 @@ class AgentToolDefinitionJsonCodecTest {
   /** 字符串边界必须拒绝 Java null、空文档、非对象、duplicate field 与 trailing token。 */
   @Test
   void rejectsMalformedDocuments() {
-    String valid =
-        codec.encode(definition("test.host", ToolVisibility.SELECTABLE, AgentToolBackend.HOST));
+    String valid = codec.encode(definition("test.host", ToolVisibility.SELECTABLE));
     String duplicate =
         valid.replace("\"id\":\"test.host\"", "\"id\":\"test.host\",\"id\":\"test.other\"");
 
@@ -93,18 +75,17 @@ class AgentToolDefinitionJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /** 顶层字段必须恰好是 id/descriptor/visibility/backend，所有缺失、unknown、null 和错误类型都失败。 */
+  /** 顶层字段必须恰好是 id/descriptor/visibility，所有缺失、unknown、null 和错误类型都失败。 */
   @Test
   void rejectsInvalidFieldsAndEnumValues() {
-    String valid =
-        codec.encode(definition("test.host", ToolVisibility.SELECTABLE, AgentToolBackend.HOST));
+    String valid = codec.encode(definition("test.host", ToolVisibility.SELECTABLE));
     String descriptor = descriptorCodec.encode(DESCRIPTOR);
 
+    // 未知字段
     assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                valid.replace(",\"backend\":\"HOST\"", ",\"extra\":true,\"backend\":\"HOST\"")));
+        IllegalArgumentException.class, () -> codec.decode(valid.replace("}", ",\"extra\":true}")));
+
+    // 缺少字段
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.replace("\"id\":\"test.host\",", "")));
@@ -113,11 +94,9 @@ class AgentToolDefinitionJsonCodecTest {
         () -> codec.decode(valid.replace("\"descriptor\":" + descriptor + ",", "")));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(valid.replace("\"visibility\":\"SELECTABLE\",", "")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(valid.replace(",\"backend\":\"HOST\"", "")));
+        () -> codec.decode(valid.replace(",\"visibility\":\"SELECTABLE\"", "")));
 
+    // null 字段
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.replace("\"id\":\"test.host\"", "\"id\":null")));
@@ -127,10 +106,8 @@ class AgentToolDefinitionJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.replace("\"visibility\":\"SELECTABLE\"", "\"visibility\":null")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(valid.replace("\"backend\":\"HOST\"", "\"backend\":null")));
 
+    // 类型错误
     assertThrows(
         IllegalArgumentException.class, () -> codec.decode(valid.replace("\"test.host\"", "1")));
     assertThrows(
@@ -138,24 +115,21 @@ class AgentToolDefinitionJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.replace("\"visibility\":\"SELECTABLE\"", "\"visibility\":1")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(valid.replace("\"backend\":\"HOST\"", "\"backend\":true")));
+
+    // 非法 enum 值
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 valid.replace("\"visibility\":\"SELECTABLE\"", "\"visibility\":\"OTHER\"")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(valid.replace("\"backend\":\"HOST\"", "\"backend\":\"LOCAL\"")));
+
+    // 非法 AgentToolId 命名
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.replace("\"test.host\"", "\"Test.Host\"")));
   }
 
-  private static AgentToolDefinition definition(
-      String id, ToolVisibility visibility, AgentToolBackend backend) {
-    return new AgentToolDefinition(new AgentToolId(id), DESCRIPTOR, visibility, backend);
+  private static AgentToolDefinition definition(String id, ToolVisibility visibility) {
+    return new AgentToolDefinition(new AgentToolId(id), DESCRIPTOR, visibility);
   }
 }

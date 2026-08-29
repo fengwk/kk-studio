@@ -6,8 +6,8 @@ import java.util.function.Consumer;
 /**
  * 受信任的 build-time 贡献者单元：声明自身 descriptor 并通过 {@link HarnessRegistrar} 贡献能力。
  *
- * <p>Contributor 是 classpath 构建期单元，不是运行时安装物；通过 {@link HarnessRegistrar} 注册 HOST、DECLARATIVE 或
- * ENVIRONMENT_CAPABILITY 工具、自定义状态类型与上下文投影器。贡献在 {@link HarnessCatalog} 冻结前完成并校验。
+ * <p>Contributor 是 classpath 构建期单元，不是运行时安装物；通过 {@link HarnessRegistrar} 注册工具、自定义状态类型与上下文投影器。贡献在
+ * {@link HarnessCatalog} 冻结前完成并校验。
  */
 public interface HarnessContributor {
 

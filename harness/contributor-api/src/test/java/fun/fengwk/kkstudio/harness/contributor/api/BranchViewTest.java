@@ -7,124 +7,134 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
+import java.util.Optional;
 
-/** {@link BranchView} 的不可变投影、精准结构化匹配、封装性与 head-recent 顺序测试。 */
+/** {@link BranchView} 纯接口契约与自定义状态快照、追加意图、上下文投影等值对象测试。 */
 class BranchViewTest {
 
-  private static final UUID SESSION_ID = UUID.randomUUID();
-  private static final ContributorId GOAL = new ContributorId("goal");
-  private static final ContributorId MEMORY = new ContributorId("memory");
-
-  /** 空 path 产生只有 ROOT 的合法 BranchView，查询匹配返回空。 */
+  /** 验证 BranchView 是纯接口且不暴露任何底层历史路径或实现细节。 */
   @Test
-  void handlesEmptyCustomHistory() {
-    BranchView view = new BranchView(rootOnlyPath());
-    assertTrue(view.customEntries(GOAL, "state").isEmpty());
-    assertTrue(view.latestCustomEntry(GOAL, "state").isEmpty());
-  }
-
-  /** 多条 CUSTOM entry 按 root-to-head 顺序返回，跨 contributor / customType 严格隔离。 */
-  @Test
-  void filtersByStructuredOwnerKeyInOrder() {
-    List<Entry> entries = new ArrayList<>();
-    UUID rootId = UUID.randomUUID();
-    entries.add(rootEntry(rootId));
-
-    UUID e1 = UUID.randomUUID();
-    CustomEntryPayload goal1 = new CustomEntryPayload("goal", "state", 1, "{\"version\":1}");
-    entries.add(new Entry(e1, SESSION_ID, rootId, goal1, Instant.now()));
-
-    UUID e2 = UUID.randomUUID();
-    CustomEntryPayload memory1 = new CustomEntryPayload("memory", "state", 1, "{\"item\":\"a\"}");
-    entries.add(new Entry(e2, SESSION_ID, e1, memory1, Instant.now()));
-
-    UUID e3 = UUID.randomUUID();
-    CustomEntryPayload goalOther =
-        new CustomEntryPayload("goal", "archive", 1, "{\"archived\":true}");
-    entries.add(new Entry(e3, SESSION_ID, e2, goalOther, Instant.now()));
-
-    UUID e4 = UUID.randomUUID();
-    CustomEntryPayload goal2 = new CustomEntryPayload("goal", "state", 2, "{\"version\":2}");
-    entries.add(new Entry(e4, SESSION_ID, e3, goal2, Instant.now()));
-
-    BranchView view = new BranchView(new EntryPath(entries));
-
-    assertEquals(List.of(goal1, goal2), view.customEntries(GOAL, "state"));
-    assertEquals(goal2, view.latestCustomEntry(GOAL, "state").orElseThrow());
-    assertEquals(List.of(memory1), view.customEntries(MEMORY, "state"));
-    assertEquals(memory1, view.latestCustomEntry(MEMORY, "state").orElseThrow());
-    assertEquals(List.of(goalOther), view.customEntries(GOAL, "archive"));
-    assertEquals(goalOther, view.latestCustomEntry(GOAL, "archive").orElseThrow());
-    assertTrue(view.customEntries(new ContributorId("unknown"), "state").isEmpty());
-    assertTrue(view.latestCustomEntry(new ContributorId("unknown"), "state").isEmpty());
-  }
-
-  /** 反射契约断言：BranchView 不是 record，不暴露 EntryPath、path() 或完整 transcript 访问。 */
-  @Test
-  void encapsulatesEntryPathWithoutPublicAccessors() {
+  void branchViewIsPureInterface() {
+    assertTrue(BranchView.class.isInterface());
     assertFalse(BranchView.class.isRecord());
-    for (Method method : BranchView.class.getMethods()) {
-      assertFalse(
-          EntryPath.class.isAssignableFrom(method.getReturnType()),
-          () -> "BranchView must not expose EntryPath: " + method.getName());
-      assertFalse(
-          "path".equals(method.getName()), () -> "BranchView must not expose path() accessor");
-      assertFalse(
-          "entries".equals(method.getName()),
-          () -> "BranchView must not expose entries() accessor");
-    }
-    for (Field field : BranchView.class.getFields()) {
-      assertFalse(
-          EntryPath.class.isAssignableFrom(field.getType()),
-          () -> "BranchView must not have public EntryPath field: " + field.getName());
-    }
   }
 
+  /** 验证 BranchView 纯接口可以通过实现类正确提供 customEntries 和 latestCustomEntry 查询。 */
   @Test
-  void supportsEqualsHashCodeAndToString() {
-    EntryPath path = rootOnlyPath();
-    BranchView first = new BranchView(path);
-    BranchView second = new BranchView(path);
+  void branchViewMockProvidesStateSnapshots() {
+    CustomStateSnapshot snapshot1 = new CustomStateSnapshot(1, "{\"item\":1}");
+    CustomStateSnapshot snapshot2 = new CustomStateSnapshot(2, "{\"item\":2}");
 
-    assertEquals(first, second);
-    assertEquals(first.hashCode(), second.hashCode());
-    assertTrue(first.toString().contains("BranchView"));
+    BranchView view =
+        new BranchView() {
+          @Override
+          public List<CustomStateSnapshot> customEntries(String customType) {
+            if ("my-state".equals(customType)) {
+              return List.of(snapshot1, snapshot2);
+            }
+            return List.of();
+          }
+
+          @Override
+          public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
+            if ("my-state".equals(customType)) {
+              return Optional.of(snapshot2);
+            }
+            return Optional.empty();
+          }
+        };
+
+    assertEquals(List.of(snapshot1, snapshot2), view.customEntries("my-state"));
+    assertEquals(Optional.of(snapshot2), view.latestCustomEntry("my-state"));
+    assertTrue(view.customEntries("other").isEmpty());
+    assertTrue(view.latestCustomEntry("other").isEmpty());
   }
 
-  /** 参数校验与不可变性。 */
+  /** 验证 CustomStateSnapshot 字段非空与版本号正数约束。 */
   @Test
-  void validatesParameters() {
-    assertThrows(NullPointerException.class, () -> new BranchView(null));
-    BranchView view = new BranchView(rootOnlyPath());
-    assertThrows(NullPointerException.class, () -> view.customEntries(null, "state"));
-    assertThrows(NullPointerException.class, () -> view.customEntries(GOAL, null));
-    assertThrows(IllegalArgumentException.class, () -> view.customEntries(GOAL, "Invalid"));
-    assertThrows(NullPointerException.class, () -> view.latestCustomEntry(null, "state"));
-    assertThrows(NullPointerException.class, () -> view.latestCustomEntry(GOAL, null));
-    assertThrows(IllegalArgumentException.class, () -> view.latestCustomEntry(GOAL, "Invalid"));
+  void customStateSnapshotValidatesFields() {
+    CustomStateSnapshot snapshot = new CustomStateSnapshot(1, "{\"k\":\"v\"}");
+    assertEquals(1, snapshot.schemaVersion());
+    assertEquals("{\"k\":\"v\"}", snapshot.dataJson());
+
+    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot(0, "{}"));
+    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot(-1, "{}"));
+    assertThrows(NullPointerException.class, () -> new CustomStateSnapshot(1, null));
+
+    CustomStateSnapshot same = new CustomStateSnapshot(1, "{\"k\":\"v\"}");
+    assertEquals(snapshot, same);
+    assertEquals(snapshot.hashCode(), same.hashCode());
   }
 
-  private static EntryPath rootOnlyPath() {
-    UUID rootId = UUID.randomUUID();
-    return new EntryPath(List.of(rootEntry(rootId)));
+  /** 验证 AppendCustomEntry 完整字段校验：canonical customType、正数版本号与非空 JSON。 */
+  @Test
+  void appendCustomEntryValidatesFields() {
+    AppendCustomEntry entry = new AppendCustomEntry("goal.state", 1, "{\"progress\":50}");
+    assertEquals("goal.state", entry.customType());
+    assertEquals(1, entry.schemaVersion());
+    assertEquals("{\"progress\":50}", entry.dataJson());
+
+    // customType canonical 校验
+    assertThrows(NullPointerException.class, () -> new AppendCustomEntry(null, 1, "{}"));
+    assertThrows(IllegalArgumentException.class, () -> new AppendCustomEntry("", 1, "{}"));
+    assertThrows(IllegalArgumentException.class, () -> new AppendCustomEntry("Goal", 1, "{}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> new AppendCustomEntry("goal_state", 1, "{}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> new AppendCustomEntry("goal..state", 1, "{}"));
+
+    // schemaVersion 校验
+    assertThrows(
+        IllegalArgumentException.class, () -> new AppendCustomEntry("goal.state", 0, "{}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> new AppendCustomEntry("goal.state", -1, "{}"));
+
+    // dataJson 校验
+    assertThrows(NullPointerException.class, () -> new AppendCustomEntry("goal.state", 1, null));
+
+    AppendCustomEntry same = new AppendCustomEntry("goal.state", 1, "{\"progress\":50}");
+    assertEquals(entry, same);
+    assertEquals(entry.hashCode(), same.hashCode());
   }
 
-  private static Entry rootEntry(UUID rootId) {
-    BranchSettings settings =
-        new BranchSettings(null, "test", new ModelSelection("openai", "gpt-4", "default"));
-    return new Entry(rootId, SESSION_ID, null, new RootPayload(settings, null), Instant.now());
+  /** 验证 ContextFragment 文本非空校验与值对象语义。 */
+  @Test
+  void contextFragmentValidatesText() {
+    ContextFragment fragment = new ContextFragment("Summary: done");
+    assertEquals("Summary: done", fragment.text());
+
+    assertThrows(NullPointerException.class, () -> new ContextFragment(null));
+
+    ContextFragment same = new ContextFragment("Summary: done");
+    assertEquals(fragment, same);
+    assertEquals(fragment.hashCode(), same.hashCode());
+  }
+
+  /** 验证 ContextProjector 接收 BranchView 并返回 List<ContextFragment> 契约。 */
+  @Test
+  void contextProjectorProjectsBranchViewToFragments() {
+    ContextProjector projector =
+        view -> {
+          Optional<CustomStateSnapshot> latest = view.latestCustomEntry("state");
+          return latest.map(s -> List.of(new ContextFragment(s.dataJson()))).orElse(List.of());
+        };
+
+    BranchView viewWithState =
+        new BranchView() {
+          @Override
+          public List<CustomStateSnapshot> customEntries(String customType) {
+            return List.of(new CustomStateSnapshot(1, "state-data"));
+          }
+
+          @Override
+          public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
+            return Optional.of(new CustomStateSnapshot(1, "state-data"));
+          }
+        };
+
+    List<ContextFragment> fragments = projector.project(viewWithState);
+    assertEquals(1, fragments.size());
+    assertEquals("state-data", fragments.get(0).text());
   }
 }
