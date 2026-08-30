@@ -10,6 +10,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
@@ -18,8 +20,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -53,7 +53,7 @@ class McpBridgeCapabilitiesTest {
     EnvironmentCapabilityResult result = new RecordingListener().execute(capability, request);
 
     assertFalse(result.error());
-    JsonNode root = MAPPER.readTree(((JsonToolContent) result.contents().get(0)).json());
+    JsonNode root = MAPPER.readTree(((JsonResultContent) result.contents().get(0)).json());
     assertEquals(2, root.path("servers").size());
     assertEquals("fs", root.path("servers").get(0).path("name").asText());
     assertEquals("READY", root.path("servers").get(0).path("status").asText());
@@ -80,7 +80,7 @@ class McpBridgeCapabilitiesTest {
     assertEquals(
         1,
         MAPPER
-            .readTree(((JsonToolContent) requested.contents().get(0)).json())
+            .readTree(((JsonResultContent) requested.contents().get(0)).json())
             .path("servers")
             .size());
 
@@ -88,7 +88,8 @@ class McpBridgeCapabilitiesTest {
         new RecordingListener()
             .execute(capability, request("mcp.list", "{\"server\":\"missing\"}"));
     assertTrue(unknown.error());
-    assertTrue(((TextToolContent) unknown.contents().get(0)).text().contains("unknown MCP server"));
+    assertTrue(
+        ((TextResultContent) unknown.contents().get(0)).text().contains("unknown MCP server"));
   }
 
   @Test
@@ -103,8 +104,8 @@ class McpBridgeCapabilitiesTest {
     assertTrue(result.error());
     assertEquals(
         "Error: MCP tool catalog rendering failed.",
-        ((TextToolContent) result.contents().get(0)).text());
-    assertFalse(((TextToolContent) result.contents().get(0)).text().contains("secret-value"));
+        ((TextResultContent) result.contents().get(0)).text());
+    assertFalse(((TextResultContent) result.contents().get(0)).text().contains("secret-value"));
     assertEquals(1, client.listCalls.get());
   }
 
@@ -122,7 +123,7 @@ class McpBridgeCapabilitiesTest {
                 request(
                     "mcp.call", "{\"server\":\"fs\",\"tool\":\"echo\",\"arguments\":{\"x\":1}}"));
     assertFalse(textResult.error());
-    assertEquals("plain text", ((TextToolContent) textResult.contents().get(0)).text());
+    assertEquals("plain text", ((TextResultContent) textResult.contents().get(0)).text());
 
     EnvironmentCapabilityResult jsonResult =
         new RecordingListener()
@@ -132,7 +133,7 @@ class McpBridgeCapabilitiesTest {
                     "mcp.call",
                     "{\"server\":\"fs\",\"tool\":\"sum\",\"arguments\":{\"a\":1,\"b\":2}}"));
     assertFalse(jsonResult.error());
-    assertEquals("{\"total\":3}", ((JsonToolContent) jsonResult.contents().get(0)).json());
+    assertEquals("{\"total\":3}", ((JsonResultContent) jsonResult.contents().get(0)).json());
     assertEquals("{\"a\":1,\"b\":2}", client.lastArguments);
   }
 
@@ -149,7 +150,7 @@ class McpBridgeCapabilitiesTest {
                 request("mcp.call", "{\"server\":\"fs\",\"tool\":\"boom\",\"arguments\":{}}"));
     assertTrue(result.error());
     assertTrue(
-        ((TextToolContent) result.contents().get(0)).text().contains("upstream failure text"));
+        ((TextResultContent) result.contents().get(0)).text().contains("upstream failure text"));
   }
 
   @Test
@@ -164,7 +165,7 @@ class McpBridgeCapabilitiesTest {
                 request("mcp.call", "{\"server\":\"missing\",\"tool\":\"t\",\"arguments\":{}}"));
     assertTrue(unknownServer.error());
     assertTrue(
-        ((TextToolContent) unknownServer.contents().get(0))
+        ((TextResultContent) unknownServer.contents().get(0))
             .text()
             .contains("MCP server is unknown or not ready"));
 
@@ -176,7 +177,7 @@ class McpBridgeCapabilitiesTest {
                 request("mcp.call", "{\"server\":\"fs\",\"tool\":\"nope\",\"arguments\":{}}"));
     assertTrue(unknownTool.error());
     assertTrue(
-        ((TextToolContent) unknownTool.contents().get(0)).text().contains("unknown MCP tool"));
+        ((TextResultContent) unknownTool.contents().get(0)).text().contains("unknown MCP tool"));
     assertEquals(0, client.calls.get());
 
     // READY 冻结列表中的工具仍正常调用。
@@ -214,7 +215,7 @@ class McpBridgeCapabilitiesTest {
     handle.cancel();
 
     assertFalse(result.error());
-    assertEquals("done", ((TextToolContent) result.contents().get(0)).text());
+    assertEquals("done", ((TextResultContent) result.contents().get(0)).text());
     assertEquals(1, listener.terminalCount.get());
   }
 
@@ -245,7 +246,8 @@ class McpBridgeCapabilitiesTest {
 
     EnvironmentCapabilityResult result = listener.awaitComplete();
     assertTrue(result.error());
-    assertTrue(((TextToolContent) result.contents().get(0)).text().contains("Operation cancelled"));
+    assertTrue(
+        ((TextResultContent) result.contents().get(0)).text().contains("Operation cancelled"));
     assertEquals(1, listener.terminalCount.get());
     assertThrows(
         IllegalArgumentException.class,
@@ -274,7 +276,7 @@ class McpBridgeCapabilitiesTest {
         new RecordingListener().execute(failing, request("mcp.list", "{}"));
 
     assertTrue(result.error());
-    assertTrue(((TextToolContent) result.contents().get(0)).text().contains("bridge failed"));
+    assertTrue(((TextResultContent) result.contents().get(0)).text().contains("bridge failed"));
   }
 
   private static McpServerRegistry registry(FakeClient readyClient) {

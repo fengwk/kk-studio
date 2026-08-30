@@ -11,13 +11,13 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -641,8 +641,8 @@ class ApplyPatchCapabilityTest {
         .reduce("", String::concat);
   }
 
-  private static String text(ToolContent content) {
-    return content instanceof TextToolContent text ? text.text() : "";
+  private static String text(ResultContent content) {
+    return content instanceof TextResultContent text ? text.text() : "";
   }
 
   private void assumeSymbolicLinksSupported() throws Exception {

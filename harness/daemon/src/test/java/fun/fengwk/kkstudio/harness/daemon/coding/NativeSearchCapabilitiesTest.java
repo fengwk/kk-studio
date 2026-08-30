@@ -9,14 +9,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -276,7 +276,7 @@ class NativeSearchCapabilitiesTest {
         invoke(grep, "{\"pattern\":\".+\",\"path\":\".\",\"include\":\"*.txt\",\"limit\":1}");
     assertTrue(text(grepResult).contains("line truncated to 500 chars"));
     assertTrue(text(grepResult).contains("1 results limit reached"));
-    ResourceToolContent grepResource = resource(grepResult);
+    ResourceResultContent grepResource = resource(grepResult);
     String completeGrep =
         new String(store.get(grepResource.resource().sha256()), StandardCharsets.UTF_8);
     assertTrue(completeGrep.startsWith("a.txt:1:" + longLine));
@@ -359,10 +359,10 @@ class NativeSearchCapabilitiesTest {
     return listener.result;
   }
 
-  private static ResourceToolContent resource(EnvironmentCapabilityResult result) {
-    return (ResourceToolContent)
+  private static ResourceResultContent resource(EnvironmentCapabilityResult result) {
+    return (ResourceResultContent)
         result.contents().stream()
-            .filter(ResourceToolContent.class::isInstance)
+            .filter(ResourceResultContent.class::isInstance)
             .findFirst()
             .orElseThrow();
   }
@@ -373,8 +373,8 @@ class NativeSearchCapabilitiesTest {
         .reduce("", String::concat);
   }
 
-  private static String text(ToolContent content) {
-    return content instanceof TextToolContent value ? value.text() : "";
+  private static String text(ResultContent content) {
+    return content instanceof TextResultContent value ? value.text() : "";
   }
 
   private static final class RecordingListener implements EnvironmentCapabilityExecutionListener {

@@ -19,7 +19,7 @@ import java.util.stream.Stream;
  * daemon 模块的轻量架构守卫。
  *
  * <p>Daemon 的 main 源码只允许依赖 JDK、Jackson、JGit（{@code org.eclipse.jgit.ignore.FastIgnoreRule}）、{@code
- * harness.environment} 以及本模块自身包。 严禁直接依赖 {@code
+ * harness.common}、{@code harness.environment} 以及本模块自身包。 严禁直接依赖 {@code
  * harness.tool}、runtime/platform/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK。LangChain4j
  * 只允许出现在技能与 MCP 适配器包中： {@code dev.langchain4j.skills.*} 仅限 {@code .../daemon/skill/}，{@code
  * dev.langchain4j.*} 其余仅限 {@code .../daemon/mcp/langchain/}。
@@ -207,6 +207,7 @@ class DaemonModuleArchitectureTest {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
         || imported.startsWith("com.fasterxml.jackson.")
+        || imported.startsWith("fun.fengwk.kkstudio.harness.common.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.environment.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.daemon.")
         || imported.equals(FastIgnoreRule.class.getName());

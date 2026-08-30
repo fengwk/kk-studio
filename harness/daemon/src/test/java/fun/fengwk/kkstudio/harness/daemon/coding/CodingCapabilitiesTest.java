@@ -11,6 +11,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.daemon.DaemonCapabilityRegistry;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
@@ -19,9 +22,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -237,7 +237,7 @@ class CodingCapabilitiesTest {
 
     assertTrue(text(window).contains("Showing lines 1-1 of 3"));
     assertTrue(directory.contents().stream().anyMatch(content -> text(content).contains("a.txt")));
-    assertTrue(binary.contents().stream().anyMatch(ResourceToolContent.class::isInstance));
+    assertTrue(binary.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
   }
 
   @Test
@@ -294,7 +294,7 @@ class CodingCapabilitiesTest {
             Duration.ofSeconds(2));
     assertTrue(ansi.await());
     assertTrue(text(ansi.result).contains("passed"));
-    assertFalse(ansi.result.contents().stream().anyMatch(ResourceToolContent.class::isInstance));
+    assertFalse(ansi.result.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
 
     RecordingListener timeout =
         invokeAsync(bash, "{\"command\":\"sleep 2\"}", Duration.ofMillis(50));
@@ -462,8 +462,8 @@ class CodingCapabilitiesTest {
     return result.contents().stream().map(CodingCapabilitiesTest::text).reduce("", String::concat);
   }
 
-  private static String text(ToolContent content) {
-    return content instanceof TextToolContent text ? text.text() : "";
+  private static String text(ResultContent content) {
+    return content instanceof TextResultContent text ? text.text() : "";
   }
 
   private static final class RecordingListener implements EnvironmentCapabilityExecutionListener {
