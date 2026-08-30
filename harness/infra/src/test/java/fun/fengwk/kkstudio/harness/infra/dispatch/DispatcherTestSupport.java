@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.infra.dispatch;
 
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -44,7 +45,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -695,7 +695,7 @@ final class DispatcherTestSupport {
                     "1.0",
                     "description of bash",
                     "bash",
-                    new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+                    new InputSchema("arguments", Map.of(), Set.of(), false),
                     ToolSideEffect.READ_ONLY,
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),

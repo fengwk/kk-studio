@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.resource;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 
 /**
  * 宿主资源存储能力：内容寻址资源的写入与读取。

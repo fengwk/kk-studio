@@ -1,5 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -16,10 +20,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.ArrayList;
@@ -33,7 +33,7 @@ import java.util.UUID;
  * <p>只做类型化映射，不做任何持久化决策：{@link ProviderResponse} 投影为 ASSISTANT {@link MessagePayload}（内容顺序为
  * thinking、text、tool calls，全部为空时回退为空 text，metadata 直接快照 usage/cost）；terminal Model 错误投影为 {@link
  * AssistantErrorPayload}（code 使用 {@code error.kind().name()}）；terminal {@link ToolInvocation} 投影为
- * TOOL {@link MessagePayload}（SUCCEEDED 把 Text/JSON/Resource {@link ToolContent}（含 Resource
+ * TOOL {@link MessagePayload}（SUCCEEDED 把 Text/JSON/Resource {@link ResultContent}（含 Resource
  * preview）映射为对应 {@link AgentMessageContent} 并回退空 text，error 标志原样保留，Binary / 未知 content 显式 {@link
  * IllegalArgumentException} 失败而不是静默丢失；非成功使用 error message + {@link ToolInvocationErrorJsonCodec}
  * 详情且 error=true，metadata.status 精确映射 invocation terminal status）；history normalization 的 synthetic
@@ -154,7 +154,7 @@ public final class HistoryPayloadMapper {
    * 用调用方物化好的 contents 构建 SUCCEEDED ToolResult payload（contents 为空时回退为空文本）。
    *
    * <p>物化路径（注入 {@link ToolResultHistoryMaterializer}）由物化端口完成 Resource 内容的 blob 外部化；本方法只做
-   * 语义消息组装，不再接受 ResourceToolContent。
+   * 语义消息组装，不再接受 ResourceResultContent。
    */
   public MessagePayload toolResultPayload(
       ToolInvocation invocation, List<AgentMessageContent> contents) {
@@ -193,18 +193,18 @@ public final class HistoryPayloadMapper {
 
   private ToolResultMessageContent succeededContent(ToolInvocation invocation, ToolResult result) {
     List<AgentMessageContent> contents = new ArrayList<>();
-    for (ToolContent toolContent : result.contents()) {
-      if (toolContent instanceof TextToolContent text) {
+    for (ResultContent toolContent : result.contents()) {
+      if (toolContent instanceof TextResultContent text) {
         contents.add(new TextMessageContent(text.text()));
-      } else if (toolContent instanceof JsonToolContent json) {
+      } else if (toolContent instanceof JsonResultContent json) {
         contents.add(new JsonMessageContent(json.json()));
-      } else if (toolContent instanceof ResourceToolContent) {
+      } else if (toolContent instanceof ResourceResultContent) {
         // Resource 引用无法在没有 ToolResultHistoryMaterializer 的情况下表示为 durable blob 内容：
-        // fail-closed（与 BinaryToolContent 一致），绝不让瞬时 URI / ResourceStore 引用进入持久化 message。
+        // fail-closed（与 BinaryResultContent 一致），绝不让瞬时 URI / ResourceStore 引用进入持久化 message。
         throw new IllegalArgumentException(
             "resource tool result content requires a ToolResultHistoryMaterializer");
       } else {
-        // BinaryToolContent 不能进入 Session 语义消息；未知 content 也不得静默丢失字节——显式失败让调用方事务回滚。
+        // BinaryResultContent 不能进入 Session 语义消息；未知 content 也不得静默丢失字节——显式失败让调用方事务回滚。
         throw new IllegalArgumentException(
             "unsupported tool result content type " + toolContent.getClass().getSimpleName());
       }

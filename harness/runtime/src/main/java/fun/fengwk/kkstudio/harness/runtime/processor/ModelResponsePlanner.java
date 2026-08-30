@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import fun.fengwk.kkstudio.harness.common.schema.InputValidator;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -7,7 +8,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsValidator;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -108,7 +108,7 @@ public final class ModelResponsePlanner {
   /** 参数不符合 binding schema 时返回 INVALID_TOOL_ARGUMENTS 错误；合法返回 null。 */
   private static ToolInvocationError validateArguments(ProviderToolCall call, ToolBinding binding) {
     try {
-      ToolArgumentsValidator.validate(call.argumentsJson(), binding.descriptor().inputSchema());
+      InputValidator.validate(call.argumentsJson(), binding.descriptor().inputSchema());
       return null;
     } catch (IllegalArgumentException failure) {
       // ToolInvocationError 拒绝 blank message：schema 校验失败 message 可能为空，回退为稳定描述。

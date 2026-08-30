@@ -9,13 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.lang.reflect.Proxy;
@@ -85,7 +85,7 @@ class ToolProcessorAdmissionTest {
         listener -> {
           listener.onPartial(ToolProcessorTestSupport.partialResult("call-1"));
           listener.onSucceeded(
-              ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));
+              ToolProcessorTestSupport.successResult("call-1", new TextResultContent("answer")));
           statusAtCallback.set(
               ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
         };
@@ -504,13 +504,13 @@ class ToolProcessorAdmissionTest {
 
     listener.onPartial(ToolProcessorTestSupport.partialResult("call-1"));
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("answer")));
 
     assertEquals(1, fixture.sink.events.size());
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
     assertEquals(1, tool.attempt());
-    assertEquals("answer", ((TextToolContent) tool.result().contents().get(0)).text());
+    assertEquals("answer", ((TextResultContent) tool.result().contents().get(0)).text());
     assertEquals(
         3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.session;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 
 import java.util.Objects;
 import java.util.UUID;

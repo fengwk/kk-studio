@@ -4,8 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.harness.prompt.PromptTemplate;
-import fun.fengwk.kkstudio.harness.prompt.PromptTemplateLoader;
+import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplate;
+import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplateLoader;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;

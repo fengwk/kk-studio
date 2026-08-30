@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
@@ -26,7 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.List;
@@ -89,7 +89,7 @@ class ToolOutcomeAppenderMaterializerTest {
     succeedToolWith(
         store,
         chain.toolInvocationIds().getFirst(),
-        new ToolResult("call-1", List.of(new TextToolContent("raw")), false, "{}"));
+        new ToolResult("call-1", List.of(new TextResultContent("raw")), false, "{}"));
     ToolInvocation invocation = tool(store, chain.toolInvocationIds().getFirst());
     var before = path(store, chain.turn().threadId());
 
@@ -147,7 +147,7 @@ class ToolOutcomeAppenderMaterializerTest {
     succeedToolWith(
         store,
         toolId,
-        new ToolResult("call-1", List.of(new TextToolContent("ok")), false, "{}"),
+        new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{}"),
         new ToolEffectBatch(
             List.of(
                 new CustomEntryPayload("goal", "type-a", 1, "{\"a\":1}"),
@@ -186,7 +186,7 @@ class ToolOutcomeAppenderMaterializerTest {
     succeedToolWith(
         store,
         chain.toolInvocationIds().getFirst(),
-        new ToolResult("call-1", List.of(new TextToolContent("raw")), false, "{}"));
+        new ToolResult("call-1", List.of(new TextResultContent("raw")), false, "{}"));
     ToolInvocation invocation = tool(store, chain.toolInvocationIds().getFirst());
     var before = path(store, chain.turn().threadId());
 

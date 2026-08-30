@@ -7,8 +7,8 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
@@ -129,7 +129,7 @@ class RealtimeEventJsonCodecTest {
             UUID.fromString("00000000-0000-0000-0000-000000000007"),
             UUID.fromString("00000000-0000-0000-0000-000000000063"),
             2,
-            new ToolResult("call-1", List.of(new TextToolContent("partial")), false, "{}"),
+            new ToolResult("call-1", List.of(new TextResultContent("partial")), false, "{}"),
             now);
     String canonical =
         "{\"threadId\":\"00000000-0000-0000-0000-000000000007\","

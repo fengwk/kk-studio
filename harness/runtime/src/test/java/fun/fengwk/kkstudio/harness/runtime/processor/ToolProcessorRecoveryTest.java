@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -19,7 +20,6 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.lang.reflect.Proxy;
@@ -165,7 +165,7 @@ class ToolProcessorRecoveryTest {
         fixture.toolInvocationId,
         tool ->
             tool.succeed(
-                ToolProcessorTestSupport.successResult("call-1", new TextToolContent("ok")),
+                ToolProcessorTestSupport.successResult("call-1", new TextResultContent("ok")),
                 ToolProcessorTestSupport.NOW));
 
     assertEquals(
@@ -220,7 +220,7 @@ class ToolProcessorRecoveryTest {
         fixture.toolInvocationId,
         tool ->
             tool.succeed(
-                ToolProcessorTestSupport.successResult("call-1", new TextToolContent("ok")),
+                ToolProcessorTestSupport.successResult("call-1", new TextResultContent("ok")),
                 ToolProcessorTestSupport.NOW));
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
@@ -727,7 +727,7 @@ class ToolProcessorRecoveryTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     listener.onPartial(ToolProcessorTestSupport.partialResult("call-1"));
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("late")));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("late")));
     assertEquals(
         ToolInvocationStatus.RUNNING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
