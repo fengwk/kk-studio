@@ -284,7 +284,6 @@ ensure_stack() {
 
   if ! curl -fsS "$BACKEND_URL/api/ai/catalog/agents?pageNumber=1&pageSize=1" >/dev/null 2>&1; then
     start_backend "$java_home"
-    sync_e2e_provider_credentials
   else
     step "Reusing backend $BACKEND_URL"
     # Reused processes must expose the current structured model contract.
@@ -294,7 +293,6 @@ raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/nu
       step "Backend contract stale (missing model.config); rebuilding and restarting"
       package_backend "$java_home"
       start_backend "$java_home"
-      sync_e2e_provider_credentials
     fi
   fi
 

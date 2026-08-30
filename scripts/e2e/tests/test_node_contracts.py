@@ -9,12 +9,23 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 
 class TestNodeContracts(unittest.TestCase):
-    """E2E polling helpers must retain their deterministic state-machine guards."""
+    """Node-native E2E helpers must retain their safety and state-machine guards."""
 
-    def test_quiescence_contract(self):
-        """A transient quiescent snapshot must not be accepted as a stable CAS cursor."""
+    def test_node_contracts(self):
+        """Execute every colocated node:test contract through Python discovery."""
+        test_files = sorted(
+            (REPOSITORY_ROOT / "scripts/e2e/tests").glob("*.test.mjs")
+        )
+        self.assertTrue(test_files)
         result = subprocess.run(
-            ["node", "--test", "scripts/e2e/tests/quiescence.test.mjs"],
+            [
+                "node",
+                "--test",
+                *(
+                    str(test_file.relative_to(REPOSITORY_ROOT))
+                    for test_file in test_files
+                ),
+            ],
             cwd=REPOSITORY_ROOT,
             text=True,
             capture_output=True,

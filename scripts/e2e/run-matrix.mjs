@@ -29,7 +29,8 @@ import {
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
-import { httpJson } from './lib/http.mjs'
+import { httpJson, pageResults } from './lib/http.mjs'
+import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { ALL_CASES } from './lib/registry.mjs'
 import { createDurationTimer } from './lib/time.mjs'
 
@@ -364,6 +365,17 @@ function caseEnabled(c, args) {
   return true
 }
 
+async function verifyProviderExecutionBoundary(args) {
+  if (args.real) return
+  const { json } = await httpJson(
+    args.baseUrl,
+    'GET',
+    '/api/ai/catalog/providers?pageNumber=1&pageSize=50',
+  )
+  assertProviderExecutionBoundary({ real: false, providers: pageResults(json) })
+  console.log('Provider boundary: free mode confirmed minimax is unconfigured')
+}
+
 async function main(argv) {
   const args = parseArgs(argv)
   if (args.help) {
@@ -392,6 +404,8 @@ async function main(argv) {
     console.error('No cases selected')
     return 2
   }
+
+  await verifyProviderExecutionBoundary(args)
 
   const runElapsed = createDurationTimer()
   const startedAt = new Date().toISOString()

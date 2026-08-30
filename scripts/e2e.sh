@@ -64,7 +64,8 @@ Env:
   BACKEND_PORT=18081
   FRONTEND_PORT=5173
   TEST_MINIMAX_API_KEY / TEST_MINIMAX_BASE_URL
-  # the complete MiniMax pair is synchronized to seed provider name=minimax after backend readiness
+  # consumed only with --real; free modes never synchronize host credentials
+  # --real synchronizes the complete pair to seed provider name=minimax after backend readiness
   # the base URL is normalized to end with /v1
   JAVA_HOME_21=...
   E2E_MAVEN_OFFLINE=true  # opt into Maven -o; default is online
@@ -116,7 +117,7 @@ fi
 ensure_stack "$REBUILD" "$WITH_TOOLS"
 
 # 2) synchronize the MiniMax pair; --real uses the seeded MiniMax model
-if [ "$REAL" = "true" ] || [ "$REBUILD" = "true" ]; then
+if [ "$REAL" = "true" ]; then
   sync_e2e_provider_credentials
 fi
 if [ "$REAL" = "true" ]; then

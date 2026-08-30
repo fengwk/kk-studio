@@ -141,6 +141,29 @@ class TestBuildScripts(unittest.TestCase):
             script,
         )
 
+    def test_e2e_provider_credentials_are_synchronized_only_for_real_mode(self):
+        """Free stack setup must never consume host MiniMax credentials."""
+        script = (REPOSITORY_ROOT / "scripts/e2e.sh").read_text()
+        ensure_stack = function_body(
+            REPOSITORY_ROOT / "scripts/e2e/lib.sh",
+            "ensure_stack",
+        )
+        sync_calls = re.findall(
+            r"(?m)^\s*sync_e2e_provider_credentials\s*$",
+            script,
+        )
+
+        self.assertEqual(1, len(sync_calls))
+        self.assertRegex(
+            script,
+            (
+                r'if \[ "\$REAL" = "true" \]; then\n'
+                r"  sync_e2e_provider_credentials\n"
+                r"fi"
+            ),
+        )
+        self.assertNotIn("sync_e2e_provider_credentials", ensure_stack)
+
     def test_container_canvas_smoke_requires_current_dto_without_thread_id(self):
         """The Docker smoke must enforce the current Canvas DTO, which omits threadId."""
         script = (REPOSITORY_ROOT / "deploy/test/run.sh").read_text()
