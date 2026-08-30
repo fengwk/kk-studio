@@ -342,7 +342,7 @@ Daemon environment root 默认是其下的 `environment`，可由
 | L2 | 3 | `--real` | 真实文本 turn、真实 task delegation、stop partial/replay/continue |
 | L3 | 1 | `--real --with-branch` | 同 Session `ENTRY` 分支 Thread |
 | L4 | 3 | `--with-tools`；真实 Tool turn 还需 `--real --with-tools --with-canvas-storage` | Environment READY 与 14 个原子 capability 投影、directories、approval 后 Resource 外部化 |
-| UI/L5 | 注册 39，默认 37 | `--ui`；额外 `--with-tools`、`--real` | Playwright 页面、Composer、debug、settings 和 runtime UI |
+| UI/L5 | 注册 39，默认 36 | `--ui`；额外 `--with-tools`、`--real` | Playwright 页面、Composer、debug、settings 和 runtime UI |
 
 L1 的默认关闭 categories 是 storage upload、attachment 和 fake Function；
 它们分别需要 `--with-canvas-storage` 或 `--with-canvas-function`。
@@ -363,13 +363,14 @@ L3 是同一 Session 的 `ENTRY` 分支；L4 是 Environment READY 与原子 cap
 精确的 API case ID、标题和 `requires` 只由
 `node scripts/e2e/run-matrix.mjs --list` 与 `--docs` 提供。
 
-### 8.4 UI matrix：注册 39，默认 37
+### 8.4 UI matrix：注册 39，默认 36
 
 UI 由 `scripts/e2e/ui-smoke.mjs`、`scripts/e2e/ui/composer-matrix.mjs` 和
 `scripts/e2e/ui/workspace-contracts.mjs` 注册；它不是 75 个 API case 的一部分。
 UI categories 是页面/runtime、Composer/debug 和 Workspace contract；`--ui` 是
-总 gate，`--with-tools` 与 `--real` 分别增加 Environment 和真实 Provider
-覆盖。精确 UI inventory 以这些脚本中的注册表为准。
+总 gate，默认执行 36 项无成本/无 daemon 用例；`--with-tools` 增加 2 项
+（Environment Workspace 创建与 ToolCard approval/layout），`--real` 增加 1 项真实
+Provider 覆盖。精确 UI inventory 以这些脚本中的注册表为准。
 
 UI 单独入口的当前帮助格式：
 
@@ -682,7 +683,7 @@ L1  free API contract matrix (default 64 / registered 68)
 L2  real Provider text/task/stop (explicit --real)
 L3  real same-session branch (explicit --with-branch)
 L4  Environment/Tool/approval (explicit --with-tools; real tool adds S3)
-L5  Playwright UI (default 37 / registered 39; --ui + gates)
+L5  Playwright UI (default 36 / registered 39; --ui + gates)
 R   reliability regression + optional eight-case Agent matrix
 P   offline performance three-scenario threshold
 S   SBOM/audit/image supply-chain gate
