@@ -18,12 +18,12 @@ import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.platform.storage.S3PostgresSpringTestSupport;
@@ -109,7 +109,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
                     SESSION,
                     new ToolResult(
                         "call-1",
-                        List.of(new ResourceToolContent(ref, "inline preview")),
+                        List.of(new ResourceResultContent(ref, "inline preview")),
                         false,
                         "{}")));
 
@@ -167,7 +167,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
                     materializer.materialize(
                         SESSION,
                         new ToolResult(
-                            "call-1", List.of(new ResourceToolContent(fileRef)), false, "{}")))
+                            "call-1", List.of(new ResourceResultContent(fileRef)), false, "{}")))
             .stream()
             .map(ResourceMessageContent.class::cast)
             .findFirst()
@@ -180,7 +180,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
                     materializer.materialize(
                         SESSION,
                         new ToolResult(
-                            "call-2", List.of(new ResourceToolContent(httpRef)), false, "{}")))
+                            "call-2", List.of(new ResourceResultContent(httpRef)), false, "{}")))
             .stream()
             .map(ResourceMessageContent.class::cast)
             .findFirst()
@@ -210,7 +210,8 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
             status ->
                 materializer.materialize(
                     SESSION,
-                    new ToolResult("call-1", List.of(new ResourceToolContent(ref)), false, "{}")));
+                    new ToolResult(
+                        "call-1", List.of(new ResourceResultContent(ref)), false, "{}")));
     ResourceMessageContent resource =
         assertInstanceOf(ResourceMessageContent.class, contents.get(0));
     assertArrayEquals(
@@ -234,7 +235,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
                             SESSION,
                             new ToolResult(
                                 "call-2",
-                                List.of(new ResourceToolContent(foreign)),
+                                List.of(new ResourceResultContent(foreign)),
                                 false,
                                 "{}"))));
     assertTrue(error.getMessage().contains("bucket"), "actual: " + error.getMessage());
@@ -257,9 +258,9 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
                     new ToolResult(
                         "call-1",
                         List.of(
-                            new TextToolContent("first"),
-                            new ResourceToolContent(ref),
-                            new TextToolContent("last")),
+                            new TextResultContent("first"),
+                            new ResourceResultContent(ref),
+                            new TextResultContent("last")),
                         false,
                         "{}")));
 
@@ -287,7 +288,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
         () ->
             materializer.materialize(
                 SESSION,
-                new ToolResult("call-1", List.of(new ResourceToolContent(ref)), false, "{}")));
+                new ToolResult("call-1", List.of(new ResourceResultContent(ref)), false, "{}")));
   }
 
   private static String sha256Hex(byte[] bytes) {

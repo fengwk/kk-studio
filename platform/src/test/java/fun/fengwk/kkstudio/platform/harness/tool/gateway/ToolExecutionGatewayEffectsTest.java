@@ -8,6 +8,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
@@ -36,15 +40,11 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 
 import java.time.Clock;
@@ -70,7 +70,7 @@ class ToolExecutionGatewayEffectsTest {
           "1",
           "effects tool",
           "effects_tool",
-          new ToolParamsSchema("args", Map.of(), Set.of(), false),
+          new InputSchema("args", Map.of(), Set.of(), false),
           ToolSideEffect.IDEMPOTENT,
           Duration.ZERO);
   private static final AgentToolDefinition DEFINITION =
@@ -118,7 +118,7 @@ class ToolExecutionGatewayEffectsTest {
   void validAppendIsValidatedThenDeliveredWithInjectedContributorOwner() {
     AppendCustomEntry entry = new AppendCustomEntry("state", 1, "{\"objective\":\"ship\"}");
     Tool tool =
-        statefulTool(new ToolOutcome(result(List.of(new TextToolContent("ok"))), List.of(entry)));
+        statefulTool(new ToolOutcome(result(List.of(new TextResultContent("ok"))), List.of(entry)));
     Fixture fixture = fixture(tool);
 
     ToolGateway.Started started =
@@ -245,7 +245,8 @@ class ToolExecutionGatewayEffectsTest {
                 new ToolOutcome(
                     result(
                         List.of(
-                            new BinaryToolContent("application/octet-stream", new byte[] {1, 2}))),
+                            new BinaryResultContent(
+                                "application/octet-stream", new byte[] {1, 2}))),
                     List.of(unregisteredEntry)));
             return CompletedToolExecutionHandle.INSTANCE;
           }
@@ -334,7 +335,8 @@ class ToolExecutionGatewayEffectsTest {
                 new ToolOutcome(
                     result(
                         List.of(
-                            new BinaryToolContent("application/octet-stream", new byte[] {1, 2}))),
+                            new BinaryResultContent(
+                                "application/octet-stream", new byte[] {1, 2}))),
                     List.of(entry)));
             return CompletedToolExecutionHandle.INSTANCE;
           }
@@ -422,7 +424,7 @@ class ToolExecutionGatewayEffectsTest {
     };
   }
 
-  private static ToolResult result(List<ToolContent> contents) {
+  private static ToolResult result(List<ResultContent> contents) {
     return new ToolResult("call-1", contents, false, "{}");
   }
 

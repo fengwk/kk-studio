@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.resource;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.util.Objects;
 

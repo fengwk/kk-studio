@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentWorkspacePath;
@@ -36,8 +38,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryEntry;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryListing;
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.platform.environment.query.EnvironmentQueryCoordinator;
 import fun.fengwk.kkstudio.platform.environment.registry.BindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
@@ -317,7 +317,7 @@ public class EnvironmentDaemonGateway
                     String errorMsg = extractErrorMessage(result, "unknown skill: " + skill);
                     future.complete(new EnvironmentSkillLoadResult.Failed(skill, errorMsg));
                   } else if (result.contents().size() == 1
-                      && result.contents().get(0) instanceof TextToolContent text) {
+                      && result.contents().get(0) instanceof TextResultContent text) {
                     future.complete(new EnvironmentSkillLoadResult.Loaded(skill, text.text()));
                   } else {
                     future.complete(
@@ -462,7 +462,7 @@ public class EnvironmentDaemonGateway
                     EnvironmentDirectoryFailureCode code = classifyDirectoryError(errorMsg);
                     future.complete(new EnvironmentDirectoryListResult.Failed(code, errorMsg));
                   } else if (result.contents().size() == 1
-                      && result.contents().get(0) instanceof JsonToolContent json) {
+                      && result.contents().get(0) instanceof JsonResultContent json) {
                     try {
                       EnvironmentDirectoryListing listing =
                           objectMapper.readValue(json.json(), EnvironmentDirectoryListing.class);
@@ -478,7 +478,7 @@ public class EnvironmentDaemonGateway
                     future.complete(
                         new EnvironmentDirectoryListResult.Failed(
                             EnvironmentDirectoryFailureCode.IO_ERROR,
-                            "Expected JsonToolContent but got unexpected content"));
+                            "Expected JsonResultContent but got unexpected content"));
                   }
                 }
 
@@ -569,7 +569,8 @@ public class EnvironmentDaemonGateway
   }
 
   private static String extractErrorMessage(EnvironmentCapabilityResult result, String fallback) {
-    if (!result.contents().isEmpty() && result.contents().get(0) instanceof TextToolContent text) {
+    if (!result.contents().isEmpty()
+        && result.contents().get(0) instanceof TextResultContent text) {
       String msg = text.text();
       if (msg.startsWith("Error: ")) {
         return msg.substring("Error: ".length());

@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
@@ -48,8 +50,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryEntry;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryListing;
-import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
@@ -157,7 +157,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     assertTrue(messageTypes(connection.envelopes()).contains(DaemonMessageType.CANCEL));
 
     fixture.gateway.receive(connection.connectionId(), completed(2, resultPayload("done")));
-    assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
+    assertEquals("done", ((TextResultContent) listener.completed.contents().get(0)).text());
     assertEquals(INVOCATION_ID.toString(), listener.completed.callId());
   }
 
@@ -169,13 +169,13 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
 
     fixture.gateway.receive(connection.connectionId(), partial(2, resultPayload("chunk")));
-    assertEquals("chunk", ((TextToolContent) listener.partials.get(0).contents().get(0)).text());
+    assertEquals("chunk", ((TextResultContent) listener.partials.get(0).contents().get(0)).text());
 
     String resourcePayload =
         resultCodec.encodeCompleted(
             new EnvironmentCapabilityResult(
                 INVOCATION_ID.toString(),
-                List.of(new BinaryToolContent("text/plain", new byte[] {1, 2})),
+                List.of(new BinaryResultContent("text/plain", new byte[] {1, 2})),
                 false,
                 "{}"),
             inlineResourceStore(new byte[] {1, 2}));
@@ -196,7 +196,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
 
     assertEquals(List.of("partial1", "partial2", "complete"), listener.events);
     assertEquals(2, listener.partials.size());
-    assertEquals("complete", ((TextToolContent) listener.completed.contents().get(0)).text());
+    assertEquals("complete", ((TextResultContent) listener.completed.contents().get(0)).text());
     assertNull(listener.error);
 
     // terminal 后的迟到 PARTIAL 没有 active invocation：按协议 contract 关闭连接，不得复活回调。
@@ -204,7 +204,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
 
     assertEquals(List.of("partial1", "partial2", "complete"), listener.events);
     assertEquals(2, listener.partials.size());
-    assertEquals("complete", ((TextToolContent) listener.completed.contents().get(0)).text());
+    assertEquals("complete", ((TextResultContent) listener.completed.contents().get(0)).text());
     assertTrue(connection.closed);
     assertEquals(1, connection.closeAfterFlushCount);
     assertEquals(
@@ -223,12 +223,12 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         resultCodec.encodeCompleted(
             new EnvironmentCapabilityResult(
                 INVOCATION_ID.toString(),
-                List.of(new BinaryToolContent("text/plain", new byte[] {7, 8})),
+                List.of(new BinaryResultContent("text/plain", new byte[] {7, 8})),
                 false,
                 "{}"),
             inlineResourceStore(new byte[] {7, 8}));
     fixture.gateway.receive(connection.connectionId(), completed(2, payload));
-    BinaryToolContent binary = (BinaryToolContent) listener.completed.contents().get(0);
+    BinaryResultContent binary = (BinaryResultContent) listener.completed.contents().get(0);
     assertEquals("text/plain", binary.mediaType());
     assertEquals(2, binary.content().length);
     assertEquals(1, listener.completed.contents().size());
@@ -314,7 +314,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     fixture.gateway.receive(connection.connectionId(), completed(4, resultPayload("done")));
 
     assertFalse(connection.closed);
-    assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
+    assertEquals("done", ((TextResultContent) listener.completed.contents().get(0)).text());
   }
 
   @Test
@@ -477,7 +477,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         messageTypes(connection.envelopes()));
 
     fixture.gateway.receive(connection.connectionId(), completed(2, resultPayload("done")));
-    assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
+    assertEquals("done", ((TextResultContent) listener.completed.contents().get(0)).text());
   }
 
   @Test
@@ -545,7 +545,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         };
     fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
     fixture.gateway.receive(connection.connectionId(), completed(2, resultPayload("done")));
-    assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
+    assertEquals("done", ((TextResultContent) listener.completed.contents().get(0)).text());
   }
 
   @Test
@@ -641,7 +641,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     int envelopesAfterComplete = connection.envelopes().size();
     handle.cancel();
     assertEquals(envelopesAfterComplete, connection.envelopes().size());
-    assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
+    assertEquals("done", ((TextResultContent) listener.completed.contents().get(0)).text());
   }
 
   @Test
@@ -1382,7 +1382,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
   private String resultPayload(String text) {
     return resultCodec.encodeCompleted(
         new EnvironmentCapabilityResult(
-            INVOCATION_ID.toString(), List.of(new TextToolContent(text)), false, "{}"),
+            INVOCATION_ID.toString(), List.of(new TextResultContent(text)), false, "{}"),
         inlineResourceStore(new byte[0]));
   }
 
@@ -1594,7 +1594,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     @Override
     public void onPartial(EnvironmentCapabilityResult partial) {
       partials.add(partial);
-      events.add(((TextToolContent) partial.contents().get(0)).text());
+      events.add(((TextResultContent) partial.contents().get(0)).text());
     }
 
     @Override

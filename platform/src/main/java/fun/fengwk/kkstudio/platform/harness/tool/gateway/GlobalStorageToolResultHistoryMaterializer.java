@@ -3,17 +3,17 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
@@ -76,19 +76,19 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
   public List<AgentMessageContent> materialize(UUID sessionId, ToolResult result) {
     Objects.requireNonNull(sessionId, "sessionId");
     Objects.requireNonNull(result, "result");
-    List<ToolContent> source = result.contents();
+    List<ResultContent> source = result.contents();
     List<AgentMessageContent> contents = new ArrayList<>(source.size());
     for (int index = 0; index < source.size(); index++) {
-      ToolContent content = source.get(index);
-      if (content instanceof TextToolContent text) {
+      ResultContent content = source.get(index);
+      if (content instanceof TextResultContent text) {
         contents.add(new TextMessageContent(text.text()));
-      } else if (content instanceof JsonToolContent json) {
+      } else if (content instanceof JsonResultContent json) {
         contents.add(new JsonMessageContent(json.json()));
-      } else if (content instanceof BinaryToolContent binary) {
-        // 外部化器在 Gateway 侧已把 transient Binary 转为 ResourceToolContent；此处防御性支持并保持确定性。
+      } else if (content instanceof BinaryResultContent binary) {
+        // 外部化器在 Gateway 侧已把 transient Binary 转为 ResourceResultContent；此处防御性支持并保持确定性。
         UUID blobId = ingestService.ingest(sessionId, binary.content(), binary.mediaType());
         contents.add(new ResourceMessageContent(blobId, "content-" + (index + 1), null));
-      } else if (content instanceof ResourceToolContent resource) {
+      } else if (content instanceof ResourceResultContent resource) {
         contents.add(ingestResource(sessionId, index + 1, resource));
       } else {
         throw new IllegalArgumentException(
@@ -100,7 +100,7 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
   }
 
   private ResourceMessageContent ingestResource(
-      UUID sessionId, int index, ResourceToolContent resource) {
+      UUID sessionId, int index, ResourceResultContent resource) {
     ResourceRef ref = resource.resource();
     byte[] bytes = resolveBytes(ref);
     UUID blobId = ingestService.ingest(sessionId, bytes, ref.mediaType());

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
@@ -30,7 +31,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
 import java.util.List;
@@ -145,7 +145,7 @@ class ToolExecutionGatewayStartTest {
             DESCRIPTOR.version(),
             "drifted description",
             DESCRIPTOR.rendererKey(),
-            new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+            new InputSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
     ToolExecutionGateway gateway =
@@ -170,7 +170,7 @@ class ToolExecutionGatewayStartTest {
             "1",
             "not in the daemon catalog",
             "no_such_daemon_tool",
-            new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+            new InputSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
     AgentToolDefinition unknownDefinition =
@@ -206,7 +206,7 @@ class ToolExecutionGatewayStartTest {
             "1",
             "drifted bash description",
             "bash",
-            new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+            new InputSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
     ToolContribution bashContribution =
@@ -687,7 +687,7 @@ class ToolExecutionGatewayStartTest {
         version,
         "drifted description",
         DESCRIPTOR.rendererKey(),
-        new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+        new InputSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofMinutes(1));
   }
