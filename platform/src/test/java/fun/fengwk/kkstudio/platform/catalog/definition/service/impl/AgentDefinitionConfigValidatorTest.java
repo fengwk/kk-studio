@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
@@ -23,7 +24,6 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.time.Duration;
@@ -151,7 +151,7 @@ class AgentDefinitionConfigValidatorTest {
         version,
         name + " tool",
         name,
-        new ToolParamsSchema("", Map.of(), Set.of(), false),
+        new InputSchema("", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(5));
   }

@@ -10,6 +10,8 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
@@ -56,14 +58,12 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandDTO;
@@ -234,7 +234,7 @@ class HarnessRuntimeResponseMapperTest {
                 "requires approval",
                 NOW.plusSeconds(1));
     ToolResult result =
-        new ToolResult("call-1", List.of(new TextToolContent("ok")), false, "{\"durationMs\":1}");
+        new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{\"durationMs\":1}");
     ToolInvocation bound =
         toolInvocation(
             ToolInvocationStatus.SUCCEEDED, environmentToolBinding(), approval, result, null, 1);
@@ -652,7 +652,7 @@ class HarnessRuntimeResponseMapperTest {
         "1.0",
         "execute a command",
         "bash",
-        new ToolParamsSchema("command arguments", Map.of(), Set.of(), true),
+        new InputSchema("command arguments", Map.of(), Set.of(), true),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
   }
@@ -673,7 +673,7 @@ class HarnessRuntimeResponseMapperTest {
 
   private static ToolResult result(ToolInvocationStatus status) {
     return status == ToolInvocationStatus.SUCCEEDED
-        ? new ToolResult("call-1", List.of(new TextToolContent("ok")), false, "{}")
+        ? new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{}")
         : null;
   }
 

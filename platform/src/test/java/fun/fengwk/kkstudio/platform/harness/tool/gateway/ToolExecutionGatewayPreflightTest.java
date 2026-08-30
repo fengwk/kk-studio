@@ -11,6 +11,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
@@ -30,8 +32,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -53,11 +53,8 @@ class ToolExecutionGatewayPreflightTest {
         "1",
         "description of demo",
         "demo",
-        new ToolParamsSchema(
-            "arguments",
-            Map.of("path", new ToolStringSchema("Target path")),
-            Set.of("path"),
-            false),
+        new InputSchema(
+            "arguments", Map.of("path", new StringSchema("Target path")), Set.of("path"), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofMinutes(1));
   }
@@ -330,11 +327,8 @@ class ToolExecutionGatewayPreflightTest {
         "1",
         "description of x",
         "x",
-        new ToolParamsSchema(
-            "arguments",
-            Map.of("path", new ToolStringSchema("Target path")),
-            Set.of("path"),
-            false),
+        new InputSchema(
+            "arguments", Map.of("path", new StringSchema("Target path")), Set.of("path"), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofMinutes(1));
   }

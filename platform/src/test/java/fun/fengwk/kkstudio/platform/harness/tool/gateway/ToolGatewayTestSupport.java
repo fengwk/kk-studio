@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -43,14 +46,11 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
@@ -172,7 +172,7 @@ final class ToolGatewayTestSupport {
         "1",
         "description of " + name,
         name,
-        new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+        new InputSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofMinutes(1));
   }
@@ -327,11 +327,12 @@ final class ToolGatewayTestSupport {
   }
 
   static ToolResult result(String callId, String text) {
-    return new ToolResult(callId, List.of(new TextToolContent(text)), false, "{}");
+    return new ToolResult(callId, List.of(new TextResultContent(text)), false, "{}");
   }
 
   static EnvironmentCapabilityResult capabilityResult(String callId, String text) {
-    return new EnvironmentCapabilityResult(callId, List.of(new TextToolContent(text)), false, "{}");
+    return new EnvironmentCapabilityResult(
+        callId, List.of(new TextResultContent(text)), false, "{}");
   }
 
   static final class FixedToolSettingsProvider implements ToolSettingsProvider {
@@ -441,7 +442,7 @@ final class ToolGatewayTestSupport {
             listener.onPartial(
                 new EnvironmentCapabilityResult(
                     callbackCallId == null ? request.call().id() : callbackCallId,
-                    List.of(new TextToolContent("progress-" + i)),
+                    List.of(new TextResultContent("progress-" + i)),
                     false,
                     "{}"));
           }

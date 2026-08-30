@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentPrompts;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskRequest;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
@@ -48,7 +49,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.harness.subagent.SubagentRunRegistry;
 
@@ -576,7 +576,8 @@ public class DatabaseSubagentRunner implements SubagentRunner {
     }
     String statusJson = status.toString();
     listener.onPartial(
-        new ToolResult(callId, List.of(new TextToolContent(statusJson + "\n")), false, statusJson));
+        new ToolResult(
+            callId, List.of(new TextResultContent(statusJson + "\n")), false, statusJson));
   }
 
   private static List<SubagentRunRegistry.RelayedApproval> pendingApprovals(
@@ -819,7 +820,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
     listener.onComplete(
         new ToolResult(
             callId,
-            List.of(new TextToolContent(text)),
+            List.of(new TextResultContent(text)),
             state != RunState.COMPLETED,
             details.toString()));
   }

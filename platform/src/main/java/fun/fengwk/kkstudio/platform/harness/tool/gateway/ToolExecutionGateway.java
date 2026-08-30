@@ -3,6 +3,9 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
@@ -51,9 +54,6 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
@@ -844,8 +844,8 @@ public final class ToolExecutionGateway implements ToolGateway {
             new ToolInvocationError(
                 INVALID_PARTIAL_KIND, "partial toolCallId does not match the request call"));
       }
-      for (ToolContent content : partial.contents()) {
-        if (content instanceof BinaryToolContent || content instanceof ResourceToolContent) {
+      for (ResultContent content : partial.contents()) {
+        if (content instanceof BinaryResultContent || content instanceof ResourceResultContent) {
           return fail(
               new ToolInvocationError(
                   INVALID_PARTIAL_KIND, "partial must not carry binary or resource content"));

@@ -8,8 +8,8 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 /** {@link ManagedResourceDownloadService} 的内容身份重建与结果隔离测试。 */
 class ManagedResourceDownloadServiceTest {

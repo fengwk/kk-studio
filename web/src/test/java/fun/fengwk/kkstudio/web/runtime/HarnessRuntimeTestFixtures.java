@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.runtime;
 
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -41,7 +42,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -192,7 +192,7 @@ public final class HarnessRuntimeTestFixtures {
             "1.0",
             "search the web",
             "web_search",
-            new ToolParamsSchema("search the web", Map.of(), Set.of(), true),
+            new InputSchema("search the web", Map.of(), Set.of(), true),
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(30));
     ToolInvocationRequest request =

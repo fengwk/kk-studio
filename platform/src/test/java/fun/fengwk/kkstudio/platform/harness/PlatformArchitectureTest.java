@@ -89,6 +89,12 @@ class PlatformArchitectureTest {
           pomText.contains("<artifactId>" + artifactId + "</artifactId>"),
           "platform/pom.xml must not declare " + artifactId);
     }
+    assertTrue(
+        pomText.contains("<artifactId>kk-studio-harness-common</artifactId>"),
+        "platform/pom.xml must declare kk-studio-harness-common");
+    assertFalse(
+        pomText.contains("<artifactId>kk-studio-harness-prompt</artifactId>"),
+        "platform/pom.xml must not declare obsolete kk-studio-harness-prompt");
     assertCanvasInfraIsTestScoped(pomText);
 
     assertTrue(
@@ -101,7 +107,10 @@ class PlatformArchitectureTest {
                 + String.join("\n", bootMainViolations));
   }
 
-  /** Environment gateway 只实现 Environment Capability transport，不依赖已删除的 remote package。 */
+  /**
+   * Environment gateway 只实现 Environment Capability transport，不得回引 harness.tool（ToolExecutionGateway
+   * 是跨 Environment/Tool 域结果的唯一适配点）。
+   */
   @Test
   void environmentGatewayUsesCapabilityTransportOnly() throws IOException {
     Path gateway =
@@ -112,8 +121,8 @@ class PlatformArchitectureTest {
     assertTrue(Files.isRegularFile(gateway), "EnvironmentDaemonGateway must exist");
     String source = Files.readString(gateway, StandardCharsets.UTF_8);
     assertFalse(
-        source.contains("fun.fengwk.kkstudio.harness.tool." + "remote"),
-        "EnvironmentDaemonGateway must not depend on the remote package");
+        source.contains("fun.fengwk.kkstudio.harness.tool."),
+        "EnvironmentDaemonGateway must not depend on harness tool package");
     assertFalse(
         source.contains("Remote" + "Tool"),
         "EnvironmentDaemonGateway must use Environment Capability terminology");
