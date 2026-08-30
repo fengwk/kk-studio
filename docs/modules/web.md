@@ -46,14 +46,14 @@ composition root。Web 不实现 Catalog、Canvas、Harness、Storage 或 Enviro
 | 方向 | 依赖 |
 | --- | --- |
 | Application/domain | `kk-studio-platform`、`kk-studio-share`、`kk-studio-canvas-infra` |
-| Harness composition | `kk-studio-harness-runtime`、`kk-studio-harness-infra`、`kk-studio-harness-contributor-api` |
+| Harness composition | `kk-studio-harness-environment`、`kk-studio-harness-runtime`、`kk-studio-harness-infra`、`kk-studio-harness-contributor-api` |
 | Web transport | `convention4j-spring-boot-starter-web`、`spring-boot-starter-websocket` |
 | Database bootstrap | `kk-studio-schema` runtime、`flyway-core`、`flyway-database-postgresql` |
-| Integration tests | convention test starter、Testcontainers PostgreSQL/JUnit |
+| Integration tests | convention test starter、Testcontainers PostgreSQL/JUnit、`kk-studio-harness-common`（test） |
 
-`WebModuleArchitectureTest`要求 web 直接声明 Canvas infra、Harness infra、Contributor API，同时禁止
-直接声明 `kk-studio-harness-tool`、`kk-studio-harness-daemon`。生产源码只允许直接使用 Harness Runtime、Harness infra、
-Contributor API，以及少数用于 DTO mapping 的 canonical Tool 类型；禁止直接消费 Platform Environment gateway/
+`WebModuleArchitectureTest`要求 web 直接声明 Canvas infra、Harness infra、Contributor API、Runtime、Environment，同时禁止
+直接声明 `kk-studio-harness-tool`、`kk-studio-harness-daemon`（`kk-studio-harness-common` 仅 test scope）。生产源码只允许直接使用 Harness Runtime、Harness infra、
+Contributor API、Environment，以及少数用于 DTO mapping 的 canonical Tool 类型；禁止直接消费 Platform Environment gateway/
 registry implementation。
 
 ### 组合结构
@@ -65,7 +65,7 @@ WebApplication
        -> Platform application services and adapters
   -> Canvas infra -> canvas-core
   -> HarnessRuntimeConfiguration
-       -> harness-infra -> harness-runtime -> harness-tool
+       -> harness-infra -> harness-runtime -> harness-tool / harness-environment -> harness-common
   -> ContributorCatalogConfiguration
        -> Spring HarnessContributor beans + TrustedJarContributorLoader
        -> immutable HarnessCatalog

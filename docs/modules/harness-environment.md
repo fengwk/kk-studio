@@ -8,7 +8,7 @@
 - 独立于模型 Tool 的 atomic Capability catalog、执行 SPI 与 transport certainty；
 - Environment Daemon protocol v5 的 envelope、消息类型、READY capabilities、INVOKE/result codec 和目录值对象。
 
-该模块依赖 `harness-tool` 的 schema 与结果内容值对象，但不依赖 Runtime、Infra、Platform、Web、Spring、数据库或具体 Daemon 实现。
+该模块依赖 [`harness-common`](harness-common.md) 的 `InputSchema`、`ResultContent` 与 `ResourceRef` 值对象，但不依赖 `harness-tool`、Runtime、Infra、Platform、Web、Spring、数据库或具体 Daemon 实现。
 
 ## Goals / Non-goals
 
@@ -30,15 +30,15 @@
 ## 依赖边界
 
 ```text
-harness-tool
-     │
-     ▼
+harness-common + Jackson
+       │
+       ▼
 harness-environment
   ├─ EnvironmentName / Binding / WorkspacePath
   ├─ capability catalog + execution/transport SPI
   └─ daemon protocol v5 values + codecs
 
-禁止：harness-runtime / harness-infra / harness-daemon implementation
+禁止：harness-tool / harness-runtime / harness-infra / harness-daemon implementation
       contributor-api / platform / web / Spring / JDBC
 ```
 
@@ -219,4 +219,4 @@ timeoutMillis
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Tool](harness-tool.md)、[Harness Daemon](harness-daemon.md)、[Harness Runtime](harness-runtime.md)、[Platform](platform.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Tool](harness-tool.md)、[Harness Daemon](harness-daemon.md)、[Harness Runtime](harness-runtime.md)、[Platform](platform.md)。

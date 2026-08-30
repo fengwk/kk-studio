@@ -43,13 +43,13 @@ Platform 不是 HTTP composition root，也不承载浏览器协议、Spring Boo
 
 | 方向 | 直接依赖 | 用途 |
 | --- | --- | --- |
-| Domain port | `kk-studio-canvas-core`、`kk-studio-harness-runtime`、`kk-studio-harness-tool` | Canvas/Harness/Tool 的纯 Java contract |
-| Contributor port | `kk-studio-harness-contributor-api` | `HarnessCatalog`、`ToolContribution`、`BranchView` |
+| Domain / Harness port | `kk-studio-canvas-core`、`kk-studio-harness-common`、`kk-studio-harness-runtime`、`kk-studio-harness-tool`、`kk-studio-harness-environment` | Canvas/Harness/Common 的纯 Java contract 与跨域基础值 |
+| Contributor port | `kk-studio-harness-contributor-api`、`kk-studio-harness-builtin` | `HarnessCatalog`、`ToolContribution`、`BranchView` 与 Builtin 贡献者 |
 | HTTP share | `kk-studio-share` | Platform service 使用的 DTO 与 JSON wire 类型 |
 | Persistence | MyBatis、PostgreSQL、`convention4j-spring-boot-starter` | Catalog、Chat、Settings、Storage 和 ComfyUI workflow API |
 | Model/third-party | LangChain4j Provider modules、`convention4j-comfyui`、AWS SDK S3、JsonPath | 外部 Provider、ComfyUI、S3 和 selector |
 
-`kk-studio-schema`、`kk-studio-canvas-infra`、Harness runtime `test-jar`、Builtin 模块、Flyway 和
+`kk-studio-schema`、`kk-studio-canvas-infra`、Harness runtime `test-jar`、Flyway 和
 Testcontainers 都是 test scope；Platform main 不直接依赖 `harness-infra`、`web` 或 `harness-daemon`。这些边界由
 `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/PlatformArchitectureTest.java`、
 `platform/src/test/java/fun/fengwk/kkstudio/platform/PlatformPackageArchitectureTest.java`、
@@ -62,7 +62,7 @@ Testcontainers 都是 test scope；Platform main 不直接依赖 `harness-infra`
 web composition root
   -> platform application services
        -> PostgreSQL repositories / Canvas ports / Harness Store ports
-       -> harness-runtime / harness-tool / contributor-api
+       -> harness-common / harness-runtime / harness-tool / harness-environment / contributor-api / builtin
        -> S3 / Model Provider / Environment Daemon / ComfyUI / OpenCLI Hub
 ```
 
@@ -516,5 +516,5 @@ Provider/Tool admission、terminal-once、Environment bind、Canvas resource pin
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Runtime](harness-runtime.md)、
+上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Runtime](harness-runtime.md)、
 [Canvas Core](canvas-core.md)、[Share](share.md)、[Web](web.md)。
