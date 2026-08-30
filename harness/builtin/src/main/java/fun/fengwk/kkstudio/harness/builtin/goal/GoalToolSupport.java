@@ -3,14 +3,14 @@ package fun.fengwk.kkstudio.harness.builtin.goal;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputValidator;
 import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsValidator;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -25,7 +25,7 @@ final class GoalToolSupport {
   private GoalToolSupport() {}
 
   static ObjectNode arguments(ToolCall call, ToolDescriptor descriptor) {
-    ToolArgumentsValidator.validate(call.argumentsJson(), descriptor.inputSchema());
+    InputValidator.validate(call.argumentsJson(), descriptor.inputSchema());
     JsonNode value = CODEC.parse(call.argumentsJson(), "goal tool arguments");
     if (!(value instanceof ObjectNode object)) {
       throw new IllegalArgumentException("goal tool arguments must be an object");
@@ -88,6 +88,6 @@ final class GoalToolSupport {
   }
 
   private static ToolResult successResult(String callId, String text) {
-    return new ToolResult(callId, List.of(new TextToolContent(text)), false, "{}");
+    return new ToolResult(callId, List.of(new TextResultContent(text)), false, "{}");
   }
 }

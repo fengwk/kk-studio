@@ -11,6 +11,10 @@ import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
@@ -18,14 +22,10 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -55,14 +55,14 @@ class TaskToolTest {
     assertFalse(descriptor.description().isBlank());
     assertEquals(ToolRequirements.none(), tool.requirements());
 
-    ToolParamsSchema schema = descriptor.inputSchema();
+    InputSchema schema = descriptor.inputSchema();
     assertEquals(Set.of("subagent_type", "prompt"), schema.required());
     assertEquals(
         Set.of("subagent_type", "prompt", "maxTurns", "session_id"), schema.properties().keySet());
-    assertInstanceOf(ToolStringSchema.class, schema.properties().get("subagent_type"));
-    assertInstanceOf(ToolStringSchema.class, schema.properties().get("prompt"));
-    assertInstanceOf(ToolIntegerSchema.class, schema.properties().get("maxTurns"));
-    assertInstanceOf(ToolStringSchema.class, schema.properties().get("session_id"));
+    assertInstanceOf(StringSchema.class, schema.properties().get("subagent_type"));
+    assertInstanceOf(StringSchema.class, schema.properties().get("prompt"));
+    assertInstanceOf(IntegerSchema.class, schema.properties().get("maxTurns"));
+    assertInstanceOf(StringSchema.class, schema.properties().get("session_id"));
   }
 
   /** 合法参数正常解析并完整委托给 SubagentRunner 执行。 */
@@ -303,6 +303,6 @@ class TaskToolTest {
   }
 
   private static String text(ToolResult result) {
-    return ((TextToolContent) result.contents().get(0)).text();
+    return ((TextResultContent) result.contents().get(0)).text();
   }
 }

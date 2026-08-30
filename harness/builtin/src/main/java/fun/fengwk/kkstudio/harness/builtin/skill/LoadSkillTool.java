@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
@@ -13,7 +14,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -137,7 +137,7 @@ public final class LoadSkillTool implements Tool {
               complete(
                   handle,
                   new ToolResult(
-                      callId, List.of(new TextToolContent(loaded.content())), false, "{}"));
+                      callId, List.of(new TextResultContent(loaded.content())), false, "{}"));
             } else if (result instanceof SkillBodyLoader.SkillBodyLoadResult.Failed failed) {
               complete(handle, error(callId, failed.message()));
             } else {
@@ -185,7 +185,7 @@ public final class LoadSkillTool implements Tool {
 
   private static ToolResult error(String callId, String message) {
     String detail = message == null || message.isBlank() ? "tool execution failed" : message;
-    return new ToolResult(callId, List.of(new TextToolContent(detail)), true, "{}");
+    return new ToolResult(callId, List.of(new TextResultContent(detail)), true, "{}");
   }
 
   private static String failureMessage(String skillName, Throwable error) {

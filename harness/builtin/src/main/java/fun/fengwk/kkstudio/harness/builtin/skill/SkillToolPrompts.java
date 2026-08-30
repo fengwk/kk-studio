@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.skill;
 
-import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,7 +12,7 @@ import java.util.Objects;
 /** 加载随 builtin 打包的静态 skill Tool prompt / schema 资源。 */
 final class SkillToolPrompts {
 
-  private static final ToolDescriptorJsonCodec CODEC = new ToolDescriptorJsonCodec();
+  private static final SchemaJsonCodec CODEC = new SchemaJsonCodec();
 
   private SkillToolPrompts() {}
 
@@ -20,8 +20,8 @@ final class SkillToolPrompts {
     return read(resourceName).trim();
   }
 
-  static ToolParamsSchema schema(String resourceName) {
-    return CODEC.decodeInputSchema(read(resourceName));
+  static InputSchema schema(String resourceName) {
+    return CODEC.decode(read(resourceName));
   }
 
   private static String read(String resourceName) {
