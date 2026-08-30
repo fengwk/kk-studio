@@ -20,6 +20,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.daemon.coding.ApplyPatchCapability;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingCapabilities;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
@@ -62,12 +68,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerStatus;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
-import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.io.IOException;
 import java.net.URI;
@@ -813,7 +813,7 @@ class DaemonRuntimeTest {
       assertMessageTypes(messages, ACK, STARTED, COMPLETED);
       EnvironmentCapabilityResult result = resultCodec.decodeResult(messages.get(2).payloadJson());
       assertFalse(result.error());
-      String json = ((JsonToolContent) result.contents().get(0)).json();
+      String json = ((JsonResultContent) result.contents().get(0)).json();
       assertTrue(json.contains("\"displayPath\":\".\""));
       assertTrue(json.contains("\"path\":\"docs\""));
       assertTrue(json.contains("\"path\":\"src\""));
@@ -831,7 +831,7 @@ class DaemonRuntimeTest {
       assertMessageTypes(messages, ACK, STARTED, COMPLETED);
       result = resultCodec.decodeResult(messages.get(2).payloadJson());
       assertTrue(result.error());
-      String error = ((TextToolContent) result.contents().get(0)).text();
+      String error = ((TextResultContent) result.contents().get(0)).text();
       assertEquals("Error: directory does not exist: missing", error);
       assertFalse(error.contains(envRoot.toString()));
     } finally {
@@ -875,7 +875,7 @@ class DaemonRuntimeTest {
       assertFalse(result.error());
       assertEquals(
           "# My Skill Body\nInstruction content.",
-          ((TextToolContent) result.contents().get(0)).text());
+          ((TextResultContent) result.contents().get(0)).text());
     } finally {
       deleteRecursively(skillRoot);
     }
@@ -923,7 +923,7 @@ class DaemonRuntimeTest {
 
     tool.complete(
         new EnvironmentCapabilityResult(
-            "invocation-1", List.of(new TextToolContent("done")), false, "{}"));
+            "invocation-1", List.of(new TextResultContent("done")), false, "{}"));
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
     assertMessageTypes(terminal, COMPLETED);
     assertTrue(terminal.get(0).payloadJson().contains("done"));
@@ -1189,7 +1189,7 @@ class DaemonRuntimeTest {
     tool.partial(
         new EnvironmentCapabilityResult(
             "structured-content",
-            List.of(new JsonToolContent("[1,2]"), new TextToolContent("hi")),
+            List.of(new JsonResultContent("[1,2]"), new TextResultContent("hi")),
             false,
             "{}"));
 
@@ -1209,7 +1209,7 @@ class DaemonRuntimeTest {
             stored.uri(), stored.mediaType(), stored.name(), stored.size(), stored.sha256());
     tool.partial(
         new EnvironmentCapabilityResult(
-            "structured-content-2", List.of(new ResourceToolContent(storedRef)), false, "{}"));
+            "structured-content-2", List.of(new ResourceResultContent(storedRef)), false, "{}"));
     List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
     assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
     assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
@@ -1233,13 +1233,13 @@ class DaemonRuntimeTest {
     transport.receive(invoke(invocationId, 1));
     tool.partial(
         new EnvironmentCapabilityResult(
-            invocationId, List.of(new TextToolContent("partial1")), false, "{}"));
+            invocationId, List.of(new TextResultContent("partial1")), false, "{}"));
     tool.partial(
         new EnvironmentCapabilityResult(
-            invocationId, List.of(new TextToolContent("partial2")), false, "{}"));
+            invocationId, List.of(new TextResultContent("partial2")), false, "{}"));
     tool.complete(
         new EnvironmentCapabilityResult(
-            invocationId, List.of(new TextToolContent("complete")), false, "{}"));
+            invocationId, List.of(new TextResultContent("complete")), false, "{}"));
 
     List<DaemonEnvelope> messages = transport.takeMessages(5);
     assertMessageTypes(messages, ACK, STARTED, PARTIAL, PARTIAL, COMPLETED);
@@ -1261,7 +1261,7 @@ class DaemonRuntimeTest {
     assertEquals(
         List.of("partial1", "partial2", "complete"),
         results.stream()
-            .map(result -> ((TextToolContent) result.contents().get(0)).text())
+            .map(result -> ((TextResultContent) result.contents().get(0)).text())
             .toList());
   }
 
@@ -1286,7 +1286,7 @@ class DaemonRuntimeTest {
             stored.uri(), stored.mediaType(), stored.name(), stored.size(), stored.sha256());
     tool.complete(
         new EnvironmentCapabilityResult(
-            "resource-rewrite", List.of(new ResourceToolContent(ref)), false, "{}"));
+            "resource-rewrite", List.of(new ResourceResultContent(ref)), false, "{}"));
 
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
     assertMessageTypes(terminal, COMPLETED);
@@ -1305,13 +1305,13 @@ class DaemonRuntimeTest {
     DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
     EnvironmentCapabilityResult decoded = resultCodec.decodeResult(payload);
     assertEquals(1, decoded.contents().size());
-    BinaryToolContent binary = (BinaryToolContent) decoded.contents().get(0);
+    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
     assertArrayEquals(data, binary.content());
   }
 
-  /** BinaryToolContent 必须先经 resource store 落盘再编码为 wire resource，wire ref 可被 store 读回。 */
+  /** BinaryResultContent 必须先经 resource store 落盘再编码为 wire resource，wire ref 可被 store 读回。 */
   @Test
-  void storesBinaryToolContentBeforeEncoding() throws Exception {
+  void storesBinaryResultContentBeforeEncoding() throws Exception {
     FakeTransport transport = new FakeTransport();
     TestCapability tool = new TestCapability();
     InMemoryResourceStore store = new InMemoryResourceStore();
@@ -1327,7 +1327,7 @@ class DaemonRuntimeTest {
     tool.complete(
         new EnvironmentCapabilityResult(
             "binary-content",
-            List.of(new BinaryToolContent("application/octet-stream", data)),
+            List.of(new BinaryResultContent("application/octet-stream", data)),
             false,
             "{}"));
 
@@ -1382,7 +1382,7 @@ class DaemonRuntimeTest {
     // PARTIAL 失败必须收敛为 FAILED，且不再发出 PARTIAL 或 COMPLETED。
     tool.partial(
         new EnvironmentCapabilityResult(
-            "resource-fail", List.of(new ResourceToolContent(localRef)), false, "{}"));
+            "resource-fail", List.of(new ResourceResultContent(localRef)), false, "{}"));
     List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
     assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
     assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
@@ -1390,7 +1390,7 @@ class DaemonRuntimeTest {
     // FAILED 之后迟到的 COMPLETED 必须被忽略（由 journal 守卫）。
     tool.complete(
         new EnvironmentCapabilityResult(
-            "resource-fail", List.of(new ResourceToolContent(localRef)), false, "{}"));
+            "resource-fail", List.of(new ResourceResultContent(localRef)), false, "{}"));
     assertFalse(transport.hasMessages());
 
     // 现在一次带 COMPLETED 失败的独立 invocation 也必须收敛为 FAILED。
@@ -1400,7 +1400,7 @@ class DaemonRuntimeTest {
         new EnvironmentCapabilityResult(
             "resource-fail-2",
             List.of(
-                new ResourceToolContent(
+                new ResourceResultContent(
                     new ResourceRef(
                         "file:///export/local-2", "text/plain", null, 1L, "0".repeat(64)))),
             false,
@@ -1428,7 +1428,7 @@ class DaemonRuntimeTest {
         new EnvironmentCapabilityResult(
             "no-source",
             List.of(
-                new ResourceToolContent(
+                new ResourceResultContent(
                     new ResourceRef(
                         "file:///export/local-only",
                         "application/json",
@@ -1538,7 +1538,7 @@ class DaemonRuntimeTest {
         new EnvironmentCapabilityResult(
             "adversarial-result",
             List.of(
-                new ResourceToolContent(
+                new ResourceResultContent(
                     new ResourceRef(
                         "file:///export/adversarial",
                         "application/octet-stream",
@@ -1581,7 +1581,7 @@ class DaemonRuntimeTest {
 
     tool.partial(
         new EnvironmentCapabilityResult(
-            "invocation-2", List.of(new TextToolContent("chunk")), false, "{}"));
+            "invocation-2", List.of(new TextResultContent("chunk")), false, "{}"));
     List<DaemonEnvelope> partial = transport.takeMessages(1);
     assertMessageTypes(partial, PARTIAL);
     assertTrue(partial.get(0).payloadJson().contains("chunk"));
@@ -1592,7 +1592,7 @@ class DaemonRuntimeTest {
 
     tool.complete(
         new EnvironmentCapabilityResult(
-            "invocation-2", List.of(new TextToolContent("late")), false, "{}"));
+            "invocation-2", List.of(new TextResultContent("late")), false, "{}"));
     assertFalse(transport.hasMessages());
   }
 
@@ -1846,7 +1846,7 @@ class DaemonRuntimeTest {
         DaemonInvocationState.CANCELLED, journal.find("shutdown-invocation").orElseThrow().state());
     tool.complete(
         new EnvironmentCapabilityResult(
-            "shutdown-invocation", List.of(new TextToolContent("late")), false, "{}"));
+            "shutdown-invocation", List.of(new TextResultContent("late")), false, "{}"));
     assertFalse(transport.hasMessages());
 
     runtime.start();
@@ -2744,7 +2744,7 @@ class DaemonRuntimeTest {
         new EnvironmentCapabilityDescriptor(
             new EnvironmentCapabilityId("fallback"),
             "1.0.0",
-            new ToolParamsSchema("fallback arguments", Map.of(), Set.of(), false),
+            new InputSchema("fallback arguments", Map.of(), Set.of(), false),
             Duration.ZERO);
     private final TestCapabilityHandle handle = new TestCapabilityHandle();
     private volatile EnvironmentCapabilityExecutionListener listener;
@@ -2779,10 +2779,10 @@ class DaemonRuntimeTest {
     private volatile EnvironmentCapabilityExecutionRequest request;
 
     private TestCapability() {
-      this("test", new ToolParamsSchema("test arguments", Map.of(), Set.of(), false));
+      this("test", new InputSchema("test arguments", Map.of(), Set.of(), false));
     }
 
-    private TestCapability(String name, ToolParamsSchema schema) {
+    private TestCapability(String name, InputSchema schema) {
       descriptor =
           new EnvironmentCapabilityDescriptor(
               new EnvironmentCapabilityId(name), "1.0.0", schema, Duration.ofSeconds(10));
@@ -2830,7 +2830,7 @@ class DaemonRuntimeTest {
         new EnvironmentCapabilityDescriptor(
             new EnvironmentCapabilityId("blocking"),
             "1.0.0",
-            new ToolParamsSchema("blocking arguments", Map.of(), Set.of(), false),
+            new InputSchema("blocking arguments", Map.of(), Set.of(), false),
             Duration.ofSeconds(10));
     private final CountDownLatch executionStarted = new CountDownLatch(1);
     private final CountDownLatch allowReturn = new CountDownLatch(1);

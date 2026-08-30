@@ -12,6 +12,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
@@ -21,9 +24,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -217,10 +217,10 @@ class CodingCapabilitiesEdgeTest {
     assertFalse(text(truncated).contains("�"));
     assertEquals("\u001b[31mpassed\u001b[0m", text(ansi.contents()));
     assertEquals(1, ansi.contents().size());
-    ResourceToolContent resource = (ResourceToolContent) truncated.contents().get(1);
+    ResourceResultContent resource = (ResourceResultContent) truncated.contents().get(1);
     assertArrayEquals(
         "😀x".getBytes(StandardCharsets.UTF_8), store.get(resource.resource().sha256()));
-    assertTrue(binary.contents().get(1) instanceof ResourceToolContent);
+    assertTrue(binary.contents().get(1) instanceof ResourceResultContent);
     CodingToolsConfig failing =
         config(
             1,
@@ -277,7 +277,7 @@ class CodingCapabilitiesEdgeTest {
     assertFalse(result.error());
     assertTrue(text(result).contains("1|alpha"));
     assertTrue(text(result).contains("2|beta"));
-    assertFalse(result.contents().stream().anyMatch(ResourceToolContent.class::isInstance));
+    assertFalse(result.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
   }
 
   @Test
@@ -469,12 +469,12 @@ class CodingCapabilitiesEdgeTest {
     return text(result.contents());
   }
 
-  private static String text(List<ToolContent> contents) {
+  private static String text(List<ResultContent> contents) {
     return contents.stream().map(CodingCapabilitiesEdgeTest::text).reduce("", String::concat);
   }
 
-  private static String text(ToolContent content) {
-    return content instanceof TextToolContent value ? value.text() : "";
+  private static String text(ResultContent content) {
+    return content instanceof TextResultContent value ? value.text() : "";
   }
 
   private static final class RecordingListener implements EnvironmentCapabilityExecutionListener {
