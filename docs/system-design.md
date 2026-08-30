@@ -30,6 +30,7 @@ flowchart LR
     Schema[schema<br/>Flyway resources]
     CanvasCore[canvas-core<br/>JDK-only domain]
     CanvasInfra[canvas-infra<br/>PostgreSQL / MyBatis / Function runtime]
+    HarnessCommon[Harness Common]
     HarnessTool[Harness Tool]
     HarnessEnvironment[Harness Environment]
     HarnessRuntime[Harness Runtime]
@@ -50,21 +51,27 @@ flowchart LR
     Web --> HarnessInfra
     Web --> HarnessRuntime
     Web --> HarnessContributorApi
+    Web --> HarnessEnvironment
     CanvasInfra --> CanvasCore
+    HarnessInfra --> HarnessCommon
     HarnessInfra --> HarnessRuntime
-    HarnessEnvironment --> HarnessTool
+    HarnessInfra --> HarnessTool
+    HarnessInfra --> HarnessEnvironment
+    HarnessTool --> HarnessCommon
+    HarnessEnvironment --> HarnessCommon
+    HarnessRuntime --> HarnessCommon
     HarnessRuntime --> HarnessEnvironment
     HarnessRuntime --> HarnessTool
-    HarnessContributorApi --> HarnessRuntime
     HarnessContributorApi --> HarnessEnvironment
     HarnessContributorApi --> HarnessTool
+    HarnessBuiltin --> HarnessCommon
     HarnessBuiltin --> HarnessContributorApi
     HarnessBuiltin --> HarnessEnvironment
-    HarnessBuiltin --> HarnessRuntime
     HarnessBuiltin --> HarnessTool
     HarnessDaemon --> HarnessEnvironment
     Platform --> CanvasCore
     Platform --> Share
+    Platform --> HarnessCommon
     Platform --> HarnessRuntime
     Platform --> HarnessEnvironment
     Platform --> HarnessTool
@@ -149,7 +156,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 
 根 `pom.xml` 直接聚合六个 Maven module：`share`、`schema`、`canvas`、
 `harness`、`platform`、`web`。`canvas/pom.xml` 再聚合 `canvas/core` 和
-`canvas/infra`；`harness/pom.xml` 再聚合 `prompt`、`tool`、`environment`、`runtime`、
+`canvas/infra`；`harness/pom.xml` 再聚合 `common`、`tool`、`environment`、`runtime`、
 `contributor-api`、`builtin`、`infra` 和 `daemon`。下表列出的是可维护的逻辑模块/目录，
 不是 root reactor 的直接 children。`frontend/` 是独立的 Node/Vite 工程，
 不属于 Maven reactor。
@@ -161,14 +168,14 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `schema` | Flyway V1 baseline 与 profile seed 资源 | 无 Java、无生产依赖 |
 | `canvas/core` | Canvas 领域、typed command、ports、Function Catalog | JDK-only |
 | `canvas/infra` | Canvas PostgreSQL/MyBatis、Snapshot query、Function durable runtime | 依赖 `canvas-core`，不反向依赖 Platform/Harness/Web |
-| `harness/prompt` | classpath prompt resource 加载与校验 | JDK-only |
-| `harness/tool` | Tool identity、descriptor、schema、call/result 与 ResourceRef | 依赖 JDK/Jackson |
-| `harness/environment` | Environment binding、Capability SPI/catalog 与 Daemon v5 wire | 依赖 Tool，不依赖 Runtime/Platform |
-| `harness/runtime` | Session/Entry/Thread/Command/Invocation/Work 状态机与 processors | 纯 Java |
-| `harness/contributor-api` | trusted Contributor 的 Catalog、BranchView、统一 Tool、effect 与 projector API | 纯 Java |
-| `harness/builtin` | 第一方内置 17 工具、goal.state 与 context projector | 依赖 Contributor API |
-| `harness/infra` | PostgreSQL HarnessStore、Work dispatcher、realtime、Resource store | 依赖 Runtime/Tool |
-| `harness/daemon` | 独立 Environment 进程适配器 | 依赖 Environment 与 Tool |
+| `harness/common` | Prompt template/loader、JSON 边界工具、ResourceRef、统一 ResultContent 与 InputSchema 体系 | 依赖 JDK/Jackson，无其它 Harness 依赖 |
+| `harness/tool` | Tool identity、descriptor、call/result 与 Tool JSON codecs（Result 组合 ResultContent） | 依赖 `harness-common` 与 Jackson |
+| `harness/environment` | Environment binding、Capability SPI/catalog 与 Daemon v5 wire（CapabilityResult 组合 ResultContent） | 依赖 `harness-common` 与 Jackson，绝不依赖 `harness-tool` |
+| `harness/runtime` | Session/Entry/Thread/Command/Invocation/Work 状态机与 processors | 依赖 `harness-common`、`harness-tool`、`harness-environment`、Jackson、SLF4J、JGit |
+| `harness/contributor-api` | trusted Contributor 的 Catalog、BranchView、统一 Tool、effect 与 projector API | 生产依赖 `harness-tool`、`harness-environment`，不进生产 Common/Runtime |
+| `harness/builtin` | 第一方内置 17 工具、goal.state 与 context projector | 依赖 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment`、Jackson |
+| `harness/infra` | PostgreSQL HarnessStore、Work dispatcher、realtime、Resource store | 依赖 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Spring JDBC、PostgreSQL |
+| `harness/daemon` | 独立 Environment 进程适配器 | 依赖 `harness-environment`、Jackson、JGit、LangChain4j adapters，绝不依赖 `harness-tool` |
 | `platform` | Catalog、Storage、Chat/Canvas application service、Resolver、Model/Tool/Environment Gateway | 适配 Share、Core/Runtime ports，不成为组合根 |
 | `web` | Spring Boot、HTTP、浏览器事件、daemon WebSocket、生产生命周期 | 唯一 composition root |
 
@@ -179,20 +186,24 @@ frontend -> web API
 web -> platform
 platform -> share
 web -> canvas-infra -> canvas-core
-web -> harness-infra -> harness-runtime -> harness-environment -> harness-tool
+web -> harness-infra -> harness-runtime -> harness-tool / harness-environment -> harness-common
 web -> harness-runtime
+web -> harness-environment
 web -> harness-contributor-api
 platform -> canvas-core
+platform -> harness-common
+platform -> harness-tool -> harness-common
+platform -> harness-environment -> harness-common
 platform -> harness-builtin -> harness-contributor-api
-platform -> harness-runtime -> harness-environment -> harness-tool
+platform -> harness-runtime
 platform -> harness-contributor-api
-harness-daemon -> harness-environment -> harness-tool
+harness-daemon -> harness-environment -> harness-common
 ```
 
 `platform` 的架构测试禁止它引用 `canvas-infra`、`harness-infra`、`web` 和
 `harness-daemon` 的生产实现；`web` 的架构测试要求它直接声明 Canvas Infra、
-Harness Infra、Contributor API，保证组合根不会依赖未声明的传递实现；Platform 声明并依赖
-Builtin 模块。
+Harness Infra、Contributor API、Runtime、Environment，保证组合根不会依赖未声明的传递实现；Platform 声明并依赖
+Common、Builtin 模块。
 
 ## 3. Web composition root
 
@@ -375,7 +386,7 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
 - 全局 Blob 的 durable 引用只使用 `blobId`。S3 bucket/key 由服务端配置和
   `StorageObjectKeys` 派生，预签名服务校验 namespace、checksum、content type
   和过期上限；`/api/storage` 不允许调用方选择对象 key。
-- Tool 边界的 `ResourceRef` 只属于瞬时执行。写入 Entry 前必须由
+- Tool 与 Environment 边界的 `ResourceRef` 只属于瞬时执行。写入 Entry 前必须由
   `GlobalStorageToolResultHistoryMaterializer` 摄入 Blob，无法摄入则 fail closed。
 - Environment 请求由 HELLO 绑定的 canonical name 路由；同名 live connection
   被占用时拒绝第二个持有者。
@@ -403,12 +414,13 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
 - [canvas-infra 模块](modules/canvas-infra.md)：PostgreSQL/MyBatis 与 Function durable runtime。
 - [frontend 模块](modules/frontend.md)：React 宿主、feature 边界与浏览器恢复。
 - [harness-builtin 模块](modules/harness-builtin.md)：第一方内置 17 工具与 Goal 契约。
+- [harness-common 模块](modules/harness-common.md)：Prompt、JSON、ResourceRef、ResultContent 与 InputSchema 基础契约。
 - [harness-contributor-api 模块](modules/harness-contributor-api.md)：trusted Java Contributor SPI 与 catalog。
 - [harness-daemon 模块](modules/harness-daemon.md)：Environment Daemon 与 Daemon wire。
 - [harness-environment 模块](modules/harness-environment.md)：Environment binding、Capability 与 Daemon v5 wire。
 - [harness-infra 模块](modules/harness-infra.md)：Harness Store、Work、通知与 ResourceStore。
 - [harness-runtime 模块](modules/harness-runtime.md)：Agent Runtime 状态机与 processors。
-- [harness-tool 模块](modules/harness-tool.md)：Tool identity、schema、call/result 与 ResourceRef。
+- [harness-tool 模块](modules/harness-tool.md)：Tool identity、descriptor、call/result 与 Tool JSON codecs。
 - [platform 模块](modules/platform.md)：application service、gateway 与外部适配。
 - [web 模块](modules/web.md)：唯一 Spring Boot composition root 与 transport。
 - [开发与测试](operations/development-and-testing.md)：质量、E2E、可靠性和报告入口。

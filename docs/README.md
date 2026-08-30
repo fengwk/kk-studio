@@ -26,12 +26,13 @@
 | canvas-infra | [modules/canvas-infra.md](modules/canvas-infra.md) | Canvas PostgreSQL 适配与 Function runtime |
 | frontend | [modules/frontend.md](modules/frontend.md) | React 宿主、feature 边界与浏览器恢复 |
 | harness-builtin | [modules/harness-builtin.md](modules/harness-builtin.md) | 第一方内置 17 工具与 Goal 契约 |
+| harness-common | [modules/harness-common.md](modules/harness-common.md) | Prompt、JSON、ResourceRef、ResultContent 与 InputSchema 基础契约 |
 | harness-contributor-api | [modules/harness-contributor-api.md](modules/harness-contributor-api.md) | Trusted Java Contributor SPI 与 catalog |
 | harness-daemon | [modules/harness-daemon.md](modules/harness-daemon.md) | Environment Daemon 与本地工具执行 |
 | harness-environment | [modules/harness-environment.md](modules/harness-environment.md) | Environment binding、Capability 与 Daemon v5 wire |
 | harness-infra | [modules/harness-infra.md](modules/harness-infra.md) | Harness Store、Work、通知和 ResourceStore |
 | harness-runtime | [modules/harness-runtime.md](modules/harness-runtime.md) | Agent Runtime 状态机与 processors |
-| harness-tool | [modules/harness-tool.md](modules/harness-tool.md) | Tool identity、schema、call/result 与 ResourceRef |
+| harness-tool | [modules/harness-tool.md](modules/harness-tool.md) | Tool identity、descriptor、call/result 与 Tool JSON codecs |
 | platform | [modules/platform.md](modules/platform.md) | Application service、gateway 与外部适配 |
 | web | [modules/web.md](modules/web.md) | Spring Boot composition root 与 transport |
 

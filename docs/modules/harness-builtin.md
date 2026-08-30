@@ -33,11 +33,11 @@
 BuiltinHarnessContributor
   -> harness-contributor-api（HarnessContributor / HarnessRegistrar / Tool / BranchView / projector）
   -> harness-environment（CapabilityCatalog / BoundEnvironment 使用的 descriptor）
-  -> harness-tool（AgentToolId / ToolDescriptor / ToolResult / schema）
-  -> harness-prompt（classpath prompt template）
+  -> harness-tool（AgentToolId / ToolDescriptor / ToolResult）
+  -> harness-common（PromptTemplate / Loader、ResultContent / InputSchema）
 ```
 
-POM 见 [`pom.xml`](../../harness/builtin/pom.xml)，包级职责见 [`package-info.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/package-info.java)。Builtin 模块不依赖 infra、daemon、platform、web、Spring 或外部数据库。
+POM 见 [`pom.xml`](../../harness/builtin/pom.xml)，包级职责见 [`package-info.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/package-info.java)。Builtin 模块依赖 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment` 与 Jackson；不依赖 runtime、infra、daemon、platform、web、Spring 或外部数据库。
 
 Harness durable schema 的唯一入口是 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)；其中只有 Harness 七张协议表，没有 Goal 专用表。
 
@@ -167,7 +167,7 @@ sequenceDiagram
 ### 关键测试守卫
 
 - [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java)：完整 17 工具清单、Tool descriptor/version/schema、ownership 与 Catalog 注册测试。
-- [`BuiltinModuleArchitectureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinModuleArchitectureTest.java)：Builtin 只依赖 tool/runtime/contributor-api，不依赖 infra/daemon/platform/web。
+- [`BuiltinModuleArchitectureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinModuleArchitectureTest.java)：Builtin 只依赖 common/contributor-api/tool/environment/Jackson，不依赖 runtime/infra/daemon/platform/web。
 - [`BuiltinToolIdsTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinToolIdsTest.java)：全局 `base.*` 稳定标识校验。
 - [`GoalFeatureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalFeatureTest.java)：branch latest snapshot、fork/sibling 隔离、replacement 时间戳、active projector 静默。
 - [`GoalStateCodecTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStateCodecTest.java)：strict JSON schema codec 与 domain 不变量校验。
@@ -176,4 +176,4 @@ sequenceDiagram
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Contributor API](harness-contributor-api.md)、[Harness Runtime](harness-runtime.md)、[Harness Tool](harness-tool.md)、[Web](web.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Contributor API](harness-contributor-api.md)、[Harness Runtime](harness-runtime.md)、[Harness Tool](harness-tool.md)、[Web](web.md)。

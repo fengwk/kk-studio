@@ -37,8 +37,8 @@ DaemonMain
        ├─ scheduler (1 thread)
        └─ taskExecutor (virtual-thread-per-task)
 
-Daemon -> harness-environment -> harness-tool
-Daemon -/-> harness-runtime / harness-infra / platform / web
+Daemon -> harness-environment
+Daemon -/-> harness-tool / harness-runtime / harness-infra / platform / web
 ```
 
 POM 和依赖架构守卫见 [`pom.xml`](../../harness/daemon/pom.xml) 与 [`DaemonModuleArchitectureTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonModuleArchitectureTest.java)。LangChain4j 只出现在 skill/MCP adapter 包；executor 只在 `DaemonRuntime` 创建，架构测试会检查这一生命周期边界。
@@ -238,5 +238,5 @@ Daemon disconnect 后保留 journal 和 running execution 的进程内事实，�
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Environment](harness-environment.md)、[Harness Tool](harness-tool.md)、
+上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Environment](harness-environment.md)、[Harness Tool](harness-tool.md)、
 [Harness Infra](harness-infra.md)、[Platform](platform.md)、[部署与运行](../operations/deployment.md)。

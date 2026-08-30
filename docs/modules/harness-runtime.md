@@ -39,10 +39,10 @@ infra / platform / web composition root
                  │ RealtimeSink    │
                  └────────┬────────┘
                           ▼
-          harness-prompt / harness-tool / harness-environment
+          harness-common / harness-tool / harness-environment
 ```
 
-主源码依赖 `harness-prompt`、`harness-tool`、`harness-environment`、Jackson、SLF4J；JGit 只由 permission path matcher 所在实现使用。POM 与架构约束见 [`pom.xml`](../../harness/runtime/pom.xml) 和 [`RuntimeModuleArchitectureTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/RuntimeModuleArchitectureTest.java)。Runtime 不得依赖具体 contributor 实现、infra、daemon、platform 或 web。
+主源码依赖 `harness-common`、`harness-tool`、`harness-environment`、Jackson、SLF4J；JGit 只由 permission path matcher 所在实现使用。POM 与架构约束见 [`pom.xml`](../../harness/runtime/pom.xml) 和 [`RuntimeModuleArchitectureTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/RuntimeModuleArchitectureTest.java)。Runtime 不得依赖具体 contributor 实现、infra、daemon、platform 或 web。
 
 ## 核心模型 / API
 
@@ -274,6 +274,6 @@ TURN_START(reason=COMPACTION, CompactionStart)
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Infra](harness-infra.md)、
+上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Infra](harness-infra.md)、
 [Harness Tool](harness-tool.md)、[Harness Environment](harness-environment.md)、[Harness Builtin](harness-builtin.md)、[Harness Contributor API](harness-contributor-api.md)、
 [Platform](platform.md)。

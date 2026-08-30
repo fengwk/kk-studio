@@ -4,7 +4,7 @@
 
 `harness-infra` 是 Runtime/Tool 的 PostgreSQL、Work dispatch、realtime notification 和本地 ResourceStore 适配层。它实现 `HarnessStore` 和进程 wiring，不拥有 Thread next-step、turn protocol、retry、Tool sibling aggregation 或插件业务规则。
 
-生产依赖是 `harness-runtime`、`harness-tool`、Spring JDBC 和 PostgreSQL driver；测试使用 schema/Flyway/Testcontainers。模块边界见 [`package-info.java`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/package-info.java) 与 [`pom.xml`](../../harness/infra/pom.xml)。
+生产依赖是 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Spring JDBC 和 PostgreSQL driver；测试使用 schema/Flyway/Testcontainers。模块边界见 [`package-info.java`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/package-info.java) 与 [`pom.xml`](../../harness/infra/pom.xml)。
 
 ## Goals / Non-goals
 
@@ -205,7 +205,7 @@ maxDispatchTasks
 
 ### 关键测试守卫
 
-- [`InfraModuleArchitectureTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/InfraModuleArchitectureTest.java)：Infra 只依赖 Runtime/Tool/Spring JDBC/PostgreSQL。
+- [`InfraModuleArchitectureTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/InfraModuleArchitectureTest.java)：Infra 生产依赖仅允许 Common/Runtime/Tool/Environment/Spring JDBC/PostgreSQL。
 - [`PostgresqlHarnessSchemaTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessSchemaTest.java)、[`PostgresqlHarnessStoreTransactionTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreTransactionTest.java)：七表 schema、transaction boundary 和 handle lifecycle。
 - [`PostgresqlHarnessStoreConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreConcurrencyTest.java)、[`PostgresqlInvocationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlInvocationTest.java)：并发锁序、Invocation transition 和 terminal facts。
 - [`PostgresqlWorkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkTest.java)、[`PostgresqlWorkNotificationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkNotificationTest.java)：claim/lease/wake/NOTIFY/poll 语义。
@@ -215,5 +215,5 @@ maxDispatchTasks
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Runtime](harness-runtime.md)、
-[Harness Tool](harness-tool.md)、[Schema](schema.md)、[Web](web.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Runtime](harness-runtime.md)、
+[Harness Tool](harness-tool.md)、[Harness Environment](harness-environment.md)、[Schema](schema.md)、[Web](web.md)。

@@ -12,6 +12,7 @@ const moduleDocuments = [
   'canvas-infra.md',
   'frontend.md',
   'harness-builtin.md',
+  'harness-common.md',
   'harness-contributor-api.md',
   'harness-daemon.md',
   'harness-environment.md',
