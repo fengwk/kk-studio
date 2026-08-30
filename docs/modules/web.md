@@ -49,12 +49,14 @@ composition root。Web 不实现 Catalog、Canvas、Harness、Storage 或 Enviro
 | Harness composition | `kk-studio-harness-environment`、`kk-studio-harness-runtime`、`kk-studio-harness-infra`、`kk-studio-harness-contributor-api` |
 | Web transport | `convention4j-spring-boot-starter-web`、`spring-boot-starter-websocket` |
 | Database bootstrap | `kk-studio-schema` runtime、`flyway-core`、`flyway-database-postgresql` |
-| Integration tests | convention test starter、Testcontainers PostgreSQL/JUnit、`kk-studio-harness-common`（test） |
+| Integration tests | convention test starter、Testcontainers PostgreSQL/JUnit |
 
 `WebModuleArchitectureTest`要求 web 直接声明 Canvas infra、Harness infra、Contributor API、Runtime、Environment，同时禁止
-直接声明 `kk-studio-harness-tool`、`kk-studio-harness-daemon`（`kk-studio-harness-common` 仅 test scope）。生产源码只允许直接使用 Harness Runtime、Harness infra、
-Contributor API、Environment，以及少数用于 DTO mapping 的 canonical Tool 类型；禁止直接消费 Platform Environment gateway/
-registry implementation。
+直接声明 `kk-studio-harness-tool`、`kk-studio-harness-daemon`、`kk-studio-harness-builtin` 和
+`kk-studio-harness-common`。Builtin 与 Common 由 Platform 的 compile-scope 依赖传递进入组合根；web 若声明更近的
+test-scope 依赖会遮蔽该传递依赖，并使 Spring Boot Fat JAR 漏包。生产源码只允许直接使用 Harness Runtime、Harness
+infra、Contributor API、Environment，以及少数用于 DTO mapping 的 canonical Tool 类型；禁止直接消费 Platform Environment
+gateway/registry implementation。
 
 ### 组合结构
 
