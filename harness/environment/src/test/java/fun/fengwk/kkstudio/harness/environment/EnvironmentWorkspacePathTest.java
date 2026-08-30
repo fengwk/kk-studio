@@ -5,9 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-/**
- * {@link EnvironmentWorkspacePath} canonical 相对 wire 路径契约测试（与 DaemonDirectoryCodec 共用同一 validator）。
- */
+/** {@link EnvironmentWorkspacePath} canonical 相对 wire 路径契约测试。 */
 class EnvironmentWorkspacePathTest {
 
   @Test

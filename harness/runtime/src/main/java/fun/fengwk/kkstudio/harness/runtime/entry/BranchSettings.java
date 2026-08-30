@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 
 import java.util.Objects;
 

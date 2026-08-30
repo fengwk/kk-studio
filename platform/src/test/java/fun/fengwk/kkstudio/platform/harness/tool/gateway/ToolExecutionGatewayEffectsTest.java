@@ -98,9 +98,9 @@ class ToolExecutionGatewayEffectsTest {
             ToolGateway.Started.class,
             fixture.gateway.start(fixture.execution("write"), fixture.listener));
     fixture.loadedAssistantId.set(null);
-    ToolGateway.Overloaded second =
+    ToolGateway.RetryLater second =
         assertInstanceOf(
-            ToolGateway.Overloaded.class,
+            ToolGateway.RetryLater.class,
             fixture.gateway.start(fixture.execution("write"), fixture.listener));
 
     assertTrue(fixture.listener.events.isEmpty());
@@ -275,7 +275,6 @@ class ToolExecutionGatewayEffectsTest {
             ToolGatewayTestSupport.ENVIRONMENT_ROOT,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,
-            ToolGatewayTestSupport.BUSY_RETRY_DELAY,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
             Clock.fixed(NOW, ZoneOffset.UTC),
             new ConcurrencyAdmission(Integer.MAX_VALUE));
@@ -365,7 +364,6 @@ class ToolExecutionGatewayEffectsTest {
             ToolGatewayTestSupport.ENVIRONMENT_ROOT,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,
-            ToolGatewayTestSupport.BUSY_RETRY_DELAY,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
             Clock.fixed(NOW, ZoneOffset.UTC),
             new ConcurrencyAdmission(Integer.MAX_VALUE));
@@ -464,7 +462,6 @@ class ToolExecutionGatewayEffectsTest {
             ToolGatewayTestSupport.ENVIRONMENT_ROOT,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,
-            ToolGatewayTestSupport.BUSY_RETRY_DELAY,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
             Clock.fixed(NOW, ZoneOffset.UTC),
             admission);

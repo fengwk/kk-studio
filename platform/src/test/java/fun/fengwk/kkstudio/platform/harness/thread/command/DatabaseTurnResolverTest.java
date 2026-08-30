@@ -22,6 +22,12 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
@@ -79,15 +85,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
@@ -383,7 +383,7 @@ class DatabaseTurnResolverTest {
 
   @Test
   void rejectsEnvironmentToolsWhenBranchHasNoEnvironment() {
-    // 分支没有环境路由时，ENVIRONMENT_CAPABILITY 工具无法绑定：确定性拒绝。
+    // 分支没有环境路由时，声明 environmentRequired 的工具无法绑定：确定性拒绝。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings(null, "default")));
     assertEquals(

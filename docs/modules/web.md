@@ -327,7 +327,7 @@ version source。建立上游时先注册 consumer 再读取 cursor；fan-out �
 1. 在 Spring WebSocket 和 native JSR-356 session 两侧设置 `max-message-bytes`；
 2. 创建 `SpringWebSocketConnection`和每连接 `DaemonOutboundSender`；
 3. 把 open/receive/close 委托给 Platform `EnvironmentDaemonEndpoint`；
-4. Gateway 只接受 v4 HELLO 及严格的 `capabilityCatalogVersion`，并负责校验 capability INVOKE payload；
+4. Gateway 只接受 protocol v5 HELLO 及严格的 `capabilityCatalogVersion`，并负责校验通用 capability INVOKE payload；
 5. Gateway 先解绑 registry、active invocation 和 pending request，再关闭 sender。
 
 `DaemonOutboundSender`使用 `ConcurrentWebSocketSessionDecorator`和每连接一个 virtual-thread sender。入队是非阻塞的，
@@ -342,7 +342,9 @@ send timeout，超时/异常会关闭入队围栏、通知 Gateway 进行 uncert
 ### HTTP async boundary：Environment directory
 
 `GET /api/ai/environments/{name}/directories?path=.`是 control-plane read-only 查询，不经过 Tool permission、不会
-创建 ToolInvocation、不会占用 Environment active tool slot，也不把绝对路径返回给浏览器。
+创建 ToolInvocation，也不把绝对路径返回给浏览器。它通过 `fs.list-directory` generic capability 执行，与 Tool/Skill
+共享该 Environment 的单一 active invocation slot；本节点不是 route owner 时经 PostgreSQL `environment_query` mailbox
+转发到 owner 节点。
 
 Controller 直接返回 `CompletionStage<ResponseEntity<Result<?>>>`：
 

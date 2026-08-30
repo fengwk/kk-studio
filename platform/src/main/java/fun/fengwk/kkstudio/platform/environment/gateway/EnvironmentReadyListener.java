@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment.gateway;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 
 /**
  * Environment daemon 连接的不可变 READY 桥。

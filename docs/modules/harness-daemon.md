@@ -2,7 +2,7 @@
 
 ## 定位
 
-Environment Daemon 是独立进程，负责固定 Environment root 内的 coding capabilities、MCP bridge、Skill discovery、目录浏览和当前 Daemon WebSocket wire。它只依赖 `harness-tool` 的 Environment Capability SPI/wire contract，不依赖 Runtime、Infra、Platform、Spring、数据库或 Model/Agent。
+Environment Daemon 是独立进程，负责固定 Environment root 内的 coding capabilities、MCP bridge、Skill discovery、目录浏览和 Daemon WebSocket protocol v5。它依赖 `harness-environment` 的 Capability SPI/wire contract，不依赖 Runtime、Infra、Platform、Spring、数据库或 Model/Agent。
 
 [`DaemonMain`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonMain.java) 是进程入口；[`DaemonRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java) 管理连接、journal、capability 执行、重连、超时和 shutdown。Daemon 的 invocation journal 是进程内 execution fact；WebSocket 只传递消息。
 
@@ -37,7 +37,7 @@ DaemonMain
        ├─ scheduler (1 thread)
        └─ taskExecutor (virtual-thread-per-task)
 
-Daemon -> harness-tool
+Daemon -> harness-environment -> harness-tool
 Daemon -/-> harness-runtime / harness-infra / platform / web
 ```
 
@@ -107,9 +107,9 @@ MCP 无论 server 是否配置都注册固定 `mcp.list` 和 `mcp.call`，保持
 
 ```text
 DISCONNECTED -> CONNECTING
-  -> HELLO(current protocol, daemonId, protocolVersion=4, gatewayToken, capabilityCatalogVersion)
+  -> HELLO(current protocol, daemonId, protocolVersion=5, gatewayToken, capabilityCatalogVersion)
   <- WELCOME(empty payload)
-  -> READY(capabilities version=4, environment + skills + MCP summaries)
+  -> READY(capabilities version=5, environment + skills + MCP summaries)
   -> READY + HEARTBEAT
 ```
 
@@ -118,9 +118,8 @@ DISCONNECTED -> CONNECTING
 Inbound：
 
 ```text
-INVOKE / CANCEL / LOAD_SKILL -> invocationId required
-LIST_DIRECTORY               -> invocationId absent, requestId in payload
-WELCOME / ACK / ERROR        -> handshake/control
+INVOKE / CANCEL           -> invocationId required
+WELCOME / ACK / ERROR     -> handshake/control
 ```
 
 scope 不匹配、未知 protocol/type、缺失/未知 payload 字段、duplicate/trailing 或非 object payload 都在 wire 边界拒绝。Environment name 冲突只认 `ENVIRONMENT_NAME_CONFLICT`，它使 runtime 进入 FAILED、停止重连并让进程非零退出；其它 ERROR 不改变 invocation journal。
@@ -160,13 +159,13 @@ Resource store 默认为 Environment root 下 `.kkstudio/resources` 的 content-
 
 ### Skills、MCP 与目录浏览
 
-[`DaemonSkillRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistry.java) 只从 CLI skill dirs 或默认 `~/.agents/skills` 发现 root/直接子目录 `SKILL.md`。同名、元数据非法、目录不存在或读取失败在启动期拒绝；READY 只返回 name/description，`LOAD_SKILL` 返回去除 front matter 的 body。
+[`DaemonSkillRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistry.java) 只从 CLI skill dirs 或默认 `~/.agents/skills` 发现 root/直接子目录 `SKILL.md`。同名、元数据非法、目录不存在或读取失败在启动期拒绝；READY 只返回 name/description，`skill.load` 返回去除 front matter 的 body。
 
 [`McpConfigParser`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpConfigParser.java) 只接受严格 UTF-8 JSON `{"servers":[...]}`；server name `[a-z][a-z0-9-]{0,63}`。STDIO 只允许 command/environment；streamable-http 只允许 http/https URL；websocket 只允许 ws/wss URL + headers。未知字段、重复 server、transport 不适用字段和非 canonical URL 直接拒绝。
 
 [`McpServerRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpServerRegistry.java) 为每个 server 独立初始化；单 server 失败记录 FAILED，不影响其它 server/coding/skills，启动后状态和 MCP tool specs 冻结；close 对成功 client 恰好一次。错误摘要单行最多 500 字符，并剔除 headers/environment values、command 和 URL。完整 schema 不进 READY wire，固定 bridge capability 按需返回。
 
-`LIST_DIRECTORY` 是 control plane，不进入 invocation journal 或 active capability slot；payload `requestId` 关联，单层列表最多 1000 项，稳定按名称排序，wire path 只使用 Environment root 下 canonical 相对路径，不回显 daemon 绝对路径。实现见 [`EnvironmentDirectoryBrowser`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/EnvironmentDirectoryBrowser.java) 和 [`DaemonDirectoryCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonDirectoryCodec.java)。
+目录浏览通过 generic capability `fs.list-directory` 执行；单层列表最多 1000 项，稳定按名称排序，wire path 只使用 Environment root 下 canonical 相对路径，不回显 daemon 绝对路径。实现见 [`EnvironmentDirectoryBrowser`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/EnvironmentDirectoryBrowser.java) 和 [`ListDirectoryCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ListDirectoryCapability.java)。
 
 ## 执行 / 状态 trace
 
@@ -177,7 +176,8 @@ sequenceDiagram
   participant J as InvocationJournal
   participant C as Local Capability
   G->>D: INVOKE(current protocol, invocationId, capabilityId, capabilityVersion, workspacePath, arguments, timeoutMillis)
-  D->>D: ACK + journal.start
+  D-->>G: ACK
+  D->>J: journal.start
   alt new invocation
     D->>D: canonicalWorkspace + descriptor/version + timeout
     D-->>G: STARTED
@@ -210,7 +210,7 @@ Daemon disconnect 后保留 journal 和 running execution 的进程内事实，�
 
 ## 配置 / 扩展
 
-- Environment Capability 通过 `harness-tool` 的 `EnvironmentCapability` SPI 和 `DaemonCapabilityRegistry`
+- Environment Capability 通过 `harness-environment` 的 `EnvironmentCapability` SPI 和 `DaemonCapabilityRegistry`
   注册，并与固定 Environment capability catalog descriptor/version 对齐。
 - Coding capabilities 的 executor、scheduler、ResourceStore 由 `DaemonRuntime` 注入；不得建立 static executor 或绕过 runtime 直接启动 virtual thread。
 - Skill 只能通过 CLI 本地目录加入；MCP 只能通过启动时 `--mcp-config` 加入，server state 在 `start()` 后冻结。
@@ -238,5 +238,5 @@ Daemon disconnect 后保留 journal 和 running execution 的进程内事实，�
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Tool](harness-tool.md)、
+上级：[系统设计](../system-design.md)。相关文档：[Harness Environment](harness-environment.md)、[Harness Tool](harness-tool.md)、
 [Harness Infra](harness-infra.md)、[Platform](platform.md)、[部署与运行](../operations/deployment.md)。

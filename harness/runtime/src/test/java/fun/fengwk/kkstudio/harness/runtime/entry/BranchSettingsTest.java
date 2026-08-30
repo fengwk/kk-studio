@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 /** Branch settings 的 immutable snapshot、Environment route identity 和 canonical name 规范化。 */
 class BranchSettingsTest {

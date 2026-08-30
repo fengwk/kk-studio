@@ -8,12 +8,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
@@ -49,9 +49,9 @@ public class HarnessToolGatewayConfiguration {
 
   /**
    * 生产 {@link ToolExecutionGateway}：与测试共用唯一构造器，本方法解析 {@link HarnessRuntimeProperties} 的
-   * workdir/environmentRoot 与 SystemSettings 的 resourceMaxBytes，并直接传两个 live suppliers——每次 Busy /
-   * Overloaded 判定从 SystemSettingsSnapshot 现读 {@code tool.toolGatewayBusyRetryMillis} / {@code
-   * tool.toolGatewayOverloadRetryMillis}。任何自定义 {@link ToolGateway} bean 都会抑制该默认实现。
+   * workdir/environmentRoot 与 SystemSettings 的 resourceMaxBytes，并直接传 live supplier——每次 RetryLater
+   * 判定从 SystemSettingsSnapshot 现读 {@code tool.toolGatewayOverloadRetryMillis}。任何自定义 {@link
+   * ToolGateway} bean 都会抑制该默认实现。
    */
   @Bean
   @ConditionalOnBean(ResourceStore.class)
@@ -83,7 +83,6 @@ public class HarnessToolGatewayConfiguration {
         properties.resolvedEnvironmentRoot(),
         resourceMaxBytes,
         toolGatewayExecutor,
-        () -> Duration.ofMillis(systemSettingsSnapshot.get().tool().toolGatewayBusyRetryMillis()),
         () ->
             Duration.ofMillis(systemSettingsSnapshot.get().tool().toolGatewayOverloadRetryMillis()),
         clock,

@@ -854,6 +854,7 @@ create table harness_work (
     wake_version bigint not null check (wake_version > 0),
     lease_token varchar(128),
     lease_until timestamptz(3),
+    required_environment_name varchar(64),
     primary key (target_type, target_id),
     constraint ck_harness_work_target_type check (
         target_type in ('THREAD', 'MODEL', 'TOOL')
@@ -864,6 +865,10 @@ create table harness_work (
     constraint ck_harness_work_lease_token check (
         lease_token is null
         or (length(lease_token) > 0 and btrim(lease_token) = lease_token)
+    ),
+    constraint ck_harness_work_required_environment check (
+        required_environment_name is null
+        or (target_type = 'TOOL' and length(required_environment_name) > 0 and btrim(required_environment_name) = required_environment_name)
     )
 );
 
@@ -874,6 +879,7 @@ comment on column harness_work.available_at is '最早可被 claim 的时间（�
 comment on column harness_work.wake_version is 'wake 计数（从 1 递增）';
 comment on column harness_work.lease_token is '当前 lease token（与 lease_until 同时存在或同时缺失）';
 comment on column harness_work.lease_until is '当前 lease 到期时间（毫秒精度）';
+comment on column harness_work.required_environment_name is '执行该 Work 所需的 live environment 名称（仅 TOOL 可非空；非空时仅持有该 environment 活跃租约的节点可 claim）';
 
 create index idx_harness_work_available
     on harness_work (available_at, target_type, target_id);

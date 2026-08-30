@@ -5,8 +5,8 @@
  * notification adapter 只提供 lossy live overlay。
  *
  * <p>{@link TurnResolver} 是同步、无副作用、事务外的解析端口；{@link ModelGateway} 与 {@link ToolGateway} 是 execution
- * admission / stream 端口，各自以 sealed 结果类型固定 admission certainty（Started / Busy / Rejected /
- * Indeterminate，Tool 另有 Overloaded），回调 duplicate / stale 由 Runtime fence。{@link RealtimeEventSink}
- * 保持现有 唯一 realtime 接口，不另造 event bus。
+ * admission / stream 端口。Model admission 固定为 Started / Busy / Rejected / Indeterminate，Tool
+ * admission 固定为 Started / RetryLater / Rejected / Indeterminate；回调 duplicate / stale 由 Runtime
+ * fence。{@link RealtimeEventSink} 保持现有唯一 realtime 接口，不另造 event bus。
  */
 package fun.fengwk.kkstudio.harness.runtime.port;

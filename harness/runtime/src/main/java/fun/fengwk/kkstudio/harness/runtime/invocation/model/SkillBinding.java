@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 
 /**
  * 冻结到一次 Model invocation 中的不可变 skill 事实。

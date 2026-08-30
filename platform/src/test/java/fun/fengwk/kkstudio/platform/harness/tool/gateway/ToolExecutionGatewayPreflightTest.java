@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -24,8 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -139,7 +139,6 @@ class ToolExecutionGatewayPreflightTest {
             ToolGatewayTestSupport.ENVIRONMENT_ROOT,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             new ToolGatewayTestSupport.DirectQueueExecutor(),
-            ToolGatewayTestSupport.BUSY_RETRY_DELAY,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
             ToolGatewayTestSupport.TEST_CLOCK,
             new ConcurrencyAdmission(Integer.MAX_VALUE));

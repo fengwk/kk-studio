@@ -77,19 +77,6 @@ final class PostgresqlHarnessStoreFixture {
           .validateMigrationNaming(true)
           .load()
           .migrate();
-      // test-local schema 假设：schema 切片将在 V1 增加 required_environment_name 与 live_environment。
-      statement.execute(
-          "alter table harness_work add column if not exists required_environment_name varchar(64)");
-      statement.execute(
-          """
-          create table if not exists live_environment (
-              environment_name varchar(64) not null,
-              node_instance_id uuid not null,
-              status varchar(32) not null,
-              lease_until timestamptz(3) not null,
-              primary key (environment_name)
-          )
-          """);
     } catch (SQLException error) {
       throw new IllegalStateException("cannot reset PostgreSQL Harness Store schema", error);
     }

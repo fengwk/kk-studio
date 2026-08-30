@@ -149,21 +149,13 @@ package_backend() {
 
 package_daemon() {
   local java_home=$1
-  step "Clean packaging daemon (Java 21, online by default; E2E_MAVEN_OFFLINE=true opts into offline, skipTests)"
-  (
-    cd "$REPO_ROOT"
-    run_maven "$java_home" -pl harness/daemon -am -DskipTests clean package
-  )
-}
-
-build_daemon_classpath() {
-  local java_home=$1
   mkdir -p "$WORK_DIR"
-  step "Building daemon runtime classpath"
+  step "Clean packaging daemon and building runtime classpath (Java 21, online by default; E2E_MAVEN_OFFLINE=true opts into offline, skipTests)"
   (
     cd "$REPO_ROOT"
-    run_maven "$java_home" -pl harness/daemon -q \
-      -DincludeScope=runtime dependency:build-classpath \
+    run_maven "$java_home" -pl harness/daemon -am -DskipTests clean package \
+      dependency:build-classpath \
+      -DincludeScope=runtime \
       -Dmdep.outputFile="$DAEMON_CP_FILE"
   )
   [ -s "$DAEMON_CP_FILE" ] || die "daemon classpath file empty: $DAEMON_CP_FILE"
@@ -231,7 +223,6 @@ start_daemon() {
   mkdir -p "$WORK_DIR" "$DAEMON_ENV_ROOT"
   kill_daemon
   package_daemon "$java_home"
-  build_daemon_classpath "$java_home"
   : >"$WORK_DIR/daemon.log"
   local cp
   # dependency:build-classpath may resolve a previously installed local harness-tool;
@@ -250,7 +241,8 @@ start_daemon() {
     >"$WORK_DIR/daemon.log" 2>&1 &
   echo $! >"$WORK_DIR/daemon.pid"
   local i env_status=""
-  for i in $(seq 1 60); do
+  # Disconnect retains the default 60s route grace lease; leave takeover headroom.
+  for i in $(seq 1 180); do
     env_status=$(curl -fsS "$BACKEND_URL/api/ai/environment" \
       | python3 -c 'import sys,json; d=json.load(sys.stdin); arr=d.get("data") or [];
 print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \

@@ -20,7 +20,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryLister;

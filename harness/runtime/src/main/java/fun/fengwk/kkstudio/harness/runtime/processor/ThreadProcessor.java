@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
@@ -60,7 +61,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Clock;
 import java.time.Duration;

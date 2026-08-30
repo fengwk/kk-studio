@@ -5,14 +5,14 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
 import java.util.Iterator;

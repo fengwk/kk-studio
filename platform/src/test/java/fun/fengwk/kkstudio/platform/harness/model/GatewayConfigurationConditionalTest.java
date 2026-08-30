@@ -67,7 +67,7 @@ class GatewayConfigurationConditionalTest {
 
                   @Override
                   public StartResult start(Execution execution, Listener listener) {
-                    return new ToolGateway.Busy(Duration.ofSeconds(1));
+                    return new ToolGateway.RetryLater(Duration.ofSeconds(1));
                   }
                 })
         .run(

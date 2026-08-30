@@ -18,6 +18,8 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -28,8 +30,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
@@ -474,7 +474,7 @@ class ToolExecutionGatewayStartTest {
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             new ToolGatewayTestSupport.RecordingListener());
-    ToolGateway.Overloaded overloaded = assertInstanceOf(ToolGateway.Overloaded.class, result);
+    ToolGateway.RetryLater overloaded = assertInstanceOf(ToolGateway.RetryLater.class, result);
     assertEquals(ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY.get(), overloaded.retryAfter());
     assertEquals(overloaded.retryAfter().toMillis(), overloaded.retryAfter().toNanos() / 1_000_000);
   }

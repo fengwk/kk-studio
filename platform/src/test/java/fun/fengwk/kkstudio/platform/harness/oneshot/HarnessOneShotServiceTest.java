@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -52,7 +53,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 

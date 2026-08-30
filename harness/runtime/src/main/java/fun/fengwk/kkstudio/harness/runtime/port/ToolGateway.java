@@ -15,7 +15,7 @@ import java.util.UUID;
  * <p>{@link #preflight} 是同步、无副作用、事务外的判定；异常表示本次判定没有产生执行副作用，Processor 可安全 reschedule。它只接收 frozen
  * {@link ToolInvocationRequest}，不感知 Thread YOLO——YOLO 短路由 Processor 在锁内读取 Thread 后自行决定，本端口 绝不查询
  * HarnessStore。{@link #start} 返回前不得同步调用任何 listener 回调；回调 duplicate / stale 由 Runtime fence，Gateway
- * 不保证 exactly-once。Tool 的 retry 决策（Busy / Overloaded 后何时重试）由 Processor 决定，不放 Gateway。
+ * 不保证 exactly-once。Tool 的 retry 决策（{@link RetryLater} 后何时重试）由 Processor 决定，不放 Gateway。
  *
  * <p>两阶段激活：{@link #start} 返回 {@link Started} 时不得打开任何回调 gate（同步回调只能缓冲），{@link Handle#activate} 由
  * Processor 在 attach handle + durable markRunning 之后、打开自身 listener 门之前调用，此时 Gateway 才允许打开回调 gate /
@@ -90,7 +90,7 @@ public interface ToolGateway {
     }
   }
 
-  /** 肯定未开始（如 Busy / Overloaded）；调用方按 {@code retryAfter} 重新 dispatch（attempt 不变）。 */
+  /** 肯定未开始；调用方按 {@code retryAfter} 重新 dispatch（attempt 不变）。 */
   record RetryLater(Duration retryAfter) implements StartResult {
     public RetryLater {
       retryAfter = HarnessStoreTime.requireWholeMillisecondDuration(retryAfter, "retryAfter");

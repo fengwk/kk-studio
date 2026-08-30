@@ -7,7 +7,7 @@ package fun.fengwk.kkstudio.harness.environment;
  * {@code '/'} 分隔（任何位置的反斜杠都拒绝），拒绝 Windows drive 前缀（{@code C:/x}、{@code C:x}）与 absolute（不得以 {@code
  * '/'} 开头）、无空段、无 {@code '.'}/{@code '..'} 段、无 ISO 控制字符。越界判定由 daemon 在 canonicalize 时完成。
  *
- * <p>{@link EnvironmentBinding} 与 {@code DaemonDirectoryCodec} 共用同一套规则，避免两套路径语义。
+ * <p>{@link EnvironmentBinding} 与目录浏览等 Capability 共用同一套规则，避免两套路径语义。
  */
 public final class EnvironmentWorkspacePath {
 

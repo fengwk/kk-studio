@@ -11,6 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
@@ -32,10 +36,6 @@ import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCancelledException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityFailedException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilitySendUncertainException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityUnavailableException;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -52,8 +52,8 @@ import java.util.function.Consumer;
 /**
  * {@link ToolExecutionGateway} 回调桥：partial / terminal / error / cancel 语义与 managed Resource 外部化。
  *
- * <p>HOST 路径由 FakeTool 的 handler 在 execute 内同步投递回调（gate 已打开，直达 listener）；ENVIRONMENT_CAPABILITY
- * 路径由测试直接驱动 FakeTransport 记录的 listener。
+ * <p>本地 Tool 路径由 FakeTool 的 handler 在 execute 内同步投递回调（gate 已打开，直达 listener）；Environment 绑定路径由测试直接驱动
+ * FakeTransport 记录的 listener。
  */
 class ToolExecutionGatewayCallbackTest {
 

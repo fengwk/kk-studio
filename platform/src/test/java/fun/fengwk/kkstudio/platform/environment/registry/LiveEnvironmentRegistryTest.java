@@ -12,10 +12,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 
 import java.sql.Connection;

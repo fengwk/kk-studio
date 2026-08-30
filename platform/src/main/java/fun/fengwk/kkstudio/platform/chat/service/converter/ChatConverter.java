@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.chat.service.converter;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.platform.chat.service.ChatIds;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;

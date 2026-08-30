@@ -18,6 +18,19 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
@@ -39,23 +52,10 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityBusyException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCancelledException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityFailedException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilitySendUncertainException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityTransport;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 
@@ -122,8 +122,7 @@ public final class ToolExecutionGateway implements ToolGateway {
   private final Path workdir;
   private final Path environmentRoot;
   private final ExecutorService executor;
-  private final Supplier<Duration> busyRetryDelay;
-  private final Supplier<Duration> overloadRetryDelay;
+  private final Supplier<Duration> retryDelay;
   private final Clock clock;
   private final ConcurrencyAdmission admission;
 
@@ -138,8 +137,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       Path environmentRoot,
       int resourceMaxBytes,
       ExecutorService executor,
-      Supplier<Duration> busyRetryDelay,
-      Supplier<Duration> overloadRetryDelay,
+      Supplier<Duration> retryDelay,
       Clock clock,
       ConcurrencyAdmission admission) {
     this.catalog = Objects.requireNonNull(catalog, "catalog");
@@ -156,8 +154,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     this.environmentRoot =
         Objects.requireNonNull(environmentRoot, "environmentRoot").toAbsolutePath().normalize();
     this.executor = Objects.requireNonNull(executor, "executor");
-    this.busyRetryDelay = Objects.requireNonNull(busyRetryDelay, "busyRetryDelay");
-    this.overloadRetryDelay = Objects.requireNonNull(overloadRetryDelay, "overloadRetryDelay");
+    this.retryDelay = Objects.requireNonNull(retryDelay, "retryDelay");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.admission = Objects.requireNonNull(admission, "admission");
     rejectUnsafeExecutorPolicies(executor);
@@ -274,7 +271,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     Objects.requireNonNull(listener, "listener");
     Optional<ConcurrencyAdmission.Lease> acquired = admission.tryAcquire();
     if (acquired.isEmpty()) {
-      return new ToolGateway.Overloaded(overloadRetryDelay.get());
+      return new ToolGateway.RetryLater(retryDelay.get());
     }
     ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
     try {
@@ -324,9 +321,14 @@ public final class ToolExecutionGateway implements ToolGateway {
               clock.instant(),
               branch,
               Optional.ofNullable(boundEnvironment));
+      Path executionWorkdir = permissionWorkdir(execution.request());
       ToolExecutionRequest toolRequest =
           new ToolExecutionRequest(
-              currentDescriptor, execution.request().call(), Duration.ZERO, context);
+              currentDescriptor,
+              execution.request().call(),
+              Duration.ZERO,
+              context,
+              executionWorkdir);
 
       GatedToolExecutionListener bridge =
           new GatedToolExecutionListener(
@@ -396,7 +398,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       log.warn(
           "tool gateway executor rejected local execution for invocation {}",
           execution.invocationId());
-      return new ToolGateway.Overloaded(overloadRetryDelay.get());
+      return new ToolGateway.RetryLater(retryDelay.get());
     } catch (RuntimeException ambiguous) {
       bridge.cancel();
       log.warn(

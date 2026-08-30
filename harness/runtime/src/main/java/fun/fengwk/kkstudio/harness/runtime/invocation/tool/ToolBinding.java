@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
 import java.util.Objects;

@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.chat.service.model;
 
 import lombok.Data;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 
 import java.time.Instant;
 import java.util.UUID;

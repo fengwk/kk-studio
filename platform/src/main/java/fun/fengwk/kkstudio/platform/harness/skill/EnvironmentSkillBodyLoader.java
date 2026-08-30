@@ -4,7 +4,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.builtin.skill.SkillBodyLoader;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentSkillLoader;
 

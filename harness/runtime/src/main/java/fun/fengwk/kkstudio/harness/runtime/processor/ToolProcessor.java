@@ -658,8 +658,8 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * admission 肯定未开始（Busy / Overloaded / 异常）：DISPATCHING -&gt; READY + version+1 + 按延迟 reschedule
-   * TOOL Work（attempt 不变）。
+   * admission 肯定未开始（RetryLater / 异常）：DISPATCHING -&gt; READY + version+1 + 按延迟 reschedule TOOL
+   * Work（attempt 不变）。
    */
   private boolean bounceDispatch(ClaimedWork claim, Prepare.Dispatched dispatched, Duration delay) {
     Instant now = clock.instant();

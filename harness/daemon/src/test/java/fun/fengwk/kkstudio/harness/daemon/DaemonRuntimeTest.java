@@ -817,6 +817,23 @@ class DaemonRuntimeTest {
       assertTrue(json.contains("\"displayPath\":\".\""));
       assertTrue(json.contains("\"path\":\"docs\""));
       assertTrue(json.contains("\"path\":\"src\""));
+
+      // generic capability failure 仍需保留稳定分类线索，且不得回显 daemon 绝对路径。
+      transport.receive(
+          invoke(
+              "list-missing",
+              2,
+              EnvironmentCapabilityIds.FS_LIST_DIRECTORY,
+              "1",
+              ".",
+              "{\"path\":\"missing\"}"));
+      messages = transport.takeMessages(3);
+      assertMessageTypes(messages, ACK, STARTED, COMPLETED);
+      result = resultCodec.decodeResult(messages.get(2).payloadJson());
+      assertTrue(result.error());
+      String error = ((TextToolContent) result.contents().get(0)).text();
+      assertEquals("Error: directory does not exist: missing", error);
+      assertFalse(error.contains(envRoot.toString()));
     } finally {
       deleteRecursively(envRoot);
     }

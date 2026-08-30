@@ -25,21 +25,21 @@ class WebModuleArchitectureTest {
   private static final String HARNESS_INFRA_PREFIX = "fun.fengwk.kkstudio.harness.infra.";
   private static final String HARNESS_CONTRIBUTOR_API_PREFIX =
       "fun.fengwk.kkstudio.harness.contributor.api.";
+  private static final String HARNESS_ENVIRONMENT_PREFIX =
+      "fun.fengwk.kkstudio.harness.environment.";
   private static final String HARNESS_TOOL_PREFIX = "fun.fengwk.kkstudio.harness.tool.";
   private static final String PLATFORM_ENVIRONMENT_PREFIX =
       "fun.fengwk.kkstudio.platform.environment.";
   private static final List<String> ALLOWED_HARNESS_PACKAGE_PREFIXES =
-      List.of(HARNESS_RUNTIME_PREFIX, HARNESS_INFRA_PREFIX, HARNESS_CONTRIBUTOR_API_PREFIX);
-
-  /**
-   * Web mapper 直接使用的 canonical tool types (EnvironmentBinding, EnvironmentName,
-   * ToolResultJsonCodec).
-   */
-  private static final List<String> ALLOWED_HARNESS_TOOL_IMPORTS =
       List.of(
-          HARNESS_TOOL_PREFIX + "EnvironmentBinding",
-          HARNESS_TOOL_PREFIX + "EnvironmentName",
-          HARNESS_TOOL_PREFIX + "codec." + "ToolResultJsonCodec");
+          HARNESS_RUNTIME_PREFIX,
+          HARNESS_INFRA_PREFIX,
+          HARNESS_CONTRIBUTOR_API_PREFIX,
+          HARNESS_ENVIRONMENT_PREFIX);
+
+  /** Web mapper 直接使用的 canonical tool types (ToolResultJsonCodec). */
+  private static final List<String> ALLOWED_HARNESS_TOOL_IMPORTS =
+      List.of(HARNESS_TOOL_PREFIX + "codec." + "ToolResultJsonCodec");
 
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
@@ -65,6 +65,7 @@ class WebModuleArchitectureTest {
           "kk-studio-platform",
           "kk-studio-canvas-infra",
           "kk-studio-harness-infra",
+          "kk-studio-harness-environment",
           "kk-studio-harness-contributor-api");
 
   @Test

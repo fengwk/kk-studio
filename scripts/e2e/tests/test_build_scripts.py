@@ -53,15 +53,16 @@ class TestBuildScripts(unittest.TestCase):
         """All E2E Maven rebuild paths must share one explicit offline switch."""
         result, default_calls = self.run_e2e_maven("unset")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertEqual(3, len(default_calls))
+        self.assertEqual(2, len(default_calls))
         self.assertTrue(all("-o" not in call.split() for call in default_calls))
         self.assertIn("-pl web", default_calls[0])
         self.assertIn("-pl harness/daemon", default_calls[1])
-        self.assertIn("dependency:build-classpath", default_calls[2])
+        self.assertIn("-am", default_calls[1].split())
+        self.assertIn("dependency:build-classpath", default_calls[1])
 
         result, offline_calls = self.run_e2e_maven("true")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertEqual(3, len(offline_calls))
+        self.assertEqual(2, len(offline_calls))
         self.assertTrue(all("-o" in call.split() for call in offline_calls))
 
     def test_e2e_maven_rejects_ambiguous_offline_values(self):
@@ -165,7 +166,7 @@ class TestBuildScripts(unittest.TestCase):
 
     @staticmethod
     def run_e2e_maven(offline):
-        """Run the three E2E Maven paths against a recorder fixture."""
+        """Run the two E2E Maven paths against a recorder fixture."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             bin_dir = root / "bin"
@@ -202,8 +203,7 @@ done
                     (
                         "source scripts/e2e/lib.sh\n"
                         "package_backend /fake/jdk\n"
-                        "package_daemon /fake/jdk\n"
-                        "build_daemon_classpath /fake/jdk"
+                        "package_daemon /fake/jdk"
                     ),
                 ],
                 cwd=REPOSITORY_ROOT,

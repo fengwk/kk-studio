@@ -6,9 +6,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;

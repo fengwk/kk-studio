@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 /** SkillBinding 的 canonical 元数据以及 nullable 的来源 environment。 */
 class SkillBindingTest {

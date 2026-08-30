@@ -10,11 +10,11 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 
 import java.time.Duration;

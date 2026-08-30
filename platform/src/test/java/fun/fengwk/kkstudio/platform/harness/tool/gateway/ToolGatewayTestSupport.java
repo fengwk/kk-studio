@@ -17,6 +17,15 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -34,7 +43,6 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -42,14 +50,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityBusyException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilitySendUncertainException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityTransport;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
@@ -270,7 +270,6 @@ final class ToolGatewayTestSupport {
         ENVIRONMENT_ROOT,
         resourceMaxBytes,
         executor,
-        BUSY_RETRY_DELAY,
         OVERLOAD_RETRY_DELAY,
         TEST_CLOCK,
         admission);
@@ -295,7 +294,6 @@ final class ToolGatewayTestSupport {
         environmentRoot,
         RESOURCE_MAX_BYTES,
         executor,
-        BUSY_RETRY_DELAY,
         OVERLOAD_RETRY_DELAY,
         TEST_CLOCK,
         new ConcurrencyAdmission(Integer.MAX_VALUE));
@@ -319,7 +317,6 @@ final class ToolGatewayTestSupport {
         properties.resolvedEnvironmentRoot(),
         RESOURCE_MAX_BYTES,
         executor,
-        BUSY_RETRY_DELAY,
         OVERLOAD_RETRY_DELAY,
         TEST_CLOCK,
         new ConcurrencyAdmission(Integer.MAX_VALUE));

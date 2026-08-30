@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.platform.environment.registry;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 
 import java.time.Duration;
 import java.time.Instant;

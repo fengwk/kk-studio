@@ -39,10 +39,10 @@ infra / platform / web composition root
                  │ RealtimeSink    │
                  └────────┬────────┘
                           ▼
-                    harness-tool
+          harness-prompt / harness-tool / harness-environment
 ```
 
-主源码依赖 `harness-tool`、Jackson、SLF4J；JGit 只由 permission path matcher 所在实现使用。POM 与架构约束见 [`pom.xml`](../../harness/runtime/pom.xml) 和 [`RuntimeModuleArchitectureTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/RuntimeModuleArchitectureTest.java)。Runtime 不得依赖具体 contributor 实现、infra、daemon、platform 或 web。
+主源码依赖 `harness-prompt`、`harness-tool`、`harness-environment`、Jackson、SLF4J；JGit 只由 permission path matcher 所在实现使用。POM 与架构约束见 [`pom.xml`](../../harness/runtime/pom.xml) 和 [`RuntimeModuleArchitectureTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/RuntimeModuleArchitectureTest.java)。Runtime 不得依赖具体 contributor 实现、infra、daemon、platform 或 web。
 
 ## 核心模型 / API
 
@@ -111,7 +111,7 @@ cacheControl
 
 完整 history、Provider tools、顶层 Environment、YOLO、contextWindow、credential、endpoint 和 compaction transient metadata 不复制进 spec。[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 从 immutable EntryPath + spec 纯投影内存 ProviderRequest；普通请求只投影 MESSAGE、CUSTOM_MESSAGE、ASSISTANT_ABORTED 和 complete summary，compaction 请求只生成 summarization SYSTEM + USER 且无 tools。
 
-`ToolInvocation` 保存冻结 `ToolCall`、完整 `ToolBinding`（`AgentToolDefinition` + Contributor provenance + 可选 Environment binding）、assistant Entry、ordinal、approval、result、effects 和 error。`ToolBinding` 包含 `definition`（`AgentToolDefinition`，其 backend 枚举确切为 `HOST`、`DECLARATIVE`、`ENVIRONMENT_CAPABILITY`）、`contributor`（`ContributorBinding(contributorId, localName, stateAccesses)`）和可选 `environment`（`EnvironmentBinding`）。`CUSTOM` Entry payload 保存 `(contributorId, customType, schemaVersion, dataJson)`；`CUSTOM_MESSAGE` Entry payload 保存 `(contributorId, customType, rendererKey, message, detailsJson)`。状态为：
+`ToolInvocation` 保存冻结 `ToolCall`、完整 `ToolBinding`（`AgentToolDefinition` + Contributor provenance + requirements + 可选 Environment binding）、assistant Entry、ordinal、approval、result、effects 和 error。`ToolBinding` 包含 `definition`、`contributor`（`ContributorBinding(contributorId, localName, stateAccesses)`）、`environmentRequired` 和可选 `EnvironmentBinding`；当且仅当 environmentRequired 为 true 时 binding 必须存在。`CUSTOM` Entry payload 保存 `(contributorId, customType, schemaVersion, dataJson)`；`CUSTOM_MESSAGE` Entry payload 保存 `(contributorId, customType, rendererKey, message, detailsJson)`。状态为：
 
 ```text
 WAITING_APPROVAL -> READY -> DISPATCHING -> RUNNING
@@ -155,7 +155,7 @@ IDLE/continuation 不暴露 invocation；Model context 暴露 Model 和未物化
 
 - [`TurnResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/TurnResolver.java)：同步、无副作用、事务外；输入 candidate EntryPath，输出冻结 spec/context window/output budget 或 deterministic `Rejected`。异常代表临时基础设施失败，ThreadProcessor reschedule。
 - [`ModelGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ModelGateway.java)：`Started`、`Busy`、`Rejected`、`Indeterminate`；Started 使用两阶段 `start` → durable RUNNING → `Handle.activate`，回调由 Runtime fence。
-- [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java)：先 `preflight` 得到 Allow/Ask/Deny，再 `start` 得到 Started/Busy/Overloaded/Rejected/Indeterminate；YOLO 由 ToolProcessor 在锁内短路，不由 gateway 查询 Store。
+- [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java)：先 `preflight` 得到 Allow/Ask/Deny，再 `start` 得到 Started/RetryLater/Rejected/Indeterminate；YOLO 由 ToolProcessor 在锁内短路，不由 gateway 查询 Store。
 - Provider adapter 只使用 Runtime 的 [`ProviderRequest`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderRequest.java)、[`ProviderResponse`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderResponse.java) 和 `ProviderStreamEvent`，SDK 类型留在 Platform。
 - [`ToolResultHistoryMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolResultHistoryMaterializer.java) 在 Tool outcome Entry 插入前把 Resource 物化为 durable blob-backed message；缺少该 port 时 Resource result fail closed。
 - [`RealtimeEventSink`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/RealtimeEventSink.java) 只发布有损 `MODEL_DELTA`/`TOOL_PARTIAL` overlay，sink 失败不改变 durable terminal。
@@ -231,7 +231,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 
 `decideToolApproval` 只接受当前 `ToolActive` context 内 `WAITING_APPROVAL` invocation。`ALLOWED` → READY + TOOL Work，`DENIED` → FAILED + THREAD Work；相同 `decisionId` 与 payload 精确 replay，不 bump version。权限规则由 [`PermissionEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluator.java) 产生 Allow/Ask/Deny 候选，`ToolSettings.permission` 的 key 是精确 `*` 全局 wildcard 或 canonical `AgentToolId`，先应用全局规则再应用 tool id 规则，数组顺序保持为求值顺序；真实文件/symlink/执行边界不在 Runtime permission 包。
 
-[`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 是内部 HOST Tool，不新增状态机或表。它验证父 ModelInvocation frozen `subagentBindings`，用 `HarnessRuntime.acceptCommands(NEW_SESSION, SubagentContext)` 创建普通 durable child Thread；`session_id` resume 要求同 parent/root 且 child quiescent。观察通过 `HarnessThreadChangeSource` 的 version/resync wake 和 [`ChangeGate`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ChangeGate.java)，不固定读取 snapshot；`SubagentRunRegistry` 只 relay descendant status，并在 reservation 中拒绝超出 parent/tree concurrency 的调用。`maxTurns` 是软提醒，idle timeout 会取消 child 但保留 Session。
+[`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 是内部 Tool，不新增状态机或表。它验证父 ModelInvocation frozen `subagentBindings`，用 `HarnessRuntime.acceptCommands(NEW_SESSION, SubagentContext)` 创建普通 durable child Thread；`session_id` resume 要求同 parent/root 且 child quiescent。观察通过 `HarnessThreadChangeSource` 的 version/resync wake 和 [`ChangeGate`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ChangeGate.java)，不固定读取 snapshot；`SubagentRunRegistry` 只 relay descendant status，并在 reservation 中拒绝超出 parent/tree concurrency 的调用。`maxTurns` 是软提醒，idle timeout 会取消 child 但保留 Session。
 
 ## 不变量、failure / recovery
 
@@ -239,7 +239,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 - Runtime 所有多实体事务遵守 `Session -> Thread -> Commands -> Model -> Tool siblings -> Work`；claim final fence 最后执行，失败时低序 mutation 整体回滚。
 - `ThreadState.version`、command sequence、Entry createdAt、Invocation attempt/checkpoint 和 Work wakeVersion 都不能回退；terminal result/error/effects 不可变。
 - lost/stale claim、过期 lease、重复 callback、重复提交和重复 approval 是正常竞态：返回 no-op / `LOST_OWNERSHIP` / exact replay，不取消合法的新 execution。
-- Provider/Tool admission 的 `Busy`/`Overloaded` 证明未开始，可 reschedule；`Rejected` 确定性失败；`Indeterminate` 可能已开始，必须收敛 `UNKNOWN`，不重放潜在副作用。
+- Model admission 的 `Busy` 与 Tool admission 的 `RetryLater` 证明未开始，可 reschedule；`Rejected` 确定性失败；`Indeterminate` 可能已开始，必须收敛 `UNKNOWN`，不重放潜在副作用。
 - retry 只重放 frozen request；`NON_IDEMPOTENT` Tool 不因字符串错误自动重放。
 - Realtime 丢失、超限或损坏只要求重新读取 durable snapshot；Entry、Invocation、Thread 和 Work 恢复不读取 realtime。
 - Tool Resource materialization 任一步失败会回滚整个 outcome Entry transaction；瞬时 URI 不进入 durable Session message。
@@ -275,5 +275,5 @@ TURN_START(reason=COMPACTION, CompactionStart)
 ---
 
 上级：[系统设计](../system-design.md)。相关文档：[Harness Infra](harness-infra.md)、
-[Harness Tool](harness-tool.md)、[Harness Builtin](harness-builtin.md)、[Harness Contributor API](harness-contributor-api.md)、
+[Harness Tool](harness-tool.md)、[Harness Environment](harness-environment.md)、[Harness Builtin](harness-builtin.md)、[Harness Contributor API](harness-contributor-api.md)、
 [Platform](platform.md)。
