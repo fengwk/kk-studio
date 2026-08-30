@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
@@ -101,7 +101,7 @@ class RealtimeEventTest {
   void toolPartialExposesIdentityAndRejectsInvalidValues() {
     Instant now = Instant.parse("2026-07-23T00:00:00Z");
     ToolResult partial =
-        new ToolResult("call-1", List.of(new TextToolContent("partial")), false, "{}");
+        new ToolResult("call-1", List.of(new TextResultContent("partial")), false, "{}");
     RealtimeEvent.ToolPartial event =
         new RealtimeEvent.ToolPartial(
             UUID.fromString("00000000-0000-0000-0000-000000000001"),

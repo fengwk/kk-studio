@@ -36,7 +36,7 @@ class RuntimeModuleArchitectureTest {
           "javax.",
           "lombok.",
           "com.fasterxml.jackson.",
-          "fun.fengwk.kkstudio.harness.prompt.",
+          "fun.fengwk.kkstudio.harness.common.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.tool.",
           "fun.fengwk.kkstudio.harness.environment.",
@@ -82,7 +82,7 @@ class RuntimeModuleArchitectureTest {
     Path harnessRoot = moduleRoot.getParent();
     assertHarnessModules(harnessRoot.resolve("pom.xml"));
     assertManagedInternalDependency(
-        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-prompt");
+        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-common");
     assertManagedInternalDependency(
         harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-contributor-api");
     assertManagedInternalDependency(
@@ -91,19 +91,24 @@ class RuntimeModuleArchitectureTest {
         harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-infra");
     assertManagedInternalDependency(
         harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-environment");
-    assertDirectProductionDependencies(harnessRoot.resolve("prompt/pom.xml"), Set.of());
     assertDirectProductionDependencies(
-        harnessRoot.resolve("tool/pom.xml"), Set.of("com.fasterxml.jackson.core:jackson-databind"));
+        harnessRoot.resolve("common/pom.xml"),
+        Set.of("com.fasterxml.jackson.core:jackson-databind"));
+    assertDirectProductionDependencies(
+        harnessRoot.resolve("tool/pom.xml"),
+        Set.of(
+            "com.fasterxml.jackson.core:jackson-databind",
+            "fun.fengwk.kk-studio:kk-studio-harness-common"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("environment/pom.xml"),
         Set.of(
             "com.fasterxml.jackson.core:jackson-databind",
-            "fun.fengwk.kk-studio:kk-studio-harness-tool"));
+            "fun.fengwk.kk-studio:kk-studio-harness-common"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("runtime/pom.xml"),
         Set.of(
             "com.fasterxml.jackson.core:jackson-databind",
-            "fun.fengwk.kk-studio:kk-studio-harness-prompt",
+            "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
             "org.eclipse.jgit:org.eclipse.jgit",
@@ -125,6 +130,7 @@ class RuntimeModuleArchitectureTest {
     assertDirectProductionDependencies(
         harnessRoot.resolve("infra/pom.xml"),
         Set.of(
+            "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-runtime",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
@@ -204,7 +210,7 @@ class RuntimeModuleArchitectureTest {
     assertTrue(
         modules.equals(
             List.of(
-                "prompt",
+                "common",
                 "tool",
                 "environment",
                 "runtime",
@@ -213,7 +219,7 @@ class RuntimeModuleArchitectureTest {
                 "infra",
                 "daemon")),
         () ->
-            "harness modules must be exactly prompt/tool/environment/runtime/contributor-api/builtin/infra/daemon, got "
+            "harness modules must be exactly common/tool/environment/runtime/contributor-api/builtin/infra/daemon, got "
                 + modules);
   }
 

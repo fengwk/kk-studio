@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -59,13 +61,11 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
@@ -457,7 +457,7 @@ final class HarnessRuntimeTestSupport {
           ToolInvocation updated =
               tool.succeed(
                   new ToolResult(
-                      tool.call().id(), List.of(new TextToolContent("real result")), false, "{}"),
+                      tool.call().id(), List.of(new TextResultContent("real result")), false, "{}"),
                   effects,
                   T3);
           tx.updateToolInvocations(List.of(updated));
@@ -1007,7 +1007,7 @@ final class HarnessRuntimeTestSupport {
         "1.0",
         "description of " + name,
         name,
-        new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+        new InputSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
   }

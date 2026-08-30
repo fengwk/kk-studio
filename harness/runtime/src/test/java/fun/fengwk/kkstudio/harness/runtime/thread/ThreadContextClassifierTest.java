@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -51,13 +53,11 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -795,7 +795,7 @@ class ThreadContextClassifierTest {
         status == ToolInvocationStatus.READY || status == ToolInvocationStatus.FAILED ? 0 : 1;
     ToolResult result =
         status == ToolInvocationStatus.SUCCEEDED
-            ? new ToolResult(callId, List.of(new TextToolContent("tool ok")), false, "{}")
+            ? new ToolResult(callId, List.of(new TextResultContent("tool ok")), false, "{}")
             : null;
     ToolInvocationError error =
         status == ToolInvocationStatus.FAILED ? new ToolInvocationError("FAILED", "boom") : null;
@@ -854,7 +854,7 @@ class ThreadContextClassifierTest {
                 "1.0",
                 "description of bash",
                 "bash",
-                new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+                new InputSchema("arguments", Map.of(), Set.of(), false),
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),

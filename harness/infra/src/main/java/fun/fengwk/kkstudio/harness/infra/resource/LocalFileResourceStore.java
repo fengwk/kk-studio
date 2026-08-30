@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.infra.resource;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.io.IOException;
 import java.net.URI;

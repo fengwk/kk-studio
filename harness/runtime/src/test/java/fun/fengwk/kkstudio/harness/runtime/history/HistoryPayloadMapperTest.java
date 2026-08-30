@@ -9,6 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -32,17 +38,11 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -181,7 +181,7 @@ class HistoryPayloadMapperTest {
         succeededInvocation(
             new ToolResult(
                 "call-1",
-                List.of(new TextToolContent("plain"), new JsonToolContent("{\"a\":1}")),
+                List.of(new TextResultContent("plain"), new JsonResultContent("{\"a\":1}")),
                 false,
                 "{}"));
     MessagePayload payload = MAPPER.toolResultPayload(invocation);
@@ -215,7 +215,7 @@ class HistoryPayloadMapperTest {
         succeededInvocation(
             new ToolResult(
                 "call-1",
-                List.of(new ResourceToolContent(resource, "complete preview")),
+                List.of(new ResourceResultContent(resource, "complete preview")),
                 false,
                 "{}"));
     // 无物化端口时 Resource 引用 fail-closed：瞬时 URI / ResourceStore 引用绝不进入持久化 message。
@@ -226,7 +226,7 @@ class HistoryPayloadMapperTest {
   void toolResultPayloadSucceededUsesMaterializedContents() {
     ToolInvocation invocation =
         succeededInvocation(
-            new ToolResult("call-1", List.of(new TextToolContent("")), false, "{}"));
+            new ToolResult("call-1", List.of(new TextResultContent("")), false, "{}"));
     MessagePayload payload =
         MAPPER.toolResultPayload(
             invocation,
@@ -244,7 +244,7 @@ class HistoryPayloadMapperTest {
   void toolResultPayloadSucceededWithUnmappableContentFallsBackToEmptyText() {
     ToolInvocation invocation =
         succeededInvocation(
-            new ToolResult("call-1", List.of(new TextToolContent("")), false, "{}"));
+            new ToolResult("call-1", List.of(new TextResultContent("")), false, "{}"));
     MessagePayload payload = MAPPER.toolResultPayload(invocation);
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
@@ -295,7 +295,7 @@ class HistoryPayloadMapperTest {
   void toolResultPayloadSucceededPreservesResultErrorFlag() {
     ToolInvocation invocation =
         succeededInvocation(
-            new ToolResult("call-1", List.of(new TextToolContent("boom")), true, "{}"));
+            new ToolResult("call-1", List.of(new TextResultContent("boom")), true, "{}"));
     MessagePayload payload = MAPPER.toolResultPayload(invocation);
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
@@ -309,7 +309,7 @@ class HistoryPayloadMapperTest {
         succeededInvocation(
             new ToolResult(
                 "call-1",
-                List.of(new BinaryToolContent("application/octet-stream", new byte[] {1, 2})),
+                List.of(new BinaryResultContent("application/octet-stream", new byte[] {1, 2})),
                 false,
                 "{}"));
     assertThrows(IllegalArgumentException.class, () -> MAPPER.toolResultPayload(invocation));
@@ -438,7 +438,7 @@ class HistoryPayloadMapperTest {
         "1.0",
         "desc",
         name.equals("bash") ? "shell-command" : name,
-        new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+        new InputSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
   }

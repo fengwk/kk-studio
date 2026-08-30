@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static org.junit.jupiter.api.Assertions.fail;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
@@ -68,13 +70,11 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
@@ -1006,7 +1006,7 @@ final class ThreadProcessorTestSupport {
   }
 
   static ToolResult successToolResult(String callId) {
-    return new ToolResult(callId, List.of(new TextToolContent("tool ok")), false, "{}");
+    return new ToolResult(callId, List.of(new TextResultContent("tool ok")), false, "{}");
   }
 
   static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
@@ -1083,7 +1083,7 @@ final class ThreadProcessorTestSupport {
         "1.0",
         "description of " + name,
         name,
-        new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+        new InputSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
   }

@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
+import fun.fengwk.kkstudio.harness.common.schema.InputValidator;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsValidator;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -504,7 +504,7 @@ public record ToolInvocation(
     }
     if (status != ToolInvocationStatus.FAILED || attempt != 0) {
       try {
-        ToolArgumentsValidator.validate(call.argumentsJson(), binding.descriptor().inputSchema());
+        InputValidator.validate(call.argumentsJson(), binding.descriptor().inputSchema());
       } catch (IllegalArgumentException schemaFailure) {
         throw new IllegalArgumentException(
             "call arguments must conform to the binding tool schema", schemaFailure);

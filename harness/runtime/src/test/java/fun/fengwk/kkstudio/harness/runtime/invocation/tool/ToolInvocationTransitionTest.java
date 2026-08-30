@@ -12,9 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
@@ -512,7 +512,7 @@ class ToolInvocationTransitionTest {
             succeeded.status(),
             succeeded.attempt(),
             succeeded.approval(),
-            new ToolResult(CALL_ID, List.of(new TextToolContent("different")), false, "{}"),
+            new ToolResult(CALL_ID, List.of(new TextResultContent("different")), false, "{}"),
             succeeded.error(),
             succeeded.createdAt(),
             T1);

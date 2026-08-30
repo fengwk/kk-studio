@@ -23,6 +23,7 @@ class InfraModuleArchitectureTest {
   private static final String PACKAGE_PREFIX = "package fun.fengwk.kkstudio.harness.infra";
   private static final Set<String> PRODUCTION_DEPENDENCIES =
       Set.of(
+          "fun.fengwk.kk-studio:kk-studio-harness-common",
           "fun.fengwk.kk-studio:kk-studio-harness-runtime",
           "fun.fengwk.kk-studio:kk-studio-harness-tool",
           "fun.fengwk.kk-studio:kk-studio-harness-environment",
@@ -33,6 +34,7 @@ class InfraModuleArchitectureTest {
           "com.fasterxml.jackson.",
           "java.",
           "javax.",
+          "fun.fengwk.kkstudio.harness.common.",
           "fun.fengwk.kkstudio.harness.infra.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.tool.",

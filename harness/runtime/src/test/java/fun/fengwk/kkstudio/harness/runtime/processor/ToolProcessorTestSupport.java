@@ -2,6 +2,9 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static org.junit.jupiter.api.Assertions.fail;
 
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -52,14 +55,11 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -426,10 +426,10 @@ final class ToolProcessorTestSupport {
   }
 
   static ToolResult partialResult(String toolCallId) {
-    return new ToolResult(toolCallId, List.of(new TextToolContent("partial")), false, "{}");
+    return new ToolResult(toolCallId, List.of(new TextResultContent("partial")), false, "{}");
   }
 
-  static ToolResult successResult(String toolCallId, ToolContent... contents) {
+  static ToolResult successResult(String toolCallId, ResultContent... contents) {
     return new ToolResult(toolCallId, List.of(contents), false, "{}");
   }
 
@@ -448,7 +448,7 @@ final class ToolProcessorTestSupport {
         "1.0",
         "description of bash",
         "bash",
-        new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+        new InputSchema("arguments", Map.of(), Set.of(), false),
         sideEffect,
         Duration.ofSeconds(30));
   }

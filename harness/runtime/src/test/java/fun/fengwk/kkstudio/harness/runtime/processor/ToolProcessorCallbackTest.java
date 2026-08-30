@@ -9,6 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
@@ -18,10 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
@@ -113,7 +113,7 @@ class ToolProcessorCallbackTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** partial 携带 BinaryToolContent（partial 不可持久资源）：确定性 FAILED。 */
+  /** partial 携带 BinaryResultContent（partial 不可持久资源）：确定性 FAILED。 */
   @Test
   void partialWithBinaryContentFails() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
@@ -122,7 +122,7 @@ class ToolProcessorCallbackTest {
     listener.onPartial(
         new ToolResult(
             "call-1",
-            List.of(new BinaryToolContent("application/octet-stream", new byte[] {1, 2})),
+            List.of(new BinaryResultContent("application/octet-stream", new byte[] {1, 2})),
             false,
             "{}"));
 
@@ -134,7 +134,7 @@ class ToolProcessorCallbackTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).error().kind());
   }
 
-  /** partial 携带 ResourceToolContent：确定性 FAILED(INVALID_PARTIAL)。 */
+  /** partial 携带 ResourceResultContent：确定性 FAILED(INVALID_PARTIAL)。 */
   @Test
   void partialWithResourceContentFails() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
@@ -144,7 +144,7 @@ class ToolProcessorCallbackTest {
         new ToolResult(
             "call-1",
             List.of(
-                new ResourceToolContent(
+                new ResourceResultContent(
                     new ResourceRef("https://example.com/a", "text/plain", null, null, null))),
             false,
             "{}"));
@@ -167,7 +167,7 @@ class ToolProcessorCallbackTest {
         ToolInvocationStatus.RUNNING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("answer")));
     assertEquals(
         ToolInvocationStatus.SUCCEEDED,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
@@ -183,12 +183,12 @@ class ToolProcessorCallbackTest {
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("done")));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("done")));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
     assertEquals(1, tool.attempt());
-    assertEquals("done", ((TextToolContent) tool.result().contents().get(0)).text());
+    assertEquals("done", ((TextResultContent) tool.result().contents().get(0)).text());
     assertEquals(
         3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
@@ -209,7 +209,7 @@ class ToolProcessorCallbackTest {
         .gateway
         .listener(fixture.toolInvocationId)
         .onSucceeded(
-            ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));
+            ToolProcessorTestSupport.successResult("call-1", new TextResultContent("answer")));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
@@ -236,7 +236,7 @@ class ToolProcessorCallbackTest {
         });
 
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("done")));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("done")));
 
     assertEquals(
         ToolInvocationStatus.SUCCEEDED,
@@ -252,7 +252,7 @@ class ToolProcessorCallbackTest {
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("other-call", new TextToolContent("x")));
+        ToolProcessorTestSupport.successResult("other-call", new TextResultContent("x")));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.FAILED, tool.status());
@@ -263,7 +263,7 @@ class ToolProcessorCallbackTest {
             .wakeVersion());
   }
 
-  /** success 携带 BinaryToolContent：Gateway 必须先外部化为稳定 ResourceToolContent ref，否则 FAILED。 */
+  /** success 携带 BinaryResultContent：Gateway 必须先外部化为稳定 ResourceResultContent ref，否则 FAILED。 */
   @Test
   void successWithBinaryContentFails() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
@@ -271,14 +271,14 @@ class ToolProcessorCallbackTest {
 
     listener.onSucceeded(
         ToolProcessorTestSupport.successResult(
-            "call-1", new BinaryToolContent("application/octet-stream", new byte[] {1})));
+            "call-1", new BinaryResultContent("application/octet-stream", new byte[] {1})));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.FAILED, tool.status());
     assertEquals("INVALID_RESULT", tool.error().kind());
   }
 
-  /** success 携带 ResourceToolContent（规范引用）：合法，直接 SUCCEEDED。 */
+  /** success 携带 ResourceResultContent（规范引用）：合法，直接 SUCCEEDED。 */
   @Test
   void successWithResourceContentSucceeds() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
@@ -287,12 +287,12 @@ class ToolProcessorCallbackTest {
     listener.onSucceeded(
         ToolProcessorTestSupport.successResult(
             "call-1",
-            new ResourceToolContent(
+            new ResourceResultContent(
                 new ResourceRef("https://example.com/a", "text/plain", null, null, null))));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
-    assertTrue(tool.result().contents().get(0) instanceof ResourceToolContent);
+    assertTrue(tool.result().contents().get(0) instanceof ResourceResultContent);
   }
 
   /** partial canonical JSON 超过 256 KiB（N×内联大文本）：确定性 INVALID_PARTIAL，绝不发布实时事件。 */
@@ -302,7 +302,7 @@ class ToolProcessorCallbackTest {
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
     listener.onPartial(
-        new ToolResult("call-1", List.of(new TextToolContent("a".repeat(300_000))), false, "{}"));
+        new ToolResult("call-1", List.of(new TextResultContent("a".repeat(300_000))), false, "{}"));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.FAILED, tool.status());
@@ -316,7 +316,7 @@ class ToolProcessorCallbackTest {
   void successWithAggregatedDataResourceRefsOverCapFails() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
-    List<ResourceToolContent> refs = new ArrayList<>();
+    List<ResourceResultContent> refs = new ArrayList<>();
     for (int index = 0; index < 20; index++) {
       refs.add(dataResource("data:text/plain,", 60_000));
     }
@@ -337,7 +337,7 @@ class ToolProcessorCallbackTest {
 
     listener.onSucceeded(
         ToolProcessorTestSupport.successResult(
-            "call-1", new TextToolContent("a".repeat(1_100_000))));
+            "call-1", new TextResultContent("a".repeat(1_100_000))));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.FAILED, tool.status());
@@ -354,7 +354,7 @@ class ToolProcessorCallbackTest {
     listener.onSucceeded(
         new ToolResult(
             "call-1",
-            List.of(new TextToolContent("b".repeat(200_000))),
+            List.of(new TextResultContent("b".repeat(200_000))),
             false,
             "{\"x\":\"" + "a".repeat(900_000) + "\"}"));
 
@@ -376,12 +376,12 @@ class ToolProcessorCallbackTest {
 
     assertTrue(
         ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
-            ToolProcessorTestSupport.successResult("call-1", new TextToolContent(huge)),
+            ToolProcessorTestSupport.successResult("call-1", new TextResultContent(huge)),
             ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES),
         "bounded helper must reject 24 MiB text without materializing the full JSON");
 
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent(huge)));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent(huge)));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.FAILED, tool.status());
@@ -389,11 +389,11 @@ class ToolProcessorCallbackTest {
     assertNull(tool.result(), "oversized result must never be persisted");
   }
 
-  /** 构造 canonical data URI ResourceToolContent；payload 全为 unreserved ASCII，无需百分号转义。 */
-  private static ResourceToolContent dataResource(String prefix, int payloadSize) {
+  /** 构造 canonical data URI ResourceResultContent；payload 全为 unreserved ASCII，无需百分号转义。 */
+  private static ResourceResultContent dataResource(String prefix, int payloadSize) {
     byte[] payload = "a".repeat(payloadSize).getBytes(StandardCharsets.UTF_8);
     String sha = HexFormat.of().formatHex(sha256(payload));
-    return new ResourceToolContent(
+    return new ResourceResultContent(
         new ResourceRef(
             prefix + new String(payload, StandardCharsets.UTF_8),
             "text/plain",
@@ -580,9 +580,9 @@ class ToolProcessorCallbackTest {
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("first")));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("first")));
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("second")));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("second")));
     listener.onFailed(new ToolGateway.Failure(new ToolInvocationError("TRANSIENT", "late"), true));
     listener.onCancelled(new ToolInvocationError("CANCELLED", "late"));
     listener.onUnknown(new ToolInvocationError("UNCERTAIN", "late"));
@@ -590,7 +590,7 @@ class ToolProcessorCallbackTest {
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
-    assertEquals("first", ((TextToolContent) tool.result().contents().get(0)).text());
+    assertEquals("first", ((TextResultContent) tool.result().contents().get(0)).text());
     assertEquals(1, tool.attempt());
     assertEquals(
         3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
@@ -605,7 +605,7 @@ class ToolProcessorCallbackTest {
     ToolProcessorTestSupport.deleteToolWork(fixture);
 
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("answer")));
     listener.onPartial(ToolProcessorTestSupport.partialResult("call-1"));
 
     assertEquals(
@@ -677,7 +677,7 @@ class ToolProcessorCallbackTest {
     ToolProcessorTestSupport.requestToolWork(fixture, ToolProcessorTestSupport.NOW);
 
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("answer")));
 
     assertEquals(
         ToolInvocationStatus.SUCCEEDED,
@@ -696,7 +696,7 @@ class ToolProcessorCallbackTest {
     fixture.sink.failure = new IllegalStateException("notification channel unavailable");
 
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("answer")));
 
     assertEquals(
         ToolInvocationStatus.SUCCEEDED,
@@ -780,7 +780,7 @@ class ToolProcessorCallbackTest {
         listener -> {
           listener.onPartial(ToolProcessorTestSupport.partialResult("call-1"));
           listener.onSucceeded(
-              ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));
+              ToolProcessorTestSupport.successResult("call-1", new TextResultContent("answer")));
         };
     fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
 
@@ -866,7 +866,7 @@ class ToolProcessorCallbackTest {
                 fixture.store, fixture.toolInvocationId, fixture.clock.instant())));
 
     oldListener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("late")));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("late")));
 
     assertEquals(
         ToolInvocationStatus.RUNNING,
@@ -1012,7 +1012,7 @@ class ToolProcessorCallbackTest {
                 new ToolInvocationError("CANCELLED", "stopped"), ToolProcessorTestSupport.NOW));
 
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));
+        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("answer")));
 
     assertEquals(
         ToolInvocationStatus.UNKNOWN,

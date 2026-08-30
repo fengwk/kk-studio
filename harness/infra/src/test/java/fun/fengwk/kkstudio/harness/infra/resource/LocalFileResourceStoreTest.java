@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

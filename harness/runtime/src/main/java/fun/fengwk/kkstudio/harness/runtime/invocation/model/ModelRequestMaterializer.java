@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
+import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
@@ -23,7 +24,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,16 +40,15 @@ import java.util.UUID;
 public final class ModelRequestMaterializer {
 
   private final ProviderMessageProjector messageProjector;
-  private final ToolDescriptorJsonCodec toolDescriptorCodec;
+  private final SchemaJsonCodec schemaCodec;
 
   public ModelRequestMaterializer() {
-    this(new ProviderMessageProjector(), new ToolDescriptorJsonCodec());
+    this(new ProviderMessageProjector(), new SchemaJsonCodec());
   }
 
-  ModelRequestMaterializer(
-      ProviderMessageProjector messageProjector, ToolDescriptorJsonCodec toolDescriptorCodec) {
+  ModelRequestMaterializer(ProviderMessageProjector messageProjector, SchemaJsonCodec schemaCodec) {
     this.messageProjector = Objects.requireNonNull(messageProjector, "messageProjector");
-    this.toolDescriptorCodec = Objects.requireNonNull(toolDescriptorCodec, "toolDescriptorCodec");
+    this.schemaCodec = Objects.requireNonNull(schemaCodec, "schemaCodec");
   }
 
   public ProviderRequest materialize(EntryPath path, ModelRequestSpec spec) {
@@ -157,9 +156,7 @@ public final class ModelRequestMaterializer {
       ToolDescriptor tool = binding.descriptor();
       tools.add(
           new ProviderToolDefinition(
-              tool.name(),
-              tool.description(),
-              toolDescriptorCodec.encodeInputSchema(tool.inputSchema())));
+              tool.name(), tool.description(), schemaCodec.encode(tool.inputSchema())));
     }
     return List.copyOf(tools);
   }

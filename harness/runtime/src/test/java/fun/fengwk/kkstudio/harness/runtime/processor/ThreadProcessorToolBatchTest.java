@@ -37,6 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
@@ -68,8 +70,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
@@ -215,12 +215,12 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     succeedToolWith(
         fixture.store,
         chain.toolInvocationIds().get(0),
-        new ToolResult("call-1", List.of(new TextToolContent("first")), false, "{}"),
+        new ToolResult("call-1", List.of(new TextResultContent("first")), false, "{}"),
         effects);
     succeedToolWith(
         fixture.store,
         chain.toolInvocationIds().get(1),
-        new ToolResult("call-2", List.of(new TextToolContent("second")), false, "{}"));
+        new ToolResult("call-2", List.of(new TextResultContent("second")), false, "{}"));
     requestThreadWork(fixture.store, chain.turn().threadId());
     fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
 
@@ -492,7 +492,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
   }
 
   @Test
-  void binaryToolContentRollsBackAtomically() {
+  void binaryResultContentRollsBackAtomically() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
     var seeded = seedSucceededToolPhase(fixture.store, baseline, List.of("call-1", "call-2"));
@@ -509,7 +509,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
         tool0,
         new ToolResult(
             "call-1",
-            List.of(new BinaryToolContent("application/octet-stream", new byte[] {1, 2})),
+            List.of(new BinaryResultContent("application/octet-stream", new byte[] {1, 2})),
             false,
             "{}"));
     requestThreadWork(fixture.store, baseline.threadId());

@@ -33,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
@@ -65,7 +66,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBa
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.math.BigDecimal;
@@ -1574,7 +1574,7 @@ public abstract class HarnessStoreInvocationContract {
                 new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"ship\"}"),
                 new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"verify\"}")));
     ToolResult result =
-        new ToolResult("call-1", List.of(new TextToolContent("ok")), false, "{\"done\":true}");
+        new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{\"done\":true}");
     updateTool(TestIds.id(10), tool -> tool.succeed(result, effects, T3));
 
     ToolInvocation stored =
