@@ -15,8 +15,9 @@ import java.util.stream.Stream;
 /**
  * Tool 模块的轻量级架构守卫。
  *
- * <p>Tool 主源码只能依赖 JDK、Jackson 和 {@code fun.fengwk.kkstudio.harness.tool}。 禁止依赖
- * Runtime/daemon/platform/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK。
+ * <p>Tool 主源码只能依赖 JDK、Jackson、{@code fun.fengwk.kkstudio.harness.common} 和 {@code
+ * fun.fengwk.kkstudio.harness.tool}。 禁止依赖 Runtime/daemon/platform/web、Spring/MyBatis/servlet/Redis
+ * 以及 Provider SDK。
  */
 class ToolModuleArchitectureTest {
 
@@ -91,6 +92,7 @@ class ToolModuleArchitectureTest {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
         || imported.startsWith("com.fasterxml.jackson.")
+        || imported.startsWith("fun.fengwk.kkstudio.harness.common.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.tool.");
   }
 

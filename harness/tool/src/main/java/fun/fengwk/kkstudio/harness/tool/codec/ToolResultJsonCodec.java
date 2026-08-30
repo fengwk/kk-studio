@@ -10,17 +10,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -87,7 +86,7 @@ public final class ToolResultJsonCodec {
     generator.writeStartObject();
     generator.writeStringField("toolCallId", result.toolCallId());
     generator.writeArrayFieldStart("contents");
-    for (ToolContent content : result.contents()) {
+    for (ResultContent content : result.contents()) {
       writeContent(generator, content);
     }
     generator.writeEndArray();
@@ -97,17 +96,17 @@ public final class ToolResultJsonCodec {
     generator.writeEndObject();
   }
 
-  private static void writeContent(JsonGenerator generator, ToolContent content)
+  private static void writeContent(JsonGenerator generator, ResultContent content)
       throws IOException {
     generator.writeStartObject();
-    if (content instanceof TextToolContent value) {
+    if (content instanceof TextResultContent value) {
       generator.writeStringField("type", "text");
       generator.writeStringField("text", value.text());
-    } else if (content instanceof JsonToolContent value) {
+    } else if (content instanceof JsonResultContent value) {
       generator.writeStringField("type", "json");
       generator.writeFieldName("json");
       copyRawJson(generator, value.json(), "json", false);
-    } else if (content instanceof ResourceToolContent value) {
+    } else if (content instanceof ResourceResultContent value) {
       ResourceRef resource = value.resource();
       generator.writeStringField("type", "resource");
       generator.writeStringField("uri", resource.uri());
@@ -166,29 +165,6 @@ public final class ToolResultJsonCodec {
     }
   }
 
-  /**
-   * 将任意 {@link JsonNode} 序列化为 JSON 文本并施加 UTF-8 字节上限。
-   *
-   * <p>同一 bounded 输出机制：超过 {@code maxBytes} 字节即在中止点停止并返回 {@code null}（不物化完整输出），供 daemon payload 等跨
-   * codec 场景复用；未超限时返回完整 JSON 文本（物化受 {@code maxBytes} 约束）。
-   *
-   * @throws IllegalArgumentException maxBytes 非正数时。
-   */
-  public static String encodeBoundedUtf8(JsonNode node, int maxBytes) {
-    if (maxBytes <= 0) {
-      throw new IllegalArgumentException("maxBytes must be positive");
-    }
-    BoundedUtf8OutputStream out = new BoundedUtf8OutputStream(maxBytes);
-    try {
-      OBJECT_MAPPER.writeValue(out, node);
-    } catch (Utf8LimitExceededException error) {
-      return null;
-    } catch (IOException exception) {
-      throw new IllegalArgumentException("cannot encode JSON", exception);
-    }
-    return out.toStringUtf8();
-  }
-
   public static ToolResult decode(String resultJson) {
     try {
       JsonNode parsed = OBJECT_MAPPER.readTree(resultJson);
@@ -197,7 +173,7 @@ public final class ToolResultJsonCodec {
       }
       requireFields(node, "toolCallId", "contents", "error", "details");
       ArrayNode array = requireArray(node.get("contents"), "contents");
-      List<ToolContent> contents = new ArrayList<>(array.size());
+      List<ResultContent> contents = new ArrayList<>(array.size());
       for (JsonNode content : array) {
         contents.add(decodeContent(content));
       }
@@ -211,15 +187,15 @@ public final class ToolResultJsonCodec {
     }
   }
 
-  private static ObjectNode encodeContent(ToolContent content) {
+  private static ObjectNode encodeContent(ResultContent content) {
     ObjectNode node = OBJECT_MAPPER.createObjectNode();
-    if (content instanceof TextToolContent value) {
+    if (content instanceof TextResultContent value) {
       node.put("type", "text");
       node.put("text", value.text());
-    } else if (content instanceof JsonToolContent value) {
+    } else if (content instanceof JsonResultContent value) {
       node.put("type", "json");
       node.set("json", readObjectOrValue(value.json(), "json"));
-    } else if (content instanceof ResourceToolContent value) {
+    } else if (content instanceof ResourceResultContent value) {
       ResourceRef resource = value.resource();
       node.put("type", "resource");
       node.put("uri", resource.uri());
@@ -236,18 +212,18 @@ public final class ToolResultJsonCodec {
     return node;
   }
 
-  private static ToolContent decodeContent(JsonNode value) {
+  private static ResultContent decodeContent(JsonNode value) {
     ObjectNode node = requireObject(value, "content");
     String type = text(node, "type");
     return switch (type) {
       case "text" -> {
         requireFields(node, "type", "text");
-        yield new TextToolContent(textAllowEmpty(node, "text"));
+        yield new TextResultContent(textAllowEmpty(node, "text"));
       }
       case "json" -> {
         requireFields(node, "type", "json");
         try {
-          yield new JsonToolContent(OBJECT_MAPPER.writeValueAsString(node.get("json")));
+          yield new JsonResultContent(OBJECT_MAPPER.writeValueAsString(node.get("json")));
         } catch (JsonProcessingException exception) {
           throw new IllegalArgumentException("cannot decode JSON content", exception);
         }
@@ -262,7 +238,7 @@ public final class ToolResultJsonCodec {
         if (!size.isNull() && (!size.isIntegralNumber() || !size.canConvertToLong())) {
           throw new IllegalArgumentException("size must be an integer or null");
         }
-        yield new ResourceToolContent(
+        yield new ResourceResultContent(
             new ResourceRef(
                 text(node, "uri"),
                 text(node, "mediaType"),
@@ -367,7 +343,7 @@ public final class ToolResultJsonCodec {
     }
   }
 
-  /** 编码超过上限时由 bounded 输出流抛出（IOException 使 Jackson 不做二次包装）；encodeBoundedUtf8 将其转换为 null。 */
+  /** 编码超过上限时由 bounded 输出流抛出（IOException 使 Jackson 不做二次包装）。 */
   private static final class Utf8LimitExceededException extends IOException {
     private Utf8LimitExceededException() {}
   }
@@ -399,10 +375,6 @@ public final class ToolResultJsonCodec {
         throw new Utf8LimitExceededException();
       }
       count += length;
-    }
-
-    private String toStringUtf8() {
-      return bytes.toString(StandardCharsets.UTF_8);
     }
   }
 }

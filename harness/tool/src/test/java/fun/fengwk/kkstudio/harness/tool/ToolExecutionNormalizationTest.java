@@ -7,9 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 
 import java.time.Duration;
 import java.util.Map;
@@ -24,11 +24,11 @@ class ToolExecutionNormalizationTest {
           "1.0.0",
           "Read a file",
           "read",
-          new ToolParamsSchema(
+          new InputSchema(
               null,
               Map.of(
-                  "path", new ToolStringSchema(null),
-                  "offset", new ToolIntegerSchema(null)),
+                  "path", new StringSchema(null),
+                  "offset", new IntegerSchema(null)),
               Set.of("path"),
               false),
           ToolSideEffect.READ_ONLY,

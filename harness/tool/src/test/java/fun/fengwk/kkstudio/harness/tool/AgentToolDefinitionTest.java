@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 
 import java.time.Duration;
 import java.util.Map;
@@ -21,7 +21,7 @@ class AgentToolDefinitionTest {
           "1.0.0",
           "Read a file",
           "read",
-          new ToolParamsSchema("Read input", Map.of(), Set.of(), false),
+          new InputSchema("Read input", Map.of(), Set.of(), false),
           ToolSideEffect.READ_ONLY,
           Duration.ZERO);
 

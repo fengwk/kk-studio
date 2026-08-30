@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.harness.tool;
 
-import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsNormalizer;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsValidator;
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.harness.common.schema.InputNormalizer;
+import fun.fengwk.kkstudio.harness.common.schema.InputValidator;
 
 /** 已完成的模型工具调用；参数保持原始 JSON 以供 Provider 和 Daemon 传递。 */
 public record ToolCall(String id, String toolName, String argumentsJson) {
@@ -13,7 +14,7 @@ public record ToolCall(String id, String toolName, String argumentsJson) {
     if (toolName == null || toolName.isBlank()) {
       throw new IllegalArgumentException("toolName must not be blank");
     }
-    argumentsJson = ToolArgumentsValidator.requireJsonObject(argumentsJson);
+    argumentsJson = JsonValues.requireJsonObject(argumentsJson, "argumentsJson");
   }
 
   /**
@@ -25,8 +26,8 @@ public record ToolCall(String id, String toolName, String argumentsJson) {
     if (!toolName.equals(descriptor.name())) {
       throw new IllegalArgumentException("toolName does not match descriptor");
     }
-    String normalized = ToolArgumentsNormalizer.normalize(argumentsJson, descriptor.inputSchema());
-    ToolArgumentsValidator.validate(normalized, descriptor.inputSchema());
+    String normalized = InputNormalizer.normalize(argumentsJson, descriptor.inputSchema());
+    InputValidator.validate(normalized, descriptor.inputSchema());
     if (normalized.equals(argumentsJson)) {
       return this;
     }

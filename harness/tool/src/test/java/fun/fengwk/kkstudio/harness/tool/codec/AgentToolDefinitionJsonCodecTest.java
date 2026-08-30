@@ -5,12 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
 import java.util.List;
@@ -26,7 +26,7 @@ class AgentToolDefinitionJsonCodecTest {
           "1.0",
           "Read a file",
           "read",
-          new ToolParamsSchema("Read input", Map.of(), Set.of(), false),
+          new InputSchema("Read input", Map.of(), Set.of(), false),
           ToolSideEffect.READ_ONLY,
           Duration.ZERO);
 

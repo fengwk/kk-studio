@@ -5,10 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
+import fun.fengwk.kkstudio.harness.common.schema.EnumSchema;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 
 import java.lang.reflect.RecordComponent;
 import java.time.Duration;
@@ -102,7 +103,7 @@ class ToolContractTest {
             String.class,
             String.class,
             String.class,
-            ToolParamsSchema.class,
+            InputSchema.class,
             ToolSideEffect.class,
             Duration.class),
         Arrays.stream(components).map(RecordComponent::getType).toList());
@@ -112,7 +113,7 @@ class ToolContractTest {
   @Test
   void validatesStructuredDetails() {
     ToolResult result =
-        new ToolResult("call-1", List.of(new TextToolContent("done")), false, "{\"exitCode\":0}");
+        new ToolResult("call-1", List.of(new TextResultContent("done")), false, "{\"exitCode\":0}");
 
     assertEquals("{\"exitCode\":0}", result.detailsJson());
     assertEquals("{}", new ToolResult("call-1", List.of(), false, null).detailsJson());
@@ -135,15 +136,14 @@ class ToolContractTest {
         Duration.ofSeconds(10));
   }
 
-  private ToolParamsSchema schema() {
-    return new ToolParamsSchema(
+  private InputSchema schema() {
+    return new InputSchema(
         "search input",
         Map.of(
             "query",
-            new ToolStringSchema("search query"),
+            new StringSchema("search query"),
             "formats",
-            new ToolArraySchema(
-                "output formats", new ToolEnumSchema("format", List.of("text", "json")))),
+            new ArraySchema("output formats", new EnumSchema("format", List.of("text", "json")))),
         Set.of("query"),
         false);
   }
