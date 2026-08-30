@@ -81,16 +81,13 @@ class RuntimeModuleArchitectureTest {
 
     Path harnessRoot = moduleRoot.getParent();
     assertHarnessModules(harnessRoot.resolve("pom.xml"));
-    assertManagedInternalDependency(
-        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-common");
-    assertManagedInternalDependency(
-        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-contributor-api");
-    assertManagedInternalDependency(
-        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-builtin");
-    assertManagedInternalDependency(
-        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-infra");
-    assertManagedInternalDependency(
-        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-environment");
+    Path rootPom = harnessRoot.getParent().resolve("pom.xml");
+    assertManagedInternalDependency(rootPom, "kk-studio-harness-common");
+    assertAbsentInternalDependency(rootPom, "kk-studio-harness-prompt");
+    assertManagedInternalDependency(rootPom, "kk-studio-harness-contributor-api");
+    assertManagedInternalDependency(rootPom, "kk-studio-harness-builtin");
+    assertManagedInternalDependency(rootPom, "kk-studio-harness-infra");
+    assertManagedInternalDependency(rootPom, "kk-studio-harness-environment");
     assertDirectProductionDependencies(
         harnessRoot.resolve("common/pom.xml"),
         Set.of("com.fasterxml.jackson.core:jackson-databind"));
@@ -141,6 +138,7 @@ class RuntimeModuleArchitectureTest {
             "com.fasterxml.jackson.core:jackson-databind",
             "dev.langchain4j:langchain4j-mcp",
             "dev.langchain4j:langchain4j-skills",
+            "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
             "org.eclipse.jgit:org.eclipse.jgit"));
 
@@ -260,6 +258,14 @@ class RuntimeModuleArchitectureTest {
       }
     }
     assertTrue(found, () -> artifactId + " must be declared in root dependencyManagement");
+  }
+
+  private static void assertAbsentInternalDependency(Path pom, String artifactId)
+      throws IOException {
+    String text = Files.readString(pom, StandardCharsets.UTF_8);
+    assertFalse(
+        text.contains("<artifactId>" + artifactId + "</artifactId>"),
+        () -> artifactId + " must not be declared in root dependencyManagement");
   }
 
   private static String requiredTag(String block, String tag) {

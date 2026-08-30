@@ -324,8 +324,8 @@ public final class LocalFileResourceStore implements ResourceStore {
    * 将 {@code ref.uri()} 解析为本组件导出的 digest 文件：URI 路径必须位于导出根之下且文件名必须为本组件生成的 64 位小写 hex
    * digest；拒绝符号链接以及任何越出导出根的解析结果。
    *
-   * <p>{@link ResourceRef} 构造期已保证 canonical {@code file:///}（无 authority/query/fragment、无 dot/空
-   * segment），此处只校验 scheme 与所有权。导出根在构造期已创建并固定为真实路径，{@code toUri()} 必然以 {@code '/'} 结尾。
+   * <p>{@link DaemonResourceRef} 构造期已保证 canonical {@code file:///}（无 authority/query/fragment、无
+   * dot/空 segment），此处只校验 scheme 与所有权。导出根在构造期已创建并固定为真实路径，{@code toUri()} 必然以 {@code '/'} 结尾。
    */
   private Path resolveOwned(DaemonResourceRef ref) throws IOException {
     URI uri = URI.create(ref.uri());
