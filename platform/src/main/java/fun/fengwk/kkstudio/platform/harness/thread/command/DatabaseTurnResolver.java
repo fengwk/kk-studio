@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
+import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
 import fun.fengwk.kkstudio.harness.contributor.api.ContextProjectorContribution;
@@ -46,7 +47,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
@@ -105,7 +105,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
   private final ProviderMessageProjector messageProjector;
-  private final ToolDescriptorJsonCodec toolDescriptorCodec;
+  private final SchemaJsonCodec schemaCodec;
   private final PromptCacheAffinityKeyFactory cacheKeyFactory;
 
   public DatabaseTurnResolver(
@@ -139,7 +139,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.messageProjector = new ProviderMessageProjector();
-    this.toolDescriptorCodec = new ToolDescriptorJsonCodec();
+    this.schemaCodec = new SchemaJsonCodec();
     this.cacheKeyFactory = new PromptCacheAffinityKeyFactory();
   }
 
@@ -580,9 +580,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       ToolDescriptor tool = binding.descriptor();
       providerTools.add(
           new ProviderToolDefinition(
-              tool.name(),
-              tool.description(),
-              toolDescriptorCodec.encodeInputSchema(tool.inputSchema())));
+              tool.name(), tool.description(), schemaCodec.encode(tool.inputSchema())));
     }
     ProviderRequest stub =
         new ProviderRequest(

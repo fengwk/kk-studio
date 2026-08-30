@@ -145,11 +145,9 @@ class ToolDescriptorJsonCodecTest {
     assertTrue(redIdx > 0 && greenIdx > redIdx && blueIdx > greenIdx);
   }
 
-  /**
-   * encodeInputSchema 输出必须是精确 canonical JsonNode 字符串；且必须与 descriptor 编码中的 inputSchema 子节点逐 字节相等。
-   */
+  /** SchemaJsonCodec 输出必须是精确 canonical JSON；且必须与 descriptor 编码中的 inputSchema 子节点逐字节相等。 */
   @Test
-  void encodeInputSchemaProducesRoundTrippableSchema() throws Exception {
+  void schemaJsonCodecProducesRoundTrippableDescriptorInputSchema() throws Exception {
     InputSchema schema =
         new InputSchema(
             "params",
@@ -192,7 +190,7 @@ class ToolDescriptorJsonCodecTest {
     assertEquals(expected, schemaNode);
     assertEquals(schemaJson, mapper.writeValueAsString(schemaNode));
 
-    // 组合成 descriptor 后，descriptor 编码中的 inputSchema 子节点必须与 encodeInputSchema 输出完全一致。
+    // 组合成 descriptor 后，descriptor 编码中的 inputSchema 子节点必须与 SchemaJsonCodec 输出完全一致。
     ToolDescriptor descriptor =
         new ToolDescriptor("x", "v1", "x", "x", schema, ToolSideEffect.READ_ONLY, Duration.ZERO);
     String descriptorJson = codec.encode(descriptor);
