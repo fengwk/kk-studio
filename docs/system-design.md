@@ -175,7 +175,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `harness/contributor-api` | trusted Contributor 的 Catalog、BranchView、统一 Tool、effect 与 projector API | 生产依赖 `harness-tool`、`harness-environment`，不进生产 Common/Runtime |
 | `harness/builtin` | 第一方内置 17 工具、goal.state 与 context projector | 依赖 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment`、Jackson |
 | `harness/infra` | PostgreSQL HarnessStore、Work dispatcher、realtime、Resource store | 依赖 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Spring JDBC、PostgreSQL |
-| `harness/daemon` | 独立 Environment 进程适配器 | 依赖 `harness-environment`、Jackson、JGit、LangChain4j adapters，绝不依赖 `harness-tool` |
+| `harness/daemon` | 独立 Environment 进程适配器 | 依赖 `harness-common`、`harness-environment`、Jackson、JGit、LangChain4j adapters，绝不依赖 `harness-tool` |
 | `platform` | Catalog、Storage、Chat/Canvas application service、Resolver、Model/Tool/Environment Gateway | 适配 Share、Core/Runtime ports，不成为组合根 |
 | `web` | Spring Boot、HTTP、浏览器事件、daemon WebSocket、生产生命周期 | 唯一 composition root |
 
@@ -197,6 +197,7 @@ platform -> harness-environment -> harness-common
 platform -> harness-builtin -> harness-contributor-api
 platform -> harness-runtime
 platform -> harness-contributor-api
+harness-daemon -> harness-common
 harness-daemon -> harness-environment -> harness-common
 ```
 
