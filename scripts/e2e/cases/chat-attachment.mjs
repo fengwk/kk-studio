@@ -267,7 +267,7 @@ registerCase({
   level: 'L1',
   requires: ['canvas-storage'],
   title: '本地 Blob 图片内联且现有 Thread 使用最新 Agent 工具',
-  docs: '本地 OpenAI Responses mock：Thread 创建后更新同名 Agent 的 toolIds，下一 turn 必须忽略历史分支设置并发送最新工具；本地 MinIO 图片必须转换为 data:image/...;base64 source，Provider 请求不得包含 127.0.0.1/localhost 预签名 URL',
+  docs: '本地 OpenAI Responses mock：使用无需 Environment 的 Goal tools，首轮建立并静止 Thread 后更新同名 Agent 的 toolIds，第二轮必须发送最新工具；第二轮本地 MinIO 图片必须转换为 data:image/...;base64 source，Provider 请求不得包含 127.0.0.1/localhost 预签名 URL',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const mock = await startResponsesProbe()
@@ -314,11 +314,11 @@ registerCase({
         (
           await ctx.call('POST', '/api/ai/catalog/agents', {
             name: `e2e-agent-image-${suffix}`,
-            description: 'Agent starts with one tool.',
+            description: 'Agent starts with one environment-independent tool.',
             systemPrompt: 'Complete without calling tools.',
             model: `${model.providerName}/${model.name}`,
             variant: 'default',
-            config: { toolIds: ['base.read'], skills: [], subagents: [] },
+            config: { toolIds: ['base.goal.get'], skills: [], subagents: [] },
           })
         ).json,
       )
@@ -331,15 +331,10 @@ registerCase({
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
         'base64',
       )
-      const uploadId = await uploadReadyFile(ctx, {
-        filename: 'pixel.png',
-        mediaType: 'image/png',
-        content: image,
-      })
-      // NEW_SESSION 首条消息即携带 TEXT+ATTACHMENT 原子物化。
+      // 首轮只建立并静止 Thread，避免 Agent 更新与同一轮解析竞态。
       const sessionId = cid()
       const createdThreadId = cid()
-      const accepted = await materializeNewSession(ctx, {
+      const firstAccepted = await materializeNewSession(ctx, {
         owner: chatOwner(chat.id),
         sessionId,
         threadId: createdThreadId,
@@ -356,16 +351,30 @@ registerCase({
           {
             type: 'USER_MESSAGE',
             clientCommandId: cid(),
-            contents: [
-              { type: 'TEXT', text: `inspect inline image ${suffix}` },
-              { type: 'ATTACHMENT', uploadId },
-            ],
+            contents: [{ type: 'TEXT', text: `establish existing thread ${suffix}` }],
           },
         ],
       })
       threadId = String(createdThreadId)
+      assert(
+        firstAccepted.acceptedCommands.length === 1,
+        JSON.stringify(firstAccepted.acceptedCommands),
+      )
+      await waitForQuiescentThread(ctx, threadId, { timeoutMs: 45_000, intervalMs: 100 })
+      const firstSnapshot = await getThreadSnapshot(ctx, threadId)
+      assert(mock.requests.length === 1, JSON.stringify(mock.requests))
+      const firstToolNames = collectToolNames(mock.requests[0].body)
+      assert(
+        firstToolNames.includes('get_goal') && !firstToolNames.includes('create_goal'),
+        JSON.stringify({ firstToolNames, tools: mock.requests[0].body.tools }),
+      )
+      assert(
+        !collectStrings(mock.requests[0].body).some((value) => value.startsWith('data:image/')),
+        JSON.stringify(mock.requests[0].body),
+      )
 
-      // Thread 已创建后再更新 Agent；下一 turn 必须读取最新 Agent config.toolIds。
+      // 既有 Thread 的第二轮必须读取最新 Agent config.toolIds。
+      // Goal tools 是无需 Environment 的真实可选工具，避免把本 Canvas-only case 错绑到 live daemon。
       agent = envelopeData(
         (
           await ctx.call('PUT', `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}`, {
@@ -373,16 +382,54 @@ registerCase({
             systemPrompt: 'Complete without calling tools.',
             model: agent.model,
             variant: 'default',
-            config: { toolIds: ['base.read', 'base.grep'], skills: [], subagents: [] },
+            config: {
+              toolIds: ['base.goal.get', 'base.goal.create'],
+              skills: [],
+              subagents: [],
+            },
             expectedVersion: agent.version,
           })
         ).json,
       )
-      assert(accepted.acceptedCommands.length === 1, JSON.stringify(accepted.acceptedCommands))
+      const uploadId = await uploadReadyFile(ctx, {
+        filename: 'pixel.png',
+        mediaType: 'image/png',
+        content: image,
+      })
+      const secondAccepted = await acceptCommandBatch(ctx, {
+        owner: chatOwner(chat.id),
+        target: threadTarget({
+          threadId,
+          expectedHeadEntryId: firstSnapshot.thread.headEntryId,
+          expectedNextCommandSequence: firstSnapshot.thread.nextCommandSequence,
+        }),
+        commands: [
+          {
+            type: 'USER_MESSAGE',
+            clientCommandId: cid(),
+            contents: [
+              { type: 'TEXT', text: `inspect inline image ${suffix}` },
+              { type: 'ATTACHMENT', uploadId },
+            ],
+          },
+        ],
+      })
+      assert(
+        secondAccepted.acceptedCommands.length === 1,
+        JSON.stringify(secondAccepted.acceptedCommands),
+      )
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 45_000, intervalMs: 100 })
 
-      assert(mock.requests.length === 1, JSON.stringify(mock.requests))
-      const request = mock.requests[0]
+      const finalSnapshot = await getThreadSnapshot(ctx, threadId)
+      const assistantErrors = (finalSnapshot.entries ?? []).filter(
+        (entry) => String(entry.entryType ?? '').toUpperCase() === 'ASSISTANT_ERROR',
+      )
+      assert(assistantErrors.length === 0, JSON.stringify(assistantErrors))
+      assert(
+        mock.requests.length === 2,
+        JSON.stringify({ requests: mock.requests, entries: finalSnapshot.entries }),
+      )
+      const request = mock.requests[1]
       const bodyText = JSON.stringify(request.body)
       const strings = collectStrings(request.body)
       const imageSources = strings.filter((value) => value.startsWith('data:image/png;base64,'))
@@ -393,25 +440,22 @@ registerCase({
       )
       assert(!bodyText.includes('127.0.0.1') && !bodyText.includes('localhost'), bodyText)
       const toolNames = collectToolNames(request.body)
-      assert(toolNames.includes('read'), JSON.stringify({ toolNames, tools: request.body.tools }))
+      assert(toolNames.includes('get_goal'), JSON.stringify({ toolNames, tools: request.body.tools }))
       assert(
-        toolNames.includes('grep'),
+        toolNames.includes('create_goal'),
         `latest Agent tool missing from existing Thread request: ${JSON.stringify({
           toolNames,
           tools: request.body.tools,
         })}`,
       )
 
-      const finalSnapshot = await getThreadSnapshot(ctx, threadId)
-      assert(
-        !(finalSnapshot.entries ?? []).some(
-          (entry) => String(entry.entryType ?? '').toUpperCase() === 'ASSISTANT_ERROR',
-        ),
-        JSON.stringify(finalSnapshot.entries),
-      )
       ctx.writeArtifact(
         'inline-image-latest-tools-request.json',
-        JSON.stringify({ toolNames, imageSource: imageSources[0], request: request.body }, null, 2),
+        JSON.stringify(
+          { firstToolNames, toolNames, imageSource: imageSources[0], request: request.body },
+          null,
+          2,
+        ),
       )
     } catch (error) {
       primaryError = error
