@@ -110,18 +110,4 @@ class SchemaJsonCodecTest {
             codec.decode(
                 "{\"type\":\"object\",\"properties\":{\"c\":{\"type\":\"string\",\"enum\":[\"A\",\"A\"]}},\"required\":[],\"additionalProperties\":false}"));
   }
-
-  /** 验证单个 SchemaElement 节点的独立编解码。 */
-  @Test
-  void encodesAndDecodesSingleElement() {
-    SchemaElement element = new EnumSchema("opt", List.of("ONE", "TWO"));
-    ObjectNode node = codec.encodeElement(element);
-
-    assertEquals("string", node.get("type").asText());
-    assertEquals("opt", node.get("description").asText());
-    assertEquals(2, node.get("enum").size());
-
-    SchemaElement decoded = codec.decodeElement(node, "testElement");
-    assertEquals(element, decoded);
-  }
 }

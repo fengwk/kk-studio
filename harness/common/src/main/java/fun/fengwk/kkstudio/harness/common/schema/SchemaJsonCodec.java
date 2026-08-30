@@ -79,19 +79,6 @@ public final class SchemaJsonCodec {
     return readInputSchema(value, context == null ? "inputSchema" : context);
   }
 
-  /** 编码单个 {@link SchemaElement} 节点为 canonical {@link ObjectNode}。 */
-  public ObjectNode encodeElement(SchemaElement element) {
-    Objects.requireNonNull(element, "element");
-    return writeSchema(element);
-  }
-
-  /** 从 {@link JsonNode} 解码单个 {@link SchemaElement} 节点。 */
-  public SchemaElement decodeElement(JsonNode node, String context) {
-    Objects.requireNonNull(node, "node");
-    ObjectNode obj = requiredObject(node, context == null ? "schemaElement" : context);
-    return readSchemaElement(obj, context == null ? "schemaElement" : context);
-  }
-
   private static ObjectNode writeSchema(SchemaElement schema) {
     ObjectNode target = NODES.objectNode();
     if (schema instanceof StringSchema) {
