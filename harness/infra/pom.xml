@@ -24,6 +24,10 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-environment</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-runtime</artifactId>
             <version>${kk-studio.version}</version>
             <type>test-jar</type>

@@ -39,6 +39,7 @@ class RuntimeModuleArchitectureTest {
           "fun.fengwk.kkstudio.harness.prompt.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.tool.",
+          "fun.fengwk.kkstudio.harness.environment.",
           FastIgnoreRule.class.getName());
 
   private static final List<String> FORBIDDEN_TEXT_MARKERS =
@@ -88,20 +89,30 @@ class RuntimeModuleArchitectureTest {
         harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-builtin");
     assertManagedInternalDependency(
         harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-infra");
+    assertManagedInternalDependency(
+        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-environment");
     assertDirectProductionDependencies(harnessRoot.resolve("prompt/pom.xml"), Set.of());
     assertDirectProductionDependencies(
         harnessRoot.resolve("tool/pom.xml"), Set.of("com.fasterxml.jackson.core:jackson-databind"));
+    assertDirectProductionDependencies(
+        harnessRoot.resolve("environment/pom.xml"),
+        Set.of(
+            "com.fasterxml.jackson.core:jackson-databind",
+            "fun.fengwk.kk-studio:kk-studio-harness-tool"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("runtime/pom.xml"),
         Set.of(
             "com.fasterxml.jackson.core:jackson-databind",
             "fun.fengwk.kk-studio:kk-studio-harness-prompt",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
+            "fun.fengwk.kk-studio:kk-studio-harness-environment",
             "org.eclipse.jgit:org.eclipse.jgit",
             "org.slf4j:slf4j-api"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("contributor-api/pom.xml"),
-        Set.of("fun.fengwk.kk-studio:kk-studio-harness-tool"));
+        Set.of(
+            "fun.fengwk.kk-studio:kk-studio-harness-tool",
+            "fun.fengwk.kk-studio:kk-studio-harness-environment"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("builtin/pom.xml"),
         Set.of(
@@ -109,12 +120,14 @@ class RuntimeModuleArchitectureTest {
             "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
             "fun.fengwk.kk-studio:kk-studio-harness-prompt",
             "fun.fengwk.kk-studio:kk-studio-harness-runtime",
-            "fun.fengwk.kk-studio:kk-studio-harness-tool"));
+            "fun.fengwk.kk-studio:kk-studio-harness-tool",
+            "fun.fengwk.kk-studio:kk-studio-harness-environment"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("infra/pom.xml"),
         Set.of(
             "fun.fengwk.kk-studio:kk-studio-harness-runtime",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
+            "fun.fengwk.kk-studio:kk-studio-harness-environment",
             "org.postgresql:postgresql",
             "org.springframework:spring-jdbc"));
     assertDirectProductionDependencies(
@@ -123,7 +136,7 @@ class RuntimeModuleArchitectureTest {
             "com.fasterxml.jackson.core:jackson-databind",
             "dev.langchain4j:langchain4j-mcp",
             "dev.langchain4j:langchain4j-skills",
-            "fun.fengwk.kk-studio:kk-studio-harness-tool",
+            "fun.fengwk.kk-studio:kk-studio-harness-environment",
             "org.eclipse.jgit:org.eclipse.jgit"));
 
     List<String> violations = scanViolations(main);
@@ -190,9 +203,17 @@ class RuntimeModuleArchitectureTest {
     }
     assertTrue(
         modules.equals(
-            List.of("prompt", "tool", "runtime", "contributor-api", "builtin", "infra", "daemon")),
+            List.of(
+                "prompt",
+                "tool",
+                "environment",
+                "runtime",
+                "contributor-api",
+                "builtin",
+                "infra",
+                "daemon")),
         () ->
-            "harness modules must be exactly prompt/tool/runtime/contributor-api/builtin/infra/daemon, got "
+            "harness modules must be exactly prompt/tool/environment/runtime/contributor-api/builtin/infra/daemon, got "
                 + modules);
   }
 

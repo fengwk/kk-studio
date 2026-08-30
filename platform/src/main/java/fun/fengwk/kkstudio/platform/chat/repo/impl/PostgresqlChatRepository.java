@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.platform.chat.repo.impl;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.impl.mapper.ChatMapper;
 import fun.fengwk.kkstudio.platform.chat.repo.impl.model.ChatDO;

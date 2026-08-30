@@ -8,15 +8,15 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerStatus;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerStatus;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpToolDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;

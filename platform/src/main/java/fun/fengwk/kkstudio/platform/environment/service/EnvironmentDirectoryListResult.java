@@ -8,7 +8,7 @@ import java.util.Objects;
 public sealed interface EnvironmentDirectoryListResult
     permits EnvironmentDirectoryListResult.Loaded, EnvironmentDirectoryListResult.Failed {
 
-  /** Daemon 返回了一层目录列表（wire {@code DIRECTORY_LISTED} 的应用读模型）。 */
+  /** Daemon 返回了一层目录列表的应用读模型。 */
   record Loaded(EnvironmentDirectoryDTO listing) implements EnvironmentDirectoryListResult {
     public Loaded {
       listing = Objects.requireNonNull(listing, "listing");

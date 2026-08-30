@@ -2,10 +2,10 @@ package fun.fengwk.kkstudio.platform.environment.service;
 
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpToolDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;

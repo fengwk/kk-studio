@@ -2,9 +2,9 @@ package fun.fengwk.kkstudio.platform.harness.task;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;

@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.platform.harness.task;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 
 import java.time.LocalDate;
 import java.util.Objects;

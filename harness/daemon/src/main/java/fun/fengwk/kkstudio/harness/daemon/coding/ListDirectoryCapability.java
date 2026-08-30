@@ -10,6 +10,9 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryListing;
 
+import java.io.IOException;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.NotDirectoryException;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
@@ -37,8 +40,19 @@ public final class ListDirectoryCapability extends AbstractCodingCapability {
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String path = string(args, "path");
-    EnvironmentDirectoryListing listing = browser.list(path);
-    String json = OBJECT_MAPPER.writeValueAsString(listing);
-    return EnvironmentCapabilityResult.json(request.call().id(), json);
+    try {
+      EnvironmentDirectoryListing listing = browser.list(path);
+      String json = OBJECT_MAPPER.writeValueAsString(listing);
+      return EnvironmentCapabilityResult.json(request.call().id(), json);
+    } catch (NoSuchFileException error) {
+      return EnvironmentCapabilityResult.error(
+          request.call().id(), "directory does not exist: " + path);
+    } catch (NotDirectoryException error) {
+      return EnvironmentCapabilityResult.error(
+          request.call().id(), "path is not a directory: " + path);
+    } catch (IOException error) {
+      return EnvironmentCapabilityResult.error(
+          request.call().id(), "cannot list directory: " + path);
+    }
   }
 }

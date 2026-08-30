@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.contributor.api;
 
 import java.util.Objects;
 
-/** Declarative Tool 对所属 contributor 某一 customType 的访问声明。 */
+/** Tool 对所属 contributor 某一 customType 的访问声明。 */
 public record StateDeclaration(String customType, StateMode mode) {
 
   public StateDeclaration {

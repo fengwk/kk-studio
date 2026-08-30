@@ -171,24 +171,32 @@ Text/Json/Binary/Resource 物化为 Harness history，任一步失败使调用�
 
 ### Environment
 
-Environment 是服务器内存中的 live registry，不是持久化资源。`LiveEnvironmentRegistry`以 canonical
-`EnvironmentName`唯一寻址，状态只有 `CONNECTING`、`READY`；可用性要求连接打开、状态 READY 且
-`lastSeenAt`未超过 `SystemSettings.environment.heartbeatTimeoutMillis`。
+Environment 的连接与 invocation 是本节点 live 状态；跨节点 route ownership 则由 PostgreSQL
+`live_environment` 租约保存。每个 JVM 共享一个 `nodeInstanceId`，route 以
+`(environmentName, ownerNodeId, routeToken)` 围栏更新。`LiveEnvironmentRegistry` 只投影本节点
+`CONNECTING` / `READY` 连接，可用性要求连接打开、状态 READY 且心跳未过期。
 
 `EnvironmentDaemonGateway`同时实现：
 
 - `EnvironmentDaemonEndpoint`：HELLO/WELCOME/READY/HEARTBEAT/close 协议；
 - `EnvironmentSkillLoader`：按冻结 skill binding 读取正文；
 - `EnvironmentCapabilityTransport`：按固定 capability catalog 向 READY Daemon 发送原子 capability；
-- `EnvironmentDirectoryLister`：不占 Tool invocation slot 的 control-plane 目录查询。
+- `EnvironmentDirectoryLister`：本地直接执行或经 `environment_query` mailbox 路由的目录查询。
 
 同名连接的 bind 是原子三态：新连接 `Accepted`、新鲜持有者存在时 `Rejected`、持有者关闭或心跳过期时
 `Replaced`。每个 Environment 只有一个 active capability invocation；并发 sibling 在 INVOKE 发送前返回
-`EnvironmentCapabilityBusyException`，不同 Environment 可以并行。Gateway 只接受 v4 HELLO，严格校验
-`capabilityCatalogVersion`；INVOKE payload 使用 `capabilityId`、`capabilityVersion`、`workspacePath`、
-`arguments` 和 `timeoutMillis`，不携带 model Tool name；PARTIAL/COMPLETED result 使用
-`EnvironmentCapabilityResult` 的 `callId` 作为关联标识。发送不确定时连接和 active/pending 请求都按不确定结果收敛，
-不重发可能已经产生副作用的请求。
+`EnvironmentCapabilityBusyException`，不同 Environment 可以并行。Tool、`skill.load` 与
+`fs.list-directory` 共享该 slot；control-plane timeout 会发送 `CANCEL`、立即释放 slot，并以有界
+invocation tombstone 吸收迟到 callback。
+
+Gateway 只接受 protocol v5 HELLO 和严格的 `capabilityCatalogVersion`。INVOKE payload 使用
+`capabilityId`、`capabilityVersion`、`workspacePath`、`arguments`、`timeoutMillis`，不携带 model
+Tool name；所有结果通过通用 `STARTED/PARTIAL/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
+`invocationId` 关联。发送不确定时关闭连接并把 active invocation 收敛为 uncertain，不重发可能已经产生副作用的请求。
+
+非 route owner 节点的目录查询写入 `environment_query` 并发 NOTIFY；owner 节点按 lease token claim。
+`EnvironmentQueryCoordinator` 对每个 Environment 使用单一 drain，前一查询 terminal 并完成回填后才 claim 下一条，
+避免一个 Daemon slot 同时承载多个 mailbox 查询；通知只负责唤醒，定期 resync 负责丢通知恢复。
 
 ### Provider adapters 与 PlatformModelGateway
 
@@ -244,7 +252,10 @@ Platform 接收由 Web 组合根冻结的不可变 `HarnessCatalog`，不自建�
 3. 构造 `ToolExecutionContext` 与 `ToolExecutionRequest`，向底层 `Tool.execute` 提交异步执行并返回两阶段门控 Handle；
 4. 门控桥处理完成回调，校验 effects 归属、注册与 WRITE 声明，完成 managed Resource 外部化并一次性投递。
 
-local executor 明确拒绝返回 `Overloaded`，提交不确定返回 `Indeterminate(EXECUTION_FAILED)`。Environment 在发送前不可用返回 `Rejected(UNAVAILABLE)`，同 Environment active 返回 `Busy`，发送不确定返回 `Indeterminate(REMOTE_UNCERTAIN)`；这些分类决定 Harness 是否重试或终止。
+Tool admission 无 permit 或 executor 明确拒绝时返回 `RetryLater`；其它无法证明是否提交的异常返回
+`Indeterminate(EXECUTION_FAILED)`。`Started` 后所有 Tool 都走同一个 listener bridge：Environment 发送前
+unavailable/busy 变为 retryable failed terminal，远端 FAILED 为普通 failed terminal，发送不确定变为
+`UNKNOWN(REMOTE_UNCERTAIN)`。统一 Tool SPI 不再按 backend 选择不同 admission 结果。
 
 `GatedToolExecutionListener` 与 Model gateway 同样是两阶段 activation、FIFO single drainer、256 signal bounded buffer 和 terminal-once。partial 必须非空、toolCallId 精确匹配、不能携带 Binary/Resource，且 canonical JSON 不得超过 256 KiB；terminal result 在 externalize 前校验，成功结果采用 all-or-nothing Resource externalization。第一个 terminal 后任何迟到信号、其余 Resource 写入和第二个 terminal 都被禁止。
 
@@ -256,7 +267,7 @@ Tool 的 `AppendCustomEntry` intent 必须属于自身 Contributor、命中已�
 
 1. 当前 Agent、Model、Provider、Variant 和 ProviderFactory；
 2. 当前 Environment context；
-3. Agent config 中的每个工具 ID 均通过 `HarnessCatalog.findTool(id)` 查找并校验 `tool.definition().visibility() == ToolVisibility.SELECTABLE`；若选中的工具后端为 `ENVIRONMENT_CAPABILITY` 但当前 branch 无 `EnvironmentBinding`，则在 planning 阶段被确定性拒绝并返回 `AssistantError.code=PLANNING_FAILED`；
+3. Agent config 中的每个工具 ID 均通过 `HarnessCatalog.findTool(id)` 查找并校验 `tool.definition().visibility() == ToolVisibility.SELECTABLE`；若 `tool.requirements().environmentRequired()` 为 true 但当前 branch 无 `EnvironmentBinding`，则在 planning 阶段被确定性拒绝并返回 `AssistantError.code=PLANNING_FAILED`；
 4. skills、subagents 和内部 `load_skill` / `task`；
 5. Contributor context projector、system prompt、cache control、context window 和 output budget。
 
@@ -419,7 +430,7 @@ Function dispatcher claim + RUNNING lease
 
 | section | 主要字段 / 默认值 | 应用时点 |
 | --- | --- | --- |
-| `tool` | permission 默认 `base.write`/`base.edit`/`base.bash` 各 `* -> ask`，`*` 为全局 wildcard，`defaultYolo=false`，Model Busy 5s、Tool Busy 1s、Tool Overload 5s、skill load 30s | admission/permission 读取点 live |
+| `tool` | permission 默认 `base.write`/`base.edit`/`base.bash` 各 `* -> ask`，`*` 为全局 wildcard，`defaultYolo=false`，Model Busy retry 5s、Tool RetryLater 5s、skill load 30s | admission/permission 读取点 live |
 | `aiRuntime` | retry 3 次、EXPONENTIAL、base 2s、max 60s；compaction keep 20000；subagent depth 2、per-parent concurrency 10、maxTurns 50 | retry、resolver、subagent 配置读取点 |
 | `environment` | resource 8 MiB、heartbeat 60s、directory list 10s | Environment gateway 查询/超时读取点 |
 | `integrations.comfyui` | disabled；connect 10s、read 30s、WebSocket 1800s、input 50 MiB | client topology 由启动快照决定 |

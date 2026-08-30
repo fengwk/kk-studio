@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.settings;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPathPattern;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.net.URI;
 

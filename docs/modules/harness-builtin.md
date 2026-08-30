@@ -2,12 +2,12 @@
 
 ## 定位
 
-`harness-builtin` 是系统第一方内置能力模块，提供唯一的 `BuiltinHarnessContributor`（ID 为 `builtin`）。它将系统内置的 17 个工具、`goal.state` 自定义 Entry ownership 与 Goal 上下文投影器统一注册到 `HarnessCatalog`，消除分散的内置工具装配。
+`harness-builtin` 是系统第一方内置能力模块，提供唯一的 `BuiltinHarnessContributor`（ID 为 `builtin`）。它将系统内置的 17 个统一 Tool、`goal.state` 自定义 Entry ownership 与 Goal 上下文投影器注册到 `HarnessCatalog`。
 
 17 个内置工具包括：
-- 12 个模型可见的 Environment capability 工具（SELECTABLE，backend `ENVIRONMENT_CAPABILITY`）；
-- 2 个内部 HOST 工具：`load_skill` 与 `task`（INTERNAL，backend `HOST`）；
-- 3 个模型可见的声明式 Goal 工具：`create_goal`、`get_goal`、`update_goal`（SELECTABLE，backend `DECLARATIVE`）。
+- 12 个模型可见、声明 `environmentRequired=true` 的 Environment capability Tool；
+- 2 个内部 Tool：`load_skill` 与 `task`；
+- 3 个模型可见、通过 `AppendCustomEntry` effect 维护 branch Goal 的 Tool。
 
 所有内置工具的全局稳定 AgentToolId 统一保持 `base.*` 前缀，并在 [`BuiltinToolIds`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinToolIds.java) 中集中定义。
 
@@ -15,15 +15,15 @@
 
 ### Goals
 
-- 通过单一 `BuiltinHarnessContributor` 统一注册 12 个 Environment capability 工具、2 个内部 Host 工具和 3 个声明式 Goal 工具。
-- 将 Goal 表达为 branch-scoped `builtin/goal.state` 全量快照，不建独立数据库表，通过声明式 `AppendCustomEntry` 由 Core 原子追加。
+- 通过单一 `BuiltinHarnessContributor` 和统一 Tool SPI 注册全部 17 个工具。
+- 将 Goal 表达为 branch-scoped `builtin/goal.state` 全量快照，不建独立数据库表，通过 `AppendCustomEntry` 由 Core 原子追加。
 - 提供 `goal.context` 投影器，仅将当前 branch 活跃的 Goal 投影到下一次 Model planning 的 SYSTEM 上下文中。
-- 将内部 `load_skill` 与 `task` 作为 Host 工具注册，为 Skill 加载与 Subagent 任务执行提供标准化工具契约。
+- 将内部 `load_skill` 与 `task` 作为普通 `INTERNAL` Tool 注册，为 Skill 加载与 Subagent 任务执行提供标准化契约。
 
 ### Non-goals
 
 - 不为 Goal 建立独立数据库表；Goal durable fact 只存在于 `harness_entry` 的 CUSTOM payload 中。
-- 不在 Builtin 模块直接实现 Environment capability 真实网络 transport 或执行 daemon；它只负责声明 descriptor 与 capability mapping。
+- 不在 Builtin 模块实现 Environment 网络 transport 或 Daemon capability；`EnvironmentCapabilityTool` 只委托执行期 `BoundEnvironment`。
 - 不提供热插拔或动态卸载；作为第一方核心能力在系统启动时一次性装配。
 - 不实现 host-side 独立 dispatcher 或 approval 工作流；调度和持久化状态机由 Harness Core 负责。
 
@@ -31,9 +31,10 @@
 
 ```text
 BuiltinHarnessContributor
-  -> harness-contributor-api（HarnessContributor / HarnessRegistrar / DeclarativeTool / BranchView / projector）
-  -> harness-runtime（CustomEntryPayload / AgentMessage / prompt loader）
-  -> harness-tool（ToolDescriptor / ToolCall / ToolResult / schema / CapabilityCatalog）
+  -> harness-contributor-api（HarnessContributor / HarnessRegistrar / Tool / BranchView / projector）
+  -> harness-environment（CapabilityCatalog / BoundEnvironment 使用的 descriptor）
+  -> harness-tool（AgentToolId / ToolDescriptor / ToolResult / schema）
+  -> harness-prompt（classpath prompt template）
 ```
 
 POM 见 [`pom.xml`](../../harness/builtin/pom.xml)，包级职责见 [`package-info.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/package-info.java)。Builtin 模块不依赖 infra、daemon、platform、web、Spring 或外部数据库。
@@ -46,25 +47,25 @@ Harness durable schema 的唯一入口是 [`V1__schema.sql`](../../schema/src/ma
 
 [`BuiltinHarnessContributor`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor.java) 接收 `loadSkillTool` 与 `taskTool`（由 Platform 装配提供），其 descriptor 为 `ContributorId("builtin")`、version `"1"`、无 requires。它共注册 17 个 Tool、1 个 Custom Entry Type 和 1 个 Context Projector：
 
-| localName | AgentToolId | model name | backend | visibility | priority | 说明 |
+| localName | AgentToolId | model name | requirements | visibility | priority | 说明 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `environment.read` | `base.read` | `read` | `ENVIRONMENT_CAPABILITY` | SELECTABLE | 0 | `fs.read`，READ_ONLY |
-| `environment.write` | `base.write` | `write` | `ENVIRONMENT_CAPABILITY` | SELECTABLE | 0 | `fs.write`，IDEMPOTENT |
-| `environment.edit` | `base.edit` | `edit` | `ENVIRONMENT_CAPABILITY` | SELECTABLE | 0 | `fs.apply-edit`，NON_IDEMPOTENT |
-| `environment.apply-patch` | `base.apply-patch` | `apply_patch` | `ENVIRONMENT_CAPABILITY` | SELECTABLE | 0 | `fs.apply-patch`，NON_IDEMPOTENT |
-| `environment.bash` | `base.bash` | `bash` | `ENVIRONMENT_CAPABILITY` | SELECTABLE | 0 | `process.exec`，NON_IDEMPOTENT |
-| `environment.grep` | `base.grep` | `grep` | `ENVIRONMENT_CAPABILITY` | SELECTABLE | 0 | `fs.search`，READ_ONLY |
-| `environment.find` | `base.find` | `find` | `ENVIRONMENT_CAPABILITY` | SELECTABLE | 0 | `fs.find`，READ_ONLY |
-| `environment.lsp-goto-definition` | `base.lsp-goto-definition` | `lsp_goto_definition` | `ENVIRONMENT_CAPABILITY` | SELECTABLE | 0 | `lsp.goto-definition`，READ_ONLY |
-| `environment.lsp-workspace-symbols` | `base.lsp-workspace-symbols` | `lsp_workspace_symbols` | `ENVIRONMENT_CAPABILITY` | SELECTABLE | 0 | `lsp.workspace-symbols`，READ_ONLY |
-| `environment.lsp-java-decompile` | `base.lsp-java-decompile` | `lsp_java_decompile` | `ENVIRONMENT_CAPABILITY` | SELECTABLE | 0 | `lsp.java-decompile`，READ_ONLY |
-| `environment.mcp-list-tools` | `base.mcp-list-tools` | `mcp_list_tools` | `ENVIRONMENT_CAPABILITY` | SELECTABLE | 0 | `mcp.list`，READ_ONLY |
-| `environment.mcp-call-tool` | `base.mcp-call-tool` | `mcp_call_tool` | `ENVIRONMENT_CAPABILITY` | SELECTABLE | 0 | `mcp.call`，NON_IDEMPOTENT |
-| `runtime.load-skill` | `base.load-skill` | `load_skill` | `HOST` | INTERNAL | 0 | 内部 Skill 加载 |
-| `runtime.task` | `base.task` | `task` | `HOST` | INTERNAL | 0 | 内部 Subagent 委派 |
-| `goal.create` | `base.goal.create` | `create_goal` | `DECLARATIVE` | SELECTABLE | 0 | WRITE(`goal.state`) |
-| `goal.get` | `base.goal.get` | `get_goal` | `DECLARATIVE` | SELECTABLE | 0 | READ(`goal.state`) |
-| `goal.update` | `base.goal.update` | `update_goal` | `DECLARATIVE` | SELECTABLE | 0 | WRITE(`goal.state`) |
+| `environment.read` | `base.read` | `read` | Environment | SELECTABLE | 0 | `fs.read`，READ_ONLY |
+| `environment.write` | `base.write` | `write` | Environment | SELECTABLE | 0 | `fs.write`，IDEMPOTENT |
+| `environment.edit` | `base.edit` | `edit` | Environment | SELECTABLE | 0 | `fs.apply-edit`，NON_IDEMPOTENT |
+| `environment.apply-patch` | `base.apply-patch` | `apply_patch` | Environment | SELECTABLE | 0 | `fs.apply-patch`，NON_IDEMPOTENT |
+| `environment.bash` | `base.bash` | `bash` | Environment | SELECTABLE | 0 | `process.exec`，NON_IDEMPOTENT |
+| `environment.grep` | `base.grep` | `grep` | Environment | SELECTABLE | 0 | `fs.search`，READ_ONLY |
+| `environment.find` | `base.find` | `find` | Environment | SELECTABLE | 0 | `fs.find`，READ_ONLY |
+| `environment.lsp-goto-definition` | `base.lsp-goto-definition` | `lsp_goto_definition` | Environment | SELECTABLE | 0 | `lsp.goto-definition`，READ_ONLY |
+| `environment.lsp-workspace-symbols` | `base.lsp-workspace-symbols` | `lsp_workspace_symbols` | Environment | SELECTABLE | 0 | `lsp.workspace-symbols`，READ_ONLY |
+| `environment.lsp-java-decompile` | `base.lsp-java-decompile` | `lsp_java_decompile` | Environment | SELECTABLE | 0 | `lsp.java-decompile`，READ_ONLY |
+| `environment.mcp-list-tools` | `base.mcp-list-tools` | `mcp_list_tools` | Environment | SELECTABLE | 0 | `mcp.list`，READ_ONLY |
+| `environment.mcp-call-tool` | `base.mcp-call-tool` | `mcp_call_tool` | Environment | SELECTABLE | 0 | `mcp.call`，NON_IDEMPOTENT |
+| `runtime.load-skill` | `base.load-skill` | `load_skill` | none | INTERNAL | 0 | 内部 Skill 加载 |
+| `runtime.task` | `base.task` | `task` | none | INTERNAL | 0 | 内部 Subagent 委派 |
+| `goal.create` | `base.goal.create` | `create_goal` | WRITE(`goal.state`) | SELECTABLE | 0 | 创建 Goal snapshot |
+| `goal.get` | `base.goal.get` | `get_goal` | READ(`goal.state`) | SELECTABLE | 0 | 读取 Goal snapshot |
+| `goal.update` | `base.goal.update` | `update_goal` | WRITE(`goal.state`) | SELECTABLE | 0 | 结束 Goal |
 
 此外注册：
 - Custom Entry Type：`goal.state-type`，customType 为 `goal.state`，priority 0；
@@ -102,7 +103,7 @@ updatedAt:   Instant
 
 ### Branch scope 与 Goal 工具
 
-每个 Goal 工具从 [`BranchView.latestCustomEntry`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 查询 `(builtin, goal.state)`，只使用当前 Tool 所在 Assistant Entry 的 root-to-head 路径：
+每个 Goal 工具从已 scoped 到 `builtin` 的 [`BranchView.latestCustomEntry`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 查询 `goal.state`，只使用当前 Tool 所在 Assistant Entry 的 root-to-head 路径：
 
 - [`CreateGoalTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/CreateGoalTool.java)：要求 `objective`，可选正 `tokenBudget`。创建 `ACTIVE` 快照；若 branch 已有 Goal，保留原 `createdAt`，返回 JSON `goal` envelope 和一个 `AppendCustomEntry` WRITE intent。
 - [`GetGoalTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GetGoalTool.java)：无参数。只读当前 branch 的最新快照；不存在时返回无 goal 提示文本。不返回 intent，不改变 branch。
@@ -111,8 +112,8 @@ updatedAt:   Instant
 
 ### Skill 与 Subagent 工具
 
-- [`LoadSkillTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillTool.java)：内部 HOST 工具，依据 `ThreadSelectedSkillLookup` 与 `SkillBodyLoader` 按需加载 Skill 正文内容。
-- [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java)：内部 HOST 工具，通过 `HarnessRuntime.acceptCommands` 创建子 Session 与 Thread，在有界并发限制下执行子任务并返回汇总报告。
+- [`LoadSkillTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillTool.java)：内部 Tool，依据 `ThreadSelectedSkillLookup` 与 `SkillBodyLoader` 按需加载 Skill 正文内容。
+- [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java)：内部 Tool，通过外部 `SubagentRunner` 创建/恢复子 Session 与 Thread，在有界并发限制下执行子任务并返回汇总报告。
 
 ## 执行 / 状态 trace
 

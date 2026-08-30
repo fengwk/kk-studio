@@ -287,6 +287,7 @@ public class HarnessRuntimeConfiguration {
 
   @Bean
   public HarnessWorkDispatcher harnessWorkDispatcher(
+      @Qualifier("nodeInstanceId") UUID nodeInstanceId,
       HarnessStore store,
       SystemSettingsSnapshot systemSettingsSnapshot,
       Clock clock,
@@ -308,6 +309,7 @@ public class HarnessRuntimeConfiguration {
             Duration.ofMillis(advanced.dispatcherRejectionDelayMillis()),
             advanced.dispatcherMaxDispatchTasks());
     return new HarnessWorkDispatcher(
+        nodeInstanceId,
         store,
         config,
         clock,

@@ -9,7 +9,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.skill.SkillBodyLoader.SkillBodyLoadResult;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentSkillLoader;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;

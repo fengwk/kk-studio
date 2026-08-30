@@ -1,38 +1,43 @@
 package fun.fengwk.kkstudio.platform.environment.gateway;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityBusyException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCancelledException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityFailedException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilitySendUncertainException;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityTransport;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityInvokeCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityResultCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonNameConflictException;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentWorkspacePath;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityInvokeCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonNameConflictException;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
+import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryEntry;
+import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryListing;
+import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
+import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.platform.environment.query.EnvironmentQueryCoordinator;
 import fun.fengwk.kkstudio.platform.environment.registry.BindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
@@ -67,8 +72,8 @@ import java.util.concurrent.TimeoutException;
 /**
  * Environment daemon 的连接/协议 transport 与能力/技能适配器。
  *
- * <p>使用当前 Daemon wire 协议（VERSION=4）：每个 envelope 都由 HELLO 时绑定的 canonical {@link EnvironmentName}
- * 限定；名称就是唯一 路由身份，不存在独立展示名。HELLO 认证时通过 PostgreSQL 路由租约原子抢占：同 daemonId 活跃路由返回 RETRY_LATER；不同 daemonId
+ * <p>使用当前 Daemon wire 协议（VERSION=5）：每个 envelope 都由 HELLO 时绑定的 canonical {@link EnvironmentName}
+ * 限定；名称就是唯一路由身份，不存在独立展示名。HELLO 认证时通过 PostgreSQL 路由租约原子抢占：同 daemonId 活跃路由返回 RETRY_LATER；不同 daemonId
  * 活跃路由抛出 {@link DaemonNameConflictException}（终态错误，daemon 收到后停止重连并非零退出）；缺少或过期路由以新 routeToken 接管。
  *
  * <p>READY、HEARTBEAT 与断开连接均以 {@code (environmentName, ownerNodeId, routeToken)} 围栏更新；数据库不可用时
@@ -81,14 +86,15 @@ public class EnvironmentDaemonGateway
         EnvironmentCapabilityTransport,
         EnvironmentDirectoryLister {
 
+  private static final int MAX_INVOCATION_TOMBSTONES = 1024;
+
   private final LiveEnvironmentRegistry environmentRegistry;
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonCapabilityInvokeCodec capabilityInvokeCodec =
       new DaemonCapabilityInvokeCodec();
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
-  private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
-  private final DaemonDirectoryCodec directoryCodec = new DaemonDirectoryCodec();
+  private final ObjectMapper objectMapper = new ObjectMapper();
   private final EnvironmentGatewayProperties properties;
   private final SystemSettingsSnapshot snapshot;
   private final Clock clock;
@@ -97,11 +103,6 @@ public class EnvironmentDaemonGateway
   private final Map<String, ConnectionState> connections = new HashMap<>();
   private final Map<EnvironmentName, ConnectionState> environmentConnections = new HashMap<>();
   private final Map<EnvironmentName, ActiveCapability> activeByEnvironment = new HashMap<>();
-  private final Map<String, PendingSkillLoad> pendingSkillLoads = new HashMap<>();
-  private final Map<String, PendingDirectoryList> pendingDirectoryLists = new HashMap<>();
-
-  /** 每个连接的目录请求超时 tombstone 上限；超过时 FIFO 淘汰最旧条目。 */
-  static final int MAX_DIRECTORY_TOMBSTONES = 1024;
 
   @Autowired
   public EnvironmentDaemonGateway(
@@ -216,6 +217,13 @@ public class EnvironmentDaemonGateway
       EnvironmentBinding binding,
       EnvironmentCapabilityExecutionRequest request,
       EnvironmentCapabilityExecutionListener listener) {
+    return startCapability(binding, request, listener);
+  }
+
+  private ActiveCapability startCapability(
+      EnvironmentBinding binding,
+      EnvironmentCapabilityExecutionRequest request,
+      EnvironmentCapabilityExecutionListener listener) {
     Objects.requireNonNull(binding, "binding");
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(listener, "listener");
@@ -236,9 +244,13 @@ public class EnvironmentDaemonGateway
     String invokePayload;
     synchronized (this) {
       state = environmentConnections.get(environmentName);
+      LiveEnvironment live = environmentRegistry.find(environmentName).orElse(null);
       if (state == null
           || !state.isReady()
-          || !environmentRegistry.isReady(environmentName, clock.instant(), heartbeatTimeout())) {
+          || live == null
+          || !live.isReady(clock.instant(), heartbeatTimeout())
+          || !live.ownerNodeId().equals(environmentRegistry.ownerNodeId())
+          || !Objects.equals(live.routeToken(), state.routeToken)) {
         throw new EnvironmentCapabilityUnavailableException(
             unavailableMessage(environmentName, descriptor.id().value()));
       }
@@ -278,41 +290,70 @@ public class EnvironmentDaemonGateway
     if (timeout == null || timeout.isZero() || timeout.isNegative()) {
       throw new IllegalArgumentException("timeout must be positive");
     }
-    ConnectionState state;
-    synchronized (this) {
-      state = environmentConnections.get(environmentName);
-      if (state == null
-          || !state.isReady()
-          || !environmentRegistry.isReady(environmentName, clock.instant(), heartbeatTimeout())) {
-        return CompletableFuture.completedFuture(
-            new EnvironmentSkillLoadResult.Failed(
-                skill, environmentName + " is offline; " + skill + " is unavailable"));
-      }
-    }
-    String requestId = UUID.randomUUID().toString();
+    EnvironmentCapabilityDescriptor descriptor =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_LOAD);
+    ObjectNode argsNode = objectMapper.createObjectNode();
+    argsNode.put("name", skill);
+    String callId = UUID.randomUUID().toString();
+    EnvironmentCapabilityCall call = new EnvironmentCapabilityCall(callId, argsNode.toString());
+    EnvironmentCapabilityExecutionRequest request =
+        new EnvironmentCapabilityExecutionRequest(descriptor, call, timeout, null);
+    EnvironmentBinding binding = new EnvironmentBinding(environmentName, ".");
+
     CompletableFuture<EnvironmentSkillLoadResult> future = new CompletableFuture<>();
-    PendingSkillLoad pending =
-        new PendingSkillLoad(environmentName, skill, state.connection.connectionId(), future);
-    synchronized (this) {
-      pendingSkillLoads.put(requestId, pending);
-    }
-    String payload = skillLoadCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest(skill));
-    if (!send(state, DaemonMessageType.LOAD_SKILL, requestId, payload)) {
-      synchronized (this) {
-        pendingSkillLoads.remove(requestId, pending);
-      }
-      future.complete(
+    ActiveCapability active;
+    try {
+      active =
+          startCapability(
+              binding,
+              request,
+              new EnvironmentCapabilityExecutionListener() {
+                @Override
+                public void onPartial(EnvironmentCapabilityResult partial) {}
+
+                @Override
+                public void onComplete(EnvironmentCapabilityResult result) {
+                  if (result.error()) {
+                    String errorMsg = extractErrorMessage(result, "unknown skill: " + skill);
+                    future.complete(new EnvironmentSkillLoadResult.Failed(skill, errorMsg));
+                  } else if (result.contents().size() == 1
+                      && result.contents().get(0) instanceof TextToolContent text) {
+                    future.complete(new EnvironmentSkillLoadResult.Loaded(skill, text.text()));
+                  } else {
+                    future.complete(
+                        new EnvironmentSkillLoadResult.Failed(
+                            skill, "Unexpected skill content type for " + skill));
+                  }
+                }
+
+                @Override
+                public void onError(Throwable error) {
+                  future.complete(
+                      new EnvironmentSkillLoadResult.Failed(
+                          skill, environmentName + " is offline; " + skill + " is unavailable"));
+                }
+              });
+    } catch (EnvironmentCapabilityUnavailableException unavailable) {
+      return CompletableFuture.completedFuture(
           new EnvironmentSkillLoadResult.Failed(
               skill, environmentName + " is offline; " + skill + " is unavailable"));
-      return future;
+    } catch (EnvironmentCapabilityBusyException busy) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentSkillLoadResult.Failed(skill, busy.getMessage()));
+    } catch (EnvironmentCapabilitySendUncertainException uncertain) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentSkillLoadResult.Failed(skill, uncertain.getMessage()));
+    } catch (RuntimeException error) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentSkillLoadResult.Failed(
+              skill, error.getMessage() != null ? error.getMessage() : "skill load failed"));
     }
+
     return future
         .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
         .exceptionally(
             error -> {
-              synchronized (this) {
-                pendingSkillLoads.remove(requestId, pending);
-              }
+              expireCapability(active);
               return new EnvironmentSkillLoadResult.Failed(
                   skill, environmentName + " is offline; " + skill + " is unavailable");
             });
@@ -324,7 +365,7 @@ public class EnvironmentDaemonGateway
     Objects.requireNonNull(environmentName, "environmentName");
     String directoryPath;
     try {
-      directoryPath = DaemonDirectoryCodec.requireCanonicalRelativePath(path);
+      directoryPath = EnvironmentWorkspacePath.requireCanonicalRelativePath(path);
     } catch (IllegalArgumentException error) {
       return CompletableFuture.completedFuture(
           new EnvironmentDirectoryListResult.Failed(
@@ -383,7 +424,7 @@ public class EnvironmentDaemonGateway
     Objects.requireNonNull(environmentName, "environmentName");
     String directoryPath;
     try {
-      directoryPath = DaemonDirectoryCodec.requireCanonicalRelativePath(path);
+      directoryPath = EnvironmentWorkspacePath.requireCanonicalRelativePath(path);
     } catch (IllegalArgumentException error) {
       return CompletableFuture.completedFuture(
           new EnvironmentDirectoryListResult.Failed(
@@ -393,70 +434,149 @@ public class EnvironmentDaemonGateway
       throw new IllegalArgumentException("timeout must be positive");
     }
 
-    ConnectionState state;
-    synchronized (this) {
-      state = environmentConnections.get(environmentName);
-      if (state == null || !state.isReady()) {
-        return CompletableFuture.completedFuture(
-            new EnvironmentDirectoryListResult.Failed(
-                EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
-                environmentName + " is not ready; directory listing is unavailable"));
-      }
-    }
+    EnvironmentCapabilityDescriptor descriptor =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_LIST_DIRECTORY);
+    ObjectNode argsNode = objectMapper.createObjectNode();
+    argsNode.put("path", directoryPath);
+    String callId = UUID.randomUUID().toString();
+    EnvironmentCapabilityCall call = new EnvironmentCapabilityCall(callId, argsNode.toString());
+    EnvironmentCapabilityExecutionRequest request =
+        new EnvironmentCapabilityExecutionRequest(descriptor, call, timeout, null);
+    EnvironmentBinding binding = new EnvironmentBinding(environmentName, ".");
 
-    String requestId = UUID.randomUUID().toString();
     CompletableFuture<EnvironmentDirectoryListResult> future = new CompletableFuture<>();
-    PendingDirectoryList pending =
-        new PendingDirectoryList(
-            environmentName, directoryPath, state.connection.connectionId(), future);
-    synchronized (this) {
-      pendingDirectoryLists.put(requestId, pending);
-    }
-    String payload =
-        directoryCodec.encodeRequest(
-            new DaemonDirectoryCodec.ListDirectoryRequest(requestId, directoryPath));
-    SendOutcome outcome = sendWithOutcome(state, DaemonMessageType.LIST_DIRECTORY, null, payload);
-    if (outcome == SendOutcome.SENT) {
-      return future
-          .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
-          .exceptionally(
-              error -> {
-                synchronized (this) {
-                  if (pendingDirectoryLists.remove(requestId, pending)) {
-                    state.directoryTombstones.addLast(
-                        new DirectoryTombstone(
-                            requestId,
-                            environmentName,
-                            state.connection.connectionId(),
-                            directoryPath));
-                    evictDirectoryTombstones(state);
+    ActiveCapability active;
+    try {
+      active =
+          startCapability(
+              binding,
+              request,
+              new EnvironmentCapabilityExecutionListener() {
+                @Override
+                public void onPartial(EnvironmentCapabilityResult partial) {}
+
+                @Override
+                public void onComplete(EnvironmentCapabilityResult result) {
+                  if (result.error()) {
+                    String errorMsg = extractErrorMessage(result, "directory listing failed");
+                    EnvironmentDirectoryFailureCode code = classifyDirectoryError(errorMsg);
+                    future.complete(new EnvironmentDirectoryListResult.Failed(code, errorMsg));
+                  } else if (result.contents().size() == 1
+                      && result.contents().get(0) instanceof JsonToolContent json) {
+                    try {
+                      EnvironmentDirectoryListing listing =
+                          objectMapper.readValue(json.json(), EnvironmentDirectoryListing.class);
+                      EnvironmentDirectoryDTO dto = toDto(listing);
+                      future.complete(new EnvironmentDirectoryListResult.Loaded(dto));
+                    } catch (Exception parseError) {
+                      future.complete(
+                          new EnvironmentDirectoryListResult.Failed(
+                              EnvironmentDirectoryFailureCode.IO_ERROR,
+                              "Failed to parse directory listing: " + parseError.getMessage()));
+                    }
+                  } else {
+                    future.complete(
+                        new EnvironmentDirectoryListResult.Failed(
+                            EnvironmentDirectoryFailureCode.IO_ERROR,
+                            "Expected JsonToolContent but got unexpected content"));
                   }
                 }
-                EnvironmentDirectoryFailureCode code =
-                    error instanceof TimeoutException
-                        ? EnvironmentDirectoryFailureCode.TIMEOUT
-                        : EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE;
-                String message =
-                    code == EnvironmentDirectoryFailureCode.TIMEOUT
-                        ? environmentName
-                            + " directory listing timed out after "
-                            + timeout.toMillis()
-                            + "ms"
-                        : environmentName + " is not ready; directory listing is unavailable";
-                return new EnvironmentDirectoryListResult.Failed(code, message);
+
+                @Override
+                public void onError(Throwable error) {
+                  future.complete(
+                      new EnvironmentDirectoryListResult.Failed(
+                          EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+                          environmentName + " is not ready; directory listing is unavailable"));
+                }
               });
+    } catch (EnvironmentCapabilityUnavailableException unavailable) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentDirectoryListResult.Failed(
+              EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+              environmentName + " is not ready; directory listing is unavailable"));
+    } catch (EnvironmentCapabilityBusyException busy) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentDirectoryListResult.Failed(
+              EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE, busy.getMessage()));
+    } catch (EnvironmentCapabilitySendUncertainException uncertain) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentDirectoryListResult.Failed(
+              EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE, uncertain.getMessage()));
+    } catch (RuntimeException error) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentDirectoryListResult.Failed(
+              EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE, error.getMessage()));
     }
-    synchronized (this) {
-      pendingDirectoryLists.remove(requestId, pending);
+
+    return future
+        .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
+        .exceptionally(
+            error -> {
+              expireCapability(active);
+              boolean isTimeout =
+                  error instanceof TimeoutException || error.getCause() instanceof TimeoutException;
+              EnvironmentDirectoryFailureCode code =
+                  isTimeout
+                      ? EnvironmentDirectoryFailureCode.TIMEOUT
+                      : EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE;
+              String message =
+                  code == EnvironmentDirectoryFailureCode.TIMEOUT
+                      ? environmentName
+                          + " directory listing timed out after "
+                          + timeout.toMillis()
+                          + "ms"
+                      : environmentName + " is not ready; directory listing is unavailable";
+              return new EnvironmentDirectoryListResult.Failed(code, message);
+            });
+  }
+
+  private static EnvironmentDirectoryDTO toDto(EnvironmentDirectoryListing listing) {
+    EnvironmentDirectoryDTO dto = new EnvironmentDirectoryDTO();
+    dto.setPath(listing.path());
+    dto.setDisplayPath(listing.displayPath());
+    dto.setParentPath(listing.parentPath());
+    dto.setTruncated(listing.truncated());
+    dto.setGitBranch(listing.gitBranch());
+    List<EnvironmentDirectoryEntryDTO> entries = new ArrayList<>();
+    for (EnvironmentDirectoryEntry entry : listing.entries()) {
+      EnvironmentDirectoryEntryDTO entryDto = new EnvironmentDirectoryEntryDTO();
+      entryDto.setName(entry.name());
+      entryDto.setPath(entry.path());
+      entries.add(entryDto);
     }
-    if (outcome == SendOutcome.UNCERTAIN) {
-      close(state.connection.connectionId());
+    dto.setEntries(List.copyOf(entries));
+    return dto;
+  }
+
+  private static EnvironmentDirectoryFailureCode classifyDirectoryError(String message) {
+    if (message == null) {
+      return EnvironmentDirectoryFailureCode.IO_ERROR;
     }
-    future.complete(
-        new EnvironmentDirectoryListResult.Failed(
-            EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
-            environmentName + " is not ready; directory listing is unavailable"));
-    return future;
+    String lower = message.toLowerCase();
+    if (lower.contains("nosuchfile")
+        || lower.contains("not found")
+        || lower.contains("does not exist")) {
+      return EnvironmentDirectoryFailureCode.NOT_FOUND;
+    }
+    if (lower.contains("notdirectory") || lower.contains("not a directory")) {
+      return EnvironmentDirectoryFailureCode.NOT_DIRECTORY;
+    }
+    if (lower.contains("invalid") || lower.contains("escapes") || lower.contains("canonical")) {
+      return EnvironmentDirectoryFailureCode.INVALID_PATH;
+    }
+    return EnvironmentDirectoryFailureCode.IO_ERROR;
+  }
+
+  private static String extractErrorMessage(EnvironmentCapabilityResult result, String fallback) {
+    if (!result.contents().isEmpty() && result.contents().get(0) instanceof TextToolContent text) {
+      String msg = text.text();
+      if (msg.startsWith("Error: ")) {
+        return msg.substring("Error: ".length());
+      }
+      return msg;
+    }
+    return fallback;
   }
 
   private String createInvokePayload(
@@ -496,11 +616,7 @@ public class EnvironmentDaemonGateway
       case CANCELLED -> handleCancelled(state, envelope, deferred);
       case ACK -> handleAck(state, envelope);
       case ERROR -> handleError(state, envelope);
-      case SKILL_LOADED -> handleSkillLoaded(state, envelope, deferred);
-      case SKILL_LOAD_FAILED -> handleSkillLoadFailed(state, envelope, deferred);
-      case DIRECTORY_LISTED -> handleDirectoryListed(state, envelope, deferred);
-      case DIRECTORY_LIST_FAILED -> handleDirectoryListFailed(state, envelope, deferred);
-      case WELCOME, INVOKE, CANCEL, LOAD_SKILL, LIST_DIRECTORY -> throw new DaemonProtocolException(
+      case WELCOME, INVOKE, CANCEL -> throw new DaemonProtocolException(
           "daemon must not send " + envelope.messageType() + " to gateway");
     }
   }
@@ -610,7 +726,7 @@ public class EnvironmentDaemonGateway
   }
 
   private void handleStarted(ConnectionState state, DaemonEnvelope envelope) {
-    requireActive(state, envelope);
+    callbackTarget(state, envelope);
     ObjectNode payload = envelopeCodec.readPayload(envelope);
     if (payload.isEmpty()) {
       return;
@@ -624,231 +740,124 @@ public class EnvironmentDaemonGateway
 
   private void handlePartial(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    ActiveCapability active = requireActive(state, envelope);
+    ActiveCapability active = callbackTarget(state, envelope);
     EnvironmentCapabilityResult result =
         resultCodec.decodePartialForInvocation(
-            envelope.payloadJson(), wireInvocationId(active), environment().maxResourceBytes());
-    deferred.add(() -> active.listener.onPartial(result));
+            envelope.payloadJson(), envelope.invocationId(), environment().maxResourceBytes());
+    if (active != null && isCurrentActive(active)) {
+      deferred.add(() -> active.listener.onPartial(result));
+    }
   }
 
   private void handleCompleted(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    ActiveCapability active = takeActive(state, envelope);
+    callbackTarget(state, envelope);
     EnvironmentCapabilityResult result =
         resultCodec.decodeCompletedForInvocation(
-            envelope.payloadJson(), wireInvocationId(active), environment().maxResourceBytes());
-    deferred.add(() -> active.listener.onComplete(result));
+            envelope.payloadJson(), envelope.invocationId(), environment().maxResourceBytes());
+    ActiveCapability active = takeTerminalTarget(state, envelope);
+    if (active != null) {
+      deferred.add(() -> active.listener.onComplete(result));
+    }
   }
 
   private void handleFailed(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    ActiveCapability active = takeActive(state, envelope);
+    callbackTarget(state, envelope);
     String message =
         requiredSingleText(envelopeCodec.readPayload(envelope), "message", "FAILED payload");
-    deferred.add(() -> active.listener.onError(new EnvironmentCapabilityFailedException(message)));
+    ActiveCapability active = takeTerminalTarget(state, envelope);
+    if (active != null) {
+      deferred.add(
+          () -> active.listener.onError(new EnvironmentCapabilityFailedException(message)));
+    }
   }
 
   private void handleCancelled(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    ActiveCapability active = takeActive(state, envelope);
+    callbackTarget(state, envelope);
     String reason =
         requiredSingleText(envelopeCodec.readPayload(envelope), "reason", "CANCELLED payload");
-    deferred.add(
-        () -> active.listener.onError(new EnvironmentCapabilityCancelledException(reason)));
-  }
-
-  private void handleSkillLoaded(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    requireReady(state);
-    PendingSkillLoad pending = takePendingSkillLoad(state, envelope);
-    DaemonSkillLoadCodec.SkillLoaded loaded = skillLoadCodec.decodeLoaded(envelope.payloadJson());
-    if (!pending.skillName.equals(loaded.name())) {
-      throw new DaemonProtocolException(
-          "SKILL_LOADED name does not match request: " + loaded.name());
-    }
-    deferred.add(
-        () ->
-            pending.future.complete(
-                new EnvironmentSkillLoadResult.Loaded(loaded.name(), loaded.content())));
-  }
-
-  private void handleSkillLoadFailed(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    requireReady(state);
-    PendingSkillLoad pending = takePendingSkillLoad(state, envelope);
-    DaemonSkillLoadCodec.SkillLoadFailed failed =
-        skillLoadCodec.decodeFailed(envelope.payloadJson());
-    if (!pending.skillName.equals(failed.name())) {
-      throw new DaemonProtocolException(
-          "SKILL_LOAD_FAILED name does not match request: " + failed.name());
-    }
-    deferred.add(
-        () ->
-            pending.future.complete(
-                new EnvironmentSkillLoadResult.Failed(failed.name(), failed.message())));
-  }
-
-  private PendingSkillLoad takePendingSkillLoad(ConnectionState state, DaemonEnvelope envelope) {
-    String requestId = requireNonBlank(envelope.invocationId(), "invocationId");
-    PendingSkillLoad pending;
-    synchronized (this) {
-      pending = pendingSkillLoads.remove(requestId);
-    }
-    if (pending == null
-        || !pending.environmentName.equals(state.environmentName)
-        || !pending.connectionId.equals(state.connection.connectionId())) {
-      throw new DaemonProtocolException(
-          "skill load callback does not own invocationId: " + requestId);
-    }
-    return pending;
-  }
-
-  private void handleDirectoryListed(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    requireReady(state);
-    requireNoInvocationId(envelope);
-    DaemonDirectoryCodec.DirectoryListed listed =
-        directoryCodec.decodeListed(envelope.payloadJson());
-    PendingDirectoryList pending = peekPendingDirectoryList(state, listed.requestId());
-    if (pending == null) {
-      if (matchesDirectoryTombstone(state, listed.requestId(), listed.path())) {
-        return;
-      }
-      throw new DaemonProtocolException(
-          "directory listing callback does not own requestId: " + listed.requestId());
-    }
-    if (!pending.path.equals(listed.path())) {
-      throw new DaemonProtocolException(
-          "DIRECTORY_LISTED path does not match request: " + listed.path());
-    }
-    if (!removePendingDirectoryList(state, listed.requestId(), pending)) {
-      return;
-    }
-    deferred.add(
-        () -> pending.future.complete(new EnvironmentDirectoryListResult.Loaded(toDto(listed))));
-  }
-
-  private void handleDirectoryListFailed(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    requireReady(state);
-    requireNoInvocationId(envelope);
-    DaemonDirectoryCodec.DirectoryListFailed failed =
-        directoryCodec.decodeFailed(envelope.payloadJson());
-    PendingDirectoryList pending = peekPendingDirectoryList(state, failed.requestId());
-    if (pending == null) {
-      if (matchesDirectoryTombstone(state, failed.requestId(), failed.path())) {
-        return;
-      }
-      throw new DaemonProtocolException(
-          "directory listing callback does not own requestId: " + failed.requestId());
-    }
-    if (!pending.path.equals(failed.path())) {
-      throw new DaemonProtocolException(
-          "DIRECTORY_LIST_FAILED path does not match request: " + failed.path());
-    }
-    if (!removePendingDirectoryList(state, failed.requestId(), pending)) {
-      return;
-    }
-    EnvironmentDirectoryFailureCode code = toApplicationCode(failed.code());
-    deferred.add(
-        () ->
-            pending.future.complete(
-                new EnvironmentDirectoryListResult.Failed(code, failed.message())));
-  }
-
-  private PendingDirectoryList peekPendingDirectoryList(ConnectionState state, String requestId) {
-    synchronized (this) {
-      PendingDirectoryList pending = pendingDirectoryLists.get(requestId);
-      if (pending == null) {
-        return null;
-      }
-      if (!pending.environmentName.equals(state.environmentName)
-          || !pending.connectionId.equals(state.connection.connectionId())) {
-        throw new DaemonProtocolException(
-            "directory listing callback does not own requestId: " + requestId);
-      }
-      return pending;
+    ActiveCapability active = takeTerminalTarget(state, envelope);
+    if (active != null) {
+      deferred.add(
+          () -> active.listener.onError(new EnvironmentCapabilityCancelledException(reason)));
     }
   }
 
-  private boolean removePendingDirectoryList(
-      ConnectionState state, String requestId, PendingDirectoryList pending) {
-    synchronized (this) {
-      return pendingDirectoryLists.remove(requestId, pending);
-    }
-  }
-
-  private boolean matchesDirectoryTombstone(ConnectionState state, String requestId, String path) {
-    synchronized (this) {
-      for (DirectoryTombstone tombstone : state.directoryTombstones) {
-        if (tombstone.requestId().equals(requestId)
-            && tombstone.environmentName().equals(state.environmentName)
-            && tombstone.connectionId().equals(state.connection.connectionId())
-            && tombstone.path().equals(path)) {
-          return true;
-        }
-      }
-      return false;
-    }
-  }
-
-  private static void evictDirectoryTombstones(ConnectionState state) {
-    while (state.directoryTombstones.size() > MAX_DIRECTORY_TOMBSTONES) {
-      state.directoryTombstones.removeFirst();
-    }
-  }
-
-  private static EnvironmentDirectoryFailureCode toApplicationCode(
-      DaemonDirectoryFailureCode wireCode) {
-    return switch (wireCode) {
-      case INVALID_PATH -> EnvironmentDirectoryFailureCode.INVALID_PATH;
-      case NOT_FOUND -> EnvironmentDirectoryFailureCode.NOT_FOUND;
-      case NOT_DIRECTORY -> EnvironmentDirectoryFailureCode.NOT_DIRECTORY;
-      case IO_ERROR -> EnvironmentDirectoryFailureCode.IO_ERROR;
-    };
-  }
-
-  private static EnvironmentDirectoryDTO toDto(DaemonDirectoryCodec.DirectoryListed listed) {
-    EnvironmentDirectoryDTO dto = new EnvironmentDirectoryDTO();
-    dto.setPath(listed.path());
-    dto.setDisplayPath(listed.displayPath());
-    dto.setParentPath(listed.parentPath());
-    dto.setTruncated(listed.truncated());
-    dto.setGitBranch(listed.gitBranch());
-    List<EnvironmentDirectoryEntryDTO> entries = new ArrayList<>();
-    for (DaemonDirectoryCodec.DirectoryEntry entry : listed.entries()) {
-      EnvironmentDirectoryEntryDTO entryDto = new EnvironmentDirectoryEntryDTO();
-      entryDto.setName(entry.name());
-      entryDto.setPath(entry.path());
-      entries.add(entryDto);
-    }
-    dto.setEntries(List.copyOf(entries));
-    return dto;
-  }
-
-  private ActiveCapability requireActive(ConnectionState state, DaemonEnvelope envelope) {
+  private ActiveCapability callbackTarget(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
     UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
-    ActiveCapability active;
     synchronized (this) {
-      active = activeByEnvironment.get(state.environmentName);
+      ActiveCapability active = activeByEnvironment.get(state.environmentName);
+      if (active != null
+          && active.invocationId.equals(invocationId)
+          && active.connectionId.equals(state.connection.connectionId())) {
+        return active;
+      }
+      if (state.invocationTombstones.contains(invocationId)) {
+        return null;
+      }
     }
-    if (active == null
-        || !active.invocationId.equals(invocationId)
-        || !active.connectionId.equals(state.connection.connectionId())) {
-      throw new DaemonProtocolException(
-          "daemon callback does not own invocationId: " + envelope.invocationId());
-    }
-    return active;
+    throw new DaemonProtocolException(
+        "daemon callback does not own invocationId: " + envelope.invocationId());
   }
 
-  private ActiveCapability takeActive(ConnectionState state, DaemonEnvelope envelope) {
-    ActiveCapability active = requireActive(state, envelope);
+  private boolean isCurrentActive(ActiveCapability active) {
     synchronized (this) {
-      activeByEnvironment.remove(state.environmentName, active);
+      return activeByEnvironment.get(active.environmentName) == active && !active.terminal;
     }
-    active.terminal = true;
-    return active;
+  }
+
+  private ActiveCapability takeTerminalTarget(ConnectionState state, DaemonEnvelope envelope) {
+    requireReady(state);
+    UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
+    synchronized (this) {
+      ActiveCapability active = activeByEnvironment.get(state.environmentName);
+      if (active != null
+          && active.invocationId.equals(invocationId)
+          && active.connectionId.equals(state.connection.connectionId())) {
+        activeByEnvironment.remove(state.environmentName, active);
+        active.terminal = true;
+        return active;
+      }
+      if (state.invocationTombstones.remove(invocationId)) {
+        return null;
+      }
+    }
+    throw new DaemonProtocolException(
+        "daemon terminal callback does not own invocationId: " + envelope.invocationId());
+  }
+
+  private void expireCapability(ActiveCapability active) {
+    boolean sendCancel;
+    synchronized (active) {
+      if (active.terminal) {
+        return;
+      }
+      active.cancelled = true;
+      sendCancel = !active.cancelSent;
+      active.cancelSent = true;
+      active.terminal = true;
+    }
+    ConnectionState state;
+    synchronized (this) {
+      if (!activeByEnvironment.remove(active.environmentName, active)) {
+        return;
+      }
+      state = environmentConnections.get(active.environmentName);
+      if (state == null || !state.connection.connectionId().equals(active.connectionId)) {
+        return;
+      }
+      state.invocationTombstones.remove(active.invocationId);
+      state.invocationTombstones.addLast(active.invocationId);
+      while (state.invocationTombstones.size() > MAX_INVOCATION_TOMBSTONES) {
+        state.invocationTombstones.removeFirst();
+      }
+    }
+    if (sendCancel) {
+      send(state, DaemonMessageType.CANCEL, active.invocationId.toString(), "{}");
+    }
   }
 
   private boolean send(
@@ -899,7 +908,7 @@ public class EnvironmentDaemonGateway
     if (error instanceof DaemonNameConflictException) {
       payload.put("code", DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT);
     } else if (error instanceof DaemonRetryLaterException) {
-      payload.put("code", "RETRY_LATER");
+      payload.put("code", DaemonProtocol.ERROR_CODE_RETRY_LATER);
     }
     enqueueProtocolError(state, receivedEnvironmentName, envelopeCodec.writeJson(payload));
     close(state.connection.connectionId());
@@ -938,8 +947,6 @@ public class EnvironmentDaemonGateway
 
   private void closeConnectionState(ConnectionState state) {
     ActiveCapability lostCapability = null;
-    List<PendingSkillLoad> doomedSkills = List.of();
-    List<PendingDirectoryList> doomedDirectoryLists = List.of();
     EnvironmentName environmentName;
     UUID routeToken;
     boolean closeAfterFlush;
@@ -968,10 +975,8 @@ public class EnvironmentDaemonGateway
             lostCapability = active;
           }
         }
-        doomedSkills = takePendingSkillLoads(environmentName);
-        doomedDirectoryLists = takePendingDirectoryLists(environmentName);
+        state.invocationTombstones.clear();
       }
-      state.directoryTombstones.clear();
       connections.remove(state.connection.connectionId(), state);
     }
     try {
@@ -994,64 +999,6 @@ public class EnvironmentDaemonGateway
                               + env
                               + "; capability invocation outcome is uncertain."))));
     }
-    completeDoomedSkillLoads(environmentName, doomedSkills);
-    completeDoomedDirectoryLists(environmentName, doomedDirectoryLists);
-  }
-
-  private List<PendingSkillLoad> takePendingSkillLoads(EnvironmentName environmentName) {
-    List<PendingSkillLoad> doomed = new ArrayList<>();
-    List<String> keys = new ArrayList<>();
-    for (Map.Entry<String, PendingSkillLoad> entry : pendingSkillLoads.entrySet()) {
-      if (environmentName.equals(entry.getValue().environmentName)) {
-        keys.add(entry.getKey());
-        doomed.add(entry.getValue());
-      }
-    }
-    for (String key : keys) {
-      pendingSkillLoads.remove(key);
-    }
-    return doomed;
-  }
-
-  private void completeDoomedSkillLoads(
-      EnvironmentName environmentName, List<PendingSkillLoad> doomed) {
-    if (environmentName == null || doomed.isEmpty()) {
-      return;
-    }
-    for (PendingSkillLoad pending : doomed) {
-      pending.future.complete(
-          new EnvironmentSkillLoadResult.Failed(
-              pending.skillName,
-              environmentName + " is offline; " + pending.skillName + " is unavailable"));
-    }
-  }
-
-  private List<PendingDirectoryList> takePendingDirectoryLists(EnvironmentName environmentName) {
-    List<PendingDirectoryList> doomed = new ArrayList<>();
-    List<String> keys = new ArrayList<>();
-    for (Map.Entry<String, PendingDirectoryList> entry : pendingDirectoryLists.entrySet()) {
-      if (environmentName.equals(entry.getValue().environmentName)) {
-        keys.add(entry.getKey());
-        doomed.add(entry.getValue());
-      }
-    }
-    for (String key : keys) {
-      pendingDirectoryLists.remove(key);
-    }
-    return doomed;
-  }
-
-  private void completeDoomedDirectoryLists(
-      EnvironmentName environmentName, List<PendingDirectoryList> doomed) {
-    if (environmentName == null || doomed.isEmpty()) {
-      return;
-    }
-    for (PendingDirectoryList pending : doomed) {
-      pending.future.complete(
-          new EnvironmentDirectoryListResult.Failed(
-              EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
-              environmentName + " is not ready; directory listing is unavailable"));
-    }
   }
 
   private void notifyEnvironmentReady(EnvironmentName environmentName) {
@@ -1061,10 +1008,10 @@ public class EnvironmentDaemonGateway
     }
   }
 
-  private static void runDeferred(List<Runnable> deferred) {
-    for (Runnable action : deferred) {
+  private void runDeferred(List<Runnable> callbacks) {
+    for (Runnable callback : callbacks) {
       try {
-        action.run();
+        callback.run();
       } catch (RuntimeException ignored) {
       }
     }
@@ -1076,10 +1023,6 @@ public class EnvironmentDaemonGateway
     if (!MessageDigest.isEqual(expected, supplied)) {
       throw new DaemonProtocolException("daemon gateway token is invalid");
     }
-  }
-
-  private static String wireInvocationId(ActiveCapability active) {
-    return active.invocationId.toString();
   }
 
   private static String unavailableMessage(EnvironmentName environmentName, String capabilityId) {
@@ -1221,45 +1164,6 @@ public class EnvironmentDaemonGateway
     }
   }
 
-  private static final class PendingSkillLoad {
-    private final EnvironmentName environmentName;
-    private final String skillName;
-    private final String connectionId;
-    private final CompletableFuture<EnvironmentSkillLoadResult> future;
-
-    private PendingSkillLoad(
-        EnvironmentName environmentName,
-        String skillName,
-        String connectionId,
-        CompletableFuture<EnvironmentSkillLoadResult> future) {
-      this.environmentName = environmentName;
-      this.skillName = skillName;
-      this.connectionId = connectionId;
-      this.future = future;
-    }
-  }
-
-  private static final class PendingDirectoryList {
-    private final EnvironmentName environmentName;
-    private final String path;
-    private final String connectionId;
-    private final CompletableFuture<EnvironmentDirectoryListResult> future;
-
-    private PendingDirectoryList(
-        EnvironmentName environmentName,
-        String path,
-        String connectionId,
-        CompletableFuture<EnvironmentDirectoryListResult> future) {
-      this.environmentName = environmentName;
-      this.path = path;
-      this.connectionId = connectionId;
-      this.future = future;
-    }
-  }
-
-  private record DirectoryTombstone(
-      String requestId, EnvironmentName environmentName, String connectionId, String path) {}
-
   private static final class ConnectionState {
     private final EnvironmentDaemonConnection connection;
     private volatile UUID routeToken;
@@ -1270,9 +1174,9 @@ public class EnvironmentDaemonGateway
     private volatile boolean sendFailed;
     private volatile boolean cleaned;
     private boolean closeAfterFlush;
-    private final ArrayDeque<DirectoryTombstone> directoryTombstones = new ArrayDeque<>();
     private long outboundSequence;
     private InboundEnvelopeIdentity lastInbound;
+    private final ArrayDeque<UUID> invocationTombstones = new ArrayDeque<>();
 
     private ConnectionState(EnvironmentDaemonConnection connection) {
       this.connection = Objects.requireNonNull(connection, "connection");

@@ -47,9 +47,9 @@ class ToolExecutionGatewayAdmissionTest {
                 ToolGatewayTestSupport.execution(
                     ToolGatewayTestSupport.hostRequest("call-1", descriptor)),
                 new ToolGatewayTestSupport.RecordingListener()));
-    ToolGateway.Overloaded second =
+    ToolGateway.RetryLater second =
         assertInstanceOf(
-            ToolGateway.Overloaded.class,
+            ToolGateway.RetryLater.class,
             gateway.start(
                 ToolGatewayTestSupport.execution(
                     ToolGatewayTestSupport.hostRequest("call-2", descriptor)),
@@ -88,16 +88,16 @@ class ToolExecutionGatewayAdmissionTest {
               admission);
 
       assertInstanceOf(
-          ToolGateway.Overloaded.class,
+          ToolGateway.RetryLater.class,
           gateway.start(
               ToolGatewayTestSupport.execution(
                   ToolGatewayTestSupport.hostRequest("host", hostDescriptor)),
               new ToolGatewayTestSupport.RecordingListener()));
       assertInstanceOf(
-          ToolGateway.Overloaded.class,
+          ToolGateway.RetryLater.class,
           gateway.start(effectsExecution(), new ToolGatewayTestSupport.RecordingListener()));
       assertInstanceOf(
-          ToolGateway.Overloaded.class,
+          ToolGateway.RetryLater.class,
           gateway.start(
               ToolGatewayTestSupport.execution(
                   ToolGatewayTestSupport.environmentRequest(
@@ -205,7 +205,7 @@ class ToolExecutionGatewayAdmissionTest {
                         "call-1", ToolGatewayTestSupport.ENV_A)),
                 new ToolGatewayTestSupport.RecordingListener()));
     assertInstanceOf(
-        ToolGateway.Overloaded.class,
+        ToolGateway.RetryLater.class,
         gateway.start(
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.environmentRequest("call-2", ToolGatewayTestSupport.ENV_A)),
@@ -252,7 +252,7 @@ class ToolExecutionGatewayAdmissionTest {
                         "call-1", ToolGatewayTestSupport.ENV_A)),
                 listener));
     assertInstanceOf(
-        ToolGateway.Overloaded.class,
+        ToolGateway.RetryLater.class,
         gateway.start(
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.environmentRequest("call-2", ToolGatewayTestSupport.ENV_A)),
@@ -292,7 +292,7 @@ class ToolExecutionGatewayAdmissionTest {
     executor.rejectSubmissions = true;
 
     assertInstanceOf(
-        ToolGateway.Overloaded.class,
+        ToolGateway.RetryLater.class,
         gateway.start(
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.hostRequest("call-1", descriptor)),

@@ -198,18 +198,23 @@ class McpBridgeCapabilitiesTest {
         () -> request("mcp.call", "{\"server\":\"fs\",\"tool\":\"t\",\"arguments\":\"string\"}"));
   }
 
+  /** 已完成调用上的迟到 cancel 不得改写已发布终态或产生第二次回调。 */
   @Test
-  void cancelProducesExactlyOneTerminalCallback() throws Exception {
-    McpCallCapability capability = new McpCallCapability(registry(new FakeClient("fs")), executor);
+  void cancelAfterCompletionDoesNotRewriteTerminalCallback() throws Exception {
+    FakeClient client = new FakeClient("fs");
+    client.outcomes.put("echo", new McpCallOutcome(false, "done"));
+    McpCallCapability capability = new McpCallCapability(registry(client), executor);
     EnvironmentCapabilityExecutionRequest request =
         request("mcp.call", "{\"server\":\"fs\",\"tool\":\"echo\",\"arguments\":{}}");
     RecordingListener listener = new RecordingListener();
     EnvironmentCapabilityExecutionHandle handle = capability.execute(request, listener);
-    handle.cancel();
-    handle.cancel();
     EnvironmentCapabilityResult result = listener.awaitComplete();
-    assertTrue(result.error());
-    assertTrue(((TextToolContent) result.contents().get(0)).text().contains("Operation cancelled"));
+
+    handle.cancel();
+    handle.cancel();
+
+    assertFalse(result.error());
+    assertEquals("done", ((TextToolContent) result.contents().get(0)).text());
     assertEquals(1, listener.terminalCount.get());
   }
 

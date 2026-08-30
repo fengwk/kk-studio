@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment.service;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;

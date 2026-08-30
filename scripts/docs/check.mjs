@@ -14,6 +14,7 @@ const moduleDocuments = [
   'harness-builtin.md',
   'harness-contributor-api.md',
   'harness-daemon.md',
+  'harness-environment.md',
   'harness-infra.md',
   'harness-runtime.md',
   'harness-tool.md',

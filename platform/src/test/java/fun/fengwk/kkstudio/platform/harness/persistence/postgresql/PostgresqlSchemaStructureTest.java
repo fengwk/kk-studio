@@ -512,7 +512,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "available_at",
         "wake_version",
         "lease_token",
-        "lease_until");
+        "lease_until",
+        "required_environment_name");
+
+    assertColumnType("character varying", "harness_work", "required_environment_name");
 
     // lease_token 与 lease_until 必须同时被设置或清空。
     assertThrows(SQLException.class, () -> insertWork("THREAD", uuid(920_001L), "token", null));
@@ -531,6 +534,39 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     // 完全合法的 leased 行可插入。
     try (Connection conn = newConnection()) {
       insertWork(conn, "TOOL", uuid(920_007L), "worker", "current_timestamp");
+    }
+
+    // required_environment_name 仅允许 target_type='TOOL' 时非空，且必须非空字符串。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_harness_work_required_environment",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement(
+                    "insert into harness_work (target_type, target_id, available_at, wake_version, required_environment_name) values ('THREAD', ?, current_timestamp, 1, 'env-1')")) {
+              ps.setObject(1, uuid(920_008L));
+              ps.executeUpdate();
+            }
+          });
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_harness_work_required_environment",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement(
+                    "insert into harness_work (target_type, target_id, available_at, wake_version, required_environment_name) values ('TOOL', ?, current_timestamp, 1, '   ')")) {
+              ps.setObject(1, uuid(920_009L));
+              ps.executeUpdate();
+            }
+          });
+      // TOOL target_type 携带合法 required_environment_name 成功插入
+      try (PreparedStatement ps =
+          conn.prepareStatement(
+              "insert into harness_work (target_type, target_id, available_at, wake_version, required_environment_name) values ('TOOL', ?, current_timestamp, 1, 'env-1')")) {
+        ps.setObject(1, uuid(920_010L));
+        ps.executeUpdate();
+      }
     }
   }
 

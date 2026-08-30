@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.runtime;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.CancelledUserMessage;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
@@ -27,7 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;

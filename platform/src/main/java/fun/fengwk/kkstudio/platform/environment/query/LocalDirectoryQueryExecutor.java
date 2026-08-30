@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment.query;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
 
 import java.time.Duration;

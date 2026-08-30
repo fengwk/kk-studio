@@ -10,12 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -167,7 +167,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     UUID node = UUID.randomUUID();
     EnvironmentName env = new EnvironmentName("env-1");
     jdbc.update(
-        "insert into live_environment (environment_name, node_instance_id, status, lease_until) values (?, ?, 'READY', statement_timestamp() + interval '60 seconds')",
+        "insert into live_environment (environment_name, daemon_id, owner_node_id, route_token, status, capabilities, last_seen_at, lease_until) values (?, 'daemon-1', ?, gen_random_uuid(), 'READY', '{}'::jsonb, statement_timestamp(), statement_timestamp() + interval '60 seconds')",
         env.value(),
         node);
 
@@ -208,12 +208,12 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     // node1: env-connecting (CONNECTING, fresh lease)
     jdbc.update(
         """
-        insert into live_environment (environment_name, node_instance_id, status, lease_until)
+        insert into live_environment (environment_name, daemon_id, owner_node_id, route_token, status, capabilities, last_seen_at, lease_until)
         values
-            ('env-1', ?, 'READY', statement_timestamp() + interval '60 seconds'),
-            ('env-2', ?, 'READY', statement_timestamp() + interval '60 seconds'),
-            ('env-stale', ?, 'READY', statement_timestamp() - interval '10 seconds'),
-            ('env-connecting', ?, 'CONNECTING', statement_timestamp() + interval '60 seconds')
+            ('env-1', 'daemon-1', ?, gen_random_uuid(), 'READY', '{}'::jsonb, statement_timestamp(), statement_timestamp() + interval '60 seconds'),
+            ('env-2', 'daemon-2', ?, gen_random_uuid(), 'READY', '{}'::jsonb, statement_timestamp(), statement_timestamp() + interval '60 seconds'),
+            ('env-stale', 'daemon-stale', ?, gen_random_uuid(), 'READY', '{}'::jsonb, statement_timestamp() - interval '20 seconds', statement_timestamp() - interval '10 seconds'),
+            ('env-connecting', 'daemon-conn', ?, gen_random_uuid(), 'CONNECTING', null, statement_timestamp(), statement_timestamp() + interval '60 seconds')
         """,
         node1,
         node2,

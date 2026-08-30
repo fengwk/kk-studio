@@ -10,8 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec;
 
 /** 严格的 ToolBinding wire JSON 编解码测试。 */

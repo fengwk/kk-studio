@@ -548,7 +548,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 12 个原子 capabilities（version=1）+ skills + mcpServers 摘要 + rootPath（daemon canonical Environment Root），且不公开旧 tools 或 READY environment metadata',
+  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 14 个原子 capabilities（version=1）+ skills + mcpServers 摘要 + rootPath（daemon canonical Environment Root），且不公开旧 tools 或 READY environment metadata',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -565,11 +565,13 @@ registerCase({
       'process.exec',
       'fs.search',
       'fs.find',
+      'fs.list-directory',
       'lsp.goto-definition',
       'lsp.workspace-symbols',
       'lsp.java-decompile',
       'mcp.list',
       'mcp.call',
+      'skill.load',
     ]
     const actualCapabilities = match.capabilities || []
     const ids = actualCapabilities.map((capability) => capability.id)

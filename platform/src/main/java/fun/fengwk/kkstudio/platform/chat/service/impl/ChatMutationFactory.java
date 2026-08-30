@@ -2,9 +2,9 @@ package fun.fengwk.kkstudio.platform.chat.service.impl;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;

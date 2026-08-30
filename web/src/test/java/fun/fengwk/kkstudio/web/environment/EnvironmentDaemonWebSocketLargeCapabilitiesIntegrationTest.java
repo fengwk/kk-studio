@@ -11,18 +11,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -173,7 +173,9 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
         sequence,
         "{"
             + "\"daemonId\":\"daemon-large-caps\","
-            + "\"protocolVersion\":4,"
+            + "\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ","
             + "\"capabilityCatalogVersion\":\""
             + EnvironmentCapabilityCatalog.version()
             + "\","

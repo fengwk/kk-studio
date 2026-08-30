@@ -31,6 +31,7 @@ flowchart LR
     CanvasCore[canvas-core<br/>JDK-only domain]
     CanvasInfra[canvas-infra<br/>PostgreSQL / MyBatis / Function runtime]
     HarnessTool[Harness Tool]
+    HarnessEnvironment[Harness Environment]
     HarnessRuntime[Harness Runtime]
     HarnessContributorApi[Harness Contributor API]
     HarnessInfra[Harness Infra]
@@ -51,16 +52,21 @@ flowchart LR
     Web --> HarnessContributorApi
     CanvasInfra --> CanvasCore
     HarnessInfra --> HarnessRuntime
+    HarnessEnvironment --> HarnessTool
+    HarnessRuntime --> HarnessEnvironment
     HarnessRuntime --> HarnessTool
     HarnessContributorApi --> HarnessRuntime
+    HarnessContributorApi --> HarnessEnvironment
     HarnessContributorApi --> HarnessTool
     HarnessBuiltin --> HarnessContributorApi
+    HarnessBuiltin --> HarnessEnvironment
     HarnessBuiltin --> HarnessRuntime
     HarnessBuiltin --> HarnessTool
-    HarnessDaemon --> HarnessTool
+    HarnessDaemon --> HarnessEnvironment
     Platform --> CanvasCore
     Platform --> Share
     Platform --> HarnessRuntime
+    Platform --> HarnessEnvironment
     Platform --> HarnessTool
     Platform --> HarnessContributorApi
     Platform --> HarnessBuiltin
@@ -118,6 +124,7 @@ PostgreSQL 中的关键事实分为四组：
 | --- | --- |
 | 产品聚合 | `agent_*`、`chat`、`canvas_*`、`system_setting` |
 | Harness 协议 | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work` |
+| Environment 路由 | `live_environment` route lease、`environment_query` 跨节点只读查询信箱 |
 | 归属关系 | `chat_session`、`canvas_session`、`session_blob_ref` |
 | Blob 元数据 | `storage_blob`、`storage_upload`，以及 Canvas Resource 对 Blob 的引用 |
 
@@ -142,8 +149,8 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 
 根 `pom.xml` 直接聚合六个 Maven module：`share`、`schema`、`canvas`、
 `harness`、`platform`、`web`。`canvas/pom.xml` 再聚合 `canvas/core` 和
-`canvas/infra`；`harness/pom.xml` 再聚合 `tool`、`runtime`、`contributor-api`、
-`builtin`、`infra` 和 `daemon`。下表列出的是可维护的逻辑模块/目录，
+`canvas/infra`；`harness/pom.xml` 再聚合 `prompt`、`tool`、`environment`、`runtime`、
+`contributor-api`、`builtin`、`infra` 和 `daemon`。下表列出的是可维护的逻辑模块/目录，
 不是 root reactor 的直接 children。`frontend/` 是独立的 Node/Vite 工程，
 不属于 Maven reactor。
 
@@ -154,12 +161,14 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `schema` | Flyway V1 baseline 与 profile seed 资源 | 无 Java、无生产依赖 |
 | `canvas/core` | Canvas 领域、typed command、ports、Function Catalog | JDK-only |
 | `canvas/infra` | Canvas PostgreSQL/MyBatis、Snapshot query、Function durable runtime | 依赖 `canvas-core`，不反向依赖 Platform/Harness/Web |
-| `harness/tool` | Tool、descriptor、ResourceRef、Environment Capability、Daemon wire | Tool 基础契约 |
+| `harness/prompt` | classpath prompt resource 加载与校验 | JDK-only |
+| `harness/tool` | Tool identity、descriptor、schema、call/result 与 ResourceRef | 依赖 JDK/Jackson |
+| `harness/environment` | Environment binding、Capability SPI/catalog 与 Daemon v5 wire | 依赖 Tool，不依赖 Runtime/Platform |
 | `harness/runtime` | Session/Entry/Thread/Command/Invocation/Work 状态机与 processors | 纯 Java |
-| `harness/contributor-api` | trusted Contributor 的 Catalog、BranchView、Tool、intent 与 projector API | 纯 Java |
+| `harness/contributor-api` | trusted Contributor 的 Catalog、BranchView、统一 Tool、effect 与 projector API | 纯 Java |
 | `harness/builtin` | 第一方内置 17 工具、goal.state 与 context projector | 依赖 Contributor API |
 | `harness/infra` | PostgreSQL HarnessStore、Work dispatcher、realtime、Resource store | 依赖 Runtime/Tool |
-| `harness/daemon` | 独立 Environment 进程适配器 | 只依赖 Tool |
+| `harness/daemon` | 独立 Environment 进程适配器 | 依赖 Environment 与 Tool |
 | `platform` | Catalog、Storage、Chat/Canvas application service、Resolver、Model/Tool/Environment Gateway | 适配 Share、Core/Runtime ports，不成为组合根 |
 | `web` | Spring Boot、HTTP、浏览器事件、daemon WebSocket、生产生命周期 | 唯一 composition root |
 
@@ -170,14 +179,14 @@ frontend -> web API
 web -> platform
 platform -> share
 web -> canvas-infra -> canvas-core
-web -> harness-infra -> harness-runtime -> harness-tool
+web -> harness-infra -> harness-runtime -> harness-environment -> harness-tool
 web -> harness-runtime
 web -> harness-contributor-api
 platform -> canvas-core
 platform -> harness-builtin -> harness-contributor-api
-platform -> harness-runtime -> harness-tool
+platform -> harness-runtime -> harness-environment -> harness-tool
 platform -> harness-contributor-api
-harness-daemon -> harness-tool
+harness-daemon -> harness-environment -> harness-tool
 ```
 
 `platform` 的架构测试禁止它引用 `canvas-infra`、`harness-infra`、`web` 和
@@ -229,7 +238,7 @@ POST /api/ai/runtime/command-batches
 
 Session 只有一棵 append-only Entry Tree。Thread 保存 head、命令 cursor、version、
 YOLO 和 materialization identity；Model/Tool 的完整请求与外部 I/O 不写入 Entry，
-而由 Invocation 及其 Work 承担执行事实。`task` 是内部 HOST Tool，通过同一
+而由 Invocation 及其 Work 承担执行事实。`task` 是内部 Tool，通过同一
 `HarnessRuntime.acceptCommands(NEW_SESSION, ...)` 创建子 Session、ROOT、Thread、
 Commands 与 Work，不增加表或调度协议。
 
@@ -263,8 +272,8 @@ Harness command acceptance 不推进 Canvas Graph version。
 | Storage | `storage_blob`、`storage_upload`、`session_blob_ref`、Canvas Resource 引用 | S3 stream、预签名 URL、`StorageMaintenance` |
 | Settings | `system_setting(id=1, config, version)` | `SystemSettingsSnapshot` 与 after-commit 回读 |
 | Realtime | Thread/Canvas version、Invocation checkpoint、Work 状态 | PostgreSQL `NOTIFY`、应用事件 WebSocket、Tool partial |
-| Environment | Thread ROOT/TURN_START 的 `EnvironmentBinding` | `LiveEnvironmentRegistry`、Daemon 连接与心跳 |
-| Contributor | Entry 中的 `CUSTOM(contributorId, customType, schemaVersion, data)` | 启动期冻结 `HarnessCatalog`、DeclarativeTool 与 projector |
+| Environment | Thread ROOT/TURN_START 的 `EnvironmentBinding`；`live_environment` route lease；`environment_query` mailbox | 本节点 `LiveEnvironmentRegistry`、Daemon 连接与心跳 |
+| Contributor | Entry 中的 `CUSTOM(contributorId, customType, schemaVersion, data)` | 启动期冻结 `HarnessCatalog`、统一 Tool 与 projector |
 
 Settings 的写入使用完整 section + `expectedVersion` CAS。提交成功后回读
 `system_setting` 并原子替换进程快照；跨节点通过 `system_settings_changed` 通知
@@ -304,8 +313,8 @@ Dispatcher 使用固定 round-robin 与 bounded handoff。worker executor 使用
 fail-fast rejection；claim 后若不能 handoff，立即 fenced reschedule。Heartbeat
 只续租当前 Work，续租失败表示 ownership 丢失，worker 停止继续写。
 
-Model/Tool Gateway 在确定性路由后尝试无等待 `ConcurrencyAdmission`。容量耗尽
-返回 `Busy`/`Overloaded`，不会打开 Provider、执行 Tool 或发送 Environment 请求。
+Model/Tool Gateway 在确定性路由后尝试无等待 `ConcurrencyAdmission`。Model 容量耗尽返回
+`Busy`，Tool 容量耗尽返回 `RetryLater`；两者都不会打开 Provider、执行 Tool 或发送 Environment 请求。
 Subagent 使用 `SynchronousQueue + AbortPolicy` 的固定并发 executor。Admission
 是进程内容量，不是 durable 状态；`lease.close()` 幂等并恰好归还一个 permit。
 
@@ -396,9 +405,10 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
 - [harness-builtin 模块](modules/harness-builtin.md)：第一方内置 17 工具与 Goal 契约。
 - [harness-contributor-api 模块](modules/harness-contributor-api.md)：trusted Java Contributor SPI 与 catalog。
 - [harness-daemon 模块](modules/harness-daemon.md)：Environment Daemon 与 Daemon wire。
+- [harness-environment 模块](modules/harness-environment.md)：Environment binding、Capability 与 Daemon v5 wire。
 - [harness-infra 模块](modules/harness-infra.md)：Harness Store、Work、通知与 ResourceStore。
 - [harness-runtime 模块](modules/harness-runtime.md)：Agent Runtime 状态机与 processors。
-- [harness-tool 模块](modules/harness-tool.md)：Tool、ResourceRef 与公共 wire contract。
+- [harness-tool 模块](modules/harness-tool.md)：Tool identity、schema、call/result 与 ResourceRef。
 - [platform 模块](modules/platform.md)：application service、gateway 与外部适配。
 - [web 模块](modules/web.md)：唯一 Spring Boot composition root 与 transport。
 - [开发与测试](operations/development-and-testing.md)：质量、E2E、可靠性和报告入口。

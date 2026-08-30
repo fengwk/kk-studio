@@ -1,10 +1,7 @@
 /**
- * Tool 描述、参数 schema、执行 SPI、Environment Capability 与 Daemon wire 公共契约。
+ * Tool 描述、稳定身份、参数 schema、调用/结果内容与 JSON codec 公共契约。
  *
- * <p>Descriptor 是 route-neutral 的功能描述。本包不依赖 Agent、Session、Runtime、Spring 或持久化框架。工具执行的持久化、权限与调度由
- * Runtime Tool processor 与 gateway 负责。
- *
- * <p>{@link fun.fengwk.kkstudio.harness.tool.EnvironmentName} 是跨 Runtime/daemon/gateway 共享的
- * Environment 逻辑路由身份：bounded 小写路由名称（无空白、无 {@code '/'}）是进入 durable 协议的唯一身份。
+ * <p>Descriptor 是 route-neutral 的功能描述。本包不依赖 Environment、Contributor、Session、Runtime、Spring
+ * 或持久化框架；工具执行 SPI、权限、调度和 durable 状态由上层模块负责。
  */
 package fun.fengwk.kkstudio.harness.tool;

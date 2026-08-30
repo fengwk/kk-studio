@@ -329,8 +329,8 @@ requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局
 `http://127.0.0.1:5173`；`scripts/e2e.sh` 会把两者传给 runner。
 
 `--rebuild` 默认允许 Maven 在线解析依赖；只有显式设置
-`E2E_MAVEN_OFFLINE=true` 时 backend、Daemon 和 Daemon runtime classpath
-三条 Maven 路径才增加 `-o`。`E2E_WORK_DIR` 默认是 `runtime/e2e`，
+`E2E_MAVEN_OFFLINE=true` 时 backend 与 Daemon/runtime classpath
+两条 Maven 路径才增加 `-o`。`E2E_WORK_DIR` 默认是 `runtime/e2e`，
 Daemon environment root 默认是其下的 `environment`，可由
 `DAEMON_ENV_ROOT` 覆盖，并由入口导出给 Node matrix。
 
@@ -341,7 +341,7 @@ Daemon environment root 默认是其下的 `environment`，可由
 | L1 | 68 | 默认执行 64；storage/function/attachment case 需显式开关 | 免费 API contract、CRUD、Session/Thread、command batch、CAS、idempotency、i18n、model attempt、Canvas API |
 | L2 | 3 | `--real` | 真实文本 turn、真实 task delegation、stop partial/replay/continue |
 | L3 | 1 | `--real --with-branch` | 同 Session `ENTRY` 分支 Thread |
-| L4 | 3 | `--with-tools`；真实 Tool turn 还需 `--real --with-tools --with-canvas-storage` | Environment READY 与 12 个原子 capability 投影、directories、approval 后 Resource 外部化 |
+| L4 | 3 | `--with-tools`；真实 Tool turn 还需 `--real --with-tools --with-canvas-storage` | Environment READY 与 14 个原子 capability 投影、directories、approval 后 Resource 外部化 |
 | UI/L5 | 注册 39，默认 37 | `--ui`；额外 `--with-tools`、`--real` | Playwright 页面、Composer、debug、settings 和 runtime UI |
 
 L1 的默认关闭 categories 是 storage upload、attachment 和 fake Function；

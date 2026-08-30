@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 
 /**
  * 测试共享 fixture：把 canonical Environment 名称包装为完整 {@link EnvironmentBinding}。

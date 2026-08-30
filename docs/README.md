@@ -28,9 +28,10 @@
 | harness-builtin | [modules/harness-builtin.md](modules/harness-builtin.md) | 第一方内置 17 工具与 Goal 契约 |
 | harness-contributor-api | [modules/harness-contributor-api.md](modules/harness-contributor-api.md) | Trusted Java Contributor SPI 与 catalog |
 | harness-daemon | [modules/harness-daemon.md](modules/harness-daemon.md) | Environment Daemon 与本地工具执行 |
+| harness-environment | [modules/harness-environment.md](modules/harness-environment.md) | Environment binding、Capability 与 Daemon v5 wire |
 | harness-infra | [modules/harness-infra.md](modules/harness-infra.md) | Harness Store、Work、通知和 ResourceStore |
 | harness-runtime | [modules/harness-runtime.md](modules/harness-runtime.md) | Agent Runtime 状态机与 processors |
-| harness-tool | [modules/harness-tool.md](modules/harness-tool.md) | Tool、ResourceRef 和 Daemon wire contract |
+| harness-tool | [modules/harness-tool.md](modules/harness-tool.md) | Tool identity、schema、call/result 与 ResourceRef |
 | platform | [modules/platform.md](modules/platform.md) | Application service、gateway 与外部适配 |
 | web | [modules/web.md](modules/web.md) | Spring Boot composition root 与 transport |
 

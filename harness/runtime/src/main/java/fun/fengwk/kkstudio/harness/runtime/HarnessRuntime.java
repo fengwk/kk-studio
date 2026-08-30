@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
@@ -32,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Clock;
 import java.time.Instant;

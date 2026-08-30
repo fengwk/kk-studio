@@ -10,7 +10,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryDTO;
@@ -143,6 +143,7 @@ public class EnvironmentQueryCoordinator {
   private final ObjectMapper objectMapper;
   private final UUID ownerNodeId;
   private final Map<UUID, PendingQuery> pendingQueries = new ConcurrentHashMap<>();
+  private final Map<EnvironmentName, QueryDrain> queryDrains = new ConcurrentHashMap<>();
   private volatile LocalDirectoryQueryExecutor localExecutor;
   private volatile Supplier<Set<EnvironmentName>> localReadyEnvironmentsSupplier = Set::of;
 
@@ -291,15 +292,83 @@ public class EnvironmentQueryCoordinator {
     if (localExecutor == null) {
       return;
     }
-    while (true) {
-      if (!localReadyEnvironmentsSupplier.get().contains(environmentName)) {
-        break;
+    QueryDrain drain = queryDrains.computeIfAbsent(environmentName, ignored -> new QueryDrain());
+    synchronized (drain) {
+      drain.requested = true;
+      if (drain.draining || drain.inFlight) {
+        return;
       }
+      drain.draining = true;
+    }
+    drainQueries(environmentName, drain);
+  }
+
+  private void drainQueries(EnvironmentName environmentName, QueryDrain drain) {
+    while (true) {
+      synchronized (drain) {
+        if (drain.inFlight || !drain.requested) {
+          drain.draining = false;
+          return;
+        }
+        drain.requested = false;
+      }
+
+      if (localExecutor == null
+          || !localReadyEnvironmentsSupplier.get().contains(environmentName)) {
+        if (retryRequestedOrStop(drain)) {
+          continue;
+        }
+        return;
+      }
+
       ClaimedQuery claimed = claimNextQuery(environmentName);
       if (claimed == null) {
-        break;
+        if (retryRequestedOrStop(drain)) {
+          continue;
+        }
+        return;
       }
-      executeClaimedQuery(claimed);
+
+      synchronized (drain) {
+        drain.inFlight = true;
+      }
+      executeClaimedQuery(claimed, () -> queryFinished(environmentName, drain));
+
+      synchronized (drain) {
+        if (drain.inFlight) {
+          drain.draining = false;
+          return;
+        }
+      }
+      // 同步完成的 future 只设置 requested，由当前循环继续，避免递归增长调用栈。
+    }
+  }
+
+  private static boolean retryRequestedOrStop(QueryDrain drain) {
+    synchronized (drain) {
+      if (drain.requested) {
+        return true;
+      }
+      drain.draining = false;
+      return false;
+    }
+  }
+
+  private void queryFinished(EnvironmentName environmentName, QueryDrain drain) {
+    boolean startDraining;
+    synchronized (drain) {
+      if (!drain.inFlight) {
+        return;
+      }
+      drain.inFlight = false;
+      drain.requested = true;
+      startDraining = !drain.draining;
+      if (startDraining) {
+        drain.draining = true;
+      }
+    }
+    if (startDraining) {
+      drainQueries(environmentName, drain);
     }
   }
 
@@ -327,7 +396,16 @@ public class EnvironmentQueryCoordinator {
     }
   }
 
-  private void executeClaimedQuery(ClaimedQuery query) {
+  private void executeClaimedQuery(ClaimedQuery query, Runnable onFinished) {
+    if (!CAPABILITY_FS_LIST_DIRECTORY.equals(query.capabilityId)) {
+      failQuery(
+          query.id,
+          query.leaseToken,
+          EnvironmentDirectoryFailureCode.IO_ERROR,
+          "unsupported claimed capability: " + query.capabilityId);
+      onFinished.run();
+      return;
+    }
     String path = ".";
     try {
       JsonNode argsNode = objectMapper.readTree(query.argumentsJson);
@@ -340,30 +418,64 @@ public class EnvironmentQueryCoordinator {
           query.leaseToken,
           EnvironmentDirectoryFailureCode.INVALID_PATH,
           "cannot parse arguments: " + error.getMessage());
+      onFinished.run();
       return;
     }
 
     LocalDirectoryQueryExecutor executor = this.localExecutor;
     if (executor == null || !localReadyEnvironmentsSupplier.get().contains(query.environmentName)) {
+      failQuery(
+          query.id,
+          query.leaseToken,
+          EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+          query.environmentName + " is not ready locally");
+      onFinished.run();
       return;
     }
 
-    executor
-        .executeLocalDirectoryList(query.environmentName, path, CLAIM_LEASE_DURATION)
-        .whenComplete(
-            (result, error) -> {
-              if (error != null) {
-                failQuery(
-                    query.id,
-                    query.leaseToken,
-                    EnvironmentDirectoryFailureCode.IO_ERROR,
-                    error.getMessage());
-              } else if (result instanceof EnvironmentDirectoryListResult.Loaded loaded) {
-                completeQuery(query.id, query.leaseToken, loaded.listing());
-              } else if (result instanceof EnvironmentDirectoryListResult.Failed failed) {
-                failQuery(query.id, query.leaseToken, failed.code(), failed.message());
-              }
-            });
+    CompletableFuture<EnvironmentDirectoryListResult> execution;
+    try {
+      execution =
+          executor.executeLocalDirectoryList(query.environmentName, path, CLAIM_LEASE_DURATION);
+    } catch (RuntimeException error) {
+      failQuery(
+          query.id, query.leaseToken, EnvironmentDirectoryFailureCode.IO_ERROR, error.getMessage());
+      onFinished.run();
+      return;
+    }
+    if (execution == null) {
+      failQuery(
+          query.id,
+          query.leaseToken,
+          EnvironmentDirectoryFailureCode.IO_ERROR,
+          "local directory query executor returned null");
+      onFinished.run();
+      return;
+    }
+    execution.whenComplete(
+        (result, error) -> {
+          try {
+            if (error != null) {
+              failQuery(
+                  query.id,
+                  query.leaseToken,
+                  EnvironmentDirectoryFailureCode.IO_ERROR,
+                  error.getMessage());
+            } else if (result instanceof EnvironmentDirectoryListResult.Loaded loaded) {
+              completeQuery(query.id, query.leaseToken, loaded.listing());
+            } else if (result instanceof EnvironmentDirectoryListResult.Failed failed) {
+              failQuery(query.id, query.leaseToken, failed.code(), failed.message());
+            } else {
+              failQuery(
+                  query.id,
+                  query.leaseToken,
+                  EnvironmentDirectoryFailureCode.IO_ERROR,
+                  "local directory query executor returned null");
+            }
+          } finally {
+            onFinished.run();
+          }
+        });
   }
 
   private void completeQuery(UUID queryId, UUID leaseToken, EnvironmentDirectoryDTO listing) {
@@ -463,6 +575,12 @@ public class EnvironmentQueryCoordinator {
       UUID queryId,
       EnvironmentName environmentName,
       CompletableFuture<EnvironmentDirectoryListResult> future) {}
+
+  private static final class QueryDrain {
+    private boolean draining;
+    private boolean inFlight;
+    private boolean requested;
+  }
 
   private record ClaimedQuery(
       UUID id,

@@ -5,6 +5,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
@@ -29,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
@@ -63,7 +63,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                     select 1
                     from live_environment le
                     where le.environment_name = harness_work.required_environment_name
-                      and le.node_instance_id = ?
+                      and le.owner_node_id = ?
                       and le.status = 'READY'
                       and le.lease_until > statement_timestamp()
                 )
