@@ -7,11 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
 import java.util.List;
@@ -22,8 +22,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /** {@link HarnessCatalog} 的完整构建、确定性拓扑排序、统一工具注册与强隔离/校验测试。 */
 class HarnessCatalogTest {
 
-  private static final ToolParamsSchema SCHEMA =
-      new ToolParamsSchema("Test schema", Map.of(), Set.of(), false);
+  private static final InputSchema SCHEMA =
+      new InputSchema("Test schema", Map.of(), Set.of(), false);
 
   /** 验证空 contributor 列表产生完全合法的空 catalog。 */
   @Test

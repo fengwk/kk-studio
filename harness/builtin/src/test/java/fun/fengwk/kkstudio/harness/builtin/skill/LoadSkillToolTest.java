@@ -10,6 +10,9 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
@@ -20,13 +23,10 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -65,9 +65,9 @@ class LoadSkillToolTest {
     assertEquals(Duration.ofMinutes(1), descriptor.timeout());
     assertEquals(ToolRequirements.environment(), tool.requirements());
 
-    ToolParamsSchema schema = descriptor.inputSchema();
+    InputSchema schema = descriptor.inputSchema();
     assertEquals(List.of("name"), schema.properties().keySet().stream().toList());
-    assertInstanceOf(ToolStringSchema.class, schema.properties().get("name"));
+    assertInstanceOf(StringSchema.class, schema.properties().get("name"));
     assertEquals(Set.of("name"), schema.required());
     assertFalse(schema.additionalProperties());
   }
@@ -89,7 +89,8 @@ class LoadSkillToolTest {
 
     ToolResult result = execute(tool, PLATFORM, "{\"name\":\"dev\"}");
     assertFalse(result.error());
-    assertEquals("# Skill\n\nDo the thing.\n", ((TextToolContent) result.contents().get(0)).text());
+    assertEquals(
+        "# Skill\n\nDo the thing.\n", ((TextResultContent) result.contents().get(0)).text());
     assertEquals(PLATFORM, loader.environment);
     assertEquals("dev", loader.skillName);
     assertEquals(Duration.ofSeconds(2), loader.timeout);
@@ -295,7 +296,7 @@ class LoadSkillToolTest {
   }
 
   private static String text(ToolResult result) {
-    return ((TextToolContent) result.contents().get(0)).text();
+    return ((TextResultContent) result.contents().get(0)).text();
   }
 
   private static final class RecordingBodyLoader implements SkillBodyLoader {

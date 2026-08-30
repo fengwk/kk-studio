@@ -12,6 +12,11 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.EnumSchema;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
@@ -26,16 +31,11 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -122,8 +122,8 @@ class GoalFeatureTest {
         ToolSideEffect.IDEMPOTENT,
         Set.of("objective"),
         Set.of("objective", "tokenBudget"));
-    assertInstanceOf(ToolStringSchema.class, create.inputSchema().properties().get("objective"));
-    assertInstanceOf(ToolIntegerSchema.class, create.inputSchema().properties().get("tokenBudget"));
+    assertInstanceOf(StringSchema.class, create.inputSchema().properties().get("objective"));
+    assertInstanceOf(IntegerSchema.class, create.inputSchema().properties().get("tokenBudget"));
 
     ToolDescriptor get = new GetGoalTool().descriptor();
     assertDescriptor(
@@ -137,10 +137,10 @@ class GoalFeatureTest {
         ToolSideEffect.IDEMPOTENT,
         Set.of("status", "reason"),
         Set.of("status", "reason"));
-    ToolEnumSchema status =
-        assertInstanceOf(ToolEnumSchema.class, update.inputSchema().properties().get("status"));
+    EnumSchema status =
+        assertInstanceOf(EnumSchema.class, update.inputSchema().properties().get("status"));
     assertEquals(List.of("complete", "blocked"), status.values());
-    assertInstanceOf(ToolStringSchema.class, update.inputSchema().properties().get("reason"));
+    assertInstanceOf(StringSchema.class, update.inputSchema().properties().get("reason"));
   }
 
   /** 状态流转验证：create -> get -> update 正常推进分支 Goal 快照与 effects。 */
@@ -390,7 +390,7 @@ class GoalFeatureTest {
   }
 
   private static String textContent(ToolResult result) {
-    return ((TextToolContent) result.contents().get(0)).text();
+    return ((TextResultContent) result.contents().get(0)).text();
   }
 
   private static void assertDescriptor(
@@ -417,7 +417,7 @@ class GoalFeatureTest {
             "1",
             name + " description",
             name,
-            new ToolParamsSchema(null, Map.of(), Set.of(), false),
+            new InputSchema(null, Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
     return new Tool() {

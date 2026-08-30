@@ -12,6 +12,8 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
@@ -23,12 +25,10 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -69,7 +69,7 @@ class EnvironmentCapabilityToolTest {
             "1",
             "read file",
             "read",
-            new ToolParamsSchema(null, Map.of(), Set.of(), false),
+            new InputSchema(null, Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             FS_READ.timeout());
     assertThrows(
@@ -129,7 +129,7 @@ class EnvironmentCapabilityToolTest {
     assertTrue(outcomeRef.get().result().error());
     assertEquals(
         "No environment bound in execution context",
-        ((TextToolContent) outcomeRef.get().result().contents().get(0)).text());
+        ((TextResultContent) outcomeRef.get().result().contents().get(0)).text());
   }
 
   /** 正常执行时委托至 BoundEnvironment 的 execute 方法并透传句柄。 */

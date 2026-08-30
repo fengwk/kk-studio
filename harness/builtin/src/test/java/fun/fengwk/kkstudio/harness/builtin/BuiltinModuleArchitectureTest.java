@@ -19,9 +19,9 @@ import java.util.stream.Stream;
  * Builtin 模块的轻量级架构守卫。
  *
  * <p>Builtin 源码只能依赖 JDK 与 {@code fun.fengwk.kkstudio.harness.contributor.api} / {@code
- * fun.fengwk.kkstudio.harness.prompt} / {@code fun.fengwk.kkstudio.harness.tool} / {@code
- * fun.fengwk.kkstudio.harness.builtin} / {@code com.fasterxml.jackson}；禁止依赖
- * runtime、Spring、infra、daemon、platform 与 web。
+ * fun.fengwk.kkstudio.harness.common} / {@code fun.fengwk.kkstudio.harness.tool} / {@code
+ * fun.fengwk.kkstudio.harness.environment} / {@code fun.fengwk.kkstudio.harness.builtin} / {@code
+ * com.fasterxml.jackson}；禁止依赖 runtime、Spring、infra、daemon、platform 与 web。
  */
 class BuiltinModuleArchitectureTest {
 
@@ -30,6 +30,7 @@ class BuiltinModuleArchitectureTest {
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.infra.",
           "fun.fengwk.kkstudio.harness.daemon.",
+          "fun.fengwk.kkstudio.harness.prompt.",
           "fun.fengwk.kkstudio.platform.",
           "fun.fengwk.kkstudio.web.",
           "org.springframework.",
@@ -78,8 +79,8 @@ class BuiltinModuleArchitectureTest {
         continue;
       }
       if (!Set.of(
+              "fun.fengwk.kk-studio:kk-studio-harness-common",
               "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
-              "fun.fengwk.kk-studio:kk-studio-harness-prompt",
               "fun.fengwk.kk-studio:kk-studio-harness-tool",
               "fun.fengwk.kk-studio:kk-studio-harness-environment",
               "com.fasterxml.jackson.core:jackson-databind")

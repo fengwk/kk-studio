@@ -7,21 +7,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -38,12 +38,12 @@ import java.util.concurrent.atomic.AtomicReference;
 class HarnessContractTest {
 
   private static final ContributorId CID = new ContributorId("goal");
-  private static final ToolParamsSchema SCHEMA =
-      new ToolParamsSchema(
+  private static final InputSchema SCHEMA =
+      new InputSchema(
           "Test schema",
           Map.of(
-              "path", new ToolStringSchema(null),
-              "offset", new ToolIntegerSchema(null)),
+              "path", new StringSchema(null),
+              "offset", new IntegerSchema(null)),
           Set.of("path"),
           false);
   private static final ToolDescriptor DESCRIPTOR =
@@ -150,7 +150,7 @@ class HarnessContractTest {
   @Test
   void toolOutcomeValidatesErrorAndEffects() {
     ToolResult successResult =
-        new ToolResult("call-1", List.of(new TextToolContent("done")), false, "{}");
+        new ToolResult("call-1", List.of(new TextResultContent("done")), false, "{}");
     ToolResult errorResult = ToolResult.error("call-1", "failed");
     AppendCustomEntry entry = new AppendCustomEntry("state", 1, "{}");
 
@@ -192,7 +192,7 @@ class HarnessContractTest {
           public void onError(Throwable error) {}
         };
 
-    ToolResult result = new ToolResult("call-1", List.of(new TextToolContent("ok")), false, "{}");
+    ToolResult result = new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{}");
     listener.onComplete(result);
 
     assertEquals(result, received.get().result());

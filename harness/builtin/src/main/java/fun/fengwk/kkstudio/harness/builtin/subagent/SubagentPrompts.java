@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.builtin.subagent;
 
-import fun.fengwk.kkstudio.harness.prompt.PromptTemplate;
-import fun.fengwk.kkstudio.harness.prompt.PromptTemplateLoader;
-import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplate;
+import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplateLoader;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 
 import java.util.Map;
 
@@ -12,7 +12,7 @@ public final class SubagentPrompts {
 
   private static final String ROOT = "fun/fengwk/kkstudio/harness/builtin/subagent/prompts/";
   private static final PromptTemplateLoader LOADER = new PromptTemplateLoader();
-  private static final ToolDescriptorJsonCodec CODEC = new ToolDescriptorJsonCodec();
+  private static final SchemaJsonCodec CODEC = new SchemaJsonCodec();
 
   private SubagentPrompts() {}
 
@@ -22,8 +22,8 @@ public final class SubagentPrompts {
   }
 
   /** task 参数 schema：稳定声明运行期 policy 默认值语义，不嵌入具体配置快照。 */
-  public static ToolParamsSchema taskInputSchema() {
-    return CODEC.decodeInputSchema(render("task.schema.json", Map.of()));
+  public static InputSchema taskInputSchema() {
+    return CODEC.decode(render("task.schema.json", Map.of()));
   }
 
   /** Agent 正文委派段落：{@code <available_subagents>} 外壳由调用方在渲染后拼接。 */

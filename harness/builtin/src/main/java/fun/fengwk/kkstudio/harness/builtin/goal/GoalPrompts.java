@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.builtin.goal;
 
-import fun.fengwk.kkstudio.harness.prompt.PromptTemplate;
-import fun.fengwk.kkstudio.harness.prompt.PromptTemplateLoader;
-import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplate;
+import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplateLoader;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 
 import java.util.Map;
 
@@ -12,7 +12,7 @@ final class GoalPrompts {
 
   private static final String ROOT = "fun/fengwk/kkstudio/harness/builtin/goal/prompts/";
   private static final PromptTemplateLoader LOADER = new PromptTemplateLoader();
-  private static final ToolDescriptorJsonCodec CODEC = new ToolDescriptorJsonCodec();
+  private static final SchemaJsonCodec CODEC = new SchemaJsonCodec();
 
   private GoalPrompts() {}
 
@@ -20,8 +20,8 @@ final class GoalPrompts {
     return template(name).render(Map.of());
   }
 
-  static ToolParamsSchema schema(String name) {
-    return CODEC.decodeInputSchema(template(name).raw());
+  static InputSchema schema(String name) {
+    return CODEC.decode(template(name).raw());
   }
 
   static PromptTemplate template(String name) {
