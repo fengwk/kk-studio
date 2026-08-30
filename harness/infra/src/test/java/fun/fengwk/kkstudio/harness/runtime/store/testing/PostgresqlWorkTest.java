@@ -45,6 +45,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     HarnessStore store = createStore();
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
+    JdbcTemplate jdbc = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
 
     Instant current = now();
     // 1. 未来可用时间
@@ -63,47 +64,58 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
                         WorkTargetType.THREAD, current, "token-1", current.plusSeconds(4)))
             .isEmpty());
 
-    // 等待 available_at 到达
-    sleep(600);
+    // 直接推进持久化时间边界，避免 JVM clock、database clock 与短 sleep 之间的竞态。
+    assertEquals(
+        1,
+        jdbc.update(
+            """
+            update harness_work
+            set available_at = statement_timestamp() - interval '1 second'
+            where target_type = ? and target_id = ?
+            """,
+            target.type().name(),
+            target.id()));
 
+    Instant claimTime = now();
     ClaimedWork claimed =
         store
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.THREAD, current, "token-1", now().plusMillis(500)))
+                        WorkTargetType.THREAD, claimTime, "token-1", claimTime.plusSeconds(60)))
             .orElseThrow();
 
     // 活跃 lease 阻止其他 claim
+    Instant blockedTime = now();
     assertTrue(
         store
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.THREAD, current, "token-2", now().plusSeconds(4)))
+                        WorkTargetType.THREAD, blockedTime, "token-2", blockedTime.plusSeconds(60)))
             .isEmpty());
 
-    // 等待 lease 过期
-    sleep(600);
+    assertEquals(
+        1,
+        jdbc.update(
+            """
+            update harness_work
+            set lease_until = statement_timestamp() - interval '1 second'
+            where target_type = ? and target_id = ?
+            """,
+            target.type().name(),
+            target.id()));
 
+    Instant reclaimTime = now();
     ClaimedWork reclaimed =
         store
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.THREAD, current, "token-3", now().plusSeconds(4)))
+                        WorkTargetType.THREAD, reclaimTime, "token-3", reclaimTime.plusSeconds(60)))
             .orElseThrow();
     assertNotEquals(claimed.leaseToken(), reclaimed.leaseToken());
     assertEquals(1L, reclaimed.claimedWakeVersion());
-  }
-
-  private static void sleep(long millis) {
-    try {
-      Thread.sleep(millis);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new AssertionError("interrupted", e);
-    }
   }
 
   @Test
