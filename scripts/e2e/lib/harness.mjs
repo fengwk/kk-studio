@@ -408,6 +408,7 @@ export async function waitForDurableMessages(
 ) {
   const deadline = Date.now() + timeoutMs
   let last = null
+  let quiescentKey = null
   while (Date.now() <= deadline) {
     const snapshot = await getThreadSnapshot(ctx, threadId)
     const entries = await listSessionEntries(ctx, snapshot.thread.sessionId)
@@ -416,16 +417,11 @@ export async function waitForDurableMessages(
     const hasExpectedMessages = expectedTexts.every(
       (text) => payloads.some((payload) => payload.includes(text)),
     )
-    if (
-      hasExpectedMessages
-      && snapshot.thread.status === 'IDLE'
-      && !snapshot.thread.processing
-      && snapshot.queuedCommands.length === 0
-      && snapshot.modelInvocation === null
-      && snapshot.toolInvocations.length === 0
-    ) {
+    const observation = observeQuiescentSnapshot(quiescentKey, snapshot)
+    if (hasExpectedMessages && observation.stable) {
       return last
     }
+    quiescentKey = hasExpectedMessages ? observation.key : null
     await sleep(intervalMs)
   }
   throw new Error(
@@ -609,8 +605,9 @@ export async function approveToolInvocation(
  * 轮询完整快照直到 Thread 真正 quiescent 并返回最终 Thread 投影。
  *
  * 判定基于完整 snapshot 而不是单字段：status=IDLE、processing=false、queuedCommands 为空、
- * modelInvocation=null、toolInvocations 为空。单看 status 会在刚入队、命令尚未被 claim 时立即
- * 返回 IDLE，导致 final assertions 抢跑。
+ * modelInvocation=null、toolInvocations 为空，且同一 cursor/version 必须连续观测两次。
+ * 单次 quiescent 可能落在异步 Work 已移除队列、尚未提交 Thread 尾部状态的瞬时窗口，不能作为
+ * 后续 CAS 写入的稳定 cursor。
  */
 export async function waitForQuiescentThread(
   ctx,
@@ -619,21 +616,44 @@ export async function waitForQuiescentThread(
 ) {
   const deadline = Date.now() + timeoutMs
   let last = null
+  let quiescentKey = null
   while (Date.now() <= deadline) {
     const snapshot = await getThreadSnapshot(ctx, threadId)
     last = snapshot.thread
-    if (
-      last.status === 'IDLE'
-      && !last.processing
-      && (snapshot.queuedCommands || []).length === 0
-      && snapshot.modelInvocation === null
-      && (snapshot.toolInvocations || []).length === 0
-    ) {
+    const observation = observeQuiescentSnapshot(quiescentKey, snapshot)
+    if (observation.stable) {
       return last
     }
+    quiescentKey = observation.key
     await sleep(intervalMs)
   }
   throw new Error(`thread did not become quiescent: ${JSON.stringify(last)}`)
+}
+
+/**
+ * 将完整快照推进为稳定 quiescent 观测。
+ *
+ * <p>返回的 key 只在快照当前满足完整 quiescent 条件时存在；stable 仅在前一轮 key 与当前
+ * thread/cursor/version 完全一致时为 true。任何 active 状态或 cursor 变化都会清空稳定候选。
+ */
+export function observeQuiescentSnapshot(previousKey, snapshot) {
+  const thread = snapshot?.thread
+  if (
+    thread?.status !== 'IDLE'
+    || thread.processing
+    || (snapshot?.queuedCommands || []).length !== 0
+    || snapshot?.modelInvocation !== null
+    || (snapshot?.toolInvocations || []).length !== 0
+  ) {
+    return { key: null, stable: false }
+  }
+  const key = [
+    thread.threadId,
+    thread.headEntryId,
+    thread.nextCommandSequence,
+    thread.version,
+  ].map(String).join('\u0000')
+  return { key, stable: key === previousKey }
 }
 
 /**

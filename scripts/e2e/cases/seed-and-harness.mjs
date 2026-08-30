@@ -296,9 +296,6 @@ registerCase({
       yoloEnabled: false,
       commands: [userMessageCommand(`wire materialize ${cid().slice(0, 8)}`, cid())],
     })
-    await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
-    const idle = await getThreadSnapshot(ctx, threadId)
-    const thread = idle.thread
     const singleClientCommandId = cid()
     const structuredClientCommandId = cid()
     const secondClientCommandId = cid()
@@ -320,7 +317,8 @@ registerCase({
     ]
     // 产品 HTTP 面：一个 batch 只能恰一条 USER_MESSAGE，三条 USER_MESSAGE 必须拆批。
     // 为保留原 case 对严格 wire + exact replay 的完整覆盖，这里逐条入队后再整体 replay。
-    // 每次全新 accept 前即时读取权威 snapshot cursor（processor 可能已消费前序命令）。
+    // 每次全新 accept 前等待连续两次一致的 quiescent cursor；单次 IDLE snapshot 可能落在
+    // processor 已移除队列、尚未提交 Thread 尾部状态的瞬时窗口。
     const batchFor = (cursorThread, commands) => ({
       owner: chatOwner(chat.id),
       target: threadTarget({
@@ -331,9 +329,11 @@ registerCase({
       commands,
     })
     const acceptedList = []
+    let cursorBefore = await waitForQuiescentThread(ctx, threadId, {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
     for (const single of commandsOf()) {
-      // 全新 accept 的 cursor 必须来自 accept 前的权威快照。
-      const cursorBefore = (await getThreadSnapshot(ctx, threadId)).thread
       const acceptedOnce = await acceptCommandBatch(ctx, batchFor(cursorBefore, [single]))
       acceptedList.push(acceptedOnce.acceptedCommands[0])
       // Exact replay：必须继续使用原首次接受前 cursor（该命令的 sequence）——
@@ -350,13 +350,17 @@ registerCase({
           replay: replayAccepted.acceptedCommands[0],
         })}`,
       )
+      cursorBefore = await waitForQuiescentThread(ctx, threadId, {
+        timeoutMs: 60_000,
+        intervalMs: 100,
+      })
     }
     const commandsDto = acceptedList
     assert(commandsDto.length === 3, JSON.stringify(commandsDto))
     const command = commandsDto[0]
     assert(String(command.clientCommandId) === singleClientCommandId, JSON.stringify(command))
     assert(commandsDto.every((item) => item.type === 'USER_MESSAGE' && item.state === 'QUEUED'), JSON.stringify(commandsDto))
-    assert(commandsDto.every((item) => String(item.threadId) === String(thread.threadId)), JSON.stringify(commandsDto))
+    assert(commandsDto.every((item) => String(item.threadId) === threadId), JSON.stringify(commandsDto))
     assert(commandsDto.every((item) => /^[1-9]\d*$/.test(String(item.sequence))), JSON.stringify(commandsDto))
     assert(commandsDto.every((item) => /^[0-9a-f]{64}$/.test(String(item.requestHash))), JSON.stringify(commandsDto))
     const payload = JSON.parse(commandsDto[0].payloadJson)
@@ -384,11 +388,7 @@ registerCase({
       }),
       `contents TEXT payload must be canonical: ${JSON.stringify(secondPayload)}`,
     )
-    await waitForQuiescentThread(ctx, threadId, {
-      timeoutMs: 60_000,
-      intervalMs: 100,
-    })
-    const validationThread = (await getThreadSnapshot(ctx, threadId)).thread
+    const validationThread = cursorBefore
 
     const expectInvalidUserCommand = (command, options = { status: 400 }) =>
       expectHttpError(
