@@ -16,7 +16,7 @@
     <dependencies>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-tool</artifactId>
+            <artifactId>kk-studio-harness-common</artifactId>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

@@ -5,7 +5,7 @@ import java.io.IOException;
 /**
  * Daemon 发端读写本地 resource bytes 的 SPI。
  *
- * <p>编码 ResourceToolContent 时通过 {@link #read} 取回字节并复核 size/sha； 编码 BinaryToolContent 时先经 {@link
+ * <p>编码 ResourceResultContent 时通过 {@link #read} 取回字节并复核 size/sha； 编码 BinaryResultContent 时先经 {@link
  * #store} 落盘再编码返回的 resource 引用。
  */
 public interface DaemonResourceStore {

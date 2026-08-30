@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsValidator;
 
 import java.util.Objects;
 import java.util.Set;
@@ -39,7 +39,7 @@ public record DaemonEnvelope(
     } else if (invocationId != null && invocationId.isBlank()) {
       throw new IllegalArgumentException("invocationId must not be blank when present");
     }
-    payloadJson = ToolArgumentsValidator.requireJsonObject(payloadJson);
+    payloadJson = JsonValues.requireJsonObject(payloadJson, "payloadJson");
   }
 
   private static String requireNonBlank(String value, String name) {

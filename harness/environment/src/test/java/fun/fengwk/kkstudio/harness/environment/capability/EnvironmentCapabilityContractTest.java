@@ -10,12 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 
 import java.lang.reflect.RecordComponent;
 import java.nio.file.Path;
@@ -29,10 +28,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Environment Capability descriptor、参数、请求、结果和流式 SPI 契约测试。 */
 class EnvironmentCapabilityContractTest {
 
-  private static final ToolParamsSchema SCHEMA =
-      new ToolParamsSchema(
+  private static final InputSchema SCHEMA =
+      new InputSchema(
           null,
-          Map.of("path", new ToolStringSchema(null), "offset", new ToolIntegerSchema(null)),
+          Map.of("path", new StringSchema(null), "offset", new IntegerSchema(null)),
           Set.of("path"),
           false);
 
@@ -49,7 +48,7 @@ class EnvironmentCapabilityContractTest {
         new String[] {"id", "version", "inputSchema", "timeout"}, componentNames(components));
     assertEquals(EnvironmentCapabilityId.class, components[0].getType());
     assertEquals(String.class, components[1].getType());
-    assertEquals(ToolParamsSchema.class, components[2].getType());
+    assertEquals(InputSchema.class, components[2].getType());
     assertEquals(Duration.class, components[3].getType());
   }
 
@@ -160,29 +159,27 @@ class EnvironmentCapabilityContractTest {
                 Path.of("relative/workdir")));
   }
 
-  /** Capability result 复用 ToolResult 的 details JSON 默认值、object 校验和 content 数量边界。 */
+  /** Capability result 的 details JSON 默认值、object 校验和 content 数量边界。 */
   @Test
-  void reusesToolResultBoundaries() {
-    assertEquals(ToolResult.MAX_CONTENT_ITEMS, EnvironmentCapabilityResult.MAX_CONTENT_ITEMS);
-    assertEquals(
-        ToolResult.MAX_DETAILS_JSON_UTF8_BYTES,
-        EnvironmentCapabilityResult.MAX_DETAILS_JSON_UTF8_BYTES);
+  void enforcesCapabilityResultBoundaries() {
+    assertEquals(64, EnvironmentCapabilityResult.MAX_CONTENT_ITEMS);
+    assertEquals(1024 * 1024, EnvironmentCapabilityResult.MAX_DETAILS_JSON_UTF8_BYTES);
     assertEquals(
         "{}", new EnvironmentCapabilityResult("call-1", List.of(), false, " ").detailsJson());
     assertThrows(
         IllegalArgumentException.class,
         () -> new EnvironmentCapabilityResult("call-1", List.of(), false, "[]"));
 
-    List<ToolContent> atLimit = new ArrayList<>();
-    for (int index = 0; index < ToolResult.MAX_CONTENT_ITEMS; index++) {
-      atLimit.add(new TextToolContent("x"));
+    List<ResultContent> atLimit = new ArrayList<>();
+    for (int index = 0; index < EnvironmentCapabilityResult.MAX_CONTENT_ITEMS; index++) {
+      atLimit.add(new TextResultContent("x"));
     }
     assertEquals(
-        ToolResult.MAX_CONTENT_ITEMS,
+        EnvironmentCapabilityResult.MAX_CONTENT_ITEMS,
         new EnvironmentCapabilityResult("call-1", atLimit, false, "{}").contents().size());
 
-    List<ToolContent> overLimit = new ArrayList<>(atLimit);
-    overLimit.add(new TextToolContent("x"));
+    List<ResultContent> overLimit = new ArrayList<>(atLimit);
+    overLimit.add(new TextResultContent("x"));
     assertThrows(
         IllegalArgumentException.class,
         () -> new EnvironmentCapabilityResult("call-1", overLimit, false, "{}"));
@@ -194,15 +191,21 @@ class EnvironmentCapabilityContractTest {
         () -> new EnvironmentCapabilityResult("call-1", null, false, "{}"));
   }
 
-  /** details JSON 的原始 UTF-8 上限也必须与 ToolResult 保持一致。 */
+  /** details JSON 的原始 UTF-8 上限校验。 */
   @Test
-  void reusesToolResultDetailsByteLimit() {
-    String atLimit = "{\"d\":\"" + "a".repeat(ToolResult.MAX_DETAILS_JSON_UTF8_BYTES - 8) + "\"}";
+  void enforcesCapabilityResultDetailsByteLimit() {
+    String atLimit =
+        "{\"d\":\""
+            + "a".repeat(EnvironmentCapabilityResult.MAX_DETAILS_JSON_UTF8_BYTES - 8)
+            + "\"}";
     assertEquals(
         atLimit,
         new EnvironmentCapabilityResult("call-1", List.of(), false, atLimit).detailsJson());
 
-    String overLimit = "{\"d\":\"" + "a".repeat(ToolResult.MAX_DETAILS_JSON_UTF8_BYTES - 7) + "\"}";
+    String overLimit =
+        "{\"d\":\""
+            + "a".repeat(EnvironmentCapabilityResult.MAX_DETAILS_JSON_UTF8_BYTES - 7)
+            + "\"}";
     assertThrows(
         IllegalArgumentException.class,
         () -> new EnvironmentCapabilityResult("call-1", List.of(), false, overLimit));
@@ -302,7 +305,7 @@ class EnvironmentCapabilityContractTest {
     private EnvironmentCapabilityResult result(
         EnvironmentCapabilityExecutionRequest request, String text) {
       return new EnvironmentCapabilityResult(
-          request.call().id(), List.of(new TextToolContent(text)), false, "{}");
+          request.call().id(), List.of(new TextResultContent(text)), false, "{}");
     }
   }
 
@@ -312,12 +315,12 @@ class EnvironmentCapabilityContractTest {
 
     @Override
     public void onPartial(EnvironmentCapabilityResult partial) {
-      events.add(((TextToolContent) partial.contents().getFirst()).text());
+      events.add(((TextResultContent) partial.contents().getFirst()).text());
     }
 
     @Override
     public void onComplete(EnvironmentCapabilityResult result) {
-      events.add(((TextToolContent) result.contents().getFirst()).text());
+      events.add(((TextResultContent) result.contents().getFirst()).text());
     }
 
     @Override

@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
-import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -28,7 +28,7 @@ public final class EnvironmentCapabilityCatalog {
 
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/environment/capability/schemas/";
-  private static final ToolDescriptorJsonCodec CODEC = new ToolDescriptorJsonCodec();
+  private static final SchemaJsonCodec CODEC = new SchemaJsonCodec();
   private static final List<EnvironmentCapabilityDescriptor> DESCRIPTORS = createDescriptors();
   private static final Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> BY_ID =
       indexById(DESCRIPTORS);
@@ -94,8 +94,8 @@ public final class EnvironmentCapabilityCatalog {
     return Map.copyOf(result);
   }
 
-  private static ToolParamsSchema loadSchema(EnvironmentCapabilityId id) {
-    return CODEC.decodeInputSchema(loadText(id.value() + ".schema.json"));
+  private static InputSchema loadSchema(EnvironmentCapabilityId id) {
+    return CODEC.decode(loadText(id.value() + ".schema.json"));
   }
 
   private static String loadText(String fileName) {

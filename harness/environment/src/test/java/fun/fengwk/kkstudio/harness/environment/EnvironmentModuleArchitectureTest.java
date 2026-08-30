@@ -18,12 +18,14 @@ import java.util.stream.Stream;
 /**
  * Environment 模块的轻量级架构守卫。
  *
- * <p>Environment 主源码只能依赖 JDK、Jackson、harness.tool 以及自身包； 禁止依赖 Runtime、Daemon、Platform、Web、Spring 等。
+ * <p>Environment 主源码只能依赖 JDK、Jackson、harness.common 以及自身包； 禁止依赖
+ * harness.tool、Runtime、Daemon、Platform、Web、Spring 等。
  */
 class EnvironmentModuleArchitectureTest {
 
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
+          "fun.fengwk.kkstudio.harness.tool.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.daemon.",
           "fun.fengwk.kkstudio.harness.infra.",
@@ -46,7 +48,7 @@ class EnvironmentModuleArchitectureTest {
           "com.google.ai.");
 
   @Test
-  void environmentMainSourcesStayOnJdkJacksonToolAndOwnPackages() throws IOException {
+  void environmentMainSourcesStayOnJdkJacksonCommonAndOwnPackages() throws IOException {
     Path main = locateEnvironmentMainJava();
     assertTrue(Files.isDirectory(main), "environment main sources must exist: " + main);
 
@@ -56,7 +58,7 @@ class EnvironmentModuleArchitectureTest {
   }
 
   @Test
-  void environmentPomDeclaresOnlyToolAndJacksonAsProductionDependencies() throws IOException {
+  void environmentPomDeclaresOnlyCommonAndJacksonAsProductionDependencies() throws IOException {
     Path moduleRoot = locateEnvironmentMainJava().getParent().getParent().getParent();
     Path pom = moduleRoot.resolve("pom.xml");
     String text = Files.readString(pom, StandardCharsets.UTF_8);
@@ -65,7 +67,7 @@ class EnvironmentModuleArchitectureTest {
     List<String> violations = new ArrayList<>();
     Set<String> allowed =
         Set.of(
-            "fun.fengwk.kk-studio:kk-studio-harness-tool",
+            "fun.fengwk.kk-studio:kk-studio-harness-common",
             "com.fasterxml.jackson.core:jackson-databind");
     while (matcher.find()) {
       String dependency = matcher.group(1);
@@ -121,7 +123,7 @@ class EnvironmentModuleArchitectureTest {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
         || imported.startsWith("com.fasterxml.jackson.")
-        || imported.startsWith("fun.fengwk.kkstudio.harness.tool.")
+        || imported.startsWith("fun.fengwk.kkstudio.harness.common.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.environment.");
   }
 

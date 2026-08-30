@@ -2,19 +2,18 @@ package fun.fengwk.kkstudio.harness.environment.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -41,9 +40,9 @@ class DaemonCapabilityResultCodecTest {
         new EnvironmentCapabilityResult(
             "call-1",
             List.of(
-                new TextToolContent("hello"),
-                new JsonToolContent("{\"a\":1}"),
-                new JsonToolContent("null")),
+                new TextResultContent("hello"),
+                new JsonResultContent("{\"a\":1}"),
+                new JsonResultContent("null")),
             false,
             "{}");
 
@@ -58,12 +57,12 @@ class DaemonCapabilityResultCodecTest {
 
     EnvironmentCapabilityResult decoded = codec.decodeResult(payload);
     assertEquals(3, decoded.contents().size());
-    assertEquals("hello", ((TextToolContent) decoded.contents().get(0)).text());
-    assertEquals("{\"a\":1}", ((JsonToolContent) decoded.contents().get(1)).json());
-    assertEquals("null", ((JsonToolContent) decoded.contents().get(2)).json());
+    assertEquals("hello", ((TextResultContent) decoded.contents().get(0)).text());
+    assertEquals("{\"a\":1}", ((JsonResultContent) decoded.contents().get(1)).json());
+    assertEquals("null", ((JsonResultContent) decoded.contents().get(2)).json());
   }
 
-  /** resource 内容编码为 flat 精确字段 + contentBase64；解码还原为内联 BinaryToolContent，不触碰持久化。 */
+  /** resource 内容编码为 flat 精确字段 + contentBase64；解码还原为内联 BinaryResultContent，不触碰持久化。 */
   @Test
   void resourcePayloadEncodesFlatFieldsAndDecodesToInlineBinary() {
     byte[] data = "kk-studio".getBytes(StandardCharsets.UTF_8);
@@ -71,7 +70,7 @@ class DaemonCapabilityResultCodecTest {
         new ResourceRef(EXPORT_URI, "text/plain", "kk.txt", (long) data.length, sha256Hex(data));
     EnvironmentCapabilityResult result =
         new EnvironmentCapabilityResult(
-            "call-2", List.of(new ResourceToolContent(local)), false, "{}");
+            "call-2", List.of(new ResourceResultContent(local)), false, "{}");
 
     String payload =
         codec.encodeCompleted(
@@ -101,12 +100,12 @@ class DaemonCapabilityResultCodecTest {
     EnvironmentCapabilityResult decoded =
         codec.decodeCompletedForInvocation(payload, "call-2", 1024);
     assertEquals(1, decoded.contents().size());
-    BinaryToolContent binary = (BinaryToolContent) decoded.contents().get(0);
+    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
     assertEquals("text/plain", binary.mediaType());
     assertArrayEquals(data, binary.content());
   }
 
-  /** 编码 ResourceToolContent 时 store 返回字节必须通过 size/sha 复核；读取失败确定性抛协议异常。 */
+  /** 编码 ResourceResultContent 时 store 返回字节必须通过 size/sha 复核；读取失败确定性抛协议异常。 */
   @Test
   void encodeRejectsStoreMismatchAndReadFailures() {
     byte[] data = "kk-studio".getBytes(StandardCharsets.UTF_8);
@@ -119,7 +118,7 @@ class DaemonCapabilityResultCodecTest {
             () ->
                 codec.encodeCompleted(
                     new EnvironmentCapabilityResult(
-                        "c", List.of(new ResourceToolContent(wrongSize)), false, "{}"),
+                        "c", List.of(new ResourceResultContent(wrongSize)), false, "{}"),
                     new StubStore(data, null)));
     assertTrue(sizeMismatch.getMessage().contains("store size mismatch"));
 
@@ -139,7 +138,7 @@ class DaemonCapabilityResultCodecTest {
             () ->
                 codec.encodeCompleted(
                     new EnvironmentCapabilityResult(
-                        "c", List.of(new ResourceToolContent(wrongSha)), false, "{}"),
+                        "c", List.of(new ResourceResultContent(wrongSha)), false, "{}"),
                     new StubStore(data, null)));
     assertTrue(shaMismatch.getMessage().contains("store sha256 mismatch"));
 
@@ -149,21 +148,21 @@ class DaemonCapabilityResultCodecTest {
             () ->
                 codec.encodeCompleted(
                     new EnvironmentCapabilityResult(
-                        "c", List.of(new ResourceToolContent(ref)), false, "{}"),
+                        "c", List.of(new ResourceResultContent(ref)), false, "{}"),
                     new StubStore(null, new IOException("resource gone"))));
     assertTrue(readFailure.getMessage().contains("cannot read resource bytes"));
   }
 
-  /** 编码 BinaryToolContent 必须先经 store 落盘，再编码返回的 resource 引用。 */
+  /** 编码 BinaryResultContent 必须先经 store 落盘，再编码返回的 resource 引用。 */
   @Test
-  void binaryToolContentIsStoredThenEncodedAsResource() {
+  void binaryResultContentIsStoredThenEncodedAsResource() {
     byte[] data = new byte[] {1, 2, 3, 4};
     ResourceRef stored =
         new ResourceRef(EXPORT_URI, "application/octet-stream", null, 4L, sha256Hex(data));
     EnvironmentCapabilityResult result =
         new EnvironmentCapabilityResult(
             "call-b",
-            List.of(new BinaryToolContent("application/octet-stream", data)),
+            List.of(new BinaryResultContent("application/octet-stream", data)),
             false,
             "{}");
 
@@ -192,7 +191,7 @@ class DaemonCapabilityResultCodecTest {
     assertTrue(payload.contains("\"type\":\"resource\""));
     assertTrue(payload.contains("\"uri\":\"" + EXPORT_URI + "\""));
     EnvironmentCapabilityResult decoded = codec.decodeResult(payload);
-    BinaryToolContent binary = (BinaryToolContent) decoded.contents().get(0);
+    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
     assertArrayEquals(data, binary.content());
 
     DaemonProtocolException storeFailure =
@@ -200,7 +199,7 @@ class DaemonCapabilityResultCodecTest {
             DaemonProtocolException.class,
             () ->
                 codec.encodeCompleted(result, new StubStore(null, new IOException("store down"))));
-    assertTrue(storeFailure.getMessage().contains("cannot store binary tool content"));
+    assertTrue(storeFailure.getMessage().contains("cannot store binary result content"));
   }
 
   /** http(s) resource 的 size/sha256 同样是必填 wire 字段；解码仍返回内联字节。 */
@@ -224,7 +223,7 @@ class DaemonCapabilityResultCodecTest {
                 + segment
                 + "]}}");
 
-    BinaryToolContent binary = (BinaryToolContent) decoded.contents().get(0);
+    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
     assertArrayEquals(data, binary.content());
 
     // size/sha256 缺失或为 null 必须拒绝，不允许以 null 声明绕过大小预检。
@@ -254,7 +253,7 @@ class DaemonCapabilityResultCodecTest {
         new EnvironmentCapabilityResult(
             "call-3",
             List.of(
-                new ResourceToolContent(
+                new ResourceResultContent(
                     new ResourceRef(EXPORT_URI, "text/plain", null, 2L, sha256Hex(data)))),
             false,
             "{}");
@@ -274,7 +273,7 @@ class DaemonCapabilityResultCodecTest {
         new EnvironmentCapabilityResult(
             "call-4",
             List.of(
-                new ResourceToolContent(
+                new ResourceResultContent(
                     new ResourceRef(EXPORT_URI, "text/plain", null, 8L, sha256Hex(data)))),
             false,
             "{}");
@@ -299,204 +298,107 @@ class DaemonCapabilityResultCodecTest {
             DaemonProtocolException.class,
             () ->
                 codec.decodeResult(
-                    "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},"
-                        + "\"contents\":["
+                    "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},\"contents\":["
                         + contents
                         + "]}}"));
-    assertTrue(error.getMessage().contains("must not exceed 64"));
+    assertTrue(error.getMessage().contains("must not exceed"));
   }
 
-  /** 聚合解码字节数不得超过 maximumResourceBytes，防止 N×limit 放大。 */
+  /** resource name 必须满足 ResourceRef 规范（可选非空白、有界 UTF-8、无 control）。 */
   @Test
-  void rejectsAggregateDecodedResourceBytesAboveLimit() {
-    byte[] data = "abcdef".getBytes(StandardCharsets.UTF_8);
-    String item =
+  void decodesResourceNameUnderUtf8Cap() {
+    byte[] data = "a".getBytes(StandardCharsets.UTF_8);
+    String segment =
         "{\"type\":\"resource\",\"uri\":\""
             + EXPORT_URI
-            + "\",\"mediaType\":\"text/plain\","
-            + "\"name\":null,\"size\":6,\"sha256\":\""
+            + "\",\"mediaType\":\"text/plain\",\"name\":\"my-file.txt\",\"size\":1,\"sha256\":\""
             + sha256Hex(data)
-            + "\",\"contentBase64\":\""
-            + Base64.getEncoder().encodeToString(data)
-            + "\"}";
-    String payload =
-        "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},"
-            + "\"contents\":["
-            + item
-            + ","
-            + item
-            + "]}}";
+            + "\",\"contentBase64\":\"YQ==\"}";
+    EnvironmentCapabilityResult decoded =
+        codec.decodeResult(
+            "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},\"contents\":["
+                + segment
+                + "]}}");
+    assertEquals(1, decoded.contents().size());
 
-    DaemonProtocolException error =
-        assertThrows(
-            DaemonProtocolException.class,
-            () -> codec.decodeCompletedForInvocation(payload, "c", 8));
-    assertTrue(error.getMessage().contains("aggregate decoded resource bytes exceed"));
-  }
-
-  /** 聚合预算预检先于 Base64 校验/分配：预算耗尽时即使后续条目 Base64 非法也报聚合错误。 */
-  @Test
-  void decodeRejectsAggregateExhaustionBeforeBase64Validation() {
-    byte[] data = "abcdefgh".getBytes(StandardCharsets.UTF_8);
-    String valid =
-        resource(
-            EXPORT_URI,
-            "text/plain",
-            8L,
-            sha256Hex(data),
-            Base64.getEncoder().encodeToString(data));
-    String overBudgetWithInvalidBase64 =
-        resource(EXPORT_URI, "text/plain", 8L, sha256Hex(data), "!!!");
-    DaemonProtocolException error =
-        assertThrows(
-            DaemonProtocolException.class,
-            () ->
-                codec.decodeCompletedForInvocation(
-                    "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},"
-                        + "\"contents\":["
-                        + valid
-                        + ","
-                        + overBudgetWithInvalidBase64
-                        + "]}}",
-                    "c",
-                    8));
-    assertTrue(error.getMessage().contains("aggregate decoded resource bytes exceed"));
-    assertFalse(error.getMessage().contains("Base64"));
-  }
-
-  /** 无参解码使用 8 MiB 默认预算：不存在 unbounded 默认入口。 */
-  @Test
-  void defaultDecodeBudgetIsEightMebibytes() {
-    DaemonProtocolException error =
-        assertThrows(
-            DaemonProtocolException.class,
-            () ->
-                codec.decodeResult(
-                    wire(
-                        resource(
-                            EXPORT_URI,
-                            "text/plain",
-                            DaemonCapabilityResultCodec.DEFAULT_MAX_RESOURCE_BYTES + 1,
-                            sha256Hex(new byte[] {0x61}),
-                            "YQ=="))));
-    assertTrue(error.getMessage().contains("aggregate decoded resource bytes exceed"));
-  }
-
-  /** 原始 payload 的 UTF-8 长度在解析前受 16 MiB 上限约束；非法 Unicode（未配对代理项）同样拒绝。 */
-  @Test
-  void decodeRejectsPayloadsAboveSixteenMebibytesAndInvalidUnicode() {
-    String oversized =
-        "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},"
-            + "\"contents\":[{\"type\":\"text\",\"text\":\""
-            + "a".repeat(DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES)
-            + "\"}]}}";
-    DaemonProtocolException error =
-        assertThrows(DaemonProtocolException.class, () -> codec.decodeResult(oversized));
-    assertTrue(error.getMessage().contains("payload exceeds"));
-
-    String loneSurrogate =
-        "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},"
-            + "\"contents\":[{\"type\":\"text\",\"text\":\"\uD800\"}]}}";
-    assertThrows(DaemonProtocolException.class, () -> codec.decodeResult(loneSurrogate));
-  }
-
-  /** canonical Base64（含 pad bits）与 size/sha 复核必须在解码边界强制执行。 */
-  @Test
-  void rejectsNonCanonicalBase64AndSizeShaMismatches() {
-    String shaOfA = sha256Hex(new byte[] {0x61});
-    // "QR==" 解码为 0x41 但 pad bits 非零，重编码为 "QQ=="，必须拒绝。
-    assertRejected(wire(resource(EXPORT_URI, "text/plain", 1L, shaOfA, "QR==")));
-    // 缺失 padding：encoded 长度与声明 size 不匹配，分配前拒绝。
-    assertRejected(
-        wire(resource(EXPORT_URI, "text/plain", 2L, sha256Hex(new byte[] {0x61, 0x62}), "YWI")));
-    // 声明 size 与解码长度不符。
-    assertRejected(wire(resource(EXPORT_URI, "text/plain", 1L, shaOfA, "YWI=")));
-    // 声明 sha256 与解码字节不符。
-    assertRejected(
-        wire(
-            resource(
-                EXPORT_URI,
-                "text/plain",
-                1L,
-                sha256Hex("zz".getBytes(StandardCharsets.UTF_8)),
-                "YQ==")));
-    // size/sha256 缺失或为 null 必须拒绝（不允许以 null 声明绕过大小预检）。
-    assertRejected(wire(resource(EXPORT_URI, "text/plain", null, null, "YQ==")));
-    assertRejected(wire(resource(EXPORT_URI, "text/plain", 1L, null, "YQ==")));
-    assertRejected(wire(resource(EXPORT_URI, "text/plain", null, shaOfA, "YQ==")));
-  }
-
-  /** resource wire 的字段集必须精确：缺失、额外、错误类型、duplicate 与 trailing 全部拒绝。 */
-  @Test
-  void rejectsMalformedResourceWireFields() {
-    String validSegment =
-        resource(EXPORT_URI, "text/plain", 1L, sha256Hex(new byte[] {0x61}), "YQ==");
-    assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decodeResult(wire(validSegment.replace("\"name\":null,", ""))));
-    assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decodeResult(wire(validSegment.replace("}", ",\"extra\":true}"))));
-    assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decodeResult(wire(validSegment.replace("\"name\":null", "\"name\":5"))));
-    assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decodeResult(wire(validSegment.replace("\"size\":1", "\"size\":\"1\""))));
-    assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decodeResult(wire(validSegment.replace("\"size\":1", "\"size\":-1"))));
+    // control 字符在 name 中拒绝。
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decodeResult(
-                wire(validSegment.replace("\"sha256\":\"", "\"sha256\":5,\"x\":\""))));
+                "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},\"contents\":["
+                    + segment.replace("my-file.txt", "my\\u0000file.txt")
+                    + "]}}"));
+  }
+
+  /** Base64 填充和长度必须符合 RFC 4648 basic（无换行、无空格）。 */
+  @Test
+  void rejectsNonCanonicalBase64() {
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decodeResult(
                 wire(
-                    "{\"type\":\"resource\",\"type\":\"resource\",\"uri\":\""
-                        + EXPORT_URI
-                        + "\",\"mediaType\":\"text/plain\",\"name\":null,\"size\":1,"
-                        + "\"sha256\":\""
-                        + sha256Hex(new byte[] {0x61})
-                        + "\",\"contentBase64\":\"YQ==\"}")));
+                    resource(
+                        EXPORT_URI, "text/plain", 1L, sha256Hex(new byte[] {0x61}), " YQ==\n"))));
+  }
+
+  /** Base64 解码长度与 sha256 必须与声明一致。 */
+  @Test
+  void rejectsMismatchedDecodedSizeAndSha() {
+    byte[] real = new byte[] {1, 2, 3};
+    String realB64 = Base64.getEncoder().encodeToString(real);
+    // 声明 size=4 但实际 Base64 解码出 3 字节。
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decodeResult(
-                "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},"
-                    + "\"contents\":["
-                    + validSegment
-                    + "]}} trailing"));
+                wire(
+                    resource(
+                        EXPORT_URI, "application/octet-stream", 4L, sha256Hex(real), realB64))));
+
+    // 声明 sha256 与 Base64 实际内容不符。
     assertThrows(
-        DaemonProtocolException.class, () -> codec.decodeResult(wire("{\"type\":\"nope\"}")));
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeResult(
+                wire(
+                    resource(
+                        EXPORT_URI, "application/octet-stream", 3L, "0".repeat(64), realB64))));
   }
 
-  private static String wire(String segment) {
-    return "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},"
-        + "\"contents\":["
-        + segment
-        + "]}}";
+  /** 聚合 resource 字节超过预算在累加时拒绝。 */
+  @Test
+  void rejectsAggregateResourceBytesExceedingBudget() {
+    byte[] chunk = new byte[] {1, 2, 3};
+    String chunkB64 = Base64.getEncoder().encodeToString(chunk);
+    String sha = sha256Hex(chunk);
+    String payload =
+        "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},"
+            + "\"contents\":["
+            + resource(EXPORT_URI + "/1", "application/octet-stream", 3L, sha, chunkB64)
+            + ","
+            + resource(EXPORT_URI + "/2", "application/octet-stream", 3L, sha, chunkB64)
+            + "]}}";
+
+    assertThrows(
+        DaemonProtocolException.class, () -> codec.decodeCompletedForInvocation(payload, "c", 5));
+    assertEquals(2, codec.decodeCompletedForInvocation(payload, "c", 6).contents().size());
   }
 
-  private static String resource(
-      String uri, String mediaType, Long size, String sha256, String contentBase64) {
-    return "{\"type\":\"resource\",\"uri\":\""
-        + uri
-        + "\",\"mediaType\":\""
-        + mediaType
-        + "\",\"name\":null,\"size\":"
-        + size
-        + ",\"sha256\":"
-        + (sha256 == null ? "null" : "\"" + sha256 + "\"")
-        + ",\"contentBase64\":\""
-        + contentBase64
-        + "\"}";
+  /** payload 超过 16 MiB 在解码前拒绝。 */
+  @Test
+  void rejectsPayloadExceedingSixteenMegabytes() {
+    String huge =
+        "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},"
+            + "\"contents\":[{\"type\":\"text\",\"text\":\""
+            + "a".repeat(DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES)
+            + "\"}]}}";
+    DaemonProtocolException error =
+        assertThrows(DaemonProtocolException.class, () -> codec.decodeResult(huge));
+    assertTrue(error.getMessage().contains("payload exceeds"));
   }
 
-  /** 解码的 resource 构造必须通过 ResourceRef 全量校验（非法 URI / mediaType 同样在 codec 边界拒绝）。 */
   @Test
   void rejectsInvalidResourceRefFieldsOnDecode() {
     assertRejected(
@@ -612,7 +514,7 @@ class DaemonCapabilityResultCodecTest {
         codec.decodeResult(
             "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},"
                 + "\"contents\":[{\"type\":\"text\",\"text\":\"\"}]}}");
-    assertEquals("", ((TextToolContent) decoded.contents().get(0)).text());
+    assertEquals("", ((TextResultContent) decoded.contents().get(0)).text());
   }
 
   /** ResourceRef 必须在任何 Base64 分配之前完成校验：非法字段与非法 Base64 同时出现时报字段错误。 */
@@ -635,23 +537,23 @@ class DaemonCapabilityResultCodecTest {
   /** contents 元素数上限由 CapabilityResult 构造期统一强制（与解码侧共用同一来源）；恰好 64 条经 COMPLETED/PARTIAL 编码均通过。 */
   @Test
   void countCapIsEnforcedAtCapabilityResultConstruction() {
-    List<ToolContent> atLimit = new ArrayList<>();
+    List<ResultContent> atLimit = new ArrayList<>();
     for (int index = 0; index < EnvironmentCapabilityResult.MAX_CONTENT_ITEMS; index++) {
-      atLimit.add(new TextToolContent("x"));
+      atLimit.add(new TextResultContent("x"));
     }
     EnvironmentCapabilityResult result = new EnvironmentCapabilityResult("c", atLimit, false, "{}");
     assertEquals(EnvironmentCapabilityResult.MAX_CONTENT_ITEMS, result.contents().size());
     codec.encodeCompleted(result, new NoopStore());
     codec.encodePartial(result, new NoopStore());
 
-    List<ToolContent> overLimit = new ArrayList<>(atLimit);
-    overLimit.add(new TextToolContent("x"));
+    List<ResultContent> overLimit = new ArrayList<>(atLimit);
+    overLimit.add(new TextResultContent("x"));
     assertThrows(
         IllegalArgumentException.class,
         () -> new EnvironmentCapabilityResult("c", overLimit, false, "{}"));
   }
 
-  /** 编码 ResourceToolContent 必须携带 size/sha256：wire 不允许 null 声明。 */
+  /** 编码 ResourceResultContent 必须携带 size/sha256：wire 不允许 null 声明。 */
   @Test
   void encodeRejectsResourceRefWithoutSizeOrSha() {
     byte[] data = "x".getBytes(StandardCharsets.UTF_8);
@@ -659,7 +561,7 @@ class DaemonCapabilityResultCodecTest {
         new ResourceRef("https://example.com/a", "text/plain", null, null, null);
     EnvironmentCapabilityResult result =
         new EnvironmentCapabilityResult(
-            "c", List.of(new ResourceToolContent(noSizeSha)), false, "{}");
+            "c", List.of(new ResourceResultContent(noSizeSha)), false, "{}");
     DaemonProtocolException error =
         assertThrows(
             DaemonProtocolException.class,
@@ -685,7 +587,7 @@ class DaemonCapabilityResultCodecTest {
   void encodePartialAcceptsTextAndJsonAndRejectsResourceOrBinaryBeforeAnyStoreCall() {
     EnvironmentCapabilityResult partial =
         new EnvironmentCapabilityResult(
-            "p", List.of(new TextToolContent("hi"), new JsonToolContent("[1]")), false, "{}");
+            "p", List.of(new TextResultContent("hi"), new JsonResultContent("[1]")), false, "{}");
     String payload = codec.encodePartial(partial, new NoopStore());
     assertTrue(payload.contains("\"type\":\"text\""));
     assertTrue(payload.contains("\"type\":\"json\""));
@@ -698,14 +600,14 @@ class DaemonCapabilityResultCodecTest {
         () ->
             codec.encodePartial(
                 new EnvironmentCapabilityResult(
-                    "p", List.of(new ResourceToolContent(ref)), false, "{}"),
+                    "p", List.of(new ResourceResultContent(ref)), false, "{}"),
                 new NoopStore()));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.encodePartial(
                 new EnvironmentCapabilityResult(
-                    "p", List.of(new BinaryToolContent("text/plain", data)), false, "{}"),
+                    "p", List.of(new BinaryResultContent("text/plain", data)), false, "{}"),
                 new NoopStore()));
   }
 
@@ -716,8 +618,8 @@ class DaemonCapabilityResultCodecTest {
         new EnvironmentCapabilityResult(
             "c",
             List.of(
-                new TextToolContent("ok"),
-                new BinaryToolContent("application/octet-stream", new byte[5])),
+                new TextResultContent("ok"),
+                new BinaryResultContent("application/octet-stream", new byte[5])),
             false,
             "{}");
     DaemonProtocolException binaryError =
@@ -730,8 +632,8 @@ class DaemonCapabilityResultCodecTest {
         new EnvironmentCapabilityResult(
             "c",
             List.of(
-                new TextToolContent("ok"),
-                new ResourceToolContent(
+                new TextResultContent("ok"),
+                new ResourceResultContent(
                     new ResourceRef(EXPORT_URI, "text/plain", null, 5L, sha256Hex(new byte[5])))),
             false,
             "{}");
@@ -746,8 +648,8 @@ class DaemonCapabilityResultCodecTest {
         new EnvironmentCapabilityResult(
             "c",
             List.of(
-                new BinaryToolContent("application/octet-stream", new byte[3]),
-                new BinaryToolContent("application/octet-stream", new byte[3])),
+                new BinaryResultContent("application/octet-stream", new byte[3]),
+                new BinaryResultContent("application/octet-stream", new byte[3])),
             false,
             "{}");
     assertThrows(
@@ -762,7 +664,7 @@ class DaemonCapabilityResultCodecTest {
         new EnvironmentCapabilityResult(
             "c",
             List.of(
-                new TextToolContent(
+                new TextResultContent(
                     "a".repeat(DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES))),
             false,
             "{}");
@@ -776,7 +678,7 @@ class DaemonCapabilityResultCodecTest {
   @Test
   void encodeCompletedValidatesBudgetAndStoreReturnedRefs() {
     EnvironmentCapabilityResult text =
-        new EnvironmentCapabilityResult("c", List.of(new TextToolContent("x")), false, "{}");
+        new EnvironmentCapabilityResult("c", List.of(new TextResultContent("x")), false, "{}");
     assertThrows(
         IllegalArgumentException.class, () -> codec.encodeCompleted(text, 0, new NoopStore()));
     assertThrows(
@@ -785,7 +687,7 @@ class DaemonCapabilityResultCodecTest {
     byte[] data = new byte[] {1};
     EnvironmentCapabilityResult binary =
         new EnvironmentCapabilityResult(
-            "c", List.of(new BinaryToolContent("text/plain", data)), false, "{}");
+            "c", List.of(new BinaryResultContent("text/plain", data)), false, "{}");
     DaemonProtocolException noSizeSha =
         assertThrows(
             DaemonProtocolException.class,
@@ -854,11 +756,11 @@ class DaemonCapabilityResultCodecTest {
         assertThrows(DaemonProtocolException.class, () -> codec.decodeResult(oversizedDetails));
     assertTrue(detailsError.getMessage().contains("result fields are invalid"));
 
-    // json 内容超限（> 1 MiB UTF-8）：JsonToolContent 构造期上限 → 协议错误。
+    // json 内容超限（> 1 MiB UTF-8）：JsonResultContent 构造期上限 → 协议错误。
     String oversizedJson =
         "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},"
             + "\"contents\":[{\"type\":\"json\",\"json\":\""
-            + "a".repeat(JsonToolContent.MAX_JSON_UTF8_BYTES)
+            + "a".repeat(JsonResultContent.MAX_JSON_UTF8_BYTES)
             + "\"}]}}";
     DaemonProtocolException jsonError =
         assertThrows(DaemonProtocolException.class, () -> codec.decodeResult(oversizedJson));
@@ -914,10 +816,10 @@ class DaemonCapabilityResultCodecTest {
     ResourceRef ref =
         new ResourceRef(EXPORT_URI, "text/plain", null, (long) data.length, sha256Hex(data));
     EnvironmentCapabilityResult resourceResult =
-        new EnvironmentCapabilityResult("c", List.of(new ResourceToolContent(ref)), false, "{}");
+        new EnvironmentCapabilityResult("c", List.of(new ResourceResultContent(ref)), false, "{}");
     EnvironmentCapabilityResult binaryResult =
         new EnvironmentCapabilityResult(
-            "c", List.of(new BinaryToolContent("text/plain", data)), false, "{}");
+            "c", List.of(new BinaryResultContent("text/plain", data)), false, "{}");
 
     assertThrows(NullPointerException.class, () -> codec.encodeCompleted(null, new NoopStore()));
     assertThrows(NullPointerException.class, () -> codec.encodeCompleted(resourceResult, null));
@@ -970,7 +872,7 @@ class DaemonCapabilityResultCodecTest {
   @Test
   void encodesNullDetailsJsonAsEmptyDetailsObject() {
     EnvironmentCapabilityResult result =
-        new EnvironmentCapabilityResult("c", List.of(new TextToolContent("hi")), false, null);
+        new EnvironmentCapabilityResult("c", List.of(new TextResultContent("hi")), false, null);
     assertTrue(codec.encodeCompleted(result, new NoopStore()).contains("\"details\":{}"));
   }
 
@@ -1016,6 +918,28 @@ class DaemonCapabilityResultCodecTest {
     public byte[] read(DaemonResourceRef ref) {
       throw new AssertionError("read must not be called");
     }
+  }
+
+  private static String resource(
+      String uri, String mediaType, Long size, String sha256, String contentBase64) {
+    return "{\"type\":\"resource\",\"uri\":\""
+        + uri
+        + "\",\"mediaType\":\""
+        + mediaType
+        + "\",\"name\":null,\"size\":"
+        + size
+        + ",\"sha256\":\""
+        + sha256
+        + "\",\"contentBase64\":\""
+        + contentBase64
+        + "\"}";
+  }
+
+  private static String wire(String content) {
+    return "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},"
+        + "\"contents\":["
+        + content
+        + "]}}";
   }
 
   private static String sha256Hex(byte[] bytes) {

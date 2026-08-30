@@ -1,20 +1,21 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
-import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsNormalizer;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsValidator;
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.harness.common.schema.InputNormalizer;
+import fun.fengwk.kkstudio.harness.common.schema.InputValidator;
 
 import java.util.Objects;
 
 /**
  * 结构化的 Environment Capability 调用请求。
  *
- * <p>调用 ID 与模型 ToolCall 拥有相同的非空/非空白要求；入参 JSON 在构造期校验为合法 JSON。
+ * <p>调用 ID 拥有非空/非空白要求；入参 JSON 在构造期校验为合法 JSON 对象。
  */
 public record EnvironmentCapabilityCall(String id, String argumentsJson) {
 
   public EnvironmentCapabilityCall {
     id = requireNonBlank(id, "id");
-    argumentsJson = ToolArgumentsValidator.requireJsonObject(argumentsJson);
+    argumentsJson = JsonValues.requireJsonObject(argumentsJson, "argumentsJson");
   }
 
   /**
@@ -24,8 +25,8 @@ public record EnvironmentCapabilityCall(String id, String argumentsJson) {
    */
   public EnvironmentCapabilityCall validateFor(EnvironmentCapabilityDescriptor descriptor) {
     Objects.requireNonNull(descriptor, "descriptor");
-    String normalized = ToolArgumentsNormalizer.normalize(argumentsJson, descriptor.inputSchema());
-    ToolArgumentsValidator.validate(normalized, descriptor.inputSchema());
+    String normalized = InputNormalizer.normalize(argumentsJson, descriptor.inputSchema());
+    InputValidator.validate(normalized, descriptor.inputSchema());
     if (normalized.equals(argumentsJson)) {
       return this;
     }

@@ -1,36 +1,48 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
-import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.List;
 import java.util.Objects;
 
-/**
- * Environment Capability 的部分或终止结果。
- *
- * <p>结果边界和 details JSON 校验统一复用 {@link ToolResult}，避免 Capability 与模型 Tool 产生两套限制。
- */
+/** Environment Capability 的部分或终止结果。 */
 public record EnvironmentCapabilityResult(
-    String callId, List<ToolContent> contents, boolean error, String detailsJson) {
+    String callId, List<ResultContent> contents, boolean error, String detailsJson) {
 
-  /** detailsJson 原始文本的 UTF-8 字节上限，与 ToolResult 使用同一约束来源。 */
-  public static final int MAX_DETAILS_JSON_UTF8_BYTES = ToolResult.MAX_DETAILS_JSON_UTF8_BYTES;
+  /** detailsJson 原始文本的 UTF-8 字节上限：1 MiB。 */
+  public static final int MAX_DETAILS_JSON_UTF8_BYTES = 1024 * 1024;
 
-  /** contents 数组的元素上限，与 ToolResult 使用同一约束来源。 */
-  public static final int MAX_CONTENT_ITEMS = ToolResult.MAX_CONTENT_ITEMS;
+  /** contents 数组的元素上限。 */
+  public static final int MAX_CONTENT_ITEMS = 64;
 
   public EnvironmentCapabilityResult {
-    ToolResult validated = new ToolResult(callId, contents, error, detailsJson);
-    callId = validated.toolCallId();
-    contents = validated.contents();
-    detailsJson = validated.detailsJson();
+    if (callId == null || callId.isBlank()) {
+      throw new IllegalArgumentException("callId must not be blank");
+    }
+    Objects.requireNonNull(contents, "contents");
+    if (contents.size() > MAX_CONTENT_ITEMS) {
+      throw new IllegalArgumentException(
+          "contents must not exceed " + MAX_CONTENT_ITEMS + " items");
+    }
+    contents = List.copyOf(contents);
+    detailsJson = requireBoundedJsonObject(detailsJson);
+  }
+
+  private static String requireBoundedJsonObject(String detailsJson) {
+    String normalized = detailsJson == null || detailsJson.isBlank() ? "{}" : detailsJson;
+    if (ResourceRef.utf8LengthUpTo(normalized, "detailsJson", MAX_DETAILS_JSON_UTF8_BYTES)
+        > MAX_DETAILS_JSON_UTF8_BYTES) {
+      throw new IllegalArgumentException(
+          "detailsJson must not exceed " + MAX_DETAILS_JSON_UTF8_BYTES + " UTF-8 bytes");
+    }
+    return JsonValues.requireJsonObject(normalized, "detailsJson");
   }
 
   /** 创建纯文本成功结果。 */
@@ -40,19 +52,21 @@ public record EnvironmentCapabilityResult(
 
   /** 创建纯文本成功结果。 */
   public static EnvironmentCapabilityResult text(String callId, String text) {
-    return new EnvironmentCapabilityResult(callId, List.of(new TextToolContent(text)), false, "{}");
+    return new EnvironmentCapabilityResult(
+        callId, List.of(new TextResultContent(text)), false, "{}");
   }
 
   /** 创建纯错误结果（统一附加 "Error: " 前缀）。 */
   public static EnvironmentCapabilityResult error(String callId, String message) {
     String detail = message == null || message.isBlank() ? "capability execution failed" : message;
     return new EnvironmentCapabilityResult(
-        callId, List.of(new TextToolContent("Error: " + detail)), true, "{}");
+        callId, List.of(new TextResultContent("Error: " + detail)), true, "{}");
   }
 
   /** 创建结构化 JSON 成功结果。 */
   public static EnvironmentCapabilityResult json(String callId, String json) {
-    return new EnvironmentCapabilityResult(callId, List.of(new JsonToolContent(json)), false, "{}");
+    return new EnvironmentCapabilityResult(
+        callId, List.of(new JsonResultContent(json)), false, "{}");
   }
 
   /** 创建包含文本预览与引用 Resource 的成功结果。 */
@@ -62,8 +76,8 @@ public record EnvironmentCapabilityResult(
     return new EnvironmentCapabilityResult(
         callId,
         List.of(
-            new TextToolContent(previewText),
-            new ResourceToolContent(
+            new TextResultContent(previewText),
+            new ResourceResultContent(
                 new ResourceRef(
                     resource.uri(),
                     resource.mediaType(),
@@ -77,6 +91,6 @@ public record EnvironmentCapabilityResult(
   /** 创建内联 Binary 成功结果。 */
   public static EnvironmentCapabilityResult binary(String callId, byte[] bytes, String mediaType) {
     return new EnvironmentCapabilityResult(
-        callId, List.of(new BinaryToolContent(mediaType, bytes)), false, "{}");
+        callId, List.of(new BinaryResultContent(mediaType, bytes)), false, "{}");
   }
 }
