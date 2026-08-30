@@ -2,7 +2,7 @@
 
 ## 定位
 
-Environment Daemon 是独立进程，负责固定 Environment root 内的 coding capabilities、MCP bridge、Skill discovery、目录浏览和 Daemon WebSocket protocol v5。它依赖 `harness-environment` 的 Capability SPI/wire contract，不依赖 Runtime、Infra、Platform、Spring、数据库或 Model/Agent。
+Environment Daemon 是独立进程，负责固定 Environment root 内的 coding capabilities、MCP bridge、Skill discovery、目录浏览和 Daemon WebSocket protocol v5。它依赖 `harness-common` 的共享值契约与 `harness-environment` 的 Capability SPI/wire contract，不依赖 Tool、Runtime、Infra、Platform、Spring、数据库或 Model/Agent。
 
 [`DaemonMain`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonMain.java) 是进程入口；[`DaemonRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java) 管理连接、journal、capability 执行、重连、超时和 shutdown。Daemon 的 invocation journal 是进程内 execution fact；WebSocket 只传递消息。
 
@@ -37,7 +37,8 @@ DaemonMain
        ├─ scheduler (1 thread)
        └─ taskExecutor (virtual-thread-per-task)
 
-Daemon -> harness-environment
+Daemon -> harness-common
+Daemon -> harness-environment -> harness-common
 Daemon -/-> harness-tool / harness-runtime / harness-infra / platform / web
 ```
 
