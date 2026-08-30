@@ -319,8 +319,15 @@ async function main(argv) {
     await page.screenshot({ path: file, fullPage: true })
   }
 
-  async function run(id, title, fn) {
+  async function run(id, title, fn, options = {}) {
+    const { requiresTools = false } = options
     registeredCaseIds.add(id)
+    if (requiresTools && !args.withTools) {
+      if (selectedCaseIds.has(id)) {
+        throw new Error(`UI case ${id} requires --with-tools`)
+      }
+      return
+    }
     if (selectedCaseIds.size > 0 && !selectedCaseIds.has(id)) {
       return
     }
@@ -850,60 +857,60 @@ async function main(argv) {
     await apiDeleteByName(args.backendUrl, 'chats', title)
   })
 
-  if (args.withTools) {
-    await run(
-      'ui.chat.create_environment_workspace',
-      'Create Chat 使用 Environment → Workspace 两阶段 picker 提交完整 binding',
-      async (caseArt) => {
-        const title = `e2e-ui-create-env-${stamp}`
-        await goto('/chats')
-        await page.getByText('新建 Chat', { exact: true }).click()
-        await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
-        await selectCustomOption(
-          page,
-          page.getByRole('button', { name: 'Agent' }),
-          'default-assistant',
-        )
+  await run(
+    'ui.chat.create_environment_workspace',
+    'Create Chat 使用 Environment → Workspace 两阶段 picker 提交完整 binding',
+    async (caseArt) => {
+      const title = `e2e-ui-create-env-${stamp}`
+      await goto('/chats')
+      await page.getByText('新建 Chat', { exact: true }).click()
+      await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
+      await selectCustomOption(
+        page,
+        page.getByRole('button', { name: 'Agent' }),
+        'default-assistant',
+      )
 
-        const environmentTrigger = page.getByRole('button', { name: 'Environment', exact: true })
-        await environmentTrigger.click()
-        const environments = page.getByRole('region', { name: '选择 Environment' })
-        await environments.waitFor({ state: 'visible', timeout: 10_000 })
-        await environments.getByRole('option', {
-          name: new RegExp(`^${escapeRegExp(args.daemonEnv)}(?:\\s|$)`),
-        }).click()
-        const directory = page.getByRole('region', { name: `${args.daemonEnv} 目录` })
-        await directory.waitFor({ state: 'visible', timeout: 10_000 })
-        assert(
-          (await environmentTrigger.innerText()).includes('（无）'),
-          'selecting an Environment silently committed workspacePath="." before confirmation',
-        )
-        await directory.getByRole('button', { name: '使用当前 Workspace' }).click()
-        assert(
-          (await environmentTrigger.innerText()).includes(`${args.daemonEnv} · @/`),
-          `complete Environment binding was not shown: ${await environmentTrigger.innerText()}`,
-        )
-        await page.getByRole('button', { name: '确认创建' }).click()
-        // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
-        await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 15_000 })
+      const environmentTrigger = page.getByRole('button', { name: 'Environment', exact: true })
+      await environmentTrigger.click()
+      const environments = page.getByRole('region', { name: '选择 Environment' })
+      await environments.waitFor({ state: 'visible', timeout: 10_000 })
+      await environments.getByRole('option', {
+        name: new RegExp(`^${escapeRegExp(args.daemonEnv)}(?:\\s|$)`),
+      }).click()
+      const directory = page.getByRole('region', { name: `${args.daemonEnv} 目录` })
+      await directory.waitFor({ state: 'visible', timeout: 10_000 })
+      assert(
+        (await environmentTrigger.innerText()).includes('（无）'),
+        'selecting an Environment silently committed workspacePath="." before confirmation',
+      )
+      await directory.getByRole('button', { name: '使用当前 Workspace' }).click()
+      assert(
+        (await environmentTrigger.innerText()).includes(`${args.daemonEnv} · @/`),
+        `complete Environment binding was not shown: ${await environmentTrigger.innerText()}`,
+      )
+      await page.getByRole('button', { name: '确认创建' }).click()
+      // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
+      await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 15_000 })
 
-        const { json } = await apiJson(args.backendUrl, 'GET', '/api/ai/chat')
-        const created = (json?.data || []).find((chat) => chat.title === title)
-        assert(
-          created?.environment?.name === args.daemonEnv
-          && created?.environment?.workspacePath === '.',
-          `Create Chat did not persist the confirmed binding: ${JSON.stringify(created)}`,
-        )
-        await shot(caseArt, 'create-chat-environment-workspace')
-        expectNoFatal(pageErrors, consoleErrors)
-        await apiDeleteByName(args.backendUrl, 'chats', title)
-      },
-    )
-  }
+      const { json } = await apiJson(args.backendUrl, 'GET', '/api/ai/chat')
+      const created = (json?.data || []).find((chat) => chat.title === title)
+      assert(
+        created?.environment?.name === args.daemonEnv
+        && created?.environment?.workspacePath === '.',
+        `Create Chat did not persist the confirmed binding: ${JSON.stringify(created)}`,
+      )
+      await shot(caseArt, 'create-chat-environment-workspace')
+      expectNoFatal(pageErrors, consoleErrors)
+      await apiDeleteByName(args.backendUrl, 'chats', title)
+    },
+    { requiresTools: true },
+  )
 
   await runComposerMatrix({
     apiCtx,
     consoleErrors,
+    daemonEnv: args.daemonEnv,
     expectNoFatal,
     goto,
     page,

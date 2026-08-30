@@ -33,6 +33,7 @@ export async function runWorkspaceContractMatrix(ui) {
     consoleErrors,
     createDurableHistoryFixture,
     createHoldingQueueFixture,
+    daemonEnv,
     expectNoFatal,
     goto,
     page,
@@ -287,7 +288,7 @@ export async function runWorkspaceContractMatrix(ui) {
       try {
         await withUiFixture(
           page,
-          () => createToolCardFixture(apiCtx, stamp),
+          () => createToolCardFixture(apiCtx, stamp, daemonEnv),
           async (fixture) => {
             await fixture.start('edit')
             await Promise.all([
@@ -465,6 +466,7 @@ export async function runWorkspaceContractMatrix(ui) {
         if (originalViewport) await page.setViewportSize(originalViewport)
       }
     },
+    { requiresTools: true },
   )
 
   await run(
@@ -936,7 +938,11 @@ async function createActiveTaskFixture(apiCtx, stamp) {
   }
 }
 
-async function createToolCardFixture(apiCtx, stamp) {
+async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
+  assert(
+    typeof daemonEnv === 'string' && daemonEnv.trim().length > 0,
+    `tool-card fixture requires a non-blank daemonEnv: ${JSON.stringify(daemonEnv)}`,
+  )
   const suffix = cid().slice(0, 8)
   const markers = {
     bash: `bash tool card ${stamp} ${suffix}`,
@@ -1010,10 +1016,19 @@ async function createToolCardFixture(apiCtx, stamp) {
     assert(agentResponse.status === 201, `create tool-card agent: ${JSON.stringify(agentResponse)}`)
     state.agent = envelopeData(agentResponse.json)
 
+    // Tool Work 在进入 WAITING_APPROVAL 前需要路由到 READY node 进行 permission preflight，
+    // 因此需要可调度的 live Environment binding；本用例对 write/edit/bash 均执行拒绝（DENY），
+    // 不实际在 node 上执行 capability。
+    const environment = {
+      name: daemonEnv,
+      workspacePath: '.',
+    }
+
     state.chat = await createChat(apiCtx, {
       title: `e2e-ui-tool-card-${stamp}-${suffix}`,
       agentName: state.agent.name,
       yoloEnabled: false,
+      environment,
     })
     const owner = chatOwner(state.chat.id)
     const sessionId = cid()
@@ -1029,6 +1044,7 @@ async function createToolCardFixture(apiCtx, stamp) {
           modelName: state.model.name,
           variant: 'default',
         },
+        { environment },
       ),
       yoloEnabled: false,
       commands: [userMessageCommand(`tool card materialize ${suffix}`, cid())],
