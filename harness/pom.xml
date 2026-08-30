@@ -14,7 +14,7 @@
     <packaging>pom</packaging>
 
     <modules>
-        <module>prompt</module>
+        <module>common</module>
         <module>tool</module>
         <module>environment</module>
         <module>runtime</module>

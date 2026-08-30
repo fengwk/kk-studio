@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -38,22 +41,22 @@ class ToolResultTest {
     ToolResult error = ToolResult.error("call-1", "boom");
     assertEquals("call-1", error.toolCallId());
     assertTrue(error.error());
-    assertEquals("boom", ((TextToolContent) error.contents().getFirst()).text());
+    assertEquals("boom", ((TextResultContent) error.contents().getFirst()).text());
     assertEquals("{}", error.detailsJson());
   }
 
   /** contents 元素数上限：恰好 64 接受；65 在 {@link List#copyOf} 之前拒绝；null list / null 元素拒绝。 */
   @Test
   void boundsContentsItemCountBeforeCopy() {
-    List<ToolContent> atLimit = new ArrayList<>();
+    List<ResultContent> atLimit = new ArrayList<>();
     for (int index = 0; index < ToolResult.MAX_CONTENT_ITEMS; index++) {
-      atLimit.add(new TextToolContent("x"));
+      atLimit.add(new TextResultContent("x"));
     }
     assertEquals(
         ToolResult.MAX_CONTENT_ITEMS, new ToolResult("c", atLimit, false, "{}").contents().size());
 
-    List<ToolContent> overLimit = new ArrayList<>(atLimit);
-    overLimit.add(new TextToolContent("x"));
+    List<ResultContent> overLimit = new ArrayList<>(atLimit);
+    overLimit.add(new TextResultContent("x"));
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class, () -> new ToolResult("c", overLimit, false, "{}"));
@@ -61,7 +64,7 @@ class ToolResultTest {
 
     assertThrows(NullPointerException.class, () -> new ToolResult("c", null, false, "{}"));
 
-    List<ToolContent> withNullElement = new ArrayList<>();
+    List<ResultContent> withNullElement = new ArrayList<>();
     withNullElement.add(null);
     assertThrows(
         NullPointerException.class, () -> new ToolResult("c", withNullElement, false, "{}"));

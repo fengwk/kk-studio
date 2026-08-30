@@ -13,16 +13,16 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
+import fun.fengwk.kkstudio.harness.common.schema.BooleanSchema;
+import fun.fengwk.kkstudio.harness.common.schema.EnumSchema;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.harness.common.schema.NumberSchema;
+import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolNumberSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolObjectSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.time.Duration;
 import java.util.List;
@@ -70,7 +70,7 @@ class ToolDescriptorJsonCodecTest {
             "v1",
             "no params",
             "noop",
-            new ToolParamsSchema(null, Map.of(), Set.of(), true),
+            new InputSchema(null, Map.of(), Set.of(), true),
             ToolSideEffect.READ_ONLY,
             Duration.ZERO);
 
@@ -89,12 +89,12 @@ class ToolDescriptorJsonCodecTest {
             "v1",
             "ord",
             "ord",
-            new ToolParamsSchema(
+            new InputSchema(
                 "params",
                 Map.of(
-                    "zeta", new ToolStringSchema("z"),
-                    "alpha", new ToolIntegerSchema("a"),
-                    "mu", new ToolBooleanSchema("m")),
+                    "zeta", new StringSchema("z"),
+                    "alpha", new IntegerSchema("a"),
+                    "mu", new BooleanSchema("m")),
                 Set.of("alpha", "zeta", "mu"),
                 false),
             ToolSideEffect.IDEMPOTENT,
@@ -128,9 +128,9 @@ class ToolDescriptorJsonCodecTest {
             "v1",
             "enum",
             "enumTool",
-            new ToolParamsSchema(
+            new InputSchema(
                 "params",
-                Map.of("color", new ToolEnumSchema(null, List.of("red", "green", "blue"))),
+                Map.of("color", new EnumSchema(null, List.of("red", "green", "blue"))),
                 Set.of("color"),
                 false),
             ToolSideEffect.READ_ONLY,
@@ -149,18 +149,18 @@ class ToolDescriptorJsonCodecTest {
    */
   @Test
   void encodeInputSchemaProducesRoundTrippableSchema() throws Exception {
-    ToolParamsSchema schema =
-        new ToolParamsSchema(
+    InputSchema schema =
+        new InputSchema(
             "params",
             Map.of(
                 "items",
-                new ToolArraySchema("list", new ToolStringSchema("element")),
+                new ArraySchema("list", new StringSchema("element")),
                 "enabled",
-                new ToolBooleanSchema("flag"),
+                new BooleanSchema("flag"),
                 "zeta",
-                new ToolIntegerSchema("z"),
+                new IntegerSchema("z"),
                 "alpha",
-                new ToolNumberSchema("a")),
+                new NumberSchema("a")),
             Set.of("items", "alpha"),
             false);
 
@@ -486,7 +486,7 @@ class ToolDescriptorJsonCodecTest {
             "v1",
             "shell",
             "remoteShell",
-            new ToolParamsSchema(null, Map.of(), Set.of(), true),
+            new InputSchema(null, Map.of(), Set.of(), true),
             ToolSideEffect.NON_IDEMPOTENT,
             Duration.ofMillis(500));
 
@@ -991,15 +991,15 @@ class ToolDescriptorJsonCodecTest {
             "v1",
             "ord",
             "ord",
-            new ToolParamsSchema(
+            new InputSchema(
                 null,
                 Map.of(
                     "outer",
-                    new ToolObjectSchema(
+                    new ObjectSchema(
                         "outer object",
                         Map.of(
-                            "y", new ToolIntegerSchema("y"),
-                            "x", new ToolIntegerSchema("x")),
+                            "y", new IntegerSchema("y"),
+                            "x", new IntegerSchema("x")),
                         // 输入顺序：y, x（违反字典序），codec 须强制排序为 x, y。
                         Set.of("y", "x"),
                         false)),
@@ -1034,11 +1034,8 @@ class ToolDescriptorJsonCodecTest {
         version,
         description,
         name,
-        new ToolParamsSchema(
-            "params",
-            Map.of("query", new ToolStringSchema("search query")),
-            Set.of("query"),
-            false),
+        new InputSchema(
+            "params", Map.of("query", new StringSchema("search query")), Set.of("query"), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofMillis(1000));
   }
@@ -1049,25 +1046,22 @@ class ToolDescriptorJsonCodecTest {
         "v2",
         "nested env tool",
         "envTool",
-        new ToolParamsSchema(
+        new InputSchema(
             "params",
             Map.of(
                 "items",
-                new ToolArraySchema("list", new ToolNumberSchema("numeric")),
+                new ArraySchema("list", new NumberSchema("numeric")),
                 "label",
-                new ToolStringSchema("label"),
+                new StringSchema("label"),
                 "mode",
-                new ToolEnumSchema("mode", List.of("READ", "WRITE")),
+                new EnumSchema("mode", List.of("READ", "WRITE")),
                 "flag",
-                new ToolBooleanSchema("flag"),
+                new BooleanSchema("flag"),
                 "limit",
-                new ToolIntegerSchema("limit"),
+                new IntegerSchema("limit"),
                 "nested",
-                new ToolObjectSchema(
-                    "nested",
-                    Map.of("inner", new ToolStringSchema("inner")),
-                    Set.of("inner"),
-                    false)),
+                new ObjectSchema(
+                    "nested", Map.of("inner", new StringSchema("inner")), Set.of("inner"), false)),
             Set.of("label", "mode", "limit", "nested"),
             false),
         ToolSideEffect.IDEMPOTENT,

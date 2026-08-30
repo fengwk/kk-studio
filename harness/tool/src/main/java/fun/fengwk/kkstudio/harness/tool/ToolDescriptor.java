@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.tool;
 
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -11,7 +11,7 @@ public record ToolDescriptor(
     String version,
     String description,
     String rendererKey,
-    ToolParamsSchema inputSchema,
+    InputSchema inputSchema,
     ToolSideEffect sideEffect,
     Duration timeout) {
 
