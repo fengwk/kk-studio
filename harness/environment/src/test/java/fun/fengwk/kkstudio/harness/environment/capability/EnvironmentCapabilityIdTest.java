@@ -6,8 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-
 /** Environment Capability identity 的 canonical 语法、长度和独立 namespace 契约测试。 */
 class EnvironmentCapabilityIdTest {
 
@@ -46,9 +44,17 @@ class EnvironmentCapabilityIdTest {
     assertThrows(IllegalArgumentException.class, () -> new EnvironmentCapabilityId("fs.-read"));
   }
 
-  /** 只证明 namespace/type 独立，不表示生产 Capability ID 与 Agent Tool ID 需要同名。 */
+  /** 验证 EnvironmentCapabilityId 的 equals 与 hashCode 契约。 */
   @Test
-  void remainsIndependentFromAgentToolId() {
-    assertNotEquals(new AgentToolId("fs.read"), new EnvironmentCapabilityId("fs.read"));
+  void satisfiesEqualsAndHashCodeContract() {
+    EnvironmentCapabilityId id1 = new EnvironmentCapabilityId("fs.read");
+    EnvironmentCapabilityId id2 = new EnvironmentCapabilityId("fs.read");
+    EnvironmentCapabilityId id3 = new EnvironmentCapabilityId("fs.write");
+
+    assertEquals(id1, id2);
+    assertEquals(id1.hashCode(), id2.hashCode());
+    assertNotEquals(id1, id3);
+    assertNotEquals(id1, "fs.read");
+    assertNotEquals(id1, null);
   }
 }

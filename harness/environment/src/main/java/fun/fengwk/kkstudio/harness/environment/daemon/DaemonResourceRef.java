@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 
 /**
  * Daemon 存储的不可变 resource 引用。

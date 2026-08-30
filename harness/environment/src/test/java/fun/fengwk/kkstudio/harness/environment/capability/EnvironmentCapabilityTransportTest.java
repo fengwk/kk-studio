@@ -8,11 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -28,8 +28,7 @@ class EnvironmentCapabilityTransportTest {
       new EnvironmentCapabilityDescriptor(
           EnvironmentCapabilityIds.FS_READ,
           "1",
-          new ToolParamsSchema(
-              null, Map.of("path", new ToolStringSchema(null)), Set.of("path"), false),
+          new InputSchema(null, Map.of("path", new StringSchema(null)), Set.of("path"), false),
           Duration.ofSeconds(10));
   private static final EnvironmentBinding BINDING =
       new EnvironmentBinding(new EnvironmentName("env-a"), "workspace");
@@ -187,7 +186,7 @@ class EnvironmentCapabilityTransportTest {
 
     private EnvironmentCapabilityResult result(String text) {
       return new EnvironmentCapabilityResult(
-          REQUEST.call().id(), List.of(new TextToolContent(text)), false, "{}");
+          REQUEST.call().id(), List.of(new TextResultContent(text)), false, "{}");
     }
   }
 
@@ -198,18 +197,19 @@ class EnvironmentCapabilityTransportTest {
 
     @Override
     public void onPartial(EnvironmentCapabilityResult partial) {
-      events.add(((TextToolContent) partial.contents().getFirst()).text());
+      events.add(((TextResultContent) partial.contents().getFirst()).text());
     }
 
     @Override
     public void onComplete(EnvironmentCapabilityResult result) {
-      events.add(((TextToolContent) result.contents().getFirst()).text());
+      events.add(((TextResultContent) result.contents().getFirst()).text());
     }
 
     @Override
     public void onError(Throwable error) {
       this.error = true;
-      terminal = error;
+      this.terminal = error;
+      events.add("error");
     }
   }
 }

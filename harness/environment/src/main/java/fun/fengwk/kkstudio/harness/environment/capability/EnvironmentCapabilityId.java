@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
 /**
  * Environment Capability 的稳定 canonical 身份。
  *
- * <p>该身份与 {@code AgentToolId} 使用相同的语法和长度上限，但属于独立 namespace 和类型，不与模型 Tool 身份互相转换。
+ * <p>该身份使用严格的 canonical 语法和长度上限，属于独立 namespace 和类型，不与模型 Tool 身份互相转换。
  */
 public record EnvironmentCapabilityId(String value) {
 

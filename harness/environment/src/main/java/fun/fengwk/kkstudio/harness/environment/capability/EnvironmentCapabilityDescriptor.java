@@ -1,13 +1,13 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 
 import java.time.Duration;
 import java.util.Objects;
 
 /** Environment Capability 的执行描述，不携带模型 Tool 展示或权限字段。 */
 public record EnvironmentCapabilityDescriptor(
-    EnvironmentCapabilityId id, String version, ToolParamsSchema inputSchema, Duration timeout) {
+    EnvironmentCapabilityId id, String version, InputSchema inputSchema, Duration timeout) {
 
   public EnvironmentCapabilityDescriptor {
     id = Objects.requireNonNull(id, "id");
