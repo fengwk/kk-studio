@@ -122,9 +122,8 @@ class RuntimeModuleArchitectureTest {
         harnessRoot.resolve("builtin/pom.xml"),
         Set.of(
             "com.fasterxml.jackson.core:jackson-databind",
+            "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
-            "fun.fengwk.kk-studio:kk-studio-harness-prompt",
-            "fun.fengwk.kk-studio:kk-studio-harness-runtime",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "fun.fengwk.kk-studio:kk-studio-harness-environment"));
     assertDirectProductionDependencies(
