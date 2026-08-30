@@ -379,7 +379,7 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_CANVAS_RESOURCE_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED` |
 | reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_ENV_NAME` |
 | supply-chain | reports/images/cache | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`TRIVY_SKIP_DB_UPDATE` |
-| explicit real E2E | host-only credential sync | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
+| explicit `--real` E2E | host-only credential sync | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
 | explicit Seedance prepare-only | external Hub/workspace | `OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID` |
 
 ### 10.2 Secrets
@@ -393,9 +393,11 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
   仅由 `canvas-test` seed 将其启用并指向隔离网络内的
   `http://opencli-hub:8080` fake Hub。真实 prepare-only smoke 必须显式提供
   外部 Hub origin。
-- `TEST_MINIMAX_BASE_URL`/`TEST_MINIMAX_API_KEY` 只能由宿主同步器经 HTTP
-  写入 E2E/reliability 专用 database；不放入 Compose environment、Dockerfile、
-  image layer、Daemon command 或报告。
+- `scripts/e2e.sh` 只在显式 `--real` 时消费
+  `TEST_MINIMAX_BASE_URL`/`TEST_MINIMAX_API_KEY`；reliability stack 保留其
+  独立的可选宿主同步。两条路径都只经 HTTP 写入各自专用 database，不把
+  credential 放入 Compose environment、Dockerfile、image layer、Daemon
+  command 或报告。
 - `e2e-daemon-token` 是 reliability/E2E 隔离配置，用于栈内 gateway handshake；
   不写入公共 Environment projection 或报告。
 - `NVD_API_KEY` 只由 supply-chain 脚本写入临时 mode-600 Maven settings；

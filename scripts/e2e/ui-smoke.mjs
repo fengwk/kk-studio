@@ -21,6 +21,7 @@ import {
 } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { createDurationTimer } from './lib/time.mjs'
 import { assertReadOnlyZeroFooter } from './ui/assertions.mjs'
 import { runComposerMatrix } from './ui/composer-matrix.mjs'
@@ -130,6 +131,18 @@ async function requireRealMiniMaxM27(backendUrl) {
       && agent?.model === `${model.providerName}/${model.name}`,
     `real UI test must use default-assistant with minimax/MiniMax-M2.7: ${JSON.stringify({ agent, model, provider })}`,
   )
+}
+
+async function requireProviderExecutionBoundary(backendUrl, real) {
+  if (real) return
+  const { json } = await apiJson(
+    backendUrl,
+    'GET',
+    '/api/ai/catalog/providers?pageNumber=1&pageSize=50',
+  )
+  const providers = json?.data?.results || []
+  assertProviderExecutionBoundary({ real: false, providers })
+  console.log('Provider boundary: free UI mode confirmed minimax is unconfigured')
 }
 
 function assert(cond, msg) {
@@ -243,6 +256,8 @@ async function main(argv) {
     )
     return 0
   }
+
+  await requireProviderExecutionBoundary(args.backendUrl, args.real)
 
   const reportDir = args.reportDir
   const artRoot = path.join(reportDir, 'artifacts')

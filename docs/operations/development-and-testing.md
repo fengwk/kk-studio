@@ -328,6 +328,12 @@ requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局
 当前默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是
 `http://127.0.0.1:5173`；`scripts/e2e.sh` 会把两者传给 runner。
 
+只有 `--real` 会读取并同步宿主 `TEST_MINIMAX_*`。免费、`--rebuild`、
+`--with-tools`、`--ui` 与 `--with-canvas-function` 都忽略这组宿主凭据。
+未带 `--real` 时，API 与 UI runner 会在首个 case 前检查 seed `minimax`
+必须明确为 `configured=false` 且无非空 `baseUrl`；复用曾执行真实 E2E
+的 database 会 fail-closed，需改用全新未配置的 E2E database。
+
 `--rebuild` 默认允许 Maven 在线解析依赖；只有显式设置
 `E2E_MAVEN_OFFLINE=true` 时 backend 与 Daemon/runtime classpath
 两条 Maven 路径才增加 `-o`。`E2E_WORK_DIR` 默认是 `runtime/e2e`，
@@ -389,10 +395,11 @@ node scripts/e2e/ui-smoke.mjs \
 - 真实 E2E 只接受完整 pair：`TEST_MINIMAX_BASE_URL` +
   `TEST_MINIMAX_API_KEY`。Base URL 去除尾部斜杠并补为 `/v1`；真实 case
   固定校验 `minimax/MiniMax-M2.7`，不会静默换 provider/model。
-- pair 只由宿主同步器通过 backend API 写入 E2E database 中由 seed 创建的
-  Provider row；credential 不进入 seed SQL/resource。Compose、Dockerfile、
-  image layer 和 container environment 不接收这两个值。不要把 `docker
-  inspect`、完整 endpoint 或数据库 credential 内容放进报告。
+- 只有显式 `--real` 才调用宿主同步器，并通过 backend API 将 pair 写入
+  E2E database 中由 seed 创建的 Provider row；credential 不进入 seed
+  SQL/resource。Compose、Dockerfile、image layer 和 container environment
+  不接收这两个值。不要把 `docker inspect`、完整 endpoint 或数据库
+  credential 内容放进报告。
 - 默认 L1、性能 baseline、`deploy/test/run.sh` 和
   `scripts/reliability/regression.sh` 不调用真实 Provider。
 - 真实 Seedance prepare-only 只能显式执行：
@@ -667,7 +674,7 @@ docker compose -f deploy/test/compose.yaml --profile app down --volumes --remove
 | local app unhealthy | `docker compose -f deploy/local/compose.yaml ps`；`docker compose -f deploy/local/compose.yaml logs app postgres` | 先确认 PostgreSQL health，再检查 `/actuator/health` |
 | Canvas test 健康失败 | `docker compose -f deploy/test/compose.yaml ps`；`docker compose -f deploy/test/compose.yaml logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |
 | E2E 只跑少数 case | `node scripts/e2e/run-matrix.mjs --list`；确认 `--real`、`--with-tools`、`--with-canvas-storage`、`--with-canvas-function` | 通过 `requires` 和 level 过滤是当前行为 |
-| 真实 Provider 不可用 | `test -n "$TEST_MINIMAX_BASE_URL"`；`test -n "$TEST_MINIMAX_API_KEY"` | 只用宿主同步器；不要放入 Compose/image/container |
+| 真实 Provider 不可用 | `test -n "$TEST_MINIMAX_BASE_URL"`；`test -n "$TEST_MINIMAX_API_KEY"` | 必须显式 `--real`，只用宿主同步器；不要放入 Compose/image/container |
 | reliability 环境未 READY | `./scripts/reliability/stack.sh status`；`./scripts/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |
 | 敏感数据门禁失败 | `python3 scripts/security/check-sensitive-data.py` | 只按输出的规则和位置排查；不要把完整敏感值复制到日志或 Issue |
 | performance/supply-chain 失败 | 阅读 `reports/performance/latest/report.md` 或 `reports/supply-chain/latest/summary.md` | 阈值、在线源、JSON 完整性和 zero-vulnerability 都不能放宽 |
