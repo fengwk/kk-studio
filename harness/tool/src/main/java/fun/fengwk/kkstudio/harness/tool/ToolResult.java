@@ -15,7 +15,7 @@ public record ToolResult(
   /** detailsJson 原始文本的 UTF-8 字节上限：1 MiB，保证任何树优先解析只面对有界输入。 */
   public static final int MAX_DETAILS_JSON_UTF8_BYTES = 1024 * 1024;
 
-  /** contents 数组的元素上限，防止无界内容列表放大；Daemon 与持久化 codec 共用同一来源。 */
+  /** contents 数组的元素上限，防止无界内容列表放大。 */
   public static final int MAX_CONTENT_ITEMS = 64;
 
   public ToolResult {

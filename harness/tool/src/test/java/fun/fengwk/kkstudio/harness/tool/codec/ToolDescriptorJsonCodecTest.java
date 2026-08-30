@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.harness.common.schema.NumberSchema;
 import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
+import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -166,7 +167,8 @@ class ToolDescriptorJsonCodecTest {
 
     ObjectMapper mapper = new ObjectMapper();
 
-    String schemaJson = codec.encodeInputSchema(schema);
+    SchemaJsonCodec schemaCodec = new SchemaJsonCodec();
+    String schemaJson = schemaCodec.encode(schema);
     assertNotNull(schemaJson);
     JsonNode schemaNode = mapper.readTree(schemaJson);
 

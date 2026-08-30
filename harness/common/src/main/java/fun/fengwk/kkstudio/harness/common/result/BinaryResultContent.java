@@ -4,9 +4,9 @@ import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * 内联二进制结果内容单元，用于远程终态结果的临时承载。
+ * 内联二进制结果内容单元。
  *
- * <p>字节仅在内存中暂存；终态持久化时先经持久化存储落盘，再以 resource 引用上 wire。
+ * <p>作为适配边界可外部化的瞬时字节载荷，内容仅在内存中暂存。
  */
 public record BinaryResultContent(String mediaType, byte[] content) implements ResultContent {
 

@@ -71,16 +71,6 @@ public final class ToolDescriptorJsonCodec {
     return readDescriptor(value);
   }
 
-  /** 把 {@link InputSchema} 编码为 canonical input schema JSON 文本（委托 {@link SchemaJsonCodec}）。 */
-  public String encodeInputSchema(InputSchema schema) {
-    return SCHEMA_CODEC.encode(schema);
-  }
-
-  /** 从 canonical input schema JSON 文本解码 {@link InputSchema}（委托 {@link SchemaJsonCodec}）。 */
-  public InputSchema decodeInputSchema(String json) {
-    return SCHEMA_CODEC.decode(json);
-  }
-
   private static void writeDescriptor(ObjectNode target, ToolDescriptor descriptor) {
     target.put("name", descriptor.name());
     target.put("version", descriptor.version());
