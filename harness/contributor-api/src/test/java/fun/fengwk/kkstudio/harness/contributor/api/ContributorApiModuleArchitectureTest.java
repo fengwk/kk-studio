@@ -18,9 +18,9 @@ import java.util.stream.Stream;
 /**
  * Contributor API 模块的轻量级架构守卫。
  *
- * <p>Contributor API 主源码只能依赖 JDK 与自身公共包及 {@code fun.fengwk.kkstudio.harness.common} / {@code
- * fun.fengwk.kkstudio.harness.tool} / {@code fun.fengwk.kkstudio.harness.environment}； 严禁依赖任何
- * Runtime（{@code fun.fengwk.kkstudio.harness.runtime}）、Platform、Daemon、Web 或第三方框架。
+ * <p>Contributor API 主源码只能依赖 JDK 与自身公共包及 {@code fun.fengwk.kkstudio.harness.tool} / {@code
+ * fun.fengwk.kkstudio.harness.environment}；严禁依赖任何 Runtime（{@code
+ * fun.fengwk.kkstudio.harness.runtime}）、Platform、Daemon、Web 或第三方框架。
  */
 class ContributorApiModuleArchitectureTest {
 
@@ -37,7 +37,7 @@ class ContributorApiModuleArchitectureTest {
           "org.mybatis.",
           "org.apache.ibatis.");
 
-  /** 验证 Contributor API 主源码仅依赖 JDK、contributor-api 自有包和 harness-common / tool / environment。 */
+  /** 验证 Contributor API 主源码仅依赖 JDK、contributor-api 自有包和 harness-tool / environment。 */
   @Test
   void contributorApiMainSourcesStayOnJdkAndHarnessApiPackages() throws IOException {
     Path main = locateContributorMainJava();
@@ -48,9 +48,10 @@ class ContributorApiModuleArchitectureTest {
         violations.isEmpty(), () -> "architecture violations:\n" + String.join("\n", violations));
   }
 
-  /** 验证 Contributor API POM 仅声明 harness-common / tool / environment 为直接生产依赖，不引入 runtime 依赖。 */
+  /** 验证 Contributor API POM 仅声明 harness-tool / environment 为直接生产依赖，不引入 runtime 或直接 common 生产依赖。 */
   @Test
-  void contributorApiPomDeclaresOnlyToolAsProductionDependency() throws IOException {
+  void contributorApiPomDeclaresOnlyToolAndEnvironmentAsProductionDependencies()
+      throws IOException {
     Path moduleRoot = locateContributorMainJava().getParent().getParent().getParent();
     Path pom = moduleRoot.resolve("pom.xml");
     String text = Files.readString(pom, StandardCharsets.UTF_8);
@@ -66,7 +67,6 @@ class ContributorApiModuleArchitectureTest {
       String coordinate =
           requiredTag(dependency, "groupId") + ":" + requiredTag(dependency, "artifactId");
       if (!Set.of(
-              "fun.fengwk.kk-studio:kk-studio-harness-common",
               "fun.fengwk.kk-studio:kk-studio-harness-tool",
               "fun.fengwk.kk-studio:kk-studio-harness-environment")
           .contains(coordinate)) {
@@ -114,7 +114,6 @@ class ContributorApiModuleArchitectureTest {
   private static boolean isAllowedImport(String imported) {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
-        || imported.startsWith("fun.fengwk.kkstudio.harness.common.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.contributor.api.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.tool.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.environment.");
