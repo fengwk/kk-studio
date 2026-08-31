@@ -57,6 +57,7 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
+import fun.fengwk.kkstudio.platform.harness.ExecutorSafety;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 
 import java.nio.file.Path;
@@ -69,11 +70,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.RejectedExecutionHandler;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
-import java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy;
-import java.util.concurrent.ThreadPoolExecutor.DiscardPolicy;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -157,8 +153,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     this.retryDelay = Objects.requireNonNull(retryDelay, "retryDelay");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.admission = Objects.requireNonNull(admission, "admission");
-    rejectUnsafeExecutorPolicies(executor);
-    rejectInlineExecutor(executor);
+    ExecutorSafety.requireSafeAsyncExecutor(executor, "tool gateway");
   }
 
   private record ResolvedContribution(ToolContribution contribution, ToolInvocationError error) {}
@@ -565,33 +560,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       return message == null || message.isBlank() ? null : message;
     } catch (RuntimeException ignored) {
       return null;
-    }
-  }
-
-  private static void rejectUnsafeExecutorPolicies(ExecutorService executor) {
-    if (executor instanceof ThreadPoolExecutor threadPool) {
-      RejectedExecutionHandler handler = threadPool.getRejectedExecutionHandler();
-      if (handler instanceof CallerRunsPolicy) {
-        throw new IllegalStateException(
-            "tool gateway requires a non-inline executor; CallerRunsPolicy is not supported");
-      }
-      if (handler instanceof DiscardPolicy || handler instanceof DiscardOldestPolicy) {
-        throw new IllegalStateException(
-            "tool gateway requires a rejecting executor; silent discard policies are not supported");
-      }
-    }
-  }
-
-  private static void rejectInlineExecutor(ExecutorService executor) {
-    Thread caller = Thread.currentThread();
-    AtomicReference<Thread> runner = new AtomicReference<>();
-    try {
-      executor.execute(() -> runner.set(Thread.currentThread()));
-    } catch (RuntimeException ignored) {
-      return;
-    }
-    if (runner.get() == caller) {
-      throw new IllegalStateException("tool gateway requires a non-inline executor");
     }
   }
 
