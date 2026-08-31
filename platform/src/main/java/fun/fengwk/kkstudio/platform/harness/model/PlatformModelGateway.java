@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
+import fun.fengwk.kkstudio.platform.harness.ExecutorSafety;
 
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -20,12 +21,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.RejectedExecutionHandler;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
-import java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy;
-import java.util.concurrent.ThreadPoolExecutor.DiscardPolicy;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
@@ -87,8 +82,7 @@ public final class PlatformModelGateway implements ModelGateway {
     this.executor = Objects.requireNonNull(executor, "executor");
     this.busyRetryDelay = Objects.requireNonNull(busyRetryDelay, "busyRetryDelay");
     this.admission = Objects.requireNonNull(admission, "admission");
-    rejectUnsafeExecutorPolicies(executor);
-    rejectInlineExecutor(executor);
+    ExecutorSafety.requireSafeAsyncExecutor(executor, "model gateway");
   }
 
   @Override
@@ -135,39 +129,6 @@ public final class PlatformModelGateway implements ModelGateway {
     // 两阶段激活：Processor 附加 handle 并把 invocation 持久化标记为 RUNNING 之前，admission gate
     // 保持关闭，随后才调用 Handle#activate()。
     return new Started(handle);
-  }
-
-  /** 拒绝内联运行 transport 任务或静默丢弃被拒任务的 executor 策略。 */
-  private static void rejectUnsafeExecutorPolicies(ExecutorService executor) {
-    if (executor instanceof ThreadPoolExecutor threadPool) {
-      RejectedExecutionHandler handler = threadPool.getRejectedExecutionHandler();
-      if (handler instanceof CallerRunsPolicy) {
-        throw new IllegalStateException(
-            "model gateway requires a non-inline executor; CallerRunsPolicy is not supported");
-      }
-      if (handler instanceof DiscardPolicy || handler instanceof DiscardOldestPolicy) {
-        throw new IllegalStateException(
-            "model gateway requires a rejecting executor; silent discard policies are not supported");
-      }
-    }
-  }
-
-  /**
-   * 拒绝任务在 {@code execute} 内同步运行的直接 inline executor；这种 executor 会使 admission gate 死锁。
-   * 探测会记录实际运行任务的线程，因此异步 executor 永远不会被误判。
-   */
-  private static void rejectInlineExecutor(ExecutorService executor) {
-    Thread caller = Thread.currentThread();
-    AtomicReference<Thread> runner = new AtomicReference<>();
-    try {
-      executor.execute(() -> runner.set(Thread.currentThread()));
-    } catch (RuntimeException ignored) {
-      // 拒绝型或已损坏的 executor 不可能内联运行任务；失败由 start() 呈现。
-      return;
-    }
-    if (runner.get() == caller) {
-      throw new IllegalStateException("model gateway requires a non-inline executor");
-    }
   }
 
   /**
