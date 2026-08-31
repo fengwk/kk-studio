@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.abort;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -13,7 +14,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityD
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 
 import java.io.IOException;
-import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -56,9 +56,8 @@ class InvocationRequestNormalizerTest {
     Path link = root.resolve("link-dir");
     try {
       Files.createSymbolicLink(link, targetDir);
-    } catch (UnsupportedOperationException | FileSystemException | SecurityException ignored) {
-      // 当前环境或文件系统不支持符号链接时跳过
-      return;
+    } catch (UnsupportedOperationException | IOException | SecurityException error) {
+      abort("symbolic links are not supported in this environment: " + error.getMessage());
     }
     InvocationRequestNormalizer normalizer = new InvocationRequestNormalizer(root, DEFAULT_TIMEOUT);
 
@@ -110,9 +109,8 @@ class InvocationRequestNormalizerTest {
     Path link = root.resolve("escape");
     try {
       Files.createSymbolicLink(link, outside);
-    } catch (UnsupportedOperationException | FileSystemException | SecurityException ignored) {
-      // 当前环境或文件系统不支持符号链接时跳过
-      return;
+    } catch (UnsupportedOperationException | IOException | SecurityException error) {
+      abort("symbolic links are not supported in this environment: " + error.getMessage());
     }
     InvocationRequestNormalizer normalizer = new InvocationRequestNormalizer(root, DEFAULT_TIMEOUT);
 
