@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentWorkspacePath;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
@@ -46,7 +45,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceStore;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZoneId;
@@ -91,6 +89,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private final ScheduledExecutorService scheduler;
   private final ExecutorService taskExecutor;
   private final ResourceStore resourceStore;
+  private final InvocationRequestNormalizer normalizer;
   private final DaemonEnvironmentInfo environmentInfo;
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
@@ -268,6 +267,8 @@ public final class DaemonRuntime implements AutoCloseable {
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.taskExecutor = Objects.requireNonNull(taskExecutor, "taskExecutor");
     this.resourceStore = resourceStore;
+    this.normalizer =
+        new InvocationRequestNormalizer(config.environmentRoot(), config.defaultToolTimeout());
     DaemonOperatingSystem operatingSystem = DaemonOperatingSystemDetector.detectCurrent();
     this.environmentInfo =
         new DaemonEnvironmentInfo(
@@ -616,7 +617,7 @@ public final class DaemonRuntime implements AutoCloseable {
     try {
       // workspace 必须在发送 STARTED / 执行工具之前 canonicalize 为 Environment Root 内现存目录；
       // 形状非法、symlink 越界、路径删除或非目录都是确定性 FAILED，绝不产生 STARTED。
-      Path workdir = canonicalWorkspace(payload.workspacePath());
+      Path workdir = normalizer.canonicalWorkspace(payload.workspacePath());
       EnvironmentCapability capability =
           capabilityRegistry
               .find(payload.capabilityId())
@@ -630,7 +631,7 @@ public final class DaemonRuntime implements AutoCloseable {
             "capabilityVersion does not match environment descriptor: "
                 + payload.capabilityVersion());
       }
-      Duration timeout = resolveTimeout(payload.timeout(), descriptor);
+      Duration timeout = normalizer.resolveTimeout(payload.timeout(), descriptor);
       EnvironmentCapabilityExecutionRequest request =
           new EnvironmentCapabilityExecutionRequest(
               descriptor,
@@ -822,33 +823,6 @@ public final class DaemonRuntime implements AutoCloseable {
     if (envelope.invocationId() == null) {
       throw new DaemonProtocolException(envelope.messageType() + " requires non-null invocationId");
     }
-  }
-
-  private Path canonicalWorkspace(String workspacePath) {
-    EnvironmentWorkspacePath.requireCanonicalRelativePath(workspacePath);
-    Path candidate = config.environmentRoot().resolve(Path.of(workspacePath)).normalize();
-    Path canonical;
-    try {
-      canonical = candidate.toRealPath();
-    } catch (IOException error) {
-      throw new IllegalArgumentException(
-          "workspace does not resolve to an existing directory: " + workspacePath, error);
-    }
-    if (!canonical.startsWith(config.environmentRoot())) {
-      throw new IllegalArgumentException("workspace escapes environment root: " + workspacePath);
-    }
-    if (!Files.isDirectory(canonical)) {
-      throw new IllegalArgumentException("workspace is not a directory: " + workspacePath);
-    }
-    return canonical;
-  }
-
-  private Duration resolveTimeout(
-      Duration requestedTimeout, EnvironmentCapabilityDescriptor descriptor) {
-    if (!requestedTimeout.isZero()) {
-      return requestedTimeout;
-    }
-    return descriptor.timeout().isZero() ? config.defaultToolTimeout() : descriptor.timeout();
   }
 
   /** 终态失败：停止重连、标记 FAILED 并释放资源。 */
