@@ -12,7 +12,8 @@ import java.util.Objects;
 /**
  * Daemon invoke 请求的入站 workspace 路径规范化与 timeout 解析。
  *
- * <p>本类为纯计算组件，不持有执行生命周期资源（如 journal、transport、running map、scheduler 或 executor）。
+ * <p>本类无生命周期状态，副作用仅限文件系统真实路径查询与存在性校验，不持有执行生命周期资源（如 journal、transport、running map、scheduler 或
+ * executor）。
  */
 final class InvocationRequestNormalizer {
 
