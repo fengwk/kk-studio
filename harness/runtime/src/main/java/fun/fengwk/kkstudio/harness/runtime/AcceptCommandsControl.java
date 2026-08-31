@@ -5,7 +5,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -28,7 +27,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 特性本地的同步 acceptCommands 控制面。
+ * HarnessRuntime 内部的同步 acceptCommands 控制面。
  *
  * <p>承担命令接受（NEW_SESSION / ENTRY / THREAD 三条路径）、materialization replay 与 ordered replay、 batch shape
  * 校验、cursor admission 校验以及向 Store 写入 Session / ROOT / Thread / Commands / Work。
@@ -47,7 +46,7 @@ final class AcceptCommandsControl {
 
   AcceptCommandsControl(HarnessStore store, Clock clock) {
     this.store = Objects.requireNonNull(store, "store");
-    this.clock = HarnessStoreTime.millisecondClock(clock);
+    this.clock = Objects.requireNonNull(clock, "clock");
   }
 
   AcceptedCommands acceptCommands(AcceptCommandsCommand command, AcceptancePreflight preflight) {
