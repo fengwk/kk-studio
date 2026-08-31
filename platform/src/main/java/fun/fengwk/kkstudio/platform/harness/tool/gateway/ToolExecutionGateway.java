@@ -57,7 +57,7 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
-import fun.fengwk.kkstudio.platform.harness.ExecutorSafety;
+import fun.fengwk.kkstudio.platform.harness.GatewayExecutorSafety;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 
 import java.nio.file.Path;
@@ -153,7 +153,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     this.retryDelay = Objects.requireNonNull(retryDelay, "retryDelay");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.admission = Objects.requireNonNull(admission, "admission");
-    ExecutorSafety.requireSafeAsyncExecutor(executor, "tool gateway");
+    GatewayExecutorSafety.requireSafeAsyncExecutor(executor, "tool gateway");
   }
 
   private record ResolvedContribution(ToolContribution contribution, ToolInvocationError error) {}

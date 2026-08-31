@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
-import fun.fengwk.kkstudio.platform.harness.ExecutorSafety;
+import fun.fengwk.kkstudio.platform.harness.GatewayExecutorSafety;
 
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -82,7 +82,7 @@ public final class PlatformModelGateway implements ModelGateway {
     this.executor = Objects.requireNonNull(executor, "executor");
     this.busyRetryDelay = Objects.requireNonNull(busyRetryDelay, "busyRetryDelay");
     this.admission = Objects.requireNonNull(admission, "admission");
-    ExecutorSafety.requireSafeAsyncExecutor(executor, "model gateway");
+    GatewayExecutorSafety.requireSafeAsyncExecutor(executor, "model gateway");
   }
 
   @Override
