@@ -138,6 +138,30 @@ class HarnessRuntimeAcceptInitialTest {
         store.<Boolean>transaction(tx -> tx.loadCommandsByThread(TestIds.id(102)).isEmpty()));
   }
 
+  @Test
+  void newSessionRejectsMalformedPreflightResultsAndRollsBack() {
+    // Preflight 是事务内 materialization 边界：null、数量变化或幂等键变化都必须 fail closed 且不留下部分事实。
+    assertPreflightContractViolation(
+        TestIds.id(130),
+        TestIds.id(131),
+        (tx, session, commands) -> null,
+        "command preflight returned null");
+    assertPreflightContractViolation(
+        TestIds.id(132),
+        TestIds.id(133),
+        (tx, session, commands) -> List.of(),
+        "command preflight must return exactly 1 commands, got 0");
+    assertPreflightContractViolation(
+        TestIds.id(134),
+        TestIds.id(135),
+        (tx, session, commands) -> {
+          NewThreadCommand command = commands.getFirst();
+          return List.of(
+              new NewThreadCommand(command.payload(), TestIds.id(999), command.requestHash()));
+        },
+        "command preflight must preserve clientCommandId and requestHash at index 0");
+  }
+
   /**
    * exact materialization replay：同 session + 同 hash 返回现有接受事实（replayed=true），不写新行、不 bump version。
    */
@@ -365,6 +389,24 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(first.thread().nextCommandSequence(), replay.thread().nextCommandSequence());
   }
 
+  @Test
+  void entryRejectsMissingSessionWithoutMaterializingThread() {
+    // ENTRY 必须锚定现存 Session；缺失时在创建 Thread/Command/Work 前确定性失败。
+    UUID missingSessionId = TestIds.id(210);
+    HarnessRuntimeNotFoundException error =
+        assertThrows(
+            HarnessRuntimeNotFoundException.class,
+            () ->
+                runtime.acceptCommands(
+                    entry(
+                        missingSessionId,
+                        TestIds.id(211),
+                        List.of(userMessageCommand(TestIds.id(1), "hello"))),
+                    AcceptancePreflight.IDENTITY));
+    assertEquals("session " + missingSessionId + " does not exist", error.getMessage());
+    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(203)).isEmpty()));
+  }
+
   /** ENTRY：start Entry 不在给定 Session 内是非法请求。 */
   @Test
   void entryRejectsStartEntryInAnotherSession() {
@@ -389,5 +431,21 @@ class HarnessRuntimeAcceptInitialTest {
                     List.of(userMessageCommand(TestIds.id(1), "hello"))),
                 AcceptancePreflight.IDENTITY));
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(203)).isEmpty()));
+  }
+
+  private void assertPreflightContractViolation(
+      UUID sessionId, UUID threadId, AcceptancePreflight preflight, String expectedMessage) {
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                runtime.acceptCommands(
+                    newSession(
+                        sessionId, threadId, List.of(userMessageCommand(TestIds.id(1), "hello"))),
+                    preflight));
+    assertEquals(expectedMessage, error.getMessage());
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(sessionId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(threadId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.loadCommandsByThread(threadId).isEmpty()));
   }
 }
