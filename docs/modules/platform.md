@@ -229,7 +229,9 @@ usage、stop reason 和 Provider error；错误消息截断并移除 Bearer/API 
 
 `Handle.activate`只在 Runtime attach handle 且 durable invocation 已标记 `RUNNING`后打开 gate。激活前 cancel 会
 唤醒等待任务、释放 permit 且不触碰 Provider；Provider stream 延迟绑定后仍会收到一次 cancel。构造时拒绝 inline executor、
-`CallerRunsPolicy`和静默丢弃 policy，避免 gate 死锁或出现无执行的 `Started`。
+`CallerRunsPolicy`和静默丢弃 policy，避免 gate 死锁或出现无执行的 `Started`。Model/Tool gateway 共用
+[`GatewayExecutorSafety`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/GatewayExecutorSafety.java)
+作为该构造约束的唯一实现。
 
 Provider callback 经 `BridgingHandler`进入单一 FIFO drainer，队列上限 256。第一个 terminal 胜出，terminal 后的
 迟到/重复信号全部丢弃；队列溢出、未知 transport 异常或非 terminal listener 异常统一以一次 `UNKNOWN`收敛；
@@ -493,7 +495,7 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 - Catalog：`CatalogParentLockIntegrationTest`及 definition/model/provider codec、mutation、service tests。
 - Chat/事务：`ChatServiceIntegrationTest`、`HarnessCommandAcceptanceOrchestratorTest`、
   `SessionDeletionOrchestratorTest`、`ChatSessionRepositoryIntegrationTest`、`CanvasSessionRepositoryIntegrationTest`。
-- Model/Provider：`PlatformModelGatewayTest`、`DatabaseProviderResolutionServiceIntegrationTest`、
+- Model/Provider：`GatewayExecutorSafetyTest`、`PlatformModelGatewayTest`、`DatabaseProviderResolutionServiceIntegrationTest`、
   `ProviderAdapterContractTest`、Provider error/stop-reason/terminal normalization tests。
 - Tool/gateway：`ToolExecutionGatewayAdmissionTest`、`ToolExecutionGatewayCallbackTest`、
   `ToolExecutionGatewayConstructionTest`、`ToolExecutionGatewayEffectsTest`、`ToolExecutionGatewayPreflightTest`、

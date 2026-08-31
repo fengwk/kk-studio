@@ -138,6 +138,8 @@ getSessionEntries
 listThreadsBySession
 ```
 
+`acceptCommands` 的 NEW_SESSION / ENTRY / THREAD materialization、ordered replay、batch shape 与 cursor admission 由 package-private [`AcceptCommandsControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AcceptCommandsControl.java) 在单个 Store transaction 内完成；`HarnessRuntime` 保持唯一公共 facade。
+
 `getThreadSnapshot` 在单事务中锁 Thread、读取 queued Commands、加载 EntryPath 并按 `ThreadContextClassifier` 暴露最小适用状态：
 
 ```text
@@ -204,6 +206,8 @@ flowchart TD
 
 需要 resolver 的 turn 使用 speculative plan：第一短事务只构造合法 candidate path 和 command cutoff；事务外 `TurnResolver.resolve`，期间由 `WorkHeartbeat` 续租；第二事务以 source head、cutoff command snapshot 和 claim ownership CAS 提交。Resolver exception/null/heartbeat loss 只 reschedule，CAS/claim loss 完整回滚并返回 `LOST_OWNERSHIP`。
 
+手工压缩的 availability 与提交由 package-private [`ManualCompactionControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ManualCompactionControl.java) 持有，严格执行 plan 短事务 → 事务外 resolve → version/head/command snapshot CAS 提交；`ThreadProcessor` 只保留公共薄入口，THREAD Work reducer 与 final fence 不经过该控制面。
+
 ### ModelProcessor 与 ToolProcessor
 
 [`ModelProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessor.java) 在有效 MODEL claim 内 materialize ProviderRequest，`READY -> DISPATCHING` 后启动 heartbeat，再调用 gateway。`Started` 返回的 handle 在 durable `RUNNING` 后 activate；stream delta 只写 attempt-local checkpoint 并尽力发 realtime，terminal result/error 写回 invocation 并 request THREAD Work。过期 `DISPATCHING`/`RUNNING` 变为 `UNKNOWN`，不重放 Provider。
@@ -256,10 +260,10 @@ TURN_START(reason=COMPACTION, CompactionStart)
 
 ### 源码入口
 
-- [`HarnessRuntime.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java)、[`StopControl.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/StopControl.java)、[`ThreadContextLock.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadContextLock.java)
+- [`HarnessRuntime.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java)、[`AcceptCommandsControl.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AcceptCommandsControl.java)、[`StopControl.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/StopControl.java)、[`ThreadContextLock.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadContextLock.java)
 - [`EntryPath.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPath.java)、[`TurnPathValidator.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/TurnPathValidator.java)、[`ThreadState.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadState.java)
 - [`ModelInvocation.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocation.java)、[`ToolInvocation.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocation.java)、[`Work.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/work/Work.java)
-- [`ThreadProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java)、[`ModelProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessor.java)、[`ToolProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java)
+- [`ThreadProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java)、[`ManualCompactionControl.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ManualCompactionControl.java)、[`ModelProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessor.java)、[`ToolProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java)
 - [`ModelRequestMaterializer.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java)、[`CompactionPlanner.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java)、[`ToolBinding.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)
 
 ### 关键测试守卫

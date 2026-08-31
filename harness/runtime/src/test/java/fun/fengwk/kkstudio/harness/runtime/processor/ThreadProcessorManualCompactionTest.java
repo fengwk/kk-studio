@@ -162,6 +162,32 @@ class ThreadProcessorManualCompactionTest extends ThreadProcessorTestBase {
   }
 
   @Test
+  void compactThreadRejectsConcurrentCommandAcceptedDuringResolve() {
+    // plan 后若有新命令推进 Thread version，第二事务必须命中 CAS fence，不能提交基于旧快照的压缩 Turn。
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, USAGE);
+    fixture.resolver.autoConsistent = true;
+    fixture.resolver.onResolve =
+        () ->
+            seedCommand(
+                fixture.store,
+                baseline.threadId(),
+                new UserMessageCommandPayload(userMessage("concurrent input")));
+
+    HarnessRuntimeConflictException error =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () ->
+                fixture.processor.compactThread(new CompactThreadCommand(baseline.threadId(), 0)));
+
+    assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, error.reason());
+    assertEquals(1L, thread(fixture.store, baseline.threadId()).version());
+    assertEquals(
+        baseline.turnEndEntryId(), thread(fixture.store, baseline.threadId()).headEntryId());
+    assertEquals(9, path(fixture.store, baseline.threadId()).entries().size());
+  }
+
+  @Test
   void resolverRejectionWakesThreadWhenDeferredUserMessagesExist() {
     // Resolver 业务拒绝且存在待处理 deferred user message 时，commit 必须追加 FAILED turn 并唤醒 THREAD Work。
     Fixture fixture = fixture();
