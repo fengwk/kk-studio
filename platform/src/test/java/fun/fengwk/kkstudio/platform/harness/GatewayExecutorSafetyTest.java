@@ -21,10 +21,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * {@link ExecutorSafety} 单元测试：覆盖三种不安全拒绝策略（CallerRunsPolicy、DiscardPolicy、DiscardOldestPolicy）、
- * 内联运行的 inline executor、正常异步 executor、异常探针容忍与 null 入参校验。
+ * {@link GatewayExecutorSafety}
+ * 单元测试：覆盖三种不安全拒绝策略（CallerRunsPolicy、DiscardPolicy、DiscardOldestPolicy）、 内联运行的 inline executor、正常异步
+ * executor、异常探针容忍与 null 入参校验。
  */
-class ExecutorSafetyTest {
+class GatewayExecutorSafetyTest {
 
   /** 验证 CallerRunsPolicy 拒绝策略会被准确拒绝，且保留 CallerRunsPolicy 不支持的错误描述。 */
   @Test
@@ -41,7 +42,7 @@ class ExecutorSafetyTest {
       IllegalStateException ex =
           assertThrows(
               IllegalStateException.class,
-              () -> ExecutorSafety.requireSafeAsyncExecutor(executor, "test component"));
+              () -> GatewayExecutorSafety.requireSafeAsyncExecutor(executor, "test component"));
       assertEquals(
           "test component requires a non-inline executor; CallerRunsPolicy is not supported",
           ex.getMessage());
@@ -65,7 +66,7 @@ class ExecutorSafetyTest {
       IllegalStateException ex =
           assertThrows(
               IllegalStateException.class,
-              () -> ExecutorSafety.requireSafeAsyncExecutor(executor, "test component"));
+              () -> GatewayExecutorSafety.requireSafeAsyncExecutor(executor, "test component"));
       assertEquals(
           "test component requires a rejecting executor; silent discard policies are not"
               + " supported",
@@ -90,7 +91,7 @@ class ExecutorSafetyTest {
       IllegalStateException ex =
           assertThrows(
               IllegalStateException.class,
-              () -> ExecutorSafety.requireSafeAsyncExecutor(executor, "test component"));
+              () -> GatewayExecutorSafety.requireSafeAsyncExecutor(executor, "test component"));
       assertEquals(
           "test component requires a rejecting executor; silent discard policies are not"
               + " supported",
@@ -108,7 +109,7 @@ class ExecutorSafetyTest {
       IllegalStateException ex =
           assertThrows(
               IllegalStateException.class,
-              () -> ExecutorSafety.requireSafeAsyncExecutor(inlineExecutor, "test gateway"));
+              () -> GatewayExecutorSafety.requireSafeAsyncExecutor(inlineExecutor, "test gateway"));
       assertEquals("test gateway requires a non-inline executor", ex.getMessage());
     } finally {
       inlineExecutor.shutdownNow();
@@ -120,7 +121,8 @@ class ExecutorSafetyTest {
   void safeAsyncThreadPoolExecutorIsAccepted() throws Exception {
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
-      assertDoesNotThrow(() -> ExecutorSafety.requireSafeAsyncExecutor(executor, "test gateway"));
+      assertDoesNotThrow(
+          () -> GatewayExecutorSafety.requireSafeAsyncExecutor(executor, "test gateway"));
       CountDownLatch latch = new CountDownLatch(1);
       AtomicReference<Thread> executedThread = new AtomicReference<>();
       executor.execute(
@@ -148,7 +150,7 @@ class ExecutorSafetyTest {
         };
     try {
       assertDoesNotThrow(
-          () -> ExecutorSafety.requireSafeAsyncExecutor(rejectingExecutor, "test gateway"));
+          () -> GatewayExecutorSafety.requireSafeAsyncExecutor(rejectingExecutor, "test gateway"));
     } finally {
       rejectingExecutor.shutdownNow();
     }
@@ -157,9 +159,26 @@ class ExecutorSafetyTest {
   /** 验证 null executor 入参会直接抛出 NullPointerException。 */
   @Test
   void nullExecutorThrowsNpe() {
-    assertThrows(
-        NullPointerException.class,
-        () -> ExecutorSafety.requireSafeAsyncExecutor(null, "test gateway"));
+    NullPointerException ex =
+        assertThrows(
+            NullPointerException.class,
+            () -> GatewayExecutorSafety.requireSafeAsyncExecutor(null, "test gateway"));
+    assertEquals("executor", ex.getMessage());
+  }
+
+  /** 验证 null component 入参会直接抛出 NullPointerException。 */
+  @Test
+  void nullComponentThrowsNpe() {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      NullPointerException ex =
+          assertThrows(
+              NullPointerException.class,
+              () -> GatewayExecutorSafety.requireSafeAsyncExecutor(executor, null));
+      assertEquals("component", ex.getMessage());
+    } finally {
+      executor.shutdownNow();
+    }
   }
 
   /** 测试用同步内联执行器。 */

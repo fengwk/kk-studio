@@ -10,26 +10,30 @@ import java.util.concurrent.ThreadPoolExecutor.DiscardPolicy;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Platform Gateway 执行器安全校验工具。
+ * Platform Gateway 内部共享的执行器构造安全校验工具。
  *
- * <p>确保供给 Gateway 异步调度的 {@link ExecutorService} 不会在调用线程内联执行任务（直接 inline executor 或 {@link
+ * <p>本类仅用于收敛 Model/Tool Gateway 的构造安全前提，并非通用的 Executor 校验器。 确保供给 Gateway 异步调度的 {@link
+ * ExecutorService} 不会在调用线程内联执行任务（直接 inline executor 或 {@link
  * CallerRunsPolicy}，可能导致门控死锁），也不会静默丢弃任务（{@link DiscardPolicy} / {@link
  * DiscardOldestPolicy}，导致拒绝无法感知）。
+ *
+ * <p>因需被 {@code model} 与 {@code tool.gateway} 跨包直接访问，本类保持 public 可见性。
  */
-public final class ExecutorSafety {
+public final class GatewayExecutorSafety {
 
-  private ExecutorSafety() {}
+  private GatewayExecutorSafety() {}
 
   /**
    * 校验指定的 executor 是安全且非内联的异步执行器。
    *
    * @param executor 待校验的执行器服务
    * @param component 错误消息中的组件标识（如 "model gateway" 或 "tool gateway"）
-   * @throws NullPointerException 若 executor 为 null
+   * @throws NullPointerException 若 executor 或 component 为 null
    * @throws IllegalStateException 若 executor 配置了不安全的拒绝策略或为内联执行器
    */
   public static void requireSafeAsyncExecutor(ExecutorService executor, String component) {
     Objects.requireNonNull(executor, "executor");
+    Objects.requireNonNull(component, "component");
     rejectUnsafeExecutorPolicies(executor, component);
     rejectInlineExecutor(executor, component);
   }
