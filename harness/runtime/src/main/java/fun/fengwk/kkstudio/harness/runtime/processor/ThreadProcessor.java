@@ -5,8 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
@@ -141,6 +139,7 @@ public final class ThreadProcessor {
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private final ThreadContextClassifier contextClassifier = new ThreadContextClassifier();
   private final ModelResponsePlanner responsePlanner = new ModelResponsePlanner();
+  private final ManualCompactionControl manualCompactionControl;
 
   public ThreadProcessor(
       HarnessStore store,
@@ -165,6 +164,15 @@ public final class ThreadProcessor {
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
+    this.manualCompactionControl =
+        new ManualCompactionControl(
+            this.store,
+            this.resolver,
+            this.config,
+            this.clock,
+            this.planBuilder,
+            this::loadContext,
+            this::compactionPreparation);
   }
 
   /**
@@ -201,18 +209,7 @@ public final class ThreadProcessor {
 
   /** 返回 Thread 当前的手动压缩可用性；结果是瞬时 projection，提交仍由 expectedVersion 做最终 CAS。 */
   public ManualCompactionAvailability manualCompactionAvailability(UUID threadId) {
-    Objects.requireNonNull(threadId, "threadId");
-    return store.transaction(
-        tx -> {
-          ThreadState thread =
-              tx.lockThread(threadId)
-                  .orElseThrow(
-                      () ->
-                          new HarnessRuntimeNotFoundException(
-                              "thread " + threadId + " does not exist"));
-          EntryPath path = tx.loadEntryPath(thread.headEntryId());
-          return manualDecision(tx, thread, path).availability();
-        });
+    return manualCompactionControl.manualCompactionAvailability(threadId);
   }
 
   /**
@@ -220,20 +217,7 @@ public final class ThreadProcessor {
    * Turn 与 MODEL Work。resolve 前崩溃零持久化；提交成功后不依赖进程内 intent。
    */
   public CompactThreadResult compactThread(CompactThreadCommand command) {
-    Objects.requireNonNull(command, "command");
-    ManualPlan manualPlan = store.transaction(tx -> planManual(tx, command));
-    TurnResolver.Result result =
-        resolver.resolve(
-            manualPlan.plan().threadId(),
-            manualPlan.plan().candidatePath(),
-            manualPlan.plan().preparation());
-    if (result == null) {
-      throw new IllegalStateException("turn resolver returned null for manual compaction");
-    }
-    if (result instanceof TurnResolver.Resolved resolved) {
-      ResolvedRequestValidator.validate(manualPlan.plan(), resolved);
-    }
-    return store.transaction(tx -> commitManual(tx, command, manualPlan.plan(), result));
+    return manualCompactionControl.compactThread(command);
   }
 
   /**
@@ -337,85 +321,6 @@ public final class ThreadProcessor {
       }
     }
     return contextClassifier.classify(thread, path, model, siblings);
-  }
-
-  private ManualPlan planManual(HarnessStore.Transaction tx, CompactThreadCommand command) {
-    ThreadState thread =
-        tx.lockThread(command.threadId())
-            .orElseThrow(
-                () ->
-                    new HarnessRuntimeNotFoundException(
-                        "thread " + command.threadId() + " does not exist"));
-    if (thread.version() != command.expectedVersion()) {
-      throw staleManualVersion(command, thread);
-    }
-    EntryPath path = tx.loadEntryPath(thread.headEntryId());
-    ManualDecision decision = manualDecision(tx, thread, path);
-    if (!decision.availability().available()) {
-      throw manualUnavailable(thread, decision.availability().disabledReason());
-    }
-    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    Instant now = durableMutationTime(clock.instant(), thread.updatedAt(), path.head().createdAt());
-    TurnPlan plan =
-        planBuilder.build(
-            thread.id(),
-            path,
-            TurnStartReason.COMPACTION,
-            queued,
-            tx::nextId,
-            now,
-            decision.preparation());
-    return new ManualPlan(plan);
-  }
-
-  private ManualDecision manualDecision(
-      HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
-    ThreadContext context = loadContext(tx, thread, path);
-    if (!(context instanceof ThreadContext.IdleOrHistorical)
-        || path.openTurnStart().isPresent()
-        || compactionPreparation(thread, path, false) != null) {
-      return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.THREAD_BUSY);
-    }
-    ClosedTurn candidate = latestClosedTurn(path, path.entries().size());
-    boolean mismatchedModelSeen = false;
-    while (candidate != null) {
-      TurnStartPayload start = (TurnStartPayload) candidate.start().payload();
-      if (!thread.id().equals(start.ownerThreadId())) {
-        return ManualDecision.disabled(
-            ManualCompactionAvailability.DisabledReason.OWNERSHIP_BARRIER);
-      }
-      if (start.contextWindow() != null && start.maxOutputTokens() != null) {
-        var executionModel =
-            start.compaction() == null
-                ? start.settings().model()
-                : start.compaction().executionModel();
-        if (executionModel.equals(path.baseSettings().model())) {
-          long projectedTokens = CompactionPlanner.estimateProjectionTokens(path);
-          long minimum =
-              config.compactionProvider().compactionConfig().manualMinimum(start.contextWindow());
-          if (projectedTokens < minimum) {
-            return ManualDecision.disabled(
-                ManualCompactionAvailability.DisabledReason.BELOW_MINIMUM);
-          }
-          CompactionPreparation preparation =
-              compactionPlanner()
-                  .prepare(path, CompactionTrigger.MANUAL, start.contextWindow())
-                  .orElse(null);
-          return preparation == null
-              ? ManualDecision.disabled(
-                  ManualCompactionAvailability.DisabledReason.NOTHING_TO_COMPACT)
-              : ManualDecision.enabled(preparation);
-        }
-        if (start.compaction() == null) {
-          mismatchedModelSeen = true;
-        }
-      }
-      candidate = previousClosedTurn(path, candidate);
-    }
-    return ManualDecision.disabled(
-        mismatchedModelSeen
-            ? ManualCompactionAvailability.DisabledReason.MODEL_CHANGED
-            : ManualCompactionAvailability.DisabledReason.NO_RESOLVED_CONTEXT);
   }
 
   /** queued 快照中是否存在真实 user-like 输入；SYSTEM steering 只等待下一 INPUT/CONTINUATION，不独立启动 Turn。 */
@@ -601,7 +506,7 @@ public final class ThreadProcessor {
     return null;
   }
 
-  private static ClosedTurn previousClosedTurn(EntryPath path, ClosedTurn turn) {
+  static ClosedTurn previousClosedTurn(EntryPath path, ClosedTurn turn) {
     int startIndex = indexOfEntry(path.entries(), turn.start().id());
     return startIndex < 0 ? null : latestClosedTurn(path, startIndex);
   }
@@ -663,7 +568,7 @@ public final class ThreadProcessor {
   }
 
   /** {@code beforeExclusive} 之前最近的已关闭 turn；该范围末尾仍是 open turn / 无任何 turn 时返回 null。 */
-  private static ClosedTurn latestClosedTurn(EntryPath path, int beforeExclusive) {
+  static ClosedTurn latestClosedTurn(EntryPath path, int beforeExclusive) {
     for (int i = beforeExclusive - 1; i >= 0; i--) {
       EntryPayload payload = path.entries().get(i).payload();
       if (payload instanceof TurnEndPayload end) {
@@ -1164,95 +1069,6 @@ public final class ThreadProcessor {
         });
   }
 
-  private CompactThreadResult commitManual(
-      HarnessStore.Transaction tx,
-      CompactThreadCommand command,
-      TurnPlan plan,
-      TurnResolver.Result result) {
-    Instant now = clock.instant();
-    ThreadState thread =
-        tx.lockThread(command.threadId())
-            .orElseThrow(
-                () ->
-                    new HarnessRuntimeNotFoundException(
-                        "thread " + command.threadId() + " does not exist"));
-    if (thread.version() != command.expectedVersion()
-        || !thread.headEntryId().equals(plan.sourceHeadEntryId())) {
-      throw staleManualVersion(command, thread);
-    }
-    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    if (!snapshotMatches(plan, queued)) {
-      throw staleManualVersion(command, thread);
-    }
-    if (!plan.consumedCommands().isEmpty()) {
-      throw new IllegalStateException("manual compaction must not consume commands");
-    }
-    Instant mutationNow = durableMutationTime(now, thread.updatedAt());
-    for (Entry entry : plan.candidateEntries()) {
-      mutationNow = durableMutationTime(mutationNow, entry.createdAt());
-    }
-    Integer contextWindow =
-        result instanceof TurnResolver.Resolved resolved ? resolved.contextWindow() : null;
-    Integer maxOutputTokens =
-        result instanceof TurnResolver.Resolved resolved ? resolved.maxOutputTokens() : null;
-    for (Entry entry : plan.candidateEntries()) {
-      tx.insertEntry(
-          withCreatedAt(
-              withResolvedTurnStart(entry, plan, contextWindow, maxOutputTokens), mutationNow));
-    }
-    if (result instanceof TurnResolver.Resolved resolved) {
-      ThreadState advanced = thread.advanceHead(plan.candidateHeadEntryId(), mutationNow);
-      tx.updateThread(advanced);
-      UUID invocationId = tx.nextId();
-      tx.insertModelInvocation(
-          new ModelInvocation(
-              invocationId,
-              thread.id(),
-              plan.turnStartEntryId(),
-              plan.candidateHeadEntryId(),
-              resolved.spec(),
-              ModelInvocationStatus.READY,
-              0,
-              null,
-              null,
-              null,
-              null,
-              List.of(),
-              mutationNow,
-              mutationNow));
-      tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId), now);
-      return new CompactThreadResult(advanced, plan.turnStartEntryId(), invocationId);
-    }
-    TurnResolver.Rejected rejected = (TurnResolver.Rejected) result;
-    UUID errorEntryId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            errorEntryId,
-            plan.sessionId(),
-            plan.candidateHeadEntryId(),
-            new AssistantErrorPayload(rejected.error(), null),
-            mutationNow));
-    UUID turnEndId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnEndId,
-            plan.sessionId(),
-            errorEntryId,
-            new TurnEndPayload(
-                plan.turnStartEntryId(),
-                TurnEndOutcome.FAILED,
-                false,
-                TurnEndReason.TURN_FAILED,
-                null),
-            mutationNow));
-    ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
-    tx.updateThread(advanced);
-    if (plan.hasDeferredUserMessages()) {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
-    }
-    return new CompactThreadResult(advanced, plan.turnStartEntryId(), null);
-  }
-
   private void commitTx(
       HarnessStore.Transaction tx, ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
     Instant now = clock.instant();
@@ -1357,7 +1173,7 @@ public final class ThreadProcessor {
   }
 
   /** cutoff 内 queued Command 与 planned 快照逐字段相等（id/thread/sequence/payload/client ID/state）。 */
-  private static boolean snapshotMatches(TurnPlan plan, List<ThreadCommand> queued) {
+  static boolean snapshotMatches(TurnPlan plan, List<ThreadCommand> queued) {
     Map<Long, ThreadCommand> plannedBySequence = new HashMap<>();
     for (ThreadCommand command : plan.plannedCommands()) {
       plannedBySequence.put(command.sequence(), command);
@@ -1381,7 +1197,7 @@ public final class ThreadProcessor {
   }
 
   /** 将 wall-clock 样本抬升到所有已锁定 durable 事实的时间下界。 */
-  private static Instant durableMutationTime(Instant candidate, Instant... floors) {
+  static Instant durableMutationTime(Instant candidate, Instant... floors) {
     Instant effective = Objects.requireNonNull(candidate, "candidate");
     for (Instant floor : floors) {
       Instant requiredFloor = Objects.requireNonNull(floor, "floor");
@@ -1392,13 +1208,13 @@ public final class ThreadProcessor {
     return effective;
   }
 
-  private static Entry withCreatedAt(Entry entry, Instant createdAt) {
+  static Entry withCreatedAt(Entry entry, Instant createdAt) {
     return new Entry(
         entry.id(), entry.sessionId(), entry.parentEntryId(), entry.payload(), createdAt);
   }
 
   /** 第二阶段 commit 在插入前补齐 Resolver 成功时的 contextWindow/maxOutputTokens；rejected 保持 null。 */
-  private static Entry withResolvedTurnStart(
+  static Entry withResolvedTurnStart(
       Entry entry, TurnPlan plan, Integer contextWindow, Integer maxOutputTokens) {
     if (!entry.id().equals(plan.turnStartEntryId())
         || !(entry.payload() instanceof TurnStartPayload start)) {
@@ -1457,53 +1273,7 @@ public final class ThreadProcessor {
     }
   }
 
-  private static HarnessRuntimeConflictException staleManualVersion(
-      CompactThreadCommand command, ThreadState thread) {
-    return new HarnessRuntimeConflictException(
-        HarnessRuntimeConflictException.Reason.STALE_VERSION,
-        "thread "
-            + thread.id()
-            + " version "
-            + thread.version()
-            + " does not match expected "
-            + command.expectedVersion());
-  }
-
-  private static HarnessRuntimeConflictException manualUnavailable(
-      ThreadState thread, ManualCompactionAvailability.DisabledReason reason) {
-    return new HarnessRuntimeConflictException(
-        HarnessRuntimeConflictException.Reason.MANUAL_COMPACTION_UNAVAILABLE,
-        "thread " + thread.id() + " cannot be compacted manually: " + reason);
-  }
-
-  private record ManualPlan(TurnPlan plan) {
-    private ManualPlan {
-      plan = Objects.requireNonNull(plan, "plan");
-    }
-  }
-
-  private record ManualDecision(
-      ManualCompactionAvailability availability, CompactionPreparation preparation) {
-    private ManualDecision {
-      availability = Objects.requireNonNull(availability, "availability");
-      if (availability.available() != (preparation != null)) {
-        throw new IllegalArgumentException(
-            "manual compaction preparation must be present iff availability is enabled");
-      }
-    }
-
-    private static ManualDecision enabled(CompactionPreparation preparation) {
-      return new ManualDecision(
-          ManualCompactionAvailability.enabled(),
-          Objects.requireNonNull(preparation, "preparation"));
-    }
-
-    private static ManualDecision disabled(ManualCompactionAvailability.DisabledReason reason) {
-      return new ManualDecision(ManualCompactionAvailability.disabled(reason), null);
-    }
-  }
-
-  private record ClosedTurn(Entry start, TurnEndPayload end) {}
+  static record ClosedTurn(Entry start, TurnEndPayload end) {}
 
   /** Work-only 前置校验：仅锁 Work 行验证 claim 当前真实 owned。 */
   private boolean claimOwned(ClaimedWork claim) {
