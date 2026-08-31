@@ -4,8 +4,10 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.branchSettings;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedClosedTurn;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCompactionReadyClosedTurn;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedOpenInputTurn;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -28,8 +31,11 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+
+import java.util.UUID;
 
 /** 手动压缩 control：availability、version fence 与无 mailbox 的 durable plan 提交。 */
 class ThreadProcessorManualCompactionTest extends ThreadProcessorTestBase {
@@ -125,5 +131,55 @@ class ThreadProcessorManualCompactionTest extends ThreadProcessorTestBase {
     assertEquals(CompactionTrigger.MANUAL, start.compaction().trigger());
     TurnEndPayload end = (TurnEndPayload) path.head().payload();
     assertEquals(TurnEndOutcome.FAILED, end.outcome());
+  }
+
+  @Test
+  void threadMustExistForAvailabilityAndCompact() {
+    // 线程不存在时，availability 查询与 compact 提交必须确定性抛出 NotFound 异常。
+    Fixture fixture = fixture();
+    UUID nonExistentId = UUID.randomUUID();
+    assertThrows(
+        HarnessRuntimeNotFoundException.class,
+        () -> fixture.processor.manualCompactionAvailability(nonExistentId));
+    assertThrows(
+        HarnessRuntimeNotFoundException.class,
+        () -> fixture.processor.compactThread(new CompactThreadCommand(nonExistentId, 0)));
+  }
+
+  @Test
+  void compactThreadRejectsNullResolverResult() {
+    // Resolver 返回 null 违背契约，必须直接抛出 IllegalStateException，零 durable mutation。
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, USAGE);
+
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                fixture.processor.compactThread(new CompactThreadCommand(baseline.threadId(), 0)));
+    assertEquals("turn resolver returned null for manual compaction", error.getMessage());
+    assertEquals(0L, thread(fixture.store, baseline.threadId()).version());
+  }
+
+  @Test
+  void resolverRejectionWakesThreadWhenDeferredUserMessagesExist() {
+    // Resolver 业务拒绝且存在待处理 deferred user message 时，commit 必须追加 FAILED turn 并唤醒 THREAD Work。
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, USAGE);
+    seedCommand(
+        fixture.store,
+        baseline.threadId(),
+        new UserMessageCommandPayload(userMessage("deferred input")));
+    fixture.resolver.results.add(
+        new TurnResolver.Rejected(new AssistantError("CONFIG_ERROR", "model unavailable")));
+
+    long currentVersion = thread(fixture.store, baseline.threadId()).version();
+    CompactThreadResult result =
+        fixture.processor.compactThread(
+            new CompactThreadCommand(baseline.threadId(), currentVersion));
+
+    assertNull(result.modelInvocationId());
+    assertEquals(currentVersion + 1, result.thread().version());
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 }
