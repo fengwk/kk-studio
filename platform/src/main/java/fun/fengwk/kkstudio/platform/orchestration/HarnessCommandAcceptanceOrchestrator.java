@@ -191,7 +191,7 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /**
    * 准备 USER_MESSAGE 内容：瞬时 ATTACHMENT(uploadId) 物化为 durable RESOURCE，已有 RESOURCE 校验 Session
-   * ownership；保持 clientCommandId/requestHash 不变。
+   * ownership；保持 idempotencyKey/requestHash 不变。
    */
   private List<NewThreadCommand> prepareUserContents(
       UUID sessionId, List<NewThreadCommand> commands) {

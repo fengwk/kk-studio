@@ -442,7 +442,7 @@ describe('thread timeline', () => {
     )
     expect(timeline.messages).toMatchObject([{ role: 'user', text: '第一句' }])
     expect(timeline.queuedMessages).toMatchObject([
-      { clientCommandId: 'cid-in-2', role: 'user', text: '排队中', sequence: '1' },
+      { idempotencyKey: 'cid-in-2', role: 'user', text: '排队中', sequence: '1' },
     ])
     expect(timeline.hasPendingInputs).toBe(true)
   })
@@ -593,7 +593,7 @@ describe('thread timeline', () => {
         id: 'inv-1',
         modelInvocationId: 'm-1',
         assistantEntryId: '40',
-        ordinal: 0,
+        callIndex: 0,
         status: 'WAITING_APPROVAL',
         attempt: 1,
         toolCallId: 'call-1',
@@ -659,7 +659,7 @@ describe('thread timeline', () => {
       id: 'inv-2',
       modelInvocationId: 'm-2',
       assistantEntryId: '41',
-      ordinal: 0,
+      callIndex: 0,
       status: 'WAITING_APPROVAL',
       attempt: 1,
       toolCallId: 'call-1',
@@ -748,7 +748,7 @@ describe('thread timeline', () => {
       id: 'inv-3',
       modelInvocationId: 'm-3',
       assistantEntryId: '42',
-      ordinal: 0,
+      callIndex: 0,
       status: 'WAITING_APPROVAL',
       attempt: 1,
       toolCallId: 'call-other',
@@ -966,8 +966,8 @@ describe('thread timeline', () => {
     expect(call?.partial).toBe('streaming partial')
   })
 
-  it('deduplicates tool invocations by assistantEntryId:ordinal identity', () => {
-    // 同一持久身份（assistantEntryId:ordinal）的重复 invocation 只取第一条：
+  it('deduplicates tool invocations by assistantEntryId:callIndex identity', () => {
+    // 同一持久身份（assistantEntryId:callIndex）的重复 invocation 只取第一条：
     // 第二条不得改写第一条的 overlay（保持第一条的 approval 状态）。
     const duplicates: ToolInvocationDTO[] = [
       invocation('inv-a', '40', 'call-1', {
@@ -1189,10 +1189,10 @@ function command(
     sequence,
     type,
     state,
-    clientCommandId: `cid-${label}`,
+    idempotencyKey: `cid-${label}`,
     requestHash: '0123456789abcdef'.repeat(4),
     payloadJson: JSON.stringify(payload),
-    consumedTurnStartEntryId: null,
+    appliedTurnStartEntryId: null,
     cancelledAt: null,
     createTime: '2026-01-01T00:00:00',
   }
@@ -1210,7 +1210,7 @@ function modelAttemptFailure(
   return {
     modelInvocationId: 'model-1',
     turnStartEntryId: 'turn-1',
-    basisHeadEntryId: 'head-1',
+    requestHeadEntryId: 'head-1',
     attempt: 1,
     sequence: '3',
     text: 'partial answer',
@@ -1228,7 +1228,7 @@ function modelInvocation(status: string, attempt: number): ModelInvocationDTO {
     id: 'model-1',
     threadId: 'thread-1',
     turnStartEntryId: 'turn-1',
-    basisHeadEntryId: 'head-1',
+    requestHeadEntryId: 'head-1',
     status,
     attempt,
     streamCheckpointJson: null,
@@ -1250,7 +1250,7 @@ function invocation(
     id,
     modelInvocationId: `m-${id}`,
     assistantEntryId,
-    ordinal: 0,
+    callIndex: 0,
     status: 'RUNNING',
     attempt: 1,
     toolCallId,

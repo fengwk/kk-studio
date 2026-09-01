@@ -94,7 +94,7 @@ registerCase({
       `/api/canvases/${canvas.id}/commands`,
       {
         expectedVersion: '0',
-        commandId: cid(),
+        idempotencyKey: cid(),
         commands: [
           {
             type: 'CREATE_RESOURCE_NODE',
@@ -148,7 +148,7 @@ registerCase({
     const textNodeId = cid()
     await ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
       expectedVersion: '1',
-      commandId: cid(),
+      idempotencyKey: cid(),
       commands: [
         {
           type: 'CREATE_TEXT_NODE',

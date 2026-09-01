@@ -15,7 +15,7 @@ public class HarnessCancelledUserMessageDTO {
   private String sequence;
 
   /** 原命令稳定幂等键：canonical UUID string。 */
-  private String clientCommandId;
+  private String idempotencyKey;
 
   /** 取消消息的 canonical AgentMessage JSON。 */
   private String messageJson;

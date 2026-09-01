@@ -183,7 +183,7 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.status").value("STOPPED"))
         .andExpect(jsonPath("$.data.cancelledCommandCount").value(2))
         .andExpect(jsonPath("$.data.cancelledUserMessages[0].sequence").value("1"))
-        .andExpect(jsonPath("$.data.cancelledUserMessages[0].clientCommandId").value(idText(50)))
+        .andExpect(jsonPath("$.data.cancelledUserMessages[0].idempotencyKey").value(idText(50)))
         .andExpect(
             jsonPath("$.data.cancelledUserMessages[0].messageJson")
                 .value(

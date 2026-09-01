@@ -27,7 +27,7 @@ public class ToolInvocationDTO {
   private String assistantEntryId;
 
   /** 在同一 Model 结果 tool calls 中的下标（非负整数，0..N-1 连续前缀）。 */
-  private Integer ordinal;
+  private Integer callIndex;
 
   /**
    * 状态，取 {@code ToolInvocationStatus} 枚举名：WAITING_APPROVAL / READY / DISPATCHING / RUNNING /

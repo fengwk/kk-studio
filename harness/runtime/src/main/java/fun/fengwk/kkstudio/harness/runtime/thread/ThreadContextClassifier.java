@@ -33,10 +33,10 @@ import java.util.Optional;
  *       {@code IDLE_OR_HISTORICAL}；此时非空 model/tools 输入是不变量错误。
  *   <li>有 open Turn 但本 Thread 无 Model：{@code IDLE_OR_HISTORICAL}（覆盖另一 Thread 共享历史 Turn 与 B′ 不恢复语义）。
  *   <li>Model 身份必须匹配当前 Thread 与 open TURN_START（threadId + turnStartEntryId 精确一致）。
- *   <li>{@code head == basisHeadEntryId && resultEntryId == null}：非 terminal 为 {@code
+ *   <li>{@code head == requestHeadEntryId && resultEntryId == null}：非 terminal 为 {@code
  *       MODEL_ACTIVE}， terminal 为 {@code MODEL_TERMINAL_PENDING}。
  *   <li>仅当 {@code model.resultEntryId == head}、head 为 ASSISTANT Message、Model SUCCEEDED 且携带 result、
- *       response toolCalls 与 Assistant ToolCall contents 按序逐字段一致、sibling 数量等于 calls、ordinal 为
+ *       response toolCalls 与 Assistant ToolCall contents 按序逐字段一致、sibling 数量等于 calls、callIndex 为
  *       0..N-1 连续前缀且全部归本 Model 所有时进入 Tool context；无 calls 且无 siblings 为历史 no-tools Assistant
  *       前缀（{@code IDLE_OR_HISTORICAL}）；存在非 terminal sibling 为 {@code TOOL_ACTIVE}；全部 terminal 为
  *       {@code TOOL_TERMINAL_PENDING}（Tool outcome 尚未物化，batch apply 后行会被删除，不存在“已挂载”的历史状态）。
@@ -92,7 +92,7 @@ public final class ThreadContextClassifier {
               + turn.id());
     }
     Entry head = path.head();
-    if (head.id().equals(model.basisHeadEntryId()) && model.resultEntryId() == null) {
+    if (head.id().equals(model.requestHeadEntryId()) && model.resultEntryId() == null) {
       // 规则 4：head 恰为 basis 且结果未挂载；siblings 只可能在结果 head 加载，出现在这里是不兼容形状。
       requireEmptySiblings(toolSiblings, "at the model basis");
       if (model.status().isTerminal()) {
@@ -159,9 +159,9 @@ public final class ThreadContextClassifier {
     }
     for (int i = 0; i < siblings.size(); i++) {
       ToolInvocation sibling = siblings.get(i);
-      if (sibling.ordinal() != i) {
+      if (sibling.callIndex() != i) {
         throw new IllegalStateException(
-            "tool siblings must be a contiguous ordinal prefix of entry " + assistant.id());
+            "tool siblings must be a contiguous callIndex prefix of entry " + assistant.id());
       }
       if (!sibling.modelInvocationId().equals(model.id())) {
         throw new IllegalStateException(

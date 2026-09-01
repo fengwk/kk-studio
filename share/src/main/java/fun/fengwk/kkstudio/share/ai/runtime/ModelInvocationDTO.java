@@ -30,8 +30,8 @@ public class ModelInvocationDTO {
   /** 所属 Turn 的 TURN_START Entry 主键：canonical UUID string。 */
   private String turnStartEntryId;
 
-  /** 调用创建时的 head Entry 主键（basis）：canonical UUID string。 */
-  private String basisHeadEntryId;
+  /** 调用创建时的 head Entry 主键（request head）：canonical UUID string。 */
+  private String requestHeadEntryId;
 
   /**
    * 状态，取 {@code ModelInvocationStatus} 枚举名：READY / DISPATCHING / RUNNING / SUCCEEDED / FAILED /

@@ -32,7 +32,7 @@ public class HarnessThreadSnapshotDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private ModelInvocationDTO modelInvocation;
 
-  /** 活跃 ModelInvocation 的工具兄弟列表（ordinal 为 0..N-1 连续前缀；不可变列表，默认空）。 */
+  /** 活跃 ModelInvocation 的工具兄弟列表（callIndex 为 0..N-1 连续前缀；不可变列表，默认空）。 */
   private List<ToolInvocationDTO> toolInvocations = List.of();
 
   /** 当前 Model context 尚未物化的 failed attempt 历史（不可变列表，默认空）。 */

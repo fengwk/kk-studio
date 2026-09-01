@@ -226,7 +226,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "name",
         "text_content",
         "created_at");
-    assertColumns("canvas_command_dedup", "canvas_id", "command_id", "request_hash");
+    assertColumns("canvas_command_dedup", "canvas_id", "idempotency_key", "request_hash");
     assertColumns(
         "canvas_function_resource_pin",
         "canvas_id",
@@ -317,7 +317,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "id",
         "session_id",
         "head_entry_id",
-        "materialization_hash",
+        "creation_request_hash",
         "yolo_enabled",
         "next_command_sequence",
         "version",
@@ -329,10 +329,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "sequence",
         "command_type",
         "payload",
-        "client_command_id",
+        "idempotency_key",
         "request_hash",
-        "consumed_turn_start_entry_id",
-        "cancel_request_id",
+        "applied_turn_start_entry_id",
+        "stop_request_id",
         "cancelled_at",
         "created_at");
     assertColumns(
@@ -340,8 +340,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "id",
         "thread_id",
         "turn_start_entry_id",
-        "basis_head_entry_id",
-        "request",
+        "request_head_entry_id",
+        "request_spec",
         "status",
         "attempt",
         "stream_checkpoint",
@@ -356,7 +356,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "id",
         "model_invocation_id",
         "assistant_entry_id",
-        "ordinal",
+        "call_index",
         "call",
         "binding",
         "status",
@@ -417,7 +417,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   void usesJsonbForStructuredPayloads() throws SQLException {
     assertColumnType("jsonb", "harness_entry", "payload");
     assertColumnType("jsonb", "harness_thread_command", "payload");
-    assertColumnType("jsonb", "harness_model_invocation", "request");
+    assertColumnType("jsonb", "harness_model_invocation", "request_spec");
     assertColumnType("jsonb", "harness_model_invocation", "stream_checkpoint");
     assertColumnType("jsonb", "harness_model_invocation", "result");
     assertColumnType("jsonb", "harness_model_invocation", "error");
@@ -1070,7 +1070,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " values (?, ?, 'ROOT', '{}'::jsonb, current_timestamp)");
         PreparedStatement thread =
             conn.prepareStatement(
-                "insert into harness_thread (id, session_id, head_entry_id, materialization_hash,"
+                "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
                     + " yolo_enabled, next_command_sequence, version, created_at, updated_at)"
                     + " values (?, ?, ?, '"
                     + "0".repeat(64)
@@ -1283,10 +1283,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_canvas_resource_owner_index",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
-            "uk_harness_thread_command_client",
+            "uk_harness_thread_command_idempotency",
             "uk_harness_model_invocation_turn",
             "uk_harness_model_invocation_result",
-            "uk_harness_tool_invocation_ordinal",
+            "uk_harness_tool_invocation_call_index",
             "uk_storage_blob_active_hash",
             "uk_storage_upload_candidate"),
         indexes,

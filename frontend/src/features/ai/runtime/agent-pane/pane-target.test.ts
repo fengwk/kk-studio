@@ -86,7 +86,7 @@ describe('PaneTarget durable-local FSM', () => {
         },
         commands: [{
           type: 'USER_MESSAGE',
-          clientCommandId: 'c1',
+          idempotencyKey: 'c1',
           contents: [{ type: 'TEXT', text: 'hello' }],
         }],
       },
@@ -164,7 +164,7 @@ describe('PaneTarget durable-local FSM', () => {
         },
         commands: [{
           type: 'USER_MESSAGE',
-          clientCommandId: 'c1',
+          idempotencyKey: 'c1',
           contents: [{ type: 'TEXT', text: 'hello' }],
         }],
       },
@@ -225,16 +225,16 @@ describe('PaneTarget durable-local FSM', () => {
       expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
     }
     for (const command of [
-      { type: 'SET_AGENT', clientCommandId: 'c1', agentName: 'assistant' },
+      { type: 'SET_AGENT', idempotencyKey: 'c1', agentName: 'assistant' },
       {
         type: 'SET_MODEL',
-        clientCommandId: 'c1',
+        idempotencyKey: 'c1',
         model: { providerName: 'p', modelName: 'm', variant: 'v' },
       },
-      { type: 'SET_ENVIRONMENT', clientCommandId: 'c1', environment: null },
+      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', environment: null },
       {
         type: 'USER_MESSAGE',
-        clientCommandId: 'c1',
+        idempotencyKey: 'c1',
         contents: [{ type: 'ATTACHMENT', uploadId: 'u1', filename: 'file.txt' }],
       },
     ]) {
@@ -245,7 +245,7 @@ describe('PaneTarget durable-local FSM', () => {
       ...validRequest,
       commands: [{
         type: 'USER_MESSAGE',
-        clientCommandId: 'c1',
+        idempotencyKey: 'c1',
         contents: [{ type: 'TEXT', text: 1 }],
       }],
     })
@@ -254,19 +254,19 @@ describe('PaneTarget durable-local FSM', () => {
       ...validRequest,
       commands: [{
         type: 'USER_MESSAGE',
-        clientCommandId: 'c1',
+        idempotencyKey: 'c1',
         contents: [{ type: 'ATTACHMENT', uploadId: '', filename: 'file.txt' }],
       }],
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({
       ...validRequest,
-      commands: [{ type: 'UNKNOWN', clientCommandId: 'c1' }],
+      commands: [{ type: 'UNKNOWN', idempotencyKey: 'c1' }],
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({
       ...validRequest,
-      commands: [{ type: 'SET_AGENT', clientCommandId: 'c1', agentName: ' ' }],
+      commands: [{ type: 'SET_AGENT', idempotencyKey: 'c1', agentName: ' ' }],
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({
@@ -307,7 +307,7 @@ describe('PaneTarget durable-local FSM', () => {
         ...validRequest,
         commands: [{
           type: 'USER_MESSAGE',
-          clientCommandId: 'c1',
+          idempotencyKey: 'c1',
           contents: [{
             type: 'RESOURCE',
             blobId: 'blob-1',
@@ -324,7 +324,7 @@ describe('PaneTarget durable-local FSM', () => {
         ...validRequest,
         commands: [{
           type: 'USER_MESSAGE',
-          clientCommandId: 'c1',
+          idempotencyKey: 'c1',
           contents: [{ type: 'RESOURCE', blobId: 'blob-1', name: '' }],
         }],
       },
@@ -365,12 +365,12 @@ describe('PaneTarget durable-local FSM', () => {
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({
       ...validRequest,
-      commands: [{ type: 'USER_MESSAGE', clientCommandId: 'c1', contents: [null] }],
+      commands: [{ type: 'USER_MESSAGE', idempotencyKey: 'c1', contents: [null] }],
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({
       ...validRequest,
-      commands: [{ type: 'SET_AGENT', clientCommandId: '', agentName: 'assistant' }],
+      commands: [{ type: 'SET_AGENT', idempotencyKey: '', agentName: 'assistant' }],
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({

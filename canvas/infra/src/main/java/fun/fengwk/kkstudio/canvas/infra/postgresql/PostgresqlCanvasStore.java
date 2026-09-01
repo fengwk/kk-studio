@@ -251,8 +251,8 @@ public class PostgresqlCanvasStore implements CanvasStore {
   }
 
   @Override
-  public Optional<CommandDedup> findCommandDedup(UUID canvasId, UUID commandId) {
-    return Optional.ofNullable(commandDedupMapper.findById(canvasId, commandId))
+  public Optional<CommandDedup> findCommandDedup(UUID canvasId, UUID idempotencyKey) {
+    return Optional.ofNullable(commandDedupMapper.findById(canvasId, idempotencyKey))
         .map(PostgresqlCanvasStore::toDomain);
   }
 
@@ -337,13 +337,15 @@ public class PostgresqlCanvasStore implements CanvasStore {
 
   private static CommandDedup toDomain(CanvasCommandDedupDO commandDedup) {
     return new CommandDedup(
-        commandDedup.getCanvasId(), commandDedup.getCommandId(), commandDedup.getRequestHash());
+        commandDedup.getCanvasId(),
+        commandDedup.getIdempotencyKey(),
+        commandDedup.getRequestHash());
   }
 
   private static CanvasCommandDedupDO toData(CommandDedup commandDedup) {
     CanvasCommandDedupDO data = new CanvasCommandDedupDO();
     data.setCanvasId(commandDedup.canvasId());
-    data.setCommandId(commandDedup.commandId());
+    data.setIdempotencyKey(commandDedup.idempotencyKey());
     data.setRequestHash(commandDedup.requestHash());
     return data;
   }

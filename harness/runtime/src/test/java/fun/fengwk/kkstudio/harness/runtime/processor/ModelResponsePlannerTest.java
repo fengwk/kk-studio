@@ -35,7 +35,7 @@ import java.util.Set;
 
 /**
  * {@link ModelResponsePlanner} 决策矩阵单元测试：generation stop reason -&gt; frozen binding lookup -&gt;
- * schema validation，每个 observed call 一个 ordinal 槽位。
+ * schema validation，每个 observed call 一个 callIndex 槽位。
  */
 class ModelResponsePlannerTest {
 
@@ -62,9 +62,9 @@ class ModelResponsePlannerTest {
 
     ModelResponsePlan.ToolBatch batch = (ModelResponsePlan.ToolBatch) plan;
     assertEquals(2, batch.tools().size());
-    for (int ordinal = 0; ordinal < 2; ordinal++) {
-      ModelResponsePlan.ToolSlot slot = batch.tools().get(ordinal);
-      assertEquals("call-" + (ordinal + 1), slot.call().id());
+    for (int callIndex = 0; callIndex < 2; callIndex++) {
+      ModelResponsePlan.ToolSlot slot = batch.tools().get(callIndex);
+      assertEquals("call-" + (callIndex + 1), slot.call().id());
       assertEquals("bash", slot.call().toolName());
       assertEquals(ToolInvocationStatus.READY, slot.status());
       assertNull(slot.error());
@@ -108,7 +108,7 @@ class ModelResponsePlannerTest {
     assertNull(slot.binding());
   }
 
-  /** mixed batch：每 call 一个槽位，READY 与 FAILED 按 ordinal 并存。 */
+  /** mixed batch：每 call 一个槽位，READY 与 FAILED 按 callIndex 并存。 */
   @Test
   void completeWithMixedBatchKeepsFullOrdinal() {
     ModelResponsePlan plan =
@@ -154,9 +154,9 @@ class ModelResponsePlannerTest {
 
     ModelResponsePlan.ToolBatch batch = (ModelResponsePlan.ToolBatch) plan;
     assertEquals(20, batch.tools().size());
-    for (int ordinal = 0; ordinal < 20; ordinal++) {
-      ModelResponsePlan.ToolSlot slot = batch.tools().get(ordinal);
-      assertEquals("call-" + (ordinal + 1), slot.call().id());
+    for (int callIndex = 0; callIndex < 20; callIndex++) {
+      ModelResponsePlan.ToolSlot slot = batch.tools().get(callIndex);
+      assertEquals("call-" + (callIndex + 1), slot.call().id());
       assertEquals(ToolInvocationStatus.FAILED, slot.status());
       assertEquals("MODEL_OUTPUT_TRUNCATED", slot.error().kind());
       assertEquals("bash", slot.binding().descriptor().name());

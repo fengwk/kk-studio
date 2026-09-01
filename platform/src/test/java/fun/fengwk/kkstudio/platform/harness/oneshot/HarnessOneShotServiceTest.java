@@ -165,7 +165,7 @@ class HarnessOneShotServiceTest {
                         threadId,
                         sequence++,
                         request.payload(),
-                        request.clientCommandId(),
+                        request.idempotencyKey(),
                         request.requestHash(),
                         null,
                         null,
@@ -393,7 +393,7 @@ class HarnessOneShotServiceTest {
         List.of());
   }
 
-  /** 构造与 Session id(1)、materializationHash 为 64 个 0 的合法持久化 Thread 状态。 */
+  /** 构造与 Session id(1)、creationRequestHash 为 64 个 0 的合法持久化 Thread 状态。 */
   private static ThreadState thread(
       UUID threadId, UUID sessionId, UUID head, long nextCommandSequence, long version) {
     return new ThreadState(

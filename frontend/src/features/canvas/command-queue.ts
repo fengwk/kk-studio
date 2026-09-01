@@ -97,7 +97,7 @@ export class CanvasCommandQueue {
         this.canvasId,
         {
           expectedVersion: this.snapshot.document.version,
-          commandId: this.createCommandId(),
+          idempotencyKey: this.createCommandId(),
           commands,
         },
         { signal },

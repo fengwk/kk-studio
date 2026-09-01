@@ -218,9 +218,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
     }
   }
 
-  /** 同 Session 两个 ENTRY materialization：KEY SHARE 锁彼此兼容，新 Thread 各自插入、互不串行化。 */
+  /** 同 Session 两个 ENTRY 初始创建：KEY SHARE 锁彼此兼容，新 Thread 各自插入、互不串行化。 */
   @Test
-  void concurrentEntryMaterializationsKeyShareTheSameSessionWithoutSerialization()
+  void concurrentEntryInitialCreationsKeyShareTheSameSessionWithoutSerialization()
       throws Exception {
     Baseline baseline = seedThreadBaseline(store);
     CountDownLatch bothAcquired = new CountDownLatch(2);
@@ -229,12 +229,12 @@ class PostgresqlHarnessStoreConcurrencyTest {
       Future<UUID> first =
           executor.submit(
               () ->
-                  materializeEntry(
+                  createEntryThread(
                       baseline.sessionId(), baseline.rootEntryId(), bothAcquired, releaseBoth));
       Future<UUID> second =
           executor.submit(
               () ->
-                  materializeEntry(
+                  createEntryThread(
                       baseline.sessionId(), baseline.rootEntryId(), bothAcquired, releaseBoth));
       // 双方都拿到同一 Session 的 KEY SHARE 并各自插入新 Thread：若误用 FOR UPDATE 锁 Session，第二个事务会在此处死等。
       assertTrue(bothAcquired.await(10, TimeUnit.SECONDS));
@@ -246,7 +246,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
     assertEquals(3, store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size());
   }
 
-  private UUID materializeEntry(
+  private UUID createEntryThread(
       UUID sessionId, UUID rootEntryId, CountDownLatch bothAcquired, CountDownLatch releaseBoth) {
     return store.transaction(
         tx -> {
@@ -474,10 +474,10 @@ class PostgresqlHarnessStoreConcurrencyTest {
           model = tx.lockModelInvocation(id(1L)).orElseThrow();
           tx.updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
         });
-    ToolInvocation ordinal0 =
+    ToolInvocation first =
         toolInvocation(
             id(10L), id(1L), assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, T2);
-    ToolInvocation ordinal1 =
+    ToolInvocation second =
         toolInvocation(
             id(11L), id(1L), assistantEntryId, 1, "call-2", ToolInvocationStatus.READY, T2);
 
@@ -485,9 +485,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
     CountDownLatch start = new CountDownLatch(1);
     try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
       Future<Boolean> ascending =
-          executor.submit(() -> insertToolBatch(List.of(ordinal0, ordinal1), ready, start));
+          executor.submit(() -> insertToolBatch(List.of(first, second), ready, start));
       Future<Boolean> descending =
-          executor.submit(() -> insertToolBatch(List.of(ordinal1, ordinal0), ready, start));
+          executor.submit(() -> insertToolBatch(List.of(second, first), ready, start));
       assertTrue(ready.await(10, TimeUnit.SECONDS));
       start.countDown();
 
@@ -498,7 +498,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
     assertEquals(
         List.of(0, 1),
         store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantEntryId)).stream()
-            .map(ToolInvocation::ordinal)
+            .map(ToolInvocation::callIndex)
             .toList());
   }
 

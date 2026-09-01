@@ -42,7 +42,7 @@ import {
   createChat,
   getThreadSnapshot,
   listEnvironments,
-  materializeNewSession,
+  createNewSession,
   stopThread,
   userMessageCommand,
   waitForQuiescentThread,
@@ -288,7 +288,7 @@ async function executeCase({ ctx, docker, runDir, testCase, agent, daemonEnv }) 
       daemonEnv,
       prompt: buildUserPrompt(testCase),
     })
-    const accepted = await materializeNewSession(ctx, request)
+    const accepted = await createNewSession(ctx, request)
     threadId = accepted.thread.threadId
     assertThreadSettings(accepted, testCase, daemonEnv, agent.name)
     result.turnStarted = true

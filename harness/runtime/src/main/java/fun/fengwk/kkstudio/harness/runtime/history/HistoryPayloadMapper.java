@@ -115,7 +115,7 @@ public final class HistoryPayloadMapper {
         new ToolResultMetadata(
             invocation.assistantEntryId(),
             invocation.call().id(),
-            invocation.ordinal(),
+            invocation.callIndex(),
             statusOf(invocation),
             false,
             null);
@@ -128,7 +128,7 @@ public final class HistoryPayloadMapper {
    * HISTORY_CUT，稳定 "No result provided" 错误内容；不关联任何 ToolInvocation。
    */
   public MessagePayload syntheticHistoryCutToolResult(
-      UUID assistantEntryId, int ordinal, ToolCallMessageContent call) {
+      UUID assistantEntryId, int callIndex, ToolCallMessageContent call) {
     Objects.requireNonNull(call, "call");
     ToolResultMessageContent content =
         new ToolResultMessageContent(
@@ -142,7 +142,7 @@ public final class HistoryPayloadMapper {
         new ToolResultMetadata(
             assistantEntryId,
             call.toolCallId(),
-            ordinal,
+            callIndex,
             ToolResultStatus.UNKNOWN,
             true,
             ToolResultReason.HISTORY_CUT);
@@ -185,7 +185,7 @@ public final class HistoryPayloadMapper {
         new ToolResultMetadata(
             invocation.assistantEntryId(),
             invocation.call().id(),
-            invocation.ordinal(),
+            invocation.callIndex(),
             statusOf(invocation),
             false,
             null));

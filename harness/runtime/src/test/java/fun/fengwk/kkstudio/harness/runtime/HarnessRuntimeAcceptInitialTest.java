@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.MATERIALIZATION_HASH;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.systemCustomMessageCommand;
@@ -38,7 +38,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * acceptCommands 的初始 target（NEW_SESSION / ENTRY）：同事务原子接受、materialization replay 与 ID reuse、batch
+ * acceptCommands 的初始 target（NEW_SESSION / ENTRY）：同事务原子接受、initial creation replay 与 ID reuse、batch
  * shape 与前缀 SYSTEM steering 规则。
  */
 class HarnessRuntimeAcceptInitialTest {
@@ -59,7 +59,7 @@ class HarnessRuntimeAcceptInitialTest {
         commands);
   }
 
-  /** 每次 shape 校验用例使用独立预分配 id，避免与上一用例的 materialization 冲突。 */
+  /** 每次 shape 校验用例使用独立预分配 id，避免与上一用例的初始创建冲突。 */
   private static AcceptCommandsCommand newSession(
       UUID sessionId, UUID threadId, List<NewThreadCommand> commands) {
     return new AcceptCommandsCommand(
@@ -73,8 +73,8 @@ class HarnessRuntimeAcceptInitialTest {
         new AcceptCommandsTarget.Entry(sessionId, startEntryId, TestIds.id(203), false), commands);
   }
 
-  private static NewThreadCommand setAgent(UUID clientCommandId) {
-    return new NewThreadCommand(new SetAgentCommandPayload("assistant"), clientCommandId);
+  private static NewThreadCommand setAgent(UUID idempotencyKey) {
+    return new NewThreadCommand(new SetAgentCommandPayload("assistant"), idempotencyKey);
   }
 
   @Test
@@ -99,10 +99,10 @@ class HarnessRuntimeAcceptInitialTest {
     ThreadState thread = store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow());
     assertEquals(TestIds.id(101), thread.sessionId());
     assertEquals(root.id(), thread.headEntryId());
-    assertEquals(MATERIALIZATION_HASH.length(), thread.materializationHash().length());
+    assertEquals(CREATION_REQUEST_HASH.length(), thread.creationRequestHash().length());
     assertTrue(thread.yoloEnabled());
-    // materialization hash 是服务端 deterministic 64 位小写 SHA-256。
-    assertTrue(thread.materializationHash().matches("[0-9a-f]{64}"));
+    // creation request hash 是服务端 deterministic 64 位小写 SHA-256。
+    assertTrue(thread.creationRequestHash().matches("[0-9a-f]{64}"));
     // 初始 thread version 0，accept 后恰好 +1；next sequence 从 1 起推进 1。
     assertEquals(1L, thread.version());
     assertEquals(2L, thread.nextCommandSequence());
@@ -140,7 +140,7 @@ class HarnessRuntimeAcceptInitialTest {
 
   @Test
   void newSessionRejectsMalformedPreflightResultsAndRollsBack() {
-    // Preflight 是事务内 materialization 边界：null、数量变化或幂等键变化都必须 fail closed 且不留下部分事实。
+    // Preflight 是事务内初始创建边界：null、数量变化或幂等键变化都必须 fail closed 且不留下部分事实。
     assertPreflightContractViolation(
         TestIds.id(130),
         TestIds.id(131),
@@ -159,11 +159,11 @@ class HarnessRuntimeAcceptInitialTest {
           return List.of(
               new NewThreadCommand(command.payload(), TestIds.id(999), command.requestHash()));
         },
-        "command preflight must preserve clientCommandId and requestHash at index 0");
+        "command preflight must preserve idempotencyKey and requestHash at index 0");
   }
 
   /**
-   * exact materialization replay：同 session + 同 hash 返回现有接受事实（replayed=true），不写新行、不 bump version。
+   * exact initial creation replay：同 session + 同 hash 返回现有接受事实（replayed=true），不写新行、不 bump version。
    */
   @Test
   void newSessionExactReplayReturnsExistingAcceptanceFacts() {
@@ -183,8 +183,8 @@ class HarnessRuntimeAcceptInitialTest {
   }
 
   /**
-   * 初始 replay：materialize 第二批后，重放初始请求只按 clientCommandId 返回原始初始命令（sequence 从 1 连续），顺序与 terminal
-   * 状态为当前值，且不产生 version mutation（replay 只命中初始批次，不返回第二批）。
+   * 初始 replay：初始创建第二批后，重放初始请求只按 idempotencyKey 返回原始初始命令（sequence 从 1 连续），顺序与 terminal 状态为当前值，且不产生
+   * version mutation（replay 只命中初始批次，不返回第二批）。
    */
   @Test
   void newSessionReplayAfterSecondBatchReturnsOnlyTheInitialCommands() {
@@ -208,7 +208,7 @@ class HarnessRuntimeAcceptInitialTest {
     // 只返回原始初始命令（SET_AGENT + user），顺序为请求顺序、sequence 从 1 连续、状态为当前 QUEUED，第二批不混入。
     assertEquals(
         List.of(TestIds.id(9), TestIds.id(1)),
-        replay.acceptedCommands().stream().map(ThreadCommand::clientCommandId).toList());
+        replay.acceptedCommands().stream().map(ThreadCommand::idempotencyKey).toList());
     assertEquals(
         List.of(1L, 2L), replay.acceptedCommands().stream().map(ThreadCommand::sequence).toList());
     assertTrue(
@@ -219,7 +219,7 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(before, store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow()));
   }
 
-  /** 同 threadId + 不同 materialization（更改为不同文本）→ MATERIALIZATION_ID_REUSED。 */
+  /** 同 threadId + 不同初始创建请求 → THREAD_ID_REUSED。 */
   @Test
   void newSessionThreadIdReusedWithDifferentHashConflicts() {
     runtime.acceptCommands(
@@ -232,7 +232,7 @@ class HarnessRuntimeAcceptInitialTest {
                 runtime.acceptCommands(
                     newSession(List.of(userMessageCommand(TestIds.id(1), "different"))),
                     AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.MATERIALIZATION_ID_REUSED, error.reason());
+    assertEquals(Reason.THREAD_ID_REUSED, error.reason());
   }
 
   /** 同 threadId + 不同 Session → 仍属 ID reuse，绝不静默重建。 */
@@ -250,7 +250,7 @@ class HarnessRuntimeAcceptInitialTest {
         assertThrows(
             HarnessRuntimeConflictException.class,
             () -> runtime.acceptCommands(otherSession, AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.MATERIALIZATION_ID_REUSED, error.reason());
+    assertEquals(Reason.THREAD_ID_REUSED, error.reason());
   }
 
   /** 初始 batch shape：恰一条 user-like message 结尾；允许固定顺序 SET_* 前缀；SYSTEM CUSTOM_MESSAGE 只允许在前缀。 */

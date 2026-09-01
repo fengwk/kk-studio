@@ -18,8 +18,8 @@ import {
   getThread,
   getThreadSnapshot,
   listEnvironments,
-  materializeEntryThread,
-  materializeNewSession,
+  createEntryThread,
+  createNewSession,
   setAgentCommand,
   setModelCommand,
   snapshotEntries,
@@ -51,7 +51,7 @@ registerCase({
     const sessionId = cid()
     const tid = cid()
     const marker = `只回复单词 OK，不要调用工具，不要解释。${cid().slice(0, 6)}`
-    const accepted = await materializeNewSession(ctx, {
+    const accepted = await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       threadId: tid,
@@ -169,7 +169,7 @@ registerCase({
         agentName: parentAgent.name,
         yoloEnabled: false,
       })
-      const accepted = await materializeNewSession(ctx, {
+      const accepted = await createNewSession(ctx, {
         owner: chatOwner(chat.id),
         sessionId: cid(),
         threadId: cid(),
@@ -288,7 +288,7 @@ registerCase({
     })
     const sessionId = cid()
     const tid = cid()
-    await materializeNewSession(ctx, {
+    await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       threadId: tid,
@@ -482,7 +482,7 @@ registerCase({
     }
     const branchThreadId = cid()
     const branchUserText = '在分支上只回复单词 BRANCH，不要调用工具。'
-    const branched = await materializeEntryThread(ctx, {
+    const branched = await createEntryThread(ctx, {
       owner: chatOwner(chatId),
       sessionId,
       startEntryId: assistantEntryId,
@@ -741,7 +741,7 @@ registerCase({
         agentName: toolAgent.name,
         yoloEnabled: false,
       })
-      const accepted = await materializeNewSession(ctx, {
+      const accepted = await createNewSession(ctx, {
         owner: chatOwner(chat.id),
         sessionId: cid(),
         threadId: cid(),

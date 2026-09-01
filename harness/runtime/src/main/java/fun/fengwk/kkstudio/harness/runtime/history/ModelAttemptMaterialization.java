@@ -59,7 +59,7 @@ public final class ModelAttemptMaterialization {
     boolean afterBasis = false;
     List<Entry> failures = new ArrayList<>();
     for (Entry entry : path.entries()) {
-      if (entry.id().equals(invocation.basisHeadEntryId())) {
+      if (entry.id().equals(invocation.requestHeadEntryId())) {
         afterBasis = true;
         continue;
       }
@@ -68,7 +68,7 @@ public final class ModelAttemptMaterialization {
       }
     }
     if (!afterBasis) {
-      throw new IllegalArgumentException("model result path must contain basisHeadEntryId");
+      throw new IllegalArgumentException("model result path must contain requestHeadEntryId");
     }
     return List.copyOf(failures);
   }
@@ -154,7 +154,7 @@ public final class ModelAttemptMaterialization {
     }
     MessagePayload expected =
         new HistoryPayloadMapper()
-            .assistantPayload(invocation.result(), invocation.request().toolBindings());
+            .assistantPayload(invocation.result(), invocation.requestSpec().toolBindings());
     if (!expected.equals(resultPayload)) {
       throw new IllegalArgumentException(
           "model result must materialize the exact assistant payload");
@@ -234,8 +234,8 @@ public final class ModelAttemptMaterialization {
    * <ul>
    *   <li>model 必须 terminal、resultEntryId 非空、failedAttempts 已清空、streamCheckpoint 已清空（attach 形状）；
    *   <li>resultEntryId 必须是 resultPath 的 head（Assistant 结果恰在 head 才构成活跃 Tool phase）；
-   *   <li>resultPath 必须包含 basisHeadEntryId 且严格位于 head 之前（result 必须是 basis 的严格 descendant， 不允许
-   *       attach 到 basis 自身）；
+   *   <li>resultPath 必须包含 requestHeadEntryId 且严格位于 head 之前（result 必须是 request head 的严格 descendant，
+   *       不允许 attach 到 basis 自身）；
    *   <li>非压缩 model：basis 之后 head 之前的 ModelAttemptFailurePayload 必须精确等于已确认的 attempt 前缀（attempt 从 1
    *       连续递增且数量恰为 {@code attached.attempt() - 1}，不允许遗漏）；压缩 model：不允许出现任何失败条目；
    *   <li>SUCCEEDED model 的 result 必须按值等价于 Assistant head：通过与 {@link
@@ -260,7 +260,7 @@ public final class ModelAttemptMaterialization {
       throw new IllegalArgumentException(
           "attached model resultEntryId must be the result path head");
     }
-    if (attached.resultEntryId().equals(attached.basisHeadEntryId())) {
+    if (attached.resultEntryId().equals(attached.requestHeadEntryId())) {
       throw new IllegalArgumentException(
           "attached model result must be a strict descendant of its basis head entry");
     }
@@ -269,7 +269,7 @@ public final class ModelAttemptMaterialization {
     boolean compaction = isCompactionInvocation(attached, resultPath);
     int expectedAttempt = 1;
     for (Entry entry : entries) {
-      if (entry.id().equals(attached.basisHeadEntryId())) {
+      if (entry.id().equals(attached.requestHeadEntryId())) {
         afterBasis = true;
         foundBasis = true;
         continue;
@@ -291,7 +291,7 @@ public final class ModelAttemptMaterialization {
       }
     }
     if (!foundBasis) {
-      throw new IllegalArgumentException("model result path must contain basisHeadEntryId");
+      throw new IllegalArgumentException("model result path must contain requestHeadEntryId");
     }
     if (!compaction && expectedAttempt - 1 != attached.attempt() - 1) {
       throw new IllegalArgumentException(

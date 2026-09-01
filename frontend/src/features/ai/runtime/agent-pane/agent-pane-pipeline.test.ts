@@ -61,7 +61,7 @@ describe('AgentPane acceptance pipeline', () => {
     expect(plan.request.commands).toHaveLength(1)
     expect(plan.request.commands[0]).toMatchObject({
       type: 'USER_MESSAGE',
-      clientCommandId: 'command-1',
+      idempotencyKey: 'command-1',
       contents: [{ type: 'TEXT', text: 'hello' }],
     })
     expect(plan.request.target).toMatchObject({
@@ -130,7 +130,7 @@ describe('AgentPane acceptance pipeline', () => {
       parts: [createTextPart('retry me')],
       createId: () => 'stable-command',
     })
-    expect(plan.request.commands[0]?.clientCommandId).toBe('stable-command')
+    expect(plan.request.commands[0]?.idempotencyKey).toBe('stable-command')
     expect(isUnknownAcceptanceOutcome(new Error('timeout'))).toBe(true)
     expect(isDefiniteAcceptanceFailure(new ApiError('stale', 409))).toBe(true)
     expect(

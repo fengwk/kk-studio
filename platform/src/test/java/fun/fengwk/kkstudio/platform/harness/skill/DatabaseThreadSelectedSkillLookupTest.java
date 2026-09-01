@@ -78,7 +78,7 @@ class DatabaseThreadSelectedSkillLookupTest {
   }
 
   private static String encodedRequest(EnvironmentBinding sourceEnvironment) {
-    ModelRequestSpec request =
+    ModelRequestSpec requestSpec =
         new ModelRequestSpec(
             ProviderType.OPENAI,
             modelDescriptor(),
@@ -88,7 +88,7 @@ class DatabaseThreadSelectedSkillLookupTest {
             List.of(new SkillBinding("review", "Review code", sourceEnvironment)),
             List.of(),
             ProviderCacheControl.none());
-    return REQUEST_CODEC.encode(request);
+    return REQUEST_CODEC.encode(requestSpec);
   }
 
   private static ModelDescriptor modelDescriptor() {

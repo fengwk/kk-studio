@@ -150,7 +150,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
         chatPreflight.prepare(transaction, new Session(SESSION_ID, NOW), chatCommand.commands());
 
     assertSame(setAgent, chatPrepared.getFirst());
-    assertEquals(user.clientCommandId(), chatPrepared.get(1).clientCommandId());
+    assertEquals(user.idempotencyKey(), chatPrepared.get(1).idempotencyKey());
     assertEquals(user.requestHash(), chatPrepared.get(1).requestHash());
     UserMessageCommandPayload mapped =
         assertInstanceOf(UserMessageCommandPayload.class, chatPrepared.get(1).payload());
@@ -284,7 +284,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
         preflight.prepare(transaction, new Session(SESSION_ID, NOW), command.commands());
 
     NewThreadCommand durable = prepared.getFirst();
-    assertEquals(raw.clientCommandId(), durable.clientCommandId());
+    assertEquals(raw.idempotencyKey(), durable.idempotencyKey());
     assertEquals(raw.requestHash(), durable.requestHash());
     UserMessageCommandPayload payload =
         assertInstanceOf(UserMessageCommandPayload.class, durable.payload());

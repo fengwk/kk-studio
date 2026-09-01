@@ -13,7 +13,7 @@ import {
   chatOwner,
   createChat,
   getThreadSnapshot,
-  materializeNewSession,
+  createNewSession,
   stopThread,
   threadTarget,
   waitForQuiescentThread,
@@ -22,10 +22,10 @@ import { baseModelConfig } from '../lib/fixtures.mjs'
 import { getCase, registerCase } from '../lib/registry.mjs'
 
 /**
- * USER_MESSAGE ATTACHMENT 消费与 requestHash 契约（L1，需 backend 启用 S3）。
+ * USER_MESSAGE ATTACHMENT 消费与幂等 replay 契约（L1，需 backend 启用 S3）。
  *
  * <p>通用存储端点 reserve -> 真实 presigned PUT -> complete -> READY uploadId 经命令 batch 的
- * ATTACHMENT(uploadId) 消费：入队响应携带 canonical requestHash、durable payload 为
+ * ATTACHMENT(uploadId) 消费：入队响应携带 durable payload、
  * resource(blobId,name,preview)；同 batch 整批重放返回既有命令且不二次消费；同 Session 可用 RESOURCE
  * 重新提交该 blob 且不要求 upload handle，跨/新 Session RESOURCE 确定性拒绝；upload 行消费后再次提交同一
  * uploadId 确定性 400；IMAGE/AUDIO/VIDEO 内容类型与 PENDING upload 均 400。
@@ -34,8 +34,8 @@ registerCase({
   id: 'chat.attachment_upload_contract',
   level: 'L1',
   requires: ['canvas-storage'],
-  title: 'USER_MESSAGE ATTACHMENT 消费与 requestHash 契约',
-  docs: '需 backend 启用 S3：reserve -> presigned PUT -> complete -> ATTACHMENT(uploadId) 作为 NEW_SESSION 首条消息原子物化；响应 requestHash 为 64 位小写 hex，durable payload 为 resource(blobId,name,preview)；同批精确重放 replayed=true 不二次消费；同 Session RESOURCE 可重提且跨/新 Session 拒绝；已消费/未 READY upload 与 IMAGE/AUDIO/VIDEO 内容类型确定性 400',
+  title: 'USER_MESSAGE ATTACHMENT 消费与幂等 replay 契约',
+  docs: '需 backend 启用 S3：reserve -> presigned PUT -> complete -> ATTACHMENT(uploadId) 作为 NEW_SESSION 首条消息原子物化；durable payload 为 resource(blobId,name,preview)；同批精确重放 replayed=true 不二次消费；同 Session RESOURCE 可重提且跨/新 Session 拒绝；已消费/未 READY upload 与 IMAGE/AUDIO/VIDEO 内容类型确定性 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -97,16 +97,16 @@ registerCase({
     const blobId = String(ready.blobId)
     assert(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(blobId), JSON.stringify(ready))
 
-    // 4. ATTACHMENT 作为 NEW_SESSION 首条消息原子物化：durable resource + requestHash。
+    // 4. ATTACHMENT 作为 NEW_SESSION 首条消息原子物化：durable resource。
     const sessionId = cid()
     const threadId = cid()
-    const clientCommandId = cid()
+    const idempotencyKey = cid()
     const attachmentCommand = {
       type: 'USER_MESSAGE',
-      clientCommandId,
+      idempotencyKey,
       contents: [{ type: 'ATTACHMENT', uploadId }],
     }
-    const accepted = await materializeNewSession(ctx, {
+    const accepted = await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       threadId,
@@ -116,15 +116,15 @@ registerCase({
     })
     const command = accepted.acceptedCommands[0]
     assert(command.type === 'USER_MESSAGE', JSON.stringify(command))
-    assert(/^[0-9a-f]{64}$/.test(String(command.requestHash)), JSON.stringify(command))
-    assert(String(command.clientCommandId) === clientCommandId, JSON.stringify(command))
+    assert(/^[1-9]\d*$/.test(String(command.sequence)), JSON.stringify(command))
+    assert(String(command.idempotencyKey) === idempotencyKey, JSON.stringify(command))
     const payload = JSON.parse(command.payloadJson)
     assert(payload.message.contents[0].type === 'resource', JSON.stringify(payload))
     assert(String(payload.message.contents[0].blobId) === blobId, JSON.stringify(payload))
     assert(payload.message.contents[0].name === 'e2e-attachment.txt', JSON.stringify(payload))
 
-    // 5. 整批精确重放：replayed=true，返回既有命令（requestHash 一致），不二次消费。
-    const replayed = await materializeNewSession(ctx, {
+    // 5. 整批精确重放：replayed=true，返回既有命令（payloadJson 一致），不二次消费。
+    const replayed = await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       threadId,
@@ -133,7 +133,7 @@ registerCase({
       commands: [attachmentCommand],
     })
     assert(replayed.replayed === true, JSON.stringify(replayed))
-    assert(String(replayed.acceptedCommands[0].requestHash) === String(command.requestHash), JSON.stringify(replayed))
+    assert(String(replayed.acceptedCommands[0].payloadJson) === String(command.payloadJson), JSON.stringify(replayed))
     await waitForQuiescentThread(ctx, String(threadId), {
       timeoutMs: 60_000,
       intervalMs: 100,
@@ -144,7 +144,7 @@ registerCase({
     // 6. Stop/草稿恢复使用的 RESOURCE 可在同 Session 重提，不需要已消费的 upload handle。
     const resourceCommand = {
       type: 'USER_MESSAGE',
-      clientCommandId: cid(),
+      idempotencyKey: cid(),
       contents: [{
         type: 'RESOURCE',
         blobId,
@@ -177,13 +177,13 @@ registerCase({
     const rejectedThreadId = cid()
     await expectHttpError(
       () =>
-        materializeNewSession(ctx, {
+        createNewSession(ctx, {
           owner: chatOwner(chat.id),
           sessionId: rejectedSessionId,
           threadId: rejectedThreadId,
           rootSettings,
           yoloEnabled: false,
-          commands: [{ ...resourceCommand, clientCommandId: cid() }],
+          commands: [{ ...resourceCommand, idempotencyKey: cid() }],
         }),
       { status: 400 },
     )
@@ -203,7 +203,7 @@ registerCase({
             expectedNextCommandSequence: snapshotAfterResource.thread.nextCommandSequence,
           }),
           commands: [
-            { type: 'USER_MESSAGE', clientCommandId: cid(), contents: [{ type: 'ATTACHMENT', uploadId }] },
+            { type: 'USER_MESSAGE', idempotencyKey: cid(), contents: [{ type: 'ATTACHMENT', uploadId }] },
           ],
         }),
       { status: 400 },
@@ -223,7 +223,7 @@ registerCase({
             commands: [
               {
                 type: 'USER_MESSAGE',
-                clientCommandId: cid(),
+                idempotencyKey: cid(),
                 contents: [{ type: media, mediaType: 'image/png', source: 'https://cdn.example.com/x.png' }],
               },
             ],
@@ -252,7 +252,7 @@ registerCase({
           commands: [
             {
               type: 'USER_MESSAGE',
-              clientCommandId: cid(),
+              idempotencyKey: cid(),
               contents: [{ type: 'ATTACHMENT', uploadId: pendingUploadId }],
             },
           ],
@@ -334,7 +334,7 @@ registerCase({
       // 首轮只建立并静止 Thread，避免 Agent 更新与同一轮解析竞态。
       const sessionId = cid()
       const createdThreadId = cid()
-      const firstAccepted = await materializeNewSession(ctx, {
+      const firstAccepted = await createNewSession(ctx, {
         owner: chatOwner(chat.id),
         sessionId,
         threadId: createdThreadId,
@@ -350,7 +350,7 @@ registerCase({
         commands: [
           {
             type: 'USER_MESSAGE',
-            clientCommandId: cid(),
+            idempotencyKey: cid(),
             contents: [{ type: 'TEXT', text: `establish existing thread ${suffix}` }],
           },
         ],
@@ -406,7 +406,7 @@ registerCase({
         commands: [
           {
             type: 'USER_MESSAGE',
-            clientCommandId: cid(),
+            idempotencyKey: cid(),
             contents: [
               { type: 'TEXT', text: `inspect inline image ${suffix}` },
               { type: 'ATTACHMENT', uploadId },

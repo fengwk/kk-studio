@@ -76,7 +76,7 @@ export function buildThreadTimeline(
       continue
     }
     queuedMessages.push({
-      clientCommandId: command.clientCommandId,
+      idempotencyKey: command.idempotencyKey,
       role: queuedMessage.role,
       text: queuedMessage.text,
       sequence: command.sequence,
@@ -147,7 +147,7 @@ function projectModelAttemptFailures(
         nextAttempt: failure.attempt + 1,
         modelInvocationId: liveRetry ? failure.modelInvocationId : undefined,
         turnStartEntryId: failure.turnStartEntryId,
-        basisHeadEntryId: failure.basisHeadEntryId,
+        requestHeadEntryId: failure.requestHeadEntryId,
       }),
     )
   }
@@ -271,7 +271,7 @@ function isProjectableModelAttemptFailure(failure: ModelAttemptFailureDTO): bool
   return Boolean(
     failure.modelInvocationId
     && failure.turnStartEntryId
-    && failure.basisHeadEntryId
+    && failure.requestHeadEntryId
     && Number.isSafeInteger(failure.attempt)
     && failure.attempt > 0
     && isCanonicalNonNegativeDecimal(failure.sequence)
@@ -298,12 +298,12 @@ function projectInvocationOverlays(
   if (toolInvocations.length === 0) {
     return
   }
-  // 持久身份键（assistantEntryId, ordinal）：一次 invocation 只属于一个 assistant Entry 的
+  // 持久身份键（assistantEntryId, callIndex）：一次 invocation 只属于一个 assistant Entry 的
   // 一个调用位置。复用的 toolCallId 出现在不同的 assistant Entry 上时，绝不能接收该
   // invocation 的 overlay，因此不存在「第一个候选」回退。
   const byDurableIdentity = new Map<string, ToolInvocationDTO>()
   for (const invocation of toolInvocations) {
-    const key = `${invocation.assistantEntryId}:${invocation.ordinal}`
+    const key = `${invocation.assistantEntryId}:${invocation.callIndex}`
     if (!byDurableIdentity.has(key)) {
       byDurableIdentity.set(key, invocation)
     }

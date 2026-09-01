@@ -7,7 +7,7 @@ import {
   chatOwner,
   createChat,
   getThreadSnapshot,
-  materializeNewSession,
+  createNewSession,
   setAgentCommand,
   setEnvironmentCommand,
   setModelCommand,
@@ -759,7 +759,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     const owner = chatOwner(state.chat.id)
     const sessionId = cid()
     const threadId = cid()
-    await materializeNewSession(apiCtx, {
+    await createNewSession(apiCtx, {
       owner,
       sessionId,
       threadId,
@@ -883,7 +883,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     const sessionId = cid()
     const threadId = cid()
     // 先用不存在的 Agent 确定性物化空闲 Thread；浏览器绑定后 start 经 THREAD batch 启动 task。
-    await materializeNewSession(apiCtx, {
+    await createNewSession(apiCtx, {
       owner,
       sessionId,
       threadId,
@@ -1033,7 +1033,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     const owner = chatOwner(state.chat.id)
     const sessionId = cid()
     const threadId = cid()
-    await materializeNewSession(apiCtx, {
+    await createNewSession(apiCtx, {
       owner,
       sessionId,
       threadId,

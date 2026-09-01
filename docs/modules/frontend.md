@@ -262,8 +262,8 @@ Chat Pane 有两个正交维度：布局状态和 target 状态。布局是
 
 | Pane target | 入口 | 本地事实 | 发送后的结果 |
 | --- | --- | --- | --- |
-| `NEW_SESSION_DRAFT` | 新建 Pane/Chat，尚无 Session | `BranchDraft`、ordered Composer parts、未发送 settings | 原子 `NEW_SESSION` materialization，成功后绑定新 Thread |
-| `ENTRY_DRAFT` | `/tree` 选择同一 Session 的历史 Entry | `sessionId + startEntryId`、BranchDraft、Composer parts | 原子 `ENTRY` materialization，建立新 Thread 的分支 |
+| `NEW_SESSION_DRAFT` | 新建 Pane/Chat，尚无 Session | `BranchDraft`、ordered Composer parts、未发送 settings | 原子 `NEW_SESSION` 初始创建，成功后绑定新 Thread |
+| `ENTRY_DRAFT` | `/tree` 选择同一 Session 的历史 Entry | `sessionId + startEntryId`、BranchDraft、Composer parts | 原子 `ENTRY` 初始创建，建立新 Thread 的分支 |
 | `BOUND_THREAD` | 已加载 Thread snapshot | Thread `branchSettings`、head、version、next command sequence | `THREAD` target 携带精确 cursor，batch 进入 mailbox |
 
 `PendingAcceptance` 按 owner 和 pane id 写入 localStorage，包含 frozen request、
@@ -300,8 +300,9 @@ sequenceDiagram
 - `BOUND_THREAD` 的 target 是 `THREAD`，带
   `expectedHeadEntryId` 和 `expectedNextCommandSequence`；YOLO 是
   `PUT /yolo` 的直接控制面，不进入 mailbox。
-- 每条 command 有 UUID `clientCommandId`；后端 response 的 `requestHash`
-  是 raw command canonical SHA-256 的 64 位小写 hex。
+- 每条 command 有 UUID `idempotencyKey`，与 raw command canonical SHA-256
+  （64 位小写 hex）一起构成服务端 ordered replay 幂等键；响应 DTO 只回
+  `idempotencyKey` 与派生 `state`，不回内部 hash 与 applied/cancel marker。
 - 网络或其它不确定失败保留 exact replay（相同 id、payload、顺序和原始
   cursor）；明确 4xx 恢复本地 Composer parts。只有
   `STALE_COMMAND_CURSOR` 且仍是同一 branch 的纯 message batch 才读取最新
@@ -401,7 +402,7 @@ sequenceDiagram
   participant S as Authoritative Snapshot
 
   U->>Q: typed command batch
-  Q->>H: expectedVersion + commandId + commands
+  Q->>H: expectedVersion + idempotencyKey + commands
   H-->>Q: baseVersion -> version patch
   Q->>Q: applyEntityPatch
   Q-->>U: local snapshot + query cache update
@@ -412,7 +413,7 @@ sequenceDiagram
 
 [CanvasCommandQueue](../../frontend/src/features/canvas/command-queue.ts) 串行化
 浏览器操作；每批以当前 snapshot 的 `expectedVersion` 和 UUID
-`commandId` 提交。响应是 graph patch：
+`idempotencyKey` 提交。响应是 graph patch：
 
 - `applyEntityPatch` 先要求 `patch.version > snapshot.version` 且
   `patch.baseVersion === snapshot.version`，再分别 upsert/remove nodes、groups、

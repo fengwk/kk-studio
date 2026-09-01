@@ -31,7 +31,7 @@ class ToolInvocationTest {
     ToolInvocation waiting =
         invocation(ToolInvocationStatus.WAITING_APPROVAL, 0, requiredUndecided(), null, null);
     assertEquals(ToolInvocationStatus.WAITING_APPROVAL, waiting.status());
-    assertEquals(0, waiting.ordinal());
+    assertEquals(0, waiting.callIndex());
     assertEquals(id(1L), waiting.modelInvocationId());
     assertEquals(id(1L), waiting.assistantEntryId());
     assertTrue(waiting.approval().required());

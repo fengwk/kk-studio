@@ -246,7 +246,7 @@ class StudioCanvasControllerTest {
         .thenReturn(patch());
     ApplyCanvasCommandsRequestDTO request = new ApplyCanvasCommandsRequestDTO();
     request.setExpectedVersion("2");
-    request.setCommandId(COMMAND.toString());
+    request.setIdempotencyKey(COMMAND.toString());
     request.setCommands(
         List.of(
             new CanvasCommandDTO.CreateTextNode(
@@ -283,7 +283,7 @@ class StudioCanvasControllerTest {
     when(commandService.applyCommands(any(UUID.class), anyLong(), any(UUID.class), anyList()))
         .thenReturn(patch());
     String commands =
-        "\"commandId\":\"%s\",\"commands\":[{\"type\":\"DELETE_NODE\",\"nodeId\":\"%s\"}]"
+        "\"idempotencyKey\":\"%s\",\"commands\":[{\"type\":\"DELETE_NODE\",\"nodeId\":\"%s\"}]"
             .formatted(COMMAND, NODE_1);
 
     // 公共契约是 string；JSON number 经 Jackson coercion 兼容接受（同一严格校验）。
@@ -362,7 +362,7 @@ class StudioCanvasControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
-                    {"expectedVersion":3,"commandId":"%s","extra":true,
+                    {"expectedVersion":3,"idempotencyKey":"%s","extra":true,
                      "commands":[{"type":"DELETE_NODE","nodeId":"%s"}]}
                     """
                         .formatted(COMMAND, NODE_1)))
@@ -373,7 +373,7 @@ class StudioCanvasControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
-                    {"expectedVersion":3,"commandId":"%s",
+                    {"expectedVersion":3,"idempotencyKey":"%s",
                      "commands":[{"type":"OLD_COMMAND"}]}
                     """
                         .formatted(COMMAND)))
@@ -384,7 +384,7 @@ class StudioCanvasControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
-                    {"expectedVersion":3,"commandId":"%s",
+                    {"expectedVersion":3,"idempotencyKey":"%s",
                      "commands":[{"type":"DELETE_NODE","nodeId":"%s","legacy":true}]}
                     """
                         .formatted(COMMAND, NODE_1)))
@@ -410,7 +410,7 @@ class StudioCanvasControllerTest {
 
   private String validCommandJson() {
     return """
-        {"expectedVersion":"3","commandId":"%s",
+        {"expectedVersion":"3","idempotencyKey":"%s",
          "commands":[{"type":"DELETE_NODE","nodeId":"%s"}]}
         """
         .formatted(COMMAND, NODE_1);

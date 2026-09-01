@@ -162,21 +162,18 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals("MESSAGE", user.getEntryType());
 
     ThreadCommand queued = HarnessRuntimeTestFixtures.queuedUserMessageCommand();
-    ThreadCommand applied = queued.consume(id(2));
+    ThreadCommand applied = queued.markApplied(id(2));
     ThreadCommand cancelled = queued.cancel(id(90), NOW.plusSeconds(1));
     HarnessThreadCommandDTO queuedDto = HarnessRuntimeResponseMapper.toCommandDto(queued);
     HarnessThreadCommandDTO appliedDto = HarnessRuntimeResponseMapper.toCommandDto(applied);
     HarnessThreadCommandDTO cancelledDto = HarnessRuntimeResponseMapper.toCommandDto(cancelled);
 
     assertEquals("QUEUED", queuedDto.getState());
-    assertNull(queuedDto.getConsumedTurnStartEntryId());
     assertNull(queuedDto.getCancelledAt());
     assertEquals("APPLIED", appliedDto.getState());
-    assertEquals(idText(2), appliedDto.getConsumedTurnStartEntryId());
     assertEquals("CANCELLED", cancelledDto.getState());
     assertEquals(NOW.plusSeconds(1), cancelledDto.getCancelledAt());
     assertEquals("4", queuedDto.getSequence());
-    assertEquals(queued.requestHash(), queuedDto.getRequestHash());
     assertEquals(NOW, queuedDto.getCreateTime());
   }
 
@@ -215,7 +212,7 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(idText(10), failedDto.getId());
     assertEquals(idText(1), failedDto.getThreadId());
     assertEquals(idText(2), failedDto.getTurnStartEntryId());
-    assertEquals(idText(3), failedDto.getBasisHeadEntryId());
+    assertEquals(idText(3), failedDto.getRequestHeadEntryId());
     assertEquals("FAILED", failedDto.getStatus());
     assertEquals(1, failedDto.getAttempt());
     assertEquals(NOW, failedDto.getCreateTime());
@@ -265,7 +262,7 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(idText(100), unboundDto.getId());
     assertEquals(idText(10), unboundDto.getModelInvocationId());
     assertEquals(idText(4), unboundDto.getAssistantEntryId());
-    assertEquals(0, unboundDto.getOrdinal());
+    assertEquals(0, unboundDto.getCallIndex());
     assertEquals("call-1", unboundDto.getToolCallId());
     assertEquals("{\"x\":1}", unboundDto.getArgumentsJson());
     assertEquals(NOW, unboundDto.getCreateTime());
@@ -363,7 +360,7 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(NOW, dto.getSession().getCreatedAt());
     assertEquals("ROOT", dto.getRootEntry().getEntryType());
     assertEquals(idText(1), dto.getThread().getThreadId());
-    assertEquals(idText(50), dto.getAcceptedCommands().getFirst().getClientCommandId());
+    assertEquals(idText(50), dto.getAcceptedCommands().getFirst().getIdempotencyKey());
     assertTrue(dto.getReplayed());
     assertThrows(
         IllegalArgumentException.class,
@@ -574,12 +571,12 @@ class HarnessRuntimeResponseMapperTest {
       ModelInvocationError error,
       UUID resultEntryId,
       int attempt,
-      UUID basisHeadEntryId) {
+      UUID requestHeadEntryId) {
     ModelInvocation invocation = mock(ModelInvocation.class);
     when(invocation.id()).thenReturn(id(10));
     when(invocation.threadId()).thenReturn(id(1));
     when(invocation.turnStartEntryId()).thenReturn(id(2));
-    when(invocation.basisHeadEntryId()).thenReturn(basisHeadEntryId);
+    when(invocation.requestHeadEntryId()).thenReturn(requestHeadEntryId);
     when(invocation.status()).thenReturn(status);
     when(invocation.attempt()).thenReturn(attempt);
     when(invocation.streamCheckpoint()).thenReturn(checkpoint);
@@ -602,7 +599,7 @@ class HarnessRuntimeResponseMapperTest {
     when(invocation.id()).thenReturn(id(100));
     when(invocation.modelInvocationId()).thenReturn(id(10));
     when(invocation.assistantEntryId()).thenReturn(id(4));
-    when(invocation.ordinal()).thenReturn(0);
+    when(invocation.callIndex()).thenReturn(0);
     when(invocation.status()).thenReturn(status);
     when(invocation.attempt()).thenReturn(attempt);
     when(invocation.call()).thenReturn(new ToolCall("call-1", "bash", "{\"x\":1}"));
@@ -702,7 +699,7 @@ class HarnessRuntimeResponseMapperTest {
             thread.id(),
             thread.sessionId(),
             thread.headEntryId(),
-            thread.materializationHash(),
+            thread.creationRequestHash(),
             thread.yoloEnabled(),
             thread.nextCommandSequence(),
             version,

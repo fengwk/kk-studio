@@ -11,7 +11,7 @@ import java.util.UUID;
 /**
  * 不可变的单次命令接受请求：sealed {@link AcceptCommandsTarget} + 本批 ordered Commands。
  *
- * <p>同一次创建（NEW_SESSION / ENTRY）的幂等键由 target 内的预分配 id 与 {@code materializationHash} 派生，不额外携带 request
+ * <p>同一次创建（NEW_SESSION / ENTRY）的幂等键由 target 内的预分配 id 与 {@code creationRequestHash} 派生，不额外携带 request
  * id。
  */
 public record AcceptCommandsCommand(AcceptCommandsTarget target, List<NewThreadCommand> commands) {
@@ -27,12 +27,12 @@ public record AcceptCommandsCommand(AcceptCommandsTarget target, List<NewThreadC
       throw new IllegalArgumentException("commands must not be empty");
     }
     List<NewThreadCommand> copied = List.copyOf(commands);
-    Set<UUID> clientCommandIds = new HashSet<>();
+    Set<UUID> idempotencyKeys = new HashSet<>();
     for (NewThreadCommand command : copied) {
       Objects.requireNonNull(command, "commands[]");
-      if (!clientCommandIds.add(command.clientCommandId())) {
+      if (!idempotencyKeys.add(command.idempotencyKey())) {
         throw new IllegalArgumentException(
-            "commands must not contain duplicate clientCommandId: " + command.clientCommandId());
+            "commands must not contain duplicate idempotencyKey: " + command.idempotencyKey());
       }
     }
     return copied;

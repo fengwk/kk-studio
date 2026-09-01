@@ -18,8 +18,8 @@ import {
   listChatSessions,
   listSessionEntries,
   listSessionThreads,
-  materializeEntryThread,
-  materializeNewSession,
+  createEntryThread,
+  createNewSession,
   setAgentCommand,
   setEnvironmentCommand,
   setModelCommand,
@@ -163,7 +163,7 @@ registerCase({
   id: 'thread.new_session_submission_atomic',
   level: 'L1',
   title: 'NEW_SESSION 原子物化返回完整 accepted 快照',
-  docs: 'POST /api/ai/runtime/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、version >= 1；accepted command 的 sequence=1、requestHash 为 64 位小写 hex；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
+  docs: 'POST /api/ai/runtime/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、version >= 1；accepted command 的 sequence=1；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -174,7 +174,7 @@ registerCase({
     })
     const sessionId = cid()
     const threadId = cid()
-    const accepted = await materializeNewSession(ctx, {
+    const accepted = await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       threadId,
@@ -201,10 +201,6 @@ registerCase({
     const acceptedCommand = accepted.acceptedCommands[0]
     assert(acceptedCommand.type === 'USER_MESSAGE', JSON.stringify(acceptedCommand))
     assert(String(acceptedCommand.sequence) === '1', JSON.stringify(acceptedCommand))
-    assert(
-      /^[0-9a-f]{64}$/.test(String(acceptedCommand.requestHash)),
-      `requestHash must be 64 lower hex: ${JSON.stringify(acceptedCommand)}`,
-    )
     for (const hidden of [
       'executionEpoch',
       'environment',
@@ -245,7 +241,7 @@ registerCase({
       agentName: ctx.vars.agent.name,
       model: modelSelectionOf(ctx),
     }
-    const accepted = await materializeNewSession(ctx, {
+    const accepted = await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId: cid(),
       threadId: cid(),
@@ -273,7 +269,7 @@ registerCase({
   id: 'thread.user_message_strict_wire',
   level: 'L1',
   title: 'USER_MESSAGE 严格结构化 contents 与 exact replay',
-  docs: 'USER_MESSAGE 只接受一个非空有序 contents 列表（TEXT/ATTACHMENT/RESOURCE）；本免费 case 覆盖 TEXT 正向与 text/content shorthand、role、未知字段、空 contents、IMAGE/AUDIO/VIDEO、非 canonical uploadId 等非法 shape；RESOURCE 正向与 Session ownership 由 chat.attachment_upload_contract 覆盖。202 payloadJson 是 canonical AgentMessage 且响应携带 64 位小写 hex requestHash；同 batch exact replay 返回既有命令（sequence/requestHash 稳定）',
+  docs: 'USER_MESSAGE 只接受一个非空有序 contents 列表（TEXT/ATTACHMENT/RESOURCE）；本免费 case 覆盖 TEXT 正向与 text/content shorthand、role、未知字段、空 contents、IMAGE/AUDIO/VIDEO、非 canonical uploadId 等非法 shape；RESOURCE 正向与 Session ownership 由 chat.attachment_upload_contract 覆盖。202 payloadJson 是 canonical AgentMessage；同 batch exact replay 返回既有命令（sequence/payloadJson 稳定）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -285,7 +281,7 @@ registerCase({
     })
     const sessionId = cid()
     const threadId = cid()
-    await materializeNewSession(ctx, {
+    await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       threadId,
@@ -296,24 +292,24 @@ registerCase({
       yoloEnabled: false,
       commands: [userMessageCommand(`wire materialize ${cid().slice(0, 8)}`, cid())],
     })
-    const singleClientCommandId = cid()
-    const structuredClientCommandId = cid()
-    const secondClientCommandId = cid()
+    const singleIdempotencyKey = cid()
+    const structuredIdempotencyKey = cid()
+    const secondIdempotencyKey = cid()
     const commandsOf = () => [
       {
         type: 'USER_MESSAGE',
-        clientCommandId: singleClientCommandId,
+        idempotencyKey: singleIdempotencyKey,
         contents: [{ type: 'TEXT', text: 'strict wire probe' }],
       },
       {
         type: 'USER_MESSAGE',
-        clientCommandId: structuredClientCommandId,
+        idempotencyKey: structuredIdempotencyKey,
         contents: [
           { type: 'TEXT', text: 'animate this' },
           { type: 'TEXT', text: 'and this' },
         ],
       },
-      userMessageCommand('second probe', secondClientCommandId),
+      userMessageCommand('second probe', secondIdempotencyKey),
     ]
     // 产品 HTTP 面：一个 batch 只能恰一条 USER_MESSAGE，三条 USER_MESSAGE 必须拆批。
     // 为保留原 case 对严格 wire + exact replay 的完整覆盖，这里逐条入队后再整体 replay。
@@ -343,8 +339,8 @@ registerCase({
       assert(
         String(replayAccepted.acceptedCommands[0].sequence)
           === String(acceptedList.at(-1).sequence)
-          && String(replayAccepted.acceptedCommands[0].requestHash)
-            === String(acceptedList.at(-1).requestHash),
+          && String(replayAccepted.acceptedCommands[0].payloadJson)
+            === String(acceptedList.at(-1).payloadJson),
         `replay must return the existing command: ${JSON.stringify({
           original: acceptedList.at(-1),
           replay: replayAccepted.acceptedCommands[0],
@@ -358,11 +354,11 @@ registerCase({
     const commandsDto = acceptedList
     assert(commandsDto.length === 3, JSON.stringify(commandsDto))
     const command = commandsDto[0]
-    assert(String(command.clientCommandId) === singleClientCommandId, JSON.stringify(command))
+    assert(String(command.idempotencyKey) === singleIdempotencyKey, JSON.stringify(command))
     assert(commandsDto.every((item) => item.type === 'USER_MESSAGE' && item.state === 'QUEUED'), JSON.stringify(commandsDto))
     assert(commandsDto.every((item) => String(item.threadId) === threadId), JSON.stringify(commandsDto))
     assert(commandsDto.every((item) => /^[1-9]\d*$/.test(String(item.sequence))), JSON.stringify(commandsDto))
-    assert(commandsDto.every((item) => /^[0-9a-f]{64}$/.test(String(item.requestHash))), JSON.stringify(commandsDto))
+    assert(commandsDto.every((item) => /^[1-9]\d*$/.test(String(item.sequence))), JSON.stringify(commandsDto))
     const payload = JSON.parse(commandsDto[0].payloadJson)
     assert(
       isDeepStrictEqual(payload, { message: { role: 'USER', contents: [{ type: 'text', text: 'strict wire probe' }] } }),
@@ -407,23 +403,23 @@ registerCase({
 
     // 文本 shorthand（text / content）已从 USER_MESSAGE wire 移除。
     // 未知字段在 Jackson 反序列化层即拒绝（detail 为通用 "Failed to read request"）。
-    await expectInvalidUserCommand({ type: 'USER_MESSAGE', clientCommandId: cid(), text: 'x' })
+    await expectInvalidUserCommand({ type: 'USER_MESSAGE', idempotencyKey: cid(), text: 'x' })
     await expectInvalidUserCommand(
-      { type: 'USER_MESSAGE', clientCommandId: cid(), content: 'x' },
+      { type: 'USER_MESSAGE', idempotencyKey: cid(), content: 'x' },
       { status: 400 },
     )
     // 多余字段（role 等）与缺少 contents 字段均确定性 400。
     await expectInvalidUserCommand(
       {
         type: 'USER_MESSAGE',
-        clientCommandId: cid(),
+        idempotencyKey: cid(),
         contents: [{ type: 'TEXT', text: 'x' }],
         role: 'USER',
       },
       { status: 400 },
     )
     await expectInvalidUserCommand(
-      { type: 'USER_MESSAGE', clientCommandId: cid() },
+      { type: 'USER_MESSAGE', idempotencyKey: cid() },
       { status: 400, messageIncludes: /contents/i },
     )
     // IMAGE/AUDIO/VIDEO 内容类型已从 wire 契约移除。
@@ -434,7 +430,7 @@ registerCase({
     ]) {
       await expectInvalidUserCommand({
         type: 'USER_MESSAGE',
-        clientCommandId: cid(),
+        idempotencyKey: cid(),
         contents: [{ type, mediaType, source }],
       })
     }
@@ -442,14 +438,14 @@ registerCase({
     await expectInvalidUserCommand(
       {
         type: 'USER_MESSAGE',
-        clientCommandId: cid(),
+        idempotencyKey: cid(),
         contents: [{ type: 'ATTACHMENT', uploadId: 'not-a-uuid' }],
       },
       { status: 400, messageIncludes: /uploadId/i },
     )
     await expectInvalidUserCommand({
       type: 'USER_MESSAGE',
-      clientCommandId: cid(),
+      idempotencyKey: cid(),
       contents: [{ type: 'ATTACHMENT', uploadId: cid() }],
     })
   },
@@ -470,7 +466,7 @@ registerCase({
     })
     const sessionId = cid()
     const threadId = cid()
-    await materializeNewSession(ctx, {
+    await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       threadId,
@@ -501,7 +497,7 @@ registerCase({
           acceptCommandBatch(ctx, {
             ...cursor(),
             commands: [
-              { type: 'CUSTOM_MESSAGE', role, clientCommandId: cid(), content: 'x' },
+              { type: 'CUSTOM_MESSAGE', role, idempotencyKey: cid(), content: 'x' },
             ],
           }),
         { status: 400 },
@@ -536,7 +532,7 @@ registerCase({
       () =>
         acceptCommandBatch(ctx, {
           ...cursor(),
-          commands: [{ type: 'RENAME_THREAD', clientCommandId: cid() }],
+          commands: [{ type: 'RENAME_THREAD', idempotencyKey: cid() }],
         }),
       { status: 400, messageIncludes: /type/i },
     )
@@ -554,8 +550,8 @@ registerCase({
 registerCase({
   id: 'thread.command_idempotent_replay',
   level: 'L1',
-  title: 'clientCommandId 幂等 replay 与部分重放拒绝',
-  docs: '整批同 clientCommandId 重放 => replayed=true 且返回既有命令（无副作用）；仅部分存在 => 409 PARTIAL_COMMAND_REPLAY',
+  title: 'idempotencyKey 幂等 replay 与部分重放拒绝',
+  docs: '整批同 idempotencyKey 重放 => replayed=true 且返回既有命令（无副作用）；仅部分存在 => 409 PARTIAL_COMMAND_REPLAY',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -566,7 +562,7 @@ registerCase({
     })
     const sessionId = cid()
     const threadId = cid()
-    await materializeNewSession(ctx, {
+    await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       threadId,
@@ -580,7 +576,7 @@ registerCase({
     await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
     const idle = await getThreadSnapshot(ctx, threadId)
     const thread = idle.thread
-    const clientCommandId = cid()
+    const idempotencyKey = cid()
     const batch = () => ({
       owner: chatOwner(chat.id),
       target: threadTarget({
@@ -588,7 +584,7 @@ registerCase({
         expectedHeadEntryId: thread.headEntryId,
         expectedNextCommandSequence: thread.nextCommandSequence,
       }),
-      commands: [userMessageCommand('idempotent replay', clientCommandId)],
+      commands: [userMessageCommand('idempotent replay', idempotencyKey)],
     })
     const first = await acceptCommandBatch(ctx, batch())
     assert(first.replayed === false, JSON.stringify(first))
@@ -596,7 +592,7 @@ registerCase({
     assert(replay.replayed === true, JSON.stringify(replay))
     assert(
       String(replay.acceptedCommands[0].sequence) === String(first.acceptedCommands[0].sequence)
-        && String(replay.acceptedCommands[0].requestHash) === String(first.acceptedCommands[0].requestHash),
+        && String(replay.acceptedCommands[0].payloadJson) === String(first.acceptedCommands[0].payloadJson),
       `replay must return the existing command: ${JSON.stringify({ first, replay })}`,
     )
     // 部分重放：HTTP 面 shape 限制一个 batch 恰一条 USER_MESSAGE，因此用
@@ -608,7 +604,7 @@ registerCase({
           ...batch(),
           commands: [
             setAgentCommand('x', cid()),
-            userMessageCommand('replayed again', clientCommandId),
+            userMessageCommand('replayed again', idempotencyKey),
           ],
         }),
       { status: 409, messageIncludes: /PARTIAL_COMMAND_REPLAY|replays only/i },
@@ -630,7 +626,7 @@ registerCase({
     })
     const sessionId = cid()
     const threadId = cid()
-    await materializeNewSession(ctx, {
+    await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       threadId,
@@ -705,7 +701,7 @@ registerCase({
     })
     const sessionId = cid()
     const threadId = cid()
-    const accepted = await materializeNewSession(ctx, {
+    const accepted = await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       threadId,
@@ -727,7 +723,7 @@ registerCase({
     }
     const branchThreadId = cid()
     const branchUserText = `branch on head ${cid().slice(0, 8)}`
-    const branched = await materializeEntryThread(ctx, {
+    const branched = await createEntryThread(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       startEntryId,
@@ -787,7 +783,7 @@ registerCase({
     // 不存在的 startEntryId => 404（Runtime 找不到 Entry）。
     await expectHttpError(
       () =>
-        materializeEntryThread(ctx, {
+        createEntryThread(ctx, {
           owner: chatOwner(chat.id),
           sessionId,
           startEntryId: cid(),
@@ -819,7 +815,7 @@ registerCase({
     })
     const sessionId = cid()
     const threadId = cid()
-    await materializeNewSession(ctx, {
+    await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       threadId,
@@ -849,7 +845,7 @@ registerCase({
 
     // 分支：ENTRY 在 branchPoint 下开新 Thread，写 alternate。
     const alternateThreadId = cid()
-    await materializeEntryThread(ctx, {
+    await createEntryThread(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       startEntryId: branchPointEntryId,
@@ -927,7 +923,7 @@ registerCase({
     })
     const firstSessionId = cid()
     const firstThreadId = cid()
-    await materializeNewSession(ctx, {
+    await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId: firstSessionId,
       threadId: firstThreadId,
@@ -940,7 +936,7 @@ registerCase({
     })
     const secondSessionId = cid()
     const secondThreadId = cid()
-    await materializeNewSession(ctx, {
+    await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId: secondSessionId,
       threadId: secondThreadId,
@@ -974,7 +970,7 @@ registerCase({
     const rejectedThreadId = cid()
     await expectHttpError(
       () =>
-        materializeEntryThread(ctx, {
+        createEntryThread(ctx, {
           owner: chatOwner(chat.id),
           sessionId: firstSessionId,
           startEntryId: secondRootEntryId,
@@ -1037,7 +1033,7 @@ registerCase({
       yoloEnabled: false,
     })
     const threadId = cid()
-    await materializeNewSession(ctx, {
+    await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId: cid(),
       threadId,
@@ -1092,7 +1088,7 @@ registerCase({
       yoloEnabled: false,
     })
     const threadId = cid()
-    await materializeNewSession(ctx, {
+    await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId: cid(),
       threadId,
@@ -1213,7 +1209,7 @@ registerCase({
             expectedHeadEntryId: fresh.thread.headEntryId,
             expectedNextCommandSequence: fresh.thread.nextCommandSequence,
           }),
-          commands: [{ type: 'RENAME_THREAD', clientCommandId: cid() }],
+          commands: [{ type: 'RENAME_THREAD', idempotencyKey: cid() }],
         }),
       { status: 400, messageIncludes: /type/i },
     )
@@ -1229,7 +1225,7 @@ registerCase({
           commands: [
             {
               type: 'SET_AGENT',
-              clientCommandId: cid(),
+              idempotencyKey: cid(),
               agentName: 'x',
               unexpected: true,
             },
@@ -1247,7 +1243,7 @@ registerCase({
             expectedHeadEntryId: fresh.thread.headEntryId,
             expectedNextCommandSequence: fresh.thread.nextCommandSequence,
           }),
-          commands: [{ type: 'SET_ENVIRONMENT', clientCommandId: cid() }],
+          commands: [{ type: 'SET_ENVIRONMENT', idempotencyKey: cid() }],
         }),
       { status: 400, messageIncludes: /environment/i },
     )
@@ -1264,7 +1260,7 @@ registerCase({
           commands: [
             {
               type: 'SET_MODEL',
-              clientCommandId: cid(),
+              idempotencyKey: cid(),
               model: {
                 providerName: modelSelection.providerName,
                 modelName: modelSelection.modelName,
@@ -1289,7 +1285,7 @@ registerCase({
           commands: [
             {
               type: 'SET_ENVIRONMENT',
-              clientCommandId: cid(),
+              idempotencyKey: cid(),
               environment: { name: 'Not-A-Name', workspacePath: '.' },
             },
           ],
@@ -1313,7 +1309,7 @@ registerCase({
       yoloEnabled: false,
     })
     const threadId = cid()
-    await materializeNewSession(ctx, {
+    await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId: cid(),
       threadId,

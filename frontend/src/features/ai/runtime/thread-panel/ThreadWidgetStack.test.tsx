@@ -7,7 +7,7 @@ describe('ThreadWidgetStack', () => {
     render(
       <ThreadWidgetStack
         working
-        queuedMessages={[{ clientCommandId: 'input-1', role: 'user', text: '下一条消息', sequence: 1 }]}
+        queuedMessages={[{ idempotencyKey: 'input-1', role: 'user', text: '下一条消息', sequence: 1 }]}
       />,
     )
 
@@ -29,7 +29,7 @@ describe('ThreadWidgetStack', () => {
 
   it('scrolls an overflowing queue to the latest message when new input arrives', () => {
     const firstMessage = {
-      clientCommandId: 'input-1',
+      idempotencyKey: 'input-1',
       role: 'user' as const,
       text: '第一条消息',
       sequence: '1',
@@ -50,7 +50,7 @@ describe('ThreadWidgetStack', () => {
         queuedMessages={[
           firstMessage,
           {
-            clientCommandId: 'input-2',
+            idempotencyKey: 'input-2',
             role: 'user',
             text: '最新消息',
             sequence: '2',
@@ -64,7 +64,7 @@ describe('ThreadWidgetStack', () => {
 
   it('does not change the scroll position when the queue does not overflow', () => {
     const firstMessage = {
-      clientCommandId: 'input-1',
+      idempotencyKey: 'input-1',
       role: 'user' as const,
       text: '第一条消息',
       sequence: '1',
@@ -85,7 +85,7 @@ describe('ThreadWidgetStack', () => {
         queuedMessages={[
           firstMessage,
           {
-            clientCommandId: 'input-2',
+            idempotencyKey: 'input-2',
             role: 'user',
             text: '最新消息',
             sequence: '2',

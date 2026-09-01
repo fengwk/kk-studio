@@ -97,7 +97,7 @@ describe('studio service transport adapter', () => {
     expect((await getCanvas(CANVAS_ID)).document.id).toBe(CANVAS_ID)
     expect((await postCanvasCommands(CANVAS_ID, {
       expectedVersion: '3',
-      commandId: ID,
+      idempotencyKey: ID,
       commands: [],
     })).version).toBe('4')
     expect(await listCanvasFunctionModels()).toEqual([{ key: 'image' }])
@@ -120,7 +120,7 @@ describe('studio service transport adapter', () => {
     const controller = new AbortController()
     await createCanvas('Named', { signal: controller.signal })
     await getCanvas(CANVAS_ID, { signal: controller.signal })
-    await postCanvasCommands(CANVAS_ID, { expectedVersion: '3', commandId: ID, commands: [] }, { signal: controller.signal })
+    await postCanvasCommands(CANVAS_ID, { expectedVersion: '3', idempotencyKey: ID, commands: [] }, { signal: controller.signal })
 
     const calls = fetchMock.mock.calls.map(([url, init]: [string, RequestInit]) => ({
       url,
@@ -133,7 +133,7 @@ describe('studio service transport adapter', () => {
     expect(calls[2]).toMatchObject({
       url: `/api/canvases/${CANVAS_ID}/commands`,
       method: 'POST',
-      body: JSON.stringify({ expectedVersion: '3', commandId: ID, commands: [] }),
+      body: JSON.stringify({ expectedVersion: '3', idempotencyKey: ID, commands: [] }),
     })
     for (const call of calls) {
       expect(call.signal).toBe(controller.signal)

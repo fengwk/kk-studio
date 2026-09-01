@@ -197,13 +197,13 @@ export interface CreateCanvasRequestDTO {
 
 /**
  * 命令批请求。expectedVersion 是精确的 graph 版本 CAS 游标（canonical
- * 非负十进制字符串，Java long wire）；commandId 是整批的幂等键（客户端 UUID）。
+ * 非负十进制字符串，Java long wire）；idempotencyKey 是整批的幂等键（客户端 UUID）。
  * 创建类命令额外携带客户端生成的实体 UUID（nodeId/groupId），无时间戳回退；
  * 资源上传句柄由共享存储服务生成，命令只引用 uploadIds。
  */
 export interface ApplyCanvasCommandsRequestDTO {
   expectedVersion: CanvasVersion
-  commandId: UUIDString
+  idempotencyKey: UUIDString
   commands: CanvasCommandDTO[]
 }
 

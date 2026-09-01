@@ -27,32 +27,32 @@ class ModelRequestSpecJsonCodecTest {
 
   @Test
   void roundTripsEnvironmentRequestWithCanonicalJson() {
-    ModelRequestSpec request = environmentModelRequest();
+    ModelRequestSpec requestSpec = environmentModelRequest();
     String expected =
         "{\"providerType\":\"OPENAI\",\"model\":"
-            + modelCodec.encodeDescriptor(request.model())
+            + modelCodec.encodeDescriptor(requestSpec.model())
             + ",\"variant\":"
-            + modelCodec.encodeVariant(request.variant())
+            + modelCodec.encodeVariant(requestSpec.variant())
             + ",\"preambleMessages\":[],\"toolBindings\":["
-            + bindingCodec.encode(request.toolBindings().getFirst())
+            + bindingCodec.encode(requestSpec.toolBindings().getFirst())
             + "],\"skillBindings\":[{\"name\":\"review\",\"description\":\"Review code\","
             + "\"sourceEnvironment\":{\"name\":\"123e4567-e89b-12d3-a456-426614174000\","
             + "\"workspacePath\":\".\"}}],\"subagentBindings\":[],\"cacheControl\":"
-            + providerCodec.encodeCacheControlNode(request.cacheControl())
+            + providerCodec.encodeCacheControlNode(requestSpec.cacheControl())
             + "}";
 
-    assertEquals(expected, codec.encode(request));
-    assertEquals(request, codec.decode(expected));
-    assertEquals(request, codec.decodeNode(codec.encodeNode(request)));
+    assertEquals(expected, codec.encode(requestSpec));
+    assertEquals(requestSpec, codec.decode(expected));
+    assertEquals(requestSpec, codec.decodeNode(codec.encodeNode(requestSpec)));
     assertThrows(
         UnsupportedOperationException.class,
-        () -> codec.decode(expected).toolBindings().add(request.toolBindings().getFirst()));
+        () -> codec.decode(expected).toolBindings().add(requestSpec.toolBindings().getFirst()));
   }
 
   @Test
   void roundTripsFrozenSubagentBindings() {
     ModelRequestSpec base = hostModelRequest();
-    ModelRequestSpec request =
+    ModelRequestSpec requestSpec =
         new ModelRequestSpec(
             base.providerType(),
             base.model(),
@@ -63,12 +63,12 @@ class ModelRequestSpecJsonCodecTest {
             List.of(new SubagentBinding("reviewer", "Review changes")),
             base.cacheControl());
 
-    String encoded = codec.encode(request);
+    String encoded = codec.encode(requestSpec);
     assertTrue(
         encoded.contains(
             "\"subagentBindings\":[{\"name\":\"reviewer\","
                 + "\"description\":\"Review changes\"}]"));
-    assertEquals(request, codec.decode(encoded));
+    assertEquals(requestSpec, codec.decode(encoded));
   }
 
   @Test

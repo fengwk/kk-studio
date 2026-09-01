@@ -85,7 +85,7 @@ class ThreadContextClassifierTest {
   private static final UUID MODEL_ID = id(20);
   private static final UUID OTHER_THREAD_ID = id(999);
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
-  private static final String MATERIALIZATION_HASH =
+  private static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   private final ThreadContextClassifier classifier = new ThreadContextClassifier();
@@ -239,7 +239,7 @@ class ThreadContextClassifierTest {
   }
 
   // -----------------------------------------------------------------------------------------------
-  // 规则 4：head == basis && 结果未挂载
+  // 规则 4：head == requestHead && 结果未挂载
   // -----------------------------------------------------------------------------------------------
 
   @Test
@@ -289,12 +289,12 @@ class ThreadContextClassifierTest {
   }
 
   // -----------------------------------------------------------------------------------------------
-  // 规则 6：其他 head/basis/result 关系一律历史
+  // 规则 6：其他 head/requestHead/result 关系一律历史
   // -----------------------------------------------------------------------------------------------
 
   @Test
   void attachedTerminalModelRelocatedBackToBasisIsIdleOrHistorical() {
-    // head 回到 basis（结果挂在另一 descendant）：head == basis 但 resultEntryId 非空，不重放、不 apply。
+    // head 回到 requestHead（结果挂在另一 descendant）：head == requestHead 但 resultEntryId 非空，不重放、不 apply。
     assertEquals(
         ThreadContext.IdleOrHistorical.class,
         classifier
@@ -314,7 +314,7 @@ class ThreadContextClassifierTest {
 
   @Test
   void terminalModelOnDescendantHeadIsIdleOrHistorical() {
-    // head relocation 到 basis 的 descendant（独立 ASSISTANT）：terminal 未挂结果但不再 applicable。
+    // head relocation 到 requestHead 的 descendant（独立 ASSISTANT）：terminal 未挂结果但不再 applicable。
     EntryPath path = assistantPath(List.of());
     assertEquals(
         ThreadContext.IdleOrHistorical.class,
@@ -348,7 +348,7 @@ class ThreadContextClassifierTest {
 
   @Test
   void toolSiblingsWithoutResultHeadAreInvariantError() {
-    // 结果未挂载（head == basis）时不允许携带 siblings：siblings 只可能来自结果 head。
+    // 结果未挂载（head == requestHead）时不允许携带 siblings：siblings 只可能来自结果 head。
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -669,7 +669,7 @@ class ThreadContextClassifierTest {
 
   private static ThreadState thread(UUID headEntryId) {
     return new ThreadState(
-        THREAD_ID, SESSION_ID, headEntryId, MATERIALIZATION_HASH, false, 1, 0, NOW, NOW);
+        THREAD_ID, SESSION_ID, headEntryId, CREATION_REQUEST_HASH, false, 1, 0, NOW, NOW);
   }
 
   private static Entry entry(UUID id, UUID parentId, EntryPayload payload) {
@@ -759,7 +759,7 @@ class ThreadContextClassifierTest {
   private static ModelInvocation model(
       UUID threadId,
       UUID turnStartEntryId,
-      UUID basisHeadEntryId,
+      UUID requestHeadEntryId,
       ModelInvocationStatus status,
       ProviderResponse result,
       UUID resultEntryId) {
@@ -772,7 +772,7 @@ class ThreadContextClassifierTest {
         MODEL_ID,
         threadId,
         turnStartEntryId,
-        basisHeadEntryId,
+        requestHeadEntryId,
         modelRequest(),
         status,
         attempt,
@@ -816,12 +816,12 @@ class ThreadContextClassifierTest {
   }
 
   /** 属于另一 Model 的 sibling（ownership 校验用）。 */
-  private static ToolInvocation foreignTool(int ordinal, String callId) {
+  private static ToolInvocation foreignTool(int callIndex, String callId) {
     return new ToolInvocation(
-        id(MODEL_ID.getLeastSignificantBits() * 100L + ordinal),
+        id(MODEL_ID.getLeastSignificantBits() * 100L + callIndex),
         id(MODEL_ID.getLeastSignificantBits() + 1),
         ASSISTANT_ID,
-        ordinal,
+        callIndex,
         new ToolCall(callId, "bash", "{}"),
         toolBinding(),
         ToolInvocationStatus.READY,

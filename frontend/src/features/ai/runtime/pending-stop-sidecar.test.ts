@@ -40,7 +40,7 @@ describe('pending Stop sidecar', () => {
     const operation = {
       stopRequestId: 'stop-1',
       expectedVersion: '7',
-      basisHeadEntryId: 'head-1',
+      requestHeadEntryId: 'head-1',
       basisVersion: '7',
     }
 
@@ -56,7 +56,7 @@ describe('pending Stop sidecar', () => {
     const storage = new MemoryStorage()
     storage.setItem(
       pendingStopStorageKey('thread-1'),
-      '{"stopRequestId":"stop-1","expectedVersion":"7","basisHeadEntryId":"","basisVersion":"7"}',
+      '{"stopRequestId":"stop-1","expectedVersion":"7","requestHeadEntryId":"","basisVersion":"7"}',
     )
 
     expect(loadPendingStop('thread-1', storage)).toBeNull()

@@ -8,13 +8,13 @@ import java.util.regex.Pattern;
 /**
  * durable Thread 当前状态。
  *
- * <p>持久化 Thread 自身拥有的字段：所属 Session、materialization 身份键、head Entry cursor、Thread YOLO runtime
+ * <p>持久化 Thread 自身拥有的字段：所属 Session、creation request hash 身份键、head Entry cursor、Thread YOLO runtime
  * policy、下一条 Command sequence 以及对外可见的 snapshot version。{@code sessionId} 与 {@code
- * materializationHash} 创建后不可变；environment、status、open turn、runnable flag、execution epoch 与
+ * creationRequestHash} 创建后不可变；environment、status、open turn、runnable flag、execution epoch 与
  * processor lease 刻意省略，settings 事实从 {@code headEntryId} 处的 Entry 分支派生。
  *
- * <p>{@code materializationHash} 是 NEW_SESSION / ENTRY 的 64 位小写 SHA-256 身份键，只作持久化身份键，不对产品 DTO
- * 暴露；{@code headEntryId} 必须属于 {@code sessionId} 的 Session，该约束由 Store 在 insert/update 时按
+ * <p>{@code creationRequestHash} 是 NEW_SESSION / ENTRY 的初始创建请求指纹：64 位小写 SHA-256 身份键，只作持久化身份键，不对产品
+ * DTO 暴露；{@code headEntryId} 必须属于 {@code sessionId} 的 Session，该约束由 Store 在 insert/update 时按
  * harness_entry 的 session 归属强制。
  *
  * <p>所有状态变更都通过下方纯转换方法执行；转换会把回拨的调用方 wall-clock 抬升到当前 {@code updatedAt}，任何对外可见的变更都会把 {@code version}
@@ -24,23 +24,23 @@ public record ThreadState(
     UUID id,
     UUID sessionId,
     UUID headEntryId,
-    String materializationHash,
+    String creationRequestHash,
     boolean yoloEnabled,
     long nextCommandSequence,
     long version,
     Instant createdAt,
     Instant updatedAt) {
 
-  private static final Pattern MATERIALIZATION_HASH_PATTERN = Pattern.compile("[0-9a-f]{64}");
+  private static final Pattern CREATION_REQUEST_HASH_PATTERN = Pattern.compile("[0-9a-f]{64}");
 
   public ThreadState {
     Objects.requireNonNull(id, "id");
     Objects.requireNonNull(sessionId, "sessionId");
     Objects.requireNonNull(headEntryId, "headEntryId");
-    if (materializationHash == null
-        || !MATERIALIZATION_HASH_PATTERN.matcher(materializationHash).matches()) {
+    if (creationRequestHash == null
+        || !CREATION_REQUEST_HASH_PATTERN.matcher(creationRequestHash).matches()) {
       throw new IllegalArgumentException(
-          "materializationHash must be 64 lowercase hexadecimal characters");
+          "creationRequestHash must be 64 lowercase hexadecimal characters");
     }
     if (nextCommandSequence < 1) {
       throw new IllegalArgumentException("nextCommandSequence must start at 1");
@@ -56,7 +56,7 @@ public record ThreadState(
   }
 
   /**
-   * 校验 {@code next} 是存储行 {@code stored} 的合法迁移：identity（id / sessionId / materializationHash /
+   * 校验 {@code next} 是存储行 {@code stored} 的合法迁移：identity（id / sessionId / creationRequestHash /
    * createdAt）不可变， {@code headEntryId} / {@code nextCommandSequence} / {@code version} / {@code
    * updatedAt} 不允许回退，任何对外可见的 变更都会把 {@code version} 严格 +1。exact replay 一律被接受。
    */
@@ -72,8 +72,8 @@ public record ThreadState(
     if (!stored.sessionId().equals(next.sessionId())) {
       throw new IllegalArgumentException("thread sessionId must not change");
     }
-    if (!stored.materializationHash().equals(next.materializationHash())) {
-      throw new IllegalArgumentException("thread materializationHash must not change");
+    if (!stored.creationRequestHash().equals(next.creationRequestHash())) {
+      throw new IllegalArgumentException("thread creationRequestHash must not change");
     }
     if (!stored.createdAt().equals(next.createdAt())) {
       throw new IllegalArgumentException("thread createdAt must not change");
@@ -103,7 +103,7 @@ public record ThreadState(
             id,
             sessionId,
             headEntryId,
-            materializationHash,
+            creationRequestHash,
             yoloEnabled,
             Math.addExact(nextCommandSequence, (long) count),
             Math.addExact(version, 1L),
@@ -123,7 +123,7 @@ public record ThreadState(
             id,
             sessionId,
             headEntryId,
-            materializationHash,
+            creationRequestHash,
             yoloEnabled,
             nextCommandSequence,
             Math.addExact(version, 1L),
@@ -143,7 +143,7 @@ public record ThreadState(
             id,
             sessionId,
             headEntryId,
-            materializationHash,
+            creationRequestHash,
             enabled,
             nextCommandSequence,
             Math.addExact(version, 1L),
@@ -160,7 +160,7 @@ public record ThreadState(
             id,
             sessionId,
             headEntryId,
-            materializationHash,
+            creationRequestHash,
             yoloEnabled,
             nextCommandSequence,
             Math.addExact(version, 1L),

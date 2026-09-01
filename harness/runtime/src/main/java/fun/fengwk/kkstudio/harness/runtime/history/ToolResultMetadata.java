@@ -7,14 +7,14 @@ import java.util.UUID;
  * ToolResult MESSAGE 的稳定 metadata。
  *
  * <p>{@code assistantEntryId} 是产生 ToolCall 的 ASSISTANT Entry；{@code toolCallId} 与 Assistant
- * ToolCall 关联；{@code ordinal} 是该 Assistant response 内的 ToolCall 序号。synthetic 结果（history
+ * ToolCall 关联；{@code callIndex} 是该 Assistant response 内 ToolCall 的位置下标。synthetic 结果（history
  * normalization 补写）必须是 {@code status=UNKNOWN} + {@code reason=HISTORY_CUT}，且不关联任何 ToolInvocation； 非
  * synthetic 结果不允许携带 reason。
  */
 public record ToolResultMetadata(
     UUID assistantEntryId,
     String toolCallId,
-    int ordinal,
+    int callIndex,
     ToolResultStatus status,
     boolean synthetic,
     ToolResultReason reason) {
@@ -24,8 +24,8 @@ public record ToolResultMetadata(
   public ToolResultMetadata {
     Objects.requireNonNull(assistantEntryId, "assistantEntryId");
     toolCallId = requireCanonicalName(toolCallId, "toolCallId");
-    if (ordinal < 0) {
-      throw new IllegalArgumentException("ordinal must be >= 0");
+    if (callIndex < 0) {
+      throw new IllegalArgumentException("callIndex must not be negative");
     }
     status = Objects.requireNonNull(status, "status");
     if (synthetic) {

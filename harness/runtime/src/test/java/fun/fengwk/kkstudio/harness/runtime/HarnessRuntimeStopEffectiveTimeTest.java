@@ -68,7 +68,7 @@ class HarnessRuntimeStopEffectiveTimeTest {
     assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
+            tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)).orElseThrow());
     assertEquals(T6, command.cancelledAt());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(result.thread().headEntryId()));
     assertEquals(T6, path.entries().get(path.entries().size() - 2).createdAt());
@@ -133,8 +133,8 @@ class HarnessRuntimeStopEffectiveTimeTest {
         model.id(),
         model.threadId(),
         model.turnStartEntryId(),
-        model.basisHeadEntryId(),
-        model.request(),
+        model.requestHeadEntryId(),
+        model.requestSpec(),
         model.status(),
         model.attempt(),
         model.streamCheckpoint(),

@@ -65,12 +65,12 @@ TURN_END
 
 `ROOT` 是唯一无 parent 节点，保存初始 `BranchSettings` 和可选 `SubagentContext`。`TURN_START` 保存完整 branch settings、owner Thread、reason（`INPUT` / `CONTINUATION` / `COMPACTION`）以及 resolved context window/output budget。`MESSAGE` 保存 USER/ASSISTANT/TOOL；`CUSTOM` 是透明 Contributor branch 状态；`CUSTOM_MESSAGE` 是可见的 SYSTEM/USER 扩展消息；`MODEL_ATTEMPT_FAILURE` 是 retry audit；`ASSISTANT_ERROR`、`ASSISTANT_ABORTED` 是 assistant barrier；`COMPACTION` 只保存 summary；`TURN_END` 保存 outcome 和 continuation obligation。
 
-[`EntryPath`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPath.java) 是 root-to-head 的不可变连续路径：同 Session、parent 连续、createdAt 不早于 parent、ROOT 唯一，并由 [`TurnPathValidator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/TurnPathValidator.java) 校验 turn grammar。`CUSTOM` 不打开/关闭 turn；INPUT 必须有 user-like message；Tool result 必须按 ordinal 前缀；closed turn 不允许再次追加消息。
+[`EntryPath`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPath.java) 是 root-to-head 的不可变连续路径：同 Session、parent 连续、createdAt 不早于 parent、ROOT 唯一，并由 [`TurnPathValidator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/TurnPathValidator.java) 校验 turn grammar。`CUSTOM` 不打开/关闭 turn；INPUT 必须有 user-like message；Tool result 必须按 callIndex 前缀；closed turn 不允许再次追加消息。
 
 `ThreadState` 只保存：
 
 ```text
-id / sessionId / headEntryId / materializationHash
+id / sessionId / headEntryId / creationRequestHash
 yoloEnabled / nextCommandSequence / version
 createdAt / updatedAt
 ```
@@ -87,11 +87,11 @@ Environment、branch settings、status、open turn、runnable flag、execution e
 
 Command 类型固定为 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_ENVIRONMENT`、`SET_AGENT`、`SET_MODEL`。SET 前缀顺序固定为 environment → agent → model；Agent 工具选择来自最新 Agent definition 的 `config.toolIds`，不进入 branch 或 command mailbox。初始化 batch 以一条末尾 user-like message 结束；THREAD batch 是一条用户消息或一条 SYSTEM steering。YOLO 不进 mailbox，而由 `setThreadYolo` 直接控制。
 
-Command 的 durable state 由 marker 派生：无 marker 为 `QUEUED`，有 `consumedTurnStartEntryId` 为 `APPLIED`，有 `cancelRequestId/cancelledAt` 为 `CANCELLED`。同 `clientCommandId` + 同 `requestHash` 是 ordered replay；不同 hash、部分 replay、序号不连续和新 batch cursor 不匹配分别产生 typed conflict。
+Command 的 durable state 由 marker 派生：无 marker 为 `QUEUED`，有 `appliedTurnStartEntryId` 为 `APPLIED`，有 `stopRequestId/cancelledAt` 为 `CANCELLED`。同 `idempotencyKey` + 同 `requestHash` 是 ordered replay；不同 hash、部分 replay、序号不连续和新 batch cursor 不匹配分别产生 typed conflict。
 
 ### Invocation 与 Work
 
-`ModelInvocation` 保存 `basisHeadEntryId`、`turnStartEntryId`、冻结 `ModelRequestSpec`、status、attempt、stream checkpoint、terminal result/error、`resultEntryId` 和 append-only failed attempts。状态为：
+`ModelInvocation` 保存 `requestHeadEntryId`、`turnStartEntryId`、冻结 `ModelRequestSpec`（durable 列 `request_spec`）、status、attempt、stream checkpoint、terminal result/error、`resultEntryId` 和 append-only failed attempts。状态为：
 
 ```text
 READY -> DISPATCHING -> RUNNING
@@ -111,7 +111,7 @@ cacheControl
 
 完整 history、Provider tools、顶层 Environment、YOLO、contextWindow、credential、endpoint 和 compaction transient metadata 不复制进 spec。[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 从 immutable EntryPath + spec 纯投影内存 ProviderRequest；普通请求只投影 MESSAGE、CUSTOM_MESSAGE、ASSISTANT_ABORTED 和 complete summary，compaction 请求只生成 summarization SYSTEM + USER 且无 tools。
 
-`ToolInvocation` 保存冻结 `ToolCall`、完整 `ToolBinding`（`AgentToolDefinition` + Contributor provenance + requirements + 可选 Environment binding）、assistant Entry、ordinal、approval、result、effects 和 error。`ToolBinding` 包含 `definition`、`contributor`（`ContributorBinding(contributorId, localName, stateAccesses)`）、`environmentRequired` 和可选 `EnvironmentBinding`；当且仅当 environmentRequired 为 true 时 binding 必须存在。`CUSTOM` Entry payload 保存 `(contributorId, customType, schemaVersion, dataJson)`；`CUSTOM_MESSAGE` Entry payload 保存 `(contributorId, customType, rendererKey, message, detailsJson)`。状态为：
+`ToolInvocation` 保存冻结 `ToolCall`、完整 `ToolBinding`（`AgentToolDefinition` + Contributor provenance + requirements + 可选 Environment binding）、assistant Entry、callIndex、approval、result、effects 和 error。`ToolBinding` 包含 `definition`、`contributor`（`ContributorBinding(contributorId, localName, stateAccesses)`）、`environmentRequired` 和可选 `EnvironmentBinding`；当且仅当 environmentRequired 为 true 时 binding 必须存在。`CUSTOM` Entry payload 保存 `(contributorId, customType, schemaVersion, dataJson)`；`CUSTOM_MESSAGE` Entry payload 保存 `(contributorId, customType, rendererKey, message, detailsJson)`。状态为：
 
 ```text
 WAITING_APPROVAL -> READY -> DISPATCHING -> RUNNING
@@ -138,7 +138,7 @@ getSessionEntries
 listThreadsBySession
 ```
 
-`acceptCommands` 的 NEW_SESSION / ENTRY / THREAD materialization、ordered replay、batch shape 与 cursor admission 由 package-private [`AcceptCommandsControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AcceptCommandsControl.java) 在单个 Store transaction 内完成；`HarnessRuntime` 保持唯一公共 facade。
+`acceptCommands` 的 NEW_SESSION / ENTRY / THREAD 接受、initial creation replay、ordered replay、batch shape 与 cursor admission 由 package-private [`AcceptCommandsControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AcceptCommandsControl.java) 在单个 Store transaction 内完成；`HarnessRuntime` 保持唯一公共 facade。
 
 `getThreadSnapshot` 在单事务中锁 Thread、读取 queued Commands、加载 EntryPath 并按 `ThreadContextClassifier` 暴露最小适用状态：
 
@@ -151,7 +151,7 @@ ToolActive
 ToolTerminalPending
 ```
 
-IDLE/continuation 不暴露 invocation；Model context 暴露 Model 和未物化 retry failures；Tool context 暴露 Model 和全部 siblings。分类器遇到 ownership、basis、result、ordinal、tool-call 数量等不变量破坏时抛 `IllegalStateException`，不把坏状态转换成业务 kind。
+IDLE/continuation 不暴露 invocation；Model context 暴露 Model 和未物化 retry failures；Tool context 暴露 Model 和全部 siblings。分类器遇到 ownership、request head、result、callIndex、tool-call 数量等不变量破坏时抛 `IllegalStateException`，不把坏状态转换成业务 kind。
 
 ### Provider、Tool、permission 与 realtime ports
 
@@ -199,7 +199,7 @@ flowchart TD
 1. Work-only 校验 claim，再进入 per-thread admission guard；
 2. 锁 Thread，构造 EntryPath，纯分类；
 3. `MODEL_TERMINAL_PENDING` 原子写 Assistant/Error/Compaction result；
-4. `TOOL_TERMINAL_PENDING` 按 ordinal 经 [`ToolOutcomeAppender`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolOutcomeAppender.java) 写 effects + Tool Result + `TURN_END(continueModel=true)`；
+4. `TOOL_TERMINAL_PENDING` 按 callIndex 经 [`ToolOutcomeAppender`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolOutcomeAppender.java) 写 effects + Tool Result + `TURN_END(continueModel=true)`；
 5. `MODEL_ACTIVE`/`TOOL_ACTIVE` 只完成当前 claim；
 6. `CONTINUATION_DUE` 优先处理 HISTORY/TURN_PREFIX 或普通 continuation；
 7. `IDLE_OR_HISTORICAL` 在有 user demand 时启动 INPUT，否则完成 claim。
@@ -269,7 +269,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 ### 关键测试守卫
 
 - [`RuntimeModuleArchitectureTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/RuntimeModuleArchitectureTest.java)：纯 Java 依赖边界、runtime 包边界和模块依赖。
-- [`HarnessRuntimeAcceptInitialTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeAcceptInitialTest.java)、[`HarnessRuntimeAcceptThreadTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeAcceptThreadTest.java)：initial materialization、ordered replay、cursor CAS。
+- [`HarnessRuntimeAcceptInitialTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeAcceptInitialTest.java)、[`HarnessRuntimeAcceptThreadTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeAcceptThreadTest.java)：initial creation replay、ordered replay、cursor CAS。
 - [`HarnessRuntimeStopReplayTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeStopReplayTest.java)、[`HarnessRuntimeStopConcurrencyTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeStopConcurrencyTest.java)、[`HarnessRuntimeApprovalTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeApprovalTest.java)：Stop/approval 的 durable 幂等和并发 fencing。
 - [`ThreadContextClassifierTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifierTest.java)、[`ThreadProcessorPlanningTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorPlanningTest.java)、[`ThreadProcessorToolBatchTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorToolBatchTest.java)：分类、speculative plan、Tool sibling apply。
 - [`ThreadProcessorCompactionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorCompactionTest.java)、[`ThreadProcessorManualCompactionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorManualCompactionTest.java)、[`CompactionPlannerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlannerTest.java)：压缩切分、fallback、manual CAS 和 no-gain。

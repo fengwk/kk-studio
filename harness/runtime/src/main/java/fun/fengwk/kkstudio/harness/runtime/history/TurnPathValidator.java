@@ -27,12 +27,13 @@ import java.util.UUID;
  * Command、绝不出现 USER/CUSTOM MESSAGE，成功结果只能是 COMPACTION payload （普通 turn 绝不包含它），失败/停止可复用
  * ASSISTANT_ERROR / ASSISTANT_ABORTED barrier 且无需 USER input； Assistant 结果（ASSISTANT MESSAGE /
  * ASSISTANT_ERROR / ASSISTANT_ABORTED / COMPACTION）只能出现一次且之后 不得再出现 USER/CUSTOM/第二个 Assistant；TOOL
- * MESSAGE 只能跟随带 ToolCall 的 ASSISTANT MESSAGE，且必须是 ordinal 0 开始的严格前缀（ordinal 连续、toolCallId/toolName
- * 匹配、assistantEntryId 等于该 Assistant Entry id）；TURN_END 只能关闭当前 open TURN_START 且 ID 匹配，并按 outcome
- * 校验前置条件（COMPLETED 必须已有 ASSISTANT MESSAGE / COMPACTION 且 ToolResult 完整；HISTORY phase gap、complete
- * OVERFLOW recovery 与 active continuation 前的 complete THRESHOLD compaction 必须 {@code
- * continueModel=true}，其它 compaction 必须 false；FAILED 必须已有 ASSISTANT_ERROR；STOPPED 必须已有 stop
- * barrier/Assistant 且 ToolResult 完整；CANCELLED 可在任意 open phase关闭）。路径可以在任意 prefix 截断。
+ * MESSAGE 只能跟随带 ToolCall 的 ASSISTANT MESSAGE，且必须是 callIndex 0 开始的严格前缀（callIndex
+ * 连续、toolCallId/toolName 匹配、assistantEntryId 等于该 Assistant Entry id）；TURN_END 只能关闭当前 open
+ * TURN_START 且 ID 匹配，并按 outcome 校验前置条件（COMPLETED 必须已有 ASSISTANT MESSAGE / COMPACTION 且 ToolResult
+ * 完整；HISTORY phase gap、complete OVERFLOW recovery 与 active continuation 前的 complete THRESHOLD
+ * compaction 必须 {@code continueModel=true}，其它 compaction 必须 false；FAILED 必须已有
+ * ASSISTANT_ERROR；STOPPED 必须已有 stop barrier/Assistant 且 ToolResult 完整；CANCELLED 可在任意 open
+ * phase关闭）。路径可以在任意 prefix 截断。
  */
 final class TurnPathValidator {
 
@@ -45,14 +46,14 @@ final class TurnPathValidator {
   private boolean assistantSeen;
   private Entry assistantResultEntry;
   private List<ToolCallMessageContent> toolCalls;
-  private int expectedOrdinal;
+  private int expectedCallIndex;
   private int expectedModelAttemptFailure;
 
   /** 按 root-to-head 顺序访问一个非 ROOT Entry。 */
   void visit(Entry entry) {
     EntryPayload payload = entry.payload();
     if (payload instanceof CustomEntryPayload) {
-      // CUSTOM 是透明 branch state：允许 ROOT 后任意位置（含 open/closed turn），不参与 input/assistant/ordinal
+      // CUSTOM 是透明 branch state：允许 ROOT 后任意位置（含 open/closed turn），不参与 input/assistant/callIndex
       // 判定，也不打开/关闭 turn。
       return;
     }
@@ -73,7 +74,7 @@ final class TurnPathValidator {
       assistantSeen = false;
       assistantResultEntry = null;
       toolCalls = null;
-      expectedOrdinal = 0;
+      expectedCallIndex = 0;
       expectedModelAttemptFailure = 0;
       return;
     }
@@ -277,7 +278,7 @@ final class TurnPathValidator {
   }
 
   private void requireCompleteToolResults(String context) {
-    if (toolCalls != null && expectedOrdinal < toolCalls.size()) {
+    if (toolCalls != null && expectedCallIndex < toolCalls.size()) {
       throw new IllegalArgumentException(context + " turns require all ordered tool results");
     }
   }
@@ -288,14 +289,14 @@ final class TurnPathValidator {
           "tool results require an assistant message with tool calls");
     }
     ToolResultMetadata metadata = message.toolResultMetadata();
-    if (metadata.ordinal() != expectedOrdinal) {
+    if (metadata.callIndex() != expectedCallIndex) {
       throw new IllegalArgumentException(
-          "tool result ordinal must be a strict prefix from 0, expected " + expectedOrdinal);
+          "tool result callIndex must be a strict prefix from 0, expected " + expectedCallIndex);
     }
-    if (metadata.ordinal() >= toolCalls.size()) {
-      throw new IllegalArgumentException("tool result ordinal exceeds the assistant tool calls");
+    if (metadata.callIndex() >= toolCalls.size()) {
+      throw new IllegalArgumentException("tool result callIndex exceeds the assistant tool calls");
     }
-    ToolCallMessageContent call = toolCalls.get(metadata.ordinal());
+    ToolCallMessageContent call = toolCalls.get(metadata.callIndex());
     if (!metadata.toolCallId().equals(call.toolCallId())) {
       throw new IllegalArgumentException(
           "tool result toolCallId must match the assistant tool call");
@@ -309,6 +310,6 @@ final class TurnPathValidator {
     if (!result.toolName().equals(call.toolName())) {
       throw new IllegalArgumentException("tool result toolName must match the assistant tool call");
     }
-    expectedOrdinal++;
+    expectedCallIndex++;
   }
 }

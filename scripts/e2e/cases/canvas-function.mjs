@@ -30,7 +30,7 @@ registerCase({
       `/api/canvases/${canvas.id}/commands`,
       {
         expectedVersion: '0',
-        commandId: cid(),
+        idempotencyKey: cid(),
         commands: [
           {
             type: 'CREATE_FUNCTION_NODE',

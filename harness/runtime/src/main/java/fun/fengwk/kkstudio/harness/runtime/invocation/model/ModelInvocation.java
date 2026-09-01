@@ -25,8 +25,8 @@ public record ModelInvocation(
     UUID id,
     UUID threadId,
     UUID turnStartEntryId,
-    UUID basisHeadEntryId,
-    ModelRequestSpec request,
+    UUID requestHeadEntryId,
+    ModelRequestSpec requestSpec,
     ModelInvocationStatus status,
     int attempt,
     StreamCheckpoint streamCheckpoint,
@@ -41,8 +41,8 @@ public record ModelInvocation(
     Objects.requireNonNull(id, "id");
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(turnStartEntryId, "turnStartEntryId");
-    Objects.requireNonNull(basisHeadEntryId, "basisHeadEntryId");
-    request = Objects.requireNonNull(request, "request");
+    Objects.requireNonNull(requestHeadEntryId, "requestHeadEntryId");
+    requestSpec = Objects.requireNonNull(requestSpec, "requestSpec");
     status = Objects.requireNonNull(status, "status");
     if (attempt < 0) {
       throw new IllegalArgumentException("attempt must not be negative");
@@ -107,12 +107,12 @@ public record ModelInvocation(
     if (!stored.id().equals(next.id())
         || !stored.threadId().equals(next.threadId())
         || !stored.turnStartEntryId().equals(next.turnStartEntryId())
-        || !stored.basisHeadEntryId().equals(next.basisHeadEntryId())
-        || !stored.request().equals(next.request())
+        || !stored.requestHeadEntryId().equals(next.requestHeadEntryId())
+        || !stored.requestSpec().equals(next.requestSpec())
         || !stored.createdAt().equals(next.createdAt())) {
       throw new IllegalArgumentException(
           "model invocation identity"
-              + " (id/thread/turnStartEntry/basisHeadEntry/request/createdAt) must not change");
+              + " (id/thread/turnStartEntry/requestHeadEntry/requestSpec/createdAt) must not change");
     }
   }
 
@@ -450,8 +450,8 @@ public record ModelInvocation(
             id,
             threadId,
             turnStartEntryId,
-            basisHeadEntryId,
-            request,
+            requestHeadEntryId,
+            requestSpec,
             status,
             attempt,
             streamCheckpoint,

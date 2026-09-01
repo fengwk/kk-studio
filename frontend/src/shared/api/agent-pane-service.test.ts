@@ -33,7 +33,7 @@ describe('agent-pane wire service', () => {
       },
       commands: [{
         type: 'USER_MESSAGE' as const,
-        clientCommandId: 'c1',
+        idempotencyKey: 'c1',
         contents: [{ type: 'TEXT' as const, text: 'hello' }],
       }],
     }

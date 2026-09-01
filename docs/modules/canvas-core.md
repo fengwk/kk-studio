@@ -89,7 +89,7 @@ link 端点关系；集合使用 defensive copy。
 `CommandDedup`。`CanvasCommandService` 的写契约是：
 
 ```text
-(canvasId, expectedVersion, commandId, commands)
+(canvasId, expectedVersion, idempotencyKey, commands)
   -> request hash exact replay
   -> stale version / hash mismatch conflict
   -> one successful graph mutation + CanvasPatch

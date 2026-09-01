@@ -196,7 +196,7 @@ class HistoryPayloadMapperTest {
     ToolResultMetadata metadata = payload.toolResultMetadata();
     assertEquals(ToolResultStatus.SUCCEEDED, metadata.status());
     assertEquals(id(7L), metadata.assistantEntryId());
-    assertEquals(3, metadata.ordinal());
+    assertEquals(3, metadata.callIndex());
     assertEquals("call-1", metadata.toolCallId());
     assertFalse(metadata.synthetic());
     assertNull(metadata.reason());
@@ -343,7 +343,7 @@ class HistoryPayloadMapperTest {
     ToolResultMetadata metadata = payload.toolResultMetadata();
     assertEquals(id(7L), metadata.assistantEntryId());
     assertEquals("call-9", metadata.toolCallId());
-    assertEquals(2, metadata.ordinal());
+    assertEquals(2, metadata.callIndex());
     assertEquals(ToolResultStatus.UNKNOWN, metadata.status());
     assertTrue(metadata.synthetic());
     assertEquals(ToolResultReason.HISTORY_CUT, metadata.reason());

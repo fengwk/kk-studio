@@ -9,7 +9,7 @@ import java.time.Instant;
 public class ModelAttemptFailureDTO {
   private String modelInvocationId;
   private String turnStartEntryId;
-  private String basisHeadEntryId;
+  private String requestHeadEntryId;
   private Integer attempt;
 
   /** 当前 attempt 的非负十进制 sequence；保持 bigint-safe 的 HTTP wire 字符串。 */

@@ -97,8 +97,8 @@ final class HarnessRuntimeTestSupport {
   static final Instant T5 = Instant.ofEpochMilli(6_000);
   static final Instant T6 = Instant.ofEpochMilli(7_000);
 
-  /** 测试种子用的合法 64 位小写 SHA-256 materialization hash（非 NEW_SESSION/ENTRY 路径的任意固定值）。 */
-  static final String MATERIALIZATION_HASH =
+  /** 测试种子用的合法 64 位小写 SHA-256 creation request hash（非 NEW_SESSION/ENTRY 路径的任意固定值）。 */
+  static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   static final EnvironmentBinding ENV = EnvironmentBindings.binding("env-1");
@@ -192,7 +192,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** MODEL_ACTIVE 兼容性 baseline：打开的 turn，在 TURN_START basis 上挂一个 RUNNING 的 Model。 */
+  /** MODEL_ACTIVE 兼容性 baseline：打开的 turn，在 TURN_START requestHead 上挂一个 RUNNING 的 Model。 */
   static ModelBaseline seedRunningModel(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
@@ -216,7 +216,7 @@ final class HarnessRuntimeTestSupport {
 
   /**
    * MODEL_ACTIVE baseline，按指定的活动状态（READY / DISPATCHING / RUNNING）： ROOT -&gt; TURN_START(INPUT)
-   * -&gt; USER，thread head 指向 USER entry，model basis = USER entry。
+   * -&gt; USER，thread head 指向 USER entry，model requestHead = USER entry。
    */
   static ModelBaseline seedModel(InMemoryHarnessStore store, ModelInvocationStatus status) {
     return store.transaction(
@@ -248,7 +248,7 @@ final class HarnessRuntimeTestSupport {
 
   /**
    * CONTINUATION turn 上的 MODEL_ACTIVE：裸的 TURN_START(CONTINUATION) head（真实 plan 形态 没有 input
-   * entry），并在该 TURN_START basis 上挂一个 RUNNING 的 Model。
+   * entry），并在该 TURN_START requestHead 上挂一个 RUNNING 的 Model。
    */
   static ModelBaseline seedRunningContinuationModel(InMemoryHarnessStore store) {
     return store.transaction(
@@ -341,7 +341,7 @@ final class HarnessRuntimeTestSupport {
           tx.insertThread(thread);
           UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
-          ModelRequestSpec request = tooledModelRequest(List.of("bash"));
+          ModelRequestSpec requestSpec = tooledModelRequest(List.of("bash"));
           ProviderResponse response = responseWithToolCalls(callIds);
           UUID assistantEntryId = tx.nextId();
           // live attached fixture：assistant Entry 由同一 frozen request + ProviderResponse 经 mapper
@@ -349,11 +349,11 @@ final class HarnessRuntimeTestSupport {
           // 与 validateAttached 的完整 payload 校验保持一致。
           tx.insertEntry(
               mappedAssistantEntry(
-                  assistantEntryId, sessionId, userEntryId, T1, request, response));
+                  assistantEntryId, sessionId, userEntryId, T1, requestSpec, response));
           UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocationWithRequest(
-                  modelId, threadId, turnStartEntryId, turnStartEntryId, request, T1);
+                  modelId, threadId, turnStartEntryId, turnStartEntryId, requestSpec, T1);
           tx.insertModelInvocation(model);
           ModelInvocation succeeded = model.beginDispatch(T2).markRunning(T2).succeed(response, T2);
           tx.updateModelInvocation(model.beginDispatch(T2));
@@ -362,11 +362,12 @@ final class HarnessRuntimeTestSupport {
           tx.updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T2));
           List<ToolInvocation> invocations = new ArrayList<>(toolCount);
           List<UUID> toolIds = new ArrayList<>(toolCount);
-          for (int ordinal = 0; ordinal < toolCount; ordinal++) {
+          for (int callIndex = 0; callIndex < toolCount; callIndex++) {
             UUID toolId = tx.nextId();
             toolIds.add(toolId);
             invocations.add(
-                toolInvocation(toolId, modelId, assistantEntryId, ordinal, callIds[ordinal], T1));
+                toolInvocation(
+                    toolId, modelId, assistantEntryId, callIndex, callIds[callIndex], T1));
           }
           tx.insertToolInvocations(invocations);
           tx.updateThread(thread.advanceHead(assistantEntryId, T2));
@@ -626,7 +627,7 @@ final class HarnessRuntimeTestSupport {
       UUID threadId,
       long sequence,
       ThreadCommandPayload payload,
-      UUID clientCommandId) {
+      UUID idempotencyKey) {
     store.transaction(
         tx -> {
           tx.lockThread(threadId);
@@ -636,7 +637,7 @@ final class HarnessRuntimeTestSupport {
                       threadId,
                       sequence,
                       payload,
-                      clientCommandId,
+                      idempotencyKey,
                       ThreadCommandPayloadJsonCodec.requestHash(payload),
                       null,
                       null,
@@ -765,7 +766,7 @@ final class HarnessRuntimeTestSupport {
 
   static ThreadState thread(UUID id, UUID sessionId, UUID headEntryId, boolean yoloEnabled) {
     return new ThreadState(
-        id, sessionId, headEntryId, MATERIALIZATION_HASH, yoloEnabled, 1, 0, T0, T0);
+        id, sessionId, headEntryId, CREATION_REQUEST_HASH, yoloEnabled, 1, 0, T0, T0);
   }
 
   static ThreadCommand withConsumedTurnStart(ThreadCommand command, UUID turnStartEntryId) {
@@ -773,7 +774,7 @@ final class HarnessRuntimeTestSupport {
         command.threadId(),
         command.sequence(),
         command.payload(),
-        command.clientCommandId(),
+        command.idempotencyKey(),
         command.requestHash(),
         turnStartEntryId,
         null,
@@ -782,25 +783,25 @@ final class HarnessRuntimeTestSupport {
   }
 
   /** 使用给定的稳定 client id 与文本构造一条 USER_MESSAGE command。 */
-  static NewThreadCommand userMessageCommand(UUID clientCommandId, String text) {
+  static NewThreadCommand userMessageCommand(UUID idempotencyKey, String text) {
     UserMessageCommandPayload payload = userMessagePayload(text);
-    return new NewThreadCommand(payload, clientCommandId);
+    return new NewThreadCommand(payload, idempotencyKey);
   }
 
   /** 使用给定的稳定 client id 与文本构造一条 USER role 的 CUSTOM_MESSAGE command。 */
-  static NewThreadCommand userCustomMessageCommand(UUID clientCommandId, String text) {
+  static NewThreadCommand userCustomMessageCommand(UUID idempotencyKey, String text) {
     return new NewThreadCommand(
         new CustomMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)))),
-        clientCommandId);
+        idempotencyKey);
   }
 
   /** 使用给定的稳定 client id 与文本构造一条 SYSTEM role 的 CUSTOM_MESSAGE command。 */
-  static NewThreadCommand systemCustomMessageCommand(UUID clientCommandId, String text) {
+  static NewThreadCommand systemCustomMessageCommand(UUID idempotencyKey, String text) {
     return new NewThreadCommand(
         new CustomMessageCommandPayload(
             new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent(text)))),
-        clientCommandId);
+        idempotencyKey);
   }
 
   static UserMessageCommandPayload userMessagePayload(String text) {
@@ -809,12 +810,12 @@ final class HarnessRuntimeTestSupport {
   }
 
   static ModelInvocation modelInvocation(
-      UUID id, UUID threadId, UUID turnStartEntryId, UUID basisHeadEntryId, Instant createdAt) {
+      UUID id, UUID threadId, UUID turnStartEntryId, UUID requestHeadEntryId, Instant createdAt) {
     return new ModelInvocation(
         id,
         threadId,
         turnStartEntryId,
-        basisHeadEntryId,
+        requestHeadEntryId,
         modelRequest(),
         ModelInvocationStatus.READY,
         0,
@@ -834,15 +835,15 @@ final class HarnessRuntimeTestSupport {
       UUID id,
       UUID threadId,
       UUID turnStartEntryId,
-      UUID basisHeadEntryId,
-      ModelRequestSpec request,
+      UUID requestHeadEntryId,
+      ModelRequestSpec requestSpec,
       Instant createdAt) {
     return new ModelInvocation(
         id,
         threadId,
         turnStartEntryId,
-        basisHeadEntryId,
-        request,
+        requestHeadEntryId,
+        requestSpec,
         ModelInvocationStatus.READY,
         0,
         null,
@@ -879,13 +880,13 @@ final class HarnessRuntimeTestSupport {
       UUID sessionId,
       UUID parentId,
       Instant createdAt,
-      ModelRequestSpec request,
+      ModelRequestSpec requestSpec,
       ProviderResponse response) {
     return new Entry(
         id,
         sessionId,
         parentId,
-        new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()),
+        new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()),
         createdAt);
   }
 
@@ -893,14 +894,14 @@ final class HarnessRuntimeTestSupport {
       UUID id,
       UUID modelInvocationId,
       UUID assistantEntryId,
-      int ordinal,
+      int callIndex,
       String toolCallId,
       Instant createdAt) {
     return new ToolInvocation(
         id,
         modelInvocationId,
         assistantEntryId,
-        ordinal,
+        callIndex,
         new ToolCall(toolCallId, "bash", "{}"),
         hostBinding(),
         ToolInvocationStatus.READY,

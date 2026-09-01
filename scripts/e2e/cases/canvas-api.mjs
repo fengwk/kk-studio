@@ -8,7 +8,7 @@ registerCase({
   level: 'L1',
   title: 'Canvas UUID/version/command patch/snapshot HTTP 契约',
   docs:
-    '免费 L1：create/list/get/commands 的 canonical UUID id 与十进制字符串 long version，expectedVersion CAS 409，同 commandId 精确回放空 patch 与不同内容 409，标准 snapshot 收敛且旧 changes 端点不存在，Group 重命名与成员子集解绑，删除后 404',
+    '免费 L1：create/list/get/commands 的 canonical UUID id 与十进制字符串 long version，expectedVersion CAS 409，同 idempotencyKey 精确回放空 patch 与不同内容 409，标准 snapshot 收敛且旧 changes 端点不存在，Group 重命名与成员子集解绑，删除后 404',
   async run(ctx) {
     const { json: createJson } = await ctx.call('POST', '/api/canvases', {
       title: 'e2e-version-contract',
@@ -42,7 +42,7 @@ registerCase({
       `/api/canvases/${canvas.id}/commands`,
       {
         expectedVersion: '0',
-        commandId: firstCommandId,
+        idempotencyKey: firstCommandId,
         commands: [textCommand, remainingTextCommand],
       },
     )
@@ -53,13 +53,13 @@ registerCase({
     const upsert = patch.nodes.find((item) => item.op === 'UPSERT' && item.node.id === nodeId)
     assert(upsert?.node.resources?.[0]?.kind === 'TEXT', JSON.stringify(patch.nodes))
 
-    // 同 commandId 精确回放：返回当前版本的确定性空 patch，version 不再前进。
+    // 同 idempotencyKey 精确回放：返回当前版本的确定性空 patch，version 不再前进。
     const { json: replayJson } = await ctx.call(
       'POST',
       `/api/canvases/${canvas.id}/commands`,
       {
         expectedVersion: '0',
-        commandId: firstCommandId,
+        idempotencyKey: firstCommandId,
         commands: [textCommand, remainingTextCommand],
       },
     )
@@ -70,12 +70,12 @@ registerCase({
       JSON.stringify(replay),
     )
 
-    // 同 commandId 不同内容：IDEMPOTENCY_CONFLICT 409；stale expectedVersion：VERSION_CONFLICT 409。
+    // 同 idempotencyKey 不同内容：IDEMPOTENCY_CONFLICT 409；stale expectedVersion：VERSION_CONFLICT 409。
     await expectHttpError(
       () =>
         ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
           expectedVersion: '1',
-          commandId: firstCommandId,
+          idempotencyKey: firstCommandId,
           commands: [
             {
               type: 'RENAME_NODE',
@@ -90,7 +90,7 @@ registerCase({
       () =>
         ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
           expectedVersion: '0',
-          commandId: cid(),
+          idempotencyKey: cid(),
           commands: [{ type: 'DELETE_NODE', nodeId }],
         }),
       { status: 409 },
@@ -102,7 +102,7 @@ registerCase({
       () =>
         ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
           expectedVersion: '1',
-          commandId: cid(),
+          idempotencyKey: cid(),
           commands: [
             {
               type: 'CREATE_GROUP',
@@ -117,7 +117,7 @@ registerCase({
     )
     await ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
       expectedVersion: '1',
-      commandId: cid(),
+      idempotencyKey: cid(),
       commands: [
         {
           type: 'CREATE_GROUP',
@@ -133,7 +133,7 @@ registerCase({
       `/api/canvases/${canvas.id}/commands`,
       {
         expectedVersion: '2',
-        commandId: cid(),
+        idempotencyKey: cid(),
         commands: [{ type: 'RENAME_GROUP', groupId, title: 'Renamed' }],
       },
     )
@@ -154,7 +154,7 @@ registerCase({
       () =>
         ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
           expectedVersion: '3',
-          commandId: cid(),
+          idempotencyKey: cid(),
           commands: [{ type: 'RENAME_GROUP', groupId, title: ' ' }],
         }),
       { status: 400 },
@@ -163,7 +163,7 @@ registerCase({
       () =>
         ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
           expectedVersion: '3',
-          commandId: cid(),
+          idempotencyKey: cid(),
           commands: [{ type: 'RENAME_GROUP', groupId: cid(), title: 'x' }],
         }),
       { status: 400 },
@@ -175,7 +175,7 @@ registerCase({
       `/api/canvases/${canvas.id}/commands`,
       {
         expectedVersion: '3',
-        commandId: cid(),
+        idempotencyKey: cid(),
         commands: [{ type: 'UNGROUP', groupId, memberNodeIds: [nodeId] }],
       },
     )

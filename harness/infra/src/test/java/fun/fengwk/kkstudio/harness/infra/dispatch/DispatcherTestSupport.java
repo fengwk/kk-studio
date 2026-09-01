@@ -87,8 +87,8 @@ final class DispatcherTestSupport {
   static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
   static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
 
-  /** 测试种子线程的合法 64 位小写 SHA-256 materialization hash。 */
-  private static final String MATERIALIZATION_HASH =
+  /** 测试种子线程的合法 64 位小写 SHA-256 creation request hash。 */
+  private static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   static final Duration THREAD_LEASE = Duration.ofSeconds(30);
@@ -190,10 +190,10 @@ final class DispatcherTestSupport {
           tx.insertEntry(userEntry(userEntryId, sessionId, turnStartEntryId));
           // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）：请求带 bash
           // binding，使 assistant ToolCall renderer 与 ToolInvocation binding 全等。
-          ModelRequestSpec request = tooledRequest();
+          ModelRequestSpec requestSpec = tooledRequest();
           ProviderResponse response = toolResponse();
           tx.insertEntry(
-              assistantEntry(assistantEntryId, sessionId, userEntryId, request, response));
+              assistantEntry(assistantEntryId, sessionId, userEntryId, requestSpec, response));
           tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
           tx.insertModelInvocation(
               new ModelInvocation(
@@ -201,7 +201,7 @@ final class DispatcherTestSupport {
                   threadId,
                   turnStartEntryId,
                   turnStartEntryId,
-                  request,
+                  requestSpec,
                   ModelInvocationStatus.READY,
                   0,
                   null,
@@ -599,17 +599,22 @@ final class DispatcherTestSupport {
   }
 
   private static Entry assistantEntry(
-      UUID id, UUID sessionId, UUID parentId, ModelRequestSpec request, ProviderResponse response) {
+      UUID id,
+      UUID sessionId,
+      UUID parentId,
+      ModelRequestSpec requestSpec,
+      ProviderResponse response) {
     return new Entry(
         id,
         sessionId,
         parentId,
-        new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()),
+        new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()),
         NOW);
   }
 
   private static ThreadState thread(UUID id, UUID sessionId, UUID headEntryId) {
-    return new ThreadState(id, sessionId, headEntryId, MATERIALIZATION_HASH, false, 1, 0, NOW, NOW);
+    return new ThreadState(
+        id, sessionId, headEntryId, CREATION_REQUEST_HASH, false, 1, 0, NOW, NOW);
   }
 
   private static BranchSettings branchSettings() {

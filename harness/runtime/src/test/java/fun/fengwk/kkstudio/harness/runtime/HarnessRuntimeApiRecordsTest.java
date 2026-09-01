@@ -101,7 +101,7 @@ class HarnessRuntimeApiRecordsTest {
         () ->
             new AcceptCommandsCommand(
                 new AcceptCommandsTarget.Thread(TestIds.id(1), TestIds.id(2), 5), List.of()));
-    // 重复 clientCommandId 被拒。
+    // 重复 idempotencyKey 被拒。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -217,7 +217,7 @@ class HarnessRuntimeApiRecordsTest {
     CancelledUserMessage message = new CancelledUserMessage(3L, TestIds.id(7), contents);
     contents.clear();
     assertEquals(3L, message.sequence());
-    assertEquals(TestIds.id(7), message.clientCommandId());
+    assertEquals(TestIds.id(7), message.idempotencyKey());
     assertEquals(1, message.contents().size());
     assertThrows(
         IllegalArgumentException.class,
@@ -247,7 +247,7 @@ class HarnessRuntimeApiRecordsTest {
                     1L, TestIds.id(9), List.<AgentMessageContent>of(new TextMessageContent("x")))));
     assertTrue(queuedReplay.replayed());
     assertEquals(2, queuedReplay.cancelledCommandCount());
-    assertEquals(TestIds.id(9), queuedReplay.cancelledUserMessages().getFirst().clientCommandId());
+    assertEquals(TestIds.id(9), queuedReplay.cancelledUserMessages().getFirst().idempotencyKey());
     assertThrows(
         IllegalArgumentException.class, () -> new StopResult(false, thread, null, -1, List.of()));
     // cancelledUserMessages 必须 sequence 严格递增（不变量拒绝乱序/非单调）。
@@ -275,7 +275,7 @@ class HarnessRuntimeApiRecordsTest {
                     new CancelledUserMessage(1L, TestIds.id(9), List.<AgentMessageContent>of()))));
   }
 
-  /** ThreadState 最终形状：materializationHash/sessionId 不可变，任何可见变更 version 严格 +1。 */
+  /** ThreadState 最终形状：creationRequestHash/sessionId 不可变，任何可见变更 version 严格 +1。 */
   @Test
   void threadStateFinalShapeIsImmutableAndHashGuarded() {
     ThreadState thread = storeThread();
@@ -299,7 +299,7 @@ class HarnessRuntimeApiRecordsTest {
             thread.id(),
             thread.sessionId(),
             thread.headEntryId(),
-            thread.materializationHash(),
+            thread.creationRequestHash(),
             false,
             1,
             0,
@@ -315,7 +315,7 @@ class HarnessRuntimeApiRecordsTest {
                     thread.id(),
                     TestIds.id(99),
                     thread.headEntryId(),
-                    thread.materializationHash(),
+                    thread.creationRequestHash(),
                     false,
                     1,
                     0,
@@ -350,17 +350,17 @@ class HarnessRuntimeApiRecordsTest {
                     thread.id(),
                     thread.sessionId(),
                     thread.headEntryId(),
-                    thread.materializationHash(),
+                    thread.creationRequestHash(),
                     true,
                     1,
                     0,
                     thread.createdAt(),
                     T0.plusMillis(1))));
     assertEquals(thread.sessionId(), bumped.sessionId());
-    assertEquals(thread.materializationHash(), bumped.materializationHash());
+    assertEquals(thread.creationRequestHash(), bumped.creationRequestHash());
   }
 
-  /** ThreadCommand 最终形状：cancelRequestId 取消回单与 QUEUED→CANCELLED 迁移。 */
+  /** ThreadCommand 最终形状：stopRequestId 取消回单与 QUEUED→CANCELLED 迁移。 */
   @Test
   void threadCommandFinalShapePairsCancelReceipt() {
     ThreadCommand queued =
@@ -379,7 +379,7 @@ class HarnessRuntimeApiRecordsTest {
 
     ThreadCommand cancelled = queued.cancel(TestIds.id(9), T0.plusMillis(1));
     assertEquals(ThreadCommandState.CANCELLED, cancelled.state());
-    assertEquals(TestIds.id(9), cancelled.cancelRequestId());
+    assertEquals(TestIds.id(9), cancelled.stopRequestId());
     assertEquals(T0.plusMillis(1), cancelled.cancelledAt());
 
     // 取消与消费 marker 互斥。
@@ -396,7 +396,7 @@ class HarnessRuntimeApiRecordsTest {
                 TestIds.id(9),
                 T0.plusMillis(1),
                 T0));
-    // cancelRequestId 必须与 cancelledAt 成对。
+    // stopRequestId 必须与 cancelledAt 成对。
     assertThrows(
         IllegalArgumentException.class,
         () ->

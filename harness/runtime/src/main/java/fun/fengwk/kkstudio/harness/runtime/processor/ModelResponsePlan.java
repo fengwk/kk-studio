@@ -14,7 +14,7 @@ import java.util.Objects;
  *
  * <p>变体语义：{@link Completed} 关闭 turn（COMPLETE 无 calls）；{@link Failed} 以稳定 reason 关闭 failed turn
  * （LENGTH 无 calls -&gt; OUTPUT_TRUNCATED，FILTERED -&gt; CONTENT_FILTERED）；{@link ToolBatch} 为每个
- * observed call 携带一个 ordinal 槽位（仅 READY 请求 TOOL Work，全部 immediate terminal 时由 Thread 自唤醒）。
+ * observed call 携带一个 callIndex 槽位（仅 READY 请求 TOOL Work，全部 immediate terminal 时由 Thread 自唤醒）。
  */
 public sealed interface ModelResponsePlan {
 
@@ -33,7 +33,7 @@ public sealed interface ModelResponsePlan {
     }
   }
 
-  /** 每个 observed call 一个槽位（保持 ordinal）；Thread 按槽位 materialize ToolInvocation。 */
+  /** 每个 observed call 一个槽位（保持 callIndex）；Thread 按槽位 materialize ToolInvocation。 */
   record ToolBatch(List<ToolSlot> tools) implements ModelResponsePlan {
 
     public ToolBatch {

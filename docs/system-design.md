@@ -249,7 +249,7 @@ POST /api/ai/runtime/command-batches
 ```
 
 Session 只有一棵 append-only Entry Tree。Thread 保存 head、命令 cursor、version、
-YOLO 和 materialization identity；Model/Tool 的完整请求与外部 I/O 不写入 Entry，
+YOLO 和 creation request hash（初始创建请求指纹）；Model/Tool 的完整请求与外部 I/O 不写入 Entry，
 而由 Invocation 及其 Work 承担执行事实。`task` 是内部 Tool，通过同一
 `HarnessRuntime.acceptCommands(NEW_SESSION, ...)` 创建子 Session、ROOT、Thread、
 Commands 与 Work，不增加表或调度协议。

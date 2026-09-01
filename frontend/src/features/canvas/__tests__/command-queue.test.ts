@@ -61,8 +61,8 @@ describe('CanvasCommandQueue', () => {
     await expect(first).resolves.toMatchObject({ document: { version: '8' } })
     await expect(second).resolves.toMatchObject({ document: { version: '9' } })
     expect(calls).toEqual(['7', '8'])
-    expect(apply.mock.calls[0]?.[1].commandId).toBe('aaaaaaaa-0000-4000-8000-000000000001')
-    expect(apply.mock.calls[1]?.[1].commandId).toBe('aaaaaaaa-0000-4000-8000-000000000002')
+    expect(apply.mock.calls[0]?.[1].idempotencyKey).toBe('aaaaaaaa-0000-4000-8000-000000000001')
+    expect(apply.mock.calls[1]?.[1].idempotencyKey).toBe('aaaaaaaa-0000-4000-8000-000000000002')
   })
 
   it('refetches on 409, adopts the snapshot, and never replays semantic commands', async () => {
@@ -124,7 +124,7 @@ describe('CanvasCommandQueue', () => {
 
     expect(apply).toHaveBeenCalledWith(CANVAS_ID, {
       expectedVersion: '1',
-      commandId: 'aaaaaaaa-0000-4000-8000-000000000005',
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-000000000005',
       commands: [{ type: 'DELETE_NODE', nodeId: NODE_ID }],
     }, { signal })
     randomUUID.mockRestore()

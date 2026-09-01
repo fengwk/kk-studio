@@ -289,7 +289,7 @@ task invocation 归属在 durable binding 中冻结，执行期间不依据运�
 `PlatformCanvasCommandService`实现 Canvas application command：
 
 - `createCanvas/applyCommands/deleteCanvas`均在事务内；
-- `applyCommands`先锁 `canvas_document`行，再以 `(canvasId, commandId, requestHash)`做精确 replay/conflict，
+- `applyCommands`先锁 `canvas_document`行，再以 `(canvasId, idempotencyKey, requestHash)`做精确 replay/conflict，
   以 `expectedVersion`推进 graph version；
 - `CREATE_RESOURCE_NODE`在同一事务锁定 READY upload、retain Canvas Blob 引用、标记 upload cleanup 并创建
   `canvas_resource`；上传对象由提交后的 Storage Maintenance 清理；

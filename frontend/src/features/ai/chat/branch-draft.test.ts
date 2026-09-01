@@ -110,10 +110,10 @@ function queuedSettingCommand(
     sequence,
     type,
     state: 'QUEUED',
-    clientCommandId: `queued-${sequence}`,
+    idempotencyKey: `queued-${sequence}`,
     requestHash: '0123456789abcdef'.repeat(4),
     payloadJson: JSON.stringify(payload),
-    consumedTurnStartEntryId: null,
+    appliedTurnStartEntryId: null,
     cancelledAt: null,
     createTime: null,
   }
@@ -209,14 +209,14 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
     expect(commands).toHaveLength(1)
     expect(commands[0]).toEqual({
       type: 'SET_ENVIRONMENT',
-      clientCommandId: 'cid-1',
+      idempotencyKey: 'cid-1',
       environment: { name: 'local', workspacePath: 'proj/b' },
     })
     // 显式清空：payload.environment 为 null，绝不携带裸 name。
     const cleared = buildBranchDiffCommands(draftWithBinding(binding), draftWithBinding(null), ids)
     expect(cleared[0]).toEqual({
       type: 'SET_ENVIRONMENT',
-      clientCommandId: 'cid-2',
+      idempotencyKey: 'cid-2',
       environment: null,
     })
     // 相同 binding（即使不同对象引用）不产生 diff。
@@ -235,7 +235,7 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
     )
     expect(commands).toEqual([{
       type: 'SET_AGENT',
-      clientCommandId: 'cid-1',
+      idempotencyKey: 'cid-1',
       agentName: 'coder',
     }])
 
@@ -246,7 +246,7 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
     )
     expect(modelChanged).toEqual([{
       type: 'SET_MODEL',
-      clientCommandId: 'cid-2',
+      idempotencyKey: 'cid-2',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'pro' },
     }])
 

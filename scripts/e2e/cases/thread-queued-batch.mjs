@@ -16,7 +16,7 @@ import {
   chatOwner,
   createChat,
   getThreadSnapshot,
-  materializeNewSession,
+  createNewSession,
   stopThread,
   threadTarget,
   userMessageCommand,
@@ -126,7 +126,7 @@ registerCase({
       })
       const sessionId = cid()
       const tid = cid()
-      const materialized = await materializeNewSession(ctx, {
+      const created = await createNewSession(ctx, {
         owner: chatOwner(chat.id),
         sessionId,
         threadId: tid,
@@ -140,10 +140,10 @@ registerCase({
       })
       threadId = String(tid)
       assert(
-        String(materialized.thread.threadId) === threadId
-          && materialized.acceptedCommands.length === 1
-          && materialized.acceptedCommands[0].type === 'USER_MESSAGE',
-        `initial materialization batch: ${JSON.stringify(materialized)}`,
+        String(created.thread.threadId) === threadId
+          && created.acceptedCommands.length === 1
+          && created.acceptedCommands[0].type === 'USER_MESSAGE',
+        `initial creation batch: ${JSON.stringify(created)}`,
       )
 
       // 首个 Provider request 到达后保持 open；确认 model active 后再入队，确保运行中 cursor 有效。

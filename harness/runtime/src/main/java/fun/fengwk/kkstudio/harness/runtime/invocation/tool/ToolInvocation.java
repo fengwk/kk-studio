@@ -24,7 +24,7 @@ public record ToolInvocation(
     UUID id,
     UUID modelInvocationId,
     UUID assistantEntryId,
-    int ordinal,
+    int callIndex,
     ToolCall call,
     ToolBinding binding,
     ToolInvocationStatus status,
@@ -41,7 +41,7 @@ public record ToolInvocation(
       UUID id,
       UUID modelInvocationId,
       UUID assistantEntryId,
-      int ordinal,
+      int callIndex,
       ToolCall call,
       ToolBinding binding,
       ToolInvocationStatus status,
@@ -55,7 +55,7 @@ public record ToolInvocation(
         id,
         modelInvocationId,
         assistantEntryId,
-        ordinal,
+        callIndex,
         call,
         binding,
         status,
@@ -72,8 +72,8 @@ public record ToolInvocation(
     Objects.requireNonNull(id, "id");
     Objects.requireNonNull(modelInvocationId, "modelInvocationId");
     Objects.requireNonNull(assistantEntryId, "assistantEntryId");
-    if (ordinal < 0) {
-      throw new IllegalArgumentException("ordinal must not be negative");
+    if (callIndex < 0) {
+      throw new IllegalArgumentException("callIndex must not be negative");
     }
     call = Objects.requireNonNull(call, "call");
     status = Objects.requireNonNull(status, "status");
@@ -123,13 +123,13 @@ public record ToolInvocation(
     if (!stored.id().equals(next.id())
         || !stored.modelInvocationId().equals(next.modelInvocationId())
         || !stored.assistantEntryId().equals(next.assistantEntryId())
-        || stored.ordinal() != next.ordinal()
+        || stored.callIndex() != next.callIndex()
         || !stored.call().equals(next.call())
         || !Objects.equals(stored.binding(), next.binding())
         || !stored.createdAt().equals(next.createdAt())) {
       throw new IllegalArgumentException(
           "tool invocation identity"
-              + " (id/modelInvocation/assistantEntry/ordinal/call/binding/createdAt) must not change");
+              + " (id/modelInvocation/assistantEntry/callIndex/call/binding/createdAt) must not change");
     }
   }
 
@@ -459,7 +459,7 @@ public record ToolInvocation(
             id,
             modelInvocationId,
             assistantEntryId,
-            ordinal,
+            callIndex,
             call,
             binding,
             status,

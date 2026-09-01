@@ -48,7 +48,7 @@ class HarnessRuntimeStopClockTest {
     assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
+            tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)).orElseThrow());
     assertEquals(T3, command.cancelledAt());
     // Stop 追加的 barrier 与 TURN_END（path 最后两个 Entry）必须使用 Work 锁后的时间。
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));

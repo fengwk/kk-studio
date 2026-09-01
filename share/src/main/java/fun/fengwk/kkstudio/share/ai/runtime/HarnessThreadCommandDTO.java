@@ -29,23 +29,10 @@ public class HarnessThreadCommandDTO {
   private String state;
 
   /** 稳定客户端幂等键（创建时提供）：canonical UUID string。 */
-  private String clientCommandId;
-
-  /**
-   * 客户端 raw 命令（含 ordered contents 与 uploadId）的 canonical SHA-256：小写 hex，64 字符。与 {@code
-   * clientCommandId} 一起构成幂等键：同 id + 同 hash 精确重放，同 id + 不同 hash 冲突。
-   */
-  private String requestHash;
+  private String idempotencyKey;
 
   /** 命令载荷的 canonical JSON（ThreadCommandPayloadJsonCodec 编码），内容形态随 type 变化。 */
   private String payloadJson;
-
-  /**
-   * 消费该命令的 TURN_START Entry 主键：canonical UUID string；QUEUED/CANCELLED 时为
-   * null（{@code @JsonInclude(ALWAYS)}）。
-   */
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String consumedTurnStartEntryId;
 
   /** 取消时间（UTC Instant）：仅 CANCELLED 状态非 null（{@code @JsonInclude(ALWAYS)}）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)

@@ -78,7 +78,7 @@ class HarnessRuntimeApprovalLockingTest {
             current.id(),
             current.modelInvocationId(),
             current.assistantEntryId(),
-            current.ordinal(),
+            current.callIndex(),
             current.call(),
             current.binding(),
             current.status(),
@@ -108,7 +108,7 @@ class HarnessRuntimeApprovalLockingTest {
 
   /**
    * 未决定 approval 的转换必须基于锁定 siblings 中的当前行：find 返回的 CANCELLED 伪探针被忽略，决策基于 WAITING_APPROVAL 的锁定
-   * sibling 成功；且不单独 lockToolInvocation（siblings 统一按 ordinal 锁定）。
+   * sibling 成功；且不单独 lockToolInvocation（siblings 统一按 callIndex 锁定）。
    */
   @Test
   void undecidedDecisionTransitionsTheLockedSiblingNotTheProbe() {
@@ -121,7 +121,7 @@ class HarnessRuntimeApprovalLockingTest {
             current.id(),
             current.modelInvocationId(),
             current.assistantEntryId(),
-            current.ordinal(),
+            current.callIndex(),
             current.call(),
             current.binding(),
             ToolInvocationStatus.CANCELLED,
@@ -140,7 +140,7 @@ class HarnessRuntimeApprovalLockingTest {
     ToolInvocation decided =
         lockedRuntime.decideToolApproval(allow(baseline.threadId(), baseline.toolId()));
     assertEquals(ToolInvocationStatus.READY, decided.status());
-    // siblings 统一锁定（ordinal 序），绝不对目标单独加锁。
+    // siblings 统一锁定（callIndex 序），绝不对目标单独加锁。
     assertTrue(
         locks.contains("lockToolInvocationsByAssistantEntryId:" + baseline.assistantEntryId()));
     assertFalse(locks.contains("lockToolInvocation:" + baseline.toolId()));
@@ -164,7 +164,7 @@ class HarnessRuntimeApprovalLockingTest {
             current.id(),
             current.modelInvocationId(),
             current.assistantEntryId(),
-            current.ordinal(),
+            current.callIndex(),
             current.call(),
             current.binding(),
             ToolInvocationStatus.READY,
@@ -213,7 +213,7 @@ class HarnessRuntimeApprovalLockingTest {
             TestIds.id(987),
             current.modelInvocationId(),
             current.assistantEntryId(),
-            current.ordinal(),
+            current.callIndex(),
             current.call(),
             current.binding(),
             ToolInvocationStatus.READY,
@@ -279,7 +279,7 @@ class HarnessRuntimeApprovalLockingTest {
             current.id(),
             TestIds.id(999), // 伪造：同 id 但 modelInvocationId 改变。
             current.assistantEntryId(),
-            current.ordinal(),
+            current.callIndex(),
             current.call(),
             current.binding(),
             current.status(),
@@ -307,7 +307,7 @@ class HarnessRuntimeApprovalLockingTest {
             current.id(),
             current.modelInvocationId(),
             current.assistantEntryId(),
-            current.ordinal(),
+            current.callIndex(),
             current.call(),
             current.binding(),
             current.status(),
@@ -344,8 +344,8 @@ class HarnessRuntimeApprovalLockingTest {
             model.id(),
             TestIds.id(999), // 伪造：同 id 但 threadId 属于另一线程。
             model.turnStartEntryId(),
-            model.basisHeadEntryId(),
-            model.request(),
+            model.requestHeadEntryId(),
+            model.requestSpec(),
             model.status(),
             model.attempt(),
             model.streamCheckpoint(),

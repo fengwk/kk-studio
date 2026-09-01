@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.i18n.LocaleContextHolder;
 
@@ -16,9 +17,20 @@ class StudioMessageServiceTest {
 
   private final StudioMessageService messageService = new StudioMessageService();
 
+  private Locale originalDefault;
+
+  @BeforeEach
+  void pinDefaultLocaleToEnglish() {
+    // 回退契约（缺失/不支持 locale -> 英文）依赖 JVM default locale；显式锚定为 US，
+    // 避免宿主环境（如 zh_CN）使回退语义不确定。
+    originalDefault = Locale.getDefault();
+    Locale.setDefault(Locale.US);
+  }
+
   @AfterEach
   void resetLocaleContext() {
     LocaleContextHolder.resetLocaleContext();
+    Locale.setDefault(originalDefault);
   }
 
   @Test

@@ -135,7 +135,7 @@ final class InvocationTestData {
     return new StreamCheckpoint(attempt, 0L, "partial", "");
   }
 
-  static ModelRequestSpec request(List<ToolBinding> bindings) {
+  static ModelRequestSpec requestSpec(List<ToolBinding> bindings) {
     ProviderRequest provider = providerRequest(bindings);
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -148,7 +148,7 @@ final class InvocationTestData {
         provider.cacheControl());
   }
 
-  static ModelRequestSpec request() {
-    return request(List.of(host("bash")));
+  static ModelRequestSpec requestSpec() {
+    return requestSpec(List.of(host("bash")));
   }
 }

@@ -13,13 +13,13 @@ import java.util.UUID;
  * 为消息的全部内容（不含 role——由命令类型隐含），按取消时 sequence 升序返回。
  */
 public record CancelledUserMessage(
-    long sequence, UUID clientCommandId, List<AgentMessageContent> contents) {
+    long sequence, UUID idempotencyKey, List<AgentMessageContent> contents) {
 
   public CancelledUserMessage {
     if (sequence <= 0) {
       throw new IllegalArgumentException("sequence must be positive");
     }
-    clientCommandId = Objects.requireNonNull(clientCommandId, "clientCommandId");
+    idempotencyKey = Objects.requireNonNull(idempotencyKey, "idempotencyKey");
     contents = List.copyOf(Objects.requireNonNull(contents, "contents"));
   }
 }

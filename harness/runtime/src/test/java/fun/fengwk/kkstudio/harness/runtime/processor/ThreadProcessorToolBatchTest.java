@@ -77,7 +77,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * ThreadProcessor Tool sibling batch：每个 claim 恰执行一个动作的原子 ordinal 回写、错误 payload、blocker 与不变量违反回滚。
+ * ThreadProcessor Tool sibling batch：每个 claim 恰执行一个动作的原子 callIndex 回写、错误 payload、blocker 与不变量违反回滚。
  */
 class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
 
@@ -106,12 +106,12 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     MessagePayload tool0 = (MessagePayload) batchEntries.get(4).payload();
     MessagePayload tool1 = (MessagePayload) batchEntries.get(5).payload();
     assertEquals(AgentMessageRole.TOOL, tool0.message().role());
-    assertEquals(0, tool0.toolResultMetadata().ordinal());
+    assertEquals(0, tool0.toolResultMetadata().callIndex());
     assertEquals("call-1", tool0.toolResultMetadata().toolCallId());
     assertEquals(ToolResultStatus.SUCCEEDED, tool0.toolResultMetadata().status());
     ToolResultMessageContent result0 = (ToolResultMessageContent) tool0.message().contents().get(0);
     assertEquals("tool ok", ((TextMessageContent) result0.contents().get(0)).text());
-    assertEquals(1, tool1.toolResultMetadata().ordinal());
+    assertEquals(1, tool1.toolResultMetadata().callIndex());
     assertEquals("call-2", tool1.toolResultMetadata().toolCallId());
     TurnEndPayload end = (TurnEndPayload) batchEntries.get(6).payload();
     assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
@@ -305,7 +305,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
       assertFalse(metadata.synthetic());
       assertNull(metadata.reason());
       assertEquals("call-" + (i + 1), metadata.toolCallId());
-      assertEquals(i, metadata.ordinal());
+      assertEquals(i, metadata.callIndex());
       assertEquals(chain.assistantEntryId(), metadata.assistantEntryId());
     }
 
@@ -432,7 +432,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
   void modelResultToolCallsMismatchingAssistantAreRejectedAtAttach() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    ModelRequestSpec request = tooledRequest(List.of("bash"));
+    ModelRequestSpec requestSpec = tooledRequest(List.of("bash"));
     ProviderResponse response = successResponse(List.of("call-1", "call-2"), "bash");
     UUID modelId =
         seedModelInvocation(
@@ -441,7 +441,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             baseline.turnStartEntryId(),
             baseline.userEntryId(),
             ModelInvocationStatus.SUCCEEDED,
-            request,
+            requestSpec,
             response,
             null);
     // assistant 与 response 不一致（第二个 call id 不同）：strict attach 校验要求完整 payload 全等，首附即拒。

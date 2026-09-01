@@ -438,7 +438,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_0
-                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -447,7 +447,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_2
-                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":-1,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":-1,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -456,7 +456,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_2
-                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"FOO\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"FOO\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -465,7 +465,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_2
-                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":true,\"reason\":\"HISTORY_CUT\"}}"));
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":true,\"reason\":\"HISTORY_CUT\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -474,23 +474,14 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_2
-                    + "\",\"toolCallId\":\"call-9\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\",\"toolCallId\":\"call-9\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.MESSAGE,
                 toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"00000000-0000-0000-0000-000000000007\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.MESSAGE,
-                toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
-                    + UUID_2
-                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":5}}"));
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"00000000-0000-0000-0000-000000000007\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -499,7 +490,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_2
-                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":99999999999999,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":5}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -508,7 +499,16 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_2
-                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":\"x\",\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":99999999999999,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.MESSAGE,
+                toolMessageJson
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_2
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":\"x\",\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.decode(EntryType.MESSAGE, toolMessageJson + "\"toolResultMetadata\":[]}"));

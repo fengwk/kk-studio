@@ -337,7 +337,7 @@ describe('thread timeline edge branches', () => {
         {
           modelInvocationId: 'model-1',
           turnStartEntryId: 'compaction-start',
-          basisHeadEntryId: 'head-1',
+          requestHeadEntryId: 'head-1',
           attempt: 1,
           sequence: '1',
           text: 'hidden',
@@ -428,7 +428,7 @@ describe('thread timeline edge branches', () => {
       id: 'inv-1',
       modelInvocationId: 'm-1',
       assistantEntryId: 'assistant-1',
-      ordinal: 0,
+      callIndex: 0,
       status: 'RUNNING',
       attempt: 1,
       toolCallId: 'call-1',
@@ -733,7 +733,7 @@ describe('thread timeline edge branches', () => {
     )
     expect(timeline.messages).toEqual([])
     expect(timeline.queuedMessages).toMatchObject([
-      { clientCommandId: 'cid-weird-role', role: 'user', text: 'x', sequence: '2' },
+      { idempotencyKey: 'cid-weird-role', role: 'user', text: 'x', sequence: '2' },
     ])
     expect(timeline.hasPendingInputs).toBe(true)
   })
@@ -843,10 +843,10 @@ function command(
     sequence,
     type,
     state,
-    clientCommandId: `cid-${label}`,
+    idempotencyKey: `cid-${label}`,
     requestHash: '0123456789abcdef'.repeat(4),
     payloadJson: JSON.stringify(payload),
-    consumedTurnStartEntryId: null,
+    appliedTurnStartEntryId: null,
     cancelledAt: null,
     createTime: '2026-01-01T00:00:00',
   }

@@ -466,7 +466,7 @@ class HarnessRuntimeRequestMapperTest {
   private static HarnessCommandCreateDTO command(String type, String suffix) {
     HarnessCommandCreateDTO command = new HarnessCommandCreateDTO();
     command.setType(type);
-    command.setClientCommandId(idText(Math.abs(suffix.hashCode()) + 100));
+    command.setIdempotencyKey(idText(Math.abs(suffix.hashCode()) + 100));
     return command;
   }
 

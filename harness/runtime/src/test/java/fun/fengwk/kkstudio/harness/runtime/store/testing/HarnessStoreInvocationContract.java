@@ -79,7 +79,7 @@ import java.util.function.UnaryOperator;
  * ModelInvocation / ToolInvocation FK、唯一 key、result-entry 类型 与 branch 约束。
  *
  * <p>Fixture chain 遵循 turn 协议：每个 INPUT TURN_START 都需要一条 USER message 作为前置，再接 assistant
- * result；ToolResult entry 追加在其 assistant entry 之下（ordinal 前缀）。
+ * result；ToolResult entry 追加在其 assistant entry 之下（callIndex 前缀）。
  */
 public abstract class HarnessStoreInvocationContract {
 
@@ -112,8 +112,8 @@ public abstract class HarnessStoreInvocationContract {
             model.id(),
             model.threadId(),
             model.turnStartEntryId(),
-            model.basisHeadEntryId(),
-            model.request(),
+            model.requestHeadEntryId(),
+            model.requestSpec(),
             model.status(),
             model.attempt(),
             model.streamCheckpoint(),
@@ -148,7 +148,7 @@ public abstract class HarnessStoreInvocationContract {
             tool.id(),
             tool.modelInvocationId(),
             tool.assistantEntryId(),
-            tool.ordinal(),
+            tool.callIndex(),
             tool.call(),
             tool.binding(),
             tool.status(),
@@ -288,7 +288,7 @@ public abstract class HarnessStoreInvocationContract {
                           null,
                           T1));
                 }));
-    // basisHead 不等于 thread 当前 head，basis CAS 失败
+    // requestHead 不等于 thread 当前 head，requestHead CAS 失败
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -391,7 +391,7 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void modelInvocationInsertRequiresBasisEqualToCurrentThreadHead() {
-    // 创建时 basis CAS：不是 thread head 的 basis 会被拒绝
+    // 创建时 requestHead CAS：不是 thread head 的 requestHead 会被拒绝
     Baseline other = seedThreadBaseline(store);
     assertThrows(
         IllegalArgumentException.class,
@@ -410,7 +410,7 @@ public abstract class HarnessStoreInvocationContract {
                           null,
                           T2));
                 }));
-    // basis 指向 thread 自身 head 是合法的
+    // requestHead 指向 thread 自身 head 是合法的
     inTransaction(
         store,
         tx -> {
@@ -432,7 +432,7 @@ public abstract class HarnessStoreInvocationContract {
     // 同一 ROOT 下的第二个 TURN_START 形成独立 branch
     UUID turnStartB =
         insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
-    // turnStartB 不在 basis path [root, turnStartA] 上
+    // turnStartB 不在 requestHead path [root, turnStartA] 上
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -450,7 +450,7 @@ public abstract class HarnessStoreInvocationContract {
                           null,
                           T2));
                 }));
-    // basis 位于 thread 自身 branch 上是合法的
+    // requestHead 位于 thread 自身 branch 上是合法的
     inTransaction(
         store,
         tx -> {
@@ -470,14 +470,14 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void modelResultEntryTypeAndUniquenessAreEnforced() {
     // 链 A：root -> turnStartA -> userA -> assistantA(call-1) -> toolResult(0, call-1)
-    ModelRequestSpec request = succeededRequest();
+    ModelRequestSpec requestSpec = succeededRequest();
     ProviderResponse response = assistantResponse("call-1");
     UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
     UUID toolResultEntryId =
         insertChildEntry(
             store,
@@ -540,7 +540,7 @@ public abstract class HarnessStoreInvocationContract {
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
         ModelInvocationStatus.SUCCEEDED,
-        request,
+        requestSpec,
         response,
         assistantEntryId,
         T1);
@@ -688,7 +688,7 @@ public abstract class HarnessStoreInvocationContract {
               StoreTestSupport.threadState(
                   baseline.threadId(), baseline.sessionId(), toolResultA, 1, 1, T0, T2));
         });
-    // assistantA 与 basis 处于同一 turn，但位于 basis 的祖先一侧：sibling branch 仍会被拒绝，
+    // assistantA 与 requestHead 处于同一 turn，但位于 requestHead 的祖先一侧：sibling branch 仍会被拒绝，
     // 即便它本身是合法的 assistant result entry
     assertThrows(
         IllegalArgumentException.class,
@@ -722,7 +722,8 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void modelResultEntryCannotBeTheBasisHeadItself() {
-    // 链：root -> turnStartA -> userA -> assistantA；thread head 迁移到 assistantA 后以 assistantA 为 basis
+    // 链：root -> turnStartA -> userA -> assistantA；thread head 迁移到 assistantA 后以 assistantA 为
+    // requestHead
     // 建 model。
     UUID userA =
         insertChildEntry(
@@ -750,7 +751,8 @@ public abstract class HarnessStoreInvocationContract {
                   null,
                   T2));
         });
-    // 把 result 挂到 basis 自身（assistantA）：result 必须是 basis 的严格 descendant，不允许 attach 到 basis。
+    // 把 result 挂到 requestHead 自身（assistantA）：result 必须是 requestHead 的严格 descendant，不允许 attach 到
+    // requestHead。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -770,14 +772,15 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void terminalReplayAndAttachStayLegalAfterTheThreadHeadRelocates() {
     // 链：root -> turnStartA -> userA -> assistantA
-    ModelRequestSpec request = modelRequest();
+    ModelRequestSpec requestSpec = modelRequest();
     // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）。
     ProviderResponse response = assistantResponse();
     UUID userA =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantA =
-        insertChildEntry(store, baseline.sessionId(), userA, mappedAssistant(request, response));
+        insertChildEntry(
+            store, baseline.sessionId(), userA, mappedAssistant(requestSpec, response));
     // terminal invocation 不带关联 result entry
     inTransaction(
         store,
@@ -808,7 +811,7 @@ public abstract class HarnessStoreInvocationContract {
         insertChildEntry(store, baseline.sessionId(), otherTurnStart, userMessagePayload());
     UUID otherAssistant =
         insertChildEntry(
-            store, baseline.sessionId(), otherUser, mappedAssistant(request, response));
+            store, baseline.sessionId(), otherUser, mappedAssistant(requestSpec, response));
     inTransaction(
         store,
         tx -> {
@@ -824,7 +827,7 @@ public abstract class HarnessStoreInvocationContract {
           tx.lockModelInvocation(TestIds.id(1));
           tx.updateModelInvocation(committed);
         });
-    // relocation 之后附加 basis/turn path 之外的 entry 仍会被拒绝
+    // relocation 之后附加 requestHead/turn path 之外的 entry 仍会被拒绝
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -849,7 +852,7 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void updateModelInvocationMovesToTerminalWithResultEntry() {
-    ModelRequestSpec request = modelRequest();
+    ModelRequestSpec requestSpec = modelRequest();
     // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）。
     ProviderResponse response = assistantResponse();
     inTransaction(
@@ -871,7 +874,7 @@ public abstract class HarnessStoreInvocationContract {
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
     inTransaction(
         store,
         tx -> {
@@ -913,7 +916,7 @@ public abstract class HarnessStoreInvocationContract {
     assertThrows(
         IllegalStateException.class,
         () -> inTransaction(store, tx -> tx.updateModelInvocation(stored)));
-    // 修改了 basisHeadEntryId
+    // 修改了 requestHeadEntryId
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -926,8 +929,8 @@ public abstract class HarnessStoreInvocationContract {
                           stored.id(),
                           stored.threadId(),
                           stored.turnStartEntryId(),
-                          TestIds.id(888), // changed basisHeadEntryId
-                          stored.request(),
+                          TestIds.id(888), // changed requestHeadEntryId
+                          stored.requestSpec(),
                           stored.status(),
                           stored.attempt(),
                           stored.streamCheckpoint(),
@@ -951,8 +954,8 @@ public abstract class HarnessStoreInvocationContract {
                           stored.id(),
                           stored.threadId(),
                           stored.turnStartEntryId(),
-                          stored.basisHeadEntryId(),
-                          stored.request(),
+                          stored.requestHeadEntryId(),
+                          stored.requestSpec(),
                           stored.status(),
                           stored.attempt(),
                           stored.streamCheckpoint(),
@@ -1325,7 +1328,7 @@ public abstract class HarnessStoreInvocationContract {
       UUID id,
       UUID threadId,
       UUID turnStartEntryId,
-      UUID basisHeadEntryId,
+      UUID requestHeadEntryId,
       ModelInvocationStatus status,
       UUID resultEntryId,
       Instant createdAt) {
@@ -1333,7 +1336,7 @@ public abstract class HarnessStoreInvocationContract {
         id,
         threadId,
         turnStartEntryId,
-        basisHeadEntryId,
+        requestHeadEntryId,
         status,
         modelRequest(),
         successResponse(),
@@ -1349,9 +1352,9 @@ public abstract class HarnessStoreInvocationContract {
       UUID id,
       UUID threadId,
       UUID turnStartEntryId,
-      UUID basisHeadEntryId,
+      UUID requestHeadEntryId,
       ModelInvocationStatus status,
-      ModelRequestSpec request,
+      ModelRequestSpec requestSpec,
       ProviderResponse response,
       UUID resultEntryId,
       Instant createdAt) {
@@ -1364,8 +1367,8 @@ public abstract class HarnessStoreInvocationContract {
                   id,
                   threadId,
                   turnStartEntryId,
-                  basisHeadEntryId,
-                  request,
+                  requestHeadEntryId,
+                  requestSpec,
                   ModelInvocationStatus.READY,
                   0,
                   null,
@@ -1422,21 +1425,21 @@ public abstract class HarnessStoreInvocationContract {
 
   /** 合法 turn 链 TURN_START -> USER -> ASSISTANT(call-1..call-3)，并附带一个 terminal model result。 */
   private UUID seedAssistantAndModel() {
-    ModelRequestSpec request = succeededRequest();
+    ModelRequestSpec requestSpec = succeededRequest();
     ProviderResponse response = assistantResponse("call-1", "call-2", "call-3");
     UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
     insertTerminalModel(
         TestIds.id(1),
         baseline.threadId(),
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
         ModelInvocationStatus.SUCCEEDED,
-        request,
+        requestSpec,
         response,
         assistantEntryId,
         T1);
@@ -1470,7 +1473,7 @@ public abstract class HarnessStoreInvocationContract {
 
     List<ToolInvocation> stored =
         store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantEntryId));
-    assertEquals(List.of(0, 1), stored.stream().map(ToolInvocation::ordinal).toList());
+    assertEquals(List.of(0, 1), stored.stream().map(ToolInvocation::callIndex).toList());
     store.transaction(
         tx -> {
           tx.lockToolInvocation(TestIds.id(11)).orElseThrow();
@@ -1511,21 +1514,21 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void toolArgumentsJsonPreservesItsExactLexicalForm() {
     String argumentsJson = "{   }";
-    ModelRequestSpec request = succeededRequest();
+    ModelRequestSpec requestSpec = succeededRequest();
     ProviderResponse response = succeededResponseWithArguments("call-1", argumentsJson);
     UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
     insertTerminalModel(
         TestIds.id(1),
         baseline.threadId(),
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
         ModelInvocationStatus.SUCCEEDED,
-        request,
+        requestSpec,
         response,
         assistantEntryId,
         T1);
@@ -1784,7 +1787,7 @@ public abstract class HarnessStoreInvocationContract {
                         "call-1",
                         ToolInvocationStatus.READY,
                         T2))));
-    // 重复的 (assistantEntryId, ordinal)
+    // 重复的 (assistantEntryId, callIndex)
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -1823,7 +1826,7 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void toolRequestCallMustExactlyMatchTheAssistantToolCallAtTheSameOrdinal() {
     UUID assistantEntryId = seedAssistantAndModel(); // assistant calls: call-1, call-2, call-3
-    // 同 ordinal 处 call id 不匹配
+    // 同 callIndex 处 call id 不匹配
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -1840,7 +1843,7 @@ public abstract class HarnessStoreInvocationContract {
                                 "call-other",
                                 ToolInvocationStatus.READY,
                                 T2)))));
-    // ordinal 超过 assistant tool calls 范围
+    // callIndex 超过 assistant tool calls 范围
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -1924,13 +1927,13 @@ public abstract class HarnessStoreInvocationContract {
                         "call-2",
                         ToolInvocationStatus.READY,
                         T2))));
-    List<Integer> ordinals =
+    List<Integer> callIndexes =
         store.transaction(
             tx ->
                 tx.loadToolInvocationsByAssistantEntryId(assistantEntryId).stream()
-                    .map(ToolInvocation::ordinal)
+                    .map(ToolInvocation::callIndex)
                     .toList());
-    assertEquals(List.of(0, 1, 2), ordinals);
+    assertEquals(List.of(0, 1, 2), callIndexes);
   }
 
   @Test
@@ -1970,7 +1973,7 @@ public abstract class HarnessStoreInvocationContract {
                               stored.id(),
                               stored.modelInvocationId(),
                               stored.assistantEntryId(),
-                              stored.ordinal(),
+                              stored.callIndex(),
                               toolCall("call-other"),
                               hostBinding(),
                               stored.status(),
@@ -2094,7 +2097,7 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   /** 在打开的 COMPACTION turn（head == turnStart）下插入 READY compaction invocation，返回 model id。 */
-  private UUID insertCompactionInvocation(UUID turnStart, ModelRequestSpec request) {
+  private UUID insertCompactionInvocation(UUID turnStart, ModelRequestSpec requestSpec) {
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -2105,7 +2108,7 @@ public abstract class HarnessStoreInvocationContract {
                   baseline.threadId(),
                   turnStart,
                   turnStart,
-                  request,
+                  requestSpec,
                   ModelInvocationStatus.READY,
                   0,
                   null,
@@ -2121,17 +2124,17 @@ public abstract class HarnessStoreInvocationContract {
 
   /** 完整压缩 turn 种子：打开 COMPACTION turn、执行 invocation 并附加 SUCCEEDED result。 */
   private UUID seedCompletedCompactionTurn(
-      ModelRequestSpec request, CompactionPayload resultPayload) {
-    return seedCompletedCompactionTurn(request, resultPayload, CompactionPhase.HISTORY, null);
+      ModelRequestSpec requestSpec, CompactionPayload resultPayload) {
+    return seedCompletedCompactionTurn(requestSpec, resultPayload, CompactionPhase.HISTORY, null);
   }
 
   private UUID seedCompletedCompactionTurn(
-      ModelRequestSpec request,
+      ModelRequestSpec requestSpec,
       CompactionPayload resultPayload,
       CompactionPhase phase,
       UUID cutEntryId) {
     UUID turnStart = openCompactionTurn(phase, cutEntryId);
-    UUID modelId = insertCompactionInvocation(turnStart, request);
+    UUID modelId = insertCompactionInvocation(turnStart, requestSpec);
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -2214,10 +2217,10 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void compactionInvocationAcceptsExactSucceededSummary() {
     // compactionRequest() 是不含压缩字段的普通 ModelRequestSpec；用途只由 TURN_START.compaction() 决定。
-    ModelRequestSpec request = compactionRequest();
+    ModelRequestSpec requestSpec = compactionRequest();
     CompactionPayload result = new CompactionPayload("summary");
 
-    UUID modelId = seedCompletedCompactionTurn(request, result);
+    UUID modelId = seedCompletedCompactionTurn(requestSpec, result);
 
     ModelInvocation stored = store.transaction(tx -> tx.findModelInvocation(modelId).orElseThrow());
     assertEquals(ModelInvocationStatus.SUCCEEDED, stored.status());
@@ -2226,12 +2229,12 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void compactionResultRejectsNonSucceededStatusAndSummaryDrift() {
-    ModelRequestSpec request = compactionRequest();
+    ModelRequestSpec requestSpec = compactionRequest();
     CompactionPayload result = new CompactionPayload("summary");
 
     // FAILED invocation 携带 COMPACTION result -> 拒绝。
     UUID turnStart = openCompactionTurn();
-    UUID modelId = insertCompactionInvocation(turnStart, request);
+    UUID modelId = insertCompactionInvocation(turnStart, requestSpec);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -2253,19 +2256,19 @@ public abstract class HarnessStoreInvocationContract {
     // SUCCEEDED 但 summaryText 与 Provider terminal 不一致 -> 由共享 materialization evaluator 拒绝。
     CompactionPayload drifted = new CompactionPayload("drifted summary");
     assertThrows(
-        IllegalArgumentException.class, () -> seedCompletedCompactionTurn(request, drifted));
+        IllegalArgumentException.class, () -> seedCompletedCompactionTurn(requestSpec, drifted));
   }
 
   @Test
   void compactionResultRejectsPathDriftThroughSharedMaterializationEvaluator() {
-    ModelRequestSpec request = compactionRequest();
+    ModelRequestSpec requestSpec = compactionRequest();
 
     // FULL 的 cutEntryId 不在 result path 上，路径事实由共享 materialization evaluator 拒绝。
     assertThrows(
         IllegalStateException.class,
         () ->
             seedCompletedCompactionTurn(
-                request,
+                requestSpec,
                 new CompactionPayload("assistant reply"),
                 CompactionPhase.FULL,
                 TestIds.id(999L)));
@@ -2279,6 +2282,6 @@ public abstract class HarnessStoreInvocationContract {
 
     ModelInvocation stored = store.transaction(tx -> tx.findModelInvocation(modelId).orElseThrow());
     assertEquals(turnStart, stored.turnStartEntryId());
-    assertEquals(modelRequest(), stored.request());
+    assertEquals(modelRequest(), stored.requestSpec());
   }
 }

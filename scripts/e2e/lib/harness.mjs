@@ -203,8 +203,8 @@ function assertAcceptedCommands(accepted) {
  * - 返回 threadId 必须等于 target.threadId；
  * - NEW_SESSION/ENTRY 的 sessionId 必须等于 target.sessionId；
  * - rootEntry.sessionId/thread.sessionId 必须等于 response session.sessionId；
- * - acceptedCommands 的 count/type/clientCommandId/order 必须与请求 commands 一致，
- *   且每项 threadId、positive sequence、canonical clientCommandId、64 位小写 hex requestHash 均校验。
+ * - acceptedCommands 的 count/type/idempotencyKey/order 必须与请求 commands 一致，
+ *   且每项 threadId、positive sequence、canonical idempotencyKey 均校验。
  */
 export async function acceptCommandBatch(ctx, { owner, target, commands }) {
   assert(owner?.type && owner?.id, `owner required: ${JSON.stringify(owner)}`)
@@ -214,7 +214,7 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
   assert(Array.isArray(commands) && commands.length > 0, 'commands required')
   for (const command of commands) {
     assert(
-      command && typeof command === 'object' && command.type && command.clientCommandId,
+      command && typeof command === 'object' && command.type && command.idempotencyKey,
       `invalid command: ${JSON.stringify(command)}`,
     )
   }
@@ -255,10 +255,10 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
       `accepted command ${i} type ${response?.type} != ${request.type}: ${JSON.stringify(accepted)}`,
     )
     assert(
-      String(response.clientCommandId) === String(request.clientCommandId),
-      `accepted command ${i} clientCommandId ${response?.clientCommandId} != ${request.clientCommandId}: ${JSON.stringify(accepted)}`,
+      String(response.idempotencyKey) === String(request.idempotencyKey),
+      `accepted command ${i} idempotencyKey ${response?.idempotencyKey} != ${request.idempotencyKey}: ${JSON.stringify(accepted)}`,
     )
-    canonicalUuid(response.clientCommandId, `accepted.commands[${i}].clientCommandId`)
+    canonicalUuid(response.idempotencyKey, `accepted.commands[${i}].idempotencyKey`)
     assert(
       String(response.threadId) === String(target.threadId),
       `accepted command ${i} threadId ${response?.threadId} != target ${target.threadId}: ${JSON.stringify(accepted)}`,
@@ -267,19 +267,15 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
       /^[1-9]\d*$/.test(String(response.sequence)),
       `accepted command ${i} sequence must be positive decimal: ${JSON.stringify(response)}`,
     )
-    assert(
-      /^[0-9a-f]{64}$/.test(String(response.requestHash)),
-      `accepted command ${i} requestHash must be 64 lower hex: ${JSON.stringify(response)}`,
-    )
   }
   return accepted
 }
 
 /**
- * NEW_SESSION 原子物化：创建 Session + ROOT + Thread 并接受本批 commands。
+ * NEW_SESSION 原子创建：创建 Session + ROOT + Thread 并接受本批 commands。
  * rootSettings 通常是 branchSettingsOf(...) 的完整分支草稿；sessionId/threadId 由调用方预分配。
  */
-export async function materializeNewSession(
+export async function createNewSession(
   ctx,
   { owner, sessionId, threadId, rootSettings, yoloEnabled = false, commands },
 ) {
@@ -290,8 +286,8 @@ export async function materializeNewSession(
   })
 }
 
-/** ENTRY 原子物化：在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）。 */
-export async function materializeEntryThread(
+/** ENTRY 原子创建：在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）。 */
+export async function createEntryThread(
   ctx,
   { owner, sessionId, startEntryId, threadId, yoloEnabled = false, commands },
 ) {
@@ -457,32 +453,32 @@ export async function listEnvironments(ctx) {
   return environments
 }
 
-export function userMessageCommand(content, clientCommandId) {
+export function userMessageCommand(content, idempotencyKey) {
   assert(typeof content === 'string' && content.trim(), 'content required')
-  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
-  // Strict wire: USER_MESSAGE carries ONLY type/clientCommandId/contents（TEXT/ATTACHMENT，无文本 shorthand）。
-  return { type: 'USER_MESSAGE', clientCommandId, contents: [{ type: 'TEXT', text: content }] }
+  assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
+  // Strict wire: USER_MESSAGE carries ONLY type/idempotencyKey/contents（TEXT/ATTACHMENT，无文本 shorthand）。
+  return { type: 'USER_MESSAGE', idempotencyKey, contents: [{ type: 'TEXT', text: content }] }
 }
 
-export function setEnvironmentCommand(environment, clientCommandId) {
-  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
+export function setEnvironmentCommand(environment, idempotencyKey) {
+  assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
   assert(
     isEnvironmentBindingOrNull(environment),
     `environment must be null or a complete binding: ${JSON.stringify(environment)}`,
   )
-  return { type: 'SET_ENVIRONMENT', clientCommandId, environment }
+  return { type: 'SET_ENVIRONMENT', idempotencyKey, environment }
 }
 
-export function setAgentCommand(agentName, clientCommandId) {
+export function setAgentCommand(agentName, idempotencyKey) {
   assert(agentName && typeof agentName === 'string', 'agentName required')
-  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
-  return { type: 'SET_AGENT', clientCommandId, agentName }
+  assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
+  return { type: 'SET_AGENT', idempotencyKey, agentName }
 }
 
-export function setModelCommand(model, clientCommandId) {
+export function setModelCommand(model, idempotencyKey) {
   assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
-  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
-  return { type: 'SET_MODEL', clientCommandId, model }
+  assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
+  return { type: 'SET_MODEL', idempotencyKey, model }
 }
 
 /**

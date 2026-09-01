@@ -77,7 +77,7 @@ class HarnessRuntimeStopIdleTest {
       ThreadCommand command =
           store.transaction(
               tx ->
-                  tx.findCommandByClientId(
+                  tx.findCommandByIdempotencyKey(
                           baseline.threadId(), id == 1 ? TestIds.id(1) : TestIds.id(2))
                       .orElseThrow());
       assertEquals(ThreadCommandState.CANCELLED, command.state());
@@ -116,7 +116,7 @@ class HarnessRuntimeStopIdleTest {
             .isPresent());
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
+            tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)).orElseThrow());
     assertEquals(ThreadCommandState.CANCELLED, command.state());
   }
 
@@ -135,7 +135,7 @@ class HarnessRuntimeStopIdleTest {
     assertEquals(0L, thread.version());
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
+            tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)).orElseThrow());
     assertEquals(ThreadCommandState.QUEUED, command.state());
     assertTrue(
         store

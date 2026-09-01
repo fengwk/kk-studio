@@ -18,7 +18,7 @@ public class HarnessCommandCreateDTO {
   private String type;
 
   /** canonical UUID string 幂等键。 */
-  private String clientCommandId;
+  private String idempotencyKey;
 
   /** USER_MESSAGE 的非空有序结构化内容。 */
   private List<HarnessUserMessageContentDTO> contents;
@@ -53,10 +53,10 @@ public class HarnessCommandCreateDTO {
     this.type = HarnessRuntimeDtoSupport.requireJsonString(value, "command.type");
   }
 
-  @JsonSetter("clientCommandId")
-  public void setClientCommandId(Object value) {
-    this.clientCommandId =
-        HarnessRuntimeDtoSupport.requireJsonString(value, "command.clientCommandId");
+  @JsonSetter("idempotencyKey")
+  public void setIdempotencyKey(Object value) {
+    this.idempotencyKey =
+        HarnessRuntimeDtoSupport.requireJsonString(value, "command.idempotencyKey");
   }
 
   @JsonSetter("contents")

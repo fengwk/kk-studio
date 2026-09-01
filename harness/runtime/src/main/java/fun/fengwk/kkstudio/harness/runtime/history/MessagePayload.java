@@ -15,9 +15,9 @@ import java.util.Set;
  *
  * <p>SYSTEM 消息属于 {@link CustomMessagePayload}。USER 消息不携带 metadata；ASSISTANT 消息必须携带 {@link
  * AssistantMessageMetadata} 且不能携带 tool result metadata；assistant tool call id 必须唯一，以保证
- * ordinal/prefix 校验的确定性。TOOL 消息必须携带 {@link ToolResultMetadata} 且不能携带 assistant metadata，且唯一的 {@link
- * ToolResultMessageContent#toolCallId()} 必须与 metadata 匹配。生成 stop reason 与 tool call 存在性 正交（{@code
- * COMPLETE}/{@code LENGTH} 均可有 calls），不在此处施加等价约束。
+ * callIndex/prefix 校验的确定性。TOOL 消息必须携带 {@link ToolResultMetadata} 且不能携带 assistant metadata，且唯一的
+ * {@link ToolResultMessageContent#toolCallId()} 必须与 metadata 匹配。生成 stop reason 与 tool call 存在性
+ * 正交（{@code COMPLETE}/{@code LENGTH} 均可有 calls），不在此处施加等价约束。
  */
 public record MessagePayload(
     AgentMessage message,

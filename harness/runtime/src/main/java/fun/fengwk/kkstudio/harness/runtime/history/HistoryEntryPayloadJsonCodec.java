@@ -64,7 +64,7 @@ public final class HistoryEntryPayloadJsonCodec {
       orderedSet("turnStartEntryId", "outcome", "continueModel", "reason", "closeRequestId");
   private static final Set<String> ERROR_FIELDS = orderedSet("code", "message");
   private static final Set<String> TOOL_RESULT_METADATA_FIELDS =
-      orderedSet("assistantEntryId", "toolCallId", "ordinal", "status", "synthetic", "reason");
+      orderedSet("assistantEntryId", "toolCallId", "callIndex", "status", "synthetic", "reason");
 
   private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
 
@@ -288,7 +288,7 @@ public final class HistoryEntryPayloadJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("assistantEntryId", metadata.assistantEntryId().toString());
     node.put("toolCallId", metadata.toolCallId());
-    node.put("ordinal", metadata.ordinal());
+    node.put("callIndex", metadata.callIndex());
     node.put("status", metadata.status().name());
     node.put("synthetic", metadata.synthetic());
     if (metadata.reason() == null) {
@@ -515,7 +515,7 @@ public final class HistoryEntryPayloadJsonCodec {
     return new ToolResultMetadata(
         HistoryValueCodecs.requiredPositiveId(node, "assistantEntryId", "toolResultMetadata"),
         HistoryValueCodecs.text(node, "toolCallId"),
-        HistoryValueCodecs.requiredNonNegativeInt(node, "ordinal", "toolResultMetadata"),
+        HistoryValueCodecs.requiredNonNegativeInt(node, "callIndex", "toolResultMetadata"),
         HistoryValueCodecs.readEnum(
             ToolResultStatus.class,
             HistoryValueCodecs.text(node, "status"),

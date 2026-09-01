@@ -1168,7 +1168,7 @@ class EntryPathTest {
   private static Entry toolResult(
       UUID id,
       UUID parentId,
-      int ordinal,
+      int callIndex,
       UUID assistantEntryId,
       String toolCallId,
       String toolName) {
@@ -1189,7 +1189,7 @@ class EntryPathTest {
                         "{}"))),
             null,
             new ToolResultMetadata(
-                assistantEntryId, toolCallId, ordinal, ToolResultStatus.SUCCEEDED, false, null)),
+                assistantEntryId, toolCallId, callIndex, ToolResultStatus.SUCCEEDED, false, null)),
         time(id));
   }
 

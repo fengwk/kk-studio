@@ -71,7 +71,7 @@ public final class HarnessOneShotService {
   /**
    * 带 media preflight 的一次性提交：NEW_SESSION 一次原子物化 Session/Thread/Command/Work（preflight 在全新接受时把 USER
    * 消息中按 manifest 顺序的占位内容物化为 durable 内容，如 H3 的全局存储 RESOURCE）；preflight 必须保持
-   * clientCommandId/requestHash 不变。CUSTOM_MESSAGE 请求 hash 只基于 durable 形态计算，因此 USER 消息在提交时不得携带 瞬时
+   * idempotencyKey/requestHash 不变。CUSTOM_MESSAGE 请求 hash 只基于 durable 形态计算，因此 USER 消息在提交时不得携带 瞬时
    * media/attachment 内容。
    */
   public UUID submit(

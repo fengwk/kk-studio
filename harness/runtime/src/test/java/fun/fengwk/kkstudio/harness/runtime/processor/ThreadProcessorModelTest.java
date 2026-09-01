@@ -191,15 +191,15 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(assistant.id(), model(fixture.store, modelId).resultEntryId());
     List<ToolInvocation> tools = toolsByAssistant(fixture.store, assistant.id());
     assertEquals(2, tools.size());
-    for (int ordinal = 0; ordinal < 2; ordinal++) {
-      ToolInvocation tool = tools.get(ordinal);
-      assertEquals(ordinal, tool.ordinal());
+    for (int callIndex = 0; callIndex < 2; callIndex++) {
+      ToolInvocation tool = tools.get(callIndex);
+      assertEquals(callIndex, tool.callIndex());
       assertEquals(ToolInvocationStatus.READY, tool.status());
       assertEquals(0, tool.attempt());
       assertNull(tool.approval());
       assertEquals(modelId, tool.modelInvocationId());
       assertEquals("bash", tool.binding().descriptor().name());
-      assertEquals(calls.get(ordinal).toolCallId(), tool.call().id());
+      assertEquals(calls.get(callIndex).toolCallId(), tool.call().id());
       assertEquals("{}", tool.call().argumentsJson());
       assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tool.id())));
     }
@@ -389,7 +389,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
             plainRequest(),
             successResponse(List.of(), "bash"),
             null);
-    // head relocation 回 TURN_START：open turn 仍在但 head != basis（USER），model 不再 applicable。
+    // head relocation 回 TURN_START：open turn 仍在但 head != requestHead（USER），model 不再 applicable。
     inTx(
         fixture,
         tx -> {
@@ -420,7 +420,8 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
             plainRequest(),
             successResponse(List.of(), "bash"),
             null);
-    // head relocation 到 basis 的 descendant（独立 ASSISTANT Entry）：model 仍 terminal 未挂结果但不再 applicable。
+    // head relocation 到 requestHead 的 descendant（独立 ASSISTANT Entry）：model 仍 terminal 未挂结果但不再
+    // applicable。
     insertAssistantWithCalls(fixture.store, baseline, List.of());
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));

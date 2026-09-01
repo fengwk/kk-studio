@@ -57,7 +57,7 @@ Harness durable protocol 恰好七张表：
 | --- | --- |
 | `harness_session` | Session id 和创建时间 |
 | `harness_entry` | append-only Entry Tree 节点和 payload |
-| `harness_thread` | Session 归属、head、materialization hash、YOLO、command cursor、version |
+| `harness_thread` | Session 归属、head、creation request hash（初始创建请求指纹）、YOLO、command cursor、version |
 | `harness_thread_command` | ordered command mailbox、request hash、APPLIED/CANCELLED marker |
 | `harness_model_invocation` | Model request/status/attempt/checkpoint/result/error |
 | `harness_tool_invocation` | Tool call/binding/status/approval/result/effects/error |
@@ -66,9 +66,9 @@ Harness durable protocol 恰好七张表：
 其中：
 
 - `harness_entry` 通过 `(session_id,parent_entry_id)` FK 保证同 Session parent，partial unique index 保证每 Session 一个 ROOT；
-- `harness_thread_command` 主键为 `(thread_id, sequence)`，另有 `(thread_id, client_command_id)` 幂等唯一键；
+- `harness_thread_command` 主键为 `(thread_id, sequence)`，另有 `(thread_id, idempotency_key)` 幂等唯一键；
 - `harness_model_invocation` 以 `(thread_id, turn_start_entry_id)` 唯一，`result_entry_id` 非空时全局唯一；
-- `harness_tool_invocation` 以 `(assistant_entry_id, ordinal)` 唯一，`effects` 非 SUCCEEDED 时必须是空 batch，Tool batch apply 后删除；
+- `harness_tool_invocation` 以 `(assistant_entry_id, call_index)` 唯一，`effects` 非 SUCCEEDED 时必须是空 batch，Tool batch apply 后删除；
 - 时间列为 `timestamptz(3)`，应用拥有 version/id/time，数据库不自动推进 Runtime version。
 
 ### 事务锁序
@@ -80,11 +80,11 @@ Session (KEY SHARE / FOR UPDATE)
   -> Thread（UUID 升序）
   -> Commands（sequence 升序）
   -> ModelInvocation
-  -> ToolInvocation siblings（assistantEntryId + ordinal）
+  -> ToolInvocation siblings（assistantEntryId + callIndex）
   -> Work（target type + UUID 升序）
 ```
 
-`FOR KEY SHARE` 用于正常 command/thread materialization，避免 sibling Thread 被 Session 级写锁串行化；删除/归属独占操作使用 `FOR UPDATE`。[`PostgresqlHarnessTransaction`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessTransaction.java) 在 transaction handle 内记录 LockRank、Thread UUID、Tool ordinal 和 Work 顺序，逆序获取锁直接抛 `IllegalStateException`；transaction handle 只能由创建线程在 callback 内使用。
+`FOR KEY SHARE` 用于正常 command/初始创建路径，避免 sibling Thread 被 Session 级写锁串行化；删除/归属独占操作使用 `FOR UPDATE`。[`PostgresqlHarnessTransaction`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessTransaction.java) 在 transaction handle 内记录 LockRank、Thread UUID、Tool callIndex 和 Work 顺序，逆序获取锁直接抛 `IllegalStateException`；transaction handle 只能由创建线程在 callback 内使用。
 
 ### harness_work claim / lease / wake
 

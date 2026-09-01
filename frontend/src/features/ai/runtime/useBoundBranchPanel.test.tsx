@@ -126,10 +126,10 @@ function queuedSettingCommand(
     sequence,
     type,
     state: 'QUEUED',
-    clientCommandId: `queued-${sequence}`,
+    idempotencyKey: `queued-${sequence}`,
     requestHash: '0123456789abcdef'.repeat(4),
     payloadJson: JSON.stringify(payload),
-    consumedTurnStartEntryId: null,
+    appliedTurnStartEntryId: null,
     cancelledAt: null,
     createTime: null,
   }

@@ -7,7 +7,7 @@ import {
   chatOwner,
   createChat,
   getThreadSnapshot,
-  materializeNewSession,
+  createNewSession,
   setAgentCommand,
   setModelCommand,
   stopThread,
@@ -103,7 +103,7 @@ registerCase({
       // 通过 THREAD batch 一次性 SET_AGENT/SET_MODEL + USER_MESSAGE 启动 mock turn。
       const sessionId = cid()
       const createdThreadId = cid()
-      await materializeNewSession(ctx, {
+      await createNewSession(ctx, {
         owner: chatOwner(chat.id),
         sessionId,
         threadId: createdThreadId,
@@ -421,7 +421,7 @@ function assertActiveFailure(snapshot, failure, { partialText, thinking }) {
   for (const [field, value] of [
     ['modelInvocationId', failure.modelInvocationId],
     ['turnStartEntryId', failure.turnStartEntryId],
-    ['basisHeadEntryId', failure.basisHeadEntryId],
+    ['requestHeadEntryId', failure.requestHeadEntryId],
   ]) {
     assertUuid(value, field)
   }
