@@ -358,7 +358,6 @@ registerCase({
     assert(commandsDto.every((item) => item.type === 'USER_MESSAGE' && item.state === 'QUEUED'), JSON.stringify(commandsDto))
     assert(commandsDto.every((item) => String(item.threadId) === threadId), JSON.stringify(commandsDto))
     assert(commandsDto.every((item) => /^[1-9]\d*$/.test(String(item.sequence))), JSON.stringify(commandsDto))
-    assert(commandsDto.every((item) => /^[1-9]\d*$/.test(String(item.sequence))), JSON.stringify(commandsDto))
     const payload = JSON.parse(commandsDto[0].payloadJson)
     assert(
       isDeepStrictEqual(payload, { message: { role: 'USER', contents: [{ type: 'text', text: 'strict wire probe' }] } }),

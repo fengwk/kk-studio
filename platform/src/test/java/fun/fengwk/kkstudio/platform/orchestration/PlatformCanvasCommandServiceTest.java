@@ -478,11 +478,11 @@ public class PlatformCanvasCommandServiceTest extends PostgresSpringTestSupport 
   void versionCasIdempotencyAndAtomicRollbackAreEnforced() throws Exception {
     CanvasDocument canvas = commandService.createCanvas("atomic");
     UUID nodeA = UUID.randomUUID();
-    UUID commandId = UUID.randomUUID();
+    UUID idempotencyKey = UUID.randomUUID();
     List<CanvasCommand> batch = List.of(new CanvasCommand.CreateTextNode(nodeA, "a", "x", T));
-    CanvasPatch first = commandService.applyCommands(canvas.id(), 0, commandId, batch);
+    CanvasPatch first = commandService.applyCommands(canvas.id(), 0, idempotencyKey, batch);
     assertEquals(1L, first.version());
-    CanvasPatch replay = commandService.applyCommands(canvas.id(), 0, commandId, batch);
+    CanvasPatch replay = commandService.applyCommands(canvas.id(), 0, idempotencyKey, batch);
     assertTrue(replay.isEmpty(), "exact replay returns a deterministic no-op patch");
     assertEquals(1L, replay.version());
     assertEquals(1L, snapshot(canvas).document().version());
@@ -494,7 +494,7 @@ public class PlatformCanvasCommandServiceTest extends PostgresSpringTestSupport 
                 commandService.applyCommands(
                     canvas.id(),
                     0,
-                    commandId,
+                    idempotencyKey,
                     List.of(new CanvasCommand.CreateTextNode(UUID.randomUUID(), "other", "y", T))));
     assertEquals(CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT, hashConflict.reason());
 
@@ -615,8 +615,9 @@ public class PlatformCanvasCommandServiceTest extends PostgresSpringTestSupport 
   }
 
   private CanvasPatch apply(
-      CanvasDocument canvas, long expectedVersion, UUID commandId, CanvasCommand... commands) {
-    return commandService.applyCommands(canvas.id(), expectedVersion, commandId, List.of(commands));
+      CanvasDocument canvas, long expectedVersion, UUID idempotencyKey, CanvasCommand... commands) {
+    return commandService.applyCommands(
+        canvas.id(), expectedVersion, idempotencyKey, List.of(commands));
   }
 
   private void assertStableSnapshotAcrossFunctionCommit(String lockedTable, String suffix)
