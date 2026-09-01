@@ -845,7 +845,6 @@ function command(
     state,
     idempotencyKey: `cid-${label}`,
     payloadJson: JSON.stringify(payload),
-    appliedTurnStartEntryId: null,
     cancelledAt: null,
     createTime: '2026-01-01T00:00:00',
   }
