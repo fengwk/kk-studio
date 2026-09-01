@@ -132,13 +132,8 @@ public final class HarnessRuntimeResponseMapper {
     dto.setSequence(Long.toString(command.sequence()));
     dto.setType(command.type().name());
     dto.setState(command.state().name());
-    dto.setClientCommandId(command.clientCommandId().toString());
-    dto.setRequestHash(command.requestHash());
+    dto.setIdempotencyKey(command.idempotencyKey().toString());
     dto.setPayloadJson(COMMAND_PAYLOADS.encode(command.payload()));
-    dto.setConsumedTurnStartEntryId(
-        command.consumedTurnStartEntryId() == null
-            ? null
-            : command.consumedTurnStartEntryId().toString());
     dto.setCancelledAt(command.cancelledAt());
     dto.setCreateTime(command.createdAt());
     return dto;
@@ -150,7 +145,7 @@ public final class HarnessRuntimeResponseMapper {
     dto.setId(invocation.id().toString());
     dto.setThreadId(invocation.threadId().toString());
     dto.setTurnStartEntryId(invocation.turnStartEntryId().toString());
-    dto.setBasisHeadEntryId(invocation.basisHeadEntryId().toString());
+    dto.setRequestHeadEntryId(invocation.requestHeadEntryId().toString());
     dto.setStatus(invocation.status().name());
     dto.setAttempt(invocation.attempt());
     dto.setStreamCheckpointJson(
@@ -173,7 +168,7 @@ public final class HarnessRuntimeResponseMapper {
     dto.setId(invocation.id().toString());
     dto.setModelInvocationId(invocation.modelInvocationId().toString());
     dto.setAssistantEntryId(invocation.assistantEntryId().toString());
-    dto.setOrdinal(invocation.ordinal());
+    dto.setCallIndex(invocation.callIndex());
     dto.setStatus(invocation.status().name());
     dto.setAttempt(invocation.attempt());
     dto.setToolCallId(invocation.call().id());
@@ -227,7 +222,7 @@ public final class HarnessRuntimeResponseMapper {
       ModelAttemptFailureDTO failureDto = new ModelAttemptFailureDTO();
       failureDto.setModelInvocationId(failure.modelInvocationId().toString());
       failureDto.setTurnStartEntryId(failure.turnStartEntryId().toString());
-      failureDto.setBasisHeadEntryId(failure.basisHeadEntryId().toString());
+      failureDto.setRequestHeadEntryId(failure.requestHeadEntryId().toString());
       failureDto.setAttempt(failure.attempt());
       failureDto.setSequence(Long.toString(failure.sequence()));
       failureDto.setText(failure.text());
@@ -311,7 +306,7 @@ public final class HarnessRuntimeResponseMapper {
     for (CancelledUserMessage message : result.cancelledUserMessages()) {
       HarnessCancelledUserMessageDTO messageDto = new HarnessCancelledUserMessageDTO();
       messageDto.setSequence(Long.toString(message.sequence()));
-      messageDto.setClientCommandId(message.clientCommandId().toString());
+      messageDto.setIdempotencyKey(message.idempotencyKey().toString());
       messageDto.setMessageJson(
           AGENT_MESSAGES.encode(new AgentMessage(AgentMessageRole.USER, message.contents())));
       cancelled.add(messageDto);

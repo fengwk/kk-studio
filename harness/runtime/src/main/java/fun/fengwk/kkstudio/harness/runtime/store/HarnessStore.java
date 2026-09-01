@@ -33,8 +33,8 @@ import java.util.function.Function;
  * #transaction}）。并发由实现决定：生产实现允许并发事务，测试参考实现使用全局 monitor 串行化。
  *
  * <p>多实体锁顺序（所有多行事务必须遵守，防止死锁）：先按 {@link UuidOrder} 升序锁 Thread，再锁其 Commands，再锁其 ModelInvocation， 再按
- * ordinal 升序锁同 Assistant Entry 的 ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work 时，同层 Work 必须按 (type,
- * id) 升序（例如先 THREAD Work 再 MODEL Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；dispatcher
+ * callIndex 升序锁同 Assistant Entry 的 ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work 时，同层 Work 必须按
+ * (type, id) 升序（例如先 THREAD Work 再 MODEL Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；dispatcher
  * claim、heartbeat/lease 等单 Work 调度事务是唯一例外，它们不得创建新的业务 wake。实现必须在实际获取新锁前以 {@link
  * IllegalStateException} 拒绝逆序；重复访问本事务已持有的锁合法。
  *
@@ -127,15 +127,15 @@ public interface HarnessStore {
     /**
      * 更新 Thread current state。要求行存在且已在本事务锁定（{@link #lockThread} 或同事务 {@link #insertThread}），并通过共享
      * transition validation（{@link ThreadState#validateTransition}）：id / sessionId /
-     * materializationHash / createdAt 不得改变，headEntryId 必须指向已存在 Entry 且属于 Thread 的
+     * creationRequestHash / createdAt 不得改变，headEntryId 必须指向已存在 Entry 且属于 Thread 的
      * Session，nextCommandSequence / version / updatedAt 不得回退，任何对外字段变化必须 version 精确 +1。未锁定抛 {@link
      * IllegalStateException}，行不存在、身份改变、非法 transition 或 head 不存在/跨 Session 抛 {@link
      * IllegalArgumentException}。
      */
     void updateThread(ThreadState thread);
 
-    /** 按 (threadId, clientCommandId) 幂等查找 Command；不存在返回 {@link Optional#empty()}。 */
-    Optional<ThreadCommand> findCommandByClientId(UUID threadId, UUID clientCommandId);
+    /** 按 (threadId, idempotencyKey) 幂等查找 Command；不存在返回 {@link Optional#empty()}。 */
+    Optional<ThreadCommand> findCommandByIdempotencyKey(UUID threadId, UUID idempotencyKey);
 
     /**
      * 读取该 Thread 全部 QUEUED Command，按 sequence 升序。要求该 Thread 已在本事务锁定（{@link #lockThread} 或同事务 {@link
@@ -148,28 +148,28 @@ public interface HarnessStore {
     List<ThreadCommand> loadCommandsByThread(UUID threadId);
 
     /**
-     * 读取该 Thread 上以指定 {@code cancelRequestId} 取消的全部 Command（CANCELLED，含历史），按 sequence 升序；不产生锁。索引用
-     * {@code idx_harness_thread_command_cancel_request}；返回不可变列表。
+     * 读取该 Thread 上以指定 {@code stopRequestId} 取消的全部 Command（CANCELLED，含历史），按 sequence 升序；不产生锁。索引用
+     * {@code idx_harness_thread_command_stop_request}；返回不可变列表。
      */
-    List<ThreadCommand> loadCancelledCommandsByRequest(UUID threadId, UUID cancelRequestId);
+    List<ThreadCommand> loadCancelledCommandsByRequest(UUID threadId, UUID stopRequestId);
 
     /**
      * 批量插入新 Command；每条 command 的 thread 必须存在且已在本事务锁定（锁序 Thread -&gt; commands），初始状态必须为 QUEUED（无任何
-     * terminal marker），并逐条校验 {@code (thread, sequence)}、{@code (thread, clientCommandId)} 唯一性后按
+     * terminal marker），并逐条校验 {@code (thread, sequence)}、{@code (thread, idempotencyKey)} 唯一性后按
      * {@code (threadId, sequence)} 稳定顺序写入。违反抛 {@link IllegalArgumentException}；入参 list 被防御性拷贝且拒绝
      * null 元素。插入后本事务内可更新。
      */
     void insertCommands(List<ThreadCommand> commands);
 
     /**
-     * 批量更新 Command 的生命周期。threadId / payload / clientCommandId / requestHash / sequence / createdAt
-     * 必须与 已存储行一致；QUEUED 行只能推进为 APPLIED（设置 consumedTurnStartEntryId）或 CANCELLED（设置 cancelRequestId 与
+     * 批量更新 Command 的生命周期。threadId / payload / idempotencyKey / requestHash / sequence / createdAt
+     * 必须与 已存储行一致；QUEUED 行只能推进为 APPLIED（设置 appliedTurnStartEntryId）或 CANCELLED（设置 stopRequestId 与
      * cancelledAt 成对），terminal 行只接受 exact-idempotent 重放（相同 marker），禁止 terminal-&gt;QUEUED、
-     * APPLIED&lt;-&gt;CANCELLED 或 terminal marker 改变；consumedTurnStartEntryId 必须指向 TURN_START
+     * APPLIED&lt;-&gt;CANCELLED 或 terminal marker 改变；appliedTurnStartEntryId 必须指向 TURN_START
      * Entry、属于 Command Thread 的 Session，且被引用 TURN_START 的 ownerThreadId 等于 command 的
      * threadId。要求每行已在本事务锁定 （{@link #loadQueuedCommands} 或 {@link #insertCommands}），且每条 command 的
      * thread 已在本事务锁定（锁序 Thread -&gt; commands）。未锁定抛 {@link IllegalStateException}，身份 / 生命周期 /
-     * consumed 引用违反或行不存在抛 {@link IllegalArgumentException}。
+     * applied 引用违反或行不存在抛 {@link IllegalArgumentException}。
      */
     void updateCommands(List<ThreadCommand> commands);
 
@@ -184,24 +184,25 @@ public interface HarnessStore {
 
     /**
      * 插入新 ModelInvocation（初始状态不变量：只能 READY / attempt=0 / 无 terminal facts）。约束：thread 存在且已在本事务锁定
-     * （{@link #lockThread} 或同事务 {@link #insertThread}，basis CAS 才能原子成立，未锁定抛 {@link
-     * IllegalStateException}）； basisHeadEntryId 必须等于 Thread 当前 head（创建时精确 basis
-     * CAS）；turnStartEntryId 指向 TURN_START Entry 且必须位于 basisHeadEntryId 的 EntryPath 上；{@code
+     * （{@link #lockThread} 或同事务 {@link #insertThread}，request head CAS 才能原子成立，未锁定抛 {@link
+     * IllegalStateException}）； requestHeadEntryId 必须等于 Thread 当前 head（创建时精确 request head
+     * CAS）；turnStartEntryId 指向 TURN_START Entry 且必须位于 requestHeadEntryId 的 EntryPath 上；{@code
      * (threadId, turnStartEntryId)} 唯一；resultEntryId 全局 唯一、必须是与 invocation 用途一致的结果 Entry（正常
      * invocation：Assistant / AssistantError / AssistantAborted；压缩 invocation：COMPACTION /
-     * AssistantError / AssistantAborted），且其 path 同时包含 basisHeadEntryId 与 turnStartEntryId（同 branch
-     * descendant）。违反抛 {@link IllegalArgumentException}。插入后本事务内可更新。
+     * AssistantError / AssistantAborted），且其 path 同时包含 requestHeadEntryId 与 turnStartEntryId（同
+     * branch descendant）。违反抛 {@link IllegalArgumentException}。插入后本事务内可更新。
      */
     void insertModelInvocation(ModelInvocation invocation);
 
     /**
      * 更新 ModelInvocation current state。要求行存在且已在本事务锁定，并通过共享 transition validation（{@link
-     * ModelInvocation#validateTransition}）：threadId / turnStartEntryId / basisHeadEntryId / request
-     * / createdAt 不得 改变，updatedAt 不回退，attempt 只在确认 start / DISPATCHING stop 窗口时 +1，terminal facts
-     * 不可变（resultEntryId 仅允许 null-&gt;non-null），checkpoint 只在 RUNNING-&gt;RUNNING 新增/增长、进入 terminal
-     * 或 retry 时保留 exact 或清空。分支校验不重复依赖 Thread 当前 head / session（relocation 后 terminal exact replay
-     * 仍合法）；仅当 resultEntryId 出现时校验其类型、path 同时包含 basis 与 turnStart、全局唯一。未锁定抛 {@link
-     * IllegalStateException}，身份改变、非法 transition 或行不存在抛 {@link IllegalArgumentException}。
+     * ModelInvocation#validateTransition}）：threadId / turnStartEntryId / requestHeadEntryId /
+     * requestSpec / createdAt 不得 改变，updatedAt 不回退，attempt 只在确认 start / DISPATCHING stop 窗口时
+     * +1，terminal facts 不可变（resultEntryId 仅允许 null-&gt;non-null），checkpoint 只在 RUNNING-&gt;RUNNING
+     * 新增/增长、进入 terminal 或 retry 时保留 exact 或清空。分支校验不重复依赖 Thread 当前 head / session（relocation 后
+     * terminal exact replay 仍合法）；仅当 resultEntryId 出现时校验其类型、path 同时包含 request head 与
+     * turnStart、全局唯一。未锁定抛 {@link IllegalStateException}，身份改变、非法 transition 或行不存在抛 {@link
+     * IllegalArgumentException}。
      */
     void updateModelInvocation(ModelInvocation invocation);
 
@@ -211,25 +212,25 @@ public interface HarnessStore {
     /** 锁定 ToolInvocation 行并返回；不存在返回 {@link Optional#empty()} 且不产生锁。 */
     Optional<ToolInvocation> lockToolInvocation(UUID id);
 
-    /** 读取指定 Assistant Entry 的全部 ToolInvocation，按 ordinal 升序；不产生锁。返回不可变列表。 */
+    /** 读取指定 Assistant Entry 的全部 ToolInvocation，按 callIndex 升序；不产生锁。返回不可变列表。 */
     List<ToolInvocation> loadToolInvocationsByAssistantEntryId(UUID assistantEntryId);
 
-    /** 读取指定 Assistant Entry 的全部 ToolInvocation，按 ordinal 升序并统一锁定；返回不可变列表。 */
+    /** 读取指定 Assistant Entry 的全部 ToolInvocation，按 callIndex 升序并统一锁定；返回不可变列表。 */
     List<ToolInvocation> lockToolInvocationsByAssistantEntryId(UUID assistantEntryId);
 
     /**
      * 批量插入新 ToolInvocation（初始状态只能是 READY，或用于 sibling 静态拒绝的 unattached FAILED；两者均
-     * attempt=0、approval=null、effects 为空）；逐条校验 id、{@code (assistantEntryId, ordinal)}
+     * attempt=0、approval=null、effects 为空）；逐条校验 id、{@code (assistantEntryId, callIndex)}
      * 唯一性，并要求：modelInvocation 存在且其 resultEntryId 等于 assistantEntryId；assistantEntryId 指向 Assistant
-     * MESSAGE Entry 且 call 与其中按 ordinal 提取的 ToolCall（id / toolName / argumentsJson）精确一致。完整预校验后按
-     * {@code (assistantEntryId, ordinal)} 稳定顺序写入；违反抛 {@link IllegalArgumentException}；入参 list
+     * MESSAGE Entry 且 call 与其中按 callIndex 提取的 ToolCall（id / toolName / argumentsJson）精确一致。完整预校验后按
+     * {@code (assistantEntryId, callIndex)} 稳定顺序写入；违反抛 {@link IllegalArgumentException}；入参 list
      * 被防御性拷贝且拒绝 null 元素。插入后本事务内可更新。
      */
     void insertToolInvocations(List<ToolInvocation> invocations);
 
     /**
      * 批量更新 ToolInvocation current state。要求每行存在且已在本事务锁定，并通过共享 transition validation（{@link
-     * ToolInvocation#validateTransition}）：id / modelInvocationId / assistantEntryId / ordinal /
+     * ToolInvocation#validateTransition}）：id / modelInvocationId / assistantEntryId / callIndex /
      * call / binding / createdAt 不得改变，updatedAt 不回退，attempt 只在确认 start 时 +1，approval
      * 一旦决定不可变，terminal facts（result/effects/error）不可变。未锁定抛 {@link IllegalStateException}，身份改变、非法
      * transition 或行不存在抛 {@link IllegalArgumentException}。

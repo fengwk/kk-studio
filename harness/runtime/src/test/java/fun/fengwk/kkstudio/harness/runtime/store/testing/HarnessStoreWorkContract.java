@@ -81,7 +81,7 @@ public abstract class HarnessStoreWorkContract {
 
   protected SeededTool seedTool(HarnessStore store) {
     TurnBaseline baseline = seedTurnBaseline(store);
-    ModelRequestSpec request = succeededRequest();
+    ModelRequestSpec requestSpec = succeededRequest();
     ProviderResponse response = StoreTestSupport.assistantResponse("call-1");
     return store.transaction(
         tx -> {
@@ -101,7 +101,7 @@ public abstract class HarnessStoreWorkContract {
                   assistantEntryId,
                   baseline.sessionId(),
                   userEntryId,
-                  mappedAssistant(request, response),
+                  mappedAssistant(requestSpec, response),
                   T1));
           tx.lockThread(baseline.threadId()).orElseThrow();
           tx.insertModelInvocation(
@@ -110,7 +110,7 @@ public abstract class HarnessStoreWorkContract {
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
-                  request,
+                  requestSpec,
                   ModelInvocationStatus.READY,
                   0,
                   null,

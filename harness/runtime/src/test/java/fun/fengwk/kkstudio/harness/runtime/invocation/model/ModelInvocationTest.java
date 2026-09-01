@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.checkpoint;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.error;
-import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.request;
+import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.requestSpec;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.response;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -49,8 +49,8 @@ class ModelInvocationTest {
     assertEquals(id(1L), ready.id());
     assertEquals(id(1L), ready.threadId());
     assertEquals(id(1L), ready.turnStartEntryId());
-    assertEquals(id(1L), ready.basisHeadEntryId());
-    assertEquals(InvocationTestData.request(), ready.request());
+    assertEquals(id(1L), ready.requestHeadEntryId());
+    assertEquals(InvocationTestData.requestSpec(), ready.requestSpec());
 
     ModelInvocation readyRetryWaiting =
         invocation(ModelInvocationStatus.READY, 1, null, null, null, null);
@@ -142,7 +142,7 @@ class ModelInvocationTest {
                 id(1L),
                 id(1L),
                 id(1L),
-                request(),
+                requestSpec(),
                 ModelInvocationStatus.READY,
                 -1,
                 null,
@@ -160,7 +160,7 @@ class ModelInvocationTest {
                 id(1L),
                 id(1L),
                 id(1L),
-                request(),
+                requestSpec(),
                 ModelInvocationStatus.READY,
                 0,
                 null,
@@ -192,8 +192,20 @@ class ModelInvocationTest {
         NullPointerException.class,
         () ->
             new ModelInvocation(
-                id(1L), id(1L), id(1L), id(1L), request(), null, 0, null, null, null, null,
-                List.of(), CREATED, UPDATED));
+                id(1L),
+                id(1L),
+                id(1L),
+                id(1L),
+                requestSpec(),
+                null,
+                0,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                CREATED,
+                UPDATED));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -202,7 +214,7 @@ class ModelInvocationTest {
                 id(1L),
                 id(1L),
                 id(1L),
-                request(),
+                requestSpec(),
                 ModelInvocationStatus.READY,
                 0,
                 null,
@@ -336,7 +348,7 @@ class ModelInvocationTest {
         id(1L),
         id(1L),
         id(1L),
-        request(),
+        requestSpec(),
         status,
         attempt,
         streamCheckpoint,
@@ -361,7 +373,7 @@ class ModelInvocationTest {
         id(1L),
         id(1L),
         id(1L),
-        request(),
+        requestSpec(),
         status,
         attempt,
         streamCheckpoint,

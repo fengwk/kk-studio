@@ -53,24 +53,25 @@ import java.util.function.Function;
  * <p>模拟必要 schema 约束：Session / Entry / Thread / Invocation id 唯一；Entry 写入前用完整 {@link EntryPath} 校验（每
  * Session 一个 ROOT 且 ROOT 先于其他 Entry、parent 连续且同 Session、createdAt 顺序与 turn / tool-prefix 结构）；Thread
  * head Entry 存在（insert 与 update）；Command 只能以 QUEUED 插入，所属 thread 存在且 保持 {@code (thread, sequence)}
- * 与 {@code (thread, clientCommandId)} 唯一，生命周期只能 QUEUED-&gt;APPLIED / CANCELLED 或 terminal
- * exact-idempotent，consumedTurnStartEntryId 必须指向与 thread 当前 head 同 session 的 TURN_START Entry；新
+ * 与 {@code (thread, idempotencyKey)} 唯一，生命周期只能 QUEUED-&gt;APPLIED / CANCELLED 或 terminal
+ * exact-idempotent，appliedTurnStartEntryId 必须指向与 thread 当前 head 同 session 的 TURN_START Entry；新
  * ModelInvocation 只能以 READY / attempt=0 插入并保持 {@code (thread, turnStartEntryId)}
- * 唯一，basisHeadEntryId 必须等于 thread 当前 head（创建时 basis CAS），turnStartEntryId 必须位于 basis 的 EntryPath
- * 上，resultEntryId 全局唯一、限定为 Assistant / AssistantError / AssistantAborted Entry 且其 path 同时包含 basis 与
- * turnStart（同 branch descendant）；新 ToolInvocation 只能以 READY（或用于 sibling 静态拒绝的 unattached
- * FAILED）、attempt=0、approval=null 插入并保持 {@code (assistantEntryId, ordinal)} 唯一，其 modelInvocation 的
- * resultEntryId 必须等于 assistantEntryId，durable {@code call} 与 Assistant 中按 ordinal 提取的 ToolCall 精确一致
- * （binding 为 null 时 renderer 固定回退）；Tool 行不持有结果引用 —— Outcome 已追加为 ToolResult MESSAGE Entry 后行 被
- * batch apply 物理删除；Work target 必须存在且保持 {@code (targetType, targetId)} 主键。
+ * 唯一，requestHeadEntryId 必须等于 thread 当前 head（创建时 requestHead CAS），turnStartEntryId 必须位于 requestHead
+ * 的 EntryPath 上，resultEntryId 全局唯一、限定为 Assistant / AssistantError / AssistantAborted Entry 且其 path
+ * 同时包含 requestHead 与 turnStart（同 branch descendant）；新 ToolInvocation 只能以 READY（或用于 sibling 静态拒绝的
+ * unattached FAILED）、attempt=0、approval=null 插入并保持 {@code (assistantEntryId, callIndex)} 唯一，其
+ * modelInvocation 的 resultEntryId 必须等于 assistantEntryId，durable {@code call} 与 Assistant 中按
+ * callIndex 提取的 ToolCall 精确一致 （binding 为 null 时 renderer 固定回退）；Tool 行不持有结果引用 —— Outcome 已追加为
+ * ToolResult MESSAGE Entry 后行 被 batch apply 物理删除；Work target 必须存在且保持 {@code (targetType, targetId)}
+ * 主键。
  *
  * <p>per-transaction lock tracking：updateThread / updateCommands / updateModelInvocation /
  * updateToolInvocations 要求对应行已在本事务锁定，且 Thread / Model / Tool 更新必须通过 aggregate 共享 transition
  * validation （非法状态机跳跃与 terminal 回退/改写被拒绝）；lock* 方法、loadQueuedCommands 与
  * lockToolInvocationsByAssistantEntryId 产生锁；insert* 之后本事务内可直接更新，insertModelInvocation 额外要求 Thread
- * 已在本事务锁定（basis CAS 原子），loadQueuedCommands / insertCommands / updateCommands 也要求相关 Thread
+ * 已在本事务锁定（requestHead CAS 原子），loadQueuedCommands / insertCommands / updateCommands 也要求相关 Thread
  * 已在本事务锁定（锁序 Thread -&gt; commands）；Work 的 renew / complete / reschedule 方法内部先锁定目标行，
- * lockClaimedWork 在 ownership 校验通过后锁行；Thread 同层按 {@link UuidOrder} 升序，Tool siblings 按 ordinal
+ * lockClaimedWork 在 ownership 校验通过后锁行；Thread 同层按 {@link UuidOrder} 升序，Tool siblings 按 callIndex
  * 升序，Work 同层按 (type, id) 升序；requestWork 与存在行的 deleteWork 要求 owning Thread 已锁定。返回对象与 list 均为
  * immutable records / copies。
  */
@@ -81,7 +82,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
           .thenComparingLong(ThreadCommand::sequence);
   private static final Comparator<ToolInvocation> TOOL_LOCK_ORDER =
       Comparator.comparing(ToolInvocation::assistantEntryId, UuidOrder.COMPARATOR)
-          .thenComparingInt(ToolInvocation::ordinal)
+          .thenComparingInt(ToolInvocation::callIndex)
           .thenComparing(ToolInvocation::id, UuidOrder.COMPARATOR);
   private static final Comparator<WorkTarget> WORK_LOCK_ORDER =
       Comparator.comparingInt((WorkTarget target) -> target.type().ordinal())
@@ -218,15 +219,15 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
   private record CommandSequenceKey(UUID threadId, long sequence) {}
 
-  private record CommandClientKey(UUID threadId, UUID clientCommandId) {}
+  private record CommandClientKey(UUID threadId, UUID idempotencyKey) {}
 
-  private record ToolOrdinalKey(UUID assistantEntryId, int ordinal) {}
+  private record ToolCallIndexKey(UUID assistantEntryId, int callIndex) {}
 
   private final class InMemoryTransaction implements Transaction {
 
     private final State state;
     private final Set<LockKey> locked = new HashSet<>();
-    private final Map<UUID, Integer> highestToolOrdinalByAssistant = new HashMap<>();
+    private final Map<UUID, Integer> highestToolCallIndexByAssistant = new HashMap<>();
     private final Thread owner = Thread.currentThread();
     private LockRank highestLockRank;
     private UUID highestThreadId;
@@ -295,19 +296,19 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     private void requireCanLockTools(List<ToolInvocation> invocations) {
-      Map<UUID, Integer> ordinals = new HashMap<>(highestToolOrdinalByAssistant);
+      Map<UUID, Integer> callIndexes = new HashMap<>(highestToolCallIndexByAssistant);
       for (ToolInvocation invocation : invocations) {
         LockKey key = LockKey.tool(invocation.id());
         if (locked.contains(key)) {
           continue;
         }
         requireCanLock(key);
-        Integer previous = ordinals.put(invocation.assistantEntryId(), invocation.ordinal());
-        if (previous != null && invocation.ordinal() <= previous) {
+        Integer previous = callIndexes.put(invocation.assistantEntryId(), invocation.callIndex());
+        if (previous != null && invocation.callIndex() <= previous) {
           throw new IllegalStateException(
               "tool invocation locks for assistant entry "
                   + invocation.assistantEntryId()
-                  + " must be acquired by ascending ordinal");
+                  + " must be acquired by ascending callIndex");
         }
       }
     }
@@ -317,7 +318,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       LockKey key = LockKey.tool(invocation.id());
       if (!locked.contains(key)) {
         lock(key);
-        highestToolOrdinalByAssistant.put(invocation.assistantEntryId(), invocation.ordinal());
+        highestToolCallIndexByAssistant.put(invocation.assistantEntryId(), invocation.callIndex());
       }
     }
 
@@ -568,12 +569,12 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public Optional<ThreadCommand> findCommandByClientId(UUID threadId, UUID clientCommandId) {
+    public Optional<ThreadCommand> findCommandByIdempotencyKey(UUID threadId, UUID idempotencyKey) {
       checkOpen();
-      Objects.requireNonNull(clientCommandId, "clientCommandId");
+      Objects.requireNonNull(idempotencyKey, "idempotencyKey");
       for (ThreadCommand command : state.commands.values()) {
         if (command.threadId().equals(threadId)
-            && command.clientCommandId().equals(clientCommandId)) {
+            && command.idempotencyKey().equals(idempotencyKey)) {
           return Optional.of(command);
         }
       }
@@ -611,15 +612,15 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public List<ThreadCommand> loadCancelledCommandsByRequest(UUID threadId, UUID cancelRequestId) {
+    public List<ThreadCommand> loadCancelledCommandsByRequest(UUID threadId, UUID stopRequestId) {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");
-      Objects.requireNonNull(cancelRequestId, "cancelRequestId");
+      Objects.requireNonNull(stopRequestId, "stopRequestId");
       return state.commands.values().stream()
           .filter(
               command ->
                   command.threadId().equals(threadId)
-                      && cancelRequestId.equals(command.cancelRequestId()))
+                      && stopRequestId.equals(command.stopRequestId()))
           .sorted(Comparator.comparingLong(ThreadCommand::sequence))
           .toList();
     }
@@ -630,7 +631,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       List<ThreadCommand> copied =
           List.copyOf(commands).stream().sorted(COMMAND_LOCK_ORDER).toList();
       Set<CommandSequenceKey> sequences = new HashSet<>();
-      Set<CommandClientKey> clientIds = new HashSet<>();
+      Set<CommandClientKey> idempotencyKeys = new HashSet<>();
       for (ThreadCommand command : copied) {
         requireMillisecondPrecision(command.cancelledAt());
         requireMillisecondPrecision(command.createdAt());
@@ -641,10 +642,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
                   + " on thread "
                   + command.threadId());
         }
-        if (!clientIds.add(new CommandClientKey(command.threadId(), command.clientCommandId()))) {
+        if (!idempotencyKeys.add(
+            new CommandClientKey(command.threadId(), command.idempotencyKey()))) {
           throw new IllegalArgumentException(
-              "duplicate clientCommandId "
-                  + command.clientCommandId()
+              "duplicate idempotencyKey "
+                  + command.idempotencyKey()
                   + " on thread "
                   + command.threadId());
         }
@@ -678,10 +680,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
                   + command.threadId());
         }
         if (existing.threadId().equals(command.threadId())
-            && existing.clientCommandId().equals(command.clientCommandId())) {
+            && existing.idempotencyKey().equals(command.idempotencyKey())) {
           throw new IllegalArgumentException(
-              "clientCommandId "
-                  + command.clientCommandId()
+              "idempotencyKey "
+                  + command.idempotencyKey()
                   + " already used on thread "
                   + command.threadId());
         }
@@ -716,20 +718,20 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     /**
-     * consumedTurnStartEntryId（若有）必须指向 TURN_START Entry，该 Entry 的 path session 与 Command Thread 的
+     * appliedTurnStartEntryId（若有）必须指向 TURN_START Entry，该 Entry 的 path session 与 Command Thread 的
      * Session 一致，且被引用 TURN_START 的 ownerThreadId 等于 command 的 threadId。
      */
     private void requireValidConsumedTurnStart(ThreadCommand command) {
-      UUID consumedTurnStartEntryId = command.consumedTurnStartEntryId();
-      if (consumedTurnStartEntryId == null) {
+      UUID appliedTurnStartEntryId = command.appliedTurnStartEntryId();
+      if (appliedTurnStartEntryId == null) {
         return;
       }
-      Entry turnStart = requireExistingEntry(consumedTurnStartEntryId);
+      Entry turnStart = requireExistingEntry(appliedTurnStartEntryId);
       if (turnStart.payload().type() != EntryType.TURN_START) {
         throw new IllegalArgumentException(
-            "consumedTurnStartEntryId must reference a TURN_START entry");
+            "appliedTurnStartEntryId must reference a TURN_START entry");
       }
-      UUID turnStartSessionId = loadEntryPath(consumedTurnStartEntryId).root().sessionId();
+      UUID turnStartSessionId = loadEntryPath(appliedTurnStartEntryId).root().sessionId();
       ThreadState thread = state.threads.get(command.threadId());
       if (thread == null) {
         throw new IllegalArgumentException("thread " + command.threadId() + " does not exist");
@@ -750,15 +752,15 @@ public final class InMemoryHarnessStore implements HarnessStore {
      * terminal-&gt;QUEUED、APPLIED&lt;-&gt;CANCELLED 或 terminal marker 改变。
      */
     private static void requireValidCommandLifecycle(ThreadCommand stored, ThreadCommand command) {
-      if (stored.consumedTurnStartEntryId() != null || stored.cancelledAt() != null) {
-        if (!Objects.equals(stored.consumedTurnStartEntryId(), command.consumedTurnStartEntryId())
+      if (stored.appliedTurnStartEntryId() != null || stored.cancelledAt() != null) {
+        if (!Objects.equals(stored.appliedTurnStartEntryId(), command.appliedTurnStartEntryId())
             || !Objects.equals(stored.cancelledAt(), command.cancelledAt())) {
           throw new IllegalArgumentException(
               "terminal commands must be updated exactly idempotently");
         }
         return;
       }
-      boolean consumed = command.consumedTurnStartEntryId() != null;
+      boolean consumed = command.appliedTurnStartEntryId() != null;
       boolean cancelled = command.cancelledAt() != null;
       if (consumed == cancelled) {
         // 两者都缺失：QUEUED -> QUEUED；两者都存在时已被 record contract 直接拒绝。
@@ -770,12 +772,12 @@ public final class InMemoryHarnessStore implements HarnessStore {
     private static void requireSameCommandIdentity(ThreadCommand stored, ThreadCommand command) {
       if (!stored.threadId().equals(command.threadId())
           || !stored.payload().equals(command.payload())
-          || !stored.clientCommandId().equals(command.clientCommandId())
+          || !stored.idempotencyKey().equals(command.idempotencyKey())
           || !stored.requestHash().equals(command.requestHash())
           || stored.sequence() != command.sequence()
           || !stored.createdAt().equals(command.createdAt())) {
         throw new IllegalArgumentException(
-            "command identity (thread/payload/clientCommandId/requestHash/sequence/createdAt) must not change");
+            "command identity (thread/payload/idempotencyKey/requestHash/sequence/createdAt) must not change");
       }
     }
 
@@ -821,7 +823,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       if (!state.threads.containsKey(invocation.threadId())) {
         throw new IllegalArgumentException("thread " + invocation.threadId() + " does not exist");
       }
-      // basis CAS 只有在 Thread 已在本事务锁定时才原子成立。
+      // requestHead CAS 只有在 Thread 已在本事务锁定时才原子成立。
       requireLocked(LockKey.thread(invocation.threadId()));
       Entry turnStart = requireExistingEntry(invocation.turnStartEntryId());
       if (turnStart.payload().type() != EntryType.TURN_START) {
@@ -846,11 +848,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
       if (invocation.status() != ModelInvocationStatus.READY || invocation.attempt() != 0) {
         throw new IllegalArgumentException("new model invocations must be READY with attempt 0");
       }
-      // 创建时精确 basis CAS：basis 必须等于 Thread 当前 head。
+      // 创建时精确 requestHead CAS：requestHead 必须等于 Thread 当前 head。
       ThreadState thread = state.threads.get(invocation.threadId());
-      if (!thread.headEntryId().equals(invocation.basisHeadEntryId())) {
+      if (!thread.headEntryId().equals(invocation.requestHeadEntryId())) {
         throw new IllegalArgumentException(
-            "basisHeadEntryId must equal the current thread head entry");
+            "requestHeadEntryId must equal the current thread head entry");
       }
       requireValidModelBranch(invocation);
       requireValidModelResultEntry(invocation);
@@ -861,23 +863,24 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     /**
-     * turnStartEntryId 必须位于 basisHeadEntryId 的 EntryPath 上，且该 path 的 session 必须与 Thread 当前 head 的
-     * session 一致。仅 insert 使用：创建时的 basis CAS 依赖 Thread 当前 head，relocation 后不应重复校验。
+     * turnStartEntryId 必须位于 requestHeadEntryId 的 EntryPath 上，且该 path 的 session 必须与 Thread 当前 head 的
+     * session 一致。仅 insert 使用：创建时的 requestHead CAS 依赖 Thread 当前 head，relocation 后不应重复校验。
      */
     private void requireValidModelBranch(ModelInvocation invocation) {
-      EntryPath basisPath = loadEntryPath(invocation.basisHeadEntryId());
-      UUID basisSessionId = basisPath.root().sessionId();
+      EntryPath requestHeadPath = loadEntryPath(invocation.requestHeadEntryId());
+      UUID requestHeadSessionId = requestHeadPath.root().sessionId();
       boolean turnStartOnBasisPath =
-          basisPath.entries().stream()
+          requestHeadPath.entries().stream()
               .anyMatch(entry -> entry.id().equals(invocation.turnStartEntryId()));
       if (!turnStartOnBasisPath) {
         throw new IllegalArgumentException(
-            "turnStartEntryId must be on the basisHeadEntryId entry path");
+            "turnStartEntryId must be on the requestHeadEntryId entry path");
       }
       ThreadState thread = state.threads.get(invocation.threadId());
       UUID threadSessionId = loadEntryPath(thread.headEntryId()).root().sessionId();
-      if (!threadSessionId.equals(basisSessionId)) {
-        throw new IllegalArgumentException("thread head session must match the basis path session");
+      if (!threadSessionId.equals(requestHeadSessionId)) {
+        throw new IllegalArgumentException(
+            "thread head session must match the requestHead path session");
       }
     }
 
@@ -909,21 +912,21 @@ public final class InMemoryHarnessStore implements HarnessStore {
                 : "model resultEntryId must reference an assistant, assistant-error or"
                     + " assistant-aborted entry");
       }
-      if (resultEntryId.equals(invocation.basisHeadEntryId())) {
+      if (resultEntryId.equals(invocation.requestHeadEntryId())) {
         throw new IllegalArgumentException(
-            "model result entry must be a strict descendant of the basis head entry");
+            "model result entry must be a strict descendant of the requestHead head entry");
       }
-      // result path 必须同时包含 basis 与 turnStart（同 branch descendant），不依赖 Thread 当前 head。
+      // result path 必须同时包含 requestHead 与 turnStart（同 branch descendant），不依赖 Thread 当前 head。
       EntryPath resultPath = loadEntryPath(resultEntryId);
       boolean onBasisPath =
           resultPath.entries().stream()
-              .anyMatch(entry -> entry.id().equals(invocation.basisHeadEntryId()));
+              .anyMatch(entry -> entry.id().equals(invocation.requestHeadEntryId()));
       boolean sameTurnStart =
           resultPath.entries().stream()
               .anyMatch(entry -> entry.id().equals(invocation.turnStartEntryId()));
       if (!onBasisPath || !sameTurnStart) {
         throw new IllegalArgumentException(
-            "model result entry must be on the basis path and in the same turn");
+            "model result entry must be on the requestHead path and in the same turn");
       }
       for (ModelInvocation other : state.modelInvocations.values()) {
         if (!other.id().equals(invocation.id())
@@ -997,7 +1000,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       return state.toolInvocations.values().stream()
           .filter(invocation -> invocation.assistantEntryId().equals(assistantEntryId))
-          .sorted(Comparator.comparingInt(ToolInvocation::ordinal))
+          .sorted(Comparator.comparingInt(ToolInvocation::callIndex))
           .toList();
     }
 
@@ -1019,18 +1022,18 @@ public final class InMemoryHarnessStore implements HarnessStore {
       List<ToolInvocation> copied =
           List.copyOf(invocations).stream().sorted(TOOL_LOCK_ORDER).toList();
       Set<UUID> ids = new HashSet<>();
-      Set<ToolOrdinalKey> ordinals = new HashSet<>();
+      Set<ToolCallIndexKey> callIndexes = new HashSet<>();
       for (ToolInvocation invocation : copied) {
         requireMillisecondPrecision(invocation.createdAt());
         requireMillisecondPrecision(invocation.updatedAt());
         if (!ids.add(invocation.id())) {
           throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
         }
-        if (!ordinals.add(
-            new ToolOrdinalKey(invocation.assistantEntryId(), invocation.ordinal()))) {
+        if (!callIndexes.add(
+            new ToolCallIndexKey(invocation.assistantEntryId(), invocation.callIndex()))) {
           throw new IllegalArgumentException(
-              "duplicate tool invocation ordinal "
-                  + invocation.ordinal()
+              "duplicate tool invocation callIndex "
+                  + invocation.callIndex()
                   + " on assistant entry "
                   + invocation.assistantEntryId());
         }
@@ -1057,10 +1060,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
     private void requireUniqueToolOrdinal(ToolInvocation invocation) {
       for (ToolInvocation existing : state.toolInvocations.values()) {
         if (existing.assistantEntryId().equals(invocation.assistantEntryId())
-            && existing.ordinal() == invocation.ordinal()) {
+            && existing.callIndex() == invocation.callIndex()) {
           throw new IllegalArgumentException(
-              "tool invocation ordinal "
-                  + invocation.ordinal()
+              "tool invocation callIndex "
+                  + invocation.callIndex()
                   + " already used on assistant entry "
                   + invocation.assistantEntryId());
         }
@@ -1087,7 +1090,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     /**
-     * ToolInvocation 的 durable call/binding 必须与 Assistant MESSAGE 中按 ordinal 提取的 ToolCall（id /
+     * ToolInvocation 的 durable call/binding 必须与 Assistant MESSAGE 中按 callIndex 提取的 ToolCall（id /
      * toolName / rendererKey / argumentsJson）精确一致。
      */
     private static void requireMatchingAssistantToolCall(
@@ -1099,11 +1102,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
           calls.add(call);
         }
       }
-      if (invocation.ordinal() >= calls.size()) {
+      if (invocation.callIndex() >= calls.size()) {
         throw new IllegalArgumentException(
-            "tool ordinal " + invocation.ordinal() + " exceeds the assistant tool calls");
+            "tool callIndex " + invocation.callIndex() + " exceeds the assistant tool calls");
       }
-      ToolCallMessageContent call = calls.get(invocation.ordinal());
+      ToolCallMessageContent call = calls.get(invocation.callIndex());
       ToolCall requestCall = invocation.call();
       String expectedRendererKey =
           invocation.binding() == null
@@ -1114,7 +1117,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
           || !call.rendererKey().equals(expectedRendererKey)
           || !call.argumentsJson().equals(requestCall.argumentsJson())) {
         throw new IllegalArgumentException(
-            "tool call/binding must exactly match the assistant tool call at the same ordinal");
+            "tool call/binding must exactly match the assistant tool call at the same callIndex");
       }
     }
 

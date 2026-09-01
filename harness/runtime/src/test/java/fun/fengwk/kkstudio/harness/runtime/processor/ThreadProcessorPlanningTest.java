@@ -225,7 +225,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         ThreadCommandState.QUEUED, command(fixture.store, baseline.threadId(), envCommand).state());
     assertEquals(
         path.entries().get(5).id(),
-        command(fixture.store, baseline.threadId(), modelCommand).consumedTurnStartEntryId());
+        command(fixture.store, baseline.threadId(), modelCommand).appliedTurnStartEntryId());
     assertEquals(1, fixture.resolver.calls);
   }
 
@@ -283,13 +283,13 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         command(fixture.store, baseline.threadId(), userCommand).state());
     assertEquals(
         path.entries().get(2).id(), thread(fixture.store, baseline.threadId()).headEntryId());
-    // ModelInvocation：basis == candidate head，turnStart 指向新 TURN_START，MODEL Work 已请求。
+    // ModelInvocation：requestHead == candidate head，turnStart 指向新 TURN_START，MODEL Work 已请求。
     ModelInvocation invocation =
         inTx(
                 fixture,
                 tx -> tx.findModelInvocationByTurn(baseline.threadId(), path.entries().get(1).id()))
             .orElseThrow();
-    assertEquals(path.entries().get(2).id(), invocation.basisHeadEntryId());
+    assertEquals(path.entries().get(2).id(), invocation.requestHeadEntryId());
     assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, invocation.id())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
     assertEquals(1, fixture.resolver.calls);

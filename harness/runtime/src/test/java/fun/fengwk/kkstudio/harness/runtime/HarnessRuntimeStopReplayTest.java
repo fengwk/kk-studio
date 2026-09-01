@@ -59,7 +59,7 @@ import java.util.UUID;
 /**
  * Stop 幂等性：durable key 是「由被关闭 TURN_START 的 ownerThreadId 界定的 closeRequestId」，在 Thread 锁内做 Session 级
  * 查找并先于 version 检查严格决定 replay；另一 Thread 的相同 raw id 被忽略而非冲突；同 owner 的非 Stop 关闭或重复 key 必须失败； 未创建 Turn
- * 的 queued 取消以 (threadId, cancelRequestId) 作幂等键。
+ * 的 queued 取消以 (threadId, stopRequestId) 作幂等键。
  */
 class HarnessRuntimeStopReplayTest {
 
@@ -342,7 +342,7 @@ class HarnessRuntimeStopReplayTest {
     assertEquals(1, path.entries().size());
   }
 
-  /** queued 取消 receipt：未创建 Turn 的 Stop 以 (threadId, cancelRequestId) 作幂等键，重试 returns replayed。 */
+  /** queued 取消 receipt：未创建 Turn 的 Stop 以 (threadId, stopRequestId) 作幂等键，重试 returns replayed。 */
   @Test
   void idleCommandRetryReplaysTheQueuedOnlyCancelReceipt() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);

@@ -127,12 +127,15 @@ public class StudioCanvasController {
     }
     try {
       UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
-      UUID commandId = WebDtoMapper.parseUuid(request.getCommandId(), "commandId");
+      UUID idempotencyKey = WebDtoMapper.parseUuid(request.getIdempotencyKey(), "idempotencyKey");
       long expectedVersion = parseVersion(request.getExpectedVersion(), "expectedVersion");
       return Results.ok(
           mapper.toDto(
               canvasCommandService.applyCommands(
-                  canvasId, expectedVersion, commandId, mapper.toCommands(request.getCommands()))));
+                  canvasId,
+                  expectedVersion,
+                  idempotencyKey,
+                  mapper.toCommands(request.getCommands()))));
     } catch (CanvasConflictException ex) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, ex.reason().name(), ex);
     } catch (IllegalArgumentException ex) {

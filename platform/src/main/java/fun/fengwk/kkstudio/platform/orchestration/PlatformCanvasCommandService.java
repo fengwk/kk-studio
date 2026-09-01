@@ -58,8 +58,8 @@ import java.util.UUID;
 /**
  * PostgreSQL-backed Canvas v1 command service。
  *
- * <p>事务内先锁定 document 行串行化全部命令，再按 {@code (canvasId, commandId)} 幂等：相同 commandId + request hash
- * 精确回放（返回当前版本的确定性空 patch），相同 commandId 不同 hash 冲突；{@code expectedVersion} 在应用后 CAS 校验。
+ * <p>事务内先锁定 document 行串行化全部命令，再按 {@code (canvasId, idempotencyKey)} 幂等：相同 idempotencyKey + request
+ * hash 精确回放（返回当前版本的确定性空 patch），相同 idempotencyKey 不同 hash 冲突；{@code expectedVersion} 在应用后 CAS 校验。
  * CREATE_RESOURCE_NODE 在同一事务内消费 READY 全局上传（行锁 → retain blob → 删上传行 → 释放上传引用）， 资源 blob 引用只经
  * StorageBlobManager 转移；删除节点/画布同步释放全部 owned blob。
  */
@@ -118,12 +118,12 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
   @Override
   @Transactional
   public CanvasPatch applyCommands(
-      UUID canvasId, long expectedVersion, UUID commandId, List<CanvasCommand> commands) {
+      UUID canvasId, long expectedVersion, UUID idempotencyKey, List<CanvasCommand> commands) {
     Objects.requireNonNull(canvasId, "canvasId");
     if (expectedVersion < 0L) {
       throw new IllegalArgumentException("expectedVersion must be >= 0");
     }
-    Objects.requireNonNull(commandId, "commandId");
+    Objects.requireNonNull(idempotencyKey, "idempotencyKey");
     Objects.requireNonNull(commands, "commands");
     List<CanvasCommand> commandBatch = List.copyOf(commands);
     if (commandBatch.isEmpty()) {
@@ -136,7 +136,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
         canvasStore
             .lockDocument(canvasId)
             .orElseThrow(() -> new IllegalArgumentException("Canvas not found: " + canvasId));
-    CommandDedup existing = canvasStore.findCommandDedup(canvasId, commandId).orElse(null);
+    CommandDedup existing = canvasStore.findCommandDedup(canvasId, idempotencyKey).orElse(null);
     if (existing != null) {
       if (!requestHash.equals(existing.requestHash())) {
         throw conflict(CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT);
@@ -163,7 +163,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
       throw conflict(CanvasConflictException.Reason.VERSION_CONFLICT);
     }
     try {
-      canvasStore.addCommandDedup(new CommandDedup(canvasId, commandId, requestHash));
+      canvasStore.addCommandDedup(new CommandDedup(canvasId, idempotencyKey, requestHash));
     } catch (DuplicateKeyException error) {
       throw conflict(CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT);
     }

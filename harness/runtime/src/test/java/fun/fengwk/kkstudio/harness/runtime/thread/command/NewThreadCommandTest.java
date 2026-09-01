@@ -17,7 +17,7 @@ import java.util.List;
 
 /**
  * NewThreadCommand 的 requestHash 语义：两参构造对 raw payload 计算；三参构造只校验 hash 格式（不重算）；{@code withPayload} 在
- * payload 被物化后保留原始 clientCommandId / requestHash。
+ * payload 被物化后保留原始 idempotencyKey / requestHash。
  */
 class NewThreadCommandTest {
 
@@ -36,8 +36,8 @@ class NewThreadCommandTest {
     UserMessageCommandPayload durablePayload = userPayloadWithResource();
     NewThreadCommand durable = raw.withPayload(durablePayload);
 
-    // clientCommandId 与 requestHash 保持原始 raw 值。
-    assertEquals(raw.clientCommandId(), durable.clientCommandId());
+    // idempotencyKey 与 requestHash 保持原始 raw 值。
+    assertEquals(raw.idempotencyKey(), durable.idempotencyKey());
     assertEquals(raw.requestHash(), durable.requestHash());
     // payload 已替换为 durable 形态。
     assertEquals(durablePayload, durable.payload());

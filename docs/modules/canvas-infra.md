@@ -82,7 +82,7 @@ PostgreSQL、Flyway、Testcontainers 和 schema 只在测试 scope。生产源�
 - `CanvasNodeMapper`、`CanvasGroupMapper`、`CanvasLinkMapper`：graph entity
   upsert、group membership、link lifecycle；
 - `CanvasResourceMapper`：owner attach/detach、text content 和删除；
-- `CanvasCommandDedupMapper`：`(canvas_id, command_id)` request hash；
+- `CanvasCommandDedupMapper`：`(canvas_id, idempotency_key)` request hash；
 - `CanvasFunctionRunMapper`、`CanvasFunctionResourcePinMapper`：Run、pin 和
   terminal/active 生命周期；
 - `CanvasSessionMapper`：Canvas owner relation 的 conditional insert；

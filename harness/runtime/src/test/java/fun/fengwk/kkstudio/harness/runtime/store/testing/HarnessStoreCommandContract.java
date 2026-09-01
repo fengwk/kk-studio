@@ -79,10 +79,10 @@ public abstract class HarnessStoreCommandContract {
             canonical.threadId(),
             canonical.sequence(),
             canonical.payload(),
-            canonical.clientCommandId(),
+            canonical.idempotencyKey(),
             canonical.requestHash(),
-            canonical.consumedTurnStartEntryId(),
-            canonical.cancelRequestId(),
+            canonical.appliedTurnStartEntryId(),
+            canonical.stopRequestId(),
             canonical.cancelledAt(),
             canonical.createdAt().plusNanos(1));
 
@@ -162,19 +162,23 @@ public abstract class HarnessStoreCommandContract {
         ThreadCommandState.APPLIED,
         store
             .transaction(
-                tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow())
+                tx ->
+                    tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1))
+                        .orElseThrow())
             .state());
     assertEquals(
         ThreadCommandState.CANCELLED,
         store
             .transaction(
-                tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(2)).orElseThrow())
+                tx ->
+                    tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(2))
+                        .orElseThrow())
             .state());
     ThreadCommand cancelled =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(2)).orElseThrow());
-    // cancelRequestId 回单原样持久化（PostgreSQL cancel_request_id 列映射）。
-    assertEquals(TestIds.id(1), cancelled.cancelRequestId());
+            tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(2)).orElseThrow());
+    // stopRequestId 回单原样持久化（PostgreSQL stop_request_id 列映射）。
+    assertEquals(TestIds.id(1), cancelled.stopRequestId());
     assertEquals(T2, cancelled.cancelledAt());
   }
 
@@ -217,7 +221,7 @@ public abstract class HarnessStoreCommandContract {
   }
 
   @Test
-  void duplicateClientCommandIdIsRejected() {
+  void duplicateIdempotencyKeyIsRejected() {
     inTransaction(
         store,
         tx -> {
@@ -236,7 +240,7 @@ public abstract class HarnessStoreCommandContract {
   }
 
   @Test
-  void sameClientCommandIdOnDifferentThreadsIsAllowed() {
+  void sameIdempotencyKeyOnDifferentThreadsIsAllowed() {
     UUID otherThreadId =
         store.transaction(
             tx -> {
@@ -258,12 +262,12 @@ public abstract class HarnessStoreCommandContract {
         });
     assertTrue(
         store
-            .transaction(tx -> tx.findCommandByClientId(otherThreadId, TestIds.id(1)))
+            .transaction(tx -> tx.findCommandByIdempotencyKey(otherThreadId, TestIds.id(1)))
             .isPresent());
   }
 
   @Test
-  void findCommandByClientIdScopesByThread() {
+  void findCommandByIdempotencyKeyScopesByThread() {
     inTransaction(
         store,
         tx -> {
@@ -272,15 +276,15 @@ public abstract class HarnessStoreCommandContract {
         });
     assertTrue(
         store
-            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)))
+            .transaction(tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)))
             .isPresent());
     assertTrue(
         store
-            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(999)))
+            .transaction(tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(999)))
             .isEmpty());
     assertTrue(
         store
-            .transaction(tx -> tx.findCommandByClientId(TestIds.id(999), TestIds.id(1)))
+            .transaction(tx -> tx.findCommandByIdempotencyKey(TestIds.id(999), TestIds.id(1)))
             .isEmpty());
   }
 
@@ -299,7 +303,8 @@ public abstract class HarnessStoreCommandContract {
                 store,
                 tx -> {
                   ThreadCommand stored =
-                      tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow();
+                      tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1))
+                          .orElseThrow();
                   tx.updateCommands(List.of(withConsumedTurnStart(stored, TestIds.id(77))));
                 }));
   }
@@ -314,14 +319,14 @@ public abstract class HarnessStoreCommandContract {
         });
     ThreadCommand stored =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
+            tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)).orElseThrow());
     List<ThreadCommand> forged =
         Arrays.asList(
             new ThreadCommand(
                 TestIds.id(999), // for threadId must match stored
                 stored.sequence(),
                 stored.payload(),
-                stored.clientCommandId(),
+                stored.idempotencyKey(),
                 stored.requestHash(),
                 null,
                 null,
@@ -331,7 +336,7 @@ public abstract class HarnessStoreCommandContract {
                 stored.threadId(),
                 stored.sequence() + 1,
                 stored.payload(),
-                stored.clientCommandId(),
+                stored.idempotencyKey(),
                 stored.requestHash(),
                 null,
                 null,
@@ -341,7 +346,7 @@ public abstract class HarnessStoreCommandContract {
                 stored.threadId(),
                 stored.sequence(),
                 stored.payload(),
-                TestIds.id(888), // different clientCommandId
+                TestIds.id(888), // different idempotencyKey
                 stored.requestHash(),
                 null,
                 null,
@@ -353,7 +358,7 @@ public abstract class HarnessStoreCommandContract {
                 new UserMessageCommandPayload(
                     new AgentMessage(
                         AgentMessageRole.USER, List.of(new TextMessageContent("other message")))),
-                stored.clientCommandId(),
+                stored.idempotencyKey(),
                 ThreadCommandPayloadJsonCodec.requestHash(
                     new UserMessageCommandPayload(
                         new AgentMessage(
@@ -367,7 +372,7 @@ public abstract class HarnessStoreCommandContract {
                 stored.threadId(),
                 stored.sequence(),
                 stored.payload(),
-                stored.clientCommandId(),
+                stored.idempotencyKey(),
                 stored.requestHash(),
                 null,
                 null,
@@ -395,7 +400,7 @@ public abstract class HarnessStoreCommandContract {
           tx.lockThread(baseline.threadId());
           tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
           ThreadCommand inserted =
-              tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow();
+              tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)).orElseThrow();
           tx.updateCommands(List.of(withCancelledAt(inserted, TestIds.id(1), T2)));
           return null;
         });
@@ -403,7 +408,9 @@ public abstract class HarnessStoreCommandContract {
         ThreadCommandState.CANCELLED,
         store
             .transaction(
-                tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow())
+                tx ->
+                    tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1))
+                        .orElseThrow())
             .state());
   }
 
@@ -552,7 +559,9 @@ public abstract class HarnessStoreCommandContract {
         ThreadCommandState.CANCELLED,
         store
             .transaction(
-                tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(2)).orElseThrow())
+                tx ->
+                    tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(2))
+                        .orElseThrow())
             .state());
   }
 
@@ -587,7 +596,7 @@ public abstract class HarnessStoreCommandContract {
         });
     assertTrue(
         store
-            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)))
+            .transaction(tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)))
             .isEmpty());
   }
 
@@ -706,13 +715,14 @@ public abstract class HarnessStoreCommandContract {
         ThreadCommandState.APPLIED,
         store
             .transaction(
-                tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow())
+                tx ->
+                    tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1))
+                        .orElseThrow())
             .state());
   }
 
   /**
-   * loadCancelledCommandsByRequest：只返回 (threadId, cancelRequestId) 精确匹配的 CANCELLED 行，且按 sequence
-   * 升序。
+   * loadCancelledCommandsByRequest：只返回 (threadId, stopRequestId) 精确匹配的 CANCELLED 行，且按 sequence 升序。
    */
   @Test
   void loadCancelledCommandsByRequestIsScopedByThreadRequestAndOrdered() {

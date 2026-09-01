@@ -98,7 +98,7 @@ export interface ModelAttemptFailureDialogueMessage extends BaseDialogueMessage 
   /** 活动 snapshot 的稳定来源身份；durable Entry 不携带这些字段。 */
   modelInvocationId?: string
   turnStartEntryId?: string
-  basisHeadEntryId?: string
+  requestHeadEntryId?: string
 }
 
 export interface ToolDialogueMessage extends BaseDialogueMessage {
@@ -153,8 +153,8 @@ export type DialogueMessage =
 
 /** 在持久 transcript 之外展示的 QUEUED mailbox 命令；sequence 保持十进制字符串。 */
 export interface QueuedThreadMessage {
-  /** 稳定客户端幂等键（DTO clientCommandId）；也是 UI 渲染 key。 */
-  clientCommandId: string
+  /** 稳定客户端幂等键（DTO idempotencyKey）；也是 UI 渲染 key。 */
+  idempotencyKey: string
   role: 'user' | 'system'
   text: string
   sequence: string

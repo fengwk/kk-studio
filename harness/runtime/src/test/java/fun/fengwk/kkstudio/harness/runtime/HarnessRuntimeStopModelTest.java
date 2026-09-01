@@ -89,7 +89,7 @@ class HarnessRuntimeStopModelTest {
 
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
+            tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)).orElseThrow());
     assertEquals(ThreadCommandState.CANCELLED, command.state());
     assertFalse(
         store
@@ -233,7 +233,7 @@ class HarnessRuntimeStopModelTest {
     assertEquals(0L, thread.version());
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
+            tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)).orElseThrow());
     assertEquals(ThreadCommandState.QUEUED, command.state());
     assertTrue(
         store

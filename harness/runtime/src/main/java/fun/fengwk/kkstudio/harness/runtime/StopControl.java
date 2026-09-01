@@ -214,12 +214,12 @@ final class StopControl {
    * <ol>
    *   <li>live receipt：Session 级查找 closeRequestId 被引用 TURN_START 的 ownerThreadId == 本 Thread 的
    *       TURN_END；raw id 归另一 Thread 所有时忽略而非冲突。
-   *   <li>queued-only receipt：本 Thread 上带该 cancelRequestId 的已取消 Command（未创建 Turn 时的幂等键）。
+   *   <li>queued-only receipt：本 Thread 上带该 stop_request_id 的已取消 Command（未创建 Turn 时的幂等键）。
    * </ol>
    *
-   * 命中任一 receipt 时，一并汇总本 Thread 上带同一 cancelRequestId 的已取消 Command，保证 live Stop 首次同时取消 queued
-   * commands 后，transport 丢失的 replay 返回一致的 cancelledCommandCount 与 sequence-ordered
-   * cancelledUserMessages （不返回 0 / 空）。任一命中都返回 replayed 结果且不写任何 marker。
+   * 命中任一 receipt 时，一并汇总本 Thread 上带同一 stopRequestId 的已取消 Command，保证 live Stop 首次同时取消 queued commands
+   * 后，transport 丢失的 replay 返回一致的 cancelledCommandCount 与 sequence-ordered cancelledUserMessages
+   * （不返回 0 / 空）。任一命中都返回 replayed 结果且不写任何 marker。
    */
   private StopResult findReplay(
       HarnessStore.Transaction tx, UUID sessionId, UUID stopRequestId, ThreadState thread) {
@@ -264,7 +264,7 @@ final class StopControl {
       }
       return cancelledReceipt(tx, thread, stopRequestId, match.id());
     }
-    // queued-only receipt：未创建 Turn 的先前 Stop 以 (threadId, cancelRequestId) 作幂等键。
+    // queued-only receipt：未创建 Turn 的先前 Stop 以 (threadId, stop_request_id) 作幂等键。
     List<ThreadCommand> cancelledWithRequest =
         tx.loadCancelledCommandsByRequest(thread.id(), stopRequestId);
     if (!cancelledWithRequest.isEmpty()) {
@@ -551,7 +551,7 @@ final class StopControl {
       if (message != null) {
         messages.add(
             new CancelledUserMessage(
-                command.sequence(), command.clientCommandId(), message.contents()));
+                command.sequence(), command.idempotencyKey(), message.contents()));
       }
     }
     return List.copyOf(messages);

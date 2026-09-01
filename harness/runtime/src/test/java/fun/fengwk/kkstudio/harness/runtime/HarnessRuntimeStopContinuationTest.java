@@ -99,9 +99,10 @@ class HarnessRuntimeStopContinuationTest {
     assertEquals(turnEnd.id(), stored.headEntryId());
 
     ThreadCommand command =
-        store.transaction(tx -> tx.findCommandByClientId(threadId, TestIds.id(1)).orElseThrow());
+        store.transaction(
+            tx -> tx.findCommandByIdempotencyKey(threadId, TestIds.id(1)).orElseThrow());
     assertEquals(ThreadCommandState.CANCELLED, command.state());
-    assertNull(command.consumedTurnStartEntryId());
+    assertNull(command.appliedTurnStartEntryId());
     assertFalse(
         store
             .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)))

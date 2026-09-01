@@ -89,8 +89,8 @@ final class StoreTestSupport {
   static final Instant T4 = Instant.ofEpochMilli(5000);
   static final Instant T5 = Instant.ofEpochMilli(6000);
 
-  /** 测试种子线程的合法 64 位小写 SHA-256 materialization hash（非 accept 路径的固定身份键）。 */
-  static final String MATERIALIZATION_HASH =
+  /** 测试种子线程的合法 64 位小写 SHA-256 creation request hash（非 accept 路径的固定身份键）。 */
+  static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   private StoreTestSupport() {}
@@ -186,13 +186,13 @@ final class StoreTestSupport {
       UUID parentId,
       Instant createdAt,
       UUID assistantEntryId,
-      int ordinal,
+      int callIndex,
       String toolCallId) {
     return new Entry(
         id,
         sessionId,
         parentId,
-        toolResultPayload(assistantEntryId, ordinal, toolCallId),
+        toolResultPayload(assistantEntryId, callIndex, toolCallId),
         createdAt);
   }
 
@@ -282,20 +282,20 @@ final class StoreTestSupport {
         null);
   }
 
-  /** TOOL MESSAGE payload，其 metadata 与给定的 assistant entry / ordinal / call id 匹配。 */
-  static EntryPayload toolResultPayload(UUID assistantEntryId, int ordinal, String toolCallId) {
-    return toolResultPayload(assistantEntryId, ordinal, toolCallId, ToolResultStatus.SUCCEEDED);
+  /** TOOL MESSAGE payload，其 metadata 与给定的 assistant entry / callIndex / call id 匹配。 */
+  static EntryPayload toolResultPayload(UUID assistantEntryId, int callIndex, String toolCallId) {
+    return toolResultPayload(assistantEntryId, callIndex, toolCallId, ToolResultStatus.SUCCEEDED);
   }
 
   /** TOOL MESSAGE payload，带显式 terminal status（必须精确映射所关联 invocation 的 status）。 */
   static EntryPayload toolResultPayload(
-      UUID assistantEntryId, int ordinal, String toolCallId, ToolResultStatus status) {
-    return toolResultPayload(assistantEntryId, ordinal, toolCallId, status, "bash");
+      UUID assistantEntryId, int callIndex, String toolCallId, ToolResultStatus status) {
+    return toolResultPayload(assistantEntryId, callIndex, toolCallId, status, "bash");
   }
 
   static EntryPayload toolResultPayload(
       UUID assistantEntryId,
-      int ordinal,
+      int callIndex,
       String toolCallId,
       ToolResultStatus status,
       String rendererKey) {
@@ -303,14 +303,14 @@ final class StoreTestSupport {
         new ToolResultMessageContent(
             toolCallId, "bash", rendererKey, List.of(new TextMessageContent("ok")), false, "{}");
     ToolResultMetadata metadata =
-        new ToolResultMetadata(assistantEntryId, toolCallId, ordinal, status, false, null);
+        new ToolResultMetadata(assistantEntryId, toolCallId, callIndex, status, false, null);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
 
   /** 用于 history-normalization 的合成 ToolResult entry；禁止关联真实 ToolInvocation。 */
   static EntryPayload syntheticToolResultPayload(
-      UUID assistantEntryId, int ordinal, String toolCallId) {
+      UUID assistantEntryId, int callIndex, String toolCallId) {
     ToolResultMessageContent content =
         new ToolResultMessageContent(
             toolCallId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
@@ -318,7 +318,7 @@ final class StoreTestSupport {
         new ToolResultMetadata(
             assistantEntryId,
             toolCallId,
-            ordinal,
+            callIndex,
             ToolResultStatus.UNKNOWN,
             true,
             ToolResultReason.HISTORY_CUT);
@@ -357,7 +357,7 @@ final class StoreTestSupport {
         id,
         sessionId,
         headEntryId,
-        MATERIALIZATION_HASH,
+        CREATION_REQUEST_HASH,
         yoloEnabled,
         nextCommandSequence,
         version,
@@ -366,10 +366,10 @@ final class StoreTestSupport {
   }
 
   /**
-   * 命令 helper：ThreadCommand 不再携带代理 id，签名仅为 {@code (threadId, sequence, clientCommandId)}。
-   * clientCommandId 必须为非空 UUID。
+   * 命令 helper：ThreadCommand 不再携带代理 id，签名仅为 {@code (threadId, sequence, idempotencyKey)}。
+   * idempotencyKey 必须为非空 UUID。
    */
-  static ThreadCommand command(UUID threadId, long sequence, UUID clientCommandId) {
+  static ThreadCommand command(UUID threadId, long sequence, UUID idempotencyKey) {
     UserMessageCommandPayload payload =
         new UserMessageCommandPayload(
             new AgentMessage(
@@ -378,7 +378,7 @@ final class StoreTestSupport {
         threadId,
         sequence,
         payload,
-        clientCommandId,
+        idempotencyKey,
         ThreadCommandPayloadJsonCodec.requestHash(payload),
         null,
         null,
@@ -392,7 +392,7 @@ final class StoreTestSupport {
         command.threadId(),
         command.sequence(),
         command.payload(),
-        command.clientCommandId(),
+        command.idempotencyKey(),
         command.requestHash(),
         turnStartEntryId,
         null,
@@ -400,17 +400,17 @@ final class StoreTestSupport {
         command.createdAt());
   }
 
-  /** 返回仅设置了 cancelled marker（cancelRequestId + cancelledAt 成对）的 command；其余身份信息保持不变。 */
+  /** 返回仅设置了 cancelled marker（stopRequestId + cancelledAt 成对）的 command；其余身份信息保持不变。 */
   static ThreadCommand withCancelledAt(
-      ThreadCommand command, UUID cancelRequestId, Instant cancelledAt) {
+      ThreadCommand command, UUID stopRequestId, Instant cancelledAt) {
     return new ThreadCommand(
         command.threadId(),
         command.sequence(),
         command.payload(),
-        command.clientCommandId(),
+        command.idempotencyKey(),
         command.requestHash(),
         null,
-        cancelRequestId,
+        stopRequestId,
         cancelledAt,
         command.createdAt());
   }
@@ -420,7 +420,7 @@ final class StoreTestSupport {
       UUID id,
       UUID threadId,
       UUID turnStartEntryId,
-      UUID basisHeadEntryId,
+      UUID requestHeadEntryId,
       ModelInvocationStatus status,
       UUID resultEntryId,
       Instant createdAt) {
@@ -432,7 +432,7 @@ final class StoreTestSupport {
         id,
         threadId,
         turnStartEntryId,
-        basisHeadEntryId,
+        requestHeadEntryId,
         modelRequest(),
         status,
         0,
@@ -452,7 +452,7 @@ final class StoreTestSupport {
       UUID id,
       UUID modelInvocationId,
       UUID assistantEntryId,
-      int ordinal,
+      int callIndex,
       String toolCallId,
       ToolInvocationStatus status,
       Instant createdAt) {
@@ -464,7 +464,7 @@ final class StoreTestSupport {
         id,
         modelInvocationId,
         assistantEntryId,
-        ordinal,
+        callIndex,
         toolCall(toolCallId),
         hostBinding(),
         status,
@@ -500,7 +500,7 @@ final class StoreTestSupport {
         invocation.id(),
         invocation.modelInvocationId(),
         invocation.assistantEntryId(),
-        invocation.ordinal(),
+        invocation.callIndex(),
         invocation.call(),
         binding,
         invocation.status(),
@@ -545,8 +545,8 @@ final class StoreTestSupport {
   }
 
   /** SUCCEEDED assistant payload：由同一 request/response 经 mapper 机械派生（strict attach 校验要求全等）。 */
-  static MessagePayload mappedAssistant(ModelRequestSpec request, ProviderResponse response) {
-    return new HistoryPayloadMapper().assistantPayload(response, request.toolBindings());
+  static MessagePayload mappedAssistant(ModelRequestSpec requestSpec, ProviderResponse response) {
+    return new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings());
   }
 
   static ToolCall toolCall(String toolCallId) {

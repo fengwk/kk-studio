@@ -103,7 +103,7 @@ import java.util.function.Function;
  * ThreadProcessor 测试共享基座：InMemoryHarnessStore + fake TurnResolver + 可变时钟 + 种子与断言 helper。
  *
  * <p>每条链按 store 约束原子种子：Session + ROOT +（TURN_START + USER/ASSISTANT/TURN_END）+
- * Thread；ModelInvocation 只能以 READY/attempt=0 插入且 basis 必须等于 Thread 当前 head，terminal 状态通过共享
+ * Thread；ModelInvocation 只能以 READY/attempt=0 插入且 requestHead 必须等于 Thread 当前 head，terminal 状态通过共享
  * transition 逐级推进； ToolInvocation 只能以 READY/attempt=0/approval=null 插入，call/binding 由基座固定绑定 bash
  * tool。
  */
@@ -125,16 +125,16 @@ final class ThreadProcessorTestSupport {
   /** 测试用默认压缩配置（20_000 保留，无 fallback）。 */
   static final CompactionConfig COMPACTION_CONFIG = new CompactionConfig(20_000, null);
 
-  /** 测试种子线程的合法 64 位小写 SHA-256 materialization hash（非 accept 路径的固定身份键）。 */
-  static final String MATERIALIZATION_HASH =
+  /** 测试种子线程的合法 64 位小写 SHA-256 creation request hash（非 accept 路径的固定身份键）。 */
+  static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   private ThreadProcessorTestSupport() {}
 
-  /** 构造有合法 materializationHash 的 ThreadState：version 0 / nextCommandSequence 1。 */
+  /** 构造有合法 creationRequestHash 的 ThreadState：version 0 / nextCommandSequence 1。 */
   static ThreadState threadState(UUID threadId, UUID sessionId, UUID headEntryId, Instant now) {
     return new ThreadState(
-        threadId, sessionId, headEntryId, MATERIALIZATION_HASH, false, 1L, 0L, now, now);
+        threadId, sessionId, headEntryId, CREATION_REQUEST_HASH, false, 1L, 0L, now, now);
   }
 
   // -----------------------------------------------------------------------------------------------
@@ -279,14 +279,14 @@ final class ThreadProcessorTestSupport {
           tx.insertEntry(
               new Entry(assistantEntryId, sessionId, userEntryId, assistantPayload(callIds), NOW));
           UUID headEntryId = assistantEntryId;
-          for (int ordinal = 0; ordinal < presentResults; ordinal++) {
+          for (int callIndex = 0; callIndex < presentResults; callIndex++) {
             UUID resultId = tx.nextId();
             tx.insertEntry(
                 new Entry(
                     resultId,
                     sessionId,
                     headEntryId,
-                    realToolResultPayload(assistantEntryId, ordinal, "call-" + ordinal),
+                    realToolResultPayload(assistantEntryId, callIndex, "call-" + callIndex),
                     NOW));
             headEntryId = resultId;
           }
@@ -325,7 +325,7 @@ final class ThreadProcessorTestSupport {
     return store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          UUID clientCommandId = tx.nextId();
+          UUID idempotencyKey = tx.nextId();
           long sequence = thread.nextCommandSequence();
           tx.insertCommands(
               List.of(
@@ -333,14 +333,14 @@ final class ThreadProcessorTestSupport {
                       threadId,
                       sequence,
                       payload,
-                      clientCommandId,
+                      idempotencyKey,
                       ThreadCommandPayloadJsonCodec.requestHash(payload),
                       null,
                       null,
                       null,
                       NOW)));
           tx.updateThread(thread.reserveCommandSequences(1, NOW));
-          return clientCommandId;
+          return idempotencyKey;
         });
   }
 
@@ -370,7 +370,7 @@ final class ThreadProcessorTestSupport {
       throw new IllegalArgumentException("toolStatuses must match callIds");
     }
     OpenTurnBaseline turn = seedOpenInputTurn(store);
-    ModelRequestSpec request = tooledRequest(List.of("bash"));
+    ModelRequestSpec requestSpec = tooledRequest(List.of("bash"));
     ProviderResponse response = successResponse(callIds, "bash");
     UUID modelId =
         seedModelInvocation(
@@ -379,7 +379,7 @@ final class ThreadProcessorTestSupport {
             turn.turnStartEntryId(),
             turn.userEntryId(),
             modelStatus,
-            request,
+            requestSpec,
             response,
             null);
     // live attached fixture：assistant Entry 必须由同一 frozen request + ProviderResponse 经 mapper 生成，
@@ -388,20 +388,20 @@ final class ThreadProcessorTestSupport {
         insertAssistantPayload(
             store,
             turn,
-            new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()));
+            new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()));
     if (modelStatus == ModelInvocationStatus.SUCCEEDED) {
       transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
     }
     List<UUID> toolIds = new ArrayList<>();
-    for (int ordinal = 0; ordinal < callIds.size(); ordinal++) {
+    for (int callIndex = 0; callIndex < callIds.size(); callIndex++) {
       toolIds.add(
           seedToolInvocation(
               store,
               modelId,
               assistantEntryId,
-              ordinal,
-              callIds.get(ordinal),
-              toolStatuses.get(ordinal)));
+              callIndex,
+              callIds.get(callIndex),
+              toolStatuses.get(callIndex)));
     }
     return new ToolChain(turn, assistantEntryId, modelId, toolIds);
   }
@@ -444,7 +444,7 @@ final class ThreadProcessorTestSupport {
   /** 原子种子合法 SUCCEEDED tool-phase model + mapper 派生 assistant（strict attach 校验要求全等），返回二者 id。 */
   static SeededToolPhase seedSucceededToolPhase(
       InMemoryHarnessStore store, OpenTurnBaseline turn, List<String> callIds) {
-    ModelRequestSpec request = tooledRequest(List.of("bash"));
+    ModelRequestSpec requestSpec = tooledRequest(List.of("bash"));
     ProviderResponse response = successResponse(callIds, "bash");
     UUID modelId =
         seedModelInvocation(
@@ -453,20 +453,20 @@ final class ThreadProcessorTestSupport {
             turn.turnStartEntryId(),
             turn.userEntryId(),
             ModelInvocationStatus.SUCCEEDED,
-            request,
+            requestSpec,
             response,
             null);
     UUID assistantEntryId =
         insertAssistantPayload(
             store,
             turn,
-            new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()));
+            new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()));
     transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
     return new SeededToolPhase(modelId, assistantEntryId);
   }
 
   /**
-   * 插入 READY ModelInvocation（basis 必须等于 Thread 当前 head）并把状态推进到 {@code status}（terminal 且
+   * 插入 READY ModelInvocation（requestHead 必须等于 Thread 当前 head）并把状态推进到 {@code status}（terminal 且
    * resultEntryId 仍 null）。
    */
   static UUID seedModelInvocation(
@@ -475,7 +475,7 @@ final class ThreadProcessorTestSupport {
       UUID turnStartEntryId,
       UUID basisEntryId,
       ModelInvocationStatus status,
-      ModelRequestSpec request,
+      ModelRequestSpec requestSpec,
       ProviderResponse response,
       ModelInvocationError error) {
     UUID modelId =
@@ -489,7 +489,7 @@ final class ThreadProcessorTestSupport {
                       threadId,
                       turnStartEntryId,
                       basisEntryId,
-                      request,
+                      requestSpec,
                       ModelInvocationStatus.READY,
                       0,
                       null,
@@ -525,7 +525,7 @@ final class ThreadProcessorTestSupport {
       InMemoryHarnessStore store,
       UUID modelInvocationId,
       UUID assistantEntryId,
-      int ordinal,
+      int callIndex,
       String callId,
       ToolInvocationStatus status) {
     UUID toolId =
@@ -539,7 +539,7 @@ final class ThreadProcessorTestSupport {
                           id,
                           modelInvocationId,
                           assistantEntryId,
-                          ordinal,
+                          callIndex,
                           request.call(),
                           request.binding(),
                           ToolInvocationStatus.READY,
@@ -637,8 +637,8 @@ final class ThreadProcessorTestSupport {
                 model.id(),
                 model.threadId(),
                 model.turnStartEntryId(),
-                model.basisHeadEntryId(),
-                model.request(),
+                model.requestHeadEntryId(),
+                model.requestSpec(),
                 model.status(),
                 model.attempt(),
                 model.streamCheckpoint(),
@@ -660,7 +660,7 @@ final class ThreadProcessorTestSupport {
                 tool.id(),
                 tool.modelInvocationId(),
                 tool.assistantEntryId(),
-                tool.ordinal(),
+                tool.callIndex(),
                 tool.call(),
                 tool.binding(),
                 tool.status(),
@@ -712,9 +712,9 @@ final class ThreadProcessorTestSupport {
     return store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantEntryId));
   }
 
-  static ThreadCommand command(InMemoryHarnessStore store, UUID threadId, UUID clientCommandId) {
+  static ThreadCommand command(InMemoryHarnessStore store, UUID threadId, UUID idempotencyKey) {
     return store
-        .transaction(tx -> tx.findCommandByClientId(threadId, clientCommandId))
+        .transaction(tx -> tx.findCommandByIdempotencyKey(threadId, idempotencyKey))
         .orElseThrow();
   }
 
@@ -758,7 +758,7 @@ final class ThreadProcessorTestSupport {
         new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text))), null, null);
   }
 
-  /** ASSISTANT MESSAGE payload；{@code callIds} 按 ordinal 生成 bash tool call。 */
+  /** ASSISTANT MESSAGE payload；{@code callIds} 按 callIndex 生成 bash tool call。 */
   static EntryPayload assistantPayload(List<String> callIds) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (int i = 0; i < callIds.size(); i++) {
@@ -774,13 +774,13 @@ final class ThreadProcessorTestSupport {
   }
 
   /** 真实 ToolResult MESSAGE payload（非 synthetic，status SUCCEEDED）。 */
-  static EntryPayload realToolResultPayload(UUID assistantEntryId, int ordinal, String callId) {
+  static EntryPayload realToolResultPayload(UUID assistantEntryId, int callIndex, String callId) {
     ToolResultMessageContent content =
         new ToolResultMessageContent(
             callId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
     ToolResultMetadata metadata =
         new ToolResultMetadata(
-            assistantEntryId, callId, ordinal, ToolResultStatus.SUCCEEDED, false, null);
+            assistantEntryId, callId, callIndex, ToolResultStatus.SUCCEEDED, false, null);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }

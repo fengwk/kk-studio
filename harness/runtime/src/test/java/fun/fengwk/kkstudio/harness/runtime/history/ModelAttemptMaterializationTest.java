@@ -185,7 +185,7 @@ class ModelAttemptMaterializationTest {
   void acceptsOnlyTheExactDirectStopBarrier() {
     StreamCheckpoint checkpoint = new StreamCheckpoint(1, 4, "partial", "thinking");
     ModelInvocation running =
-        invocation(request(), ModelInvocationStatus.RUNNING, 1, checkpoint, null, List.of());
+        invocation(requestSpec(), ModelInvocationStatus.RUNNING, 1, checkpoint, null, List.of());
     ModelInvocationError cancellation =
         new ModelInvocationError(ProviderErrorKind.CANCELLED, "cancelled");
     Entry aborted =
@@ -210,7 +210,7 @@ class ModelAttemptMaterializationTest {
         () -> ModelAttemptMaterialization.validate(running, attached, inputPath(droppedPartial)));
 
     ModelInvocation ready =
-        invocation(request(), ModelInvocationStatus.READY, 0, null, null, List.of());
+        invocation(requestSpec(), ModelInvocationStatus.READY, 0, null, null, List.of());
     Entry cancellationBarrier = assistantError(id(4L), id(3L), cancellation, null, T6);
     ModelInvocation stopped =
         ready.cancel(cancellation, T6).attachResultEntry(cancellationBarrier.id(), T6);
@@ -230,7 +230,7 @@ class ModelAttemptMaterializationTest {
             id(20L),
             id(2L),
             id(2L),
-            request(),
+            requestSpec(),
             ModelInvocationStatus.FAILED,
             2,
             null,
@@ -274,8 +274,8 @@ class ModelAttemptMaterializationTest {
             base.id(),
             base.threadId(),
             base.turnStartEntryId(),
-            base.basisHeadEntryId(),
-            base.request(),
+            base.requestHeadEntryId(),
+            base.requestSpec(),
             ModelInvocationStatus.RUNNING,
             1,
             new StreamCheckpoint(1, 0, "partial", ""),
@@ -297,8 +297,8 @@ class ModelAttemptMaterializationTest {
                     base.id(),
                     base.threadId(),
                     base.turnStartEntryId(),
-                    base.basisHeadEntryId(),
-                    base.request(),
+                    base.requestHeadEntryId(),
+                    base.requestSpec(),
                     ModelInvocationStatus.SUCCEEDED,
                     1,
                     null,
@@ -311,7 +311,7 @@ class ModelAttemptMaterializationTest {
                 path));
   }
 
-  /** basis 与 result 相同（attach 到 basis 自身）是非法的真实形状，必须被拒。 */
+  /** requestHead 与 result 相同（attach 到 requestHead 自身）是非法的真实形状，必须被拒。 */
   @Test
   void rejectsAttachedResultEqualToBasis() {
     ModelInvocation attached = succeededToolPhase(1, id(4L));
@@ -337,14 +337,14 @@ class ModelAttemptMaterializationTest {
         IllegalArgumentException.class,
         () -> ModelAttemptMaterialization.validateAttached(attached, extraHead));
 
-    // basisHeadEntryId 不在 path 中。
+    // requestHeadEntryId 不在 path 中。
     ModelInvocation missingBasis =
         new ModelInvocation(
             attached.id(),
             attached.threadId(),
             attached.turnStartEntryId(),
             id(99L),
-            attached.request(),
+            attached.requestSpec(),
             attached.status(),
             attached.attempt(),
             attached.streamCheckpoint(),
@@ -372,7 +372,7 @@ class ModelAttemptMaterializationTest {
             id(20L),
             id(2L),
             id(4L),
-            request(),
+            requestSpec(),
             ModelInvocationStatus.FAILED,
             1,
             null,
@@ -394,7 +394,7 @@ class ModelAttemptMaterializationTest {
             id(20L),
             id(2L),
             id(2L),
-            request(),
+            requestSpec(),
             ModelInvocationStatus.SUCCEEDED,
             1,
             null,
@@ -441,8 +441,8 @@ class ModelAttemptMaterializationTest {
             attached.id(),
             attached.threadId(),
             attached.turnStartEntryId(),
-            attached.basisHeadEntryId(),
-            attached.request(),
+            attached.requestHeadEntryId(),
+            attached.requestSpec(),
             attached.status(),
             attached.attempt(),
             attached.streamCheckpoint(),
@@ -480,7 +480,7 @@ class ModelAttemptMaterializationTest {
         () -> ModelAttemptMaterialization.validateAttached(attached, omitted));
   }
 
-  /** 合法 retry tool phase 被接受：attempt=3 已在 basis 与 head 之间物化连续 failure(1)、failure(2)。 */
+  /** 合法 retry tool phase 被接受：attempt=3 已在 requestHead 与 head 之间物化连续 failure(1)、failure(2)。 */
   @Test
   void acceptsAttachedRetryToolPhase() {
     ModelInvocation attached = succeededToolPhase(3, id(3L));
@@ -618,7 +618,7 @@ class ModelAttemptMaterializationTest {
   @Test
   void acceptsExactCompactionSuccessResultAndRejectsSummaryDrift() {
     CompactionStart compaction = historyCompactionStart();
-    // compaction 结果必须位于 COMPACTION turn 内（TurnPathValidator），basis = TURN_START id(2)。
+    // compaction 结果必须位于 COMPACTION turn 内（TurnPathValidator），requestHead = TURN_START id(2)。
     ModelInvocation stored = compactionSucceededInvocation();
     EntryPath preResult =
         new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction)));
@@ -646,12 +646,14 @@ class ModelAttemptMaterializationTest {
         "compaction result must match the assembled summary exactly");
   }
 
-  /** preResultPath 下界：compaction 成功结果前的 preResult 前缀必须至少保留 ROOT + basis（即 resultPath 至少 3 项）。 */
+  /**
+   * preResultPath 下界：compaction 成功结果前的 preResult 前缀必须至少保留 ROOT + requestHead（即 resultPath 至少 3 项）。
+   */
   @Test
   void compactionSuccessResultRequiresNonTrivialPreResultPath() {
     CompactionStart compaction = historyCompactionStart();
     ModelInvocation stored = compactionSucceededInvocation();
-    // 最短合法形状恰为 [ROOT, TURN_START, result]：preResult = [ROOT, TURN_START]（ROOT+basis 两项）是 <3
+    // 最短合法形状恰为 [ROOT, TURN_START, result]：preResult = [ROOT, TURN_START]（ROOT+requestHead 两项）是 <3
     // 下界守卫允许的边界；更短（只剩 ROOT）的前缀无法由 EntryPath 构造（ROOT-first + COMPACTION 必须在 open TURN_START
     // 内），该守卫仅作不可达防御。
     EntryPath preResult =
@@ -667,14 +669,14 @@ class ModelAttemptMaterializationTest {
                 stored, stored.attachResultEntry(result.id(), T6), minimum));
   }
 
-  /** SUCCEEDED compaction invocation：basis = TURN_START id(2)，result = 固定摘要文本快照。 */
+  /** SUCCEEDED compaction invocation：requestHead = TURN_START id(2)，result = 固定摘要文本快照。 */
   private static ModelInvocation compactionSucceededInvocation() {
     return new ModelInvocation(
         id(10L),
         id(20L),
         id(2L),
         id(2L),
-        request(),
+        requestSpec(),
         ModelInvocationStatus.SUCCEEDED,
         1,
         null,
@@ -688,7 +690,7 @@ class ModelAttemptMaterializationTest {
 
   private static ModelInvocation failedInvocation(List<ModelAttemptFailure> failures) {
     return invocation(
-        request(),
+        requestSpec(),
         ModelInvocationStatus.FAILED,
         2,
         new StreamCheckpoint(2, 7, "terminal partial", "terminal thinking"),
@@ -697,7 +699,7 @@ class ModelAttemptMaterializationTest {
   }
 
   private static ModelInvocation invocation(
-      ModelRequestSpec request,
+      ModelRequestSpec requestSpec,
       ModelInvocationStatus status,
       int attempt,
       StreamCheckpoint checkpoint,
@@ -708,7 +710,7 @@ class ModelAttemptMaterializationTest {
         id(20L),
         id(2L),
         id(3L),
-        request,
+        requestSpec,
         status,
         attempt,
         checkpoint,
@@ -794,7 +796,7 @@ class ModelAttemptMaterializationTest {
     return new Entry(id(1L), id(100L), null, new RootPayload(SETTINGS), T0);
   }
 
-  private static ModelRequestSpec request() {
+  private static ModelRequestSpec requestSpec() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         modelDescriptor(),
@@ -828,20 +830,20 @@ class ModelAttemptMaterializationTest {
   }
 
   /**
-   * 活跃 Tool phase 的 attached SUCCEEDED ModelInvocation：basis == USER head id(3)，result == ASSISTANT
-   * id(4)（result 是 basis 的严格 descendant，真实合法形状）。
+   * 活跃 Tool phase 的 attached SUCCEEDED ModelInvocation：requestHead == USER head id(3)，result ==
+   * ASSISTANT id(4)（result 是 requestHead 的严格 descendant，真实合法形状）。
    */
   private static ModelInvocation succeededToolPhase() {
     return succeededToolPhase(1, id(3L));
   }
 
-  /** attached SUCCEEDED tool phase，可显式配置 attempt 与 basisHeadEntryId 以构造 retry 审计场景。 */
-  private static ModelInvocation succeededToolPhase(int attempt, UUID basisHeadEntryId) {
+  /** attached SUCCEEDED tool phase，可显式配置 attempt 与 requestHeadEntryId 以构造 retry 审计场景。 */
+  private static ModelInvocation succeededToolPhase(int attempt, UUID requestHeadEntryId) {
     return new ModelInvocation(
         id(10L),
         id(20L),
         id(2L),
-        basisHeadEntryId,
+        requestHeadEntryId,
         toolPhaseRequest(),
         ModelInvocationStatus.SUCCEEDED,
         attempt,
@@ -883,12 +885,15 @@ class ModelAttemptMaterializationTest {
         ProviderCacheControl.none());
   }
 
-  /** [root, TURN_START, USER, assistant] 且 basis == assistant == head 的 tool phase path。 */
+  /** [root, TURN_START, USER, assistant] 且 requestHead == assistant == head 的 tool phase path。 */
   private static EntryPath attachedToolPath(Entry assistant) {
     return new EntryPath(List.of(root(), turnStart(), userMessage(), assistant));
   }
 
-  /** retry 结构 path：[root, TURN_START, USER, failures..., assistant]，失败 entry 连续挂链、basis = USER。 */
+  /**
+   * retry 结构 path：[root, TURN_START, USER, failures..., assistant]，失败 entry 连续挂链、requestHead =
+   * USER。
+   */
   private static EntryPath retryAttachedToolPath(List<Entry> failures, Entry assistant) {
     List<Entry> entries = new ArrayList<>(List.of(root(), turnStart(), userMessage()));
     entries.addAll(failures);

@@ -107,7 +107,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
 
     String sessionId = UUID.randomUUID().toString();
     String threadId = UUID.randomUUID().toString();
-    String clientCommandId = UUID.randomUUID().toString();
+    String idempotencyKey = UUID.randomUUID().toString();
     String createBody =
         """
         {
@@ -129,12 +129,12 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
           },
           "commands":[{
             "type":"USER_MESSAGE",
-            "clientCommandId":"%s",
+            "idempotencyKey":"%s",
             "contents":[{"type":"TEXT","text":"hello"}]
           }]
         }
         """
-            .formatted(chatId, sessionId, threadId, clientCommandId);
+            .formatted(chatId, sessionId, threadId, idempotencyKey);
     HttpResponse<String> threadResponse =
         http.send(
             HttpRequest.newBuilder(uri("/api/ai/runtime/command-batches"))

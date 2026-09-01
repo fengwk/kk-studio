@@ -119,7 +119,7 @@ function isCommandContent(value: unknown): boolean {
 }
 
 function isCommand(value: unknown): value is HarnessCommandCreateDTO {
-  if (!isRecord(value) || !nonBlank(value.type) || !nonBlank(value.clientCommandId)) {
+  if (!isRecord(value) || !nonBlank(value.type) || !nonBlank(value.idempotencyKey)) {
     return false
   }
   switch (value.type) {

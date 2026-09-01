@@ -120,7 +120,7 @@ export function retireStaleStopPending(
     return pending
   }
   if (
-    thread.headEntryId !== pending.basisHeadEntryId
+    thread.headEntryId !== pending.requestHeadEntryId
     || thread.version !== pending.basisVersion
   ) {
     return null
@@ -516,7 +516,7 @@ export function useAgentThreadController(
     const operation = pending ?? {
       stopRequestId: createStopRequestId(),
       expectedVersion: thread.version,
-      basisHeadEntryId: thread.headEntryId,
+      requestHeadEntryId: thread.headEntryId,
       basisVersion: thread.version,
     }
     if (pending == null) {

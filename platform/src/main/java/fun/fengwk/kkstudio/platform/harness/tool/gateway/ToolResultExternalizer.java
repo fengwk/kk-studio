@@ -197,9 +197,9 @@ final class ToolResultExternalizer {
     }
   }
 
-  /** 稳定可读的资源展示名：{toolName}-result-{ordinal}[.txt|.json]。 */
-  private static String resourceName(String toolName, int ordinal, String extension) {
-    return toolName + "-result-" + ordinal + (extension == null ? "" : "." + extension);
+  /** 稳定可读的资源展示名：{toolName}-result-{callIndex}[.txt|.json]。 */
+  private static String resourceName(String toolName, int callIndex, String extension) {
+    return toolName + "-result-" + callIndex + (extension == null ? "" : "." + extension);
   }
 
   private static String text(ResultContent content) {

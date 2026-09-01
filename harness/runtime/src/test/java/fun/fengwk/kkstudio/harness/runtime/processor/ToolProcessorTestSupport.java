@@ -236,7 +236,7 @@ final class ToolProcessorTestSupport {
                   threadId,
                   sessionId,
                   turnStartEntryId,
-                  ThreadProcessorTestSupport.MATERIALIZATION_HASH,
+                  ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
                   yoloEnabled,
                   1L,
                   0L,

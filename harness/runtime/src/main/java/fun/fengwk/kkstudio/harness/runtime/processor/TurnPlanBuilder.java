@@ -193,7 +193,7 @@ final class TurnPlanBuilder {
 
   /**
    * history normalization suffix：source path 存在 open 历史 Turn 时，基于该 path 已有的严格 ToolResult 前缀补写缺失
-   * ordinal 的 synthetic UNKNOWN/HISTORY_CUT ToolResult，再追加 CANCELLED TURN_END；不读取任何 descendant
+   * callIndex 的 synthetic UNKNOWN/HISTORY_CUT ToolResult，再追加 CANCELLED TURN_END；不读取任何 descendant
    * Invocation 结果。ROOT / 已关闭 TURN_END 无 suffix。
    */
   private List<Entry> normalizationSuffix(
@@ -217,15 +217,15 @@ final class TurnPlanBuilder {
         }
       }
       int present = countToolResultsAfter(sourcePath, assistant.id());
-      for (int ordinal = present; ordinal < calls.size(); ordinal++) {
-        ToolCallMessageContent call = calls.get(ordinal);
+      for (int callIndex = present; callIndex < calls.size(); callIndex++) {
+        ToolCallMessageContent call = calls.get(callIndex);
         UUID entryId = idAllocator.get();
         suffix.add(
             new Entry(
                 entryId,
                 sessionId,
                 parentId,
-                payloadMapper.syntheticHistoryCutToolResult(assistant.id(), ordinal, call),
+                payloadMapper.syntheticHistoryCutToolResult(assistant.id(), callIndex, call),
                 now));
         parentId = entryId;
       }
@@ -268,7 +268,7 @@ final class TurnPlanBuilder {
     return null;
   }
 
-  /** 统计 assistant Entry 之后 path 上已有的 TOOL Message 数量（TurnPathValidator 保证是 ordinal 严格前缀）。 */
+  /** 统计 assistant Entry 之后 path 上已有的 TOOL Message 数量（TurnPathValidator 保证是 callIndex 严格前缀）。 */
   static int countToolResultsAfter(EntryPath path, UUID assistantEntryId) {
     int count = 0;
     boolean after = false;

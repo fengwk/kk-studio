@@ -38,7 +38,7 @@ import java.util.function.Consumer;
  * <p>每个方法严格执行一次 {@link HarnessStore} transaction，使用规范锁序 Session -&gt; Thread -&gt; Commands -&gt;
  * ModelInvocation -&gt; ToolInvocation siblings -&gt; Work，从而保证命令接受、Stop 与 snapshot 永不观察到混合的
  * durable 状态。所有业务拒绝均为类型化 {@link HarnessRuntimeConflictException} / {@link
- * HarnessRuntimeNotFoundException}；被破坏 的持久化不变量（所有权错误、sibling 混合挂接、ordinal 不连续）仍为 {@link
+ * HarnessRuntimeNotFoundException}；被破坏 的持久化不变量（所有权错误、sibling 混合挂接、callIndex 不连续）仍为 {@link
  * IllegalStateException}。对已存在 Thread 的 mutation 在相关 durable 锁之后读取时间戳，因此 lock-wait 不会让过期的 pre-lock
  * instant 让 {@code updatedAt} 回退； Stop 与未决 Approval 还会把 mutation 时间钳制到最新的已锁定 durable
  * fact，以容忍本地时钟回滚与跨节点时钟偏差，而 Work request 始终使用未抬升的本地调度时钟。
@@ -131,14 +131,14 @@ public final class HarnessRuntime {
    *
    * <p><b>NEW_SESSION</b>：调用方预分配 {@code sessionId}/{@code threadId}，在同一事务内插入 Session + ROOT +
    * Thread（version 0 / nextCommandSequence 1）+ preflight + Commands（sequence 从 1 起）+ THREAD Work，最后
-   * version/next sequence 原子推进；任一步失败整个回滚。以 client threadId 做 materialization replay：命中现有 Thread 后先按
-   * immutable sessionId KEY SHARE Session、再锁 Thread 复核（禁止混合 unlocked snapshot）；同 hash + 同 Session
-   * 精确重放（返回现有接受事实，不写任何行），不同 hash 冲突为 {@link
-   * HarnessRuntimeConflictException.Reason#MATERIALIZATION_ID_REUSED}。
+   * version/next sequence 原子推进；任一步失败整个回滚。以 client threadId 做初始创建 replay：命中现有 Thread 后先按 immutable
+   * sessionId KEY SHARE Session、再锁 Thread 复核（禁止混合 unlocked snapshot）；同 creation request hash + 同
+   * Session 精确重放（返回现有接受事实，不写任何行），不同 hash 冲突为 {@link
+   * HarnessRuntimeConflictException.Reason#THREAD_ID_REUSED}。
    *
-   * <p><b>ENTRY</b>：<b>KEY SHARE</b> 锁既有 Session（不串行化同 Session 的 sibling materialization）、验证 start
-   * Entry 属于该 Session、预分配 {@code threadId}，插入 Thread + preflight + Commands + Work；不复制 Entry（新
-   * Thread head 直接指向 start Entry）。materialization replay 语义与 NEW_SESSION 相同。
+   * <p><b>ENTRY</b>：<b>KEY SHARE</b> 锁既有 Session（不串行化同 Session 的 sibling 初始创建）、验证 start Entry 属于该
+   * Session、预分配 {@code threadId}，插入 Thread + preflight + Commands + Work；不复制 Entry（新 Thread head
+   * 直接指向 start Entry）。初始创建 replay 语义与 NEW_SESSION 相同。
    *
    * <p><b>THREAD</b>：先读 immutable {@code thread.sessionId} 并 KEY SHARE Session，再锁 Thread 复核；exact
    * ordered replay 查找必须先于任何 cursor/preflight admission。全新 batch 要求精确的 expected head + next sequence
@@ -154,16 +154,16 @@ public final class HarnessRuntime {
     return acceptCommandsControl.acceptCommands(command, preflight);
   }
 
-  /** 按 Thread + clientCommandId 读取 durable command，用于应用层精确重放校验。 */
-  public Optional<ThreadCommand> findThreadCommand(UUID threadId, UUID clientCommandId) {
+  /** 按 Thread + idempotencyKey 读取 durable command，用于应用层精确重放校验。 */
+  public Optional<ThreadCommand> findThreadCommand(UUID threadId, UUID idempotencyKey) {
     Objects.requireNonNull(threadId, "threadId");
-    Objects.requireNonNull(clientCommandId, "clientCommandId");
+    Objects.requireNonNull(idempotencyKey, "idempotencyKey");
     return store.transaction(
         tx -> {
           if (tx.findThread(threadId).isEmpty()) {
             throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
           }
-          return tx.findCommandByClientId(threadId, clientCommandId);
+          return tx.findCommandByIdempotencyKey(threadId, idempotencyKey);
         });
   }
 
@@ -346,7 +346,7 @@ public final class HarnessRuntime {
           new ModelAttemptFailureProjection(
               invocation.id(),
               invocation.turnStartEntryId(),
-              invocation.basisHeadEntryId(),
+              invocation.requestHeadEntryId(),
               failure.attempt(),
               failure.sequence(),
               failure.text(),

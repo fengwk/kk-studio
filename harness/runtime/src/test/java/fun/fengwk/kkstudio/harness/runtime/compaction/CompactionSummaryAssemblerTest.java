@@ -280,7 +280,7 @@ class CompactionSummaryAssemblerTest {
   }
 
   private static MessagePayload toolResult(
-      UUID assistantEntryId, int ordinal, String callId, String toolName) {
+      UUID assistantEntryId, int callIndex, String callId, String toolName) {
     return new MessagePayload(
         new AgentMessage(
             AgentMessageRole.TOOL,
@@ -294,7 +294,7 @@ class CompactionSummaryAssemblerTest {
                     "{}"))),
         null,
         new ToolResultMetadata(
-            assistantEntryId, callId, ordinal, ToolResultStatus.SUCCEEDED, false, null));
+            assistantEntryId, callId, callIndex, ToolResultStatus.SUCCEEDED, false, null));
   }
 
   private static AssistantMessageMetadata metadata() {

@@ -10,7 +10,7 @@ import java.util.UUID;
 public record ModelAttemptFailureProjection(
     UUID modelInvocationId,
     UUID turnStartEntryId,
-    UUID basisHeadEntryId,
+    UUID requestHeadEntryId,
     int attempt,
     long sequence,
     String text,
@@ -22,7 +22,7 @@ public record ModelAttemptFailureProjection(
   public ModelAttemptFailureProjection {
     Objects.requireNonNull(modelInvocationId, "modelInvocationId");
     Objects.requireNonNull(turnStartEntryId, "turnStartEntryId");
-    Objects.requireNonNull(basisHeadEntryId, "basisHeadEntryId");
+    Objects.requireNonNull(requestHeadEntryId, "requestHeadEntryId");
     if (attempt <= 0) {
       throw new IllegalArgumentException("attempt must be positive");
     }

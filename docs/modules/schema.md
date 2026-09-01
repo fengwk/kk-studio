@@ -77,7 +77,7 @@ Web 以 runtime scope 依赖 `kk-studio-schema`、`flyway-core` 和
 - Thread head 必须属于同一 Session；`next_command_sequence >= 1`，
   `version >= 0`。
 - `harness_thread_command` 以 `(thread_id, sequence)` 和
-  `(thread_id, client_command_id)` 保证顺序与 exact replay。
+  `(thread_id, idempotency_key)` 保证顺序与 exact replay。
 - `harness_work` 以 `(target_type, target_id)` 唯一表示 THREAD/MODEL/TOOL 的
   可调度事实，`wake_version` 为正数，lease token 与 lease until 成对存在。
 - Canvas ownership foreign key、owner relation、Blob 引用全部使用

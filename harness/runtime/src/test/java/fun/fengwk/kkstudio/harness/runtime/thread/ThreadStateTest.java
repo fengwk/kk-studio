@@ -15,7 +15,7 @@ import java.util.UUID;
 class ThreadStateTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
-  private static final String MATERIALIZATION_HASH =
+  private static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   private static final UUID SESSION_ID = id(1_000_000L);
 
@@ -148,7 +148,7 @@ class ThreadStateTest {
                     id(7),
                     SESSION_ID,
                     id(42),
-                    MATERIALIZATION_HASH,
+                    CREATION_REQUEST_HASH,
                     false,
                     3L,
                     5L,
@@ -224,7 +224,7 @@ class ThreadStateTest {
         id,
         SESSION_ID,
         headEntryId,
-        MATERIALIZATION_HASH,
+        CREATION_REQUEST_HASH,
         yoloEnabled,
         nextCommandSequence,
         version,

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.MATERIALIZATION_HASH;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -37,7 +37,7 @@ class StopRecordsTest {
           id(1L),
           id(2L),
           id(3L),
-          MATERIALIZATION_HASH,
+          CREATION_REQUEST_HASH,
           false,
           1,
           0,

@@ -39,10 +39,10 @@ class ThreadCommandTest {
             "threadId",
             "sequence",
             "payload",
-            "clientCommandId",
+            "idempotencyKey",
             "requestHash",
-            "consumedTurnStartEntryId",
-            "cancelRequestId",
+            "appliedTurnStartEntryId",
+            "stopRequestId",
             "cancelledAt",
             "createdAt"),
         List.of(ThreadCommand.class.getRecordComponents()).stream()
@@ -60,7 +60,7 @@ class ThreadCommandTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new ThreadCommand(id(1L), 0L, payload(), id(99L), HASH, null, null, null, CREATED));
-    // consumed 与 cancelRequestId 互斥。
+    // applied 与 stopRequestId 互斥。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -96,20 +96,20 @@ class ThreadCommandTest {
   }
 
   @Test
-  void consumeTransitionsQueuedToAppliedWithConsumedTurnStart() {
+  void markAppliedTransitionsQueuedToAppliedWithAppliedTurnStart() {
     ThreadCommand queued = command(1L, 1L, 1L, null, null, null);
-    ThreadCommand consumed = queued.consume(id(99));
-    assertEquals(ThreadCommandState.APPLIED, consumed.state());
-    assertEquals(id(99), consumed.consumedTurnStartEntryId());
-    assertNull(consumed.cancelRequestId());
-    assertNull(consumed.cancelledAt());
+    ThreadCommand applied = queued.markApplied(id(99));
+    assertEquals(ThreadCommandState.APPLIED, applied.state());
+    assertEquals(id(99), applied.appliedTurnStartEntryId());
+    assertNull(applied.stopRequestId());
+    assertNull(applied.cancelledAt());
     // identity 不变
-    assertEquals(queued.threadId(), consumed.threadId());
-    assertEquals(queued.sequence(), consumed.sequence());
-    assertEquals(queued.payload(), consumed.payload());
-    assertEquals(queued.clientCommandId(), consumed.clientCommandId());
-    assertEquals(queued.requestHash(), consumed.requestHash());
-    assertEquals(queued.createdAt(), consumed.createdAt());
+    assertEquals(queued.threadId(), applied.threadId());
+    assertEquals(queued.sequence(), applied.sequence());
+    assertEquals(queued.payload(), applied.payload());
+    assertEquals(queued.idempotencyKey(), applied.idempotencyKey());
+    assertEquals(queued.requestHash(), applied.requestHash());
+    assertEquals(queued.createdAt(), applied.createdAt());
   }
 
   @Test
@@ -117,42 +117,40 @@ class ThreadCommandTest {
     ThreadCommand queued = command(1L, 1L, 1L, null, null, null);
     ThreadCommand cancelled = queued.cancel(STOP_REQUEST, CANCELLED);
     assertEquals(ThreadCommandState.CANCELLED, cancelled.state());
-    assertEquals(STOP_REQUEST, cancelled.cancelRequestId());
+    assertEquals(STOP_REQUEST, cancelled.stopRequestId());
     assertEquals(CANCELLED, cancelled.cancelledAt());
-    assertNull(cancelled.consumedTurnStartEntryId());
+    assertNull(cancelled.appliedTurnStartEntryId());
   }
 
   @Test
   void terminalCommandsRejectFurtherTransitions() {
     ThreadCommand applied = command(1L, 1L, 1L, id(99), null, null);
     ThreadCommand cancelled = command(2L, 1L, 2L, null, STOP_REQUEST, CANCELLED);
-    assertThrows(IllegalStateException.class, () -> applied.consume(id(100)));
+    assertThrows(IllegalStateException.class, () -> applied.markApplied(id(100)));
     assertThrows(IllegalStateException.class, () -> applied.cancel(STOP_REQUEST, CANCELLED));
-    assertThrows(IllegalStateException.class, () -> cancelled.consume(id(100)));
+    assertThrows(IllegalStateException.class, () -> cancelled.markApplied(id(100)));
     assertThrows(
         IllegalStateException.class,
         () -> cancelled.cancel(STOP_REQUEST, CANCELLED.plusSeconds(1)));
   }
 
   @Test
-  void consumeRejectsNonPositiveTurnStartAndCancelRejectsPastTime() {
+  void markAppliedRejectsNullTurnStartAndCancelRejectsPastTime() {
     ThreadCommand queued = command(1L, 1L, 1L, null, null, null);
-    assertThrows(NullPointerException.class, () -> queued.consume(null));
+    assertThrows(NullPointerException.class, () -> queued.markApplied(null));
     assertThrows(
         IllegalArgumentException.class, () -> queued.cancel(STOP_REQUEST, CREATED.minusSeconds(1)));
     assertThrows(NullPointerException.class, () -> queued.cancel(null, CANCELLED));
     assertThrows(NullPointerException.class, () -> queued.cancel(STOP_REQUEST, null));
   }
 
-  /**
-   * 构造 QUEUED/APPLIED/CANCELLED 之一的 ThreadCommand；cancel 必须以 (cancelRequestId, cancelledAt) 成对出现。
-   */
+  /** 构造 QUEUED/APPLIED/CANCELLED 之一的 ThreadCommand；cancel 必须以 (stopRequestId, cancelledAt) 成对出现。 */
   private static ThreadCommand command(
       long id,
       long threadId,
       long sequence,
-      UUID consumedTurnStartEntryId,
-      UUID cancelRequestId,
+      UUID appliedTurnStartEntryId,
+      UUID stopRequestId,
       Instant cancelledAt) {
     return new ThreadCommand(
         id(threadId),
@@ -160,8 +158,8 @@ class ThreadCommandTest {
         payload(),
         id(id),
         HASH,
-        consumedTurnStartEntryId,
-        cancelRequestId,
+        appliedTurnStartEntryId,
+        stopRequestId,
         cancelledAt,
         CREATED);
   }

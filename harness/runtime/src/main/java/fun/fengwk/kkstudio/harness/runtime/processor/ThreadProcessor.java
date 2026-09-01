@@ -81,7 +81,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * ThreadContext}，unlocked 读：Model 只按 (threadId, open TURN_START) 查找，Tool siblings 只在 Model 结果恰为当前
  * Assistant head 时加载），再按上下文恰执行一个动作：(a) MODEL_TERMINAL_PENDING —— head 恰为 basis 且未挂结果的 terminal
  * ModelInvocation 原子 apply；(b) TOOL_TERMINAL_PENDING —— 当前 head 恰为本 Thread ModelInvocation 产出 的
- * Assistant Entry、且其 Tool siblings 全部 terminal 时按 ordinal 原子 apply；(c) MODEL_ACTIVE / TOOL_ACTIVE
+ * Assistant Entry、且其 Tool siblings 全部 terminal 时按 callIndex 原子 apply；(c) MODEL_ACTIVE / TOOL_ACTIVE
  * —— 当前 applicable invocation 非 terminal 时完成 claim；(d) CONTINUATION_DUE —— HISTORY phase gap 启动
  * TURN_PREFIX，其它 continueModel obligation 启动 CONTINUATION；(e) queued USER_MESSAGE/CUSTOM_MESSAGE
  * 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。旧 / 历史 open Turn 只在启动 新 INPUT Turn 时被
@@ -658,7 +658,7 @@ public final class ThreadProcessor {
       boolean hasQueuedMessage) {
     if (!model.status().isTerminal()
         || model.resultEntryId() != null
-        || !thread.headEntryId().equals(model.basisHeadEntryId())) {
+        || !thread.headEntryId().equals(model.requestHeadEntryId())) {
       // 决策与执行同事务，理论不可达；改为明确的不变量失败，绝不降级为循环重试。
       throw new IllegalStateException(
           "terminal model apply preconditions changed under the same transaction for model "
@@ -699,7 +699,7 @@ public final class ThreadProcessor {
             sessionId,
             parentId,
             succeeded
-                ? payloadMapper.assistantPayload(response, model.request().toolBindings())
+                ? payloadMapper.assistantPayload(response, model.requestSpec().toolBindings())
                 : payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model)),
             mutationNow));
     UUID head = resultEntryId;
@@ -707,7 +707,7 @@ public final class ThreadProcessor {
     List<ToolInvocation> invocations = List.of();
     if (succeeded) {
       // canonical response 已在 SUCCEEDED 前通过 validator；这里只按 planner 的纯决策落地。
-      ModelResponsePlan plan = responsePlanner.plan(response, model.request().toolBindings());
+      ModelResponsePlan plan = responsePlanner.plan(response, model.requestSpec().toolBindings());
       switch (plan) {
         case ModelResponsePlan.Completed ignored -> {
           UUID turnEndId = tx.nextId();
@@ -743,8 +743,8 @@ public final class ThreadProcessor {
           tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
           List<ToolInvocation> materialized = new ArrayList<>(batch.tools().size());
           Map<ContributorStateKey, ContributorStateAccessMode> seenStateAccesses = new HashMap<>();
-          for (int ordinal = 0; ordinal < batch.tools().size(); ordinal++) {
-            ModelResponsePlan.ToolSlot slot = batch.tools().get(ordinal);
+          for (int callIndex = 0; callIndex < batch.tools().size(); callIndex++) {
+            ModelResponsePlan.ToolSlot slot = batch.tools().get(callIndex);
             ToolInvocationStatus status = slot.status();
             ToolInvocationError error = slot.error();
             if (status == ToolInvocationStatus.READY) {
@@ -762,7 +762,7 @@ public final class ThreadProcessor {
                     toolId,
                     model.id(),
                     resultEntryId,
-                    ordinal,
+                    callIndex,
                     slot.call(),
                     slot.binding(),
                     status,
@@ -903,11 +903,12 @@ public final class ThreadProcessor {
   }
 
   /**
-   * Tool sibling 原子应用：全部 terminal 才执行，按 ordinal 通过统一 appender 追加 effects + ToolResult，再追加 COMPLETED
-   * TURN_END(continueModel=true)；同一事务删除全部 child ToolInvocation 与 parent ModelInvocation并固定先请求
-   * THREAD 再 complete，下一 claim 才做 continuation。数量 / ordinal 前缀 / ownership / terminal 任一违反即抛错回滚；删除
-   * parent 前先执行 与 {@link ModelAttemptMaterialization} 等价的最小严格校验（attached Assistant/result 与已物化失败
-   * attempt 前缀），绝不 绕过校验直接 delete。低序 mutation 完成后最后执行 claimed THREAD Work fence。
+   * Tool sibling 原子应用：全部 terminal 才执行，按 callIndex 通过统一 appender 追加 effects + ToolResult，再追加
+   * COMPLETED TURN_END(continueModel=true)；同一事务删除全部 child ToolInvocation 与 parent
+   * ModelInvocation并固定先请求 THREAD 再 complete，下一 claim 才做 continuation。数量 / callIndex 前缀 / ownership
+   * / terminal 任一违反即抛错回滚；删除 parent 前先执行 与 {@link ModelAttemptMaterialization} 等价的最小严格校验（attached
+   * Assistant/result 与已物化失败 attempt 前缀），绝不 绕过校验直接 delete。低序 mutation 完成后最后执行 claimed THREAD Work
+   * fence。
    */
   private void applyToolBatch(
       HarnessStore.Transaction tx,
@@ -924,9 +925,9 @@ public final class ThreadProcessor {
           "tool sibling count must match the assistant tool calls of entry " + assistant.id());
     }
     for (int i = 0; i < siblings.size(); i++) {
-      if (siblings.get(i).ordinal() != i) {
+      if (siblings.get(i).callIndex() != i) {
         throw new IllegalStateException(
-            "tool siblings must be a contiguous ordinal prefix of entry " + assistant.id());
+            "tool siblings must be a contiguous callIndex prefix of entry " + assistant.id());
       }
       ToolInvocation sibling = siblings.get(i);
       if (!sibling.modelInvocationId().equals(model.id()) || !sibling.status().isTerminal()) {
@@ -1099,7 +1100,7 @@ public final class ThreadProcessor {
     }
     List<ThreadCommand> consumed = new ArrayList<>(plan.consumedCommands().size());
     for (ThreadCommand command : plan.consumedCommands()) {
-      consumed.add(command.consume(plan.turnStartEntryId()));
+      consumed.add(command.markApplied(plan.turnStartEntryId()));
     }
     tx.updateCommands(consumed);
     UUID invocationId = null;
@@ -1188,7 +1189,7 @@ public final class ThreadProcessor {
       if (planned == null
           || !planned.threadId().equals(command.threadId())
           || !planned.payload().equals(command.payload())
-          || !planned.clientCommandId().equals(command.clientCommandId())
+          || !planned.idempotencyKey().equals(command.idempotencyKey())
           || planned.state() != command.state()) {
         return false;
       }

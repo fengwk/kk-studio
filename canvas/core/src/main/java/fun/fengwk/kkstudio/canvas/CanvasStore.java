@@ -76,7 +76,7 @@ public interface CanvasStore {
 
   int deleteLinksByCanvas(UUID canvasId);
 
-  Optional<CommandDedup> findCommandDedup(UUID canvasId, UUID commandId);
+  Optional<CommandDedup> findCommandDedup(UUID canvasId, UUID idempotencyKey);
 
   void addCommandDedup(CommandDedup commandDedup);
 
@@ -120,12 +120,12 @@ public interface CanvasStore {
     }
   }
 
-  /** Canvas command 幂等键对应的持久化事实。 */
-  record CommandDedup(UUID canvasId, UUID commandId, String requestHash) {
+  /** Canvas command batch 幂等键对应的持久化事实。 */
+  record CommandDedup(UUID canvasId, UUID idempotencyKey, String requestHash) {
 
     public CommandDedup {
       canvasId = Objects.requireNonNull(canvasId, "canvasId");
-      commandId = Objects.requireNonNull(commandId, "commandId");
+      idempotencyKey = Objects.requireNonNull(idempotencyKey, "idempotencyKey");
       requestHash = Objects.requireNonNull(requestHash, "requestHash");
     }
   }

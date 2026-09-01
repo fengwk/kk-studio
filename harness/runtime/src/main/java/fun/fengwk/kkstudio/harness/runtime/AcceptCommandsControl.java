@@ -29,8 +29,8 @@ import java.util.UUID;
 /**
  * HarnessRuntime 内部的同步 acceptCommands 控制面。
  *
- * <p>承担命令接受（NEW_SESSION / ENTRY / THREAD 三条路径）、materialization replay 与 ordered replay、 batch shape
- * 校验、cursor admission 校验以及向 Store 写入 Session / ROOT / Thread / Commands / Work。
+ * <p>承担命令接受（NEW_SESSION / ENTRY / THREAD 三条路径）、initial creation replay 与 ordered replay、 batch
+ * shape 校验、cursor admission 校验以及向 Store 写入 Session / ROOT / Thread / Commands / Work。
  */
 final class AcceptCommandsControl {
 
@@ -67,8 +67,8 @@ final class AcceptCommandsControl {
     validateBatchShape(target, commands);
     return store.transaction(
         tx -> {
-          String materializationHash =
-              MaterializationHash.forNewSession(
+          String creationRequestHash =
+              ThreadCreationRequestHash.forNewSession(
                   target.sessionId(),
                   target.threadId(),
                   target.rootSettings(),
@@ -78,7 +78,7 @@ final class AcceptCommandsControl {
           ThreadState existing = tx.findThread(target.threadId()).orElse(null);
           if (existing != null) {
             return replayInitial(
-                tx, target.sessionId(), target.threadId(), existing, commands, materializationHash);
+                tx, target.sessionId(), target.threadId(), existing, commands, creationRequestHash);
           }
           Instant now = clock.instant();
           tx.insertSession(new Session(target.sessionId(), now));
@@ -95,7 +95,7 @@ final class AcceptCommandsControl {
                   target.threadId(),
                   target.sessionId(),
                   rootEntryId,
-                  materializationHash,
+                  creationRequestHash,
                   target.yoloEnabled(),
                   1,
                   0,
@@ -115,17 +115,17 @@ final class AcceptCommandsControl {
         tx -> {
           ThreadState existing = tx.findThread(target.threadId()).orElse(null);
           if (existing != null) {
-            String materializationHash =
-                MaterializationHash.forEntry(
+            String creationRequestHash =
+                ThreadCreationRequestHash.forEntry(
                     target.sessionId(),
                     target.startEntryId(),
                     target.threadId(),
                     target.yoloEnabled(),
                     commands);
             return replayInitial(
-                tx, target.sessionId(), target.threadId(), existing, commands, materializationHash);
+                tx, target.sessionId(), target.threadId(), existing, commands, creationRequestHash);
           }
-          // ENTRY 新建路径用 KEY SHARE：不串行化同 Session 的 sibling materialization。
+          // ENTRY 新建路径用 KEY SHARE：不串行化同 Session 的 sibling 初始创建。
           tx.lockSessionForKeyShare(target.sessionId())
               .orElseThrow(
                   () ->
@@ -144,8 +144,8 @@ final class AcceptCommandsControl {
                     + " is not in session "
                     + target.sessionId());
           }
-          String materializationHash =
-              MaterializationHash.forEntry(
+          String creationRequestHash =
+              ThreadCreationRequestHash.forEntry(
                   target.sessionId(),
                   target.startEntryId(),
                   target.threadId(),
@@ -157,7 +157,7 @@ final class AcceptCommandsControl {
                   target.threadId(),
                   target.sessionId(),
                   target.startEntryId(),
-                  materializationHash,
+                  creationRequestHash,
                   target.yoloEnabled(),
                   1,
                   0,
@@ -195,7 +195,8 @@ final class AcceptCommandsControl {
           // exact replay 查找必须先于 cursor/preflight admission。
           List<Optional<ThreadCommand>> existing = new ArrayList<>(commands.size());
           for (NewThreadCommand request : commands) {
-            existing.add(tx.findCommandByClientId(target.threadId(), request.clientCommandId()));
+            existing.add(
+                tx.findCommandByIdempotencyKey(target.threadId(), request.idempotencyKey()));
           }
           long present = existing.stream().filter(Optional::isPresent).count();
           if (present > 0 && present < existing.size()) {
@@ -243,7 +244,7 @@ final class AcceptCommandsControl {
               thread.id(),
               nextSequence + i,
               request.payload(),
-              request.clientCommandId(),
+              request.idempotencyKey(),
               request.requestHash(),
               null,
               null,
@@ -263,10 +264,10 @@ final class AcceptCommandsControl {
   }
 
   /**
-   * NEW_SESSION / ENTRY：同 hash + 同 Session 的 client threadId 精确 replay。
+   * NEW_SESSION / ENTRY：同 creation request hash + 同 Session 的 client threadId 精确 replay。
    *
    * <p>{@code immutable} 快照只用于在上锁前定位 Session；随后按规范锁序 KEY SHARE Session -&gt; FOR UPDATE Thread
-   * 复核后返回当前 projection（禁止混合 unlocked snapshot）。只按本请求 clientCommandId 顺序重放原始初始命令，验证 requestHash 相等且
+   * 复核后返回当前 projection（禁止混合 unlocked snapshot）。只按本请求 idempotencyKey 顺序重放原始初始命令，验证 requestHash 相等且
    * sequence 从 1 连续，绝不返回该 Thread 后续批次的历史命令。
    */
   private static AcceptedCommands replayInitial(
@@ -275,14 +276,14 @@ final class AcceptCommandsControl {
       UUID threadId,
       ThreadState immutable,
       List<NewThreadCommand> requests,
-      String materializationHash) {
+      String creationRequestHash) {
     if (!immutable.sessionId().equals(sessionId)
-        || !immutable.materializationHash().equals(materializationHash)) {
+        || !immutable.creationRequestHash().equals(creationRequestHash)) {
       throw conflict(
-          HarnessRuntimeConflictException.Reason.MATERIALIZATION_ID_REUSED,
+          HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED,
           "thread "
               + threadId
-              + " is already materialized with a different session/hash (session "
+              + " is already associated with a different initial creation request (session "
               + immutable.sessionId()
               + ")");
     }
@@ -297,32 +298,32 @@ final class AcceptCommandsControl {
                 () ->
                     new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
     if (!thread.sessionId().equals(sessionId)
-        || !thread.materializationHash().equals(materializationHash)) {
+        || !thread.creationRequestHash().equals(creationRequestHash)) {
       throw conflict(
-          HarnessRuntimeConflictException.Reason.MATERIALIZATION_ID_REUSED,
+          HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED,
           "thread "
               + threadId
-              + " is already materialized with a different session/hash (session "
+              + " is already associated with a different initial creation request (session "
               + thread.sessionId()
               + ")");
     }
     List<ThreadCommand> ordered = new ArrayList<>(requests.size());
     for (NewThreadCommand request : requests) {
       ThreadCommand existing =
-          tx.findCommandByClientId(threadId, request.clientCommandId())
+          tx.findCommandByIdempotencyKey(threadId, request.idempotencyKey())
               .orElseThrow(
                   () ->
                       conflict(
                           HarnessRuntimeConflictException.Reason.PARTIAL_COMMAND_REPLAY,
                           "initial batch on thread "
                               + threadId
-                              + " is missing clientCommandId "
-                              + request.clientCommandId()));
+                              + " is missing idempotencyKey "
+                              + request.idempotencyKey()));
       if (!existing.requestHash().equals(request.requestHash())) {
         throw conflict(
-            HarnessRuntimeConflictException.Reason.COMMAND_ID_REUSED,
-            "clientCommandId "
-                + request.clientCommandId()
+            HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
+            "idempotencyKey "
+                + request.idempotencyKey()
                 + " is reused with a different request hash on thread "
                 + threadId);
       }
@@ -363,9 +364,9 @@ final class AcceptCommandsControl {
       NewThreadCommand request = commands.get(i);
       if (!existing.requestHash().equals(request.requestHash())) {
         throw conflict(
-            HarnessRuntimeConflictException.Reason.COMMAND_ID_REUSED,
-            "clientCommandId "
-                + request.clientCommandId()
+            HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
+            "idempotencyKey "
+                + request.idempotencyKey()
                 + " is reused with a different request hash on thread "
                 + target.threadId());
       }
@@ -417,10 +418,10 @@ final class AcceptCommandsControl {
       NewThreadCommand request = requests.get(i);
       NewThreadCommand result = prepared.get(i);
       if (result == null
-          || !result.clientCommandId().equals(request.clientCommandId())
+          || !result.idempotencyKey().equals(request.idempotencyKey())
           || !result.requestHash().equals(request.requestHash())) {
         throw new IllegalStateException(
-            "command preflight must preserve clientCommandId and requestHash at index " + i);
+            "command preflight must preserve idempotencyKey and requestHash at index " + i);
       }
     }
   }

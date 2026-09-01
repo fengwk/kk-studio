@@ -61,7 +61,7 @@ public sealed interface ThreadContext
     }
   }
 
-  /** Tool siblings 全部 terminal 且 outcome 尚未物化：需锁 Model + siblings 并按 ordinal 原子 apply。 */
+  /** Tool siblings 全部 terminal 且 outcome 尚未物化：需锁 Model + siblings 并按 callIndex 原子 apply。 */
   record ToolTerminalPending(
       ModelInvocation model,
       Entry assistant,

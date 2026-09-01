@@ -269,12 +269,12 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresT
     UUID canvasId = canvasCommandService.createCanvas("canvas-owner").id();
     UUID sessionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
-    UUID clientCommandId = UUID.randomUUID();
+    UUID idempotencyKey = UUID.randomUUID();
     UserMessageCommandPayload payload =
         new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("owner"))));
 
-    accept(new OwnerRef(OwnerType.CHAT, chatId), sessionId, threadId, payload, clientCommandId);
+    accept(new OwnerRef(OwnerType.CHAT, chatId), sessionId, threadId, payload, idempotencyKey);
 
     assertThrows(
         IllegalArgumentException.class,
@@ -289,7 +289,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresT
                 sessionId,
                 threadId,
                 payload,
-                clientCommandId));
+                idempotencyKey));
 
     assertEquals(1, chatSessionRepository.listSessionIds(chatId).size());
     assertEquals(0, canvasSessionRepository.listSessionIds(canvasId).size());
@@ -339,12 +339,12 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresT
       UUID sessionId,
       UUID threadId,
       UserMessageCommandPayload payload,
-      UUID clientCommandId) {
+      UUID idempotencyKey) {
     acceptanceService.accept(
         owner,
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
-            List.of(new NewThreadCommand(payload, clientCommandId))));
+            List.of(new NewThreadCommand(payload, idempotencyKey))));
   }
 
   private static BranchSettings settings() {

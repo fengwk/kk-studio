@@ -46,7 +46,7 @@ export interface FrozenCommandBatchRequest {
   identity: string
 }
 
-export function createClientCommandId(): string {
+export function createIdempotencyKey(): string {
   return createUuid()
 }
 
@@ -71,7 +71,7 @@ export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsD
  * contains only USER_MESSAGE: the final draft is materialized directly into rootSettings.
  */
 export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenCommandBatchRequest {
-  const createId = input.createId ?? createClientCommandId
+  const createId = input.createId ?? createIdempotencyKey
   const payloadParts = trimMessageParts(input.parts)
   const composerParts = trimMessageParts(input.localParts ?? input.parts)
   if (!hasMessageContent(payloadParts)) {
@@ -87,7 +87,7 @@ export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenComma
   }
   const message: HarnessCommandCreateDTO = {
     type: 'USER_MESSAGE',
-    clientCommandId: createId(),
+    idempotencyKey: createId(),
     contents: [firstContent, ...contents.slice(1)],
   }
   const commands =
@@ -113,8 +113,8 @@ export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenComma
       owner: input.owner,
       target: input.target,
       commands: commands.map((command) => command.type === 'USER_MESSAGE'
-        ? { ...command, clientCommandId: undefined }
-        : { ...command, clientCommandId: undefined }),
+        ? { ...command, idempotencyKey: undefined }
+        : { ...command, idempotencyKey: undefined }),
       branchDraft: input.draft,
       parts: partsKey(payloadParts),
     }),

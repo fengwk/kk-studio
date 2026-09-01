@@ -47,9 +47,9 @@ test('run-agent-matrix contract: NEW_SESSION request is atomic', () => {
   assert.match(request.threadId, UUID_RE)
   assert.equal(request.yoloEnabled, true)
   assert.equal(request.commands.length, 1)
-  assert.deepEqual(request.commands[0], userMessageCommand(prompt, request.commands[0].clientCommandId))
+  assert.deepEqual(request.commands[0], userMessageCommand(prompt, request.commands[0].idempotencyKey))
   assert.equal(request.commands[0].type, 'USER_MESSAGE')
-  assert.match(request.commands[0].clientCommandId, UUID_RE)
+  assert.match(request.commands[0].idempotencyKey, UUID_RE)
   assert.deepEqual(request.commands[0].contents, [{ type: 'TEXT', text: prompt }])
 })
 
@@ -148,10 +148,9 @@ function acceptedEnvelope(chat, model) {
     acceptedCommands: [
       {
         type: 'USER_MESSAGE',
-        clientCommandId: promptCommandId,
+        idempotencyKey: promptCommandId,
         threadId,
         sequence: '1',
-        requestHash: '0'.repeat(64),
       },
     ],
     replayed: false,

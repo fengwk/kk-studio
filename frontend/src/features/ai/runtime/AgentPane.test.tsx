@@ -617,7 +617,7 @@ describe('AgentPane orchestration', () => {
       JSON.stringify({
         stopRequestId: 'stop-1',
         expectedVersion: '0',
-        basisHeadEntryId: 'head-1',
+        requestHeadEntryId: 'head-1',
         basisVersion: '0',
       }),
     )
@@ -982,12 +982,12 @@ describe('AgentPane orchestration', () => {
           sequence: '1',
           type: 'USER_MESSAGE',
           state: 'QUEUED',
-          clientCommandId: 'queued-1',
+          idempotencyKey: 'queued-1',
           requestHash: '0123456789abcdef'.repeat(4),
           payloadJson: JSON.stringify({
             message: { role: 'USER', contents: [{ type: 'text', text: '排队中' }] },
           }),
-          consumedTurnStartEntryId: null,
+          appliedTurnStartEntryId: null,
           cancelledAt: null,
           createTime: null,
         }],

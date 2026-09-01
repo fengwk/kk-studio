@@ -364,9 +364,9 @@ public final class ModelProcessor implements AutoCloseable {
     }
     return new Prepare.Dispatched(
         thread.id(),
-        model.basisHeadEntryId(),
+        model.requestHeadEntryId(),
         model.attempt(),
-        model.request(),
+        model.requestSpec(),
         start.compaction() != null);
   }
 
@@ -379,7 +379,7 @@ public final class ModelProcessor implements AutoCloseable {
               if (tx.lockClaimedWork(claim, now).isEmpty()) {
                 throw new ClaimLostSignal();
               }
-              return tx.loadEntryPath(dispatched.basisHeadEntryId());
+              return tx.loadEntryPath(dispatched.requestHeadEntryId());
             });
     return materializer.materialize(path, dispatched.request());
   }
@@ -537,7 +537,7 @@ public final class ModelProcessor implements AutoCloseable {
 
     record Dispatched(
         UUID threadId,
-        UUID basisHeadEntryId,
+        UUID requestHeadEntryId,
         int attempt,
         ModelRequestSpec request,
         boolean compaction)

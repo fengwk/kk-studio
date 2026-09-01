@@ -229,7 +229,7 @@ describe('useAgentThreadController', () => {
           id: invocationId,
           modelInvocationId: 'm1',
           assistantEntryId: 'a1',
-          ordinal: 0,
+          callIndex: 0,
           status: 'APPROVED',
           attempt: 1,
           toolCallId: 'call-1',
@@ -414,8 +414,8 @@ describe('useAgentThreadController', () => {
         expectedNextCommandSequence: '2',
       },
     })
-    expect(calls[1]?.[0].commands[0]?.clientCommandId).toBe(
-      calls[0]?.[0].commands[0]?.clientCommandId,
+    expect(calls[1]?.[0].commands[0]?.idempotencyKey).toBe(
+      calls[0]?.[0].commands[0]?.idempotencyKey,
     )
     expect(result.current.actionError).toBeNull()
     expect(partsToText(result.current.draft)).toBe('')
@@ -705,7 +705,7 @@ describe('useAgentThreadController', () => {
       await result.current.submitMessage()
     })
     const firstId = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]?.[0]
-      .commands[0]?.clientCommandId
+      .commands[0]?.idempotencyKey
 
     // 将 composer 编辑成不同内容时，会重置回放身份。
     act(() => result.current.setDraft([createTextPart('changed content')]))
@@ -713,7 +713,7 @@ describe('useAgentThreadController', () => {
       await result.current.submitMessage()
     })
     const secondId = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[1]?.[0]
-      .commands[0]?.clientCommandId
+      .commands[0]?.idempotencyKey
     expect(secondId).toBeTruthy()
     expect(secondId).not.toBe(firstId)
   })
@@ -815,13 +815,13 @@ describe('useAgentThreadController', () => {
         cancelledUserMessages: [
           {
             sequence: '1',
-            clientCommandId: 'c1',
+            idempotencyKey: 'c1',
             messageJson:
               '{"role":"USER","contents":[{"type":"text","text":"cancelled"}]}',
           },
           {
             sequence: '2',
-            clientCommandId: 'c2',
+            idempotencyKey: 'c2',
             messageJson:
               '{"role":"USER","contents":[{"type":"resource","blobId":"00000000-0000-0000-0000-000000000001","name":"a.txt","preview":"p"}]}',
           },
@@ -861,7 +861,7 @@ describe('useAgentThreadController', () => {
       cancelledUserMessages: [
         {
           sequence: '1',
-          clientCommandId: 'c1',
+          idempotencyKey: 'c1',
           messageJson:
             '{"role":"USER","contents":[{"type":"text","text":"cancelled"}]}',
         },
@@ -1026,7 +1026,7 @@ describe('useAgentThreadController', () => {
     const pending = {
       stopRequestId: 's-1',
       expectedVersion: '0',
-      basisHeadEntryId: 'h1',
+      requestHeadEntryId: 'h1',
       basisVersion: '0',
     }
     // basis 匹配时：精确重试继续生效。
@@ -1118,7 +1118,7 @@ describe('useAgentThreadController', () => {
         id: 'tool-1',
         modelInvocationId: 'm1',
         assistantEntryId: 'a1',
-        ordinal: 0,
+        callIndex: 0,
         status: 'APPROVED',
         attempt: 1,
         toolCallId: 'call-1',
@@ -1192,7 +1192,7 @@ describe('useAgentThreadController', () => {
         id: 'tool-child',
         modelInvocationId: 'm1',
         assistantEntryId: 'a1',
-        ordinal: 0,
+        callIndex: 0,
         status: 'APPROVED',
         attempt: 1,
         toolCallId: 'call-1',
@@ -1384,20 +1384,20 @@ describe('useAgentThreadController', () => {
         expectedHeadEntryId: string
         expectedNextCommandSequence: string
       }
-      commands: Array<{ clientCommandId: string }>
+      commands: Array<{ idempotencyKey: string }>
     }
     const second = calls[1]?.[0] as {
       target: {
         expectedHeadEntryId: string
         expectedNextCommandSequence: string
       }
-      commands: Array<{ clientCommandId: string }>
+      commands: Array<{ idempotencyKey: string }>
     }
     // 409 = 该 batch 未被接受：重试使用刷新后的 head/nextSequence
     // 以及全新的 command id，而不是回放陈旧的 batch。
     expect(second.target.expectedHeadEntryId).toBe('h1')
     expect(second.target.expectedNextCommandSequence).toBe('3')
-    expect(second.commands[0]?.clientCommandId).not.toBe(first.commands[0]?.clientCommandId)
+    expect(second.commands[0]?.idempotencyKey).not.toBe(first.commands[0]?.idempotencyKey)
     // 网络/不确定失败会保留精确 batch；409 不能这样做。
     void first
     void second
@@ -1590,8 +1590,8 @@ describe('useAgentThreadController', () => {
     expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(2)
     const firstPlan = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]?.[0]
     const secondPlan = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[1]?.[0]
-    expect(secondPlan?.commands[0]?.clientCommandId).not.toBe(
-      firstPlan?.commands[0]?.clientCommandId,
+    expect(secondPlan?.commands[0]?.idempotencyKey).not.toBe(
+      firstPlan?.commands[0]?.idempotencyKey,
     )
     // 较新的请求先完成：replay 被清空。
     await act(async () => {

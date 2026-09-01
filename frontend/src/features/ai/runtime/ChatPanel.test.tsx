@@ -130,7 +130,7 @@ describe('ChatPanel', () => {
             messages: [],
             queuedMessages: [
               {
-                clientCommandId: 'queued-1',
+                idempotencyKey: 'queued-1',
                 role: 'user',
                 text: 'queued input',
                 sequence: 1,
@@ -289,7 +289,7 @@ describe('ChatPanel', () => {
             messages: [{ id: 'm1', role: 'user', text: 'conversation text', subjectEntryId: 'e1', createdAt: null }],
             queuedMessages: [
               {
-                clientCommandId: 'queued-1',
+                idempotencyKey: 'queued-1',
                 role: 'user',
                 text: 'queued input',
                 sequence: 1,

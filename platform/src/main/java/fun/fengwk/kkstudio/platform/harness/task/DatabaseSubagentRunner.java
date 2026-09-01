@@ -412,7 +412,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
               + "/"
               + configProvider.subagentConfig().maxDepth());
     }
-    List<SubagentBinding> allowed = snapshot.model().request().subagentBindings();
+    List<SubagentBinding> allowed = snapshot.model().requestSpec().subagentBindings();
     if (allowed.isEmpty()) {
       throw reject("the frozen parent invocation does not allow subagent delegation");
     }

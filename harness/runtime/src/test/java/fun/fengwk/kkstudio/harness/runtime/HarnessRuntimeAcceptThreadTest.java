@@ -60,8 +60,8 @@ class HarnessRuntimeAcceptThreadTest {
         new AcceptCommandsTarget.Thread(threadId, expectedHead, expectedNext), commands);
   }
 
-  private static NewThreadCommand setAgentCommand(UUID clientCommandId) {
-    return new NewThreadCommand(new SetAgentCommandPayload("assistant"), clientCommandId);
+  private static NewThreadCommand setAgentCommand(UUID idempotencyKey) {
+    return new NewThreadCommand(new SetAgentCommandPayload("assistant"), idempotencyKey);
   }
 
   @Test
@@ -136,7 +136,7 @@ class HarnessRuntimeAcceptThreadTest {
 
   /**
    * preflight 把 raw ATTACHMENT 物化为 durable RESOURCE 后，durable command 的 requestHash 仍是 raw hash： 相同
-   * raw 请求重试能按 clientCommandId + requestHash 命中 ordered replay，且 durable payload hash 与 raw 不同。
+   * raw 请求重试能按 idempotencyKey + requestHash 命中 ordered replay，且 durable payload hash 与 raw 不同。
    */
   @Test
   void materializedPreflightReplayMatchesRawRequestHash() {
@@ -172,7 +172,7 @@ class HarnessRuntimeAcceptThreadTest {
                 .anyMatch(content -> content instanceof ResourceMessageContent));
     assertEquals(raw.requestHash(), first.acceptedCommands().getFirst().requestHash());
 
-    // 相同 raw 请求重试：按 clientCommandId + raw requestHash 命中 ordered replay（不调用 preflight）。
+    // 相同 raw 请求重试：按 idempotencyKey + raw requestHash 命中 ordered replay（不调用 preflight）。
     AcceptedCommands replay =
         runtime.acceptCommands(
             thread(baseline.threadId(), baseline.rootEntryId(), 1, List.of(raw)), materialize);
@@ -208,7 +208,7 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(Reason.COMMAND_REPLAY_ORDER_MISMATCH, error.reason());
   }
 
-  /** 部分 id 已存在 → PARTIAL_COMMAND_REPLAY；同 id 不同 hash → COMMAND_ID_REUSED。 */
+  /** 部分 id 已存在 → PARTIAL_COMMAND_REPLAY；同 id 不同 hash → IDEMPOTENCY_KEY_REUSED。 */
   @Test
   void partialAndHashConflictsUseStableReasons() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
@@ -249,7 +249,7 @@ class HarnessRuntimeAcceptThreadTest {
                             setAgentCommand(TestIds.id(9)),
                             userMessageCommand(TestIds.id(1), "DIFFERENT"))),
                     AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.COMMAND_ID_REUSED, reused.reason());
+    assertEquals(Reason.IDEMPOTENCY_KEY_REUSED, reused.reason());
   }
 
   /**

@@ -232,7 +232,7 @@ class WorkHeartbeatTest {
                         threadIdValue,
                         sessionId,
                         rootEntryId,
-                        ThreadProcessorTestSupport.MATERIALIZATION_HASH,
+                        ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
                         false,
                         1,
                         0,

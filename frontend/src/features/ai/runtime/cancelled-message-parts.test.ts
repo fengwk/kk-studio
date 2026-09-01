@@ -14,13 +14,13 @@ describe('cancelled message composer recovery', () => {
       [
         {
           sequence: '1',
-          clientCommandId: 'c1',
+          idempotencyKey: 'c1',
           messageJson:
             '{"role":"USER","contents":[{"type":"text","text":"first"}]}',
         },
         {
           sequence: '2',
-          clientCommandId: 'c2',
+          idempotencyKey: 'c2',
           messageJson:
             '{"role":"USER","contents":[{"type":"resource","blobId":"00000000-0000-0000-0000-000000000001","name":"a.txt","preview":"p"}]}',
         },

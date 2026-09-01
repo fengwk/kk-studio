@@ -315,15 +315,15 @@ create index idx_canvas_function_run_claim
 
 create table canvas_command_dedup (
     canvas_id uuid not null,
-    command_id uuid not null,
+    idempotency_key uuid not null,
     request_hash char(64) not null,
-    constraint pk_canvas_command_dedup primary key (canvas_id, command_id),
+    constraint pk_canvas_command_dedup primary key (canvas_id, idempotency_key),
     constraint ck_canvas_command_dedup_request_hash check (request_hash ~ '^[0-9a-f]{64}$')
 );
 
-comment on table canvas_command_dedup is '命令批幂等：相同 (canvas_id, command_id) 只能以相同 request_hash 精确回放一次；graph 版本由 canvas_document.version 游标负责，本表不冗余存储';
+comment on table canvas_command_dedup is '命令批幂等：相同 (canvas_id, idempotency_key) 只能以相同 request_hash 精确回放一次；graph 版本由 canvas_document.version 游标负责，本表不冗余存储';
 comment on column canvas_command_dedup.canvas_id is '所属 Canvas';
-comment on column canvas_command_dedup.command_id is '客户端幂等 UUID';
+comment on column canvas_command_dedup.idempotency_key is '客户端整批命令的幂等 UUID';
 comment on column canvas_command_dedup.request_hash is '整批命令的 SHA-256（64 位小写十六进制）';
 
 create table canvas_function_resource_pin (
@@ -627,7 +627,7 @@ create table harness_thread (
     id uuid primary key,
     session_id uuid not null,
     head_entry_id uuid not null,
-    materialization_hash char(64) not null,
+    creation_request_hash char(64) not null,
     yolo_enabled boolean not null,
     next_command_sequence bigint not null check (next_command_sequence >= 1),
     version bigint not null check (version >= 0),
@@ -637,17 +637,17 @@ create table harness_thread (
         references harness_session (id),
     constraint fk_harness_thread_head foreign key (session_id, head_entry_id)
         references harness_entry (session_id, id),
-    constraint ck_harness_thread_materialization_hash check (
-        materialization_hash ~ '^[0-9a-f]{64}$'
+    constraint ck_harness_thread_creation_request_hash check (
+        creation_request_hash ~ '^[0-9a-f]{64}$'
     ),
     constraint ck_harness_thread_time_order check (updated_at >= created_at)
 );
 
-comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 materialization_hash 创建后不可变，head 必须与 session 同 Session';
+comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session';
 comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
 comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
 comment on column harness_thread.head_entry_id is '当前 head Entry（必须存在且属于 thread.session_id 的 Session）';
-comment on column harness_thread.materialization_hash is 'NEW_SESSION/ENTRY 的服务端 64 位小写 SHA-256 materialization 身份键（创建后不可变，不对产品 DTO 暴露）';
+comment on column harness_thread.creation_request_hash is 'NEW_SESSION/ENTRY 初始创建请求指纹：服务端 64 位小写 SHA-256 身份键（创建后不可变，不对产品 DTO 暴露）';
 comment on column harness_thread.yolo_enabled is '当前 yolo 模式开关';
 comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
 comment on column harness_thread.version is '并发控制版本：任何对外字段变化必须 +1';
@@ -664,18 +664,18 @@ create table harness_thread_command (
     sequence bigint not null check (sequence > 0),
     command_type varchar(32) not null,
     payload jsonb not null check (jsonb_typeof(payload) = 'object'),
-    client_command_id uuid not null,
+    idempotency_key uuid not null,
     request_hash char(64) not null,
-    consumed_turn_start_entry_id uuid,
-    cancel_request_id uuid,
+    applied_turn_start_entry_id uuid,
+    stop_request_id uuid,
     cancelled_at timestamptz(3),
     created_at timestamptz(3) not null,
     primary key (thread_id, sequence),
     constraint fk_harness_thread_command_thread foreign key (thread_id)
         references harness_thread (id),
-    constraint fk_harness_thread_command_consumed foreign key (consumed_turn_start_entry_id)
+    constraint fk_harness_thread_command_applied foreign key (applied_turn_start_entry_id)
         references harness_entry (id),
-    constraint uk_harness_thread_command_client unique (thread_id, client_command_id),
+    constraint uk_harness_thread_command_idempotency unique (thread_id, idempotency_key),
     constraint ck_harness_thread_command_type check (
         command_type in (
             'USER_MESSAGE',
@@ -689,47 +689,47 @@ create table harness_thread_command (
         request_hash ~ '^[0-9a-f]{64}$'
     ),
     constraint ck_harness_thread_command_terminal check (
-        consumed_turn_start_entry_id is null or cancelled_at is null
+        applied_turn_start_entry_id is null or cancelled_at is null
     ),
     constraint ck_harness_thread_command_cancel_pair check (
-        (cancel_request_id is null and cancelled_at is null)
-        or (cancel_request_id is not null and cancelled_at is not null)
+        (stop_request_id is null and cancelled_at is null)
+        or (stop_request_id is not null and cancelled_at is not null)
     ),
     constraint ck_harness_thread_command_cancel_time check (
         cancelled_at is null or cancelled_at >= created_at
     )
 );
 
-comment on table harness_thread_command is 'ThreadCommand：无代理主键，身份为 (thread_id, sequence)；QUEUED 只能推进为 APPLIED 或 CANCELLED，CANCELLED 必须 cancel_request_id 与 cancelled_at 成对';
+comment on table harness_thread_command is 'ThreadCommand：无代理主键，身份为 (thread_id, sequence)；QUEUED 只能推进为 APPLIED 或 CANCELLED，CANCELLED 必须 stop_request_id 与 cancelled_at 成对';
 comment on column harness_thread_command.thread_id is '所属 Thread';
 comment on column harness_thread_command.sequence is 'Thread 内单调递增序号（与身份一起构成主键）';
 comment on column harness_thread_command.command_type is 'Command payload 类型';
 comment on column harness_thread_command.payload is '按 command_type 编码的 payload（JSON object）';
-comment on column harness_thread_command.client_command_id is '客户端幂等 ID（UUID），同一 Thread 内唯一';
-comment on column harness_thread_command.request_hash is '客户端 raw 命令（含 ordered contents 与 uploadId）的 canonical SHA-256（64 小写 hex）；同 clientCommandId 重放必须精确匹配';
-comment on column harness_thread_command.consumed_turn_start_entry_id is 'APPLIED 时消费的 TURN_START Entry；与 cancelled_at 互斥';
-comment on column harness_thread_command.cancel_request_id is 'CANCELLED 时取消它的 Stop stopRequestId（queued-only receipt 幂等键）；与 cancelled_at 成对';
+comment on column harness_thread_command.idempotency_key is '客户端幂等键（UUID），同一 Thread 内唯一';
+comment on column harness_thread_command.request_hash is '客户端 raw 命令（含 ordered contents 与 uploadId）的 canonical SHA-256（64 小写 hex）；同 idempotencyKey 重放必须精确匹配';
+comment on column harness_thread_command.applied_turn_start_entry_id is 'APPLIED 时应用的 TURN_START Entry；与 cancelled_at 互斥';
+comment on column harness_thread_command.stop_request_id is 'CANCELLED 时取消它的 Stop stopRequestId（queued-only receipt 幂等键）；与 cancelled_at 成对';
 comment on column harness_thread_command.cancelled_at is 'CANCELLED 时间；不得早于 created_at';
 comment on column harness_thread_command.created_at is 'Command 创建时间（毫秒精度）';
 
 create index idx_harness_thread_command_queued
     on harness_thread_command (thread_id, sequence)
-    where consumed_turn_start_entry_id is null and cancelled_at is null;
+    where applied_turn_start_entry_id is null and cancelled_at is null;
 
 comment on index idx_harness_thread_command_queued is '按 sequence 升序读取 QUEUED Command（for update 锁序）';
 
-create index idx_harness_thread_command_cancel_request
-    on harness_thread_command (thread_id, cancel_request_id, sequence)
-    where cancel_request_id is not null;
+create index idx_harness_thread_command_stop_request
+    on harness_thread_command (thread_id, stop_request_id, sequence)
+    where stop_request_id is not null;
 
-comment on index idx_harness_thread_command_cancel_request is 'Stop 幂等键：(thread_id, cancel_request_id) 按 sequence 升序汇总被该 stopRequestId 取消的 Command';
+comment on index idx_harness_thread_command_stop_request is 'Stop 幂等键：(thread_id, stop_request_id) 按 sequence 升序汇总被该 stopRequestId 取消的 Command';
 
 create table harness_model_invocation (
     id uuid primary key,
     thread_id uuid not null,
     turn_start_entry_id uuid not null,
-    basis_head_entry_id uuid not null,
-    request jsonb not null check (jsonb_typeof(request) = 'object'),
+    request_head_entry_id uuid not null,
+    request_spec jsonb not null check (jsonb_typeof(request_spec) = 'object'),
     status varchar(16) not null,
     attempt integer not null check (attempt >= 0),
     stream_checkpoint jsonb check (
@@ -745,7 +745,7 @@ create table harness_model_invocation (
         references harness_thread (id),
     constraint fk_harness_model_invocation_turn_start foreign key (turn_start_entry_id)
         references harness_entry (id),
-    constraint fk_harness_model_invocation_basis foreign key (basis_head_entry_id)
+    constraint fk_harness_model_invocation_request_head foreign key (request_head_entry_id)
         references harness_entry (id),
     constraint fk_harness_model_invocation_result foreign key (result_entry_id)
         references harness_entry (id),
@@ -771,8 +771,8 @@ comment on table harness_model_invocation is 'ModelInvocation：一次 model tur
 comment on column harness_model_invocation.id is 'ModelInvocation 的全局唯一 UUID';
 comment on column harness_model_invocation.thread_id is '所属 Thread';
 comment on column harness_model_invocation.turn_start_entry_id is '本次 turn 的 TURN_START Entry';
-comment on column harness_model_invocation.basis_head_entry_id is '创建时的 Thread head（basis CAS 快照）';
-comment on column harness_model_invocation.request is '冻结的 model 请求（JSON object）';
+comment on column harness_model_invocation.request_head_entry_id is '创建时的 Thread head（request 头 Entry CAS 快照）';
+comment on column harness_model_invocation.request_spec is '冻结的 model 请求规格（JSON object）';
 comment on column harness_model_invocation.status is '生命周期状态';
 comment on column harness_model_invocation.attempt is '已确认的 start 尝试次数（从 0 递增）';
 comment on column harness_model_invocation.stream_checkpoint is 'RUNNING 流式断点（JSON object，可空）';
@@ -793,7 +793,7 @@ create table harness_tool_invocation (
     id uuid primary key,
     model_invocation_id uuid not null,
     assistant_entry_id uuid not null,
-    ordinal integer not null check (ordinal >= 0),
+    call_index integer not null check (call_index >= 0),
     call jsonb not null check (jsonb_typeof(call) = 'object'),
     binding jsonb check (binding is null or jsonb_typeof(binding) = 'object'),
     status varchar(32) not null,
@@ -808,7 +808,7 @@ create table harness_tool_invocation (
         references harness_model_invocation (id),
     constraint fk_harness_tool_invocation_assistant foreign key (assistant_entry_id)
         references harness_entry (id),
-    constraint uk_harness_tool_invocation_ordinal unique (assistant_entry_id, ordinal),
+    constraint uk_harness_tool_invocation_call_index unique (assistant_entry_id, call_index),
     constraint ck_harness_tool_invocation_status check (
         status in (
             'WAITING_APPROVAL',
@@ -831,11 +831,11 @@ create table harness_tool_invocation (
     constraint ck_harness_tool_invocation_time_order check (updated_at >= created_at)
 );
 
-comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (assistant_entry_id, ordinal) 与 assistant 消息对齐；batch apply 后行被物理删除';
+comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (assistant_entry_id, call_index) 与 assistant 消息对齐；batch apply 后行被物理删除';
 comment on column harness_tool_invocation.id is 'ToolInvocation 的全局唯一 UUID';
 comment on column harness_tool_invocation.model_invocation_id is '所属 ModelInvocation';
 comment on column harness_tool_invocation.assistant_entry_id is '携带对应 ToolCall 的 Assistant MESSAGE Entry';
-comment on column harness_tool_invocation.ordinal is 'assistant 消息内 tool call 的序号（从 0 递增）';
+comment on column harness_tool_invocation.call_index is 'assistant 消息内 tool call 的下标（从 0 递增）';
 comment on column harness_tool_invocation.call is '冻结的 ToolCall（JSON object）';
 comment on column harness_tool_invocation.binding is '冻结的 tool binding（JSON object，仅在 immediate FAILED attempt=0 槽位可空）';
 comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_APPROVAL）';

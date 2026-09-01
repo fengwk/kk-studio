@@ -8,6 +8,6 @@ import java.util.UUID;
 @Data
 public class CanvasCommandDedupDO {
   private UUID canvasId;
-  private UUID commandId;
+  private UUID idempotencyKey;
   private String requestHash;
 }

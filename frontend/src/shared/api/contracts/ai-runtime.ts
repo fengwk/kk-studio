@@ -83,18 +83,15 @@ export interface HarnessThreadDTO {
 
 /**
  * 持久的 Thread mailbox command 投影；身份为 (threadId, sequence)，无代理主键。
- * clientCommandId 是稳定的客户端幂等键；requestHash 是其 raw 命令的 canonical SHA-256。
+ * idempotencyKey 是稳定的客户端幂等键；state 由 durable 终态标记派生。
  */
 export interface HarnessThreadCommandDTO {
   threadId: string
   sequence: string
   type: string
   state: 'QUEUED' | 'APPLIED' | 'CANCELLED' | string
-  clientCommandId: string
-  /** 客户端 raw 命令（含 ordered contents 与 uploadId）的 canonical SHA-256：64 位小写 hex；与 clientCommandId 构成幂等键。 */
-  requestHash: string
+  idempotencyKey: string
   payloadJson: string
-  consumedTurnStartEntryId: string | null
   cancelledAt: InstantTimestamp
   createTime: BackendDateTime
 }
@@ -104,7 +101,7 @@ export interface HarnessThreadCommandDTO {
  *
  * USER_MESSAGE 只接受一个非空、有序的 contents 列表（TEXT/ATTACHMENT/RESOURCE），不提供
  * 任何文本 shorthand。持久 Entry/投影仍可包含 CUSTOM_MESSAGE，但它不是创建命令。
- * clientCommandId 是稳定的幂等键。
+ * idempotencyKey 是稳定的幂等键。
  */
 export type HarnessUserMessageContentDTO =
   | { type: 'TEXT'; text: string }
@@ -118,15 +115,15 @@ export type HarnessUserMessageContentDTO =
 
 type HarnessUserMessageCommandDTO = {
   type: 'USER_MESSAGE'
-  clientCommandId: string
+  idempotencyKey: string
   contents: [HarnessUserMessageContentDTO, ...HarnessUserMessageContentDTO[]]
 }
 
 export type HarnessCommandCreateDTO =
   | HarnessUserMessageCommandDTO
-  | { type: 'SET_AGENT'; clientCommandId: string; agentName: string }
-  | { type: 'SET_MODEL'; clientCommandId: string; model: HarnessModelSelectionDTO }
-  | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environment: EnvironmentBindingDTO | null }
+  | { type: 'SET_AGENT'; idempotencyKey: string; agentName: string }
+  | { type: 'SET_MODEL'; idempotencyKey: string; model: HarnessModelSelectionDTO }
+  | { type: 'SET_ENVIRONMENT'; idempotencyKey: string; environment: EnvironmentBindingDTO | null }
 
 /**
  * Thread YOLO policy 直接更新请求；expectedVersion 是精确的 version CAS 游标
@@ -158,7 +155,7 @@ export interface HarnessThreadStopResultDTO {
 /** Stop 取消的一条 user-like 消息；messageJson 为 canonical AgentMessage JSON。 */
 export interface HarnessCancelledUserMessageDTO {
   sequence: string
-  clientCommandId: string
+  idempotencyKey: string
   messageJson: string
 }
 
@@ -179,7 +176,7 @@ export interface ModelInvocationDTO {
   id: string
   threadId: string
   turnStartEntryId: string
-  basisHeadEntryId: string
+  requestHeadEntryId: string
   status: string
   attempt: number
   streamCheckpointJson: string | null
@@ -201,7 +198,7 @@ export interface ToolInvocationDTO {
   id: string
   modelInvocationId: string
   assistantEntryId: string
-  ordinal: number
+  callIndex: number
   status: string
   attempt: number
   toolCallId: string
@@ -223,7 +220,7 @@ export interface ToolInvocationDTO {
 export interface ModelAttemptFailureDTO {
   modelInvocationId: string
   turnStartEntryId: string
-  basisHeadEntryId: string
+  requestHeadEntryId: string
   attempt: number
   /** 当前 attempt 的非负十进制 sequence；Java Long 在 HTTP wire 上保持字符串。 */
   sequence: DecimalLong

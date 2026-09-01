@@ -264,10 +264,10 @@ function timestampValue(value: unknown): string | number | readonly number[] | n
 function projectToolCall(
   entry: HarnessSessionEntryDTO,
   content: Record<string, unknown>,
-  ordinal: number,
+  callIndex: number,
 ): ToolDialogueMessage {
   return {
-    id: `${entry.entryId}:tool-call:${toolCallIdentity(content, ordinal)}`,
+    id: `${entry.entryId}:tool-call:${toolCallIdentity(content, callIndex)}`,
     role: 'tool',
     phase: 'call',
     subjectEntryId: entry.entryId,
@@ -286,12 +286,12 @@ function projectToolResult(
   entry: HarnessSessionEntryDTO,
   content: Record<string, unknown>,
   argumentsJson: string,
-  ordinal: number,
+  callIndex: number,
 ): ToolDialogueMessage {
   const contents = getRecordList(content.contents)
   const error = content.error === true
   return {
-    id: `${entry.entryId}:tool-result:${toolCallIdentity(content, ordinal)}`,
+    id: `${entry.entryId}:tool-result:${toolCallIdentity(content, callIndex)}`,
     role: 'tool',
     phase: 'result',
     subjectEntryId: entry.entryId,
@@ -307,8 +307,8 @@ function projectToolResult(
   }
 }
 
-function toolCallIdentity(content: Record<string, unknown>, ordinal: number): string {
-  return `${getString(content.toolCallId) || 'unknown'}:${ordinal}`
+function toolCallIdentity(content: Record<string, unknown>, callIndex: number): string {
+  return `${getString(content.toolCallId) || 'unknown'}:${callIndex}`
 }
 
 function toolCallKey(toolCallId: string): string {

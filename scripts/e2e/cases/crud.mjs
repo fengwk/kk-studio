@@ -7,7 +7,7 @@ import {
   getThreadSnapshot,
   listChatSessions,
   listSessionThreads,
-  materializeNewSession,
+  createNewSession,
   userMessageCommand,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
@@ -510,7 +510,7 @@ registerCase({
         model: modelSelectionFor(agent),
       }
       const threadId = cid()
-      const accepted = await materializeNewSession(ctx, {
+      const accepted = await createNewSession(ctx, {
         owner: chatOwner(chat.id),
         sessionId: cid(),
         threadId,
@@ -635,7 +635,7 @@ registerCase({
     const makeSession = async (title) => {
       const threadId = cid()
       const commands = [userMessageCommand(`${title} ${suffix}`, cid())]
-      const accepted = await materializeNewSession(ctx, {
+      const accepted = await createNewSession(ctx, {
         owner: chatOwner(chat.id),
         sessionId: cid(),
         threadId,
@@ -689,7 +689,7 @@ registerCase({
 
       // 同批 NEW_SESSION 幂等重放：replayed=true 且不新增 Session/Thread relation。
       const { accepted: thirdAccepted, commands: thirdCommands } = third
-      const replayed = await materializeNewSession(ctx, {
+      const replayed = await createNewSession(ctx, {
         owner: chatOwner(chat.id),
         sessionId: String(thirdAccepted.session.sessionId),
         threadId: String(thirdAccepted.thread.threadId),

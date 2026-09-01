@@ -10,7 +10,7 @@ import java.util.UUID;
  * 不可变 Stop 结果。
  *
  * <p>{@code replayed=true} 表示重放了一次先前 Stop 的 durable receipt（live receipt：本 Thread 拥有并关闭的 TURN_END 的
- * {@code closeRequestId}；queued-only receipt：本 Thread 上带该 {@code cancelRequestId} 的已取消
+ * {@code closeRequestId}；queued-only receipt：本 Thread 上带该 {@code stopRequestId} 的已取消
  * Command），本次调用不写任何 marker、不触碰 version。{@code stoppedTurnEndEntryId} 在停止了一个 live Turn 时非 null；纯
  * queued-only / 未创建 Turn 时（包括 queued-only replay）为 null。{@code thread} 始终是当前 Thread
  * projection，{@code cancelledUserMessages} 按 sequence 升序返回被取消的 user-like 消息内容（SET_* 与 SYSTEM

@@ -448,7 +448,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
                     + " values (?, ?, 'ROOT', '{}'::jsonb, current_timestamp)");
         PreparedStatement thread =
             conn.prepareStatement(
-                "insert into harness_thread (id, session_id, head_entry_id, materialization_hash,"
+                "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
                     + " yolo_enabled, next_command_sequence, version, created_at, updated_at)"
                     + " values (?, ?, ?, '"
                     + "0".repeat(64)
@@ -568,7 +568,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   private void insertDedup(Connection conn, UUID canvasId, String requestHash) throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into canvas_command_dedup (canvas_id, command_id, request_hash)"
+            "insert into canvas_command_dedup (canvas_id, idempotency_key, request_hash)"
                 + " values (?, ?, ?)")) {
       ps.setObject(1, canvasId);
       ps.setObject(2, uuid());

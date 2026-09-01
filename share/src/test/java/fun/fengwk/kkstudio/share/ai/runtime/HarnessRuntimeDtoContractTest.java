@@ -49,11 +49,11 @@ class HarnessRuntimeDtoContractTest {
   void commandDtoDoesNotExposeCustomMessagePayloadFields() {
     HarnessCommandCreateDTO command = new HarnessCommandCreateDTO();
     command.setType("USER_MESSAGE");
-    command.setClientCommandId("00000000-0000-0000-0000-000000000001");
+    command.setIdempotencyKey("00000000-0000-0000-0000-000000000001");
     command.setContents(List.of());
 
     assertEquals("USER_MESSAGE", command.getType());
-    assertEquals("00000000-0000-0000-0000-000000000001", command.getClientCommandId());
+    assertEquals("00000000-0000-0000-0000-000000000001", command.getIdempotencyKey());
     assertTrue(command.hasContentsField());
     assertFalse(command.hasEnvironmentField());
   }
@@ -83,7 +83,7 @@ class HarnessRuntimeDtoContractTest {
         () ->
             MAPPER.readValue(
                 """
-                {"type":"SET_MODEL","clientCommandId":"00000000-0000-0000-0000-000000000001",
+                {"type":"SET_MODEL","idempotencyKey":"00000000-0000-0000-0000-000000000001",
                  "model":{"providerName":"p","modelName":"m","variant":"v","unknown":true}}
                 """,
                 HarnessCommandCreateDTO.class));

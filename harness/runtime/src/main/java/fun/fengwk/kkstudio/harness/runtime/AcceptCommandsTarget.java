@@ -9,9 +9,9 @@ import java.util.UUID;
 /**
  * 单次 {@code acceptCommands} 的 sealed target：NEW_SESSION（新建 Session + ROOT + Thread）、ENTRY（在既有
  * Session 的既有 Entry 下开新 Thread，不复制 Entry）与 THREAD（在既有 Thread 上继续接受 Commands）。本批 Commands 由 {@link
- * AcceptCommandsCommand#commands()} 携带，target 只负责定位 / materialization 语义。
+ * AcceptCommandsCommand#commands()} 携带，target 只负责定位 / 初始创建语义。
  *
- * <p>NEW_SESSION / ENTRY 的 {@code sessionId} / {@code threadId} 由调用方预分配（materialization replay 以
+ * <p>NEW_SESSION / ENTRY 的 {@code sessionId} / {@code threadId} 由调用方预分配（initial creation replay 以
  * client threadId 为查找键）；THREAD 使用 exact 的 head / next-sequence cursor 期望。
  */
 public sealed interface AcceptCommandsTarget {

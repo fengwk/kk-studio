@@ -42,7 +42,7 @@ class StudioHarnessCommandBatchControllerTest {
   private static final String SESSION_ID = "00000000-0000-0000-0000-000000000011";
   private static final String THREAD_ID = "00000000-0000-0000-0000-000000000012";
   private static final String ENTRY_ID = "00000000-0000-0000-0000-000000000013";
-  private static final String CLIENT_COMMAND_ID = "00000000-0000-0000-0000-000000000014";
+  private static final String IDEMPOTENCY_KEY = "00000000-0000-0000-0000-000000000014";
 
   private HarnessCommandAcceptanceOrchestrator acceptanceService;
   private HarnessRuntime runtime;
@@ -154,12 +154,12 @@ class StudioHarnessCommandBatchControllerTest {
             """
             {
               "type":"CUSTOM_MESSAGE",
-              "clientCommandId":"%s",
+              "idempotencyKey":"%s",
               "content":"system rules",
               "role":"SYSTEM"
             }
             """
-                .formatted(CLIENT_COMMAND_ID));
+                .formatted(IDEMPOTENCY_KEY));
 
     mockMvc
         .perform(
@@ -179,17 +179,17 @@ class StudioHarnessCommandBatchControllerTest {
             """
             [{
               "type":"SET_MODEL",
-              "clientCommandId":"00000000-0000-0000-0000-000000000021",
+              "idempotencyKey":"00000000-0000-0000-0000-000000000021",
               "model":{"providerName":"openai","modelName":"gpt-5","variant":"default"}
             },
             {
               "type":"SET_AGENT",
-              "clientCommandId":"00000000-0000-0000-0000-000000000022",
+              "idempotencyKey":"00000000-0000-0000-0000-000000000022",
               "agentName":"default-assistant"
             },
             {
               "type":"USER_MESSAGE",
-              "clientCommandId":"00000000-0000-0000-0000-000000000023",
+              "idempotencyKey":"00000000-0000-0000-0000-000000000023",
               "contents":[{"type":"TEXT","text":"hello"}]
             }]
             """);
@@ -208,7 +208,7 @@ class StudioHarnessCommandBatchControllerTest {
     when(acceptanceService.accept(any(OwnerRef.class), any(AcceptCommandsCommand.class)))
         .thenThrow(
             new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.COMMAND_ID_REUSED,
+                HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
                 "client command id was reused"));
 
     mockMvc
@@ -217,7 +217,7 @@ class StudioHarnessCommandBatchControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(batch(threadTarget())))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.errors.reason").value("COMMAND_ID_REUSED"))
+        .andExpect(jsonPath("$.errors.reason").value("IDEMPOTENCY_KEY_REUSED"))
         .andExpect(jsonPath("$.errors.detail").value("client command id was reused"));
   }
 
@@ -227,11 +227,11 @@ class StudioHarnessCommandBatchControllerTest {
         """
         [{
           "type":"USER_MESSAGE",
-          "clientCommandId":"%s",
+          "idempotencyKey":"%s",
           "contents":[{"type":"TEXT","text":"hello"}]
         }]
         """
-            .formatted(CLIENT_COMMAND_ID));
+            .formatted(IDEMPOTENCY_KEY));
   }
 
   private static String batchWithCommands(String target, String commands) {

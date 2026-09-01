@@ -22,20 +22,20 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 服务端 deterministic materialization hash：NEW_SESSION / ENTRY 在持久化 Thread 上的 64 位小写 SHA-256 身份键。
+ * 服务端 creation request hash：NEW_SESSION / ENTRY 初始创建请求在持久化 Thread 上的 64 位小写 SHA-256 身份键。
  *
  * <p>哈希覆盖 target 语义、预分配 ID（session/thread/start entry）、NEW_SESSION 的 root settings + subagent +
- * yolo，以及 ordered {@code (clientCommandId, requestHash)} 对；同一 raw 请求永远得到同一 hash，不同内容（含 id
+ * yolo，以及 ordered {@code (idempotencyKey, requestHash)} 对；同一 raw 请求永远得到同一 hash，不同内容（含 id
  * 或命令顺序变化）得到不同 hash。该 hash 只作持久化身份键，不对产品 DTO 暴露。
  */
-public final class MaterializationHash {
+public final class ThreadCreationRequestHash {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private MaterializationHash() {}
+  private ThreadCreationRequestHash() {}
 
-  /** 计算 NEW_SESSION target 的 materialization hash。 */
+  /** 计算 NEW_SESSION target 的 creation request hash。 */
   public static String forNewSession(
       UUID sessionId,
       UUID threadId,
@@ -52,7 +52,7 @@ public final class MaterializationHash {
     return digest(envelope);
   }
 
-  /** 计算 ENTRY target 的 materialization hash。 */
+  /** 计算 ENTRY target 的 creation request hash。 */
   public static String forEntry(
       UUID sessionId,
       UUID startEntryId,
@@ -92,7 +92,7 @@ public final class MaterializationHash {
     for (NewThreadCommand command : commands) {
       Objects.requireNonNull(command, "commands[]");
       ObjectNode entry = NODES.objectNode();
-      entry.put("clientCommandId", command.clientCommandId().toString());
+      entry.put("idempotencyKey", command.idempotencyKey().toString());
       entry.put("requestHash", command.requestHash());
       node.add(entry);
     }

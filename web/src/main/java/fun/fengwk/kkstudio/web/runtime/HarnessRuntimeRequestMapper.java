@@ -239,7 +239,7 @@ public final class HarnessRuntimeRequestMapper {
     ThreadCommandPayload payload = toPayload(dto);
     return new NewThreadCommand(
         payload,
-        parseUuid(dto.getClientCommandId(), "command.clientCommandId"),
+        parseUuid(dto.getIdempotencyKey(), "command.idempotencyKey"),
         ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 

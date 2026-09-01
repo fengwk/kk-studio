@@ -733,10 +733,10 @@ class CompactionPlannerTest {
       return this;
     }
 
-    /** 为最后一个（assistant）Entry 的每个 call 追加严格 ordinal 前缀的 TOOL result。 */
+    /** 为最后一个（assistant）Entry 的每个 call 追加严格 callIndex 前缀的 TOOL result。 */
     PathBuilder toolResults() {
       UUID assistantEntryId = entries.get(entries.size() - 1).id();
-      int ordinal = 0;
+      int callIndex = 0;
       for (AgentMessageContent content :
           ((MessagePayload) entries.get(entries.size() - 1).payload()).message().contents()) {
         if (!(content instanceof ToolCallMessageContent call)) {
@@ -762,7 +762,7 @@ class CompactionPlannerTest {
                     new ToolResultMetadata(
                         assistantEntryId,
                         call.toolCallId(),
-                        ordinal++,
+                        callIndex++,
                         ToolResultStatus.SUCCEEDED,
                         false,
                         null)),

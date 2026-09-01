@@ -148,7 +148,7 @@ export function copyBinding(
 
 /**
  * 构建 effective base 与 draft 之间的最小 settings command diff，固定顺序为 SET_ENVIRONMENT/SET_AGENT/SET_MODEL。
- * 每个 command 都通过注入的 id factory 携带自己的稳定 clientCommandId。
+ * 每个 command 都通过注入的 id factory 携带自己的稳定 idempotencyKey。
  * YOLO 是 Thread 级直接控制面（PUT /yolo），绝不生成 SET_YOLO command。
  */
 export function buildBranchDiffCommands(
@@ -160,21 +160,21 @@ export function buildBranchDiffCommands(
   if (!sameBinding(base.environment, draft.environment)) {
     commands.push({
       type: 'SET_ENVIRONMENT',
-      clientCommandId: createCommandId(),
+      idempotencyKey: createCommandId(),
       environment: copyBinding(draft.environment),
     })
   }
   if (base.agentName !== draft.agentName) {
     commands.push({
       type: 'SET_AGENT',
-      clientCommandId: createCommandId(),
+      idempotencyKey: createCommandId(),
       agentName: draft.agentName,
     })
   }
   if (!sameModelSelection(base.model, draft.model)) {
     commands.push({
       type: 'SET_MODEL',
-      clientCommandId: createCommandId(),
+      idempotencyKey: createCommandId(),
       model: { ...draft.model },
     })
   }

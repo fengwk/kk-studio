@@ -221,7 +221,7 @@ class HarnessRuntimeSnapshotTest {
     // 终态快照必然看到已入队命令（InMemory monitor 串行化保证线性一致）。
     ThreadSnapshot finalSnapshot = runtime.getThreadSnapshot(baseline.threadId());
     assertEquals(1, finalSnapshot.queuedCommands().size());
-    assertEquals(TestIds.id(1), finalSnapshot.queuedCommands().get(0).clientCommandId());
+    assertEquals(TestIds.id(1), finalSnapshot.queuedCommands().get(0).idempotencyKey());
   }
 
   /**

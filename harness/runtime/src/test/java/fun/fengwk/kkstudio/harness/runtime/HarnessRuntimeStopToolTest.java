@@ -49,8 +49,8 @@ import java.util.UUID;
 
 /**
  * Stop 在 TOOL_ACTIVE 上：每个 sibling 按自身状态收敛（WAITING_APPROVAL/READY 转 CANCELLED， DISPATCHING/RUNNING 转
- * UNKNOWN，terminal 保持原样），按 ordinal 的 ToolResult Entry 以 invocation-backed 方式挂载且 synthetic=false，删除
- * THREAD/MODEL 与全部 TOOL Work 行； TOOL_TERMINAL_PENDING 保持零变更。
+ * UNKNOWN，terminal 保持原样），按 callIndex 的 ToolResult Entry 以 invocation-backed 方式挂载且
+ * synthetic=false，删除 THREAD/MODEL 与全部 TOOL Work 行； TOOL_TERMINAL_PENDING 保持零变更。
  */
 class HarnessRuntimeStopToolTest {
 
@@ -108,16 +108,17 @@ class HarnessRuntimeStopToolTest {
     assertEquals(
         new CustomEntryPayload("goal", "state", 1, "{\"status\":\"active\"}"),
         path.entries().get(8).payload());
-    for (int ordinal = 0; ordinal < ids.size(); ordinal++) {
-      Entry entry = path.entries().get(resultEntryIndex(ordinal));
+    for (int callIndex = 0; callIndex < ids.size(); callIndex++) {
+      Entry entry = path.entries().get(resultEntryIndex(callIndex));
       assertTrue(entry.payload() instanceof MessagePayload);
       ToolResultMetadata metadata = ((MessagePayload) entry.payload()).toolResultMetadata();
       assertEquals(baseline.assistantEntryId(), metadata.assistantEntryId());
-      assertEquals("call-" + ordinal, metadata.toolCallId());
-      assertEquals(ordinal, metadata.ordinal());
+      assertEquals("call-" + callIndex, metadata.toolCallId());
+      assertEquals(callIndex, metadata.callIndex());
       assertFalse(metadata.synthetic());
       assertEquals(
-          ordinal == 4 ? ToolResultStatus.SUCCEEDED : metadataStatus(ordinal), metadata.status());
+          callIndex == 4 ? ToolResultStatus.SUCCEEDED : metadataStatus(callIndex),
+          metadata.status());
     }
     Entry turnEnd = path.head();
     assertTrue(turnEnd.payload() instanceof TurnEndPayload);
@@ -141,9 +142,9 @@ class HarnessRuntimeStopToolTest {
       "cancelled", // 5 CANCELLED -> CANCELLED
       CANCELLED_WORDING, // 6 RUNNING+retry -> CANCELLED
     };
-    for (int ordinal = 0; ordinal < ids.size(); ordinal++) {
-      Entry toolResult = path.entries().get(resultEntryIndex(ordinal));
-      assertEquals(expectedTexts[ordinal], resultTextOf(toolResult));
+    for (int callIndex = 0; callIndex < ids.size(); callIndex++) {
+      Entry toolResult = path.entries().get(resultEntryIndex(callIndex));
+      assertEquals(expectedTexts[callIndex], resultTextOf(toolResult));
     }
 
     // 每个 sibling Tool 行已被 Stop 物理删除。
@@ -218,15 +219,15 @@ class HarnessRuntimeStopToolTest {
     return ((TextMessageContent) text).text();
   }
 
-  private static ToolResultStatus metadataStatus(int ordinal) {
-    return switch (ordinal) {
+  private static ToolResultStatus metadataStatus(int callIndex) {
+    return switch (callIndex) {
       case 0, 1, 5, 6 -> ToolResultStatus.CANCELLED;
       case 2, 3 -> ToolResultStatus.UNKNOWN;
-      default -> throw new IllegalArgumentException("unexpected ordinal " + ordinal);
+      default -> throw new IllegalArgumentException("unexpected callIndex " + callIndex);
     };
   }
 
-  private static int resultEntryIndex(int ordinal) {
-    return ordinal < 4 ? 4 + ordinal : 5 + ordinal;
+  private static int resultEntryIndex(int callIndex) {
+    return callIndex < 4 ? 4 + callIndex : 5 + callIndex;
   }
 }

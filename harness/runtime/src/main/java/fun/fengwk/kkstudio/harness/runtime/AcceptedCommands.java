@@ -13,9 +13,9 @@ import java.util.Objects;
  * 不可变的命令接受结果：接受后的当前 Thread projection、其所属 Session 与 Session ROOT，以及该 Thread 上与本次接受一致的 durable
  * Commands。
  *
- * <p>{@code replayed=true} 表示这是一次 exact materialization / ordered replay，未写任何新行且未触碰 version；
- * 否则为新接受（THREAD Work 已请求、version/next sequence 已推进）。acceptedCommands 非空且全部属于返回 Thread； rootEntry 必为
- * Session ROOT。
+ * <p>{@code replayed=true} 表示这是一次 exact initial creation replay / ordered replay，未写任何新行且未触碰
+ * version； 否则为新接受（THREAD Work 已请求、version/next sequence 已推进）。acceptedCommands 非空且全部属于返回 Thread；
+ * rootEntry 必为 Session ROOT。
  */
 public record AcceptedCommands(
     Session session,

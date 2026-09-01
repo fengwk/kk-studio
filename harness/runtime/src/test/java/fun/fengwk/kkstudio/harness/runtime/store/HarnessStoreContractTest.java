@@ -40,7 +40,7 @@ class HarnessStoreContractTest {
               "listThreadsBySession",
               "lockSessionForKeyShare",
               "lockSessionForUpdate",
-              "findCommandByClientId",
+              "findCommandByIdempotencyKey",
               "loadCommandsByThread",
               "loadCancelledCommandsByRequest",
               "loadQueuedCommands",

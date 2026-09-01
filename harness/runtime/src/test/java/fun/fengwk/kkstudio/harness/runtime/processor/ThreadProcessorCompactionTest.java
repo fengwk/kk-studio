@@ -119,7 +119,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             tx -> {
               tx.lockThread(baseline.threadId());
               return tx.loadQueuedCommands(baseline.threadId()).stream()
-                  .anyMatch(c -> c.clientCommandId().equals(userCommand));
+                  .anyMatch(c -> c.idempotencyKey().equals(userCommand));
             });
     assertTrue(inputStillQueued);
     // resolved 压缩不制造 active 期无意义 THREAD Work：本 claim 的 THREAD 行已 complete 删除（deferred input
@@ -455,7 +455,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   tx.findThread(baseline.threadId()).orElseThrow().advanceHead(id, NOW));
               return id;
             });
-    ModelRequestSpec request = compactionRequest(preparation);
+    ModelRequestSpec requestSpec = compactionRequest(preparation);
     ProviderResponse response =
         successResponse("history summary", List.of(), GenerationStopReason.COMPLETE);
     UUID modelId =
@@ -465,7 +465,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             turnStartId,
             turnStartId,
             ModelInvocationStatus.SUCCEEDED,
-            request,
+            requestSpec,
             response,
             null);
     requestThreadWork(fixture.store, baseline.threadId());

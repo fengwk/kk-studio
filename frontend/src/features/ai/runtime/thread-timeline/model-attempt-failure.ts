@@ -15,7 +15,7 @@ export interface ModelAttemptFailureMessageInput {
   nextAttempt: number | null
   modelInvocationId?: string
   turnStartEntryId?: string
-  basisHeadEntryId?: string
+  requestHeadEntryId?: string
 }
 
 export function createModelAttemptFailureMessage(
@@ -42,8 +42,8 @@ export function createModelAttemptFailureMessage(
     ...(input.turnStartEntryId == null
       ? {}
       : { turnStartEntryId: input.turnStartEntryId }),
-    ...(input.basisHeadEntryId == null
+    ...(input.requestHeadEntryId == null
       ? {}
-      : { basisHeadEntryId: input.basisHeadEntryId }),
+      : { requestHeadEntryId: input.requestHeadEntryId }),
   }
 }

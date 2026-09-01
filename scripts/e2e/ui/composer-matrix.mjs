@@ -17,8 +17,8 @@ import {
   chatOwner,
   createChat,
   getThreadSnapshot,
-  materializeEntryThread,
-  materializeNewSession,
+  createEntryThread,
+  createNewSession,
   setAgentCommand,
   setModelCommand,
   stopThreadForCleanup,
@@ -1119,7 +1119,7 @@ async function createDurableHistoryFixture(
     const sessionId = cid()
     const threadId = cid()
     const missingAgentName = `e2e-ui-missing-${cid().slice(0, 8)}`
-    await materializeNewSession(apiCtx, {
+    await createNewSession(apiCtx, {
       owner,
       sessionId,
       threadId,
@@ -1203,7 +1203,7 @@ async function createBranchedHistoryFixture(
     const sessionId = cid()
     const threadId = cid()
     const missingAgentName = `e2e-ui-missing-${cid().slice(0, 8)}`
-    await materializeNewSession(apiCtx, {
+    await createNewSession(apiCtx, {
       owner,
       sessionId,
       threadId,
@@ -1263,7 +1263,7 @@ async function createBranchedHistoryFixture(
 
     // 分支：ENTRY 在同 Session branchPoint 下开新 Thread，写 alternateMessage。
     const alternateThreadId = cid()
-    const branched = await materializeEntryThread(apiCtx, {
+    const branched = await createEntryThread(apiCtx, {
       owner,
       sessionId,
       startEntryId: branchPointEntryId,
@@ -1381,7 +1381,7 @@ async function createHoldingQueueFixture(
     const sessionId = cid()
     const threadId = cid()
     // 先以不存在的 Agent 确定性物化空闲 Thread，再在 mock 上通过 THREAD batch 启动真实 hold turn。
-    await materializeNewSession(apiCtx, {
+    await createNewSession(apiCtx, {
       owner,
       sessionId,
       threadId,

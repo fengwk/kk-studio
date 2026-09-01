@@ -130,11 +130,11 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     // ROOT, TS, USER, ASSISTANT, SYNTH0, SYNTH1, SYNTH2, TURN_END(CANCELLED), TS2, USER2
     EntryPath path = fixture.resolver.lastPath;
     assertEquals(10, path.entries().size());
-    for (int ordinal = 0; ordinal < 3; ordinal++) {
-      MessagePayload synthetic = (MessagePayload) path.entries().get(4 + ordinal).payload();
+    for (int callIndex = 0; callIndex < 3; callIndex++) {
+      MessagePayload synthetic = (MessagePayload) path.entries().get(4 + callIndex).payload();
       ToolResultMetadata metadata = synthetic.toolResultMetadata();
-      assertEquals(ordinal, metadata.ordinal());
-      assertEquals("call-" + ordinal, metadata.toolCallId());
+      assertEquals(callIndex, metadata.callIndex());
+      assertEquals("call-" + callIndex, metadata.toolCallId());
       assertEquals(ToolResultStatus.UNKNOWN, metadata.status());
       assertTrue(metadata.synthetic());
       assertEquals(ToolResultReason.HISTORY_CUT, metadata.reason());
@@ -169,10 +169,10 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     MessagePayload real0 = (MessagePayload) path.entries().get(4).payload();
     assertFalse(real0.toolResultMetadata().synthetic());
     MessagePayload synth1 = (MessagePayload) path.entries().get(5).payload();
-    assertEquals(1, synth1.toolResultMetadata().ordinal());
+    assertEquals(1, synth1.toolResultMetadata().callIndex());
     assertTrue(synth1.toolResultMetadata().synthetic());
     MessagePayload synth2 = (MessagePayload) path.entries().get(6).payload();
-    assertEquals(2, synth2.toolResultMetadata().ordinal());
+    assertEquals(2, synth2.toolResultMetadata().callIndex());
     assertTrue(synth2.toolResultMetadata().synthetic());
   }
 
@@ -258,7 +258,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
   void relocationToAttachedAssistantWithoutToolsNormalizesFreshTurn() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    ModelRequestSpec request = plainRequest();
+    ModelRequestSpec requestSpec = plainRequest();
     ProviderResponse response = successResponse(List.of(), "bash");
     UUID modelId =
         seedModelInvocation(
@@ -267,7 +267,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
             baseline.turnStartEntryId(),
             baseline.userEntryId(),
             ModelInvocationStatus.SUCCEEDED,
-            request,
+            requestSpec,
             response,
             null);
     // live attached assistant 由同一 request/response 经 mapper 生成（strict attach 校验要求全等）。
@@ -275,7 +275,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
         insertAssistantPayload(
             fixture.store,
             baseline,
-            new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()));
+            new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()));
     transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW));
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
@@ -304,8 +304,8 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
 
   /**
    * 历史 open Turn 的 head 已落到部分 ToolResult descendant（partial prefix）：新的 {@link
-   * ThreadContextClassifier}（rule 6：head/basis/result 任一不等视为历史）走 IDLE_OR_HISTORICAL → INPUT
-   * normalization，按 path 中已有的 ToolResult ordinal 前缀补写缺失 synthetic 并补 CANCELLED TURN_END 与新 INPUT
+   * ThreadContextClassifier}（rule 6：head/requestHead/result 任一不等视为历史）走 IDLE_OR_HISTORICAL → INPUT
+   * normalization，按 path 中已有的 ToolResult callIndex 前缀补写缺失 synthetic 并补 CANCELLED TURN_END 与新 INPUT
    * Turn。Tool 行 不再有 resultEntryId 字段，"已挂载" 状态由 Entry 路径事实承载。
    */
   @Test
@@ -347,8 +347,9 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     ClaimedWork claim = claimThreadWork(fixture.store, threadId);
 
-    // head != assistant、不在 basis 与 resultEntryId 上：IDLE_OR_HISTORICAL → INPUT normalization 只补缺失
-    // ordinal。
+    // head != assistant、不在 requestHead 与 resultEntryId 上：IDLE_OR_HISTORICAL → INPUT normalization
+    // 只补缺失
+    // callIndex。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
 
     EntryPath path = path(fixture.store, threadId);
@@ -356,9 +357,9 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     // ROOT, TS, USER, ASSISTANT, TOOL0(real), SYNTH1, TURN_END(CANCELLED), TS2, USER2
     MessagePayload real0 = (MessagePayload) path.entries().get(4).payload();
     assertFalse(real0.toolResultMetadata().synthetic());
-    assertEquals(0, real0.toolResultMetadata().ordinal());
+    assertEquals(0, real0.toolResultMetadata().callIndex());
     MessagePayload synth1 = (MessagePayload) path.entries().get(5).payload();
-    assertEquals(1, synth1.toolResultMetadata().ordinal());
+    assertEquals(1, synth1.toolResultMetadata().callIndex());
     assertTrue(synth1.toolResultMetadata().synthetic());
     assertEquals(1, fixture.resolver.calls);
   }

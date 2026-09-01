@@ -187,7 +187,7 @@ class ModelProcessorTest {
     ModelGateway.Execution execution = fixture.gateway.executions.get(0);
     assertEquals(fixture.invocationId, execution.invocationId());
     assertEquals(1, execution.proposedAttempt());
-    assertEquals(fixture.request.providerType(), execution.providerType());
+    assertEquals(fixture.requestSpec.providerType(), execution.providerType());
     assertEquals(materialized(fixture), execution.request());
     assertFalse(handle.isCancelled());
     assertTrue(fixture.processor.hasActiveExecution());
@@ -853,9 +853,9 @@ class ModelProcessorTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> retryPolicy, FALLBACK_DELAY),
             clock,
             newScheduler());
-    // 与生产一致的最小链：ROOT + TURN_START(INPUT) + USER，Thread head 与 invocation basis 指向 USER。
+    // 与生产一致的最小链：ROOT + TURN_START(INPUT) + USER，Thread head 与 invocation requestHead 指向 USER。
     UserBasis baseline = seedUserBasis(store);
-    UUID invocationId = seedUserBasisInvocation(store, baseline, request(), NOW);
+    UUID invocationId = seedUserBasisInvocation(store, baseline, requestSpec(), NOW);
 
     // attempt 1：N 启动，N+2 失败 -> retry（failure#1 failedAt=N+2 / retryAt=N+7）。
     gateway.queue(new ModelGateway.Started(new FakeHandle()));
@@ -1555,7 +1555,7 @@ class ModelProcessorTest {
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
-            request());
+            requestSpec());
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -2252,7 +2252,7 @@ class ModelProcessorTest {
                   }
                   return method.invoke(base, args);
                 });
-    Fixture fixture = fixture(NO_RETRY, request(), hooked);
+    Fixture fixture = fixture(NO_RETRY, requestSpec(), hooked);
     cancelId.set(fixture.invocationId);
     processorRef.set(fixture.processor);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle())); // 不应被消费
@@ -2351,7 +2351,7 @@ class ModelProcessorTest {
                   }
                   return result;
                 });
-    Fixture fixtureA = fixture(NO_RETRY, request(), hooked);
+    Fixture fixtureA = fixture(NO_RETRY, requestSpec(), hooked);
     fixtureA.gateway.queue(new ModelGateway.Started(new FakeHandle())); // 不应被消费
     ClaimedWork claimedA = claim(fixtureA.store, fixtureA.invocationId, NOW, "token-1");
 
@@ -2508,7 +2508,7 @@ class ModelProcessorTest {
   void heartbeatCannotRestartAfterStop() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     Baseline baseline = seedBaseline(store, NOW);
-    UUID invocationId = seedInvocation(store, baseline, request(), NOW);
+    UUID invocationId = seedInvocation(store, baseline, requestSpec(), NOW);
     ClaimedWork claimed = claim(store, invocationId, NOW);
     WorkHeartbeat heartbeat =
         new WorkHeartbeat(store, newScheduler(), LEASE_CONFIG, Clock.systemUTC(), () -> {});
@@ -2594,7 +2594,7 @@ class ModelProcessorTest {
   void closeCancelsAllLocalExecutions() {
     Fixture fixture = fixture();
     Baseline secondBaseline = seedBaseline(fixture.store, NOW);
-    UUID secondInvocationId = seedInvocation(fixture.store, secondBaseline, request(), NOW);
+    UUID secondInvocationId = seedInvocation(fixture.store, secondBaseline, requestSpec(), NOW);
     FakeHandle firstHandle = new FakeHandle();
     FakeHandle secondHandle = new FakeHandle();
     fixture.gateway.queue(new ModelGateway.Started(firstHandle));
@@ -2622,7 +2622,7 @@ class ModelProcessorTest {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
     Baseline baseline = seedBaseline(store, now);
-    UUID invocationId = seedInvocation(store, baseline, request(), now);
+    UUID invocationId = seedInvocation(store, baseline, requestSpec(), now);
     FakeGateway gateway = new FakeGateway();
     RecordingSink sink = new RecordingSink();
     FakeHandle handle = new FakeHandle();
@@ -2826,26 +2826,26 @@ class ModelProcessorTest {
   }
 
   private Fixture fixture() {
-    return fixture(NO_RETRY, request());
+    return fixture(NO_RETRY, requestSpec());
   }
 
   private Fixture fixture(InvocationRetryPolicy retryPolicy) {
-    return fixture(retryPolicy, request());
+    return fixture(retryPolicy, requestSpec());
   }
 
   private Fixture compactionFixture(InvocationRetryPolicy retryPolicy) {
-    return new Fixture(retryPolicy, request(), newScheduler(), TurnStartReason.COMPACTION);
+    return new Fixture(retryPolicy, requestSpec(), newScheduler(), TurnStartReason.COMPACTION);
   }
 
-  private Fixture fixture(InvocationRetryPolicy retryPolicy, ModelRequestSpec request) {
-    return new Fixture(retryPolicy, request, newScheduler());
+  private Fixture fixture(InvocationRetryPolicy retryPolicy, ModelRequestSpec requestSpec) {
+    return new Fixture(retryPolicy, requestSpec, newScheduler());
   }
 
   private Fixture fixture(
       InvocationRetryPolicy retryPolicy,
-      ModelRequestSpec request,
+      ModelRequestSpec requestSpec,
       ScheduledExecutorService scheduler) {
-    return new Fixture(retryPolicy, request, scheduler);
+    return new Fixture(retryPolicy, requestSpec, scheduler);
   }
 
   private final class Fixture {
@@ -2854,31 +2854,31 @@ class ModelProcessorTest {
     final FakeGateway gateway = new FakeGateway();
     final RecordingSink sink = new RecordingSink();
     final ScheduledExecutorService scheduler;
-    final ModelRequestSpec request;
+    final ModelRequestSpec requestSpec;
     final Baseline baseline;
     final UUID invocationId;
     final ModelProcessor processor;
 
-    Fixture(InvocationRetryPolicy retryPolicy, ModelRequestSpec request) {
-      this(retryPolicy, request, newScheduler());
+    Fixture(InvocationRetryPolicy retryPolicy, ModelRequestSpec requestSpec) {
+      this(retryPolicy, requestSpec, newScheduler());
     }
 
     Fixture(
         InvocationRetryPolicy retryPolicy,
-        ModelRequestSpec request,
+        ModelRequestSpec requestSpec,
         ScheduledExecutorService scheduler) {
-      this(retryPolicy, request, scheduler, TurnStartReason.INPUT);
+      this(retryPolicy, requestSpec, scheduler, TurnStartReason.INPUT);
     }
 
     Fixture(
         InvocationRetryPolicy retryPolicy,
-        ModelRequestSpec request,
+        ModelRequestSpec requestSpec,
         ScheduledExecutorService scheduler,
         TurnStartReason reason) {
       this.scheduler = scheduler;
-      this.request = request;
+      this.requestSpec = requestSpec;
       this.baseline = seedBaseline(store, NOW, reason);
-      this.invocationId = seedInvocation(store, baseline, request, NOW);
+      this.invocationId = seedInvocation(store, baseline, requestSpec, NOW);
       this.processor =
           new ModelProcessor(
               store,
@@ -2892,7 +2892,7 @@ class ModelProcessorTest {
 
   private record Baseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}
 
-  /** 带 USER 输入的 open turn 基线：Thread head 与 invocation basis 指向 USER。 */
+  /** 带 USER 输入的 open turn 基线：Thread head 与 invocation requestHead 指向 USER。 */
   private record UserBasis(
       UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID userEntryId, UUID threadId) {}
 
@@ -2929,9 +2929,9 @@ class ModelProcessorTest {
         });
   }
 
-  /** 以 USER 为 basis 插入 READY ModelInvocation + THREAD / MODEL Work（materialization 全链测试用）。 */
+  /** 以 USER 为 requestHead 插入 READY ModelInvocation + THREAD / MODEL Work（materialization 全链测试用）。 */
   private static UUID seedUserBasisInvocation(
-      InMemoryHarnessStore store, UserBasis baseline, ModelRequestSpec request, Instant now) {
+      InMemoryHarnessStore store, UserBasis baseline, ModelRequestSpec requestSpec, Instant now) {
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -2942,7 +2942,7 @@ class ModelProcessorTest {
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.userEntryId(),
-                  request,
+                  requestSpec,
                   ModelInvocationStatus.READY,
                   0,
                   null,
@@ -2976,7 +2976,7 @@ class ModelProcessorTest {
           Instant turnStartAt = now.plusMillis(1);
           CompactionStart compaction = null;
           if (reason == TurnStartReason.COMPACTION) {
-            // 压缩 invocation 的 basis 是 COMPACTION TURN_START；摘要范围必须落在此前可见历史里。
+            // 压缩 invocation 的 requestHead 是 COMPACTION TURN_START；摘要范围必须落在此前可见历史里。
             UUID inputStart = tx.nextId();
             UUID userId = tx.nextId();
             UUID assistantId = tx.nextId();
@@ -3027,7 +3027,7 @@ class ModelProcessorTest {
   }
 
   private static UUID seedInvocation(
-      InMemoryHarnessStore store, Baseline baseline, ModelRequestSpec request, Instant now) {
+      InMemoryHarnessStore store, Baseline baseline, ModelRequestSpec requestSpec, Instant now) {
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -3038,7 +3038,7 @@ class ModelProcessorTest {
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
-                  request,
+                  requestSpec,
                   ModelInvocationStatus.READY,
                   0,
                   null,
@@ -3084,8 +3084,8 @@ class ModelProcessorTest {
   private static ProviderRequest materialized(Fixture fixture) {
     ModelInvocation invocation = model(fixture.store, fixture.invocationId);
     EntryPath path =
-        fixture.store.transaction(tx -> tx.loadEntryPath(invocation.basisHeadEntryId()));
-    return new ModelRequestMaterializer().materialize(path, fixture.request);
+        fixture.store.transaction(tx -> tx.loadEntryPath(invocation.requestHeadEntryId()));
+    return new ModelRequestMaterializer().materialize(path, fixture.requestSpec);
   }
 
   private static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {
@@ -3116,7 +3116,7 @@ class ModelProcessorTest {
     fail("condition not met within " + timeout);
   }
 
-  private static ModelRequestSpec request() {
+  private static ModelRequestSpec requestSpec() {
     return spec(List.of());
   }
 

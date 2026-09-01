@@ -22,7 +22,7 @@ export function ThreadWidgetStack({
   const { t } = useI18n()
   const queueRef = useRef<HTMLOListElement>(null)
   const hasQueuedMessages = queuedMessages.length > 0
-  const latestQueuedMessageId = queuedMessages.at(-1)?.clientCommandId
+  const latestQueuedMessageId = queuedMessages.at(-1)?.idempotencyKey
   const showWorking = working
 
   useLayoutEffect(() => {
@@ -47,7 +47,7 @@ export function ThreadWidgetStack({
           aria-label={t('ai.runtime.thread.queue')}
         >
           {queuedMessages.map((message) => (
-            <li key={message.clientCommandId} className="thread-input-queue-item">
+            <li key={message.idempotencyKey} className="thread-input-queue-item">
               <span className="thread-input-queue-label">{t('ai.runtime.thread.queued')}</span>
               <span className="thread-input-queue-content">{message.text}</span>
             </li>
