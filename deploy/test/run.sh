@@ -322,7 +322,7 @@ resource_patch = json_call(
     f"/api/canvases/{canvas['id']}/commands",
     {
         "expectedVersion": "0",
-        "commandId": new_id(),
+        "idempotencyKey": new_id(),
         "commands": [
             {
                 "type": "CREATE_RESOURCE_NODE",
@@ -374,7 +374,7 @@ function_patch = json_call(
     f"/api/canvases/{canvas['id']}/commands",
     {
         "expectedVersion": "1",
-        "commandId": new_id(),
+        "idempotencyKey": new_id(),
         "commands": [
             {
                 "type": "CREATE_FUNCTION_NODE",
@@ -462,7 +462,7 @@ def create_and_run(
         f"/api/canvases/{canvas['id']}/commands",
         {
             "expectedVersion": current["document"]["version"],
-            "commandId": new_id(),
+            "idempotencyKey": new_id(),
             "commands": [
                 {
                     "type": "CREATE_FUNCTION_NODE",
@@ -566,7 +566,7 @@ accepted = json_call(
         "commands": [
             {
                 "type": "USER_MESSAGE",
-                "clientCommandId": new_id(),
+                "idempotencyKey": new_id(),
                 "contents": [{"type": "TEXT", "text": marker}],
             }
         ],

@@ -226,15 +226,15 @@ class PostgresqlCanvasStoreIntegrationTest extends PostgresCanvasInfraTestSuppor
   @Test
   void commandDedupLifecycle() {
     UUID canvasId = addDocument();
-    UUID commandId = UUID.randomUUID();
-    CommandDedup dedup = new CommandDedup(canvasId, commandId, "a".repeat(64));
+    UUID idempotencyKey = UUID.randomUUID();
+    CommandDedup dedup = new CommandDedup(canvasId, idempotencyKey, "a".repeat(64));
 
-    assertTrue(canvasStore.findCommandDedup(canvasId, commandId).isEmpty());
+    assertTrue(canvasStore.findCommandDedup(canvasId, idempotencyKey).isEmpty());
     canvasStore.addCommandDedup(dedup);
-    assertEquals(dedup, canvasStore.findCommandDedup(canvasId, commandId).orElseThrow());
+    assertEquals(dedup, canvasStore.findCommandDedup(canvasId, idempotencyKey).orElseThrow());
     assertEquals(1, canvasStore.deleteCommandDedupByCanvas(canvasId));
     assertEquals(0, canvasStore.deleteCommandDedupByCanvas(canvasId));
-    assertTrue(canvasStore.findCommandDedup(canvasId, commandId).isEmpty());
+    assertTrue(canvasStore.findCommandDedup(canvasId, idempotencyKey).isEmpty());
   }
 
   private static void await(CountDownLatch latch) {

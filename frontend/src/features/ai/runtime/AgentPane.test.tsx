@@ -983,8 +983,7 @@ describe('AgentPane orchestration', () => {
           type: 'USER_MESSAGE',
           state: 'QUEUED',
           idempotencyKey: 'queued-1',
-          requestHash: '0123456789abcdef'.repeat(4),
-          payloadJson: JSON.stringify({
+                payloadJson: JSON.stringify({
             message: { role: 'USER', contents: [{ type: 'text', text: '排队中' }] },
           }),
           appliedTurnStartEntryId: null,
