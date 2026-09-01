@@ -112,7 +112,6 @@ function queuedSettingCommand(
     state: 'QUEUED',
     idempotencyKey: `queued-${sequence}`,
     payloadJson: JSON.stringify(payload),
-    appliedTurnStartEntryId: null,
     cancelledAt: null,
     createTime: null,
   }
