@@ -40,6 +40,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "agent_definition",
           "flyway_schema_history",
           "comfyui_workflow_api",
+          "mcp_server",
+          "mcp_tool",
           "canvas_document",
           "canvas_group",
           "canvas_node",
@@ -188,6 +190,24 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "created_at",
         "updated_at",
         "version");
+    assertColumns(
+        "mcp_server",
+        "id",
+        "name",
+        "url",
+        "bearer_token",
+        "timeout_millis",
+        "created_at",
+        "updated_at",
+        "version");
+    assertColumns(
+        "mcp_tool",
+        "id",
+        "mcp_server_id",
+        "source_name",
+        "model_name",
+        "description",
+        "input_schema");
     assertColumns("canvas_document", "id", "title", "version", "created_at", "updated_at");
     assertColumns("canvas_group", "id", "canvas_id", "title", "x", "y", "width", "height");
     assertColumns(
@@ -1108,6 +1128,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "session_blob_ref", "session_id");
     assertColumnType("uuid", "session_blob_ref", "blob_id");
     assertColumnType("uuid", "chat", "id");
+    assertColumnType("uuid", "mcp_server", "id");
+    assertColumnType("uuid", "mcp_tool", "id");
+    assertColumnType("uuid", "mcp_tool", "mcp_server_id");
+    assertColumnType("jsonb", "mcp_tool", "input_schema");
     assertColumnType("uuid", "comfyui_workflow_api", "id");
     assertColumnType("uuid", "chat_session", "session_id");
     assertColumnType("uuid", "chat_session", "chat_id");
@@ -1288,7 +1312,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_harness_model_invocation_result",
             "uk_harness_tool_invocation_call_index",
             "uk_storage_blob_active_hash",
-            "uk_storage_upload_candidate"),
+            "uk_storage_upload_candidate",
+            "uk_mcp_server_name",
+            "uk_mcp_tool_model_name",
+            "uk_mcp_tool_server_source_name"),
         indexes,
         "the final schema must expose only its declared domain unique keys");
 
@@ -1308,7 +1335,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " 'fk_canvas_function_run_node',"
                     + " 'fk_canvas_function_resource_pin_node',"
                     + " 'fk_chat_session_chat', 'fk_chat_session_session',"
-                    + " 'fk_canvas_session_canvas', 'fk_canvas_session_session')")) {
+                    + " 'fk_canvas_session_canvas', 'fk_canvas_session_session', 'fk_mcp_tool_server')")) {
       while (rs.next()) {
         foreignKeys.add(rs.getString(1));
       }
@@ -1331,7 +1358,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_chat_session_chat",
             "fk_chat_session_session",
             "fk_canvas_session_canvas",
-            "fk_canvas_session_session"),
+            "fk_canvas_session_session",
+            "fk_mcp_tool_server"),
         foreignKeys,
         "all non-Harness ownership relations must be enforced by PostgreSQL");
   }
