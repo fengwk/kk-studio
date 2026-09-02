@@ -95,7 +95,7 @@ export async function main(argv = process.argv.slice(2)) {
     preflight = await validatePreflight(ctx, args.daemonEnv)
     const selectedModelRefs = new Set(selectedCases.map((testCase) => testCase.model.ref))
     for (const model of MODELS.filter((candidate) => selectedModelRefs.has(candidate.ref))) {
-      const agent = await createTemporaryAgent(ctx, model, systemPrompt, runId)
+      const agent = await createTemporaryAgent(ctx, model, systemPrompt, runId, preflight.environment.id)
       agents.set(model.ref, agent)
     }
 
@@ -224,13 +224,13 @@ async function validatePreflight(ctx, daemonEnv) {
   return {
     provider: { name: 'minimax', configured: true },
     models: checkedModels,
-    environment: { name: daemonEnv, status: 'READY', ready: true },
+    environment: { id: environment.id, name: daemonEnv, status: 'READY', ready: true },
     agentToolIds: [...AGENT_TOOL_IDS],
     modelToolNames: [...MODEL_TOOL_NAMES],
   }
 }
 
-async function createTemporaryAgent(ctx, model, systemPrompt, runId) {
+async function createTemporaryAgent(ctx, model, systemPrompt, runId, environmentId) {
   const suffix = runId.replace(/[^a-z0-9]/g, '').slice(-12)
   const name = `reliability-${model.key}-${suffix}`
   const body = {
@@ -239,6 +239,7 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId) {
     systemPrompt,
     model: model.ref,
     variant: VARIANT,
+    environmentId,
     config: { toolIds: [...AGENT_TOOL_IDS], skills: [], subagents: [] },
   }
   const { status, json } = await ctx.call('POST', '/api/ai/catalog/agents', body)
@@ -247,6 +248,7 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId) {
   assert(agent?.name === name, `created Agent identity mismatch: ${JSON.stringify(agent)}`)
   assert(agent.systemPrompt === systemPrompt, 'created Agent systemPrompt mismatch')
   assert(agent.model === model.ref && agent.variant === VARIANT, 'created Agent model mismatch')
+  assert(agent.environmentId === environmentId, 'created Agent environmentId mismatch')
   assert(
     JSON.stringify(agent.config) === JSON.stringify(body.config),
     `created Agent config mismatch: ${JSON.stringify(agent.config)}`,
@@ -279,18 +281,18 @@ async function executeCase({ ctx, docker, runDir, testCase, agent, daemonEnv }) 
       title: `reliability-${testCase.id}`,
       agentName: agent.name,
       yoloEnabled: true,
-      environment: { name: daemonEnv, workspacePath: '.' },
+      workspacePath: '.',
     })
     const request = buildNewSessionRequest({
       chat,
       agent,
       testCase,
-      daemonEnv,
+      workspacePath: '.',
       prompt: buildUserPrompt(testCase),
     })
     const accepted = await createNewSession(ctx, request)
     threadId = accepted.thread.threadId
-    assertThreadSettings(accepted, testCase, daemonEnv, agent.name)
+    assertThreadSettings(accepted, testCase, '.', agent.name)
     result.turnStarted = true
 
     try {
@@ -565,7 +567,7 @@ async function postcheckCase(docker, testCase, precheck) {
 }
 
 /** 构造原子 NEW_SESSION 提交：预分配 sessionId/threadId，rootSettings 绑定环境，yolo true，首条 USER command。 */
-export function buildNewSessionRequest({ chat, agent, testCase, daemonEnv, prompt }) {
+export function buildNewSessionRequest({ chat, agent, testCase, workspacePath = '.', prompt }) {
   return {
     owner: chatOwner(chat.id),
     sessionId: cid(),
@@ -577,14 +579,14 @@ export function buildNewSessionRequest({ chat, agent, testCase, daemonEnv, promp
         modelName: testCase.model.modelName,
         variant: VARIANT,
       },
-      { environment: { name: daemonEnv, workspacePath: '.' } },
+      { workspacePath },
     ),
     yoloEnabled: true,
     commands: [userMessageCommand(prompt, cid())],
   }
 }
 
-export function assertThreadSettings(accepted, testCase, daemonEnv, agentName) {
+export function assertThreadSettings(accepted, testCase, expectedWorkspacePath, agentName) {
   const thread = accepted.thread
   const firstAccepted = accepted.acceptedCommands?.[0]
   assert(
@@ -603,8 +605,8 @@ export function assertThreadSettings(accepted, testCase, daemonEnv, agentName) {
   )
   assert(thread.yoloEnabled === true, 'Thread yoloEnabled must be true')
   assert(
-    thread.branchSettings?.environment?.name === daemonEnv,
-    'Thread Environment mismatch',
+    thread.branchSettings?.workspacePath === expectedWorkspacePath,
+    'Thread workspacePath mismatch',
   )
   assert(thread.branchSettings?.agentName === agentName, 'Thread Agent mismatch')
   assert(
@@ -618,7 +620,7 @@ export function assertThreadSettings(accepted, testCase, daemonEnv, agentName) {
   )
   assert(
     Object.keys(thread.branchSettings ?? {}).sort().join(',')
-      === 'agentName,environment,model',
+      === 'agentName,model,workspacePath',
     `Thread branch settings shape mismatch: ${JSON.stringify(thread.branchSettings)}`,
   )
 }

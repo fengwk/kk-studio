@@ -227,7 +227,7 @@ registerCase({
   id: 'thread.branch_settings_projection',
   level: 'L1',
   title: 'NEW_SESSION rootSettings 完整投影到 Thread 快照',
-  docs: 'EnvironmentBinding/agentName/model 与 yoloEnabled 原样持久化并投影；Chat 默认值独立',
+  docs: 'workspacePath/agentName/model 与 yoloEnabled 原样持久化并投影；Chat 默认值独立',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -237,7 +237,7 @@ registerCase({
       yoloEnabled: false,
     })
     const requested = {
-      environment: null,
+      workspacePath: null,
       agentName: ctx.vars.agent.name,
       model: modelSelectionOf(ctx),
     }
@@ -1076,7 +1076,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知类型、额外字段、显式 null 与非法 EnvironmentBinding => 400',
+  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知类型、额外字段、旧 environment 字段、缺失 workspacePath 与非法路径 => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1146,7 +1146,7 @@ registerCase({
     assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
     const finalSnapshot = await getThreadSnapshot(ctx, threadId)
     const expectedSettings = {
-      environment: null,
+      workspacePath: null,
       agentName: missingAgentName,
       model: {
         providerName: modelSelection.providerName,
@@ -1244,9 +1244,9 @@ registerCase({
           }),
           commands: [{ type: 'SET_ENVIRONMENT', idempotencyKey: cid() }],
         }),
-      { status: 400, messageIncludes: /environment/i },
+      { status: 400, messageIncludes: /workspacePath/i },
     )
-    // 其他 discriminator 即使显式传 environment:null 也必须按 forbidden 拒绝。
+    // 其他 discriminator 即使显式传 workspacePath:null 也必须按 forbidden 拒绝。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -1265,13 +1265,13 @@ registerCase({
                 modelName: modelSelection.modelName,
                 variant: modelSelection.variant,
               },
-              environment: null,
+              workspacePath: null,
             },
           ],
         }),
-      { status: 400, messageIncludes: /environment/i },
+      { status: 400, messageIncludes: /workspacePath/i },
     )
-    // SET_ENVIRONMENT 只接受完整 binding；name/path 在 mapper 处校验，resolver 运行时才查 registry READY。
+    // 严格 wire：旧的 environment 字段必须被拒绝（400 unknown HTTP command field: environment）。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -1289,7 +1289,27 @@ registerCase({
             },
           ],
         }),
-      { status: 400, messageIncludes: /environment|name/i },
+      { status: 400, messageIncludes: /environment/i },
+    )
+    // 非法 canonical 相对路径也必须被拒绝（例如包含 ..）。
+    await expectHttpError(
+      () =>
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: fresh.thread.headEntryId,
+            expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+          }),
+          commands: [
+            {
+              type: 'SET_ENVIRONMENT',
+              idempotencyKey: cid(),
+              workspacePath: '../escaped',
+            },
+          ],
+        }),
+      { status: 400, messageIncludes: /path/i },
     )
   },
 })

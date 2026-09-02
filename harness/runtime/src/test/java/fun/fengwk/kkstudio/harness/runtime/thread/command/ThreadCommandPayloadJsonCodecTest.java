@@ -103,7 +103,7 @@ class ThreadCommandPayloadJsonCodecTest {
         () ->
             codec.decode(
                 ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"Not-A-Name\"}"));
-    // 新 wire：binding 对象必须恰好 {name, workspacePath} 且两字段都严格校验。
+    // 旧 wire：environment 对象不是合法输入，必须被拒绝。
     assertThrows(
         IllegalArgumentException.class,
         () ->

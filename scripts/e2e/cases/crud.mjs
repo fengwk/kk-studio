@@ -485,7 +485,7 @@ registerCase({
   id: 'crud.chat.thread_branch_settings_independent',
   level: 'L1',
   title: 'Chat 默认值与 Thread branchSettings 相互独立',
-  docs: 'Chat 仅保存 agentName/yoloEnabled/可选默认 EnvironmentBinding；NEW_SESSION rootSettings 携带 environment/agentName/model branch draft；更新 Chat 默认值不改变既有 Thread',
+  docs: 'Chat 仅保存 agentName/yoloEnabled/可选默认 workspacePath；NEW_SESSION rootSettings 携带 workspacePath/agentName/model branch draft；更新 Chat 默认值不改变既有 Thread',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -499,13 +499,14 @@ registerCase({
       assert(
         chat.agentName === agent.name
           && chat.yoloEnabled === false
-          && chat.environment === null,
+          && chat.workspacePath === null
+          && !Object.hasOwn(chat, 'environment'),
         JSON.stringify(chat),
       )
       // 先创建 Thread（NEW_SESSION materialization），再更新 Chat 默认值，最后 reread 同一 Thread：
-      // 更新 Chat 不影响既有 Thread 的 branchSettings（immutable Environment route；Thread 快照是运行时事实）。
+      // 更新 Chat 不影响既有 Thread 的 branchSettings（Thread 快照是运行时事实）。
       const requested = {
-        environment: null,
+        workspacePath: null,
         agentName: agent.name,
         model: modelSelectionFor(agent),
       }
@@ -536,7 +537,8 @@ registerCase({
       assert(
         updated.agentName === agent.name
           && updated.yoloEnabled === true
-          && updated.environment === null,
+          && updated.workspacePath === null
+          && !Object.hasOwn(updated, 'environment'),
         JSON.stringify(updated),
       )
       // 同一 Thread reread：branchSettings 逐字段不变。
@@ -639,7 +641,7 @@ registerCase({
         owner: chatOwner(chat.id),
         sessionId: cid(),
         threadId,
-        rootSettings: branchSettingsOf({ name: agent.name }, modelSelection, { environment: null }),
+        rootSettings: branchSettingsOf({ name: agent.name }, modelSelection, { workspacePath: null }),
         yoloEnabled: true,
         commands,
       })
@@ -693,7 +695,7 @@ registerCase({
         owner: chatOwner(chat.id),
         sessionId: String(thirdAccepted.session.sessionId),
         threadId: String(thirdAccepted.thread.threadId),
-        rootSettings: branchSettingsOf({ name: agent.name }, modelSelection, { environment: null }),
+        rootSettings: branchSettingsOf({ name: agent.name }, modelSelection, { workspacePath: null }),
         yoloEnabled: true,
         commands: thirdCommands,
       })

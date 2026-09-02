@@ -243,7 +243,7 @@ start_daemon() {
   local i env_status=""
   # Disconnect retains the default 60s route grace lease; leave takeover headroom.
   for i in $(seq 1 180); do
-    env_status=$(curl -fsS "$BACKEND_URL/api/ai/environment" \
+    env_status=$(curl -fsS "$BACKEND_URL/api/ai/environments" \
       | python3 -c 'import sys,json; d=json.load(sys.stdin); arr=d.get("data") or [];
 print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \
       2>/dev/null || true)
@@ -309,7 +309,7 @@ raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/nu
   fi
 
   if [ "$with_daemon" = "true" ]; then
-    env_status=$(curl -fsS "$BACKEND_URL/api/ai/environment" \
+    env_status=$(curl -fsS "$BACKEND_URL/api/ai/environments" \
       | python3 -c 'import sys,json; d=json.load(sys.stdin); arr=d.get("data") or [];
 print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \
       2>/dev/null || true)
