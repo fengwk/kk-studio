@@ -256,6 +256,36 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertTrue(registry1.find(DEV).isEmpty());
   }
 
+  /**
+   * 测试意图：证明 hasActiveLease、holdsReadyLease 与 hasActiveLeaseToken 严格依据 PostgreSQL
+   * statement_timestamp() 判定租约活跃性；当数据库中租约过期时，无论外部传入的时钟如何滞后，三者均确定性返回 false。
+   */
+  @Test
+  void dbAuthoritativePredicatesReflectExpiredLeaseRegardlessOfAppClock() {
+    BindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    UUID token1 = ((BindResult.Acquired) r1).leaseToken();
+    assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
+
+    // 活跃状态下三个谓词均返回 true
+    assertTrue(registry1.hasActiveLease(DEV));
+    assertTrue(registry1.holdsReadyLease(DEV, token1));
+    assertTrue(registry1.hasActiveLeaseToken(DEV, token1));
+
+    // 非持有节点或错误 token 判定
+    assertFalse(registry2.holdsReadyLease(DEV, token1));
+    assertFalse(registry1.holdsReadyLease(DEV, UUID.randomUUID()));
+
+    // 手动调整 DB 租约到期时间为过去
+    jdbcTemplate.update(
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
+        DEV.value());
+
+    // 此时即使外部认为时间未走，DB 现在时判定必须全部返回 false
+    assertFalse(registry1.hasActiveLease(DEV));
+    assertFalse(registry1.holdsReadyLease(DEV, token1));
+    assertFalse(registry1.hasActiveLeaseToken(DEV, token1));
+  }
+
   /** 测试意图：验证 list 查询能列出不同环境的独立路由行。 */
   @Test
   void listAndDistinctEnvironments() {

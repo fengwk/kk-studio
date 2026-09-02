@@ -255,19 +255,18 @@ public class EnvironmentDaemonGateway
     String invokePayload;
     synchronized (this) {
       state = environmentConnections.get(environmentId);
-      EnvironmentConnection live;
+      if (state == null || !state.isReady() || state.leaseToken == null) {
+        throw new EnvironmentCapabilityUnavailableException(
+            unavailableMessage(environmentId, descriptor.id().value()));
+      }
+      boolean holdsReady;
       try {
-        live = environmentRegistry.find(environmentId).orElse(null);
+        holdsReady = environmentRegistry.holdsReadyLease(environmentId, state.leaseToken);
       } catch (DataAccessException error) {
         throw new EnvironmentCapabilityUnavailableException(
             "database unavailable: " + error.getMessage(), error);
       }
-      if (state == null
-          || !state.isReady()
-          || live == null
-          || !live.isReady(clock.instant(), heartbeatTimeout())
-          || !live.ownerNodeId().equals(environmentRegistry.ownerNodeId())
-          || !Objects.equals(live.leaseToken(), state.leaseToken)) {
+      if (!holdsReady) {
         throw new EnvironmentCapabilityUnavailableException(
             unavailableMessage(environmentId, descriptor.id().value()));
       }
@@ -407,23 +406,24 @@ public class EnvironmentDaemonGateway
               EnvironmentDirectoryFailureCode.ENVIRONMENT_NOT_FOUND,
               "environment is not registered: " + environmentId));
     }
-    if (!live.isReady(clock.instant(), heartbeatTimeout())) {
-      return CompletableFuture.completedFuture(
-          new EnvironmentDirectoryListResult.Failed(
-              EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
-              "environment " + environmentId + " is not ready; directory listing is unavailable"));
-    }
 
     ConnectionState localState;
     synchronized (this) {
       localState = environmentConnections.get(environmentId);
     }
-    if (localState != null
-        && localState.isReady()
-        && localState.leaseToken != null
-        && localState.leaseToken.equals(live.leaseToken())
-        && live.ownerNodeId().equals(environmentRegistry.ownerNodeId())) {
-      return listDirectoryLocal(environmentId, directoryPath, timeout);
+    if (localState != null && localState.isReady() && localState.leaseToken != null) {
+      boolean holdsReady;
+      try {
+        holdsReady = environmentRegistry.holdsReadyLease(environmentId, localState.leaseToken);
+      } catch (DataAccessException error) {
+        return CompletableFuture.completedFuture(
+            new EnvironmentDirectoryListResult.Failed(
+                EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+                "database unavailable: " + error.getMessage()));
+      }
+      if (holdsReady) {
+        return listDirectoryLocal(environmentId, directoryPath, timeout);
+      }
     }
 
     if (queryCoordinator != null) {
@@ -675,11 +675,14 @@ public class EnvironmentDaemonGateway
     ConnectionState existing;
     synchronized (this) {
       existing = environmentConnections.get(environmentId);
-      if (existing != null && existing.connection.isOpen()) {
-        EnvironmentConnection liveConn = environmentRegistry.find(environmentId).orElse(null);
-        if (liveConn != null
-            && liveConn.isOnline(clock.instant())
-            && Objects.equals(liveConn.leaseToken(), existing.leaseToken)) {
+      if (existing != null && existing.connection.isOpen() && existing.leaseToken != null) {
+        boolean activeToken;
+        try {
+          activeToken = environmentRegistry.hasActiveLeaseToken(environmentId, existing.leaseToken);
+        } catch (DataAccessException error) {
+          throw new DaemonProtocolException("database unavailable: " + error.getMessage(), error);
+        }
+        if (activeToken) {
           throw new DaemonRetryLaterException(
               "environment "
                   + environmentId

@@ -176,12 +176,12 @@ class EnvironmentServiceImplTest {
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(repo, registry, agents, jdbc, snapshot, CLOCK);
 
-    // Online -> rejects
-    when(registry.isOnline(EnvironmentId.of(ENV_ID), NOW)).thenReturn(true);
+    // Active lease in DB -> rejects
+    when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
     assertThrows(AiInUseException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
 
-    // Offline -> succeeds and returns new token
-    when(registry.isOnline(EnvironmentId.of(ENV_ID), NOW)).thenReturn(false);
+    // No active lease -> succeeds and returns new token
+    when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(false);
     EnvironmentCardDTO rotated = service.rotateToken(EnvironmentId.of(ENV_ID), "0");
     assertNotNull(rotated.getRegistrationToken());
   }
@@ -207,12 +207,12 @@ class EnvironmentServiceImplTest {
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(repo, registry, agents, jdbc, snapshot, CLOCK);
 
-    // 1. Online -> rejects
-    when(registry.isOnline(EnvironmentId.of(ENV_ID), NOW)).thenReturn(true);
+    // 1. Active lease in DB -> rejects
+    when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
     assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
 
-    // 2. Offline but referenced by Agent -> rejects
-    when(registry.isOnline(EnvironmentId.of(ENV_ID), NOW)).thenReturn(false);
+    // 2. No active lease but referenced by Agent -> rejects
+    when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(false);
     when(agents.existsByEnvironmentId(ENV_ID)).thenReturn(true);
     assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
 

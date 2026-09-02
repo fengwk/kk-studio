@@ -146,7 +146,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       throw new AiVersionConflictException(
           RESOURCE, id.toString(), expectedVersion, CatalogVersions.format(env.getVersion()));
     }
-    if (environmentRegistry.isOnline(id, clock.instant())) {
+    if (environmentRegistry.hasActiveLease(id)) {
       throw new AiInUseException(
           RESOURCE, "cannot rotate token while environment has an active connection lease");
     }
@@ -176,7 +176,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       throw new AiVersionConflictException(
           RESOURCE, id.toString(), expectedVersion, CatalogVersions.format(env.getVersion()));
     }
-    if (environmentRegistry.isOnline(id, clock.instant())) {
+    if (environmentRegistry.hasActiveLease(id)) {
       throw new AiInUseException(
           RESOURCE, "cannot delete environment with an active connection lease");
     }
