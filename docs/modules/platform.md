@@ -451,7 +451,7 @@ endpoint 等 bootstrap property 完整，否则明确启动失败；禁用时对
 | --- | --- |
 | `kk-studio.harness.execution-admission.{model,tool,subagent}` | 进程级容量，默认 `16/64/10`；不进数据库、DTO 或 frontend |
 | `kk-studio.harness.runtime.{workers-enabled,environment-root,workdir}` | worker 开关与本地工作目录；`workdir`必须位于 root 内 |
-| `kk-studio.harness.environment-gateway.{daemon-token,max-message-bytes,queue-capacity,max-bytes,send-timeout}` | Daemon 握手秘密与 WebSocket 安全边界；默认 `16MiB/256/16MiB/10s` |
+| `kk-studio.harness.environment-gateway.{max-message-bytes,queue-capacity,max-bytes,send-timeout}` | WebSocket 安全边界；默认 `16MiB/256/16MiB/10s` |
 | `kk-studio.storage.s3.{endpoint,public-endpoint,region,bucket,access-key,secret-key,public-base-url}` | S3/MinIO 服务端和 presign endpoint；bucket 只能由服务端配置 |
 | `kk-studio.storage.maintenance.{poll-delay,cleanup-lease}` | maintenance 唤醒轮询与 cleanup lease，默认 `30s/5m` |
 | `kk-studio.comfyui.api-key` | ComfyUI secret；非 SystemSettings |

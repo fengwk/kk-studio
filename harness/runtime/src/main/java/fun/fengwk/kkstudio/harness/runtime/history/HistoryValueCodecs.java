@@ -30,7 +30,7 @@ final class HistoryValueCodecs {
   static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> BRANCH_SETTINGS_FIELDS =
-      orderedSet("environment", "agentName", "model");
+      orderedSet("workspacePath", "agentName", "model");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
@@ -67,9 +67,9 @@ final class HistoryValueCodecs {
   static ObjectNode encodeBranchSettings(BranchSettings settings) {
     ObjectNode node = NODES.objectNode();
     if (settings.workspacePath() == null) {
-      node.putNull("environment");
+      node.putNull("workspacePath");
     } else {
-      node.put("environment", settings.workspacePath());
+      node.put("workspacePath", settings.workspacePath());
     }
     node.put("agentName", settings.agentName());
     node.set("model", encodeModelSelection(settings.model()));
@@ -80,12 +80,12 @@ final class HistoryValueCodecs {
     ObjectNode node = requireObject(value, context);
     requireExactFields(node, BRANCH_SETTINGS_FIELDS, context);
     return new BranchSettings(
-        nullableWorkspacePath(node, "environment", context),
+        nullableWorkspacePath(node, "workspacePath", context),
         requiredText(node, "agentName", context),
         decodeModelSelection(node.get("model"), context + ".model"));
   }
 
-  /** 读取可空 canonical workspace path（{@code environment} 字段在 BranchSettings wire 上存 path）。 */
+  /** 读取可空 canonical workspace path。 */
   static String nullableWorkspacePath(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value.isNull()) {

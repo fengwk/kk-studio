@@ -15,9 +15,8 @@ name: kk-studio-distributed
 #
 # 身份变量（固定默认值，可由宿主环境覆盖；deploy/distributed/run.sh 导出同一组
 # 默认值，最终 Environment 分支集成时可改参数名）：
-#   DISTRIBUTED_NODE_A_ID / DISTRIBUTED_NODE_B_ID   node instance id（同时是 daemon-id）
-#   DISTRIBUTED_ENV_A_NAME / DISTRIBUTED_ENV_B_NAME daemon 注册的 environment name
-#   DISTRIBUTED_DAEMON_TOKEN                        gateway handshake token
+#   DISTRIBUTED_ENV_A_NAME / DISTRIBUTED_ENV_B_NAME daemon 对应的 environment name
+#   DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN / DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN
 #   DISTRIBUTED_APP_A_PORT / DISTRIBUTED_APP_B_PORT 宿主 app 端口
 #
 # 全部凭据是固定、可丢弃的测试值；宿主 MiniMax 凭据不会被本栈读取，
@@ -223,14 +222,10 @@ services:
       workspace-init:
         condition: service_completed_successfully
     command:
-      - --environment-name
-      - ${DISTRIBUTED_ENV_A_NAME:-distributed-a}
       - --gateway-uri
       - ws://app-a:8080/api/ai/environment/daemon/v2
-      - --gateway-token
-      - ${DISTRIBUTED_DAEMON_TOKEN:-e2e-daemon-token}
-      - --daemon-id
-      - ${DISTRIBUTED_NODE_A_ID:-node-a}
+      - --registration-token
+      - ${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-distributed-a}
       - --note
       - Distributed test node A (shared data, no app-to-app network).
       - --environment-root
@@ -249,14 +244,10 @@ services:
       workspace-init:
         condition: service_completed_successfully
     command:
-      - --environment-name
-      - ${DISTRIBUTED_ENV_B_NAME:-distributed-b}
       - --gateway-uri
       - ws://app-b:8080/api/ai/environment/daemon/v2
-      - --gateway-token
-      - ${DISTRIBUTED_DAEMON_TOKEN:-e2e-daemon-token}
-      - --daemon-id
-      - ${DISTRIBUTED_NODE_B_ID:-node-b}
+      - --registration-token
+      - ${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-distributed-b}
       - --note
       - Distributed test node B (shared data, no app-to-app network).
       - --environment-root

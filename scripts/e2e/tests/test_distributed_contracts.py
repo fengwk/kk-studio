@@ -137,13 +137,14 @@ class TestDistributedTopologyContract(unittest.TestCase):
         self.assertNotIn("app-b-db", compose)
 
     def test_node_identity_defaults_are_fixed_and_overridable(self):
-        """Node ids / env names / token have explicit disposable defaults in compose."""
+        """Registration tokens have explicit disposable defaults in compose and CLI options are clean."""
         compose = COMPOSE_FILE.read_text()
-        self.assertIn("${DISTRIBUTED_NODE_A_ID:-node-a}", compose)
-        self.assertIn("${DISTRIBUTED_NODE_B_ID:-node-b}", compose)
-        self.assertIn("${DISTRIBUTED_ENV_A_NAME:-distributed-a}", compose)
-        self.assertIn("${DISTRIBUTED_ENV_B_NAME:-distributed-b}", compose)
-        self.assertIn("${DISTRIBUTED_DAEMON_TOKEN:-e2e-daemon-token}", compose)
+        self.assertIn("${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-distributed-a}", compose)
+        self.assertIn("${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-distributed-b}", compose)
+        self.assertNotIn("--environment-name", compose)
+        self.assertNotIn("--gateway-token", compose)
+        self.assertNotIn("--daemon-id", compose)
+        self.assertNotIn("DISTRIBUTED_DAEMON_TOKEN", compose)
 
 
 class TestDistributedNodeContracts(unittest.TestCase):

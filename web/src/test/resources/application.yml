@@ -27,5 +27,3 @@ kk-studio:
     runtime:
       workers-enabled: false
       environment-root: target/harness-environment
-    environment-gateway:
-      daemon-token: test-daemon-token

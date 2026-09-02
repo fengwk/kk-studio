@@ -68,14 +68,10 @@ services:
       workspace-init:
         condition: service_completed_successfully
     command:
-      - --environment-name
-      - ${RELIABILITY_ENV_NAME:-docker-reliability}
       - --gateway-uri
       - ws://app:8080/api/ai/environment/daemon/v2
-      - --gateway-token
-      - e2e-daemon-token
-      - --daemon-id
-      - docker-reliability-daemon
+      - --registration-token
+      - ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-docker-reliability}
       - --note
       - Isolated Docker reliability environment.
       - --environment-root
