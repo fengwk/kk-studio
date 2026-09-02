@@ -170,4 +170,54 @@ describe('ConfirmActionModal', () => {
     expect(refreshIcon).toHaveClass('lucide-refresh-cw')
     expect(refreshIcon).not.toHaveClass('lucide-trash2')
   })
+
+  // 验证 ConfirmActionModal 支持在确认操作失败时可见地展示错误提示，防止静默失败。
+  it('renders optional error in modal-body when error is provided in modal state or prop', () => {
+    const onClose = vi.fn()
+    const { unmount, rerender } = render(
+      <ConfirmActionModal
+        modal={{
+          title: '确认删除',
+          description: '即将删除',
+          error: '版本冲突，无法删除',
+          onConfirm: vi.fn(),
+        }}
+        pending={false}
+        onClose={onClose}
+      />,
+    )
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('版本冲突，无法删除')
+    expect(alert).toHaveClass('field-error')
+
+    // 优先采用 prop 级 error
+    rerender(
+      <ConfirmActionModal
+        modal={{
+          title: '确认删除',
+          description: '即将删除',
+          error: '内部错误',
+          onConfirm: vi.fn(),
+        }}
+        error="覆盖后的错误"
+        pending={false}
+        onClose={onClose}
+      />,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('覆盖后的错误')
+
+    unmount()
+    render(
+      <ConfirmActionModal
+        modal={{
+          title: '确认删除',
+          description: '即将删除',
+          onConfirm: vi.fn(),
+        }}
+        pending={false}
+        onClose={onClose}
+      />,
+    )
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
 })

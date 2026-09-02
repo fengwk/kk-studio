@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EnvironmentsPage } from '@/features/ai/environment/EnvironmentsPage'
 import { environmentService } from '@/shared/api/environment-service'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import { ApiError } from '@/shared/api/client'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
@@ -48,6 +49,10 @@ function environment(overrides: Partial<EnvironmentCardDTO>): EnvironmentCardDTO
 }
 
 describe('EnvironmentsPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('renders environment cards with status capabilities and skills', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       {
@@ -274,5 +279,119 @@ describe('EnvironmentsPage', () => {
     expect(capabilityRow!.querySelectorAll('.meta-chip')).toHaveLength(4)
     expect(within(capabilityRow!).getByText('+2')).toBeInTheDocument()
     expect(capabilityRow!.querySelector('.meta-chips')).toHaveAttribute('title', 'a, b, c, d, e')
+  })
+
+  // 验证 Environment update 发生 HTTP 409 冲突时通过 ConflictPresenter 呈现，点击刷新后关闭过期编辑弹窗并拉取最新列表，绝不自动重试
+  it('handles 409 conflict on update and resets stale edit modal on explicit refresh without auto-replay', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'old-name', version: '1' }),
+    ])
+    vi.mocked(environmentService.updateEnvironment).mockRejectedValue(
+      new ApiError('版本冲突', 409, 'CONFLICT', {
+        reason: 'version_conflict',
+        detail: 'Environment version modified concurrently',
+      }),
+    )
+    renderPage()
+
+    const editBtn = await screen.findByRole('button', { name: '编辑环境' })
+    await user.click(editBtn)
+
+    const input = screen.getByRole('textbox', { name: /环境名称/ })
+    await user.clear(input)
+    await user.type(input, 'new-name')
+    await user.click(screen.getByRole('button', { name: '确认' }))
+
+    // 冲突弹窗展示且不提供自动重试按钮
+    const conflictModal = await screen.findByRole('alertdialog', { name: '持久状态已变化' })
+    expect(within(conflictModal).getByText(/version_conflict/)).toBeInTheDocument()
+    expect(within(conflictModal).getByText('Environment version modified concurrently')).toBeInTheDocument()
+    expect(within(conflictModal).queryByRole('button', { name: '重试' })).toBeNull()
+
+    // 点击刷新：重置 stale modal 并触发权威重新拉取
+    const listCallsBefore = vi.mocked(environmentService.listEnvironments).mock.calls.length
+    await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog', { name: '持久状态已变化' })).toBeNull()
+      expect(screen.queryByRole('dialog', { name: '编辑环境' })).toBeNull()
+    })
+    expect(vi.mocked(environmentService.listEnvironments).mock.calls.length).toBeGreaterThan(listCallsBefore)
+    expect(environmentService.updateEnvironment).toHaveBeenCalledTimes(1)
+  })
+
+  // 验证 Environment rotate 失败时在确认弹窗中可见展示错误（防止静默失败），并在 409 时走共享 ConflictPresenter 语义
+  it('shows visible error on rotate token failure and handles 409 conflict refresh', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'my-box', version: '1' }),
+    ])
+    vi.mocked(environmentService.rotateToken).mockRejectedValueOnce(
+      new Error('token rotation internal failure'),
+    )
+    renderPage()
+
+    const rotateBtn = await screen.findByRole('button', { name: '重新生成 Token' })
+    await user.click(rotateBtn)
+
+    const modal = await screen.findByRole('alertdialog', { name: '重新生成 Token' })
+    const confirmBtn = within(modal).getByRole('button', { name: '重新生成 Token' })
+    await user.click(confirmBtn)
+
+    // 非 409 失败在确认弹窗内可见展示
+    expect(await within(modal).findByRole('alert')).toHaveTextContent('token rotation internal failure')
+
+    // 下一次测试 409 冲突
+    vi.mocked(environmentService.rotateToken).mockRejectedValueOnce(
+      new ApiError('冲突', 409, 'CONFLICT', { reason: 'stale_version', detail: 'Token rotation conflict' }),
+    )
+    await user.click(confirmBtn)
+
+    const conflictModal = await screen.findByRole('alertdialog', { name: '持久状态已变化' })
+    expect(within(conflictModal).getByText(/stale_version/)).toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: '重新生成 Token' })).toBeNull()
+
+    await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog', { name: '持久状态已变化' })).toBeNull()
+    })
+  })
+
+  // 验证 Environment delete 失败时在确认弹窗内可见展示错误，并在 409 冲突时呈现 ConflictPresenter
+  it('shows visible error on delete failure and handles 409 conflict refresh', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'to-delete', version: '1' }),
+    ])
+    vi.mocked(environmentService.deleteEnvironment).mockRejectedValueOnce(
+      new Error('delete failed due to locked resources'),
+    )
+    renderPage()
+
+    const deleteBtn = await screen.findByRole('button', { name: '删除环境' })
+    await user.click(deleteBtn)
+
+    const modal = await screen.findByRole('alertdialog', { name: '删除环境' })
+    const confirmBtn = within(modal).getByRole('button', { name: '删除环境' })
+    await user.click(confirmBtn)
+
+    // 非 409 失败在弹窗内展示
+    expect(await within(modal).findByRole('alert')).toHaveTextContent('delete failed due to locked resources')
+
+    // 409 冲突切换到 ConflictPresenter
+    vi.mocked(environmentService.deleteEnvironment).mockRejectedValueOnce(
+      new ApiError('版本冲突', 409, 'CONFLICT', { reason: 'version_conflict', detail: 'Already deleted or modified' }),
+    )
+    await user.click(confirmBtn)
+
+    const conflictModal = await screen.findByRole('alertdialog', { name: '持久状态已变化' })
+    expect(within(conflictModal).getByText(/version_conflict/)).toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: '删除环境' })).toBeNull()
+
+    await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog', { name: '持久状态已变化' })).toBeNull()
+    })
   })
 })

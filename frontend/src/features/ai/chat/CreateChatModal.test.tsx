@@ -138,7 +138,7 @@ describe('CreateChatModal', () => {
       </QueryClientProvider>,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Environment' }))
+    await user.click(screen.getByRole('button', { name: '工作区路径' }))
     const directory = await screen.findByRole('region', { name: 'dev 目录' })
     await user.click(within(directory).getByRole('button', { name: /^使用当前/ }))
 
@@ -166,7 +166,7 @@ describe('CreateChatModal', () => {
       </QueryClientProvider>,
     )
 
-    const envButton = screen.getByRole('button', { name: 'Environment' })
+    const envButton = screen.getByRole('button', { name: '工作区路径' })
     expect(envButton).toBeDisabled()
     expect(screen.getByText('当前 Agent 未绑定环境，无法选择工作区路径。')).toBeInTheDocument()
   })

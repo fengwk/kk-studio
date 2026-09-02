@@ -794,18 +794,6 @@ export const aiCatalog = {
     'en-US': '(None)',
     'zh-CN': '（无）',
   },
-  'ai.chat.environmentUnavailable': {
-    'en-US': 'Unavailable',
-    'zh-CN': '不可用',
-  },
-  'ai.chat.selectEnvironment': {
-    'en-US': 'Select Environment',
-    'zh-CN': '选择 Environment',
-  },
-  'ai.chat.noEnvironments': {
-    'en-US': 'No READY Environments',
-    'zh-CN': '暂无 READY Environment',
-  },
   'ai.chat.selected': {
     'en-US': 'Selected',
     'zh-CN': '已选',
@@ -851,8 +839,8 @@ export const aiCatalog = {
     'zh-CN': '新对话',
   },
   'ai.chat.blankDescription': {
-    'en-US': 'Send a message to create a new Thread; /agent changes the visible Chat setting, /environment chooses this pane’s draft Environment, and /thread reuses an existing Thread.',
-    'zh-CN': '输入后创建新 Thread；/agent 修改当前 Chat 设置，/environment 选择当前 pane 的 Environment 草稿，/thread 复用已有 Thread。',
+    'en-US': 'Send a message to create a new Thread; /agent changes the visible Chat setting, /environment chooses this pane’s draft workspace path, and /thread reuses an existing Thread.',
+    'zh-CN': '输入后创建新 Thread；/agent 修改当前 Chat 设置，/environment 选择当前 pane 的工作目录草稿，/thread 复用已有 Thread。',
   },
   'ai.chat.scope': {
     'en-US': 'Scope',

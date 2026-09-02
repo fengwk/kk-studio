@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { McpServersPage } from '@/features/ai/mcp/McpServersPage'
 import { mcpServerService } from '@/shared/api/mcp-server-service'
 import type { McpServerDTO } from '@/shared/api/contracts/ai-mcp'
+import { ApiError } from '@/shared/api/client'
 
 vi.mock('@/shared/api/mcp-server-service', () => ({
   mcpServerService: {
@@ -45,6 +46,10 @@ function server(overrides: Partial<McpServerDTO>): McpServerDTO {
 }
 
 describe('McpServersPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('renders configured MCP servers with status and details', async () => {
     vi.mocked(mcpServerService.pageServers).mockResolvedValue({
       pageNumber: 1,
@@ -163,5 +168,121 @@ describe('McpServersPage', () => {
     await user.click(confirmBtn)
 
     expect(mcpServerService.deleteServer).toHaveBeenCalledWith('srv-1', '1')
+  })
+
+  // 验证 MCP Server update 发生 409 冲突时通过 ConflictPresenter 展示，点击刷新后重置编辑弹窗并刷新列表，不自动重放
+  it('handles 409 conflict on server update and resets stale edit modal on explicit refresh', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 100,
+      totalCount: 1,
+      results: [server({ id: 'srv-1', name: 'filesystem', version: '1' })],
+    })
+    vi.mocked(mcpServerService.updateServer).mockRejectedValue(
+      new ApiError('冲突', 409, 'CONFLICT', { reason: 'version_conflict', detail: 'MCP Server version conflict' }),
+    )
+    renderPage()
+
+    const editBtn = await screen.findByRole('button', { name: '编辑 MCP 服务' })
+    await user.click(editBtn)
+
+    const urlInput = screen.getByRole('textbox', { name: /Endpoint URL/ })
+    await user.clear(urlInput)
+    await user.type(urlInput, 'http://localhost:8088/mcp')
+    await user.click(screen.getByRole('button', { name: '确认' }))
+
+    const conflictModal = await screen.findByRole('alertdialog', { name: '持久状态已变化' })
+    expect(within(conflictModal).getByText(/version_conflict/)).toBeInTheDocument()
+    expect(within(conflictModal).getByText('MCP Server version conflict')).toBeInTheDocument()
+    expect(within(conflictModal).queryByRole('button', { name: '重试' })).toBeNull()
+
+    const listCallsBefore = vi.mocked(mcpServerService.pageServers).mock.calls.length
+    await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog', { name: '持久状态已变化' })).toBeNull()
+      expect(screen.queryByRole('dialog', { name: '编辑 MCP 服务' })).toBeNull()
+    })
+    expect(vi.mocked(mcpServerService.pageServers).mock.calls.length).toBeGreaterThan(listCallsBefore)
+    expect(mcpServerService.updateServer).toHaveBeenCalledTimes(1)
+  })
+
+  // 验证 MCP Server 工具刷新失败时在页面顶部 banner 区域可见展示（不静默），并在 409 冲突时呈现 ConflictPresenter
+  it('shows visible banner error on refresh failure and handles 409 conflict refresh', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 100,
+      totalCount: 1,
+      results: [server({ id: 'srv-1', name: 'filesystem', version: '1' })],
+    })
+    vi.mocked(mcpServerService.refreshServer).mockRejectedValueOnce(
+      new Error('refresh tool discover timeout'),
+    )
+    renderPage()
+
+    const refreshBtn = await screen.findByRole('button', { name: '刷新工具' })
+    await user.click(refreshBtn)
+
+    // 非 409 失败在页面 banner 区域可见展示
+    const banner = await screen.findByRole('alert')
+    expect(banner).toHaveTextContent('refresh tool discover timeout')
+    await user.click(within(banner).getByRole('button', { name: '关闭' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    // 409 冲突展示 ConflictPresenter
+    vi.mocked(mcpServerService.refreshServer).mockRejectedValueOnce(
+      new ApiError('冲突', 409, 'CONFLICT', { reason: 'stale_version', detail: 'Server modified during discovery' }),
+    )
+    await user.click(refreshBtn)
+
+    const conflictModal = await screen.findByRole('alertdialog', { name: '持久状态已变化' })
+    expect(within(conflictModal).getByText(/stale_version/)).toBeInTheDocument()
+
+    await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog', { name: '持久状态已变化' })).toBeNull()
+    })
+  })
+
+  // 验证 MCP Server 删除失败时在确认弹窗中展示错误，并在 409 冲突时呈现 ConflictPresenter
+  it('shows visible error on server delete failure and handles 409 conflict refresh', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 100,
+      totalCount: 1,
+      results: [server({ id: 'srv-1', name: 'filesystem', version: '1' })],
+    })
+    vi.mocked(mcpServerService.deleteServer).mockRejectedValueOnce(
+      new Error('server delete permission denied'),
+    )
+    renderPage()
+
+    const deleteBtn = await screen.findByRole('button', { name: '删除 MCP 服务' })
+    await user.click(deleteBtn)
+
+    const modal = await screen.findByRole('alertdialog', { name: '删除 MCP 服务' })
+    const confirmBtn = within(modal).getByRole('button', { name: '删除 MCP 服务' })
+    await user.click(confirmBtn)
+
+    // 非 409 错误在弹窗中展示
+    expect(await within(modal).findByRole('alert')).toHaveTextContent('server delete permission denied')
+
+    // 409 冲突展示 ConflictPresenter 并关闭确认弹窗
+    vi.mocked(mcpServerService.deleteServer).mockRejectedValueOnce(
+      new ApiError('冲突', 409, 'CONFLICT', { reason: 'version_conflict', detail: 'Already deleted' }),
+    )
+    await user.click(confirmBtn)
+
+    const conflictModal = await screen.findByRole('alertdialog', { name: '持久状态已变化' })
+    expect(within(conflictModal).getByText(/version_conflict/)).toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: '删除 MCP 服务' })).toBeNull()
+
+    await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog', { name: '持久状态已变化' })).toBeNull()
+    })
   })
 })

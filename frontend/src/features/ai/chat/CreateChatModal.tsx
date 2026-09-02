@@ -98,11 +98,11 @@ export function CreateChatModal({
             />
           </label>
           <div className="form-group">
-            <FieldLabel>{t('ai.chat.environment')}</FieldLabel>
+            <FieldLabel>{t('ai.chat.workspacePath')}</FieldLabel>
             <button
               type="button"
               className="environment-binding-trigger"
-              aria-label={t('ai.chat.environment')}
+              aria-label={t('ai.chat.workspacePath')}
               aria-expanded={environmentPanelOpen}
               disabled={pending || !boundEnvironment}
               onClick={() => setEnvironmentPanelOpen((current) => !current)}

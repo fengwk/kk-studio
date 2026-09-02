@@ -5,9 +5,8 @@ import { translate } from '@/shared/i18n'
  * Environment binding 的只读形状。
  */
 export interface EnvironmentBindingShape {
-  environmentId?: string
+  environmentId: string
   environmentName?: string
-  name?: string
   workspacePath: string
 }
 
@@ -46,7 +45,7 @@ function clean(value?: string | null): string {
 export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadStatusModel {
   const segments: ThreadStatusSegment[] = []
   const binding = input.environment
-  const environmentName = binding ? clean(binding.environmentName || binding.name || binding.environmentId) : ''
+  const environmentName = binding ? clean(binding.environmentName || binding.environmentId) : ''
   const environmentWorkspacePath = binding ? clean(binding.workspacePath) : ''
   if (environmentName && environmentWorkspacePath) {
     const fullWorkspace = workspaceDisplayPath(environmentWorkspacePath)
