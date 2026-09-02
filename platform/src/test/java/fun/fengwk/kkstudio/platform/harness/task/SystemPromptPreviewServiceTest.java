@@ -115,7 +115,6 @@ class SystemPromptPreviewServiceTest {
                     "America/Los_Angeles",
                     "Local <dev> & tools.",
                     "/home/dev"),
-                List.of(),
                 List.of()));
     when(environments.find(environmentId)).thenReturn(Optional.of(liveEnvironment));
 

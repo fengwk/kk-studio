@@ -21,8 +21,7 @@ import java.util.stream.Stream;
  * <p>Daemon 的 main 源码只允许依赖 JDK、Jackson、JGit（{@code org.eclipse.jgit.ignore.FastIgnoreRule}）、{@code
  * harness.common}、{@code harness.environment} 以及本模块自身包。 严禁直接依赖 {@code
  * harness.tool}、runtime/platform/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK。LangChain4j
- * 只允许出现在技能与 MCP 适配器包中： {@code dev.langchain4j.skills.*} 仅限 {@code .../daemon/skill/}，{@code
- * dev.langchain4j.*} 其余仅限 {@code .../daemon/mcp/langchain/}。
+ * 只允许出现在技能适配器包中： {@code dev.langchain4j.skills.*} 仅限 {@code .../daemon/skill/}。
  */
 class DaemonModuleArchitectureTest {
 
@@ -50,7 +49,6 @@ class DaemonModuleArchitectureTest {
           "com.google.ai.");
 
   private static final String SKILL_ADAPTER_PACKAGE = "/skill/";
-  private static final String MCP_LANGCHAIN_ADAPTER_PACKAGE = "/mcp/langchain/";
   private static final Pattern STATIC_EXECUTOR_FIELD =
       Pattern.compile(
           "\\bstatic\\s+(?:final\\s+)?(?:[\\w.]*Executor(?:Service)?|"
@@ -192,13 +190,10 @@ class DaemonModuleArchitectureTest {
     return violations;
   }
 
-  /** LangChain4j 类型只允许出现在 daemon 技能/MCP 适配器包内。 */
+  /** LangChain4j 类型只允许出现在 daemon 技能适配器包内。 */
   private static boolean isAllowedLangChain4jImport(String imported, String relativePath) {
     if (imported.startsWith("dev.langchain4j.skills.")) {
       return relativePath.contains(SKILL_ADAPTER_PACKAGE);
-    }
-    if (imported.startsWith("dev.langchain4j.")) {
-      return relativePath.contains(MCP_LANGCHAIN_ADAPTER_PACKAGE);
     }
     return false;
   }

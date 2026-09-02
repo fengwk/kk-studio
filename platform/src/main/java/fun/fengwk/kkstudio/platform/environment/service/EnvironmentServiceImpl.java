@@ -10,8 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnectionStatus;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
@@ -25,8 +25,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentCapabilityDTO;
-import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentMcpServerDTO;
-import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentMcpToolDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentSkillDTO;
 
 import java.time.Clock;
@@ -256,7 +254,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
               clock.instant(),
               Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
       dto.setLastSeen(conn.lastSeenAt());
-      if (conn.status() == LiveEnvironmentStatus.READY && conn.daemonCapabilities() != null) {
+      if (conn.status() == EnvironmentConnectionStatus.READY && conn.daemonCapabilities() != null) {
         dto.setRootPath(conn.rootPath());
         dto.setSkills(
             conn.skills().stream()
@@ -268,31 +266,8 @@ public class EnvironmentServiceImpl implements EnvironmentService {
                       return sdto;
                     })
                 .toList());
-        dto.setMcpServers(
-            conn.mcpServers().stream()
-                .map(
-                    m -> {
-                      LiveEnvironmentMcpServerDTO mdto = new LiveEnvironmentMcpServerDTO();
-                      mdto.setName(m.name());
-                      mdto.setStatus(m.status().name());
-                      mdto.setError(m.error());
-                      mdto.setTools(
-                          m.tools().stream()
-                              .map(
-                                  t -> {
-                                    LiveEnvironmentMcpToolDTO tdto =
-                                        new LiveEnvironmentMcpToolDTO();
-                                    tdto.setName(t.name());
-                                    tdto.setDescription(t.description());
-                                    return tdto;
-                                  })
-                              .toList());
-                      return mdto;
-                    })
-                .toList());
       } else {
         dto.setSkills(List.of());
-        dto.setMcpServers(List.of());
       }
       dto.setCapabilities(
           conn.capabilities().stream()
@@ -308,7 +283,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       dto.setStatus("OFFLINE");
       dto.setReady(false);
       dto.setSkills(List.of());
-      dto.setMcpServers(List.of());
       dto.setCapabilities(List.of());
     }
     return dto;

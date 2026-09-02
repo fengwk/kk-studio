@@ -55,7 +55,6 @@ describe('useChatListController', () => {
         lastSeen: null,
         capabilities: [],
         skills: [],
-        mcpServers: [],
       },
     ]
     const { result } = renderHook(() => useChatListController(agents, true, environments), { wrapper })
@@ -105,7 +104,6 @@ describe('useChatListController', () => {
         lastSeen: null,
         capabilities: [],
         skills: [],
-        mcpServers: [],
       },
     ]
     const { result } = renderHook(() => useChatListController(agents, true, environments), { wrapper })

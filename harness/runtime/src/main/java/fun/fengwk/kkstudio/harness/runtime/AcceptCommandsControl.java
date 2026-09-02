@@ -428,8 +428,8 @@ final class AcceptCommandsControl {
 
   /**
    * THREAD 全新 batch 的 admission：stale cursor（head / next sequence 不匹配）必须确定性拒绝。SET_*（含
-   * SET_ENVIRONMENT）只入队、由 Reducer 于下一个 INPUT 边界收割，不参与 admission——即使 Thread 处于 live Model / Tool 或 有
-   * queued 消息 / THREAD Work 也照常接受。
+   * SET_WORKSPACE_PATH）只入队、由 Reducer 于下一个 INPUT 边界收割，不参与 admission——即使 Thread 处于 live Model / Tool
+   * 或 有 queued 消息 / THREAD Work 也照常接受。
    */
   private static void validateThreadBatchAdmission(
       AcceptCommandsTarget.Thread target, ThreadState thread) {

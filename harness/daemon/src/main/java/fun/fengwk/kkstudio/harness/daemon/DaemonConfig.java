@@ -15,11 +15,11 @@ import java.util.Objects;
 /**
  * Daemon 独立进程的连接与执行配置。
  *
- * <p>连接、身份、说明、environment root、skill 与 MCP 的唯一配置来源是 CLI：{@code --registration-token}、gateway
- * 连接参数、可选且唯一 {@code --note}、唯一 {@code --environment-root}、可重复 {@code --skill-dir} 与可选 {@code
- * --mcp-config}。{@code --registration-token} 是该 Environment 颁发的 HELLO 注册凭证。Daemon 不配置也不持有
- * Environment UUID，连接建立后由 Gateway 在 WELCOME 消息中下发。environment root 默认启动用户 canonical HOME；skill/MCP
- * 路径不使用服务端托管配置。{@code --note} 会进入受信任的模型 SYSTEM Prompt，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。
+ * <p>连接、身份、说明、environment root 与 skill 的唯一配置来源是 CLI：{@code --registration-token}、gateway 连接参数、可选且唯一
+ * {@code --note}、唯一 {@code --environment-root} 与可重复 {@code --skill-dir}。{@code
+ * --registration-token} 是该 Environment 颁发的 HELLO 注册凭证。Daemon 不配置也不持有 Environment UUID，连接建立后由
+ * Gateway 在 WELCOME 消息中下发。environment root 默认启动用户 canonical HOME；skill 路径不使用服务端托管配置。{@code --note}
+ * 会进入受信任的模型 SYSTEM Prompt，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。
  */
 public record DaemonConfig(
     URI gatewayUri,
@@ -30,8 +30,7 @@ public record DaemonConfig(
     Duration defaultToolTimeout,
     String note,
     Path environmentRoot,
-    List<Path> skillDirs,
-    Path mcpConfigPath) {
+    List<Path> skillDirs) {
 
   public DaemonConfig {
     gatewayUri = Objects.requireNonNull(gatewayUri, "gatewayUri");
@@ -54,7 +53,6 @@ public record DaemonConfig(
                 path ->
                     Objects.requireNonNull(path, "skillDirs element").toAbsolutePath().normalize())
             .toList();
-    mcpConfigPath = mcpConfigPath == null ? null : mcpConfigPath.toAbsolutePath().normalize();
   }
 
   /** 解析 CLI 参数。未给出 {@code --skill-dir} 时默认 {@code ~/.agents/skills}（仅当该目录存在时纳入）。 */
@@ -66,7 +64,6 @@ public record DaemonConfig(
     String reconnectInitial = null;
     String reconnectMax = null;
     String toolTimeout = null;
-    String mcpConfig = null;
     String environmentRoot = null;
     String note = null;
     List<Path> skillDirs = new ArrayList<>();
@@ -81,7 +78,6 @@ public record DaemonConfig(
         case "--reconnect-initial" -> reconnectInitial = requireArgValue(args, ++index, arg);
         case "--reconnect-max" -> reconnectMax = requireArgValue(args, ++index, arg);
         case "--tool-timeout" -> toolTimeout = requireArgValue(args, ++index, arg);
-        case "--mcp-config" -> mcpConfig = requireArgValue(args, ++index, arg);
         case "--note" -> {
           if (note != null) {
             throw new IllegalArgumentException("--note may only be specified once");
@@ -118,8 +114,7 @@ public record DaemonConfig(
         parseDuration(toolTimeout, Duration.ofMinutes(5)),
         note,
         environmentRoot == null ? defaultEnvironmentRoot() : Path.of(environmentRoot),
-        skillDirs,
-        mcpConfig == null ? null : Path.of(mcpConfig));
+        skillDirs);
   }
 
   /** 默认本地 skill 根目录：{@code ~/.agents/skills}。 */

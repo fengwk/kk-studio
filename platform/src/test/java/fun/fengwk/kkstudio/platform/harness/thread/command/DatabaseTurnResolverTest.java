@@ -99,8 +99,8 @@ import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnectionStatus;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -1207,8 +1207,6 @@ class DatabaseTurnResolverTest {
       case "lsp_goto_definition" -> BuiltinToolIds.LSP_GOTO_DEFINITION;
       case "lsp_workspace_symbols" -> BuiltinToolIds.LSP_WORKSPACE_SYMBOLS;
       case "lsp_java_decompile" -> BuiltinToolIds.LSP_JAVA_DECOMPILE;
-      case "mcp_list_tools" -> BuiltinToolIds.MCP_LIST_TOOLS;
-      case "mcp_call_tool" -> BuiltinToolIds.MCP_CALL_TOOL;
       case "load_skill" -> BuiltinToolIds.LOAD_SKILL;
       case TaskTool.NAME -> BuiltinToolIds.TASK;
       case "create_goal" -> BuiltinToolIds.GOAL_CREATE;
@@ -2000,7 +1998,7 @@ class DatabaseTurnResolverTest {
               environment.environmentId(),
               UUID.randomUUID(),
               UUID.randomUUID(),
-              LiveEnvironmentStatus.CONNECTING,
+              EnvironmentConnectionStatus.CONNECTING,
               null,
               NOW,
               NOW.plusSeconds(60));
@@ -2058,9 +2056,8 @@ class DatabaseTurnResolverTest {
               environment.environmentId(),
               UUID.randomUUID(),
               UUID.randomUUID(),
-              LiveEnvironmentStatus.READY,
-              new DaemonCapabilities(
-                  DaemonCapabilities.VERSION, environmentInfo, skills, List.of()),
+              EnvironmentConnectionStatus.READY,
+              new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo, skills),
               lastSeenAt,
               lastSeenAt.plusSeconds(60));
       when(environmentRegistry.find(environment.environmentId())).thenReturn(Optional.of(env));

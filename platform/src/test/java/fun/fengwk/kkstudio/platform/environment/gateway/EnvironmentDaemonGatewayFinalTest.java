@@ -38,9 +38,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCode
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerDescriptor;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerStatus;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpToolDescriptor;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
@@ -50,8 +47,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryEntry;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryListing;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnectionStatus;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
@@ -126,15 +123,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
           DaemonCapabilities.VERSION,
           new DaemonEnvironmentInfo(
               DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Linux environment.", "/home/dev"),
-          ADVERTISED_SKILLS,
-          List.of(
-              new DaemonMcpServerDescriptor(
-                  "fs",
-                  DaemonMcpServerStatus.READY,
-                  null,
-                  List.of(new DaemonMcpToolDescriptor("read_file", "Read a file"))),
-              new DaemonMcpServerDescriptor(
-                  "broken", DaemonMcpServerStatus.FAILED, "cannot connect", List.of())));
+          ADVERTISED_SKILLS);
 
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
@@ -540,7 +529,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     assertTrue(connection.closed);
     assertTrue(listener.error instanceof EnvironmentCapabilitySendUncertainException);
     assertEquals(
-        LiveEnvironmentStatus.CONNECTING,
+        EnvironmentConnectionStatus.CONNECTING,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
@@ -589,7 +578,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
                 ENVIRONMENT, request(fixture.descriptor), new RecordingListener()));
     assertTrue(connection.closed);
     assertEquals(
-        LiveEnvironmentStatus.CONNECTING,
+        EnvironmentConnectionStatus.CONNECTING,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
@@ -632,7 +621,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
 
     assertTrue(connection.closed);
     assertEquals(
-        LiveEnvironmentStatus.CONNECTING,
+        EnvironmentConnectionStatus.CONNECTING,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
@@ -666,14 +655,13 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     fixture.gateway.receive(connection.connectionId(), hello(0));
 
     var connecting = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
-    assertEquals(LiveEnvironmentStatus.CONNECTING, connecting.status());
+    assertEquals(EnvironmentConnectionStatus.CONNECTING, connecting.status());
     assertEquals(EnvironmentCapabilityCatalog.descriptors(), connecting.capabilities());
     assertTrue(connecting.skills().isEmpty());
-    assertTrue(connecting.mcpServers().isEmpty());
 
     fixture.gateway.receive(connection.connectionId(), ready(1, ENVIRONMENT_NAME));
     var ready = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
-    assertEquals(LiveEnvironmentStatus.READY, ready.status());
+    assertEquals(EnvironmentConnectionStatus.READY, ready.status());
     assertEquals(ADVERTISED_CAPABILITIES, ready.daemonCapabilities());
   }
 
@@ -687,15 +675,6 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     var registered = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
     assertEquals(ENVIRONMENT_NAME, registered.environmentId());
     assertEquals(ADVERTISED_SKILLS, registered.skills());
-    assertEquals(
-        List.of("fs", "broken"), registered.mcpServers().stream().map(s -> s.name()).toList());
-    assertEquals(DaemonMcpServerStatus.READY, registered.mcpServers().get(0).status());
-    assertEquals(
-        List.of("read_file"),
-        registered.mcpServers().get(0).tools().stream().map(t -> t.name()).toList());
-    assertEquals(DaemonMcpServerStatus.FAILED, registered.mcpServers().get(1).status());
-    assertEquals("cannot connect", registered.mcpServers().get(1).error());
-    assertTrue(registered.mcpServers().get(1).tools().isEmpty());
     assertEquals(EnvironmentCapabilityCatalog.descriptors(), registered.capabilities());
   }
 
@@ -922,7 +901,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         ENVIRONMENT_NAME,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().environmentId());
     assertEquals(
-        LiveEnvironmentStatus.READY,
+        EnvironmentConnectionStatus.READY,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(first.envelopes()));
   }
@@ -1041,7 +1020,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         messageTypes(connection.envelopes()));
     assertEquals(1, connection.closeAfterFlushCount);
     assertEquals(
-        LiveEnvironmentStatus.CONNECTING,
+        EnvironmentConnectionStatus.CONNECTING,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
@@ -1057,7 +1036,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.ERROR),
         messageTypes(connection.envelopes()));
     assertEquals(
-        LiveEnvironmentStatus.CONNECTING,
+        EnvironmentConnectionStatus.CONNECTING,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 

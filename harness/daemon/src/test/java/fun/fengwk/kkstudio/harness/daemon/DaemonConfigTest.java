@@ -222,26 +222,6 @@ class DaemonConfigTest {
     assertEquals(
         List.of(first.toAbsolutePath().normalize(), second.toAbsolutePath().normalize()),
         config.skillDirs());
-    assertNull(config.mcpConfigPath());
-  }
-
-  /** {@code --mcp-config} 是可选的 CLI 参数。 */
-  @Test
-  void acceptsMcpConfigCli(@TempDir Path configDir) throws Exception {
-    Path configFile = configDir.resolve("mcp.json");
-    Files.writeString(configFile, "{\"servers\":[]}");
-
-    DaemonConfig cliConfig =
-        DaemonConfig.fromArgs(
-            new String[] {
-              "--gateway-uri",
-              "ws://gateway.example/daemon",
-              "--registration-token",
-              "secret",
-              "--mcp-config",
-              configFile.toString()
-            });
-    assertEquals(configFile.toAbsolutePath().normalize(), cliConfig.mcpConfigPath());
   }
 
   /** 当部署缺少 gateway 所需的密钥时，启动失败关闭。 */
@@ -288,8 +268,7 @@ class DaemonConfigTest {
         defaultToolTimeout,
         null,
         DaemonConfig.defaultEnvironmentRoot(),
-        skillDirs,
-        null);
+        skillDirs);
   }
 
   private static void assertInvalidNoteArgs(String... noteArgs) {

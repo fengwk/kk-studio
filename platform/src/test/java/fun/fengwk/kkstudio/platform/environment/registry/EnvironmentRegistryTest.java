@@ -38,7 +38,6 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
           DaemonCapabilities.VERSION,
           new DaemonEnvironmentInfo(
               DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"),
-          List.of(),
           List.of());
 
   private final UUID node1 = UUID.randomUUID();
@@ -79,7 +78,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertEquals(DEV, env.environmentId());
     assertEquals(node1, env.ownerNodeId());
     assertEquals(acquired.leaseToken(), env.leaseToken());
-    assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
+    assertEquals(EnvironmentConnectionStatus.CONNECTING, env.status());
     assertNull(env.daemonCapabilities());
     assertFalse(env.isReady(Instant.now(), LEASE_DURATION));
   }
@@ -115,7 +114,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     EnvironmentConnection env = registry2.find(DEV).orElseThrow();
     assertEquals(node2, env.ownerNodeId());
     assertEquals(acquired2.leaseToken(), env.leaseToken());
-    assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
+    assertEquals(EnvironmentConnectionStatus.CONNECTING, env.status());
   }
 
   @Test
@@ -126,12 +125,12 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     // 错误的 leaseToken 无法标记 READY
     assertFalse(registry1.markReady(DEV, UUID.randomUUID(), CAPABILITIES, LEASE_DURATION));
     EnvironmentConnection connecting = registry1.find(DEV).orElseThrow();
-    assertEquals(LiveEnvironmentStatus.CONNECTING, connecting.status());
+    assertEquals(EnvironmentConnectionStatus.CONNECTING, connecting.status());
 
     // 正确的 (node1, token1) 成功标记 READY
     assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
     EnvironmentConnection ready = registry1.find(DEV).orElseThrow();
-    assertEquals(LiveEnvironmentStatus.READY, ready.status());
+    assertEquals(EnvironmentConnectionStatus.READY, ready.status());
     assertNotNull(ready.daemonCapabilities());
     assertTrue(ready.isReady(Instant.now(), LEASE_DURATION));
   }
@@ -159,12 +158,12 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
 
     // 错误 token 的断开不会影响现有行
     assertFalse(registry1.disconnect(DEV, UUID.randomUUID(), LEASE_DURATION));
-    assertEquals(LiveEnvironmentStatus.READY, registry1.find(DEV).orElseThrow().status());
+    assertEquals(EnvironmentConnectionStatus.READY, registry1.find(DEV).orElseThrow().status());
 
     // 正确 token 断开 -> 状态回退为 CONNECTING，capabilities 置空，但行仍然保留
     assertTrue(registry1.disconnect(DEV, token1, LEASE_DURATION));
     EnvironmentConnection env = registry1.find(DEV).orElseThrow();
-    assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
+    assertEquals(EnvironmentConnectionStatus.CONNECTING, env.status());
     assertNull(env.daemonCapabilities());
     assertEquals(token1, env.leaseToken());
   }

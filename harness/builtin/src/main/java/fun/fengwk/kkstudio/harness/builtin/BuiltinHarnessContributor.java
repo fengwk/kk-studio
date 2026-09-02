@@ -139,20 +139,6 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
         "lsp_java_decompile",
         EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
         ToolSideEffect.READ_ONLY);
-    registerEnvironment(
-        registrar,
-        "environment.mcp-list-tools",
-        BuiltinToolIds.MCP_LIST_TOOLS,
-        "mcp_list_tools",
-        EnvironmentCapabilityIds.MCP_LIST,
-        ToolSideEffect.READ_ONLY);
-    registerEnvironment(
-        registrar,
-        "environment.mcp-call-tool",
-        BuiltinToolIds.MCP_CALL_TOOL,
-        "mcp_call_tool",
-        EnvironmentCapabilityIds.MCP_CALL,
-        ToolSideEffect.NON_IDEMPOTENT);
 
     // Internal server-side tools
     registrar.registerTool(

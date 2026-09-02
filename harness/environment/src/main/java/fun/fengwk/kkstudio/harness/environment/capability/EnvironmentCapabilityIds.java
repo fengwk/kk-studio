@@ -21,8 +21,6 @@ public final class EnvironmentCapabilityIds {
       new EnvironmentCapabilityId("lsp.workspace-symbols");
   public static final EnvironmentCapabilityId LSP_JAVA_DECOMPILE =
       new EnvironmentCapabilityId("lsp.java-decompile");
-  public static final EnvironmentCapabilityId MCP_LIST = new EnvironmentCapabilityId("mcp.list");
-  public static final EnvironmentCapabilityId MCP_CALL = new EnvironmentCapabilityId("mcp.call");
   public static final EnvironmentCapabilityId SKILL_LOAD =
       new EnvironmentCapabilityId("skill.load");
 

@@ -31,9 +31,6 @@ public class EnvironmentCardDTO {
   /** daemon 通告的技能列表。 */
   private List<LiveEnvironmentSkillDTO> skills;
 
-  /** daemon 通告的 MCP servers。 */
-  private List<LiveEnvironmentMcpServerDTO> mcpServers;
-
   /** daemon 实际 root display path。 */
   private String rootPath;
 

@@ -16,8 +16,6 @@ public final class BuiltinToolIds {
   public static final AgentToolId LSP_WORKSPACE_SYMBOLS =
       new AgentToolId("base.lsp-workspace-symbols");
   public static final AgentToolId LSP_JAVA_DECOMPILE = new AgentToolId("base.lsp-java-decompile");
-  public static final AgentToolId MCP_LIST_TOOLS = new AgentToolId("base.mcp-list-tools");
-  public static final AgentToolId MCP_CALL_TOOL = new AgentToolId("base.mcp-call-tool");
   public static final AgentToolId LOAD_SKILL = new AgentToolId("base.load-skill");
   public static final AgentToolId TASK = new AgentToolId("base.task");
   public static final AgentToolId GOAL_CREATE = new AgentToolId("base.goal.create");

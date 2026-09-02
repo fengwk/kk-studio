@@ -73,7 +73,7 @@ environmentId + workspacePath
 capabilityId / capabilityVersion / inputSchema / timeout
 ```
 
-[`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 当前 catalog version 为 `1`，按稳定顺序冻结 14 个 capability：
+[`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 当前 catalog version 为 `1`，按稳定顺序冻结 12 个 capability：
 
 ```text
 fs.read
@@ -87,8 +87,6 @@ fs.list-directory
 lsp.goto-definition
 lsp.workspace-symbols
 lsp.java-decompile
-mcp.list
-mcp.call
 skill.load
 ```
 

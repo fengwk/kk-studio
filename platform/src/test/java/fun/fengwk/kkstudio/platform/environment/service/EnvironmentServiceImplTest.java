@@ -17,15 +17,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerDescriptor;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerStatus;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpToolDescriptor;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnectionStatus;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
@@ -127,18 +124,12 @@ class EnvironmentServiceImplTest {
             EnvironmentId.of(ENV_ID),
             UUID.randomUUID(),
             UUID.randomUUID(),
-            LiveEnvironmentStatus.READY,
+            EnvironmentConnectionStatus.READY,
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,
                 new DaemonEnvironmentInfo(
                     DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Note", "/home/dev"),
-                List.of(new DaemonSkillDescriptor("dev", "dev skill")),
-                List.of(
-                    new DaemonMcpServerDescriptor(
-                        "fs",
-                        DaemonMcpServerStatus.READY,
-                        null,
-                        List.of(new DaemonMcpToolDescriptor("read", "read file"))))),
+                List.of(new DaemonSkillDescriptor("dev", "dev skill"))),
             NOW,
             NOW.plusSeconds(60));
 
