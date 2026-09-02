@@ -20,6 +20,6 @@ public class HarnessCommandBatchDTO {
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("unknown command batch field: " + name);
+    throw new HarnessRequestFormatException("unknown command batch field: " + name);
   }
 }

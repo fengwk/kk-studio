@@ -17,6 +17,6 @@ public class EnvironmentBindingDTO {
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("unknown environment binding field: " + name);
+    throw new HarnessRequestFormatException("unknown environment binding field: " + name);
   }
 }

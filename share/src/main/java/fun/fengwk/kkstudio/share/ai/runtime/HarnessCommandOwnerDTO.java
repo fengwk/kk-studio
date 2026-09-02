@@ -26,6 +26,6 @@ public class HarnessCommandOwnerDTO {
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("unknown command owner field: " + name);
+    throw new HarnessRequestFormatException("unknown command owner field: " + name);
   }
 }

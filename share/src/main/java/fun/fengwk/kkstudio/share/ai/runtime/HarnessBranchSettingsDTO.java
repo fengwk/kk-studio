@@ -20,6 +20,6 @@ public class HarnessBranchSettingsDTO {
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("unknown branch settings field: " + name);
+    throw new HarnessRequestFormatException("unknown branch settings field: " + name);
   }
 }

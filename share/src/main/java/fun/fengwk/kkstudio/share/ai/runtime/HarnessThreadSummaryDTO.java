@@ -31,6 +31,6 @@ public class HarnessThreadSummaryDTO {
 
   @JsonAnySetter
   public void rejectUnknownField(String field, Object value) {
-    throw new IllegalArgumentException("unknown harness thread summary field: " + field);
+    throw new HarnessRequestFormatException("unknown harness thread summary field: " + field);
   }
 }

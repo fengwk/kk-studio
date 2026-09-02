@@ -17,6 +17,6 @@ public class HarnessModelSelectionDTO {
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("unknown model selection field: " + name);
+    throw new HarnessRequestFormatException("unknown model selection field: " + name);
   }
 }
