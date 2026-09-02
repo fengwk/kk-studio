@@ -36,8 +36,8 @@ import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.platform.environment.query.EnvironmentQueryCoordinator;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnectionStatus;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
@@ -231,7 +231,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
 
     EnvironmentConnection env = registryNode1.find(DEV).orElseThrow();
-    assertEquals(EnvironmentConnectionStatus.CONNECTING, env.status());
+    assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
     assertEquals(node1, env.ownerNodeId());
     assertNotNull(env.leaseToken());
 
@@ -245,7 +245,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
-    assertEquals(EnvironmentConnectionStatus.READY, readyEnv.status());
+    assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
     assertNotNull(readyEnv.daemonCapabilities());
   }
 
@@ -307,7 +307,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     EnvironmentConnection env = registryNode2.find(DEV).orElseThrow();
     assertEquals(node2, env.ownerNodeId());
-    assertEquals(EnvironmentConnectionStatus.CONNECTING, env.status());
+    assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
 
     // 检查 conn2 收到 WELCOME
     assertEquals(1, conn2.envelopes().size());
@@ -340,13 +340,13 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
-    assertEquals(EnvironmentConnectionStatus.READY, readyEnv.status());
+    assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
 
     // 断开连接
     gatewayNode1.close(conn1.connectionId());
 
     EnvironmentConnection disconnectedEnv = registryNode1.find(DEV).orElseThrow();
-    assertEquals(EnvironmentConnectionStatus.CONNECTING, disconnectedEnv.status());
+    assertEquals(LiveEnvironmentStatus.CONNECTING, disconnectedEnv.status());
     assertNull(disconnectedEnv.daemonCapabilities());
     assertEquals(readyEnv.leaseToken(), disconnectedEnv.leaseToken());
     assertEquals(node1, disconnectedEnv.ownerNodeId());

@@ -17,7 +17,7 @@ public record EnvironmentConnection(
     EnvironmentId environmentId,
     UUID ownerNodeId,
     UUID leaseToken,
-    EnvironmentConnectionStatus status,
+    LiveEnvironmentStatus status,
     DaemonCapabilities daemonCapabilities,
     Instant lastSeenAt,
     Instant leaseUntil) {
@@ -27,7 +27,7 @@ public record EnvironmentConnection(
     ownerNodeId = Objects.requireNonNull(ownerNodeId, "ownerNodeId");
     leaseToken = Objects.requireNonNull(leaseToken, "leaseToken");
     status = Objects.requireNonNull(status, "status");
-    if (status == EnvironmentConnectionStatus.READY) {
+    if (status == LiveEnvironmentStatus.READY) {
       daemonCapabilities = Objects.requireNonNull(daemonCapabilities, "READY daemonCapabilities");
     }
     lastSeenAt = Objects.requireNonNull(lastSeenAt, "lastSeenAt");
@@ -48,7 +48,7 @@ public record EnvironmentConnection(
 
   public boolean isReady(Instant now, Duration heartbeatTimeout) {
     Instant current = now != null ? now : Instant.now();
-    return status == EnvironmentConnectionStatus.READY
+    return status == LiveEnvironmentStatus.READY
         && !leaseUntil.isBefore(current)
         && (heartbeatTimeout == null || !lastSeenAt.isBefore(current.minus(heartbeatTimeout)));
   }

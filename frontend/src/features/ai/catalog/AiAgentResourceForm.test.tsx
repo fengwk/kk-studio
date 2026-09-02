@@ -380,7 +380,7 @@ describe('AgentForm current contracts', () => {
     expect(screen.getByText('暂无候选 Skills')).toBeInTheDocument()
   })
 
-  it('keeps fixed tool candidates independent of Environment capabilities and MCP summaries', () => {
+  it('keeps fixed tool candidates independent of Environment capabilities', () => {
     render(
       <AgentForm
         draft={emptyAgentDraft(modelWithVariants())}
@@ -412,7 +412,6 @@ describe('AgentForm current contracts', () => {
     expect(screen.getByLabelText(/bash/)).toBeInTheDocument()
     expect(screen.getByLabelText(/read/)).toBeInTheDocument()
     expect(screen.queryByLabelText(/env-only-tool/)).not.toBeInTheDocument()
-    expect(screen.queryByLabelText(/mcp_only_tool/)).not.toBeInTheDocument()
   })
 
   it('resets the browsing source when a different Agent editor opens', async () => {

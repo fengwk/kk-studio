@@ -47,8 +47,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryEntry;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryListing;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnectionStatus;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
@@ -529,7 +529,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     assertTrue(connection.closed);
     assertTrue(listener.error instanceof EnvironmentCapabilitySendUncertainException);
     assertEquals(
-        EnvironmentConnectionStatus.CONNECTING,
+        LiveEnvironmentStatus.CONNECTING,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
@@ -578,7 +578,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
                 ENVIRONMENT, request(fixture.descriptor), new RecordingListener()));
     assertTrue(connection.closed);
     assertEquals(
-        EnvironmentConnectionStatus.CONNECTING,
+        LiveEnvironmentStatus.CONNECTING,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
@@ -621,7 +621,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
 
     assertTrue(connection.closed);
     assertEquals(
-        EnvironmentConnectionStatus.CONNECTING,
+        LiveEnvironmentStatus.CONNECTING,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
@@ -655,13 +655,13 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     fixture.gateway.receive(connection.connectionId(), hello(0));
 
     var connecting = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
-    assertEquals(EnvironmentConnectionStatus.CONNECTING, connecting.status());
+    assertEquals(LiveEnvironmentStatus.CONNECTING, connecting.status());
     assertEquals(EnvironmentCapabilityCatalog.descriptors(), connecting.capabilities());
     assertTrue(connecting.skills().isEmpty());
 
     fixture.gateway.receive(connection.connectionId(), ready(1, ENVIRONMENT_NAME));
     var ready = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
-    assertEquals(EnvironmentConnectionStatus.READY, ready.status());
+    assertEquals(LiveEnvironmentStatus.READY, ready.status());
     assertEquals(ADVERTISED_CAPABILITIES, ready.daemonCapabilities());
   }
 
@@ -901,7 +901,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         ENVIRONMENT_NAME,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().environmentId());
     assertEquals(
-        EnvironmentConnectionStatus.READY,
+        LiveEnvironmentStatus.READY,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(first.envelopes()));
   }
@@ -1020,7 +1020,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         messageTypes(connection.envelopes()));
     assertEquals(1, connection.closeAfterFlushCount);
     assertEquals(
-        EnvironmentConnectionStatus.CONNECTING,
+        LiveEnvironmentStatus.CONNECTING,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 
@@ -1036,7 +1036,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.ERROR),
         messageTypes(connection.envelopes()));
     assertEquals(
-        EnvironmentConnectionStatus.CONNECTING,
+        LiveEnvironmentStatus.CONNECTING,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
   }
 

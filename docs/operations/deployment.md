@@ -359,7 +359,7 @@ handle 和 presigned URL contract，不把 bucket/key 暴露给 Frontend。
 Environment Daemon 是独立 JVM 进程，连接 App 的
 `/api/ai/environment/daemon/v2` WebSocket gateway。App 负责：
 
-- Daemon handshake、Environment binding、Tool/Skill/MCP capability projection；
+- Daemon handshake、Environment binding、Tool/Skill capability projection；
 - inbound/outbound frame size、queue capacity、send timeout；
 - `/api/ai/environment` 的 public READY projection。
 

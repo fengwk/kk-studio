@@ -258,11 +258,10 @@ public class EnvironmentRegistry {
       EnvironmentId id = EnvironmentId.of((UUID) rs.getObject("environment_id"));
       UUID owner = (UUID) rs.getObject("owner_node_id");
       UUID leaseToken = (UUID) rs.getObject("lease_token");
-      EnvironmentConnectionStatus status =
-          EnvironmentConnectionStatus.valueOf(rs.getString("status"));
+      LiveEnvironmentStatus status = LiveEnvironmentStatus.valueOf(rs.getString("status"));
       String runtimeInfoJson = rs.getString("runtime_info");
       DaemonCapabilities capabilities = null;
-      if (status == EnvironmentConnectionStatus.READY && runtimeInfoJson != null) {
+      if (status == LiveEnvironmentStatus.READY && runtimeInfoJson != null) {
         capabilities = capabilitiesCodec.decode(runtimeInfoJson);
       }
       Instant lastSeenAt = rs.getObject("last_seen_at", OffsetDateTime.class).toInstant();

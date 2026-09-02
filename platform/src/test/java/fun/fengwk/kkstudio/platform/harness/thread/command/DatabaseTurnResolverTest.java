@@ -99,8 +99,8 @@ import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnectionStatus;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -1998,7 +1998,7 @@ class DatabaseTurnResolverTest {
               environment.environmentId(),
               UUID.randomUUID(),
               UUID.randomUUID(),
-              EnvironmentConnectionStatus.CONNECTING,
+              LiveEnvironmentStatus.CONNECTING,
               null,
               NOW,
               NOW.plusSeconds(60));
@@ -2056,7 +2056,7 @@ class DatabaseTurnResolverTest {
               environment.environmentId(),
               UUID.randomUUID(),
               UUID.randomUUID(),
-              EnvironmentConnectionStatus.READY,
+              LiveEnvironmentStatus.READY,
               new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo, skills),
               lastSeenAt,
               lastSeenAt.plusSeconds(60));

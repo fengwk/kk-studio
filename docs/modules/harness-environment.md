@@ -119,9 +119,9 @@ PARTIAL* -> exactly one terminal
 
 远端 `FAILED` 和 `CANCELLED` 分别映射为 `EnvironmentCapabilityFailedException` 与 `EnvironmentCapabilityCancelledException`；terminal 后的 late event 必须丢弃，cancel 必须透传而不能重排 partial/terminal。
 
-### Daemon protocol v5
+### Daemon protocol v6
 
-[`DaemonProtocol.VERSION`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java) 固定为 `5`。当前唯一消息集合：
+[`DaemonProtocol.VERSION`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java) 固定为 `6`。当前唯一消息集合：
 
 ```text
 HELLO / WELCOME / READY / HEARTBEAT
@@ -132,7 +132,7 @@ CANCEL / CANCELLED / ACK / ERROR
 [`DaemonEnvelope`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelope.java) 固定字段：
 
 ```text
-protocolVersion / messageType / environmentName
+protocolVersion / messageType / environmentId
 invocationId? / sequence / payload
 ```
 
@@ -141,9 +141,9 @@ invocationId? / sequence / payload
 握手与执行主序列：
 
 ```text
-Daemon -> HELLO(protocolVersion=5, catalog version)
-Gateway -> WELCOME
-Daemon -> READY(capabilities version=5)
+Daemon -> HELLO(protocolVersion=6, registrationToken, catalog version)
+Gateway -> WELCOME(environmentId)
+Daemon -> READY(capabilities version=6)
 Daemon -> HEARTBEAT*
 
 Gateway -> INVOKE
@@ -162,13 +162,12 @@ Daemon -> CANCELLED | 已冻结 terminal replay
 [`DaemonCapabilitiesCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java) 编解码 READY payload：
 
 ```text
-version=5
-environment: operatingSystem / timeZone / note
+version=6
+environment: operatingSystem / timeZone / note / rootPath
 skills: name / description
-mcpServers: name / status / bounded error / tool summaries
 ```
 
-READY 不暴露本地绝对路径、headers、environment values、command、URL 或完整 MCP schema。
+READY 不暴露本地绝对路径、headers、environment values、command 或 URL。
 
 [`DaemonCapabilityInvokeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodec.java) 的字段固定为：
 

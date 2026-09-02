@@ -191,7 +191,7 @@ errors；`409` 由 `isConflictError` 识别，只有 `errors.reason` 精确匹�
 | [base.ts](../../frontend/src/shared/api/contracts/base.ts) | `ResultEnvelope`、分页、时间、canonical decimal、`CatalogVersion`、`CanvasVersion` |
 | [ai-runtime.ts](../../frontend/src/shared/api/contracts/ai-runtime.ts) | Session/Entry/Thread、branch settings、command、stop、approval、model/tool invocation、snapshot、command batch |
 | [ai-catalog.ts](../../frontend/src/shared/api/contracts/ai-catalog.ts) | Provider、Model、Agent、Tool catalog 与 config |
-| [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | READY Environment、Capability/Skill/MCP、workspace binding 与目录 |
+| [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | READY Environment、Capability/Skill、workspace binding 与目录 |
 | [studio.ts](../../frontend/src/shared/api/contracts/studio.ts) | Canvas document、node/resource/group/link、snapshot、patch、version event、typed command |
 | [storage.ts](../../frontend/src/shared/api/contracts/storage.ts) | PENDING/READY upload、presigned PUT、render-time presigned URL |
 | [comfyui.ts](../../frontend/src/shared/api/contracts/comfyui.ts) | Workflow、input binding、run、job、cancel |
@@ -249,7 +249,7 @@ AI feature 由 `CatalogRuntime`、`ChatRuntime`、`AgentPane` 和
   在成功后失效对应 query，冲突沿用 ConflictPresenter。
 - Chat list 使用 `ChatRuntime` + `ChatCardsPanel`；创建 Chat 时先选择 READY
   Environment，再明确确认 workspace，保存完整 `{name, workspacePath}`。
-- Environment 页面读取 live Environment、原子 Capability、Skill、MCP 和目录；Capability 只展示
+- Environment 页面读取 live Environment、原子 Capability、Skill 和目录；Capability 只展示
   canonical `id`，不把 capability ID 当作 model Tool name；`"."` 是 workspace root 的 wire 表示，UI 显示为 `@/`。
 - `builtin.ai` 的 `task` renderer 只展示宿主投影的 message；approval 和
   状态机操作仍由宿主 controller 负责。
