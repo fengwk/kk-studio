@@ -27,6 +27,9 @@ registerCase({
   id: 'model.attempt_failure_visibility',
   level: 'L1',
   title: '模型失败 attempt partial 可见、持久恢复且不进入 Provider 上下文',
+  // 本 case 把 Provider baseUrl 指向 case 内自建的宿主 127.0.0.1 mock；App 在
+  // distributed 容器内无法回连宿主 loopback，因此必须排除 host-mock capability。
+  requires: ['host-mock'],
   docs: '本地 node:http OpenAI Chat Completions SSE mock：先建立 /api/events/v1 Thread 订阅并收到 ack，首次 Provider attempt 输出确定性 partial 后断连，后续自动重试成功；轮询活跃 snapshot 的 modelAttemptFailures，断言 MODEL_ATTEMPT_FAILURE durable 顺序/精确 payload、失败 partial 不拼入 assistant，第二 turn 的 Provider messages 排除失败 partial/thinking/error',
   async run(ctx) {
     const suffix = cid().slice(0, 8)

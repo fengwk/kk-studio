@@ -16,6 +16,7 @@
  *   npm --prefix frontend run e2e:matrix
  */
 
+import { execFileSync } from 'node:child_process'
 import {
   copyFileSync,
   cpSync,
@@ -31,6 +32,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { httpJson, pageResults } from './lib/http.mjs'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
+import { createBaseUrls, createNodeCall } from './lib/distributed.mjs'
+import { redactSecrets } from './lib/redact.mjs'
 import { ALL_CASES } from './lib/registry.mjs'
 import { createDurationTimer } from './lib/time.mjs'
 
@@ -56,6 +59,7 @@ await import('./cases/real.mjs')
 class CaseContext {
   constructor({
     baseUrl,
+    baseUrlB,
     daemonEnv,
     real,
     withTools,
@@ -74,6 +78,9 @@ class CaseContext {
     this.reportDir = reportDir
     this.caseId = null
     this.vars = {}
+    // distributed capability：只在同时给出两个节点 URL 时可用。
+    this.baseUrls = createBaseUrls(baseUrl, baseUrlB)
+    if (this.baseUrls) this.callNode = createNodeCall(this.baseUrls)
   }
 
   artifactsDir() {
@@ -157,12 +164,14 @@ function writeSummaryAndReport(
     durationMs,
     baseUrl: args.baseUrl,
     frontendUrl: args.frontendUrl || null,
+    topology: args.distributed ? 'distributed-a-b' : 'single',
     flags: {
       real: args.real,
       withTools: args.withTools,
       withBranch: args.withBranch,
       withCanvasStorage: args.withCanvasStorage,
       withCanvasFunction: args.withCanvasFunction,
+      distributed: args.distributed,
       only: args.only,
       level: args.level,
     },
@@ -184,9 +193,13 @@ function writeSummaryAndReport(
   lines.push('')
   lines.push(`- Started: \`${startedAt}\``)
   lines.push(`- Finished: \`${finishedAt}\``)
+  lines.push(`- Topology: \`${args.distributed ? 'distributed-a-b' : 'single'}\``)
   lines.push(`- Backend: \`${args.baseUrl}\``)
+  if (args.distributed) lines.push(`- Backend B: \`${args.baseUrlB}\``)
   if (args.frontendUrl) lines.push(`- Frontend: \`${args.frontendUrl}\``)
-  lines.push(`- Flags: real=${args.real} tools=${args.withTools} branch=${args.withBranch}`)
+  lines.push(
+    `- Flags: real=${args.real} tools=${args.withTools} branch=${args.withBranch} distributed=${args.distributed}`,
+  )
   lines.push(
     `- Totals: total=${results.length} pass=${passed.length} fail=${failed.length} skip=${skipped.length}`,
   )
@@ -277,9 +290,42 @@ function maybeCopyRuntimeLogs(runDir) {
   }
 }
 
+/** distributed 运行把双 app/daemon 容器日志复制进报告 logs/（只读容器，不影响栈）。 */
+function maybeCopyDistributedContainerLogs(runDir) {
+  const services = ['app-a', 'app-b', 'daemon-a', 'daemon-b']
+  const dest = path.join(runDir, 'logs')
+  mkdirSync(dest, { recursive: true })
+  for (const service of services) {
+    const logs = distributedContainerLogs(service)
+    if (logs === null) continue
+    writeFileSync(path.join(dest, `distributed-${service}.log`), redactSecrets(logs), 'utf8')
+  }
+}
+
+function distributedContainerLogs(service) {
+  try {
+    return execFileSync(
+      'docker',
+      [
+        'compose',
+        '-f',
+        path.join(REPO_ROOT, 'deploy/distributed/compose.yaml'),
+        'logs',
+        '--no-color',
+        '--no-log-prefix',
+        service,
+      ],
+      { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'ignore'] },
+    )
+  } catch {
+    return null
+  }
+}
+
 function parseArgs(argv) {
   const args = {
     baseUrl: 'http://127.0.0.1:18081',
+    baseUrlB: '',
     frontendUrl: '',
     daemonEnv: 'tool-e2e',
     real: false,
@@ -287,6 +333,7 @@ function parseArgs(argv) {
     withBranch: false,
     withCanvasStorage: false,
     withCanvasFunction: false,
+    distributed: false,
     only: [],
     level: [],
     list: false,
@@ -300,6 +347,9 @@ function parseArgs(argv) {
     switch (a) {
       case '--base-url':
         args.baseUrl = next()
+        break
+      case '--base-url-b':
+        args.baseUrlB = next()
         break
       case '--frontend-url':
         args.frontendUrl = next()
@@ -323,6 +373,9 @@ function parseArgs(argv) {
       case '--with-canvas-function':
         args.withCanvasFunction = true
         args.withCanvasStorage = true
+        break
+      case '--distributed':
+        args.distributed = true
         break
       case '--only':
         args.only.push(next())
@@ -350,6 +403,13 @@ function parseArgs(argv) {
         throw new Error(`unknown arg: ${a}`)
     }
   }
+  // distributed 是正交 capability：显式开关 + 双 URL 缺一不可。
+  if (args.distributed && !args.baseUrlB) {
+    throw new Error('--distributed requires --base-url-b')
+  }
+  if (!args.distributed && args.baseUrlB) {
+    throw new Error('--base-url-b requires --distributed')
+  }
   return args
 }
 
@@ -360,6 +420,10 @@ function caseEnabled(c, args) {
   if (c.requires.has('branch') && !args.withBranch) return false
   if (c.requires.has('canvas-storage') && !args.withCanvasStorage) return false
   if (c.requires.has('canvas-function') && !args.withCanvasFunction) return false
+  if (c.requires.has('distributed') && !args.distributed) return false
+  // host-mock 表示 case 依赖宿主 127.0.0.1 上自建的 mock server；单实例路径
+  // （宿主 jar）天然满足，distributed（容器 App）无法回连宿主 loopback。
+  if (c.requires.has('host-mock') && args.distributed) return false
   if (args.only.length && !args.only.includes(c.id)) return false
   if (args.level.length && !args.level.includes(c.level)) return false
   return true
@@ -380,8 +444,8 @@ async function main(argv) {
   const args = parseArgs(argv)
   if (args.help) {
     console.log(`Usage: node scripts/e2e/run-matrix.mjs [options]
-  --base-url --frontend-url --real --with-tools --with-branch --with-canvas-storage
-  --with-canvas-function
+  --base-url --base-url-b --frontend-url --real --with-tools --with-branch
+  --with-canvas-storage --with-canvas-function --distributed
   --only <id> --level L1 --list --docs --report-root DIR`)
     return 0
   }
@@ -419,6 +483,7 @@ async function main(argv) {
 
   const ctx = new CaseContext({
     baseUrl: args.baseUrl,
+    baseUrlB: args.distributed ? args.baseUrlB : '',
     daemonEnv: args.daemonEnv,
     real: args.real,
     withTools: args.withTools,
@@ -429,7 +494,10 @@ async function main(argv) {
   })
   if (args.frontendUrl) ctx.vars.frontendUrl = args.frontendUrl.replace(/\/$/, '')
 
-  console.log(`Running ${selected.length}/${ALL_CASES.length} cases against ${args.baseUrl}`)
+  console.log(
+    `Running ${selected.length}/${ALL_CASES.length} cases against ${args.baseUrl}` +
+      (args.distributed ? ` and ${args.baseUrlB} (distributed)` : ''),
+  )
   const results = []
   for (const c of selected) {
     console.log(`\n==> [${c.level}] ${c.id}: ${c.title}`)
@@ -483,6 +551,7 @@ async function main(argv) {
 
   if (runDir) {
     maybeCopyRuntimeLogs(runDir)
+    if (args.distributed) maybeCopyDistributedContainerLogs(runDir)
     const reportPath = writeSummaryAndReport(
       runDir,
       runId,
