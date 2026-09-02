@@ -61,11 +61,9 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.harness.contributor.ScopedBranchView;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -99,7 +97,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final ProviderFactories providerFactories;
   private final HarnessCatalog catalog;
   private final EnvironmentRegistry environmentRegistry;
-  private final SystemSettingsSnapshot snapshot;
   private final CompactionConfigProvider compactionConfigProvider;
   private final SubagentConfigProvider subagentConfigProvider;
   private final AgentPromptComposer promptComposer;
@@ -117,7 +114,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
       ProviderFactories providerFactories,
       HarnessCatalog catalog,
       EnvironmentRegistry environmentRegistry,
-      SystemSettingsSnapshot snapshot,
       CompactionConfigProvider compactionConfigProvider,
       SubagentConfigProvider subagentConfigProvider,
       AgentPromptComposer promptComposer,
@@ -131,7 +127,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
     this.catalog = Objects.requireNonNull(catalog, "catalog");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
-    this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
     this.subagentConfigProvider =
@@ -205,8 +200,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     EnvironmentBinding environmentBinding = resolveEnvironmentBinding(agent, settings);
     CurrentEnvironmentContext currentEnvironment =
         resolveCurrentEnvironment(environmentBinding, now);
-    List<SkillBinding> skillBindings =
-        resolveSkills(agentConfig.getSkills(), environmentBinding, now);
+    List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), environmentBinding);
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents(), path);
     List<AgentToolId> toolIds = resolveToolIds(agentConfig, path);
     List<ToolBinding> toolBindings = resolveTools(environmentBinding, toolIds);
@@ -449,8 +443,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /** Agent skills 只从最新 Agent config 读取，且必须由最新选中的 Environment 精确提供。 */
-  private List<SkillBinding> resolveSkills(
-      List<String> skillNames, EnvironmentBinding binding, Instant now) {
+  private List<SkillBinding> resolveSkills(List<String> skillNames, EnvironmentBinding binding) {
     if (skillNames.isEmpty()) {
       return List.of();
     }
@@ -467,8 +460,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
           "agent skills require the latest selected environment which is not live: "
               + environmentId);
     }
-    if (!environment.isReady(
-        now, Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis()))) {
+    if (!environmentRegistry.hasReadyLease(environmentId)) {
       throw rejection(
           "agent skills require the latest selected environment which is not ready: "
               + environmentId);

@@ -670,9 +670,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
   void readyRegistersAdvertisedSkillsAndStaticCapabilities() {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-skills");
-    assertTrue(
-        fixture.environmentRegistry.isReady(
-            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
+    assertTrue(fixture.environmentRegistry.hasReadyLease(ENVIRONMENT_NAME));
     var registered = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
     assertEquals(ENVIRONMENT_NAME, registered.environmentId());
     assertEquals(ADVERTISED_SKILLS, registered.skills());
@@ -924,9 +922,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     assertEquals(
         ENVIRONMENT_NAME,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().environmentId());
-    assertTrue(
-        fixture.environmentRegistry.isReady(
-            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
+    assertTrue(fixture.environmentRegistry.hasReadyLease(ENVIRONMENT_NAME));
   }
 
   @Test
@@ -947,9 +943,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isPresent());
 
     fixture.gateway.receive(second.connectionId(), ready(1));
-    assertTrue(
-        fixture.environmentRegistry.isReady(
-            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
+    assertTrue(fixture.environmentRegistry.hasReadyLease(ENVIRONMENT_NAME));
     RecordingListener secondListener = new RecordingListener();
     fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), secondListener);
     assertEquals(
@@ -991,9 +985,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
   void loadSkillUsesSameHeartbeatFreshnessRuleAsInvokeAndQuery() {
     Fixture fixture = fixture();
     fixture.connectReady("connection-skill-stale");
-    assertTrue(
-        fixture.environmentRegistry.isReady(
-            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
+    assertTrue(fixture.environmentRegistry.hasReadyLease(ENVIRONMENT_NAME));
     fixture.jdbc.update(
         "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
         ENVIRONMENT_NAME.value());
@@ -1194,9 +1186,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
   void heartbeatKeepsEnvironmentAliveAfterReady() {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-heartbeat");
-    assertTrue(
-        fixture.environmentRegistry.isReady(
-            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
+    assertTrue(fixture.environmentRegistry.hasReadyLease(ENVIRONMENT_NAME));
     fixture.gateway.receive(connection.connectionId(), heartbeat(2));
     assertNotNull(fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().lastSeenAt());
   }

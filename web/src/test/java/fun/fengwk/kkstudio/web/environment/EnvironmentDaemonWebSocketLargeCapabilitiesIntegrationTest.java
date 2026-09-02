@@ -27,15 +27,12 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -47,8 +44,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@code READY}（skills）帧。
  *
  * <p>若未调高缓冲区配置，内嵌 Tomcat 在收到超长帧时会立刻以 close code 1009 关闭连接，导致实时注册表永远无法进入 READY。本测试发送一个携带远超默认阈值的厚重
- * skills payload 的 {@code READY} 帧，并断言 {@link EnvironmentRegistry#isReady(EnvironmentId)} 在截止时间内变为
- * {@code true}。任何未来删除或弱化缓冲区初始化逻辑的改动都会在此处暴露，表现为注册表始终不进入 READY 且伴随 close code 1009。
+ * skills payload 的 {@code READY} 帧，并断言 {@link EnvironmentRegistry#hasReadyLease(EnvironmentId)}
+ * 在截止时间内变为 {@code true}。任何未来删除或弱化缓冲区初始化逻辑的改动都会在此处暴露，表现为注册表始终不进入 READY 且伴随 close code 1009。
  */
 class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPostgresTestSupport {
 
@@ -63,7 +60,6 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   @LocalServerPort private int port;
 
   @Autowired private EnvironmentRegistry registry;
-  @Autowired private SystemSettingsSnapshot snapshot;
   @Autowired private JdbcTemplate jdbcTemplate;
 
   @BeforeEach
@@ -138,15 +134,13 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   private boolean awaitReady() throws InterruptedException {
     long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-    Duration heartbeatTimeout =
-        Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis());
     while (System.nanoTime() < deadlineNanos) {
-      if (registry.isReady(ENVIRONMENT_ID, Instant.now(), heartbeatTimeout)) {
+      if (registry.hasReadyLease(ENVIRONMENT_ID)) {
         return true;
       }
       Thread.sleep(50);
     }
-    return registry.isReady(ENVIRONMENT_ID, Instant.now(), heartbeatTimeout);
+    return registry.hasReadyLease(ENVIRONMENT_ID);
   }
 
   private static String readMessageType(String envelopeJson) throws Exception {

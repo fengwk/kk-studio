@@ -314,16 +314,6 @@ public class EnvironmentRegistry {
     return jdbcTemplate.query(LIST_SQL, new EnvironmentConnectionRowMapper());
   }
 
-  /** 判定环境当前是否可用（READY 状态且租约未过期）。 */
-  public boolean isReady(EnvironmentId environmentId, Instant now, Duration heartbeatTimeout) {
-    return find(environmentId).map(env -> env.isReady(now, heartbeatTimeout)).orElse(false);
-  }
-
-  /** 判定环境是否有活跃租约（无论 CONNECTING 还是 READY）。 */
-  public boolean isOnline(EnvironmentId environmentId, Instant now) {
-    return find(environmentId).map(env -> env.isOnline(now)).orElse(false);
-  }
-
   /** 数据库现在时判定指定环境是否有任意活跃租约（用于 admin rotateToken/delete 在锁行下的安全准入）。 */
   public boolean hasActiveLease(EnvironmentId environmentId) {
     if (environmentId == null) {
