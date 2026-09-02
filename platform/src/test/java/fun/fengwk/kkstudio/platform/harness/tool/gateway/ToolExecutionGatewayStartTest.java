@@ -77,7 +77,7 @@ class ToolExecutionGatewayStartTest {
   }
 
   @Test
-  void environmentRouteUsesFrozenEnvironmentNameOnlyAndSameDisplayNamesAreIrrelevant() {
+  void environmentRouteUsesFrozenEnvironmentIdOnlyAndSameDisplayNamesAreIrrelevant() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     ExecutorService executor = Executors.newSingleThreadExecutor();

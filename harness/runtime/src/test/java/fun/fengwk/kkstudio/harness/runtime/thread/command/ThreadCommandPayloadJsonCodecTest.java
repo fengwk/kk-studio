@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -33,8 +32,8 @@ class ThreadCommandPayloadJsonCodecTest {
             new CustomMessageCommandPayload(system("system")),
             new SetAgentCommandPayload("coding"),
             new SetModelCommandPayload(MODEL),
-            new SetEnvironmentCommandPayload(EnvironmentBindings.binding(ENV)),
-            new SetEnvironmentCommandPayload(null));
+            new SetWorkspacePathCommandPayload(ENV),
+            new SetWorkspacePathCommandPayload(null));
 
     for (ThreadCommandPayload payload : payloads) {
       assertEquals(payload, codec.decode(payload.type(), codec.encode(payload)));
@@ -55,9 +54,10 @@ class ThreadCommandPayloadJsonCodecTest {
         codec.encode(new SetModelCommandPayload(MODEL)));
     assertEquals("{\"agentName\":\"coding\"}", codec.encode(new SetAgentCommandPayload("coding")));
     assertEquals(
-        "{\"environment\":{\"name\":\"" + ENV + "\",\"workspacePath\":\".\"}}",
-        codec.encode(new SetEnvironmentCommandPayload(EnvironmentBindings.binding(ENV))));
-    assertEquals("{\"environment\":null}", codec.encode(new SetEnvironmentCommandPayload(null)));
+        "{\"workspacePath\":\"" + ENV + "\"}",
+        codec.encode(new SetWorkspacePathCommandPayload(ENV)));
+    assertEquals(
+        "{\"workspacePath\":null}", codec.encode(new SetWorkspacePathCommandPayload(null)));
   }
 
   @Test
@@ -99,29 +99,30 @@ class ThreadCommandPayloadJsonCodecTest {
     // 旧 wire 的 name-only 字段（environmentName）不再是合法输入，必须拒绝。
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":5}"));
+        () -> codec.decode(ThreadCommandType.SET_WORKSPACE_PATH, "{\"environmentName\":5}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"Not-A-Name\"}"));
+                ThreadCommandType.SET_WORKSPACE_PATH, "{\"environmentName\":\"Not-A-Name\"}"));
     // 新 wire：binding 对象必须恰好 {name, workspacePath} 且两字段都严格校验。
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                ThreadCommandType.SET_ENVIRONMENT, "{\"environment\":{\"name\":\"" + ENV + "\"}}"));
+                ThreadCommandType.SET_WORKSPACE_PATH,
+                "{\"environment\":{\"name\":\"" + ENV + "\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                ThreadCommandType.SET_ENVIRONMENT,
+                ThreadCommandType.SET_WORKSPACE_PATH,
                 "{\"environment\":{\"name\":\"Not-A-Name\",\"workspacePath\":\".\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                ThreadCommandType.SET_ENVIRONMENT,
+                ThreadCommandType.SET_WORKSPACE_PATH,
                 "{\"environment\":{\"name\":\"" + ENV + "\",\"workspacePath\":\"/abs\"}}"));
     assertThrows(
         IllegalArgumentException.class,
@@ -150,7 +151,7 @@ class ThreadCommandPayloadJsonCodecTest {
   void rejectsOldEnvironmentIdFieldAndWrongTypeDispatch() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentId\":\"env-1\"}"));
+        () -> codec.decode(ThreadCommandType.SET_WORKSPACE_PATH, "{\"environmentId\":\"env-1\"}"));
     String userJson = codec.encode(new UserMessageCommandPayload(user("hello")));
     assertThrows(
         IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, userJson));
@@ -206,18 +207,18 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(NullPointerException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, null));
   }
 
+  /** SET_WORKSPACE_PATH 的显式 null 与 canonical path round-trip 语义。 */
   @Test
-  void preservesEnvironmentClearSemantics() {
-    SetEnvironmentCommandPayload cleared =
-        (SetEnvironmentCommandPayload)
-            codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environment\":null}");
-    assertNull(cleared.environment());
-    SetEnvironmentCommandPayload bound =
-        (SetEnvironmentCommandPayload)
+  void preservesWorkspacePathClearSemantics() {
+    SetWorkspacePathCommandPayload cleared =
+        (SetWorkspacePathCommandPayload)
+            codec.decode(ThreadCommandType.SET_WORKSPACE_PATH, "{\"workspacePath\":null}");
+    assertNull(cleared.workspacePath());
+    SetWorkspacePathCommandPayload bound =
+        (SetWorkspacePathCommandPayload)
             codec.decode(
-                ThreadCommandType.SET_ENVIRONMENT,
-                "{\"environment\":{\"name\":\"" + ENV + "\",\"workspacePath\":\".\"}}");
-    assertEquals(EnvironmentBindings.binding(ENV), bound.environment());
+                ThreadCommandType.SET_WORKSPACE_PATH, "{\"workspacePath\":\"" + ENV + "\"}");
+    assertEquals(ENV, bound.workspacePath());
   }
 
   private static AgentMessage user(String text) {

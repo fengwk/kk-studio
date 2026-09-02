@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
@@ -73,10 +72,7 @@ class AgentPromptComposerTest {
   /** Environment、skill 与 subagent 动态值在进入 XML 模板前全部转义。 */
   @Test
   void escapesXmlInDynamicValues() {
-    EnvironmentName name = mock(EnvironmentName.class);
-    when(name.value()).thenReturn("env<&\"'");
     EnvironmentBinding binding = mock(EnvironmentBinding.class);
-    when(binding.environmentName()).thenReturn(name);
     when(binding.workspacePath()).thenReturn("sub/<&\"'");
     CurrentEnvironmentContext environment =
         new CurrentEnvironmentContext(
@@ -92,7 +88,6 @@ class AgentPromptComposerTest {
             List.of(skill("a&b", "uses <angle> and \"quotes\" and 'apos'")),
             List.of(new SubagentBinding("x<y>", "desc & more")));
 
-    assertTrue(result.contains("- name: env&lt;&amp;&quot;&apos;"), result);
     assertTrue(result.contains("- workspace: sub/&lt;&amp;&quot;&apos;"), result);
     assertTrue(
         result.contains(

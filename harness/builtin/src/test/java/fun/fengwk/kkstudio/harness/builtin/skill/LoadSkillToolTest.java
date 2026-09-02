@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -44,9 +44,9 @@ import java.util.concurrent.atomic.AtomicReference;
 class LoadSkillToolTest {
 
   private static final EnvironmentBinding PLATFORM =
-      new EnvironmentBinding(new EnvironmentName("platform"), ".");
+      new EnvironmentBinding(EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), ".");
   private static final EnvironmentBinding LOCAL_DEV =
-      new EnvironmentBinding(new EnvironmentName("local-dev"), ".");
+      new EnvironmentBinding(EnvironmentId.parse("22222222-2222-2222-2222-222222222222"), ".");
 
   /** descriptor 的 name/version/renderer/side-effect/timeout 与单参数 schema 声明及 environment 要求。 */
   @Test

@@ -24,7 +24,7 @@
 ### Non-goals
 
 - 不定义 `AgentToolId`、`AgentToolDefinition`、`ToolCall` 或 `ToolResult`（位于 [`harness-tool`](harness-tool.md)）。
-- 不定义 `EnvironmentName`、`EnvironmentBinding`、Capability catalog、Daemon protocol（位于 [`harness-environment`](harness-environment.md)）。
+- 不定义 `EnvironmentId`、`EnvironmentBinding`、Capability catalog、Daemon protocol（位于 [`harness-environment`](harness-environment.md)）。
 - 不定义执行 SPI（`Tool` / `EnvironmentCapability`）或网关路由。
 - 不引入 Spring、JDBC、数据库事务或模型 Provider SDK。
 

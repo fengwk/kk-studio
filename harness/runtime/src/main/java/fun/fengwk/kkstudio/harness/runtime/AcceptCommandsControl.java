@@ -9,8 +9,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetWorkspacePathCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -34,10 +34,10 @@ import java.util.UUID;
  */
 final class AcceptCommandsControl {
 
-  /** SET_* prefix 的固定顺序：SET_ENVIRONMENT -&gt; SET_AGENT -&gt; SET_MODEL，每类至多一次、全部在消息之前。 */
+  /** SET_* prefix 的固定顺序：SET_WORKSPACE_PATH -&gt; SET_AGENT -&gt; SET_MODEL，每类至多一次、全部在消息之前。 */
   private static final List<ThreadCommandType> SET_PREFIX_ORDER =
       List.of(
-          ThreadCommandType.SET_ENVIRONMENT,
+          ThreadCommandType.SET_WORKSPACE_PATH,
           ThreadCommandType.SET_AGENT,
           ThreadCommandType.SET_MODEL);
 
@@ -444,7 +444,7 @@ final class AcceptCommandsControl {
   }
 
   /**
-   * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_ENVIRONMENT -&gt; SET_AGENT -&gt;
+   * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_WORKSPACE_PATH -&gt; SET_AGENT -&gt;
    * SET_MODEL）、至多一次且全部出现在消息之前；初始 target 必须恰有一条 user-like message 结尾（SYSTEM CUSTOM_MESSAGE
    * 只允许在前缀）；THREAD 要么是恰一条 SYSTEM CUSTOM_MESSAGE steering，要么是不含 SYSTEM CUSTOM_MESSAGE、<b>恰有一条</b>末尾
    * user-like 的用户 batch。非法 batch 是请求校验错误，抛 {@link IllegalArgumentException} 而非业务冲突。
@@ -459,7 +459,7 @@ final class AcceptCommandsControl {
       ThreadCommandPayload payload = command.payload();
       if (payload instanceof SetAgentCommandPayload
           || payload instanceof SetModelCommandPayload
-          || payload instanceof SetEnvironmentCommandPayload) {
+          || payload instanceof SetWorkspacePathCommandPayload) {
         if (sawMessage) {
           throw invalidBatch(target, "SET_* commands must precede all messages");
         }

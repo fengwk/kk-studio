@@ -4,17 +4,13 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
-/**
- * 单个 Entry branch 的完整设置快照。
- *
- * <p>{@code environment} 是可空的完整 Environment binding（{@code {name, workspacePath}}，null 表示未绑定）， 是
- * durable 快照中的唯一路由身份。
- */
+/** 单个 Entry branch 的设置快照。 */
 @Data
 public class HarnessBranchSettingsDTO {
-  /** 可空的完整 Environment binding：canonical 路由名称 + canonical workspace path；null 表示未绑定 Environment。 */
+
+  /** 可空的 workspace path；null 表示未绑定 workspace。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private EnvironmentBindingDTO environment;
+  private String workspacePath;
 
   /** 必填 Agent definition 名（canonical text，≤128 字符）。 */
   private String agentName;

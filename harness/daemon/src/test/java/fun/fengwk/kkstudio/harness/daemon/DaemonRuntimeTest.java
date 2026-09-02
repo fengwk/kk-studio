@@ -47,7 +47,7 @@ import fun.fengwk.kkstudio.harness.daemon.skill.SkillLoadCapability;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
@@ -102,7 +102,8 @@ import java.util.concurrent.atomic.AtomicReference;
 class DaemonRuntimeTest {
 
   private static final long ASYNC_TEST_TIMEOUT_SECONDS = 5;
-  private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("environment");
+  private static final EnvironmentId ENVIRONMENT_ID =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final Path ENVIRONMENT_ROOT = Path.of(System.getProperty("user.dir"));
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
@@ -117,9 +118,9 @@ class DaemonRuntimeTest {
     }
   }
 
-  /** 名称已被另一 live daemon 持有是终态冲突：daemon 进入 FAILED、停止重连并释放终止闩。 */
+  /** 注册身份已被另一 live daemon 持有是终态冲突：daemon 进入 FAILED、停止重连并释放终止闩。 */
   @Test
-  void nameConflictErrorIsTerminalFailureWithoutReconnect() throws Exception {
+  void registrationRejectedErrorIsTerminalFailureWithoutReconnect() throws Exception {
     FakeTransport transport = new FakeTransport();
     runtime = runtime(transport, new TestCapability());
 
@@ -131,13 +132,13 @@ class DaemonRuntimeTest {
     transport.receiveRaw(
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
-            + ",\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
-            + "\"sequence\":1,\"payload\":{\"code\":\"ENVIRONMENT_NAME_CONFLICT\","
+            + ",\"messageType\":\"ERROR\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
+            + "\"sequence\":1,\"payload\":{\"code\":\"REGISTRATION_REJECTED\","
             + "\"message\":\"environment already bound to another active daemon\"}}");
 
     assertEquals(DaemonRuntimeState.FAILED, runtime.state());
     assertEquals(DaemonRuntimeState.FAILED, runtime.awaitTermination());
-    assertTrue(runtime.failureReason().contains("environment name is held by another live daemon"));
+    assertTrue(runtime.failureReason().contains("environment registration is rejected"));
 
     // FAILED 后不得安排新的重连：连接计数保持现状，不会再有新的 HELLO。
     transport.awaitNoNewConnection(500);
@@ -158,7 +159,7 @@ class DaemonRuntimeTest {
     transport.receiveRaw(
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
-            + ",\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+            + ",\"messageType\":\"ERROR\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
             + "\"sequence\":1,\"payload\":{\"code\":\"RETRY_LATER\","
             + "\"message\":\"server busy, retry later\"}}");
 
@@ -181,7 +182,7 @@ class DaemonRuntimeTest {
     transport.receiveRaw(
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
-            + ",\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+            + ",\"messageType\":\"ERROR\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
             + "\"sequence\":1,\"payload\":{\"message\":\"informational\"}}");
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
@@ -198,8 +199,7 @@ class DaemonRuntimeTest {
     List<DaemonEnvelope> handshake = transport.takeMessages(2);
     assertMessageTypes(handshake, HELLO, READY);
     JsonNode hello = codec.readPayload(handshake.get(0));
-    assertEquals("test-gateway-token", hello.path("gatewayToken").asText());
-    assertEquals("daemon", hello.path("daemonId").asText());
+    assertEquals("test-registration-token", hello.path("registrationToken").asText());
     assertEquals(DaemonProtocol.VERSION, hello.path("protocolVersion").asInt());
     assertEquals(
         EnvironmentCapabilityCatalog.version(), hello.path("capabilityCatalogVersion").asText());
@@ -226,13 +226,11 @@ class DaemonRuntimeTest {
     DaemonConfig config =
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
             List.of(),
@@ -255,13 +253,11 @@ class DaemonRuntimeTest {
     DaemonConfig config =
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
             List.of(),
@@ -285,13 +281,11 @@ class DaemonRuntimeTest {
     DaemonConfig config =
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
             List.of(),
@@ -370,13 +364,11 @@ class DaemonRuntimeTest {
       assertEquals(
           new DaemonConfig(
                   URI.create("ws://localhost/gateway"),
-                  new EnvironmentName("environment"),
-                  "daemon",
+                  "test-registration-token",
                   Duration.ofMinutes(1),
                   Duration.ZERO,
                   Duration.ofSeconds(1),
                   Duration.ofSeconds(10),
-                  "test-gateway-token",
                   null,
                   ENVIRONMENT_ROOT,
                   List.of(),
@@ -486,7 +478,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"arguments\":{},\"timeoutMillis\":100}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
 
@@ -494,7 +486,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{\"capabilityId\":\"test\","
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":2,\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":1,\"arguments\":{},\"timeoutMillis\":100}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
 
@@ -502,7 +494,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":3,\"payload\":{\"capabilityId\":\"test\","
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":3,\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":100,"
             + "\"extra\":true}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
@@ -615,7 +607,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.INVOKE,
-            new EnvironmentName("other-environment"),
+            EnvironmentId.parse("22222222-2222-2222-2222-222222222222"),
             "wrong-scope",
             1,
             "{\"capabilityId\":\"test\",\"arguments\":{}}"));
@@ -625,7 +617,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.INVOKE,
-            ENVIRONMENT_NAME,
+            ENVIRONMENT_ID,
             "bad-payload",
             2,
             "{\"capabilityId\":\"test\",\"arguments\":[]}"));
@@ -635,7 +627,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.INVOKE,
-            ENVIRONMENT_NAME,
+            ENVIRONMENT_ID,
             "invalid-capability-id",
             3,
             "{\"capabilityId\":\"TEST\",\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\","
@@ -656,14 +648,14 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     transport.receiveRaw(
         "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":1,"
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,"
             + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
             + "\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":1000}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
     transport.receiveRaw(
         "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":1,"
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,"
             + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
             + "\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":1000}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
@@ -687,7 +679,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},"
             + "\"timeoutMillis\":1000}}");
 
@@ -696,7 +688,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"CANCEL\","
-            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{}}");
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,\"payload\":{}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
     transport.receive(invoke("valid-after-missing-id", 1));
@@ -1016,13 +1008,11 @@ class DaemonRuntimeTest {
           new DaemonRuntime(
               new DaemonConfig(
                   URI.create("ws://localhost/gateway"),
-                  ENVIRONMENT_NAME,
-                  "daemon",
+                  "test-registration-token",
                   Duration.ofMinutes(1),
                   Duration.ZERO,
                   Duration.ofSeconds(1),
                   Duration.ofSeconds(10),
-                  "test-gateway-token",
                   null,
                   root,
                   List.of(),
@@ -1752,7 +1742,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{}}");
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":2,\"payload\":{}}");
     assertFalse(transport.hasMessages());
 
     transport.receive(invoke("current-invoke", 1));
@@ -1804,8 +1794,7 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
 
     transport.receive(
-        new DaemonEnvelope(
-            DaemonProtocol.VERSION, DaemonMessageType.HELLO, ENVIRONMENT_NAME, null, 1, "{}"));
+        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.HELLO, null, null, 1, "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
 
     transport.receive(cancel("unknown-cancel", 1));
@@ -1815,7 +1804,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.INVOKE,
-            ENVIRONMENT_NAME,
+            ENVIRONMENT_ID,
             "invalid-invoke-payload",
             2,
             "{}"));
@@ -1879,13 +1868,11 @@ class DaemonRuntimeTest {
         new DaemonRuntime(
             new DaemonConfig(
                 URI.create("ws://localhost/gateway"),
-                new EnvironmentName("environment"),
-                "daemon",
+                "test-registration-token",
                 Duration.ofMinutes(1),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(10),
-                "test-gateway-token",
                 null,
                 ENVIRONMENT_ROOT,
                 List.of(),
@@ -1929,13 +1916,11 @@ class DaemonRuntimeTest {
         new DaemonRuntime(
             new DaemonConfig(
                 URI.create("ws://localhost/gateway"),
-                new EnvironmentName("environment"),
-                "daemon",
+                "test-registration-token",
                 Duration.ofMillis(20),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(10),
-                "test-gateway-token",
                 null,
                 ENVIRONMENT_ROOT,
                 List.of(),
@@ -2045,13 +2030,11 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             note,
             ENVIRONMENT_ROOT,
             List.of(),
@@ -2072,13 +2055,11 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             environmentRoot,
             List.of(),
@@ -2097,13 +2078,11 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             environmentRoot,
             List.of(),
@@ -2125,13 +2104,11 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
             List.of(),
@@ -2162,13 +2139,11 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
             List.of(),
@@ -2192,13 +2167,11 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
             List.of(),
@@ -2221,13 +2194,11 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
             List.of(),
@@ -2302,13 +2273,11 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             heartbeatInterval,
             Duration.ZERO,
             Duration.ofSeconds(1),
             defaultToolTimeout,
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
             List.of(),
@@ -2429,7 +2398,7 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
-        ENVIRONMENT_NAME,
+        ENVIRONMENT_ID,
         invocationId,
         sequence,
         "{\"capabilityId\":\""
@@ -2451,7 +2420,7 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
-        ENVIRONMENT_NAME,
+        ENVIRONMENT_ID,
         invocationId,
         sequence,
         "{\"capabilityId\":\""
@@ -2476,7 +2445,7 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
-        ENVIRONMENT_NAME,
+        ENVIRONMENT_ID,
         invocationId,
         sequence,
         "{\"capabilityId\":\""
@@ -2507,7 +2476,7 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
-        ENVIRONMENT_NAME,
+        ENVIRONMENT_ID,
         invocationId,
         sequence,
         "{\"capabilityId\":\""
@@ -2527,7 +2496,7 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
-        ENVIRONMENT_NAME,
+        ENVIRONMENT_ID,
         invocationId,
         sequence,
         "{\"capabilityId\":\""
@@ -2543,14 +2512,14 @@ class DaemonRuntimeTest {
 
   private DaemonEnvelope platformMessage(DaemonMessageType messageType, long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION, messageType, ENVIRONMENT_NAME, null, sequence, "{}");
+        DaemonProtocol.VERSION, messageType, ENVIRONMENT_ID, null, sequence, "{}");
   }
 
   private DaemonEnvelope cancel(String invocationId, long sequence) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.CANCEL,
-        ENVIRONMENT_NAME,
+        ENVIRONMENT_ID,
         invocationId,
         sequence,
         "{}");

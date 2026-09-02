@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.settings;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPathPattern;
 
 import java.net.URI;
@@ -102,17 +101,6 @@ final class SystemSettingsValidation {
       throw new IllegalArgumentException(field + " must be at most 64 characters");
     }
     return stripped;
-  }
-
-  static String requireOptionalEnvironmentName(String value, String field) {
-    if (value == null) {
-      return null;
-    }
-    try {
-      return new EnvironmentName(value).value();
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(field + " " + error.getMessage(), error);
-    }
   }
 
   static void requirePositiveMillis(long value, String field) {

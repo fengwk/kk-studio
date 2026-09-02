@@ -14,12 +14,13 @@ import org.apache.ibatis.annotations.Update;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.model.AgentDefinitionDO;
 
 import java.util.List;
+import java.util.UUID;
 
 @Mapper
 public interface AgentDefinitionMapper extends BaseMapper {
 
   String COLUMNS =
-      "name, description, system_prompt, model_provider_name, model_name, variant, config, version, "
+      "name, description, system_prompt, model_provider_name, model_name, variant, environment_id, config, version, "
           + "created_at as create_time, updated_at as update_time";
 
   @Select("select count(*) from agent_definition")
@@ -39,6 +40,7 @@ public interface AgentDefinitionMapper extends BaseMapper {
         @Result(column = "model_provider_name", property = "modelProviderName"),
         @Result(column = "model_name", property = "modelName"),
         @Result(column = "variant", property = "variant"),
+        @Result(column = "environment_id", property = "environmentId"),
         @Result(column = "config", property = "configJson"),
         @Result(column = "version", property = "version"),
         @Result(column = "create_time", property = "createTime"),
@@ -64,13 +66,16 @@ public interface AgentDefinitionMapper extends BaseMapper {
       """)
   boolean existsReferencingSubagent(@Param("name") String name);
 
+  @Select("select count(1) > 0 from agent_definition where environment_id = #{environmentId}")
+  boolean existsByEnvironmentId(@Param("environmentId") UUID environmentId);
+
   @Insert(
       """
       insert into agent_definition (
-          name, description, system_prompt, model_provider_name, model_name, variant, config,
+          name, description, system_prompt, model_provider_name, model_name, variant, environment_id, config,
           created_at, updated_at, version
       ) values (
-          #{name}, #{description}, #{systemPrompt}, #{modelProviderName}, #{modelName}, #{variant},
+          #{name}, #{description}, #{systemPrompt}, #{modelProviderName}, #{modelName}, #{variant}, #{environmentId},
           cast(#{configJson} as jsonb), current_timestamp, current_timestamp, 0
       )
       """)
@@ -81,7 +86,8 @@ public interface AgentDefinitionMapper extends BaseMapper {
       update agent_definition
       set description = #{agent.description}, system_prompt = #{agent.systemPrompt},
           model_provider_name = #{agent.modelProviderName}, model_name = #{agent.modelName},
-          variant = #{agent.variant}, config = cast(#{agent.configJson} as jsonb),
+          variant = #{agent.variant}, environment_id = #{agent.environmentId},
+          config = cast(#{agent.configJson} as jsonb),
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where name = #{agent.name} and version = #{expectedVersion}
       """)

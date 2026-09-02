@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryLister;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -48,21 +48,21 @@ public class StudioEnvironmentDirectoryController {
    * 浏览 Environment Root 下单层目录；{@code path} 缺省为 {@code '.'}（root），wire 使用 {@code '/'} 分隔的 canonical
    * 相对路径。
    */
-  @GetMapping("/api/ai/environments/{name}/directories")
+  @GetMapping("/api/ai/environments/{id}/directories")
   public CompletionStage<ResponseEntity<Result<?>>> listDirectories(
-      @PathVariable String name, @RequestParam(defaultValue = ".") String path) {
-    EnvironmentName environmentName;
+      @PathVariable String id, @RequestParam(defaultValue = ".") String path) {
+    EnvironmentId environmentId;
     try {
-      environmentName = new EnvironmentName(name);
+      environmentId = EnvironmentId.parse(id);
     } catch (IllegalArgumentException error) {
       return CompletableFuture.completedFuture(
-          errorResponse(HttpStatus.BAD_REQUEST, "INVALID_ENVIRONMENT_NAME", error.getMessage()));
+          errorResponse(HttpStatus.BAD_REQUEST, "INVALID_ENVIRONMENT_ID", error.getMessage()));
     }
     CompletionStage<EnvironmentDirectoryListResult> future;
     try {
       future =
           directoryLister.listDirectory(
-              environmentName,
+              environmentId,
               path,
               Duration.ofMillis(snapshot.get().environment().directoryListTimeoutMillis()));
     } catch (RuntimeException error) {

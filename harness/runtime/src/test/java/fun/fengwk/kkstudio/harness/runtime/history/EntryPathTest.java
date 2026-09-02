@@ -105,11 +105,12 @@ class EntryPathTest {
   void baseSettingsReturnsExactLatestSnapshotWhenEnvironmentAndAgentChanged() {
     // 多个关闭 Turn 之间 environment/agent 都变化过，最新快照的 environment 为 null：
     // baseSettings() 必须返回最新 ROOT/TURN_START 的完整快照，绝不回看更旧的非 null environment/agent。
-    BranchSettings rootSettings = settings(null, "root-agent");
+    BranchSettings rootSettings = settingsPath(null, "root-agent");
     BranchSettings firstTurn =
-        settings(EnvironmentBindings.binding("env-a"), "first-agent")
+        settingsPath(
+                EnvironmentBindings.binding("33333333-3333-3333-3333-333333333333"), "first-agent")
             .withModel(new ModelSelection("anthropic", "claude-sonnet", "custom"));
-    BranchSettings latestTurn = settings(null, "latest-agent");
+    BranchSettings latestTurn = settingsPath(null, "latest-agent");
     Entry root = root(rootSettings);
     Entry start1 = turnStart(id(2L), id(1L), TurnStartReason.INPUT, firstTurn);
     Entry user1 = userMessage(id(3L), id(2L));
@@ -124,7 +125,7 @@ class EntryPathTest {
 
     BranchSettings base = path.baseSettings();
     assertEquals(latestTurn, base);
-    assertNull(base.environment());
+    assertNull(base.workspacePath());
     assertEquals("latest-agent", base.agentName());
     assertEquals(new ModelSelection("anthropic", "claude-sonnet", "default"), base.model());
     assertNotEquals(firstTurn, base);
@@ -1283,11 +1284,13 @@ class EntryPathTest {
   }
 
   private static BranchSettings settings(String agentName) {
-    return settings(null, agentName);
+    return settingsPath(null, agentName);
   }
 
-  private static BranchSettings settings(EnvironmentBinding environment, String agentName) {
+  private static BranchSettings settingsPath(EnvironmentBinding environment, String agentName) {
     return new BranchSettings(
-        environment, agentName, new ModelSelection("anthropic", "claude-sonnet", "default"));
+        environment == null ? null : environment.workspacePath(),
+        agentName,
+        new ModelSelection("anthropic", "claude-sonnet", "default"));
   }
 }

@@ -4,7 +4,6 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -61,11 +60,9 @@ public final class HarnessOneShotService {
   }
 
   public UUID submit(
-      String agentName,
-      EnvironmentBinding environment,
-      String systemMessage,
-      AgentMessage userMessage) {
-    return submit(agentName, environment, systemMessage, userMessage, AcceptancePreflight.IDENTITY);
+      String agentName, String workspacePath, String systemMessage, AgentMessage userMessage) {
+    return submit(
+        agentName, workspacePath, systemMessage, userMessage, AcceptancePreflight.IDENTITY);
   }
 
   /**
@@ -76,7 +73,7 @@ public final class HarnessOneShotService {
    */
   public UUID submit(
       String agentName,
-      EnvironmentBinding environment,
+      String workspacePath,
       String systemMessage,
       AgentMessage userMessage,
       AcceptancePreflight preflight) {
@@ -86,7 +83,7 @@ public final class HarnessOneShotService {
       throw new IllegalArgumentException("one-shot userMessage must use USER role");
     }
     HarnessRuntime runtime = requireRuntime();
-    var settings = settingsMaterializer.materialize(agentName, environment);
+    var settings = settingsMaterializer.materialize(agentName, workspacePath);
     CustomMessageCommandPayload systemPayload =
         new CustomMessageCommandPayload(AgentMessage.system(systemMessage));
     CustomMessageCommandPayload userPayload = new CustomMessageCommandPayload(userMessage);

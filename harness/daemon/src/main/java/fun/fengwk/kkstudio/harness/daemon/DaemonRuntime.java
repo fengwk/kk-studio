@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
@@ -80,7 +80,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private static final String FALLBACK_FAILURE_MESSAGE = "capability execution failed";
 
   private final DaemonConfig config;
-  private final EnvironmentName environmentName;
+  private volatile EnvironmentId boundEnvironmentId;
   private final DaemonTransport transport;
   private final DaemonCapabilityRegistry capabilityRegistry;
   private final DaemonSkillRegistry skillRegistry;
@@ -258,7 +258,6 @@ public final class DaemonRuntime implements AutoCloseable {
       ResourceStore resourceStore,
       boolean requireFixedCapabilityCatalog) {
     this.config = Objects.requireNonNull(config, "config");
-    this.environmentName = Objects.requireNonNull(config.environmentName(), "environmentName");
     this.transport = Objects.requireNonNull(transport, "transport");
     this.capabilityRegistry = Objects.requireNonNull(capabilityRegistry, "capabilityRegistry");
     this.skillRegistry = Objects.requireNonNull(skillRegistry, "skillRegistry");
@@ -337,6 +336,10 @@ public final class DaemonRuntime implements AutoCloseable {
   /** 返回终态失败原因；非 FAILED 时为 {@code null}。 */
   public String failureReason() {
     return failureReason;
+  }
+
+  public EnvironmentId boundEnvironmentId() {
+    return boundEnvironmentId;
   }
 
   DaemonInvocationJournal journal() {
@@ -441,6 +444,7 @@ public final class DaemonRuntime implements AutoCloseable {
     if (!started.get() || generation != connectionGeneration.get()) {
       return;
     }
+    this.boundEnvironmentId = null;
     state = DaemonRuntimeState.DISCONNECTED;
     Duration delay;
     synchronized (reconnectLock) {
@@ -461,9 +465,8 @@ public final class DaemonRuntime implements AutoCloseable {
 
   private boolean sendHello(ActiveConnection connection) {
     ObjectNode payload = envelopeCodec.createPayload();
-    payload.put("daemonId", config.daemonId());
     payload.put("protocolVersion", DaemonProtocol.VERSION);
-    payload.put("gatewayToken", config.gatewayToken());
+    payload.put("registrationToken", config.registrationToken());
     payload.put("capabilityCatalogVersion", EnvironmentCapabilityCatalog.version());
     return sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
   }
@@ -543,9 +546,8 @@ public final class DaemonRuntime implements AutoCloseable {
       if (!connection.markWelcomed()) {
         throw new DaemonProtocolException("WELCOME may only be received once per connection");
       }
-      if (!envelopeCodec.readPayload(envelope).isEmpty()) {
-        throw new DaemonProtocolException("WELCOME payload must be empty");
-      }
+      this.boundEnvironmentId =
+          Objects.requireNonNull(envelope.environmentId(), "WELCOME environmentId");
       if (sendReady(connection) && activeConnection.get() == connection) {
         connection.markReady();
         state = DaemonRuntimeState.READY;
@@ -576,11 +578,10 @@ public final class DaemonRuntime implements AutoCloseable {
       throw new DaemonProtocolException("ERROR payload.code is unknown: " + code);
     }
     String codeValue = code.textValue();
-    if (DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT.equals(codeValue)) {
+    if (DaemonProtocol.ERROR_CODE_REGISTRATION_REJECTED.equals(codeValue)) {
       String message = payload.path("message").asText("");
       failTerminal(
-          "environment name is held by another live daemon"
-              + (message.isBlank() ? "" : ": " + message));
+          "environment registration is rejected" + (message.isBlank() ? "" : ": " + message));
       return;
     }
     if (DaemonProtocol.ERROR_CODE_RETRY_LATER.equals(codeValue)) {
@@ -591,9 +592,23 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private void verifyScope(DaemonEnvelope envelope) {
-    if (!environmentName.equals(envelope.environmentName())) {
-      throw new DaemonProtocolException(
-          "envelope environmentName does not match daemon: " + envelope.environmentName());
+    if (envelope.messageType() == DaemonMessageType.HELLO) {
+      if (envelope.environmentId() != null) {
+        throw new DaemonProtocolException("HELLO must not declare environmentId");
+      }
+      return;
+    }
+    if (envelope.messageType() == DaemonMessageType.WELCOME) {
+      if (envelope.environmentId() == null) {
+        throw new DaemonProtocolException("WELCOME must declare non-null environmentId");
+      }
+      return;
+    }
+    if (boundEnvironmentId != null && envelope.environmentId() != null) {
+      if (!boundEnvironmentId.equals(envelope.environmentId())) {
+        throw new DaemonProtocolException(
+            "envelope environmentId does not match daemon: " + envelope.environmentId());
+      }
     }
   }
 
@@ -775,12 +790,17 @@ public final class DaemonRuntime implements AutoCloseable {
     return true;
   }
 
+  /**
+   * Daemon 出站 envelope：HELLO 在认证前没有 Environment scope（必须为 null）；其余消息都由已绑定连接发出（携带本 daemon 的 {@link
+   * EnvironmentId}）。
+   */
   private DaemonEnvelope envelope(
       DaemonMessageType messageType, String invocationId, String payloadJson) {
+    boolean hello = messageType == DaemonMessageType.HELLO;
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         messageType,
-        environmentName,
+        hello ? null : boundEnvironmentId,
         invocationId,
         outboundSequence.getAndIncrement(),
         payloadJson);
@@ -977,7 +997,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private record InboundEnvelopeIdentity(
       int protocolVersion,
       DaemonMessageType messageType,
-      EnvironmentName environmentName,
+      EnvironmentId environmentId,
       String invocationId,
       long sequence,
       JsonNode payload) {
@@ -986,7 +1006,7 @@ public final class DaemonRuntime implements AutoCloseable {
       return new InboundEnvelopeIdentity(
           envelope.protocolVersion(),
           envelope.messageType(),
-          envelope.environmentName(),
+          envelope.environmentId(),
           envelope.invocationId(),
           envelope.sequence(),
           payload);

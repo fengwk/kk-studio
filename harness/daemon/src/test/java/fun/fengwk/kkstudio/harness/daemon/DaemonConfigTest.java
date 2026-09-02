@@ -1,13 +1,13 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 
@@ -20,7 +20,7 @@ import java.util.List;
 /** 配置契约用于阻止生产 Daemon 在缺少身份或 gateway 凭证时接入。 */
 class DaemonConfigTest {
 
-  /** 所有显式连接输入，包括共享的 gateway token，都是必填且有界的。 */
+  /** 所有显式连接输入，包括 registration token，都是必填且有界的。 */
   @Test
   void validatesExplicitConnectionConfiguration() {
     assertThrows(
@@ -28,8 +28,6 @@ class DaemonConfigTest {
         () ->
             config(
                 URI.create("http://localhost/gateway"),
-                "environment",
-                "daemon",
                 Duration.ofSeconds(1),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
@@ -41,8 +39,6 @@ class DaemonConfigTest {
         () ->
             config(
                 URI.create("ws://localhost/gateway"),
-                "environment",
-                "daemon",
                 Duration.ofSeconds(1),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
@@ -54,21 +50,6 @@ class DaemonConfigTest {
         () ->
             config(
                 URI.create("ws://localhost/gateway"),
-                " ",
-                "daemon",
-                Duration.ofSeconds(1),
-                Duration.ZERO,
-                Duration.ofSeconds(1),
-                Duration.ofSeconds(1),
-                "token",
-                List.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            config(
-                URI.create("ws://localhost/gateway"),
-                "environment",
-                "daemon",
                 Duration.ZERO,
                 Duration.ZERO,
                 Duration.ofSeconds(1),
@@ -83,14 +64,10 @@ class DaemonConfigTest {
     DaemonConfig config =
         DaemonConfig.fromArgs(
             new String[] {
-              "--environment-name",
-              "local-dev",
               "--gateway-uri",
               "wss://gateway.example/daemon",
-              "--gateway-token",
+              "--registration-token",
               "secret",
-              "--daemon-id",
-              "daemon-a",
               "--heartbeat",
               "PT2S",
               "--reconnect-initial",
@@ -108,9 +85,7 @@ class DaemonConfigTest {
             });
 
     assertEquals(URI.create("wss://gateway.example/daemon"), config.gatewayUri());
-    assertEquals(new EnvironmentName("local-dev"), config.environmentName());
-    assertEquals("daemon-a", config.daemonId());
-    assertEquals("secret", config.gatewayToken());
+    assertEquals("secret", config.registrationToken());
     assertEquals(Duration.ofSeconds(2), config.heartbeatInterval());
     assertEquals(Duration.ZERO, config.initialReconnectDelay());
     assertEquals(Duration.ofSeconds(3), config.maxReconnectDelay());
@@ -129,9 +104,8 @@ class DaemonConfigTest {
       DaemonConfig config =
           DaemonConfig.fromArgs(
               new String[] {
-                "--environment-name", "env",
                 "--gateway-uri", "ws://gateway.example/daemon",
-                "--gateway-token", "secret"
+                "--registration-token", "secret"
               });
 
       assertEquals(home.toRealPath(), config.environmentRoot());
@@ -149,9 +123,8 @@ class DaemonConfigTest {
         () ->
             DaemonConfig.fromArgs(
                 new String[] {
-                  "--environment-name", "env",
                   "--gateway-uri", "ws://gateway.example/daemon",
-                  "--gateway-token", "secret",
+                  "--registration-token", "secret",
                   "--environment-root", file.toString()
                 }));
     assertThrows(
@@ -159,11 +132,14 @@ class DaemonConfigTest {
         () ->
             DaemonConfig.fromArgs(
                 new String[] {
-                  "--environment-name", "env",
-                  "--gateway-uri", "ws://gateway.example/daemon",
-                  "--gateway-token", "secret",
-                  "--environment-root", root.toString(),
-                  "--environment-root", root.toString()
+                  "--gateway-uri",
+                  "ws://gateway.example/daemon",
+                  "--registration-token",
+                  "secret",
+                  "--environment-root",
+                  root.toString(),
+                  "--environment-root",
+                  root.toString()
                 }));
   }
 
@@ -173,11 +149,10 @@ class DaemonConfigTest {
     DaemonConfig omitted =
         DaemonConfig.fromArgs(
             new String[] {
-              "--environment-name", "env",
               "--gateway-uri", "ws://gateway.example/daemon",
-              "--gateway-token", "secret"
+              "--registration-token", "secret"
             });
-    assertEquals(null, omitted.note());
+    assertNull(omitted.note());
 
     assertInvalidNoteArgs("--note", "first", "--note", "second");
     assertInvalidNoteArgs("--note", "");
@@ -192,9 +167,8 @@ class DaemonConfigTest {
     DaemonConfig maxLength =
         DaemonConfig.fromArgs(
             new String[] {
-              "--environment-name", "env",
               "--gateway-uri", "ws://gateway.example/daemon",
-              "--gateway-token", "secret",
+              "--registration-token", "secret",
               "--note", "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS)
             });
     assertEquals(DaemonEnvironmentInfo.MAX_NOTE_CHARS, maxLength.note().length());
@@ -206,9 +180,8 @@ class DaemonConfigTest {
     DaemonConfig defaults =
         DaemonConfig.fromArgs(
             new String[] {
-              "--environment-name", "env",
               "--gateway-uri", "ws://gateway.example/daemon",
-              "--gateway-token", "secret"
+              "--registration-token", "secret"
             });
     assertEquals("Windows environment.", defaults.effectiveNote(DaemonOperatingSystem.WINDOWS));
     assertEquals(
@@ -221,9 +194,8 @@ class DaemonConfigTest {
     DaemonConfig explicit =
         DaemonConfig.fromArgs(
             new String[] {
-              "--environment-name", "env",
               "--gateway-uri", "ws://gateway.example/daemon",
-              "--gateway-token", "secret",
+              "--registration-token", "secret",
               "--note", "Explicit environment."
             });
     for (DaemonOperatingSystem operatingSystem : DaemonOperatingSystem.values()) {
@@ -237,11 +209,9 @@ class DaemonConfigTest {
     DaemonConfig config =
         DaemonConfig.fromArgs(
             new String[] {
-              "--environment-name",
-              "env",
               "--gateway-uri",
               "ws://gateway.example/daemon",
-              "--gateway-token",
+              "--registration-token",
               "secret",
               "--skill-dir",
               first.toString(),
@@ -252,7 +222,7 @@ class DaemonConfigTest {
     assertEquals(
         List.of(first.toAbsolutePath().normalize(), second.toAbsolutePath().normalize()),
         config.skillDirs());
-    assertTrue(config.mcpConfigPath() == null);
+    assertNull(config.mcpConfigPath());
   }
 
   /** {@code --mcp-config} 是可选的 CLI 参数。 */
@@ -264,11 +234,9 @@ class DaemonConfigTest {
     DaemonConfig cliConfig =
         DaemonConfig.fromArgs(
             new String[] {
-              "--environment-name",
-              "env",
               "--gateway-uri",
               "ws://gateway.example/daemon",
-              "--gateway-token",
+              "--registration-token",
               "secret",
               "--mcp-config",
               configFile.toString()
@@ -278,38 +246,10 @@ class DaemonConfigTest {
 
   /** 当部署缺少 gateway 所需的密钥时，启动失败关闭。 */
   @Test
-  void rejectsMissingGatewayToken() {
+  void rejectsMissingRegistrationToken() {
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            DaemonConfig.fromArgs(
-                new String[] {
-                  "--environment-name", "env",
-                  "--gateway-uri", "ws://gateway.example/daemon"
-                }));
-  }
-
-  /** 非 canonical 的 {@code --environment-name} 在配置解析期立即失败（名称是路由身份，不允许歧义）。 */
-  @Test
-  void rejectsNonCanonicalEnvironmentName() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            DaemonConfig.fromArgs(
-                new String[] {
-                  "--environment-name", "My Env",
-                  "--gateway-uri", "ws://gateway.example/daemon",
-                  "--gateway-token", "secret"
-                }));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            DaemonConfig.fromArgs(
-                new String[] {
-                  "--environment-name", "my/env",
-                  "--gateway-uri", "ws://gateway.example/daemon",
-                  "--gateway-token", "secret"
-                }));
+        () -> DaemonConfig.fromArgs(new String[] {"--gateway-uri", "ws://gateway.example/daemon"}));
   }
 
   /** 未知的 CLI 参数立即失败，而不是被静默忽略。 */
@@ -320,9 +260,8 @@ class DaemonConfigTest {
         () ->
             DaemonConfig.fromArgs(
                 new String[] {
-                  "--environment-name", "env",
                   "--gateway-uri", "ws://gateway.example/daemon",
-                  "--gateway-token", "secret",
+                  "--registration-token", "secret",
                   "--unexpected", "x"
                 }));
   }
@@ -334,23 +273,19 @@ class DaemonConfigTest {
 
   private DaemonConfig config(
       URI gatewayUri,
-      String environmentName,
-      String daemonId,
       Duration heartbeatInterval,
       Duration initialReconnectDelay,
       Duration maxReconnectDelay,
       Duration defaultToolTimeout,
-      String gatewayToken,
+      String registrationToken,
       List<Path> skillDirs) {
     return new DaemonConfig(
         gatewayUri,
-        new EnvironmentName(environmentName),
-        daemonId,
+        registrationToken,
         heartbeatInterval,
         initialReconnectDelay,
         maxReconnectDelay,
         defaultToolTimeout,
-        gatewayToken,
         null,
         DaemonConfig.defaultEnvironmentRoot(),
         skillDirs,
@@ -358,14 +293,12 @@ class DaemonConfigTest {
   }
 
   private static void assertInvalidNoteArgs(String... noteArgs) {
-    String[] args = new String[6 + noteArgs.length];
-    args[0] = "--environment-name";
-    args[1] = "env";
-    args[2] = "--gateway-uri";
-    args[3] = "ws://gateway.example/daemon";
-    args[4] = "--gateway-token";
-    args[5] = "secret";
-    System.arraycopy(noteArgs, 0, args, 6, noteArgs.length);
+    String[] args = new String[4 + noteArgs.length];
+    args[0] = "--gateway-uri";
+    args[1] = "ws://gateway.example/daemon";
+    args[2] = "--registration-token";
+    args[3] = "secret";
+    System.arraycopy(noteArgs, 0, args, 4, noteArgs.length);
     assertThrows(IllegalArgumentException.class, () -> DaemonConfig.fromArgs(args));
   }
 }

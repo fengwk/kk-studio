@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
@@ -462,11 +462,11 @@ public final class HarnessRuntime {
     tx.updateToolInvocations(List.of(updated));
     tx.updateThread(thread.touchVersion(mutationNow));
     if (command.decision() == ToolApprovalDecision.ALLOWED) {
-      EnvironmentName environmentName =
+      EnvironmentId environmentId =
           tool.binding() == null || tool.binding().environment() == null
               ? null
-              : tool.binding().environment().environmentName();
-      tx.requestWork(new WorkTarget(WorkTargetType.TOOL, tool.id()), workNow, environmentName);
+              : tool.binding().environment().environmentId();
+      tx.requestWork(new WorkTarget(WorkTargetType.TOOL, tool.id()), workNow, environmentId);
     } else {
       tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), workNow);
     }

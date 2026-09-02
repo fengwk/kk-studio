@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.runtime;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
@@ -19,15 +17,14 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetWorkspacePathCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
-import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
@@ -221,7 +218,7 @@ public final class HarnessRuntimeRequestMapper {
   private static BranchSettings toBranchSettings(HarnessBranchSettingsDTO dto) {
     requireNonNull(dto, "branchSettings");
     return new BranchSettings(
-        toEnvironmentBinding(dto.getEnvironment()),
+        dto.getWorkspacePath(),
         requireText(dto.getAgentName(), "branchSettings.agentName"),
         toModelSelection(dto.getModel()));
   }
@@ -249,31 +246,31 @@ public final class HarnessRuntimeRequestMapper {
       case "USER_MESSAGE" -> {
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
         requireForbidden(dto.hasModelField(), "model", "command type " + type);
-        requireForbidden(dto.hasEnvironmentField(), "environment", "command type " + type);
+        requireForbidden(dto.hasWorkspacePathField(), "workspacePath", "command type " + type);
         yield new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, toUserMessageContents(dto)));
       }
       case "SET_AGENT" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
         requireForbidden(dto.hasModelField(), "model", "command type " + type);
-        requireForbidden(dto.hasEnvironmentField(), "environment", "command type " + type);
+        requireForbidden(dto.hasWorkspacePathField(), "workspacePath", "command type " + type);
         yield new SetAgentCommandPayload(requireText(dto.getAgentName(), "agentName"));
       }
       case "SET_MODEL" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
-        requireForbidden(dto.hasEnvironmentField(), "environment", "command type " + type);
+        requireForbidden(dto.hasWorkspacePathField(), "workspacePath", "command type " + type);
         yield new SetModelCommandPayload(toModelSelection(requireNonNull(dto.getModel(), "model")));
       }
-      case "SET_ENVIRONMENT" -> {
+      case "SET_WORKSPACE_PATH" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
         requireForbidden(dto.hasModelField(), "model", "command type " + type);
-        if (!dto.hasEnvironmentField()) {
+        if (!dto.hasWorkspacePathField()) {
           throw new IllegalArgumentException(
-              "SET_ENVIRONMENT must contain environment (a binding object selects, null unbinds)");
+              "SET_WORKSPACE_PATH must contain workspacePath (a relative string selects, null unbinds)");
         }
-        yield new SetEnvironmentCommandPayload(toEnvironmentBinding(dto.getEnvironment()));
+        yield new SetWorkspacePathCommandPayload(dto.getWorkspacePath());
       }
       case "CUSTOM_MESSAGE" -> throw new IllegalArgumentException(
           "CUSTOM_MESSAGE is not allowed on the product HTTP surface");
@@ -284,7 +281,7 @@ public final class HarnessRuntimeRequestMapper {
   private static void validateHttpCommandShape(List<NewThreadCommand> commands) {
     List<ThreadCommandType> prefixOrder =
         List.of(
-            ThreadCommandType.SET_ENVIRONMENT,
+            ThreadCommandType.SET_WORKSPACE_PATH,
             ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_MODEL);
     int lastSetOrder = -1;
@@ -301,7 +298,7 @@ public final class HarnessRuntimeRequestMapper {
       int order = prefixOrder.indexOf(type);
       if (order <= lastSetOrder) {
         throw new IllegalArgumentException(
-            "HTTP commands must use SET_ENVIRONMENT, SET_AGENT, SET_MODEL order");
+            "HTTP commands must use SET_WORKSPACE_PATH, SET_AGENT, SET_MODEL order");
       }
       lastSetOrder = order;
     }
@@ -364,15 +361,6 @@ public final class HarnessRuntimeRequestMapper {
     if (present) {
       throw new IllegalArgumentException("field " + field + " is forbidden for " + context);
     }
-  }
-
-  private static EnvironmentBinding toEnvironmentBinding(EnvironmentBindingDTO dto) {
-    if (dto == null) {
-      return null;
-    }
-    return new EnvironmentBinding(
-        new EnvironmentName(requireText(dto.getName(), "environment.name")),
-        requireText(dto.getWorkspacePath(), "environment.workspacePath"));
   }
 
   private static String requireText(String value, String field) {

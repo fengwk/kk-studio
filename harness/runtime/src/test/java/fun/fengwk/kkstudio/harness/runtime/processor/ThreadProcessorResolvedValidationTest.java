@@ -60,9 +60,23 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
 
   @Test
   void routeMismatchIsContractErrorWithZeroMutation() {
-    BranchSettings mismatched =
-        branchSettings().withEnvironment(EnvironmentBindings.binding("env-2"));
-    assertMismatchRollsBack(requestWithEnvironmentTool(mismatched));
+    // branch workspace path 与 resolved binding 的 path 不一致是 Resolver 契约错误。
+    ModelRequestSpec spec = requestWithEnvironmentTool(branchSettings());
+    assertPathMismatchRollsBack(spec, branchSettings().withWorkspacePath("other/repo"));
+  }
+
+  private void assertPathMismatchRollsBack(ModelRequestSpec spec, BranchSettings candidate) {
+    Fixture fixture = fixture();
+    var baseline = seedBaseline(fixture.store);
+    UUID userCommand =
+        seedCommand(
+            fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.results.add(new TurnResolver.Resolved(spec, 100_000, 16_384));
+    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
+
+    assertThrows(IllegalStateException.class, () -> fixture.processor.process(claim));
+    assertEquals(1, path(fixture.store, baseline.threadId()).entries().size());
   }
 
   @Test
@@ -133,8 +147,8 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),
             new ContributorBinding("base", "fs", List.of()),
-            settings.environment() != null,
-            settings.environment());
+            settings.workspacePath() != null,
+            EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111"));
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         new ModelDescriptor(

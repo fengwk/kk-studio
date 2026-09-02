@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
@@ -51,10 +51,13 @@ import java.util.UUID;
 /** 直接校验 Resolver 结果与 candidate path 的机械契约，覆盖正常 turn、压缩 turn 和环境边界。 */
 class ResolvedRequestValidatorTest {
   private static final BranchSettings SETTINGS =
-      new BranchSettings(
-          EnvironmentBindings.binding("env-1"),
-          "agent",
-          new ModelSelection("provider", "model", "v1"));
+      new BranchSettings("projects/web", "agent", new ModelSelection("provider", "model", "v1"));
+  private static final EnvironmentBinding ENV_BINDING =
+      new EnvironmentBinding(
+          EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), "projects/web");
+  private static final EnvironmentBinding OTHER_BINDING =
+      new EnvironmentBinding(
+          EnvironmentId.parse("22222222-2222-2222-2222-222222222222"), "other/repo");
   private static final UUID SESSION_ID = new UUID(0L, 1L);
   private static final UUID THREAD_ID = new UUID(0L, 2L);
   private static final UUID ROOT_ENTRY_ID = new UUID(0L, 3L);
@@ -78,8 +81,8 @@ class ResolvedRequestValidatorTest {
     ModelRequestSpec spec =
         normalSpec(
             SETTINGS,
-            List.of(environmentTool(SETTINGS.environment())),
-            List.of(new SkillBinding("dev", "developer rules", SETTINGS.environment())),
+            List.of(environmentTool(ENV_BINDING)),
+            List.of(new SkillBinding("dev", "developer rules", ENV_BINDING)),
             List.of(),
             ProviderCacheControl.none());
 
@@ -203,16 +206,15 @@ class ResolvedRequestValidatorTest {
   @Test
   void checksEnvironmentRoutesIncludingNullTransitions() {
     // 校验 environment-required 工具的 environment 与 branch environment 的一致性。
-    assertRouteMismatch(SETTINGS, environmentTool(EnvironmentBindings.binding("env-2")));
+    assertRouteMismatch(SETTINGS, environmentTool(OTHER_BINDING));
 
-    BranchSettings unbound = SETTINGS.withEnvironment(null);
-    assertRouteMismatch(unbound, environmentTool(SETTINGS.environment()));
+    BranchSettings unbound = SETTINGS.withWorkspacePath(null);
+    assertRouteMismatch(unbound, environmentTool(ENV_BINDING));
   }
 
   @Test
   void rejectsSkillWhoseSourceRouteDiffersFromCandidateEnvironment() {
-    SkillBinding skill =
-        new SkillBinding("dev", "developer rules", EnvironmentBindings.binding("env-2"));
+    SkillBinding skill = new SkillBinding("dev", "developer rules", OTHER_BINDING);
 
     // skill source environment 也必须与 branch environment 完全一致。
     IllegalStateException error =
@@ -229,9 +231,9 @@ class ResolvedRequestValidatorTest {
                             List.of(),
                             ProviderCacheControl.none()))));
     assertEquals(
-        "resolved skill source environment=EnvironmentBinding[environmentName=env-2, workspacePath=.]"
-            + " does not match candidate branch environment=EnvironmentBinding[environmentName=env-1,"
-            + " workspacePath=.]",
+        "resolved skill source environment="
+            + OTHER_BINDING
+            + " does not match candidate branch environment=projects/web",
         error.getMessage());
   }
 
@@ -253,7 +255,7 @@ class ResolvedRequestValidatorTest {
         "resolved tool environment="
             + tool.environment()
             + " does not match candidate branch environment="
-            + settings.environment(),
+            + settings.workspacePath(),
         error.getMessage());
   }
 

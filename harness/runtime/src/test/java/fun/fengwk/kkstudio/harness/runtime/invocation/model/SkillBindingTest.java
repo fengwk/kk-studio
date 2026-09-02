@@ -12,7 +12,8 @@ import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 /** SkillBinding 的 canonical 元数据以及 nullable 的来源 environment。 */
 class SkillBindingTest {
 
-  private static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
+  private static final EnvironmentBinding ENV_ID =
+      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
 
   @Test
   void acceptsCanonicalMetadataWithNullableEnvironment() {

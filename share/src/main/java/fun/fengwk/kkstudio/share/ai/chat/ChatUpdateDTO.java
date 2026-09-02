@@ -2,9 +2,8 @@ package fun.fengwk.kkstudio.share.ai.chat;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.Data;
-
-import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 
 /**
  * {@code /api/ai/chat/{id}} 的更新请求体。
@@ -21,37 +20,28 @@ public class ChatUpdateDTO {
   /** 部分更新：省略（null）保留当前值；提供时必须为已存在的 Agent definition 名（约束同创建）。 */
   private String agentName;
 
-  /**
-   * 部分更新：仅在 {@link #environmentProvided} 为 true 时生效；提供时必须为完整 Environment binding 对象，显式 null
-   * 表示清除默认环境。
-   */
-  private EnvironmentBindingDTO environment;
+  /** 部分更新：仅在 {@link #workspacePathProvided} 为 true 时生效；显式 null 表示清除默认 workspace path。 */
+  private String workspacePath;
 
-  /**
-   * 内部序列化控制标记（{@code @JsonIgnore}，不参与 HTTP 契约）：由 {@link #setEnvironment} 自动置位，用于区分 JSON 中缺省
-   * environment 与显式 null。
-   */
-  @JsonIgnore private boolean environmentProvided;
+  @JsonIgnore private boolean workspacePathProvided;
 
-  public void setEnvironment(EnvironmentBindingDTO environment) {
-    this.environment = environment;
-    this.environmentProvided = true;
+  @JsonSetter("workspacePath")
+  public void setWorkspacePath(String workspacePath) {
+    this.workspacePath = workspacePath;
+    this.workspacePathProvided = true;
   }
 
   @JsonIgnore
-  public boolean isEnvironmentProvided() {
-    return environmentProvided;
+  public boolean isWorkspacePathProvided() {
+    return workspacePathProvided;
   }
 
   /** 部分更新：仅在 {@link #yoloEnabledProvided} 为 true 时生效，且显式提供时不得为 null。 */
   private Boolean yoloEnabled;
 
-  /**
-   * 内部序列化控制标记（{@code @JsonIgnore}，不参与 HTTP 契约）：由 {@link #setYoloEnabled} 自动置位，用于区分 JSON 中缺省
-   * yoloEnabled 与显式 null。
-   */
   @JsonIgnore private boolean yoloEnabledProvided;
 
+  @JsonSetter("yoloEnabled")
   public void setYoloEnabled(Boolean yoloEnabled) {
     this.yoloEnabled = yoloEnabled;
     this.yoloEnabledProvided = true;
@@ -62,7 +52,7 @@ public class ChatUpdateDTO {
     return yoloEnabledProvided;
   }
 
-  /** 必填非负十进制字符串；必须与当前 Chat 版本一致。 */
+  /** 乐观并发控制：必须与服务器当前 chat.version 精确匹配。 */
   private String expectedVersion;
 
   @JsonAnySetter

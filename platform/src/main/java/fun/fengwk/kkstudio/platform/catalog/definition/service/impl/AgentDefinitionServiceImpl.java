@@ -33,6 +33,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
 
   private static final String RESOURCE = "agent_definition";
   private static final String MODEL_RESOURCE = "agent_model";
+  private static final String ENVIRONMENT_RESOURCE = "environment";
 
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentDefinitionConverter agentDefinitionConverter;
@@ -54,6 +55,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
     String name = createDTO == null ? null : createDTO.getName();
     AgentDefinition definition = definitionMutationFactory.newAgent(name, createDTO);
+    referenceResolver.requireEnvironmentForShare(definition.getEnvironmentId());
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
     validateConfig(config);
@@ -67,6 +69,12 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
           RESOURCE, "agent definition name already exists: " + definition.getName(), error);
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
+        if (definition.getEnvironmentId() != null) {
+          throw new AiResourceNotFoundException(
+              ENVIRONMENT_RESOURCE,
+              ENVIRONMENT_RESOURCE + " not found: " + definition.getEnvironmentId(),
+              error);
+        }
         throw new AiResourceNotFoundException(
             MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelRef, error);
       }
@@ -89,6 +97,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     ModelRef modelRef = parseModelRef(updateDTO.getModel());
     referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
     definitionMutationFactory.update(definition, updateDTO);
+    referenceResolver.requireEnvironmentForShare(definition.getEnvironmentId());
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
     validateConfig(config);
@@ -106,6 +115,12 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
       }
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
+        if (definition.getEnvironmentId() != null) {
+          throw new AiResourceNotFoundException(
+              ENVIRONMENT_RESOURCE,
+              ENVIRONMENT_RESOURCE + " not found: " + definition.getEnvironmentId(),
+              error);
+        }
         throw new AiResourceNotFoundException(
             MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelRef, error);
       }
@@ -150,10 +165,12 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   }
 
   private void validateVariant(ModelRef modelRef, String variant) {
-    try {
-      variantResolver.resolve(modelRef.providerName(), modelRef.modelName(), variant);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+    if (variant != null && !variant.isBlank()) {
+      try {
+        variantResolver.resolve(modelRef.providerName(), modelRef.modelName(), variant);
+      } catch (IllegalArgumentException error) {
+        throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      }
     }
   }
 

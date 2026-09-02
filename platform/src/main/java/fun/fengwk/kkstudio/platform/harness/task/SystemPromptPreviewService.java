@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.harness.task;
 
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -14,8 +15,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.time.Clock;
@@ -36,7 +37,7 @@ public final class SystemPromptPreviewService {
   private final HarnessRuntime runtime;
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentDefinitionConfigCodec agentConfigCodec;
-  private final LiveEnvironmentRegistry environmentRegistry;
+  private final EnvironmentRegistry environmentRegistry;
   private final SubagentConfigProvider configProvider;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
@@ -45,7 +46,7 @@ public final class SystemPromptPreviewService {
       HarnessRuntime runtime,
       AgentDefinitionRepository agentDefinitionRepository,
       AgentDefinitionConfigCodec agentConfigCodec,
-      LiveEnvironmentRegistry environmentRegistry,
+      EnvironmentRegistry environmentRegistry,
       SubagentConfigProvider configProvider,
       AgentPromptComposer promptComposer,
       Clock clock) {
@@ -65,7 +66,8 @@ public final class SystemPromptPreviewService {
     BranchSettings settings = path.baseSettings();
     AgentDefinition agent = agentDefinitionRepository.getByName(settings.agentName());
     Instant now = clock.instant();
-    CurrentEnvironmentContext environment = resolveCurrentEnvironment(settings.environment(), now);
+    EnvironmentBinding binding = resolveBinding(agent, settings);
+    CurrentEnvironmentContext environment = resolveCurrentEnvironment(binding, now);
     if (agent == null) {
       return promptComposer.compose(null, environment, List.of(), List.of());
     }
@@ -78,8 +80,16 @@ public final class SystemPromptPreviewService {
     return promptComposer.compose(
         agent.getSystemPrompt(),
         environment,
-        previewSkills(config.getSkills(), settings.environment()),
+        previewSkills(config.getSkills(), binding),
         previewSubagents(config.getSubagents(), path));
+  }
+
+  private static EnvironmentBinding resolveBinding(AgentDefinition agent, BranchSettings settings) {
+    if (agent == null || agent.getEnvironmentId() == null || settings.workspacePath() == null) {
+      return null;
+    }
+    return new EnvironmentBinding(
+        EnvironmentId.of(agent.getEnvironmentId()), settings.workspacePath());
   }
 
   private CurrentEnvironmentContext resolveCurrentEnvironment(
@@ -88,8 +98,8 @@ public final class SystemPromptPreviewService {
       return new CurrentEnvironmentContext(
           null, null, now.atZone(clock.getZone()).toLocalDate(), null);
     }
-    LiveEnvironment liveEnvironment =
-        environmentRegistry.find(binding.environmentName()).orElse(null);
+    EnvironmentConnection liveEnvironment =
+        environmentRegistry.find(binding.environmentId()).orElse(null);
     DaemonEnvironmentInfo environmentInfo =
         liveEnvironment == null || liveEnvironment.daemonCapabilities() == null
             ? null
@@ -106,7 +116,8 @@ public final class SystemPromptPreviewService {
     if (skillNames == null || skillNames.isEmpty() || binding == null) {
       return List.of();
     }
-    LiveEnvironment environment = environmentRegistry.find(binding.environmentName()).orElse(null);
+    EnvironmentConnection environment =
+        environmentRegistry.find(binding.environmentId()).orElse(null);
     if (environment == null) {
       return List.of();
     }
@@ -130,7 +141,7 @@ public final class SystemPromptPreviewService {
         || sessionDepth(path) >= configProvider.subagentConfig().maxDepth()) {
       return List.of();
     }
-    List<SubagentBinding> bindings = new ArrayList<>();
+    List<SubagentBinding> bindings = new ArrayList<>(names.size());
     for (String name : names) {
       AgentDefinition subagent = agentDefinitionRepository.getByName(name);
       if (subagent != null) {

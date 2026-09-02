@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
@@ -818,12 +818,11 @@ public final class ThreadProcessor {
       for (ToolInvocation invocation : ordered) {
         if (invocation.status() == ToolInvocationStatus.READY) {
           readyRequested = true;
-          EnvironmentName environmentName =
+          EnvironmentId environmentId =
               invocation.binding() == null || invocation.binding().environment() == null
                   ? null
-                  : invocation.binding().environment().environmentName();
-          tx.requestWork(
-              new WorkTarget(WorkTargetType.TOOL, invocation.id()), now, environmentName);
+                  : invocation.binding().environment().environmentId();
+          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, invocation.id()), now, environmentId);
         }
       }
       if (!readyRequested) {

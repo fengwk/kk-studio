@@ -8,8 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentWorkspacePath;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 
@@ -27,8 +26,7 @@ import java.util.Set;
  *
  * <p>command type 本身不编码：durable {@code command_type} 单列与 HTTP DTO 外层 discriminator 负责类型。
  * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；SET_MODEL 携带完整 {@link
- * ModelSelection}；SET_ENVIRONMENT 的 {@code environment} 为可空完整 binding 对象（{@code {name,
- * workspacePath}}，null 表示 clear）。
+ * ModelSelection}；SET_WORKSPACE_PATH 的 {@code workspacePath} 为可空 canonical 相对路径字符串（null 表示 clear）。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -43,8 +41,7 @@ public final class ThreadCommandPayloadJsonCodec {
   private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
   private static final Set<String> SET_AGENT_FIELDS = orderedSet("agentName");
   private static final Set<String> SET_MODEL_FIELDS = orderedSet("model");
-  private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environment");
-  private static final Set<String> ENVIRONMENT_BINDING_FIELDS = orderedSet("name", "workspacePath");
+  private static final Set<String> SET_WORKSPACE_PATH_FIELDS = orderedSet("workspacePath");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
 
@@ -124,7 +121,7 @@ public final class ThreadCommandPayloadJsonCodec {
       case CUSTOM_MESSAGE -> decodeCustomMessage(root);
       case SET_AGENT -> decodeSetAgent(root);
       case SET_MODEL -> decodeSetModel(root);
-      case SET_ENVIRONMENT -> decodeSetEnvironment(root);
+      case SET_WORKSPACE_PATH -> decodeSetWorkspacePath(root);
     };
   }
 
@@ -157,23 +154,16 @@ public final class ThreadCommandPayloadJsonCodec {
       case SetModelCommandPayload value -> NODES
           .objectNode()
           .set("model", encodeModelSelection(value.model()));
-      case SetEnvironmentCommandPayload value -> {
+      case SetWorkspacePathCommandPayload value -> {
         ObjectNode node = NODES.objectNode();
-        if (value.environment() == null) {
-          node.putNull("environment");
+        if (value.workspacePath() == null) {
+          node.putNull("workspacePath");
         } else {
-          node.set("environment", encodeEnvironmentBinding(value.environment()));
+          node.put("workspacePath", value.workspacePath());
         }
         yield node;
       }
     };
-  }
-
-  private static ObjectNode encodeEnvironmentBinding(EnvironmentBinding binding) {
-    return NODES
-        .objectNode()
-        .put("name", binding.environmentName().value())
-        .put("workspacePath", binding.workspacePath());
   }
 
   private static ObjectNode encodeModelSelection(ModelSelection selection) {
@@ -210,30 +200,20 @@ public final class ThreadCommandPayloadJsonCodec {
     return new SetModelCommandPayload(decodeModelSelection(node.get("model")));
   }
 
-  private static SetEnvironmentCommandPayload decodeSetEnvironment(JsonNode value) {
-    ObjectNode node = requireObject(value, "SET_ENVIRONMENT");
-    requireExactFields(node, SET_ENVIRONMENT_FIELDS, "SET_ENVIRONMENT");
-    JsonNode environment = node.get("environment");
-    if (environment.isNull()) {
-      return new SetEnvironmentCommandPayload(null);
+  private static SetWorkspacePathCommandPayload decodeSetWorkspacePath(JsonNode value) {
+    ObjectNode node = requireObject(value, "SET_WORKSPACE_PATH");
+    requireExactFields(node, SET_WORKSPACE_PATH_FIELDS, "SET_WORKSPACE_PATH");
+    JsonNode workspacePath = node.get("workspacePath");
+    if (workspacePath.isNull()) {
+      return new SetWorkspacePathCommandPayload(null);
     }
-    if (!environment.isObject()) {
-      throw new IllegalArgumentException("SET_ENVIRONMENT.environment must be an object or null");
-    }
-    return new SetEnvironmentCommandPayload(decodeEnvironmentBinding(environment));
-  }
-
-  private static EnvironmentBinding decodeEnvironmentBinding(JsonNode value) {
-    ObjectNode node = requireObject(value, "SET_ENVIRONMENT.environment");
-    requireExactFields(node, ENVIRONMENT_BINDING_FIELDS, "SET_ENVIRONMENT.environment");
-    String name = canonicalText(node, "name", "SET_ENVIRONMENT.environment");
-    JsonNode workspacePathNode = node.get("workspacePath");
-    if (!workspacePathNode.isTextual() || workspacePathNode.textValue().isBlank()) {
+    if (!workspacePath.isTextual()) {
       throw new IllegalArgumentException(
-          "SET_ENVIRONMENT.environment.workspacePath must be a non-blank string");
+          "SET_WORKSPACE_PATH.workspacePath must be a string or null");
     }
-    // workspacePath 形状（canonical 相对 wire 路径）由 EnvironmentBinding 构造器统一校验。
-    return new EnvironmentBinding(new EnvironmentName(name), workspacePathNode.textValue());
+    // canonical 相对 wire 路径形状由 EnvironmentWorkspacePath 校验器统一约束。
+    return new SetWorkspacePathCommandPayload(
+        EnvironmentWorkspacePath.requireCanonicalRelativePath(workspacePath.textValue()));
   }
 
   private static ModelSelection decodeModelSelection(JsonNode value) {

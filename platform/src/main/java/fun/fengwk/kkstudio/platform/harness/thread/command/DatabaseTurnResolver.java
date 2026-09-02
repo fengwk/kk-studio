@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContextProjectorContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
@@ -56,8 +56,8 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.harness.contributor.ScopedBranchView;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
@@ -77,13 +77,13 @@ import java.util.UUID;
  * 生产 Platform 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的
  * {@link ModelRequestSpec}、contextWindow 与 maxOutputTokens。
  *
- * <p>输入事实只有 candidate path 的 {@link BranchSettings}（environment binding / agentName / {@link
+ * <p>输入事实只有 candidate path 的 {@link BranchSettings}（workspacePath / agentName / {@link
  * ModelSelection}）；实现按这些精确引用读取最新 catalog / environment 事实，Agent 的 toolIds/skills/subagents 每个新 turn
- * 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。environment 是完整 binding（路由名 + workspace path），为最新
- * branch 的不可变事实：要求环境的工具一律按最新 {@code settings.environment()} 绑定（未选定环境时确定性拒绝规划）；Agent skills 要求最新
- * Environment 提供 live descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的 branch settings。配置或 Environment
- * 不满足一律返回 {@link Result.Rejected}（稳定 error code {@value #REJECTION_CODE}）；只有 repository / registry
- * 等基础设施异常向上传播，由 ThreadProcessor reschedule。YOLO 不进入 spec。
+ * 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。Environment 由 AgentDefinition.environmentId 在每轮
+ * turn 开始时按引用解析出当时事实（{@link EnvironmentBinding}）：要求环境的工具一律按最新解析出的 binding 绑定（未选定环境时确定性拒绝规划）； Agent
+ * skills 要求最新 Environment 提供 live descriptors，缺失/未 READY 时确定性拒绝。配置或 Environment 不满足一律返回 {@link
+ * Result.Rejected}（稳定 error code {@value #REJECTION_CODE}）；只有 repository / registry 等基础设施异常向上传播， 由
+ * ThreadProcessor reschedule。YOLO 不进入 spec。
  */
 @Component
 public final class DatabaseTurnResolver implements TurnResolver {
@@ -98,7 +98,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final ProviderFactories providerFactories;
   private final HarnessCatalog catalog;
-  private final LiveEnvironmentRegistry environmentRegistry;
+  private final EnvironmentRegistry environmentRegistry;
   private final SystemSettingsSnapshot snapshot;
   private final CompactionConfigProvider compactionConfigProvider;
   private final SubagentConfigProvider subagentConfigProvider;
@@ -116,7 +116,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       AgentModelRuntimeConfigParser modelConfigParser,
       ProviderFactories providerFactories,
       HarnessCatalog catalog,
-      LiveEnvironmentRegistry environmentRegistry,
+      EnvironmentRegistry environmentRegistry,
       SystemSettingsSnapshot snapshot,
       CompactionConfigProvider compactionConfigProvider,
       SubagentConfigProvider subagentConfigProvider,
@@ -202,12 +202,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 + ")");
 
     Instant now = clock.instant();
+    EnvironmentBinding environmentBinding = resolveEnvironmentBinding(agent, settings);
     CurrentEnvironmentContext currentEnvironment =
-        resolveCurrentEnvironment(settings.environment(), now);
-    List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), settings, now);
+        resolveCurrentEnvironment(environmentBinding, now);
+    List<SkillBinding> skillBindings =
+        resolveSkills(agentConfig.getSkills(), environmentBinding, now);
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents(), path);
     List<AgentToolId> toolIds = resolveToolIds(agentConfig, path);
-    List<ToolBinding> toolBindings = resolveTools(settings, toolIds);
+    List<ToolBinding> toolBindings = resolveTools(environmentBinding, toolIds);
 
     if (!toolBindings.isEmpty() && !parsedModel.tools()) {
       throw rejection(
@@ -250,6 +252,15 @@ public final class DatabaseTurnResolver implements TurnResolver {
             cacheControl),
         contextWindow(parsedModel),
         maxOutputTokens(parsedModel, variant));
+  }
+
+  private static EnvironmentBinding resolveEnvironmentBinding(
+      AgentDefinition agent, BranchSettings settings) {
+    if (agent.getEnvironmentId() == null || settings.workspacePath() == null) {
+      return null;
+    }
+    return new EnvironmentBinding(
+        EnvironmentId.of(agent.getEnvironmentId()), settings.workspacePath());
   }
 
   /**
@@ -398,10 +409,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * 按最新 Agent 配置派生的精确顺序逐一绑定。声明环境需求的工具一律绑定最新 branch 的完整 {@code settings.environment()}
+   * 按最新 Agent 配置派生的精确顺序逐一绑定。声明环境需求的工具一律绑定最新解析的完整 {@code environmentBinding}
    * binding（分支未选定环境时确定性拒绝规划）；所有工具冻结 ContributorBinding 与 state accesses。 缺失能力仍立即拒绝，绝不静默跳过。
    */
-  private List<ToolBinding> resolveTools(BranchSettings settings, List<AgentToolId> toolIds) {
+  private List<ToolBinding> resolveTools(
+      EnvironmentBinding environmentBinding, List<AgentToolId> toolIds) {
     List<ToolBinding> bindings = new ArrayList<>(toolIds.size());
     for (AgentToolId id : toolIds) {
       ToolContribution contribution = catalog.findTool(id).orElse(null);
@@ -422,7 +434,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
               contribution.id().localName(),
               stateAccesses);
       boolean environmentRequired = contribution.requirements().environmentRequired();
-      EnvironmentBinding environment = environmentRequired ? settings.environment() : null;
+      EnvironmentBinding environment = environmentRequired ? environmentBinding : null;
       if (environmentRequired && environment == null) {
         throw rejection(
             "environment tool "
@@ -438,29 +450,28 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   /** Agent skills 只从最新 Agent config 读取，且必须由最新选中的 Environment 精确提供。 */
   private List<SkillBinding> resolveSkills(
-      List<String> skillNames, BranchSettings settings, Instant now) {
+      List<String> skillNames, EnvironmentBinding binding, Instant now) {
     if (skillNames.isEmpty()) {
       return List.of();
     }
-    EnvironmentBinding binding = settings.environment();
     if (binding == null) {
       throw rejection(
           "agent skills require the latest selected environment but the branch has no environment");
     }
-    EnvironmentName environmentName = binding.environmentName();
-    // skills 需要最新 Environment 提供 live descriptors：按最新名称精确查找并要求 READY（同一可用性规则），
+    EnvironmentId environmentId = binding.environmentId();
+    // skills 需要最新 Environment 提供 live descriptors：按最新 id 精确查找并要求 READY（同一可用性规则），
     // 缺失/未 READY 确定性拒绝，绝不回看更旧的 branch settings。
-    LiveEnvironment environment = environmentRegistry.find(environmentName).orElse(null);
+    EnvironmentConnection environment = environmentRegistry.find(environmentId).orElse(null);
     if (environment == null) {
       throw rejection(
           "agent skills require the latest selected environment which is not live: "
-              + environmentName);
+              + environmentId);
     }
     if (!environment.isReady(
         now, Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis()))) {
       throw rejection(
           "agent skills require the latest selected environment which is not ready: "
-              + environmentName);
+              + environmentId);
     }
     List<SkillBinding> bindings = new ArrayList<>(skillNames.size());
     for (String skillName : skillNames) {
@@ -483,8 +494,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
       return new CurrentEnvironmentContext(
           null, null, now.atZone(clock.getZone()).toLocalDate(), null);
     }
-    LiveEnvironment liveEnvironment =
-        environmentRegistry.find(binding.environmentName()).orElse(null);
+    EnvironmentConnection liveEnvironment =
+        environmentRegistry.find(binding.environmentId()).orElse(null);
     DaemonEnvironmentInfo environmentInfo =
         liveEnvironment == null || liveEnvironment.daemonCapabilities() == null
             ? null

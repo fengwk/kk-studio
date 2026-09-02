@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.work;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -13,8 +13,8 @@ import java.util.Optional;
  * leaseUntil} fence 掉过期的 worker，且两者总是同时存在或同时缺失。所有转换都是纯函数：返回下一个状态，或返回 {@link Optional#empty()}
  * 表示删除，绝不会修改接收者。
  *
- * <p>{@code requiredEnvironmentName} 冻结该 Work 必须路由的环境名称；仅允许 targetType 为 {@link
- * WorkTargetType#TOOL} 时非空。一旦创建不可变，后续 request 冲突将被拒绝。
+ * <p>{@code requiredEnvironmentId} 冻结该 Work 必须路由的环境 id；仅允许 targetType 为 {@link WorkTargetType#TOOL}
+ * 时非空。一旦创建不可变，后续 request 冲突将被拒绝。
  */
 public record Work(
     WorkTarget target,
@@ -22,7 +22,7 @@ public record Work(
     long wakeVersion,
     String leaseToken,
     Instant leaseUntil,
-    EnvironmentName requiredEnvironmentName) {
+    EnvironmentId requiredEnvironmentId) {
 
   public Work {
     target = Objects.requireNonNull(target, "target");
@@ -37,9 +37,9 @@ public record Work(
       throw new IllegalArgumentException(
           "leaseToken and leaseUntil must both be present or both be absent");
     }
-    if (requiredEnvironmentName != null && target.type() != WorkTargetType.TOOL) {
+    if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
       throw new IllegalArgumentException(
-          "requiredEnvironmentName must be null for target type " + target.type());
+          "requiredEnvironmentId must be null for target type " + target.type());
     }
   }
 
@@ -60,10 +60,10 @@ public record Work(
 
   /** 创建 target 的首次 wake：wakeVersion 为 1，无 lease，冻结环境亲和性。 */
   public static Work initial(
-      WorkTarget target, Instant requestedAt, EnvironmentName requiredEnvironmentName) {
+      WorkTarget target, Instant requestedAt, EnvironmentId requiredEnvironmentId) {
     Objects.requireNonNull(target, "target");
     Objects.requireNonNull(requestedAt, "requestedAt");
-    return new Work(target, requestedAt, 1L, null, null, requiredEnvironmentName);
+    return new Work(target, requestedAt, 1L, null, null, requiredEnvironmentId);
   }
 
   /**
@@ -78,20 +78,20 @@ public record Work(
    * 请求另一次 wake：{@code wakeVersion} 递增，并将 {@code availableAt} 提前到当前时间与 requested time 的最小值，保留当前
    * lease。若传入非空环境需求，必须与已冻结的亲和性一致，否则抛出 {@link IllegalArgumentException}。
    */
-  public Work request(Instant requestedAt, EnvironmentName newRequiredEnvironmentName) {
+  public Work request(Instant requestedAt, EnvironmentId newRequiredEnvironmentId) {
     Objects.requireNonNull(requestedAt, "requestedAt");
-    if (newRequiredEnvironmentName != null
-        && !Objects.equals(requiredEnvironmentName, newRequiredEnvironmentName)) {
+    if (newRequiredEnvironmentId != null
+        && !Objects.equals(requiredEnvironmentId, newRequiredEnvironmentId)) {
       throw new IllegalArgumentException(
-          "conflicting requiredEnvironmentName: existing "
-              + requiredEnvironmentName
+          "conflicting requiredEnvironmentId: existing "
+              + requiredEnvironmentId
               + " vs requested "
-              + newRequiredEnvironmentName);
+              + newRequiredEnvironmentId);
     }
     long nextWakeVersion = Math.addExact(wakeVersion, 1L);
     Instant nextAvailableAt = availableAt.isAfter(requestedAt) ? requestedAt : availableAt;
     return new Work(
-        target, nextAvailableAt, nextWakeVersion, leaseToken, leaseUntil, requiredEnvironmentName);
+        target, nextAvailableAt, nextWakeVersion, leaseToken, leaseUntil, requiredEnvironmentId);
   }
 
   /**
@@ -111,8 +111,7 @@ public record Work(
     if (!until.isAfter(now)) {
       throw new IllegalArgumentException("lease until must be after now");
     }
-    return new Work(
-        target, availableAt, wakeVersion, canonicalToken, until, requiredEnvironmentName);
+    return new Work(target, availableAt, wakeVersion, canonicalToken, until, requiredEnvironmentId);
   }
 
   /**
@@ -128,7 +127,7 @@ public record Work(
     if (!until.isAfter(leaseUntil)) {
       throw new IllegalArgumentException("renew must strictly extend the current lease");
     }
-    return new Work(target, availableAt, wakeVersion, leaseToken, until, requiredEnvironmentName);
+    return new Work(target, availableAt, wakeVersion, leaseToken, until, requiredEnvironmentId);
   }
 
   /**
@@ -150,7 +149,7 @@ public record Work(
       return Optional.empty();
     }
     return Optional.of(
-        new Work(target, availableAt, wakeVersion, null, null, requiredEnvironmentName));
+        new Work(target, availableAt, wakeVersion, null, null, requiredEnvironmentId));
   }
 
   /**
@@ -176,7 +175,7 @@ public record Work(
     } else {
       nextAvailableAt = availableAt.isAfter(requestedAt) ? requestedAt : availableAt;
     }
-    return new Work(target, nextAvailableAt, wakeVersion, null, null, requiredEnvironmentName);
+    return new Work(target, nextAvailableAt, wakeVersion, null, null, requiredEnvironmentId);
   }
 
   private boolean hasActiveLeaseAt(Instant now) {

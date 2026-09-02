@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.CancelledUserMessage;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
@@ -132,8 +132,7 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals("4", dto.getNextCommandSequence());
     assertEquals("3", dto.getVersion());
     assertTrue(dto.getYoloEnabled());
-    assertEquals("env-1", dto.getBranchSettings().getEnvironment().getName());
-    assertEquals(".", dto.getBranchSettings().getEnvironment().getWorkspacePath());
+    assertEquals(".", dto.getBranchSettings().getWorkspacePath());
     assertEquals("default-assistant", dto.getBranchSettings().getAgentName());
     assertEquals("openai", dto.getBranchSettings().getModel().getProviderName());
     assertEquals("gpt-5", dto.getBranchSettings().getModel().getModelName());
@@ -146,7 +145,7 @@ class HarnessRuntimeResponseMapperTest {
     assertNull(
         HarnessRuntimeResponseMapper.toThreadDto(withoutEnvironment)
             .getBranchSettings()
-            .getEnvironment());
+            .getWorkspacePath());
   }
 
   @Test
@@ -241,7 +240,8 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals("1.0", boundDto.getToolVersion());
     assertEquals("bash", boundDto.getRendererKey());
     assertEquals("test.bash", boundDto.getToolId());
-    assertEquals("local", boundDto.getEnvironment().getName());
+    assertEquals(
+        "11111111-1111-1111-1111-111111111111", boundDto.getEnvironment().getEnvironmentId());
     assertEquals("workspace", boundDto.getEnvironment().getWorkspacePath());
     assertEquals(approval, new ToolApprovalJsonCodec().decode(boundDto.getApprovalJson()));
     assertEquals(result, ToolResultJsonCodec.decode(boundDto.getResultJson()));
@@ -631,7 +631,8 @@ class HarnessRuntimeResponseMapperTest {
             new AgentToolId("test.bash"), descriptor(), ToolVisibility.SELECTABLE),
         new ContributorBinding("test", "bash", List.of()),
         true,
-        new EnvironmentBinding(new EnvironmentName("local"), "workspace"));
+        new EnvironmentBinding(
+            EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), "workspace"));
   }
 
   private static ToolBinding hostToolBinding() {

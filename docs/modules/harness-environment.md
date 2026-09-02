@@ -14,10 +14,10 @@
 
 ### Goals
 
-- 让 durable branch binding、Platform route、Daemon wire 使用同一个 `EnvironmentName`。
+- 让 durable branch binding、Platform route、Daemon wire 使用同一个 `EnvironmentId`。
 - 让 Environment Capability ID/schema/version 独立于模型 Tool name、prompt、visibility 和 permission。
 - 固定 transport 的发送确定性、流式顺序、cancel 与 terminal-once 契约。
-- 只保留 Daemon protocol v5 的通用消息和严格 codec。
+- 只保留 Daemon protocol v6 的通用消息和严格 codec。
 - 统一 workspace 与目录浏览使用的相对 wire path 规则。
 
 ### Non-goals
@@ -34,9 +34,9 @@ harness-common + Jackson
        │
        ▼
 harness-environment
-  ├─ EnvironmentName / Binding / WorkspacePath
+  ├─ EnvironmentId / Binding / WorkspacePath
   ├─ capability catalog + execution/transport SPI
-  └─ daemon protocol v5 values + codecs
+  └─ daemon protocol v6 values + codecs
 
 禁止：harness-tool / harness-runtime / harness-infra / harness-daemon implementation
       contributor-api / platform / web / Spring / JDBC
@@ -48,18 +48,14 @@ harness-environment
 
 ### Environment identity 与 binding
 
-[`EnvironmentName`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentName.java) 是最长 64 字符的 canonical ASCII route：
+[`EnvironmentId`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java) 是 canonical UUID route 值对象：
 
-```text
-[a-z0-9]+(-[a-z0-9]+)*
-```
-
-它是 BranchSettings、EnvironmentBinding、Daemon envelope 和跨节点 route 的唯一逻辑身份；没有独立 display name 或 UUID identity。
+它是 BranchSettings、EnvironmentBinding、Daemon envelope 和跨节点 route 的唯一逻辑身份。
 
 [`EnvironmentBinding`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentBinding.java) 冻结：
 
 ```text
-environmentName + workspacePath
+environmentId + workspacePath
 ```
 
 [`EnvironmentWorkspacePath`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentWorkspacePath.java) 定义跨平台纯字符串规则：
@@ -194,10 +190,10 @@ timeoutMillis
 
 ## 不变量、failure / recovery
 
-- `EnvironmentName` 是 route、binding 与 wire 的唯一逻辑身份；不能用连接 ID、daemon ID 或节点 ID替代。
-- `EnvironmentBinding` 一经写入 invocation 就同时冻结 name 与 workspace；不存在半空 binding。
+- `EnvironmentId` 是 route、binding 与 wire 的唯一逻辑身份；不能用连接 ID、daemon ID 或节点 ID替代。
+- `EnvironmentBinding` 一经写入 invocation 就同时冻结 id 与 workspace；不存在半空 binding。
 - Capability catalog 与 model Tool catalog 分离；Capability ID/version mismatch 是确定性协议失败。
-- Protocol v5 只允许当前通用消息集合；历史专用 Skill/Directory 消息必须按 unknown type 拒绝。
+- Protocol v6 只允许当前通用消息集合；历史专用 Skill/Directory 消息必须按 unknown type 拒绝。
 - `SendUncertain` 代表副作用结果未知，调用方不得自动重放。
 - Codec 只负责 wire/value validation；connection generation、journal replay、route lease 和 durable recovery 分别由 Daemon、Platform 与 Runtime 负责。
 
@@ -205,7 +201,7 @@ timeoutMillis
 
 ### 源码入口
 
-- [`EnvironmentName.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentName.java)、[`EnvironmentBinding.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentBinding.java)、[`EnvironmentWorkspacePath.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentWorkspacePath.java)
+- [`EnvironmentId.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java)、[`EnvironmentBinding.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentBinding.java)、[`EnvironmentWorkspacePath.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentWorkspacePath.java)
 - [`EnvironmentCapabilityCatalog.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java)、[`EnvironmentCapability.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapability.java)、[`EnvironmentCapabilityTransport.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java)
 - [`DaemonProtocol.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java)、[`DaemonEnvelopeCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java)、[`DaemonCapabilitiesCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java)
 - [`DaemonCapabilityInvokeCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodec.java)、[`DaemonCapabilityResultCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodec.java)
@@ -213,9 +209,9 @@ timeoutMillis
 ### 关键测试守卫
 
 - [`EnvironmentModuleArchitectureTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentModuleArchitectureTest.java)：模块依赖方向。
-- [`EnvironmentNameTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentNameTest.java)、[`EnvironmentWorkspacePathTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentWorkspacePathTest.java)：identity 与 path grammar。
+- [`EnvironmentIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentIdTest.java)、[`EnvironmentWorkspacePathTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentWorkspacePathTest.java)：identity 与 path grammar。
 - [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)、[`EnvironmentCapabilityTransportTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransportTest.java)：catalog 与 certainty/ordering。
-- [`DaemonEnvelopeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonCapabilityInvokeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodecTest.java)、[`DaemonCapabilityResultCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodecTest.java)：protocol v5 严格 codec。
+- [`DaemonEnvelopeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonCapabilityInvokeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodecTest.java)、[`DaemonCapabilityResultCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodecTest.java)：protocol v6 严格 codec。
 
 ---
 

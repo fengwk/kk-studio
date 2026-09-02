@@ -22,7 +22,8 @@ import java.util.List;
 /** ToolBinding 的 definition/contributor/environmentRequired/environment 契约与不变式。 */
 class ToolBindingTest {
 
-  private static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
+  private static final EnvironmentBinding ENV_ID =
+      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
 
   @Test
   void exposesOnlyDefinitionContributorEnvironmentRequiredAndEnvironmentComponents() {

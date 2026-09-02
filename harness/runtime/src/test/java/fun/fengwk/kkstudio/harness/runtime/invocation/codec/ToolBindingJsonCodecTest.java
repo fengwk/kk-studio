@@ -250,8 +250,8 @@ class ToolBindingJsonCodecTest {
   }
 
   private static String environmentJson(EnvironmentBinding binding) {
-    return "{\"name\":\""
-        + binding.environmentName().value()
+    return "{\"environmentId\":\""
+        + binding.environmentId()
         + "\",\"workspacePath\":\""
         + binding.workspacePath()
         + "\"}";

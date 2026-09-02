@@ -8,8 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -17,13 +15,12 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 
 import java.util.List;
 
-/** 类型化 command payload 的 role、字段与防御性拷贝不变量。 */
+/** 类型化 command payload 的 role、字段与 canonical 值不变量。 */
 class ThreadCommandPayloadTest {
 
   private static final ModelSelection MODEL =
       new ModelSelection("anthropic", "claude-sonnet", "default");
-  private static final EnvironmentBinding ENV =
-      EnvironmentBindings.binding("123e4567-e89b-12d3-a456-426614174000");
+  private static final String WORKSPACE_PATH = "projects/web";
 
   @Test
   void everyPayloadReportsItsCommandType() {
@@ -33,13 +30,13 @@ class ThreadCommandPayloadTest {
             ThreadCommandType.CUSTOM_MESSAGE,
             ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_MODEL,
-            ThreadCommandType.SET_ENVIRONMENT),
+            ThreadCommandType.SET_WORKSPACE_PATH),
         List.of(
                 new UserMessageCommandPayload(user("hello")),
                 new CustomMessageCommandPayload(system("system")),
                 new SetAgentCommandPayload("coding"),
                 new SetModelCommandPayload(MODEL),
-                new SetEnvironmentCommandPayload(ENV))
+                new SetWorkspacePathCommandPayload(WORKSPACE_PATH))
             .stream()
             .map(ThreadCommandPayload::type)
             .toList());
@@ -62,18 +59,20 @@ class ThreadCommandPayloadTest {
     assertThrows(NullPointerException.class, () -> new UserMessageCommandPayload(null));
   }
 
+  /** SET_WORKSPACE_PATH 接受 canonical 相对路径与显式 null（清除）；绝对路径拒绝。 */
   @Test
   void settingPayloadsEnforceCanonicalValuesAndAtomicModel() {
     assertEquals(MODEL, new SetModelCommandPayload(MODEL).model());
     assertThrows(IllegalArgumentException.class, () -> new SetAgentCommandPayload(" coding"));
     assertThrows(NullPointerException.class, () -> new SetModelCommandPayload(null));
-    assertNull(new SetEnvironmentCommandPayload(null).environment());
-    assertEquals(ENV, new SetEnvironmentCommandPayload(ENV).environment());
+    assertNull(new SetWorkspacePathCommandPayload(null).workspacePath());
+    assertEquals(
+        WORKSPACE_PATH, new SetWorkspacePathCommandPayload(WORKSPACE_PATH).workspacePath());
     assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new SetEnvironmentCommandPayload(
-                EnvironmentBindings.binding("123E4567-E89B-12D3-A456-426614174000")));
+        IllegalArgumentException.class, () -> new SetWorkspacePathCommandPayload("/absolute"));
+    assertThrows(
+        IllegalArgumentException.class, () -> new SetWorkspacePathCommandPayload("../escape"));
+    assertThrows(IllegalArgumentException.class, () -> new SetWorkspacePathCommandPayload("a\\b"));
   }
 
   @Test
@@ -81,6 +80,7 @@ class ThreadCommandPayloadTest {
     assertTrue(ThreadCommandType.USER_MESSAGE.isMessage());
     assertTrue(ThreadCommandType.CUSTOM_MESSAGE.isMessage());
     assertFalse(ThreadCommandType.SET_AGENT.isMessage());
+    assertFalse(ThreadCommandType.SET_WORKSPACE_PATH.isMessage());
   }
 
   private static AgentMessage user(String text) {
