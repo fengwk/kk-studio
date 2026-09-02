@@ -577,11 +577,11 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   }
 
   /**
-   * 测试意图：证明当已认领的 RUNNING 目录查询在完成回调前 deadline 被置为过去（超时）时， 迟到的 complete 或 fail 不得更新终态（受 deadline_at >
-   * statement_timestamp() 保护）， 也不得向响应信道发送通知，过期行由 cleanQuery 删除。
+   * 测试意图：证明当已认领的 RUNNING 目录查询在完成回调前 deadline 被置为过去（超时）时， 迟到的 complete 不得更新终态（受 deadline_at >
+   * statement_timestamp() 保护）， 也不得向响应信道发送通知，过期行由 resync cleanup 删除。
    */
   @Test
-  void runningMailboxQueryWithExpiredDeadlineRejectsLateCompletionAndFailure() throws Exception {
+  void runningMailboxQueryWithExpiredDeadlineRejectsLateCompletion() throws Exception {
     FakeConnection conn1 = new FakeConnection("conn-1");
     gatewayNode1.open(conn1);
     gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
@@ -616,6 +616,63 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     completeDirectoryInvocation(conn1, invokeEnvelope, 2);
 
     // 状态必须仍然是 RUNNING，绝不能被迟到的 callback 改成 SUCCEEDED
+    String statusAfterLate =
+        jdbcTemplate.queryForObject(
+            "select status from environment_directory_query where environment_id = ?",
+            String.class,
+            DEV.value());
+    assertEquals("RUNNING", statusAfterLate);
+
+    // 执行过期清理 onResync -> 该 query 必须被清理删除
+    coordinatorNode1.onResync();
+    Integer count =
+        jdbcTemplate.queryForObject(
+            "select count(1) from environment_directory_query where environment_id = ?",
+            Integer.class,
+            DEV.value());
+    assertEquals(0, count);
+  }
+
+  /**
+   * 测试意图：证明当已认领的 RUNNING 目录查询在失败回调前 deadline 被置为过去（超时）时， 迟到的 fail 不得更新终态（受 deadline_at >
+   * statement_timestamp() 保护）， 状态保持 RUNNING、不发送通知，过期行由 resync cleanup 删除。
+   */
+  @Test
+  void runningMailboxQueryWithExpiredDeadlineRejectsLateFailure() throws Exception {
+    FakeConnection conn1 = new FakeConnection("conn-1");
+    gatewayNode1.open(conn1);
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+
+    // 提交一个查询，设置较长的 30s 初始超时
+    CompletableFuture<EnvironmentDirectoryListResult> future =
+        gatewayNode2.listDirectory(DEV, ".", Duration.ofSeconds(30));
+
+    // Node 1 认领该查询
+    coordinatorNode1.onRequestNotification(DEV.toString());
+
+    // 验证 Node 1 的 daemon 收到了 INVOKE
+    assertEquals(2, conn1.envelopes().size());
+    DaemonEnvelope invokeEnvelope = conn1.envelopes().get(1);
+    assertEquals(DaemonMessageType.INVOKE, invokeEnvelope.messageType());
+
+    // 验证数据库中该 query 状态为 RUNNING
+    String status =
+        jdbcTemplate.queryForObject(
+            "select status from environment_directory_query where environment_id = ?",
+            String.class,
+            DEV.value());
+    assertEquals("RUNNING", status);
+
+    // 人工将该 RUNNING query 的 deadline_at 调整为过去
+    jdbcTemplate.update(
+        "update environment_directory_query set created_at = statement_timestamp() - interval '10 seconds', deadline_at = statement_timestamp() - interval '5 seconds' where environment_id = ?",
+        DEV.value());
+
+    // daemon 迟到的失败结果到达
+    failDirectoryInvocation(conn1, invokeEnvelope, 2, "late error");
+
+    // 状态必须仍然是 RUNNING，绝不能被迟到的 callback 改成 FAILED
     String statusAfterLate =
         jdbcTemplate.queryForObject(
             "select status from environment_directory_query where environment_id = ?",
@@ -701,6 +758,25 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
                 invokeEnvelope.invocationId(),
                 sequence,
                 completedJson)));
+  }
+
+  private void failDirectoryInvocation(
+      FakeConnection connection, DaemonEnvelope invokeEnvelope, long sequence, String errorMessage)
+      throws Exception {
+    String failedJson =
+        RESULT_CODEC.encodeCompleted(
+            EnvironmentCapabilityResult.error(invokeEnvelope.invocationId(), errorMessage),
+            DUMMY_STORE);
+    gatewayNode1.receive(
+        connection.connectionId(),
+        ENVELOPE_CODEC.encode(
+            new DaemonEnvelope(
+                DaemonProtocol.VERSION,
+                DaemonMessageType.COMPLETED,
+                DEV,
+                invokeEnvelope.invocationId(),
+                sequence,
+                failedJson)));
   }
 
   private static final class FakeConnection implements EnvironmentDaemonConnection {

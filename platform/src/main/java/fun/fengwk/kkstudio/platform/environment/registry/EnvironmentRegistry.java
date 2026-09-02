@@ -119,6 +119,38 @@ public class EnvironmentRegistry {
       where environment_id = ?
       """;
 
+  private static final String HAS_ACTIVE_LEASE_SQL =
+      """
+      select exists (
+          select 1 from environment_connection
+          where environment_id = ?
+            and lease_until > statement_timestamp()
+      )
+      """;
+
+  private static final String HOLDS_READY_LEASE_SQL =
+      """
+      select exists (
+          select 1 from environment_connection
+          where environment_id = ?
+            and owner_node_id = ?
+            and lease_token = ?
+            and status = 'READY'
+            and lease_until > statement_timestamp()
+      )
+      """;
+
+  private static final String HAS_ACTIVE_LEASE_TOKEN_SQL =
+      """
+      select exists (
+          select 1 from environment_connection
+          where environment_id = ?
+            and owner_node_id = ?
+            and lease_token = ?
+            and lease_until > statement_timestamp()
+      )
+      """;
+
   private static final String LIST_SQL =
       """
       select environment_id, owner_node_id, lease_token,
@@ -280,6 +312,42 @@ public class EnvironmentRegistry {
   /** 判定环境是否有活跃租约（无论 CONNECTING 还是 READY）。 */
   public boolean isOnline(EnvironmentId environmentId, Instant now) {
     return find(environmentId).map(env -> env.isOnline(now)).orElse(false);
+  }
+
+  /** 数据库现在时判定指定环境是否有任意活跃租约（用于 admin rotateToken/delete 在锁行下的安全准入）。 */
+  public boolean hasActiveLease(EnvironmentId environmentId) {
+    if (environmentId == null) {
+      return false;
+    }
+    Boolean exists =
+        jdbcTemplate.queryForObject(HAS_ACTIVE_LEASE_SQL, Boolean.class, environmentId.value());
+    return Boolean.TRUE.equals(exists);
+  }
+
+  /** 数据库现在时判定当前节点是否持有有效的 READY 路由租约（用于本地 capability INVOKE 准入）。 */
+  public boolean holdsReadyLease(EnvironmentId environmentId, UUID leaseToken) {
+    if (environmentId == null || leaseToken == null) {
+      return false;
+    }
+    Boolean exists =
+        jdbcTemplate.queryForObject(
+            HOLDS_READY_LEASE_SQL, Boolean.class, environmentId.value(), ownerNodeId, leaseToken);
+    return Boolean.TRUE.equals(exists);
+  }
+
+  /** 数据库现在时判定当前节点是否持有活跃的连接代币（用于 HELLO 同节点活跃连接防冲突保护）。 */
+  public boolean hasActiveLeaseToken(EnvironmentId environmentId, UUID leaseToken) {
+    if (environmentId == null || leaseToken == null) {
+      return false;
+    }
+    Boolean exists =
+        jdbcTemplate.queryForObject(
+            HAS_ACTIVE_LEASE_TOKEN_SQL,
+            Boolean.class,
+            environmentId.value(),
+            ownerNodeId,
+            leaseToken);
+    return Boolean.TRUE.equals(exists);
   }
 
   private record AcquireRow(UUID leaseToken, boolean acquired, String resultType) {}

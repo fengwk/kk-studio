@@ -1008,6 +1008,34 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
                 ENVIRONMENT, request(fixture.descriptor), new RecordingListener()));
   }
 
+  /**
+   * 测试意图：证明当应用注入的时钟 (Clock) 滞后于实际数据库时间（时钟漂移）、但数据库中 lease_until 已经过期时， Gateway 依据 PostgreSQL 现在时
+   * holdsReadyLease 必须 fail-closed 抛出 unavailable， 绝不能因为应用时钟落后而误判为就绪并发出 INVOKE 消息。
+   */
+  @Test
+  void invokeFailsClosedWhenDatabaseLeaseIsExpiredEvenIfInjectedClockIsLagging() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("conn-clock-lag");
+
+    // 将数据库租约到期时间调整为过去（以 statement_timestamp() 为准已过期）
+    fixture.jdbc.update(
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
+        ENVIRONMENT_NAME.value());
+
+    // 模拟应用时钟严重滞后（停留在过去）
+    fixture.now.set(Instant.now().minus(Duration.ofMinutes(10)));
+
+    // 验证 invoke 必须以 DB 现在时为准 fail-closed，抛出 Unavailable
+    RecordingListener listener = new RecordingListener();
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener));
+
+    // 确保连接上没有被发出任何 INVOKE 帧（仅有先前的 WELCOME）
+    assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
+    assertNull(listener.error);
+  }
+
   @Test
   void wrongNameOnBoundConnectionIsRejectedWithoutRerouting() {
     Fixture fixture = fixture();
