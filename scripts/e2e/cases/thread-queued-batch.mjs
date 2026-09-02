@@ -29,7 +29,9 @@ registerCase({
   id: 'thread.queued_command_batch',
   level: 'L1',
   title: '运行中连续两批 USER 按 sequence 逐 Turn 收割',
-  requires: [],
+  // 本 case 把 Provider baseUrl 指向 case 内自建的宿主 127.0.0.1 mock；App 在
+  // distributed 容器内无法回连宿主 loopback，因此必须排除 host-mock capability。
+  requires: ['host-mock'],
   docs: '本地受控 OpenAI chat-completions SSE hold mock（免费确定性，不调用真实 Provider）：首个 USER 启动后 mock 保持响应 open；确认 model active 后连续接受两条 THREAD batch，轮询确认两条命令同时 QUEUED 且 sequence 连续；release 首响应后 request#2 只新增 firstMarker（不得有 secondMarker），request#3 新增 secondMarker 且历史顺序 first->second；最终 entry 顺序 initial USER->assistant->first USER->assistant->second USER->assistant、queuedCommands 清空',
   async run(ctx) {
     const suffix = cid().slice(0, 8)

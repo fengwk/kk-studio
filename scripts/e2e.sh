@@ -7,6 +7,7 @@
 #   ./scripts/e2e.sh --real           # + 真 MiniMax 文本轮次（需 TEST_MINIMAX_*）
 #   ./scripts/e2e.sh --real --with-branch
 #   ./scripts/e2e.sh --real --with-tools --with-canvas-storage  # 真实 Tool turn（Resource 外部化需 S3）
+#   ./scripts/e2e.sh --distributed    # + 双节点 distributed mock topology（免费）
 #   ./scripts/e2e.sh --ui              # + Playwright UI E2E（截图进报告）
 #   ./scripts/e2e.sh --list           # 只打印矩阵，不执行
 #
@@ -23,6 +24,7 @@
 # - 前端 UI 易变：默认矩阵断言 HTTP 契约/状态机，不把脆弱 selector 当门槛
 # - 改 API 字段/首发顺序/usage 语义时，必须同步更新矩阵 case 与文档
 # - 真模型默认关闭，避免 CI/本地无意识扣费
+# - --distributed 是正交 capability，只启停 deploy/distributed 栈，不改变默认单实例路径
 
 set -euo pipefail
 
@@ -37,6 +39,7 @@ WITH_CANVAS_STORAGE=false
 WITH_CANVAS_FUNCTION=false
 REAL=false
 WITH_UI=false
+DISTRIBUTED=false
 LIST_ONLY=false
 DOCS_ONLY=false
 ONLY_ARGS=()
@@ -53,6 +56,7 @@ Options:
   --with-branch     Enable branch usage cases (implies --real)
   --with-canvas-storage  Enable Canvas Resource/Blob storage contract (backend S3 config required; also a precondition of real tool.read_turn)
   --with-canvas-function Enable free fake Canvas Function E2E (implies storage + rebuild)
+  --distributed     Run the two-node distributed mock topology (free; no real provider)
   --ui              Enable Playwright UI E2E (screenshots in report)
   --only <caseId>   Run one case id (repeatable)
   --level <Lx>      Filter by level L1/L2/L3/L4 (repeatable)
@@ -89,6 +93,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     --ui) WITH_UI=true; shift ;;
+    --distributed) DISTRIBUTED=true; shift ;;
     --only) ONLY_ARGS+=(--only "$2"); shift 2 ;;
     --level) LEVEL_ARGS+=(--level "$2"); shift 2 ;;
     --list) LIST_ONLY=true; shift ;;
@@ -113,8 +118,39 @@ if [ "$WITH_CANVAS_FUNCTION" = "true" ]; then
   export SPRING_FLYWAY_LOCATIONS=${SPRING_FLYWAY_LOCATIONS:-classpath:db/migration,classpath:db/seed/e2e,classpath:db/seed/canvas-test}
 fi
 
-# 1) ensure stack
-ensure_stack "$REBUILD" "$WITH_TOOLS"
+DISTRIBUTED_RUNNER="$SCRIPT_DIR/../deploy/distributed/run.sh"
+
+# --distributed 是正交 capability：默认单实例路径完全不变；只有显式 --distributed
+# 才启停 deploy/distributed 双节点 mock 栈。本切片 distributed 只承载免费基础设施
+# case，与真实 Provider/Daemon/UI/storage 组合留待 Environment 分支集成。
+if [ "$DISTRIBUTED" = "true" ]; then
+  for flag in REAL WITH_TOOLS WITH_BRANCH WITH_CANVAS_STORAGE WITH_CANVAS_FUNCTION WITH_UI; do
+    if [ "${!flag}" = "true" ]; then
+      die "--distributed cannot be combined with --${flag} capability in this slice"
+    fi
+  done
+  command -v docker >/dev/null 2>&1 || die "docker is required for --distributed"
+  [ -x "$DISTRIBUTED_RUNNER" ] || die "missing distributed runner: $DISTRIBUTED_RUNNER"
+  step "Ensuring distributed two-node stack"
+  "$DISTRIBUTED_RUNNER" up --skip-build || "$DISTRIBUTED_RUNNER" up
+  APP_A_PORT=${DISTRIBUTED_APP_A_PORT:-18082}
+  APP_B_PORT=${DISTRIBUTED_APP_B_PORT:-18083}
+  BACKEND_URL="http://127.0.0.1:$APP_A_PORT"
+  # 双节点模式不启动宿主 frontend；置空可让 runner 自动排除 frontend case。
+  FRONTEND_URL=""
+  cleanup_distributed() {
+    local status=$?
+    set +e
+    "$DISTRIBUTED_RUNNER" down --volumes >/dev/null 2>&1
+    exit $status
+  }
+  trap cleanup_distributed EXIT
+fi
+
+# 1) ensure stack（--distributed 时栈即 deploy/distributed，跳过宿主单实例栈）
+if [ "$DISTRIBUTED" != "true" ]; then
+  ensure_stack "$REBUILD" "$WITH_TOOLS"
+fi
 
 # 2) synchronize the MiniMax pair; --real uses the seeded MiniMax model
 if [ "$REAL" = "true" ]; then
@@ -131,9 +167,14 @@ fi
 # 3) run matrix
 MATRIX_ARGS=(
   --base-url "$BACKEND_URL"
-  --frontend-url "$FRONTEND_URL"
   --daemon-env "$DAEMON_ENV_NAME"
 )
+if [ "$DISTRIBUTED" != "true" ]; then
+  MATRIX_ARGS+=(--frontend-url "$FRONTEND_URL")
+fi
+if [ "$DISTRIBUTED" = "true" ]; then
+  MATRIX_ARGS+=(--distributed --base-url-b "http://127.0.0.1:$APP_B_PORT")
+fi
 if [ "$REAL" = "true" ]; then MATRIX_ARGS+=(--real); fi
 if [ "$WITH_TOOLS" = "true" ]; then MATRIX_ARGS+=(--with-tools); fi
 if [ "$WITH_BRANCH" = "true" ]; then MATRIX_ARGS+=(--with-branch); fi
