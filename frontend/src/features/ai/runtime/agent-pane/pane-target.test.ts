@@ -340,6 +340,31 @@ describe('PaneTarget durable-local FSM', () => {
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setPending({ owner: { type: 'OTHER', id: 'chat-1' } })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    // 验证持久化 validator 严格 exact shape 校验：fail closed 拒绝携带旧 environment 字段的数据，不向后兼容读取旧 localStorage
+    setPending({
+      branchDraft: {
+        ...valid.branchDraft,
+        environment: { name: 'local', workspacePath: '.' },
+      },
+      request: validRequest,
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    setPending({
+      branchDraft: valid.branchDraft,
+      request: {
+        ...validRequest,
+        target: {
+          ...validRequest.target,
+          rootSettings: {
+            ...validRequest.target.rootSettings,
+            environment: { name: 'local', workspacePath: '.' },
+          },
+        },
+      },
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
     setPending({
       branchDraft: {
         ...valid.branchDraft,
@@ -356,7 +381,7 @@ describe('PaneTarget durable-local FSM', () => {
         },
       },
     })
-    expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({ ...validRequest, target: null })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({ ...validRequest, target: { type: 1 } })

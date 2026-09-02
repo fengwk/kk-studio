@@ -51,7 +51,7 @@ export function ChatCard({
       <div className="meta-block">
         <MetaRow label={t('ai.chat.agent')} value={agentLabel} />
         <MetaRow
-          label={t('ai.chat.environment')}
+          label={t('ai.chat.workspacePath')}
           value={workspaceLabel}
         />
         <MetaRow label={t('ai.chat.updated')} value={formatBackendDate(chat.updateTime)} />

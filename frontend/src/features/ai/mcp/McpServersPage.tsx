@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Plus, RefreshCw, Server, Trash2, ShieldCheck, ShieldAlert } from 'lucide-react'
+import { isConflictError } from '@/shared/api/client'
+import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
+import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
@@ -57,6 +60,9 @@ export function McpServersPage() {
   const [createModal, setCreateModal] = useState<CreateModalState | null>(null)
   const [editModal, setEditModal] = useState<EditModalState | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<McpServerDTO | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
 
   const serversQuery = useQuery({
@@ -78,8 +84,14 @@ export function McpServersPage() {
       setCreateModal(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })
     },
-    onError: (err: Error) => {
-      setCreateModal((prev) => (prev ? { ...prev, error: err.message || String(err) } : null))
+    onError: (err: unknown) => {
+      if (isConflictError(err)) {
+        setConflict(presentConflict(err))
+        setCreateModal(null)
+        return
+      }
+      const message = err instanceof Error ? err.message : String(err)
+      setCreateModal((prev) => (prev ? { ...prev, error: message } : null))
     },
   })
 
@@ -101,8 +113,14 @@ export function McpServersPage() {
       setEditModal(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })
     },
-    onError: (err: Error) => {
-      setEditModal((prev) => (prev ? { ...prev, error: err.message || String(err) } : null))
+    onError: (err: unknown) => {
+      if (isConflictError(err)) {
+        setConflict(presentConflict(err))
+        setEditModal(null)
+        return
+      }
+      const message = err instanceof Error ? err.message : String(err)
+      setEditModal((prev) => (prev ? { ...prev, error: message } : null))
     },
   })
 
@@ -115,8 +133,17 @@ export function McpServersPage() {
       setRefreshingId(null)
     },
     onSuccess: () => {
+      setActionError(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })
       void queryClient.invalidateQueries({ queryKey: queryKeys.tools.all })
+    },
+    onError: (err: unknown) => {
+      if (isConflictError(err)) {
+        setConflict(presentConflict(err))
+        setActionError(null)
+        return
+      }
+      setActionError(err instanceof Error ? err.message : String(err))
     },
   })
 
@@ -125,8 +152,18 @@ export function McpServersPage() {
       mcpServerService.deleteServer(id, expectedVersion),
     onSuccess: () => {
       setDeleteTarget(null)
+      setDeleteError(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })
       void queryClient.invalidateQueries({ queryKey: queryKeys.tools.all })
+    },
+    onError: (err: unknown) => {
+      if (isConflictError(err)) {
+        setConflict(presentConflict(err))
+        setDeleteTarget(null)
+        setDeleteError(null)
+        return
+      }
+      setDeleteError(err instanceof Error ? err.message : String(err))
     },
   })
 
@@ -194,7 +231,9 @@ export function McpServersPage() {
           <button
             type="button"
             className="btn-primary"
-            onClick={() =>
+            onClick={() => {
+              setActionError(null)
+              setConflict(null)
               setCreateModal({
                 name: '',
                 url: '',
@@ -202,7 +241,7 @@ export function McpServersPage() {
                 timeoutMillis: '30000',
                 error: null,
               })
-            }
+            }}
           >
             <Plus aria-hidden="true" />
             {t('ai.mcp.create')}
@@ -210,6 +249,19 @@ export function McpServersPage() {
         </div>
       </nav>
       <div className="screen-body">
+        {actionError && (
+          <div className="form-error-banner" role="alert" style={{ marginBottom: 16 }}>
+            <span>{actionError}</span>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => setActionError(null)}
+              aria-label={t('shared.close')}
+            >
+              {t('shared.close')}
+            </button>
+          </div>
+        )}
         {serversQuery.isLoading && <StateBlock title={t('ai.mcp.loading')} />}
         {serversQuery.error && (
           <StateBlock
@@ -278,12 +330,14 @@ export function McpServersPage() {
                       <button
                         type="button"
                         className="action-enter-btn"
-                        onClick={() =>
+                        onClick={() => {
+                          setActionError(null)
+                          setConflict(null)
                           refreshMutation.mutate({
                             id: server.id,
                             expectedVersion: server.version,
                           })
-                        }
+                        }}
                         disabled={refreshingId === server.id}
                       >
                         <RefreshCw
@@ -295,7 +349,9 @@ export function McpServersPage() {
                       <button
                         type="button"
                         className="action-enter-btn"
-                        onClick={() =>
+                        onClick={() => {
+                          setActionError(null)
+                          setConflict(null)
                           setEditModal({
                             server,
                             url: server.url,
@@ -304,7 +360,7 @@ export function McpServersPage() {
                             bearerToken: '',
                             error: null,
                           })
-                        }
+                        }}
                       >
                         <Pencil aria-hidden="true" />
                         {t('ai.mcp.edit')}
@@ -312,7 +368,12 @@ export function McpServersPage() {
                       <button
                         type="button"
                         className="action-enter-btn danger"
-                        onClick={() => setDeleteTarget(server)}
+                        onClick={() => {
+                          setActionError(null)
+                          setConflict(null)
+                          setDeleteError(null)
+                          setDeleteTarget(server)
+                        }}
                       >
                         <Trash2 aria-hidden="true" />
                         {t('ai.mcp.delete')}
@@ -544,6 +605,7 @@ export function McpServersPage() {
             confirmLabel: t('ai.mcp.delete'),
             icon: 'delete',
             tone: 'danger',
+            error: deleteError,
             onConfirm: () =>
               deleteMutation.mutate({
                 id: deleteTarget.id,
@@ -551,9 +613,27 @@ export function McpServersPage() {
               }),
           }}
           pending={deleteMutation.isPending}
-          onClose={() => setDeleteTarget(null)}
+          onClose={() => {
+            setDeleteTarget(null)
+            setDeleteError(null)
+          }}
         />
       )}
+
+      <ConflictPresenter
+        conflict={conflict}
+        onRefresh={() => {
+          setConflict(null)
+          setCreateModal(null)
+          setEditModal(null)
+          setDeleteTarget(null)
+          setDeleteError(null)
+          setActionError(null)
+          void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })
+          void queryClient.invalidateQueries({ queryKey: queryKeys.tools.all })
+        }}
+        onClose={() => setConflict(null)}
+      />
     </section>
   )
 }

@@ -7,6 +7,10 @@ import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLa
 import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { environmentService } from '@/shared/api/environment-service'
+import { isConflictError } from '@/shared/api/client'
+import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
+import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
+import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -24,7 +28,7 @@ function formatDateTime24(date: Date, locale: AppLocale): string {
   })
 }
 
-function formatLastSeen(value: string | number | null | undefined, locale: AppLocale): string {
+function formatLastSeen(value: InstantTimestamp | undefined, locale: AppLocale): string {
   if (value == null || value === '') {
     return ''
   }
@@ -98,7 +102,10 @@ export function EnvironmentsPage() {
   const [copied, setCopied] = useState(false)
 
   const [deleteTarget, setDeleteTarget] = useState<EnvironmentCardDTO | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [rotateTarget, setRotateTarget] = useState<EnvironmentCardDTO | null>(null)
+  const [rotateError, setRotateError] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
 
   const environmentsQuery = useQuery({
     queryKey: queryKeys.environments.list,
@@ -125,8 +132,14 @@ export function EnvironmentsPage() {
         })
       }
     },
-    onError: (err: Error) => {
-      setCreateError(err.message || String(err))
+    onError: (err: unknown) => {
+      if (isConflictError(err)) {
+        setConflict(presentConflict(err))
+        setCreateModalOpen(false)
+        setCreateError(null)
+        return
+      }
+      setCreateError(err instanceof Error ? err.message : String(err))
     },
   })
 
@@ -144,8 +157,14 @@ export function EnvironmentsPage() {
       setEditModal(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
     },
-    onError: (err: Error) => {
-      setEditModal((prev) => (prev ? { ...prev, error: err.message || String(err) } : null))
+    onError: (err: unknown) => {
+      if (isConflictError(err)) {
+        setConflict(presentConflict(err))
+        setEditModal(null)
+        return
+      }
+      const message = err instanceof Error ? err.message : String(err)
+      setEditModal((prev) => (prev ? { ...prev, error: message } : null))
     },
   })
 
@@ -154,6 +173,7 @@ export function EnvironmentsPage() {
       environmentService.rotateToken(id, expectedVersion),
     onSuccess: (card) => {
       setRotateTarget(null)
+      setRotateError(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
       if (card.registrationToken) {
         setTokenModal({
@@ -162,6 +182,15 @@ export function EnvironmentsPage() {
         })
       }
     },
+    onError: (err: unknown) => {
+      if (isConflictError(err)) {
+        setConflict(presentConflict(err))
+        setRotateTarget(null)
+        setRotateError(null)
+        return
+      }
+      setRotateError(err instanceof Error ? err.message : String(err))
+    },
   })
 
   const deleteMutation = useMutation({
@@ -169,7 +198,17 @@ export function EnvironmentsPage() {
       environmentService.deleteEnvironment(id, expectedVersion),
     onSuccess: () => {
       setDeleteTarget(null)
+      setDeleteError(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
+    },
+    onError: (err: unknown) => {
+      if (isConflictError(err)) {
+        setConflict(presentConflict(err))
+        setDeleteTarget(null)
+        setDeleteError(null)
+        return
+      }
+      setDeleteError(err instanceof Error ? err.message : String(err))
     },
   })
 
@@ -290,13 +329,14 @@ export function EnvironmentsPage() {
                       <button
                         type="button"
                         className="action-enter-btn"
-                        onClick={() =>
+                        onClick={() => {
+                          setConflict(null)
                           setEditModal({
                             environment,
                             name: environment.name,
                             error: null,
                           })
-                        }
+                        }}
                       >
                         <Pencil aria-hidden="true" />
                         {t('ai.environment.edit')}
@@ -304,7 +344,11 @@ export function EnvironmentsPage() {
                       <button
                         type="button"
                         className="action-enter-btn"
-                        onClick={() => setRotateTarget(environment)}
+                        onClick={() => {
+                          setConflict(null)
+                          setRotateError(null)
+                          setRotateTarget(environment)
+                        }}
                       >
                         <KeyRound aria-hidden="true" />
                         {t('ai.environment.rotateToken')}
@@ -312,7 +356,11 @@ export function EnvironmentsPage() {
                       <button
                         type="button"
                         className="action-enter-btn danger"
-                        onClick={() => setDeleteTarget(environment)}
+                        onClick={() => {
+                          setConflict(null)
+                          setDeleteError(null)
+                          setDeleteTarget(environment)
+                        }}
                       >
                         <Trash2 aria-hidden="true" />
                         {t('ai.environment.delete')}
@@ -437,6 +485,7 @@ export function EnvironmentsPage() {
             description: t('ai.environment.rotateTokenConfirm', { name: rotateTarget.name }),
             confirmLabel: t('ai.environment.rotateToken'),
             icon: 'refresh',
+            error: rotateError,
             onConfirm: () =>
               rotateMutation.mutate({
                 id: rotateTarget.id,
@@ -444,7 +493,10 @@ export function EnvironmentsPage() {
               }),
           }}
           pending={rotateMutation.isPending}
-          onClose={() => setRotateTarget(null)}
+          onClose={() => {
+            setRotateTarget(null)
+            setRotateError(null)
+          }}
         />
       )}
 
@@ -456,6 +508,7 @@ export function EnvironmentsPage() {
             confirmLabel: t('ai.environment.delete'),
             icon: 'delete',
             tone: 'danger',
+            error: deleteError,
             onConfirm: () =>
               deleteMutation.mutate({
                 id: deleteTarget.id,
@@ -463,7 +516,10 @@ export function EnvironmentsPage() {
               }),
           }}
           pending={deleteMutation.isPending}
-          onClose={() => setDeleteTarget(null)}
+          onClose={() => {
+            setDeleteTarget(null)
+            setDeleteError(null)
+          }}
         />
       )}
 
@@ -530,6 +586,22 @@ export function EnvironmentsPage() {
           </div>
         </ModalBackdrop>
       )}
+
+      <ConflictPresenter
+        conflict={conflict}
+        onRefresh={() => {
+          setConflict(null)
+          setCreateModalOpen(false)
+          setCreateError(null)
+          setEditModal(null)
+          setRotateTarget(null)
+          setRotateError(null)
+          setDeleteTarget(null)
+          setDeleteError(null)
+          void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
+        }}
+        onClose={() => setConflict(null)}
+      />
     </section>
   )
 }

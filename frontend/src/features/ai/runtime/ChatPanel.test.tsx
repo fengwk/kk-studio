@@ -21,7 +21,7 @@ describe('ChatPanel', () => {
     render(
       <ChatPanel
         labels={{
-          environment: { name: 'local', workspacePath: '.' },
+          environment: { environmentId: 'env-1', environmentName: 'local', workspacePath: '.' },
           environmentReady: true,
           branchUsage: {
             input: 10,

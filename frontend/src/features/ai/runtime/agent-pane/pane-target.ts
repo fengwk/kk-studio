@@ -59,8 +59,17 @@ function isModelSelection(value: unknown): value is HarnessModelSelectionDTO {
 }
 
 function isBranchSettings(value: unknown): value is HarnessBranchSettingsDTO {
-  return isRecord(value)
-    && (value.workspacePath === null || typeof value.workspacePath === 'string')
+  if (!isRecord(value)) {
+    return false
+  }
+  const keys = Object.keys(value)
+  if (
+    keys.length !== 3
+    || !keys.every((key) => key === 'agentName' || key === 'model' || key === 'workspacePath')
+  ) {
+    return false
+  }
+  return (value.workspacePath === null || typeof value.workspacePath === 'string')
     && nonBlank(value.agentName)
     && isModelSelection(value.model)
 }
@@ -123,6 +132,7 @@ function isCommand(value: unknown): value is HarnessCommandCreateDTO {
       return isModelSelection(value.model)
     case 'SET_ENVIRONMENT':
       return Object.prototype.hasOwnProperty.call(value, 'workspacePath')
+        && !Object.prototype.hasOwnProperty.call(value, 'environment')
         && (value.workspacePath === null || typeof value.workspacePath === 'string')
     default:
       return false
@@ -139,8 +149,17 @@ function isCommandBatchRequest(value: unknown): value is AgentCommandBatchReques
 }
 
 function isBranchDraft(value: unknown): value is BranchDraft {
-  return isRecord(value)
-    && (value.workspacePath === null || typeof value.workspacePath === 'string')
+  if (!isRecord(value)) {
+    return false
+  }
+  const keys = Object.keys(value)
+  if (
+    keys.length !== 4
+    || !keys.every((key) => key === 'agentName' || key === 'model' || key === 'workspacePath' || key === 'yoloEnabled')
+  ) {
+    return false
+  }
+  return (value.workspacePath === null || typeof value.workspacePath === 'string')
     && nonBlank(value.agentName)
     && isModelSelection(value.model)
     && typeof value.yoloEnabled === 'boolean'

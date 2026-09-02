@@ -66,7 +66,7 @@ export interface EnvironmentCardDTO {
   /** 是否就绪。 */
   ready: boolean
   /** 最近活跃时间。 */
-  lastSeen: string | null
+  lastSeen: InstantTimestamp
   /** 支持的原子能力列表。 */
   capabilities: LiveEnvironmentCapabilityDTO[]
   /** daemon 通告的技能列表。 */
