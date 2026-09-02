@@ -221,6 +221,54 @@ class StudioHarnessCommandBatchControllerTest {
         .andExpect(jsonPath("$.errors.detail").value("client command id was reused"));
   }
 
+  @Test
+  void rejectsLegacyEnvironmentFieldInSetEnvironmentCommand() throws Exception {
+    // 意图：验证 SET_ENVIRONMENT 命令携带旧 environment 字段被严格拒绝且 detail 包含该字段，不调用底层服务。
+    String payload =
+        batchWithCommands(
+            threadTarget(),
+            """
+            [{
+              "type":"SET_ENVIRONMENT",
+              "idempotencyKey":"%s",
+              "environment":{"name":"Not-A-Name","workspacePath":"."}
+            }]
+            """
+                .formatted(IDEMPOTENCY_KEY));
+
+    mockMvc
+        .perform(
+            post("/api/ai/runtime/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+        .andExpect(jsonPath("$.errors.type").value("about:blank"))
+        .andExpect(jsonPath("$.errors.title").value("Bad Request"))
+        .andExpect(jsonPath("$.errors.detail").value("unknown HTTP command field: environment"));
+
+    verify(acceptanceService, never())
+        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+  }
+
+  @Test
+  void fallsBackToGenericDetailWhenPayloadJsonIsMalformed() throws Exception {
+    // 意图：验证畸形 JSON 请求体安全回退通用 detail 且不泄露 parser 细节，不调用底层服务。
+    mockMvc
+        .perform(
+            post("/api/ai/runtime/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{ invalid json"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+        .andExpect(jsonPath("$.errors.type").value("about:blank"))
+        .andExpect(jsonPath("$.errors.title").value("Bad Request"))
+        .andExpect(jsonPath("$.errors.detail").value("Failed to read request"));
+
+    verify(acceptanceService, never())
+        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+  }
+
   private static String batch(String target) {
     return batchWithCommands(
         target,

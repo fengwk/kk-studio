@@ -105,6 +105,6 @@ public class HarnessCommandCreateDTO {
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("unknown HTTP command field: " + name);
+    throw new HarnessRequestFormatException("unknown HTTP command field: " + name);
   }
 }

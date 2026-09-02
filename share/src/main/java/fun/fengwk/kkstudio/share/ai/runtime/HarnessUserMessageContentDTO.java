@@ -113,6 +113,6 @@ public class HarnessUserMessageContentDTO {
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("unknown USER_MESSAGE content field: " + name);
+    throw new HarnessRequestFormatException("unknown USER_MESSAGE content field: " + name);
   }
 }

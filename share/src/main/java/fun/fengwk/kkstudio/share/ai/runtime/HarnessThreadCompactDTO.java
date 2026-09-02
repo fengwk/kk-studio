@@ -18,6 +18,6 @@ public class HarnessThreadCompactDTO {
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("unknown compact field: " + name);
+    throw new HarnessRequestFormatException("unknown compact field: " + name);
   }
 }
