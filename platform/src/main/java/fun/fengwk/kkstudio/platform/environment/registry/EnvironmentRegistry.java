@@ -34,14 +34,22 @@ public class EnvironmentRegistry {
 
   private static final String TRY_ACQUIRE_SQL =
       """
-      with tried_upsert as (
+      with locked_env as (
+          select id, (registration_token = ?) as token_valid
+          from environment
+          where id = ?
+          for update
+      ),
+      tried_upsert as (
           insert into environment_connection (
               environment_id, owner_node_id, lease_token,
               status, runtime_info, last_seen_at, lease_until
-          ) values (
-              ?, ?, ?,
-              'CONNECTING', null, statement_timestamp(), statement_timestamp() + (? * interval '1 millisecond')
           )
+          select
+              id, ?, ?,
+              'CONNECTING', null, statement_timestamp(), statement_timestamp() + (? * interval '1 millisecond')
+          from locked_env
+          where token_valid = true
           on conflict (environment_id) do update
           set owner_node_id = excluded.owner_node_id,
               lease_token = excluded.lease_token,
@@ -50,12 +58,20 @@ public class EnvironmentRegistry {
               last_seen_at = statement_timestamp(),
               lease_until = statement_timestamp() + (? * interval '1 millisecond')
           where environment_connection.lease_until <= statement_timestamp()
+             or (environment_connection.status = 'CONNECTING' and environment_connection.owner_node_id = excluded.owner_node_id)
           returning environment_connection.lease_token, true as acquired
       )
-      select lease_token, acquired from tried_upsert
+      select lease_token, true as acquired, 'ACQUIRED' as result_type
+      from tried_upsert
       union all
-      select lease_token, false as acquired from environment_connection
-      where environment_id = ? and not exists (select 1 from tried_upsert)
+      select null::uuid as lease_token, false as acquired,
+             case
+                 when not exists (select 1 from locked_env) then 'NOT_FOUND'
+                 when not (select token_valid from locked_env) then 'INVALID_TOKEN'
+                 else 'ACTIVE_ROUTE'
+             end as result_type
+      from (select 1) as dummy
+      where not exists (select 1 from tried_upsert)
       """;
 
   private static final String MARK_READY_SQL =
@@ -68,6 +84,7 @@ public class EnvironmentRegistry {
       where environment_id = ?
         and owner_node_id = ?
         and lease_token = ?
+        and lease_until > statement_timestamp()
       """;
 
   private static final String HEARTBEAT_SQL =
@@ -78,6 +95,7 @@ public class EnvironmentRegistry {
       where environment_id = ?
         and owner_node_id = ?
         and lease_token = ?
+        and lease_until > statement_timestamp()
       """;
 
   private static final String DISCONNECT_SQL =
@@ -90,6 +108,7 @@ public class EnvironmentRegistry {
       where environment_id = ?
         and owner_node_id = ?
         and lease_token = ?
+        and lease_until > statement_timestamp()
       """;
 
   private static final String FIND_SQL =
@@ -123,14 +142,17 @@ public class EnvironmentRegistry {
   }
 
   /**
-   * 在 HELLO 认证后，尝试原子抢占 {@code environmentId} 的路由租约。
+   * 在 HELLO 认证时，原子校验 registrationToken 并抢占/续约 {@code environmentId} 的路由租约。
    *
    * @param environmentId 环境 UUID
+   * @param registrationToken 注册令牌
    * @param leaseDuration 租约时长
-   * @return 类型化绑定结果
+   * @return 类型化绑定结果（Acquired / RetryLater / Rejected）
    */
-  public BindResult tryAcquire(EnvironmentId environmentId, Duration leaseDuration) {
+  public BindResult tryAcquire(
+      EnvironmentId environmentId, String registrationToken, Duration leaseDuration) {
     Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(registrationToken, "registrationToken");
     Objects.requireNonNull(leaseDuration, "leaseDuration");
     UUID newLeaseToken = UUID.randomUUID();
     long millis = leaseDuration.toMillis();
@@ -138,23 +160,33 @@ public class EnvironmentRegistry {
         jdbcTemplate.query(
             TRY_ACQUIRE_SQL,
             (rs, rowNum) ->
-                new AcquireRow((UUID) rs.getObject("lease_token"), rs.getBoolean("acquired")),
+                new AcquireRow(
+                    (UUID) rs.getObject("lease_token"),
+                    rs.getBoolean("acquired"),
+                    rs.getString("result_type")),
+            registrationToken,
             environmentId.value(),
             ownerNodeId,
             newLeaseToken,
             millis,
-            millis,
-            environmentId.value());
+            millis);
 
     if (rows.isEmpty()) {
       return BindResult.retryLater("route acquisition returned no row: " + environmentId);
     }
     AcquireRow row = rows.get(0);
-    if (row.acquired) {
-      return BindResult.acquired(newLeaseToken);
+    if (row.acquired && row.leaseToken != null) {
+      return BindResult.acquired(row.leaseToken);
     }
-    return BindResult.retryLater(
-        "environment " + environmentId + " is actively held by another connection");
+    return switch (row.resultType) {
+      case "NOT_FOUND" -> BindResult.rejected("environment not found: " + environmentId);
+      case "INVALID_TOKEN" -> BindResult.rejected(
+          "invalid registration token for environment: " + environmentId);
+      case "ACTIVE_ROUTE" -> BindResult.retryLater(
+          "environment " + environmentId + " is actively held by another connection");
+      default -> BindResult.retryLater(
+          "route acquisition failed for environment: " + environmentId);
+    };
   }
 
   /**
@@ -250,7 +282,7 @@ public class EnvironmentRegistry {
     return find(environmentId).map(env -> env.isOnline(now)).orElse(false);
   }
 
-  private record AcquireRow(UUID leaseToken, boolean acquired) {}
+  private record AcquireRow(UUID leaseToken, boolean acquired, String resultType) {}
 
   private final class EnvironmentConnectionRowMapper implements RowMapper<EnvironmentConnection> {
     @Override
