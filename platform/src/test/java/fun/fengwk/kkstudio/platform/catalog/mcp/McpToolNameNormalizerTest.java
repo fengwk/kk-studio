@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.Locale;
+
 /**
  * MCP 工具名规范化器测试：确保覆盖 100% 规则分支。
  *
@@ -37,6 +39,19 @@ class McpToolNameNormalizerTest {
     assertEquals("search_files", McpToolNameNormalizer.normalizeSourceToolName("search@#$%files"));
     assertEquals("tool_123", McpToolNameNormalizer.normalizeSourceToolName("Tool-123!"));
     assertEquals("123", McpToolNameNormalizer.normalizeSourceToolName("123"));
+  }
+
+  @Test
+  void normalizesConsistentlyAcrossLocales() {
+    // 意图：验证在 Turkish 等特殊默认 Locale 环境下，小写转换依然使用 Locale.ROOT 保证确定性
+    Locale defaultLocale = Locale.getDefault();
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+      assertEquals("info_test", McpToolNameNormalizer.normalizeSourceToolName("INFO_TEST"));
+      assertEquals("title", McpToolNameNormalizer.normalizeSourceToolName("TITLE"));
+    } finally {
+      Locale.setDefault(defaultLocale);
+    }
   }
 
   @ParameterizedTest

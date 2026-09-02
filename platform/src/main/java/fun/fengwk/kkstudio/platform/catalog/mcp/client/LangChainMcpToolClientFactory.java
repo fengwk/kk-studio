@@ -50,6 +50,7 @@ public final class LangChainMcpToolClientFactory implements McpToolClientFactory
               .transport(transport)
               .key("platform-mcp")
               .clientName(CLIENT_NAME)
+              .protocolVersion("2025-11-25")
               .initializationTimeout(timeout)
               .toolExecutionTimeout(timeout)
               // 关闭 list 缓存与 list-change 订阅：本平台 client 每次发现都是完整新会话。
@@ -65,7 +66,9 @@ public final class LangChainMcpToolClientFactory implements McpToolClientFactory
         try {
           client.close();
         } catch (RuntimeException closeError) {
-          log.debug("failed to close half-initialized MCP client", closeError);
+          log.debug(
+              "failed to close half-initialized MCP client: {}",
+              closeError.getClass().getSimpleName());
         }
       }
       throw error;
@@ -142,7 +145,7 @@ public final class LangChainMcpToolClientFactory implements McpToolClientFactory
                 "{}"));
       } catch (RuntimeException error) {
         // 传输/协议异常可能携带 URL、header 或 token；模型侧只接收稳定的非敏感错误。
-        log.info("MCP tool call failed for tool {}", sourceToolName, error);
+        log.warn("MCP tool call failed for tool: {}", sourceToolName);
         return McpToolCallOutcome.failure(toolCallId);
       }
     }

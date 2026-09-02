@@ -33,6 +33,9 @@ public final class McpToolDiscovery {
 
   private static final String RESOURCE = "mcp_server";
 
+  /** 远端原始工具名最大长度（与 mcp_tool.source_name 列宽一致）。 */
+  public static final int SOURCE_NAME_MAX_LENGTH = 128;
+
   private final Function<McpConnectionSpec, McpToolClient> clientFactory;
 
   private McpToolDiscovery(Function<McpConnectionSpec, McpToolClient> clientFactory) {
@@ -76,7 +79,7 @@ public final class McpToolDiscovery {
       String sourceName = validateSourceName(remote.name());
       if (!seenSourceNames.add(sourceName)) {
         throw new AiValidationException(
-            RESOURCE, "mcp server returned duplicate tools for name: " + sourceName);
+            RESOURCE, "mcp server returned duplicate tools for source name: " + sourceName);
       }
       String description = requireDescription(remote.description(), sourceName);
       String inputSchemaJson = canonicalizeSchema(remote.inputSchemaJson(), sourceName);
@@ -129,11 +132,15 @@ public final class McpToolDiscovery {
   }
 
   private static String validateSourceName(String rawName) {
-    try {
-      return McpToolNameNormalizer.normalizeSourceToolName(rawName);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+    if (rawName == null || rawName.isBlank()) {
+      throw new AiValidationException(RESOURCE, "mcp tool source name must not be blank");
     }
+    if (rawName.length() > SOURCE_NAME_MAX_LENGTH) {
+      throw new AiValidationException(
+          RESOURCE,
+          "mcp tool source name exceeds " + SOURCE_NAME_MAX_LENGTH + " characters: " + rawName);
+    }
+    return rawName;
   }
 
   private static String requireDescription(String description, String sourceName) {

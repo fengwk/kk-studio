@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpConnectionSpec;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
@@ -111,6 +113,37 @@ class McpServerMutationValidatorTest {
     dto.setUrl("http://example.com/" + "a".repeat(2048));
     assertThrows(
         AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "ftp://example.com/mcp",
+        "file:///tmp/mcp",
+        "ws://example.com/mcp",
+        "http:///path",
+        "http://user:secret@example.com/mcp",
+        "https://token@example.com/mcp",
+        "invalid-url-without-scheme",
+        "://missing-scheme"
+      })
+  void rejectsNonHttpUrlsOrUrlsWithUserInfoAndDoesNotEchoUrl(String invalidUrl) {
+    // 意图：验证非 http(s)、无 host、含 user-info 或无效语法的 URL 均被拒绝，且错误信息绝不回显该 URL
+    McpServerCreateDTO dto = new McpServerCreateDTO();
+    dto.setName("mcp_test");
+    dto.setUrl(invalidUrl);
+    dto.setTimeoutMillis(5000L);
+
+    AiValidationException ex =
+        assertThrows(
+            AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
+    assertFalse(ex.getMessage().contains(invalidUrl));
+
+    // 同时验证 McpConnectionSpec 防御校验
+    IllegalArgumentException specEx =
+        assertThrows(
+            IllegalArgumentException.class, () -> new McpConnectionSpec(invalidUrl, null, 5000L));
+    assertFalse(specEx.getMessage().contains(invalidUrl));
   }
 
   @Test

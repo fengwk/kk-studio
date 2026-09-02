@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp;
 
+import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -30,7 +31,7 @@ public final class McpToolNameNormalizer {
     if (sourceToolName == null || sourceToolName.isBlank()) {
       throw new IllegalArgumentException("source tool name must not be blank");
     }
-    String replaced = sourceToolName.toLowerCase().replaceAll("[^a-z0-9]", "_");
+    String replaced = sourceToolName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "_");
     String merged = replaced.replaceAll("_+", "_");
     String trimmed = trimUnderscores(merged);
     if (trimmed.isEmpty()) {

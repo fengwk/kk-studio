@@ -4,6 +4,8 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.regex.Pattern;
 
 /**
@@ -82,7 +84,31 @@ public final class McpServerMutationValidator {
       throw new AiValidationException(
           RESOURCE, RESOURCE + " url must not exceed " + URL_MAX_LENGTH + " characters");
     }
+    validateStreamableHttpUrl(trimmed);
     return trimmed;
+  }
+
+  private static void validateStreamableHttpUrl(String url) {
+    try {
+      URI uri = new URI(url);
+      if (!uri.isAbsolute()) {
+        throw new AiValidationException(
+            RESOURCE, RESOURCE + " url must be an absolute http or https URL");
+      }
+      String scheme = uri.getScheme();
+      if (scheme == null
+          || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
+        throw new AiValidationException(RESOURCE, RESOURCE + " url scheme must be http or https");
+      }
+      if (uri.getHost() == null || uri.getHost().isBlank()) {
+        throw new AiValidationException(RESOURCE, RESOURCE + " url must contain a valid host");
+      }
+      if (uri.getUserInfo() != null || uri.getRawUserInfo() != null) {
+        throw new AiValidationException(RESOURCE, RESOURCE + " url must not contain user-info");
+      }
+    } catch (URISyntaxException error) {
+      throw new AiValidationException(RESOURCE, RESOURCE + " url format is invalid");
+    }
   }
 
   private static String normalizeToken(String token, String field) {

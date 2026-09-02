@@ -30,6 +30,7 @@ public final class FakeStreamableHttpMcpServer implements AutoCloseable {
   private final HttpServer server;
   private final List<DiscoveredTool> tools = new CopyOnWriteArrayList<>();
   private final List<String> receivedAuthHeaders = new CopyOnWriteArrayList<>();
+  private final List<String> receivedToolCallNames = new CopyOnWriteArrayList<>();
   private final AtomicInteger toolCallCount = new AtomicInteger(0);
   private volatile boolean failDiscovery = false;
   private volatile boolean failToolCall = false;
@@ -134,6 +135,10 @@ public final class FakeStreamableHttpMcpServer implements AutoCloseable {
 
             if ("tools/call".equals(method)) {
               toolCallCount.incrementAndGet();
+              JsonNode params = request.get("params");
+              if (params != null && params.has("name")) {
+                receivedToolCallNames.add(params.get("name").asText());
+              }
               if (failToolCall) {
                 ObjectNode err = MAPPER.createObjectNode();
                 err.put("jsonrpc", "2.0");
@@ -201,6 +206,10 @@ public final class FakeStreamableHttpMcpServer implements AutoCloseable {
 
   public List<String> receivedAuthHeaders() {
     return new ArrayList<>(receivedAuthHeaders);
+  }
+
+  public List<String> receivedToolCallNames() {
+    return new ArrayList<>(receivedToolCallNames);
   }
 
   public int toolCallCount() {
