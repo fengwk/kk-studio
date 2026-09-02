@@ -1,6 +1,5 @@
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
 import type { BranchDraft } from '@/features/ai/chat/branch-draft'
-import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
 import type {
   AgentCommandTargetDTO,
   AgentCommandBatchRequestDTO,
@@ -59,18 +58,18 @@ function isModelSelection(value: unknown): value is HarnessModelSelectionDTO {
     && nonBlank(value.variant)
 }
 
-function isEnvironmentBinding(value: unknown): value is EnvironmentBindingDTO | null {
-  return value === null
-    || (
-      isRecord(value)
-      && nonBlank(value.name)
-      && nonBlank(value.workspacePath)
-    )
-}
-
 function isBranchSettings(value: unknown): value is HarnessBranchSettingsDTO {
-  return isRecord(value)
-    && isEnvironmentBinding(value.environment)
+  if (!isRecord(value)) {
+    return false
+  }
+  const keys = Object.keys(value)
+  if (
+    keys.length !== 3
+    || !keys.every((key) => key === 'agentName' || key === 'model' || key === 'workspacePath')
+  ) {
+    return false
+  }
+  return (value.workspacePath === null || typeof value.workspacePath === 'string')
     && nonBlank(value.agentName)
     && isModelSelection(value.model)
 }
@@ -131,9 +130,16 @@ function isCommand(value: unknown): value is HarnessCommandCreateDTO {
       return nonBlank(value.agentName)
     case 'SET_MODEL':
       return isModelSelection(value.model)
-    case 'SET_ENVIRONMENT':
-      return Object.prototype.hasOwnProperty.call(value, 'environment')
-        && isEnvironmentBinding(value.environment)
+    case 'SET_ENVIRONMENT': {
+      const keys = Object.keys(value)
+      if (
+        keys.length !== 3
+        || !keys.every((key) => key === 'type' || key === 'idempotencyKey' || key === 'workspacePath')
+      ) {
+        return false
+      }
+      return value.workspacePath === null || typeof value.workspacePath === 'string'
+    }
     default:
       return false
   }
@@ -149,8 +155,17 @@ function isCommandBatchRequest(value: unknown): value is AgentCommandBatchReques
 }
 
 function isBranchDraft(value: unknown): value is BranchDraft {
-  return isRecord(value)
-    && isEnvironmentBinding(value.environment)
+  if (!isRecord(value)) {
+    return false
+  }
+  const keys = Object.keys(value)
+  if (
+    keys.length !== 4
+    || !keys.every((key) => key === 'agentName' || key === 'model' || key === 'workspacePath' || key === 'yoloEnabled')
+  ) {
+    return false
+  }
+  return (value.workspacePath === null || typeof value.workspacePath === 'string')
     && nonBlank(value.agentName)
     && isModelSelection(value.model)
     && typeof value.yoloEnabled === 'boolean'
@@ -219,14 +234,59 @@ export function normalizePaneTarget(value: unknown): PaneTarget {
   return { kind: value.kind, threadId: value.threadId.trim() }
 }
 
+export function samePaneTarget(left: PaneTarget, right: PaneTarget): boolean {
+  if (left.kind !== right.kind) {
+    return false
+  }
+  if (left.kind === 'NEW_SESSION_DRAFT' && right.kind === 'NEW_SESSION_DRAFT') {
+    return true
+  }
+  if (left.kind === 'ENTRY_DRAFT' && right.kind === 'ENTRY_DRAFT') {
+    return left.sessionId === right.sessionId && left.startEntryId === right.startEntryId
+  }
+  if (left.kind === 'BOUND_THREAD' && right.kind === 'BOUND_THREAD') {
+    return left.threadId === right.threadId
+  }
+  return false
+}
+
+export function isNewSessionTarget(target: PaneTarget): target is { kind: 'NEW_SESSION_DRAFT' } {
+  return target.kind === 'NEW_SESSION_DRAFT'
+}
+
+export function isEntryTarget(
+  target: PaneTarget,
+): target is { kind: 'ENTRY_DRAFT'; sessionId: string; startEntryId: string } {
+  return target.kind === 'ENTRY_DRAFT'
+}
+
+export function isBoundTarget(
+  target: PaneTarget,
+): target is { kind: 'BOUND_THREAD'; threadId: string } {
+  return target.kind === 'BOUND_THREAD'
+}
+
+export function targetIdentity(target: PaneTarget): string {
+  if (target.kind === 'NEW_SESSION_DRAFT') {
+    return 'new-session'
+  }
+  if (target.kind === 'ENTRY_DRAFT') {
+    return `entry:${target.sessionId}:${target.startEntryId}`
+  }
+  return `thread:${target.threadId}`
+}
+
 export function loadPaneTarget(
   owner: AgentRuntimeOwnerDTO,
   paneId: string,
-  storage: Storage = localStorage,
+  storage: Pick<Storage, 'getItem'> = globalThis.localStorage,
 ): PaneTarget {
   try {
     const raw = storage.getItem(storageKey(owner, paneId))
-    return normalizePaneTarget(raw == null ? null : JSON.parse(raw))
+    if (!raw) {
+      return { kind: 'NEW_SESSION_DRAFT' }
+    }
+    return normalizePaneTarget(JSON.parse(raw))
   } catch {
     return { kind: 'NEW_SESSION_DRAFT' }
   }
@@ -236,50 +296,50 @@ export function savePaneTarget(
   owner: AgentRuntimeOwnerDTO,
   paneId: string,
   target: PaneTarget,
-  storage: Storage = localStorage,
+  storage: Pick<Storage, 'setItem'> = globalThis.localStorage,
 ): void {
   try {
-    storage.setItem(storageKey(owner, paneId), JSON.stringify(normalizePaneTarget(target)))
+    storage.setItem(storageKey(owner, paneId), JSON.stringify(target))
   } catch {
-    // Storage is an optimization; pane navigation remains usable when it is unavailable.
+    // Ignore quota or cross-origin storage errors.
   }
 }
 
 export function clearPaneTarget(
   owner: AgentRuntimeOwnerDTO,
   paneId: string,
-  storage: Storage = localStorage,
+  storage: Pick<Storage, 'removeItem'> = globalThis.localStorage,
 ): void {
   try {
     storage.removeItem(storageKey(owner, paneId))
   } catch {
-    // Ignore privacy-mode storage failures.
+    // Ignore storage errors.
   }
 }
 
 export function loadPendingAcceptance(
   owner: AgentRuntimeOwnerDTO,
   paneId: string,
-  storage: Storage = localStorage,
+  storage: Pick<Storage, 'getItem'> = globalThis.localStorage,
 ): PendingAcceptance | null {
   try {
     const raw = storage.getItem(pendingStorageKey(owner, paneId))
-    if (raw == null) {
+    if (!raw) {
       return null
     }
-    const value: unknown = JSON.parse(raw)
-    if (!isPendingAcceptanceValue(value)) {
+    const parsed: unknown = JSON.parse(raw)
+    if (!isPendingAcceptanceValue(parsed)) {
       return null
     }
     if (
-      value.owner.type !== owner.type
-      || value.owner.id !== owner.id
-      || value.request.owner.type !== owner.type
-      || value.request.owner.id !== owner.id
+      parsed.owner.type !== owner.type
+      || parsed.owner.id !== owner.id
+      || parsed.request.owner.type !== owner.type
+      || parsed.request.owner.id !== owner.id
     ) {
       return null
     }
-    return value
+    return parsed
   } catch {
     return null
   }
@@ -289,45 +349,23 @@ export function savePendingAcceptance(
   owner: AgentRuntimeOwnerDTO,
   paneId: string,
   pending: PendingAcceptance,
-  storage: Storage = localStorage,
+  storage: Pick<Storage, 'setItem'> = globalThis.localStorage,
 ): void {
   try {
     storage.setItem(pendingStorageKey(owner, paneId), JSON.stringify(pending))
   } catch {
-    // A request still retains its in-memory exact replay when persistence is unavailable.
+    // Ignore quota errors.
   }
 }
 
 export function clearPendingAcceptance(
   owner: AgentRuntimeOwnerDTO,
   paneId: string,
-  storage: Storage = localStorage,
+  storage: Pick<Storage, 'removeItem'> = globalThis.localStorage,
 ): void {
   try {
     storage.removeItem(pendingStorageKey(owner, paneId))
   } catch {
-    // Ignore privacy-mode storage failures.
+    // Ignore storage errors.
   }
-}
-
-export function targetIdentity(target: PaneTarget): string {
-  return JSON.stringify(target)
-}
-
-export function samePaneTarget(left: PaneTarget, right: PaneTarget): boolean {
-  return targetIdentity(left) === targetIdentity(right)
-}
-
-export function isBoundTarget(target: PaneTarget): target is { kind: 'BOUND_THREAD'; threadId: string } {
-  return target.kind === 'BOUND_THREAD'
-}
-
-export function isEntryTarget(
-  target: PaneTarget,
-): target is { kind: 'ENTRY_DRAFT'; sessionId: string; startEntryId: string } {
-  return target.kind === 'ENTRY_DRAFT'
-}
-
-export function isNewSessionTarget(target: PaneTarget): target is { kind: 'NEW_SESSION_DRAFT' } {
-  return target.kind === 'NEW_SESSION_DRAFT'
 }

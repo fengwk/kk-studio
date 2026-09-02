@@ -21,6 +21,10 @@ export const aiCatalog = {
     'en-US': 'Environment',
     'zh-CN': '环境',
   },
+  'ai.nav.mcpServers': {
+    'en-US': 'MCP Server',
+    'zh-CN': 'MCP 服务',
+  },
   'ai.catalog.resourceType.agent': {
     'en-US': 'Agent',
     'zh-CN': 'Agent',
@@ -790,18 +794,6 @@ export const aiCatalog = {
     'en-US': '(None)',
     'zh-CN': '（无）',
   },
-  'ai.chat.environmentUnavailable': {
-    'en-US': 'Unavailable',
-    'zh-CN': '不可用',
-  },
-  'ai.chat.selectEnvironment': {
-    'en-US': 'Select Environment',
-    'zh-CN': '选择 Environment',
-  },
-  'ai.chat.noEnvironments': {
-    'en-US': 'No READY Environments',
-    'zh-CN': '暂无 READY Environment',
-  },
   'ai.chat.selected': {
     'en-US': 'Selected',
     'zh-CN': '已选',
@@ -847,8 +839,8 @@ export const aiCatalog = {
     'zh-CN': '新对话',
   },
   'ai.chat.blankDescription': {
-    'en-US': 'Send a message to create a new Thread; /agent changes the visible Chat setting, /environment chooses this pane’s draft Environment, and /thread reuses an existing Thread.',
-    'zh-CN': '输入后创建新 Thread；/agent 修改当前 Chat 设置，/environment 选择当前 pane 的 Environment 草稿，/thread 复用已有 Thread。',
+    'en-US': 'Send a message to create a new Thread; /agent changes the visible Chat setting, /environment chooses this pane’s draft workspace path, and /thread reuses an existing Thread.',
+    'zh-CN': '输入后创建新 Thread；/agent 修改当前 Chat 设置，/environment 选择当前 pane 的工作目录草稿，/thread 复用已有 Thread。',
   },
   'ai.chat.scope': {
     'en-US': 'Scope',
@@ -1862,6 +1854,10 @@ export const aiCatalog = {
     'en-US': 'The current Thread still has an operation awaiting completion or exact replay',
     'zh-CN': '当前 Thread 仍有操作等待完成或精确重试',
   },
+  'ai.common.loadingMcpServer': {
+    'en-US': 'Loading MCP Servers',
+    'zh-CN': '正在加载 MCP 服务',
+  },
   'ai.environment.loading': {
     'en-US': 'Loading Environments',
     'zh-CN': '正在加载 Environments',
@@ -1871,8 +1867,68 @@ export const aiCatalog = {
     'zh-CN': '加载失败',
   },
   'ai.environment.empty': {
-    'en-US': 'There are no live Environments',
-    'zh-CN': '当前没有 live Environment',
+    'en-US': 'There are no Environments',
+    'zh-CN': '当前没有 Environment',
+  },
+  'ai.environment.create': {
+    'en-US': 'Create Environment',
+    'zh-CN': '创建环境',
+  },
+  'ai.environment.edit': {
+    'en-US': 'Edit Environment',
+    'zh-CN': '编辑环境',
+  },
+  'ai.environment.rename': {
+    'en-US': 'Rename Environment',
+    'zh-CN': '重命名环境',
+  },
+  'ai.environment.name': {
+    'en-US': 'Environment Name',
+    'zh-CN': '环境名称',
+  },
+  'ai.environment.namePlaceholder': {
+    'en-US': 'e.g. local-dev',
+    'zh-CN': '如 local-dev',
+  },
+  'ai.environment.rotateToken': {
+    'en-US': 'Rotate Token',
+    'zh-CN': '重新生成 Token',
+  },
+  'ai.environment.rotateTokenConfirm': {
+    'en-US': 'Rotate registration token for "{name}"? The previous token will be invalidated immediately.',
+    'zh-CN': '确认重新生成环境「{name}」的 Registration Token？旧 Token 将立即失效。',
+  },
+  'ai.environment.delete': {
+    'en-US': 'Delete Environment',
+    'zh-CN': '删除环境',
+  },
+  'ai.environment.deleteConfirm': {
+    'en-US': 'Are you sure you want to delete environment "{name}"?',
+    'zh-CN': '确认删除环境「{name}」？',
+  },
+  'ai.environment.tokenTitle': {
+    'en-US': 'Registration Token',
+    'zh-CN': 'Registration Token',
+  },
+  'ai.environment.tokenNotice': {
+    'en-US': 'This registration token is only displayed once. It cannot be retrieved again. Please copy and store it securely.',
+    'zh-CN': '此 Registration Token 仅在本次创建或轮换时展示一次，后续无法再次查看。请立即复制并妥善保管。',
+  },
+  'ai.environment.copyToken': {
+    'en-US': 'Copy Token',
+    'zh-CN': '复制 Token',
+  },
+  'ai.environment.tokenCopied': {
+    'en-US': 'Copied!',
+    'zh-CN': '已复制！',
+  },
+  'ai.environment.close': {
+    'en-US': 'Close',
+    'zh-CN': '关闭',
+  },
+  'ai.environment.unavailable': {
+    'en-US': 'Unavailable',
+    'zh-CN': '不可用',
   },
   'ai.environment.lastSeen': {
     'en-US': 'Last seen',
@@ -1885,5 +1941,113 @@ export const aiCatalog = {
   'ai.environment.skills': {
     'en-US': 'Skills',
     'zh-CN': 'Skills',
+  },
+  'ai.environment.rootPath': {
+    'en-US': 'Root Path',
+    'zh-CN': 'Root 路径',
+  },
+  'ai.mcp.title': {
+    'en-US': 'MCP Servers',
+    'zh-CN': 'MCP 服务',
+  },
+  'ai.mcp.create': {
+    'en-US': 'Create MCP Server',
+    'zh-CN': '创建 MCP 服务',
+  },
+  'ai.mcp.edit': {
+    'en-US': 'Edit MCP Server',
+    'zh-CN': '编辑 MCP 服务',
+  },
+  'ai.mcp.delete': {
+    'en-US': 'Delete MCP Server',
+    'zh-CN': '删除 MCP 服务',
+  },
+  'ai.mcp.deleteConfirm': {
+    'en-US': 'Are you sure you want to delete MCP server "{name}"?',
+    'zh-CN': '确认删除 MCP 服务「{name}」？',
+  },
+  'ai.mcp.refresh': {
+    'en-US': 'Refresh Tools',
+    'zh-CN': '刷新工具',
+  },
+  'ai.mcp.refreshSuccess': {
+    'en-US': 'Tools refreshed successfully',
+    'zh-CN': '工具刷新成功',
+  },
+  'ai.mcp.empty': {
+    'en-US': 'No MCP servers configured',
+    'zh-CN': '暂无配置的 MCP 服务',
+  },
+  'ai.mcp.name': {
+    'en-US': 'Server Name',
+    'zh-CN': '服务名称',
+  },
+  'ai.mcp.url': {
+    'en-US': 'Endpoint URL',
+    'zh-CN': 'Endpoint URL',
+  },
+  'ai.mcp.bearerToken': {
+    'en-US': 'Bearer Token',
+    'zh-CN': 'Bearer Token',
+  },
+  'ai.mcp.tokenMode': {
+    'en-US': 'Token Setting',
+    'zh-CN': 'Token 设置',
+  },
+  'ai.mcp.tokenKeep': {
+    'en-US': 'Keep current token',
+    'zh-CN': '保留当前 Token',
+  },
+  'ai.mcp.tokenClear': {
+    'en-US': 'Clear token (anonymous)',
+    'zh-CN': '清除 Token (匿名访问)',
+  },
+  'ai.mcp.tokenSet': {
+    'en-US': 'Replace token',
+    'zh-CN': '替换新 Token',
+  },
+  'ai.mcp.timeout': {
+    'en-US': 'Timeout (ms)',
+    'zh-CN': '超时时间 (毫秒)',
+  },
+  'ai.mcp.configured': {
+    'en-US': 'Configured',
+    'zh-CN': '已配置',
+  },
+  'ai.mcp.anonymous': {
+    'en-US': 'Anonymous',
+    'zh-CN': '匿名访问',
+  },
+  'ai.mcp.loading': {
+    'en-US': 'Loading MCP servers',
+    'zh-CN': '正在加载 MCP 服务',
+  },
+  'ai.mcp.loadFailed': {
+    'en-US': 'Failed to load MCP servers',
+    'zh-CN': '加载 MCP 服务失败',
+  },
+  'ai.mcp.version': {
+    'en-US': 'Version',
+    'zh-CN': '版本',
+  },
+  'ai.mcp.updated': {
+    'en-US': 'Updated',
+    'zh-CN': '更新时间',
+  },
+  'ai.catalog.form.environment': {
+    'en-US': 'Bound Environment',
+    'zh-CN': '绑定环境',
+  },
+  'ai.chat.noEnvironmentBound': {
+    'en-US': 'Current Agent is not bound to an environment; workspace path selection is disabled.',
+    'zh-CN': '当前 Agent 未绑定环境，无法选择工作区路径。',
+  },
+  'ai.chat.workspacePath': {
+    'en-US': 'Workspace Path',
+    'zh-CN': '工作区路径',
+  },
+  'ai.chat.clearWorkspacePath': {
+    'en-US': 'Clear Workspace Path',
+    'zh-CN': '清除工作目录',
   },
 } satisfies LocaleCatalog

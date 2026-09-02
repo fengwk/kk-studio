@@ -13,9 +13,6 @@ import type {
   AgentModelDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type {
-  EnvironmentBindingDTO,
-} from '@/shared/api/contracts/ai-environment'
-import type {
   HarnessBranchSettingsDTO,
   HarnessThreadCommandDTO,
 } from '@/shared/api/contracts/ai-runtime'
@@ -49,7 +46,6 @@ const model: AgentModelDTO = {
   updateTime: '2026-08-09T00:00:00Z',
 }
 
-/** defaultVariant 缺失且 variants 为空：materialize 必须失败而不是产出空选择。 */
 const modelWithoutDefaultVariant: AgentModelDTO = {
   ...model,
   config: {
@@ -59,7 +55,6 @@ const modelWithoutDefaultVariant: AgentModelDTO = {
   },
 }
 
-/** model ref 解析不到：agent 在 catalog 中不可用（如已删除）。 */
 const modelWithoutCatalogEntry: AgentModelDTO = {
   ...model,
   providerName: 'another',
@@ -70,6 +65,7 @@ function agent(
   toolIds: string[],
   skills: string[],
   subagents: string[],
+  environmentId: string | null = 'env-uuid-1',
 ): AgentDefinitionDTO {
   return {
     name: 'root',
@@ -77,6 +73,7 @@ function agent(
     systemPrompt: null,
     model: 'provider/model',
     variant: null,
+    environmentId,
     config: { toolIds, skills, subagents },
     version: '1',
     createTime: '2026-08-09T00:00:00Z',
@@ -92,7 +89,7 @@ function draftWith(
   overrides: Partial<BranchDraft> = {},
 ): BranchDraft {
   return {
-    environment: null,
+    workspacePath: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     yoloEnabled: false,
@@ -121,7 +118,6 @@ describe('BranchDraft materialization failures', () => {
   it('returns null when the Agent is missing or has no model ref', () => {
     expect(materializeBlankBranchDraft(undefined, false, [model])).toBeNull()
     expect(materializeBlankBranchDraft(agentWithoutModel(), false, [model])).toBeNull()
-    // materializeAgentBranchDraft 同样遵循完整 materialization 规则。
     expect(materializeAgentBranchDraft(agentWithoutModel(), [model], null)).toBeNull()
   })
 
@@ -136,89 +132,129 @@ describe('BranchDraft materialization failures', () => {
     expect(
       materializeBlankBranchDraft(withUnknownVariant, false, [modelWithoutDefaultVariant]),
     ).toBeNull()
-    // 显式指定 variants 中不存在的 variant 同样失败。
     const missingVariantAgent = { ...withUnknownVariant, variant: 'missing' }
     expect(materializeBlankBranchDraft(missingVariantAgent, false, [model])).toBeNull()
   })
 })
 
-describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
-  const binding: EnvironmentBindingDTO = { name: 'local', workspacePath: 'proj/a' }
-  const otherBinding: EnvironmentBindingDTO = { name: 'local', workspacePath: 'proj/b' }
-
-  function draftWithBinding(environment: EnvironmentBindingDTO | null): BranchDraft {
-    return draftWith({ environment })
-  }
-
-  function settingsWith(environment: EnvironmentBindingDTO | null): HarnessBranchSettingsDTO {
+describe('workspacePath semantics in BranchDraft and Agent switching', () => {
+  function settingsWith(workspacePath: string | null): HarnessBranchSettingsDTO {
     return {
-      environment,
+      workspacePath,
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     }
   }
 
-  it('materializes the whole binding from Chat defaults and from branch settings', () => {
-    const materialized = materializeBlankBranchDraft(
-      agent(['read'], [], []),
+  it('converts HarnessBranchSettingsDTO to BranchDraft via branchDraftFromBranchSettings', () => {
+    const draft = branchDraftFromBranchSettings(settingsWith('proj/a'), true)
+    expect(draft).toEqual({
+      workspacePath: 'proj/a',
+      agentName: 'assistant',
+      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      yoloEnabled: true,
+    })
+  })
+
+  it('materializes workspacePath when agent has environmentId, but forces null when agent has no environmentId', () => {
+    const withEnv = agent(['read'], [], [], 'env-uuid-1')
+    const noEnv = agent(['read'], [], [], null)
+
+    const materializedWithEnv = materializeBlankBranchDraft(
+      withEnv,
       true,
       [model],
-      binding,
+      'proj/a',
     )
-    expect(materialized?.environment).toEqual(binding)
-    // 复制而非共享引用：后续编辑不会反向影响调用方对象。
-    expect(materialized?.environment).not.toBe(binding)
+    expect(materializedWithEnv?.workspacePath).toBe('proj/a')
 
-    const rematerialized = materializeAgentBranchDraft(
-      agent(['read'], [], []),
+    const materializedNoEnv = materializeBlankBranchDraft(
+      noEnv,
+      true,
       [model],
+      'proj/a',
+    )
+    // 无 environmentId 的 Agent 强制为 null 工作目录
+    expect(materializedNoEnv?.workspacePath).toBeNull()
+  })
+
+  it('resets workspacePath to null when switching to an agent with a different environmentId or no environmentId', () => {
+    const envAgent1 = { ...agent([], [], [], 'env-uuid-1'), name: 'agent1' }
+    const envAgent2 = { ...agent([], [], [], 'env-uuid-2'), name: 'agent2' }
+    const envAgent1Clone = { ...agent([], [], [], 'env-uuid-1'), name: 'agent1-alt' }
+    const noEnvAgent = { ...agent([], [], [], null), name: 'no-env-agent' }
+
+    const existingDraft = draftWith({
+      agentName: 'agent1',
+      workspacePath: 'my-proj',
+    })
+
+    // 1. 切换到不同 environmentId 的 agent -> workspacePath 归零
+    const switchedDifferent = materializeAgentBranchDraft(
+      envAgent2,
+      [model],
+      existingDraft,
+      false,
       null,
-      true,
-      binding,
+      envAgent1,
     )
-    expect(rematerialized?.yoloEnabled).toBe(true)
-    expect(rematerialized?.environment).toEqual(binding)
-    expect(rematerialized?.environment).not.toBe(binding)
+    expect(switchedDifferent?.workspacePath).toBeNull()
 
-    const fromSettings = branchDraftFromBranchSettings(settingsWith(binding), false)
-    expect(fromSettings.environment).toEqual(binding)
-    expect(fromSettings.environment).not.toBe(binding)
-    expect(branchDraftFromBranchSettings(settingsWith(null), false).environment).toBeNull()
+    // 2. 切换到无 environmentId 的 agent -> workspacePath 归零
+    const switchedToNoEnv = materializeAgentBranchDraft(
+      noEnvAgent,
+      [model],
+      existingDraft,
+      false,
+      null,
+      envAgent1,
+    )
+    expect(switchedToNoEnv?.workspacePath).toBeNull()
+
+    // 3. 切换到相同 environmentId 的 agent -> 保留已有 workspacePath
+    const switchedSame = materializeAgentBranchDraft(
+      envAgent1Clone,
+      [model],
+      existingDraft,
+      false,
+      null,
+      envAgent1,
+    )
+    expect(switchedSame?.workspacePath).toBe('my-proj')
   })
 
-  it('compares the entire binding atomically (name or workspacePath changes)', () => {
-    expect(branchDraftsEqual(draftWithBinding(binding), draftWithBinding({ ...binding }))).toBe(true)
-    expect(branchDraftsEqual(draftWithBinding(binding), draftWithBinding(otherBinding))).toBe(false)
-    expect(branchDraftsEqual(draftWithBinding(binding), draftWithBinding(null))).toBe(false)
-    expect(branchDraftsEqual(draftWithBinding(null), draftWithBinding(null))).toBe(true)
-    expect(branchDraftsEqual(draftWithBinding(null), draftWithBinding({ name: 'local', workspacePath: '.' }))).toBe(false)
+  it('compares workspacePath in branchDraftsEqual', () => {
+    expect(branchDraftsEqual(draftWith({ workspacePath: 'proj/a' }), draftWith({ workspacePath: 'proj/a' }))).toBe(true)
+    expect(branchDraftsEqual(draftWith({ workspacePath: 'proj/a' }), draftWith({ workspacePath: 'proj/b' }))).toBe(false)
+    expect(branchDraftsEqual(draftWith({ workspacePath: 'proj/a' }), draftWith({ workspacePath: null }))).toBe(false)
+    expect(branchDraftsEqual(draftWith({ workspacePath: null }), draftWith({ workspacePath: null }))).toBe(true)
   })
 
-  it('emits SET_ENVIRONMENT with the exact whole-binding payload and skips equal bindings', () => {
+  it('emits SET_ENVIRONMENT with the exact workspacePath payload and skips equal workspacePath', () => {
     const ids = (() => {
       let next = 0
       return () => `cid-${++next}`
     })()
     const commands = buildBranchDiffCommands(
-      draftWithBinding(binding),
-      draftWithBinding(otherBinding),
+      draftWith({ workspacePath: 'proj/a' }),
+      draftWith({ workspacePath: 'proj/b' }),
       ids,
     )
     expect(commands).toHaveLength(1)
     expect(commands[0]).toEqual({
       type: 'SET_ENVIRONMENT',
       idempotencyKey: 'cid-1',
-      environment: { name: 'local', workspacePath: 'proj/b' },
+      workspacePath: 'proj/b',
     })
-    // 显式清空：payload.environment 为 null，绝不携带裸 name。
-    const cleared = buildBranchDiffCommands(draftWithBinding(binding), draftWithBinding(null), ids)
+
+    const cleared = buildBranchDiffCommands(draftWith({ workspacePath: 'proj/a' }), draftWith({ workspacePath: null }), ids)
     expect(cleared[0]).toEqual({
       type: 'SET_ENVIRONMENT',
       idempotencyKey: 'cid-2',
-      environment: null,
+      workspacePath: null,
     })
-    // 相同 binding（即使不同对象引用）不产生 diff。
-    expect(buildBranchDiffCommands(draftWithBinding(binding), draftWithBinding({ ...binding }), ids)).toEqual([])
+
+    expect(buildBranchDiffCommands(draftWith({ workspacePath: 'proj/a' }), draftWith({ workspacePath: 'proj/a' }), ids)).toEqual([])
   })
 
   it('emits SET_AGENT/SET_MODEL only for the actually changed field', () => {
@@ -247,7 +283,6 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
       idempotencyKey: 'cid-2',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'pro' },
     }])
-
   })
 
   it('emits every settings diff in the fixed order and never a SET_YOLO command', () => {
@@ -258,7 +293,7 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
     const commands = buildBranchDiffCommands(
       draftWith(),
       draftWith({
-        environment: binding,
+        workspacePath: 'proj/a',
         agentName: 'coder',
         model: { providerName: 'other', modelName: 'Other', variant: 'v2' },
         yoloEnabled: true,
@@ -270,32 +305,19 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
       'SET_AGENT',
       'SET_MODEL',
     ])
-    // YOLO 是 Thread 级直接控制面：diff 命令中绝不出现 SET_YOLO。
     expect(commands.some((command) => command.type === 'SET_YOLO')).toBe(false)
   })
 
-  it('projects a queued SET_ENVIRONMENT payload as the whole binding', () => {
-    const base = draftWithBinding(null)
+  it('projects a queued SET_ENVIRONMENT payload as workspacePath', () => {
+    const base = draftWith({ workspacePath: null })
     const queued: HarnessThreadCommandDTO[] = [
-      queuedSettingCommand('1', 'SET_ENVIRONMENT', { environment: otherBinding }),
-      queuedSettingCommand('2', 'SET_ENVIRONMENT', { environment: null }),
+      queuedSettingCommand('1', 'SET_ENVIRONMENT', { workspacePath: 'proj/sub' }),
+      queuedSettingCommand('2', 'SET_ENVIRONMENT', { workspacePath: null }),
     ]
-    expect(projectPendingTarget(base, queued).environment).toBeNull()
+    expect(projectPendingTarget(base, queued).workspacePath).toBeNull()
 
     const onlyFirst = projectPendingTarget(base, [queued[0]!])
-    expect(onlyFirst.environment).toEqual(otherBinding)
-    // 复制而非共享引用：草稿后续编辑不会反向污染队列命令对象。
-    expect(onlyFirst.environment).not.toBe(otherBinding)
-    // 非法/不完整 binding 绝不把 name 单独透传：保持 base 不变。
-    const malformed = projectPendingTarget(base, [
-      queuedSettingCommand('1', 'SET_ENVIRONMENT', { environment: { name: 'local' } }),
-    ])
-    expect(malformed.environment).toBeNull()
-    // payload.environment 非对象（如字符串）同样保持 base 不变。
-    const notRecord = projectPendingTarget(base, [
-      queuedSettingCommand('1', 'SET_ENVIRONMENT', { environment: 'local' }),
-    ])
-    expect(notRecord.environment).toBeNull()
+    expect(onlyFirst.workspacePath).toBe('proj/sub')
   })
 })
 

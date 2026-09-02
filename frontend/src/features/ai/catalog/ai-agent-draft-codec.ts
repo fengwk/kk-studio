@@ -57,6 +57,7 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     model: model ? modelRef(model) : '',
     // 空值 = 不覆盖；runtime 使用 model.defaultVariant。
     variant: '',
+    environmentId: '',
     toolIds: [],
     skills: [],
     subagents: [],
@@ -71,6 +72,7 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     systemPrompt: agent.systemPrompt || '',
     model: agent.model,
     variant: agent.variant?.trim() || '',
+    environmentId: agent.environmentId || '',
     toolIds: normalizeNames(config.toolIds),
     skills: normalizeNames(config.skills),
     subagents: normalizeNames(config.subagents),
@@ -94,6 +96,7 @@ export function toEditableAgent(draft: AgentDraft): AgentDefinitionCreateDTO {
     systemPrompt: trimToNull(draft.systemPrompt),
     model,
     variant,
+    environmentId: trimToNull(draft.environmentId ?? ''),
     config: toConfig(draft),
   }
 }
@@ -108,6 +111,7 @@ export function toEditableAgentUpdate(draft: AgentDraft): AgentDefinitionEditabl
     systemPrompt: trimToNull(draft.systemPrompt),
     model,
     variant: trimToNull(draft.variant),
+    environmentId: trimToNull(draft.environmentId ?? ''),
     config: toConfig(draft),
   }
 }

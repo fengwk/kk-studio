@@ -2,13 +2,11 @@ import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import { translate } from '@/shared/i18n'
 
 /**
- * Environment binding 的只读形状（{name, workspacePath}）。
- *
- * thread-panel 是可移植包，只依赖 thread-timeline-types 与本地模块；调用方传入
- * 的 API contract 结构与该形状兼容。
+ * Environment binding 的只读形状。
  */
 export interface EnvironmentBindingShape {
-  name: string
+  environmentId: string
+  environmentName?: string
   workspacePath: string
 }
 
@@ -26,7 +24,7 @@ export interface ThreadStatusModel {
 export interface ThreadStatusModelInput {
   /** 完整 Environment binding；null 时只读展示 `none env`。 */
   environment?: EnvironmentBindingShape | null
-  /** 该 binding name 的实时可用标记；false 时展示 unavailable 事实。 */
+  /** 实时可用标记；false 时展示 unavailable 事实。 */
   environmentReady?: boolean
   gitBranch?: string | null
   /** 当前 root-to-head 已关闭 Turn 的累计 usage；缺失时按 0 展示。 */
@@ -47,7 +45,7 @@ function clean(value?: string | null): string {
 export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadStatusModel {
   const segments: ThreadStatusSegment[] = []
   const binding = input.environment
-  const environmentName = binding ? clean(binding.name) : ''
+  const environmentName = binding ? clean(binding.environmentName || binding.environmentId) : ''
   const environmentWorkspacePath = binding ? clean(binding.workspacePath) : ''
   if (environmentName && environmentWorkspacePath) {
     const fullWorkspace = workspaceDisplayPath(environmentWorkspacePath)

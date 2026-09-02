@@ -45,6 +45,7 @@ function draft(overrides: Partial<AgentDraft> = {}): AgentDraft {
     description: ' description ',
     systemPrompt: ' prompt ',
     variant: 'quality',
+    environmentId: ' env-uuid-1 ',
     toolIds: [' base.read ', 'base.bash'],
     skills: [' dev '],
     subagents: [' helper '],
@@ -57,9 +58,10 @@ describe('ai-agent-draft-codec', () => {
     expect(emptyAgentDraft(model())).toMatchObject({
       model: 'minimax/model',
       variant: '',
+      environmentId: '',
       subagents: [],
     })
-    expect(emptyAgentDraft()).toMatchObject({ model: '', variant: '', subagents: [] })
+    expect(emptyAgentDraft()).toMatchObject({ model: '', variant: '', environmentId: '', subagents: [] })
   })
 
   it('normalizes tool IDs and capability names and rejects collisions in create payloads', () => {
@@ -83,6 +85,7 @@ describe('ai-agent-draft-codec', () => {
       systemPrompt: null,
       model: 'minimax/model',
       variant: 'quality',
+      environmentId: 'env-uuid-1',
       config: {
         toolIds: [' base.read ', ''],
         skills: [],
@@ -99,6 +102,7 @@ describe('ai-agent-draft-codec', () => {
       systemPrompt: '',
       model: 'minimax/model',
       variant: 'quality',
+      environmentId: 'env-uuid-1',
       toolIds: ['base.read'],
       skills: [],
       subagents: ['writer'],
@@ -108,17 +112,19 @@ describe('ai-agent-draft-codec', () => {
       toAgentDraft({
         ...agent,
         variant: null,
+        environmentId: null,
       }),
-    ).toMatchObject({ variant: '' })
+    ).toMatchObject({ variant: '', environmentId: '' })
   })
 
-  it('builds complete create and update bodies', () => {
+  it('builds complete create and update bodies with environmentId', () => {
     const expected = {
       name: 'assistant',
       description: 'description',
       systemPrompt: 'prompt',
       model: 'minimax/model',
       variant: 'quality',
+      environmentId: 'env-uuid-1',
       config: {
         toolIds: ['base.read', 'base.bash'],
         skills: ['dev'],
@@ -131,6 +137,7 @@ describe('ai-agent-draft-codec', () => {
       systemPrompt: 'prompt',
       model: 'minimax/model',
       variant: 'quality',
+      environmentId: 'env-uuid-1',
       config: {
         toolIds: ['base.read', 'base.bash'],
         skills: ['dev'],
@@ -140,11 +147,12 @@ describe('ai-agent-draft-codec', () => {
 
     expect(
       toEditableAgent(
-        draft({ description: '', systemPrompt: '' }),
+        draft({ description: '', systemPrompt: '', environmentId: '   ' }),
       ),
     ).toMatchObject({
       description: null,
       systemPrompt: null,
+      environmentId: null,
       config: { toolIds: ['base.read', 'base.bash'], skills: ['dev'], subagents: ['helper'] },
     })
     expect(toEditableAgent(draft({ variant: ' ' })).variant).toBeNull()
