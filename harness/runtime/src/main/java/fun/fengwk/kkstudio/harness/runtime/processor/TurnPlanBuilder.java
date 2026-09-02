@@ -179,7 +179,7 @@ final class TurnPlanBuilder {
       case SET_AGENT, SET_MODEL -> true;
       case CUSTOM_MESSAGE -> ((CustomMessageCommandPayload) command.payload()).message().role()
           == AgentMessageRole.SYSTEM;
-      case USER_MESSAGE, SET_WORKSPACE_PATH -> false;
+      case USER_MESSAGE, SET_ENVIRONMENT -> false;
     };
   }
 

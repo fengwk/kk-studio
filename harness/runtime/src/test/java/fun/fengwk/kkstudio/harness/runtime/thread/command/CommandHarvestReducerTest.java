@@ -46,8 +46,8 @@ class CommandHarvestReducerTest {
                     5L,
                     new SetModelCommandPayload(
                         new ModelSelection("anthropic", "claude-opus", "thinking"))),
-                queued(id(6L), 6L, new SetWorkspacePathCommandPayload(ENV_B)),
-                queued(id(7L), 7L, new SetWorkspacePathCommandPayload(null)),
+                queued(id(6L), 6L, new SetEnvironmentCommandPayload(ENV_B)),
+                queued(id(7L), 7L, new SetEnvironmentCommandPayload(null)),
                 queued(id(8L), 8L, new CustomMessageCommandPayload(system("instruction")))));
 
     assertEquals(

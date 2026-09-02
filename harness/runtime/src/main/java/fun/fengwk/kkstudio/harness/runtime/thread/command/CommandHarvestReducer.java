@@ -48,7 +48,7 @@ public final class CommandHarvestReducer {
         case CustomMessageCommandPayload ignored -> {}
         case SetAgentCommandPayload value -> settings = settings.withAgentName(value.agentName());
         case SetModelCommandPayload value -> settings = settings.withModel(value.model());
-        case SetWorkspacePathCommandPayload value -> settings =
+        case SetEnvironmentCommandPayload value -> settings =
             settings.withWorkspacePath(value.workspacePath());
       }
     }

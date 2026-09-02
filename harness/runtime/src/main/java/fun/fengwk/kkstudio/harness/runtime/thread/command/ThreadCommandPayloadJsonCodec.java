@@ -26,7 +26,7 @@ import java.util.Set;
  *
  * <p>command type 本身不编码：durable {@code command_type} 单列与 HTTP DTO 外层 discriminator 负责类型。
  * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；SET_MODEL 携带完整 {@link
- * ModelSelection}；SET_WORKSPACE_PATH 的 {@code workspacePath} 为可空 canonical 相对路径字符串（null 表示 clear）。
+ * ModelSelection}；SET_ENVIRONMENT 的 {@code workspacePath} 为可空 canonical 相对路径字符串（null 表示 clear）。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -41,7 +41,7 @@ public final class ThreadCommandPayloadJsonCodec {
   private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
   private static final Set<String> SET_AGENT_FIELDS = orderedSet("agentName");
   private static final Set<String> SET_MODEL_FIELDS = orderedSet("model");
-  private static final Set<String> SET_WORKSPACE_PATH_FIELDS = orderedSet("workspacePath");
+  private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("workspacePath");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
 
@@ -121,7 +121,7 @@ public final class ThreadCommandPayloadJsonCodec {
       case CUSTOM_MESSAGE -> decodeCustomMessage(root);
       case SET_AGENT -> decodeSetAgent(root);
       case SET_MODEL -> decodeSetModel(root);
-      case SET_WORKSPACE_PATH -> decodeSetWorkspacePath(root);
+      case SET_ENVIRONMENT -> decodeSetEnvironment(root);
     };
   }
 
@@ -154,7 +154,7 @@ public final class ThreadCommandPayloadJsonCodec {
       case SetModelCommandPayload value -> NODES
           .objectNode()
           .set("model", encodeModelSelection(value.model()));
-      case SetWorkspacePathCommandPayload value -> {
+      case SetEnvironmentCommandPayload value -> {
         ObjectNode node = NODES.objectNode();
         if (value.workspacePath() == null) {
           node.putNull("workspacePath");
@@ -200,19 +200,18 @@ public final class ThreadCommandPayloadJsonCodec {
     return new SetModelCommandPayload(decodeModelSelection(node.get("model")));
   }
 
-  private static SetWorkspacePathCommandPayload decodeSetWorkspacePath(JsonNode value) {
-    ObjectNode node = requireObject(value, "SET_WORKSPACE_PATH");
-    requireExactFields(node, SET_WORKSPACE_PATH_FIELDS, "SET_WORKSPACE_PATH");
+  private static SetEnvironmentCommandPayload decodeSetEnvironment(JsonNode value) {
+    ObjectNode node = requireObject(value, "SET_ENVIRONMENT");
+    requireExactFields(node, SET_ENVIRONMENT_FIELDS, "SET_ENVIRONMENT");
     JsonNode workspacePath = node.get("workspacePath");
     if (workspacePath.isNull()) {
-      return new SetWorkspacePathCommandPayload(null);
+      return new SetEnvironmentCommandPayload(null);
     }
     if (!workspacePath.isTextual()) {
-      throw new IllegalArgumentException(
-          "SET_WORKSPACE_PATH.workspacePath must be a string or null");
+      throw new IllegalArgumentException("SET_ENVIRONMENT.workspacePath must be a string or null");
     }
     // canonical 相对 wire 路径形状由 EnvironmentWorkspacePath 校验器统一约束。
-    return new SetWorkspacePathCommandPayload(
+    return new SetEnvironmentCommandPayload(
         EnvironmentWorkspacePath.requireCanonicalRelativePath(workspacePath.textValue()));
   }
 

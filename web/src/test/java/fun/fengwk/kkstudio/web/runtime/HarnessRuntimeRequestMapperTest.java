@@ -14,7 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetWorkspacePathCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -112,7 +112,7 @@ class HarnessRuntimeRequestMapperTest {
   void mapsFixedSetPrefixEnvironmentAndRawRequestHash() {
     // 只允许稳定 SET_* 前缀，workspace path 与 USER_MESSAGE raw hash 必须保持精确。
     HarnessCommandBatchDTO request = request(threadTarget(), userCommand("user"));
-    HarnessCommandCreateDTO workspace = command("SET_WORKSPACE_PATH", "workspace");
+    HarnessCommandCreateDTO workspace = command("SET_ENVIRONMENT", "workspace");
     workspace.setWorkspacePath("workspace");
     HarnessCommandCreateDTO agent = command("SET_AGENT", "agent");
     agent.setAgentName("default-assistant");
@@ -124,14 +124,14 @@ class HarnessRuntimeRequestMapperTest {
 
     assertEquals(
         List.of(
-            ThreadCommandType.SET_WORKSPACE_PATH,
+            ThreadCommandType.SET_ENVIRONMENT,
             ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_MODEL,
             ThreadCommandType.USER_MESSAGE),
         mapped.commands().stream().map(command -> command.payload().type()).toList());
-    SetWorkspacePathCommandPayload workspacePayload =
+    SetEnvironmentCommandPayload workspacePayload =
         assertInstanceOf(
-            SetWorkspacePathCommandPayload.class, mapped.commands().getFirst().payload());
+            SetEnvironmentCommandPayload.class, mapped.commands().getFirst().payload());
     assertEquals("workspace", workspacePayload.workspacePath());
     assertEquals(
         ThreadCommandPayloadJsonCodec.requestHash(mapped.commands().getLast().payload()),
@@ -141,7 +141,7 @@ class HarnessRuntimeRequestMapperTest {
     mapped = HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
     workspacePayload =
         assertInstanceOf(
-            SetWorkspacePathCommandPayload.class, mapped.commands().getFirst().payload());
+            SetEnvironmentCommandPayload.class, mapped.commands().getFirst().payload());
     assertNull(workspacePayload.workspacePath());
   }
 
@@ -327,7 +327,7 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void rejectsCrossCommandFieldsAndMissingPayloads() {
-    // 每个 command variant 只能携带自己的字段，显式 null 仅对 SET_WORKSPACE_PATH 表示清除。
+    // 每个 command variant 只能携带自己的字段，显式 null 仅对 SET_ENVIRONMENT 表示清除。
     HarnessCommandCreateDTO user = userCommand("user-with-agent");
     user.setAgentName("forbidden");
     assertCommandRejected(user);
@@ -342,12 +342,12 @@ class HarnessRuntimeRequestMapperTest {
     model.setAgentName("forbidden");
     assertCommandRejected(model);
 
-    HarnessCommandCreateDTO workspace = command("SET_WORKSPACE_PATH", "workspace-with-contents");
+    HarnessCommandCreateDTO workspace = command("SET_ENVIRONMENT", "workspace-with-contents");
     workspace.setWorkspacePath(null);
     workspace.setContents(List.of());
     assertCommandRejected(workspace);
 
-    assertCommandRejected(command("SET_WORKSPACE_PATH", "missing-workspace"));
+    assertCommandRejected(command("SET_ENVIRONMENT", "missing-workspace"));
     assertCommandRejected(command("USER_MESSAGE", "missing-contents"));
 
     HarnessCommandCreateDTO blankAgent = command("SET_AGENT", "blank-agent");

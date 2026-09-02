@@ -10,7 +10,7 @@ public sealed interface ThreadCommandPayload
         CustomMessageCommandPayload,
         SetAgentCommandPayload,
         SetModelCommandPayload,
-        SetWorkspacePathCommandPayload {
+        SetEnvironmentCommandPayload {
 
   /** 返回该 payload 所代表的 command type。 */
   ThreadCommandType type();

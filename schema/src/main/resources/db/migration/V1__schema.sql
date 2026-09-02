@@ -685,7 +685,7 @@ create table harness_thread_command (
             'CUSTOM_MESSAGE',
             'SET_AGENT',
             'SET_MODEL',
-            'SET_WORKSPACE_PATH'
+            'SET_ENVIRONMENT'
         )
     ),
     constraint ck_harness_thread_command_request_hash check (

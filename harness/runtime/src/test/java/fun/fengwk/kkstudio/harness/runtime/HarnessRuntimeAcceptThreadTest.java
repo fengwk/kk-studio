@@ -28,7 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetWorkspacePathCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -41,7 +41,7 @@ import java.util.UUID;
 
 /**
  * acceptCommands 的 THREAD target：cursor 原子接受、ordered exact replay（hash / partial / order）、
- * SET_WORKSPACE_PATH 静止 admission 与 batch shape（steering vs user batch）。
+ * SET_ENVIRONMENT 静止 admission 与 batch shape（steering vs user batch）。
  */
 class HarnessRuntimeAcceptThreadTest {
 
@@ -253,9 +253,8 @@ class HarnessRuntimeAcceptThreadTest {
   }
 
   /**
-   * SET_WORKSPACE_PATH 无 quiescent admission：live Model / THREAD Work 期间接受 {@code
-   * SET_WORKSPACE_PATH + 恰一条 user message}，只入队 / 推进 cursor，不改当前 open Turn（SET_* 由 Reducer 于下一个
-   * INPUT 边界收割）。
+   * SET_ENVIRONMENT 无 quiescent admission：live Model / THREAD Work 期间接受 {@code SET_ENVIRONMENT +
+   * 恰一条 user message}，只入队 / 推进 cursor，不改当前 open Turn（SET_* 由 Reducer 于下一个 INPUT 边界收割）。
    */
   @Test
   void setEnvironmentDuringLiveOrWorkIsAcceptedAndOnlyAdvancesCursor() {
@@ -271,7 +270,7 @@ class HarnessRuntimeAcceptThreadTest {
                 liveHead,
                 1,
                 List.of(
-                    new NewThreadCommand(new SetWorkspacePathCommandPayload(null), TestIds.id(1)),
+                    new NewThreadCommand(new SetEnvironmentCommandPayload(null), TestIds.id(1)),
                     userMessageCommand(TestIds.id(2), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(liveResult.replayed());
@@ -292,7 +291,7 @@ class HarnessRuntimeAcceptThreadTest {
                 idle.rootEntryId(),
                 1,
                 List.of(
-                    new NewThreadCommand(new SetWorkspacePathCommandPayload(null), TestIds.id(3)),
+                    new NewThreadCommand(new SetEnvironmentCommandPayload(null), TestIds.id(3)),
                     userMessageCommand(TestIds.id(4), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(idleResult.replayed());
