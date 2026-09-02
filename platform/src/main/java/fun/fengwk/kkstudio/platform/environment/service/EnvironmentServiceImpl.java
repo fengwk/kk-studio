@@ -10,8 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnectionStatus;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
@@ -254,7 +254,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
               clock.instant(),
               Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
       dto.setLastSeen(conn.lastSeenAt());
-      if (conn.status() == EnvironmentConnectionStatus.READY && conn.daemonCapabilities() != null) {
+      if (conn.status() == LiveEnvironmentStatus.READY && conn.daemonCapabilities() != null) {
         dto.setRootPath(conn.rootPath());
         dto.setSkills(
             conn.skills().stream()

@@ -70,7 +70,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * invocationId，RUNNING/terminal journal 条目分别重放 STARTED/terminal。
  *
  * <p>Daemon 只拥有两个执行生命周期资源：单线程 scheduler 处理 heartbeat、reconnect 与 timeout，共享的
- * virtual-thread-per-task executor 处理 Coding/MCP 等阻塞调用。transport/JDK 内部线程不在该生命周期内。
+ * virtual-thread-per-task executor 处理 Coding/目录浏览等阻塞调用。transport/JDK 内部线程不在该生命周期内。
  */
 public final class DaemonRuntime implements AutoCloseable {
 

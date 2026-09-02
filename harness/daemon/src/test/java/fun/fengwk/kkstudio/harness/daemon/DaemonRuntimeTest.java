@@ -259,7 +259,7 @@ class DaemonRuntimeTest {
     assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
   }
 
-  /** 生产装配在 capability 注册失败时必须释放已经创建的 scheduler/executor，并关闭已启动的 MCP registry。 */
+  /** 生产装配在 capability 注册失败时必须释放已经创建的 scheduler/executor。 */
   @Test
   void productionConstructionFailureReleasesCreatedLifecycleResources() throws Exception {
     DaemonConfig config =

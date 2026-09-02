@@ -21,8 +21,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnectionStatus;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
@@ -124,7 +124,7 @@ class EnvironmentServiceImplTest {
             EnvironmentId.of(ENV_ID),
             UUID.randomUUID(),
             UUID.randomUUID(),
-            EnvironmentConnectionStatus.READY,
+            LiveEnvironmentStatus.READY,
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,
                 new DaemonEnvironmentInfo(
