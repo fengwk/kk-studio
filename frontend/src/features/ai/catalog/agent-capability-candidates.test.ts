@@ -7,7 +7,7 @@ import {
   withSelectedOrphans,
 } from '@/features/ai/catalog/agent-capability-candidates'
 import type { AgentDefinitionDTO, ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 
 function agent(name: string, description: string | null): AgentDefinitionDTO {
   return {
@@ -16,6 +16,7 @@ function agent(name: string, description: string | null): AgentDefinitionDTO {
     systemPrompt: null,
     model: 'minimax/MiniMax',
     variant: null,
+    environmentId: null,
     config: { toolIds: [], skills: [], subagents: [] },
     version: '1',
     createTime: null,
@@ -26,8 +27,9 @@ function agent(name: string, description: string | null): AgentDefinitionDTO {
 function environment(
   name: string,
   skills: { name: string; description: string | null }[],
-): LiveEnvironmentDTO {
+): EnvironmentCardDTO {
   return {
+    id: `id-${name}`,
     name,
     rootPath: null,
     status: 'READY',
@@ -35,6 +37,9 @@ function environment(
     lastSeen: null,
     capabilities: [],
     skills,
+    version: '1',
+    createTime: '2026-07-20T00:00:00.000Z',
+    updateTime: '2026-07-20T00:00:00.000Z',
   }
 }
 

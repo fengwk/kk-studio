@@ -12,40 +12,45 @@ function createClient(): HttpClient {
 }
 
 describe('chatService', () => {
-  it('keeps only Chat collection/detail CRUD without Thread membership endpoints', async () => {
+  it('keeps Chat collection/detail CRUD and update', async () => {
     const client = createClient()
     const service = createChatService(client)
     await service.listChats()
-    await service.createChat({ title: 'A', agentName: '9' })
+    await service.createChat({ title: 'A', agentName: 'assistant', workspacePath: 'proj/a' })
     await service.getChat('chat /1')
+    await service.updateChat('chat /1', { title: 'B', expectedVersion: '2' })
     await service.deleteChat('chat /1', '5')
 
     expect(client.get).toHaveBeenNthCalledWith(1, '/ai/chat')
     expect(client.post).toHaveBeenCalledWith('/ai/chat', {
       title: 'A',
-      agentName: '9',
+      agentName: 'assistant',
+      workspacePath: 'proj/a',
     })
     expect(client.get).toHaveBeenNthCalledWith(2, '/ai/chat/chat%20%2F1')
+    expect(client.put).toHaveBeenCalledWith('/ai/chat/chat%20%2F1', {
+      title: 'B',
+      expectedVersion: '2',
+    })
     expect(client.delete).toHaveBeenCalledWith(
       '/ai/chat/chat%20%2F1',
       { params: { expectedVersion: '5' } },
     )
-    expect(Object.keys(service)).toEqual(['listChats', 'createChat', 'getChat', 'deleteChat'])
   })
 
-  it('keeps the complete EnvironmentBinding atomic on Chat creation', async () => {
+  it('transmits nullable workspacePath directly on Chat creation without environment object', async () => {
     const client = createClient()
     const service = createChatService(client)
     await service.createChat({
       title: 'A',
-      agentName: '9',
-      environment: { name: 'local', workspacePath: 'proj/a' },
+      agentName: 'assistant',
+      workspacePath: 'proj/a',
     })
 
     expect(client.post).toHaveBeenCalledWith('/ai/chat', {
       title: 'A',
-      agentName: '9',
-      environment: { name: 'local', workspacePath: 'proj/a' },
+      agentName: 'assistant',
+      workspacePath: 'proj/a',
     })
   })
 })

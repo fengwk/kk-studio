@@ -190,9 +190,9 @@ describe('AI i18n live-switch contracts', () => {
     act(() => setLocale('en-US'))
     renderPage(<EnvironmentsPage />, 'environments')
 
-    expect(await screen.findByText('There are no live Environments')).toBeInTheDocument()
+    expect(await screen.findByText('There are no Environments')).toBeInTheDocument()
 
     act(() => setLocale('zh-CN'))
-    expect(screen.getByText('当前没有 live Environment')).toBeInTheDocument()
+    expect(screen.getByText('当前没有 Environment')).toBeInTheDocument()
   })
 })

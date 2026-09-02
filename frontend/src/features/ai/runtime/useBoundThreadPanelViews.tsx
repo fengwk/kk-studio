@@ -14,7 +14,7 @@ import { useEnvironmentWorkspaceMetadata } from '@/features/ai/environment/useEn
 import type { ToolDialogueMessage, TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import type {
   EnvironmentBindingDTO,
-  LiveEnvironmentDTO,
+  EnvironmentCardDTO,
 } from '@/shared/api/contracts/ai-environment'
 import type {
   HarnessSessionEntryDTO,
@@ -73,7 +73,7 @@ export function useBoundThreadPanelViews(
 
 /** Footer 只展示已经生效的 snapshot facts，不能把 pane-local draft 混进来。 */
 export function useBoundThreadPanelLabels(
-  environments: LiveEnvironmentDTO[],
+  environments: EnvironmentCardDTO[],
   controller: {
     runtimeLabels: {
       environment: EnvironmentBindingDTO | null
@@ -82,16 +82,28 @@ export function useBoundThreadPanelLabels(
     branchUsage: TurnUsage | null
   },
 ): ChatPanelLabels {
-  const environmentReadyByName = useMemo(
-    () => new Map(environments.map((environment) => [environment.name, environment.ready])),
+  const environmentReadyById = useMemo(
+    () => new Map(environments.map((environment) => [environment.id, environment.ready])),
     [environments],
   )
-  const environment = controller.runtimeLabels.environment
+  const environmentBinding = controller.runtimeLabels.environment
+  const boundEnvCard = environmentBinding
+    ? environments.find((e) => e.id === environmentBinding.environmentId)
+    : undefined
   const environmentReady =
-    environment != null
-      ? (environmentReadyByName.get(environment.name) ?? false)
-      : undefined
-  const { gitBranch } = useEnvironmentWorkspaceMetadata(environment, environmentReady)
+    boundEnvCard != null
+      ? boundEnvCard.ready
+      : environmentBinding != null
+        ? (environmentReadyById.get(environmentBinding.environmentId) ?? false)
+        : undefined
+  const environment = environmentBinding
+    ? {
+        environmentId: environmentBinding.environmentId,
+        environmentName: boundEnvCard?.name ?? environmentBinding.environmentId,
+        workspacePath: environmentBinding.workspacePath,
+      }
+    : null
+  const { gitBranch } = useEnvironmentWorkspaceMetadata(environmentBinding, environmentReady)
   return {
     environment,
     environmentReady,

@@ -10,7 +10,7 @@ import type {
   AgentProviderDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { useI18n } from '@/shared/i18n'
 
 export function ResourceEditorModal({
@@ -37,7 +37,7 @@ export function ResourceEditorModal({
   models: AgentModelView[]
   agents?: AgentDefinitionDTO[]
   toolCatalog?: ToolCatalogEntryDTO[]
-  environments?: LiveEnvironmentDTO[]
+  environments?: EnvironmentCardDTO[]
   providerDraft: ProviderDraft
   modelDraft: ModelDraft
   agentDraft: AgentDraft

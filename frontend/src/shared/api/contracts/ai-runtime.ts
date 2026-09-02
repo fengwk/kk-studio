@@ -16,12 +16,9 @@ export interface HarnessModelSelectionDTO {
 
 /**
  * 单个 Entry branch 的完整 branch settings 快照。
- *
- * environment 是可空的完整 Environment binding（{name, workspacePath}，null 表示未绑定），
- * 是 durable 快照中的唯一路由身份。
  */
 export interface HarnessBranchSettingsDTO {
-  environment: EnvironmentBindingDTO | null
+  workspacePath: string | null
   agentName: string
   model: HarnessModelSelectionDTO
 }
@@ -123,7 +120,7 @@ export type HarnessCommandCreateDTO =
   | HarnessUserMessageCommandDTO
   | { type: 'SET_AGENT'; idempotencyKey: string; agentName: string }
   | { type: 'SET_MODEL'; idempotencyKey: string; model: HarnessModelSelectionDTO }
-  | { type: 'SET_ENVIRONMENT'; idempotencyKey: string; environment: EnvironmentBindingDTO | null }
+  | { type: 'SET_ENVIRONMENT'; idempotencyKey: string; workspacePath: string | null }
 
 /**
  * Thread YOLO policy 直接更新请求；expectedVersion 是精确的 version CAS 游标

@@ -147,6 +147,8 @@ export interface AgentDefinitionDTO {
   model: string
   /** 可选覆盖；为 null 表示使用所选 Model 的 defaultVariant。 */
   variant: string | null
+  /** 绑定的 Environment UUID 字符串（可空；null 表示未绑定环境）。 */
+  environmentId: string | null
   config: AgentDefinitionConfigDTO
   version: CatalogVersion
   createTime: InstantTimestamp
@@ -161,6 +163,8 @@ export interface AgentDefinitionEditablePropertiesDTO {
   model: string
   /** 可选覆盖；为 null 表示使用所选 Model 的 defaultVariant。 */
   variant: string | null
+  /** 可空绑定的 Environment UUID 字符串（null/空白表示清除环境绑定）。 */
+  environmentId?: string | null
   config: AgentDefinitionConfigDTO
 }
 

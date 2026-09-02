@@ -4,10 +4,7 @@ import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { chatService } from '@/shared/api/chat-service'
-import type {
-  EnvironmentBindingDTO,
-  LiveEnvironmentDTO,
-} from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { mergeChatList } from '@/features/ai/chat/chat-utils'
@@ -30,14 +27,14 @@ function resolveChatAgentName(
 export function useChatListController(
   agents: AgentDefinitionDTO[],
   enabled: boolean,
-  environments: LiveEnvironmentDTO[] = [],
+  environments: EnvironmentCardDTO[] = [],
 ) {
   const navigate = useNavigate()
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedAgentName, setSelectedAgentName] = useState('')
-  const [selectedEnvironment, setSelectedEnvironment] = useState<EnvironmentBindingDTO | null>(null)
+  const [selectedWorkspacePath, setSelectedWorkspacePath] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [formError, setFormError] = useState('')
   const [nameError, setNameError] = useState('')
@@ -57,7 +54,7 @@ export function useChatListController(
       chatService.createChat({
         title: title.trim(),
         agentName: selectedAgentName,
-        environment: selectedEnvironment,
+        workspacePath: selectedWorkspacePath,
       }),
     invalidateQueryKeys: [queryKeys.chats.list],
     onSuccess: async (chat: ChatDTO) => {
@@ -70,8 +67,9 @@ export function useChatListController(
   })
 
   function openCreateChat(agentName?: string) {
-    setSelectedAgentName(resolveChatAgentName(agentName, selectedAgentName, agents))
-    setSelectedEnvironment(null)
+    const nextAgentName = resolveChatAgentName(agentName, selectedAgentName, agents)
+    setSelectedAgentName(nextAgentName)
+    setSelectedWorkspacePath(null)
     setTitle('')
     setFormError('')
     setNameError('')
@@ -87,11 +85,16 @@ export function useChatListController(
   }
 
   function handleSelectAgent(agentName: string) {
+    const prevAgent = agents.find((a) => a.name === selectedAgentName)
+    const nextAgent = agents.find((a) => a.name === agentName)
+    if (prevAgent?.environmentId !== nextAgent?.environmentId) {
+      setSelectedWorkspacePath(null)
+    }
     setSelectedAgentName(agentName)
   }
 
-  function handleSelectEnvironment(environment: EnvironmentBindingDTO | null) {
-    setSelectedEnvironment(environment)
+  function handleSelectWorkspacePath(workspacePath: string | null) {
+    setSelectedWorkspacePath(workspacePath)
   }
 
   const submitCreateChat: FormEventHandler<HTMLFormElement> = (event) => {
@@ -113,7 +116,6 @@ export function useChatListController(
   return {
     chatsQuery,
     chats: chatsQuery.data ?? [],
-    // modal 打开时不把 API mutation 错误暴露到页面 banner；由 modal 自行负责校验 UX。
     chatMutationError: modalOpen ? null : createChatMutation.error,
     openCreateChat,
     createChatModal: {
@@ -121,7 +123,7 @@ export function useChatListController(
       agents,
       environments,
       selectedAgentName,
-      selectedEnvironment,
+      selectedWorkspacePath,
       title,
       pending: createChatMutation.isPending,
       formError: formError || (createChatMutation.error ? String(createChatMutation.error.message || createChatMutation.error) : ''),
@@ -132,7 +134,7 @@ export function useChatListController(
         setNameError('')
       },
       onSelectAgent: handleSelectAgent,
-      onSelectEnvironment: handleSelectEnvironment,
+      onSelectWorkspacePath: handleSelectWorkspacePath,
       onTitleChange: handleTitleChange,
       onSubmit: submitCreateChat,
     },

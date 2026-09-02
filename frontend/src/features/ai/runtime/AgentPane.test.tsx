@@ -18,7 +18,7 @@ import type {
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { setLocale } from '@/shared/i18n'
@@ -68,12 +68,13 @@ vi.mock('@/shared/api/agent-pane-service', () => ({
   },
 }))
 
-const agents = [{
+const agents: AgentDefinitionDTO[] = [{
   name: 'assistant',
   description: null,
   systemPrompt: null,
   model: 'minimax/MiniMax',
   variant: 'default',
+  environmentId: 'env-local-1',
   config: { toolIds: [], skills: [], subagents: [] },
   version: '0',
   createTime: null,
@@ -112,7 +113,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     status: 'IDLE',
     processing: false,
     branchSettings: {
-      environment: null,
+      workspacePath: null,
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     },
@@ -497,6 +498,7 @@ describe('AgentPane orchestration', () => {
   it('renders the Agent, Environment, and Shortcuts interactions from the shared command menu', async () => {
     const user = userEvent.setup()
     renderPane({ type: 'CHAT', id: CHAT_ID }, [{
+      id: 'env-local-1',
       name: 'local',
       rootPath: null,
       ready: true,
@@ -504,6 +506,9 @@ describe('AgentPane orchestration', () => {
       lastSeen: null,
       capabilities: [],
       skills: [],
+      version: '1',
+      createTime: null,
+      updateTime: null,
     }])
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
@@ -514,7 +519,7 @@ describe('AgentPane orchestration', () => {
 
     await user.click(composer)
     await user.keyboard('/environment{Enter}')
-    expect(await screen.findByText('local')).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: /local 目录/ })).toBeInTheDocument()
     await user.keyboard('{Escape}')
 
     await user.click(composer)
@@ -776,14 +781,8 @@ describe('AgentPane orchestration', () => {
     expect(hook.result.current.error).toBeTruthy()
     act(() => hook.result.current.selectAgent('assistant'))
     expect(hook.result.current.error).toBeNull()
-    act(() => hook.result.current.selectEnvironment({
-      name: 'local',
-      workspacePath: '.',
-    }))
-    expect(hook.result.current.activeDraft?.environment).toEqual({
-      name: 'local',
-      workspacePath: '.',
-    })
+    act(() => hook.result.current.selectWorkspacePath('.'))
+    expect(hook.result.current.activeDraft?.workspacePath).toBe('.')
     act(() => hook.result.current.composer.settings?.onModelChange({
       providerName: 'minimax',
       modelName: 'MiniMax',
@@ -799,7 +798,7 @@ describe('AgentPane orchestration', () => {
       entryType: 'ROOT',
       payloadJson: JSON.stringify({
         settings: {
-          environment: { name: 'local', workspacePath: '.' },
+          workspacePath: '.',
           agentName: 'assistant',
           model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
         },
@@ -812,7 +811,7 @@ describe('AgentPane orchestration', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payloadJson: JSON.stringify({ settings: { environment: null } }),
+      payloadJson: JSON.stringify({ settings: { workspacePath: null } }),
       createTime: null,
     }))
     act(() => hook.result.current.selectEntry({
@@ -829,7 +828,7 @@ describe('AgentPane orchestration', () => {
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: JSON.stringify({
-        settings: { environment: { name: 1, workspacePath: '' } },
+        settings: { workspacePath: 123 },
       }),
       createTime: null,
     }))
@@ -1061,7 +1060,7 @@ describe('AgentPane orchestration', () => {
     const hook = renderController({ agents: [] })
     await waitFor(() => expect(hook.result.current.activeDraft).toBeNull())
     expect(hook.result.current.composer.disabled).toBe(true)
-    act(() => hook.result.current.selectEnvironment({ name: 'local', workspacePath: '.' }))
+    act(() => hook.result.current.selectWorkspacePath('.'))
     act(() => hook.result.current.selectEntry({
       entryId: 'entry-without-draft',
       sessionId: 'session-1',
@@ -1091,7 +1090,7 @@ describe('AgentPane orchestration', () => {
     )
     const hook = renderController()
     await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
-    act(() => hook.result.current.selectEnvironment({ name: 'local', workspacePath: '.' }))
+    act(() => hook.result.current.selectWorkspacePath('.'))
     act(() => hook.result.current.selectAgent('assistant'))
     act(() => hook.result.current.composer.settings?.onModelChange({
       providerName: 'minimax',
@@ -1121,7 +1120,7 @@ function threadFixture(threadId: string, overrides: Partial<HarnessThreadDTO> = 
 
 function renderPane(
   owner: { type: 'CHAT' | 'CANVAS'; id: string },
-  environments: LiveEnvironmentDTO[] = [],
+  environments: EnvironmentCardDTO[] = [],
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
