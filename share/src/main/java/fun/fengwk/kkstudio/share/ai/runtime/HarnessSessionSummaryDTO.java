@@ -26,6 +26,6 @@ public class HarnessSessionSummaryDTO {
 
   @JsonAnySetter
   public void rejectUnknownField(String field, Object value) {
-    throw new IllegalArgumentException("unknown harness session summary field: " + field);
+    throw new HarnessRequestFormatException("unknown harness session summary field: " + field);
   }
 }

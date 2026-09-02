@@ -7,14 +7,14 @@ final class HarnessRuntimeDtoSupport {
 
   static String requireJsonString(Object value, String field) {
     if (value != null && !(value instanceof String)) {
-      throw new IllegalArgumentException(field + " must be a JSON string");
+      throw new HarnessRequestFormatException(field + " must be a JSON string");
     }
     return (String) value;
   }
 
   static Boolean requireJsonBoolean(Object value, String field) {
     if (value != null && !(value instanceof Boolean)) {
-      throw new IllegalArgumentException(field + " must be a JSON boolean");
+      throw new HarnessRequestFormatException(field + " must be a JSON boolean");
     }
     return (Boolean) value;
   }
