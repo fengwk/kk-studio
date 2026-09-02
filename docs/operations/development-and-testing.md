@@ -455,10 +455,8 @@ node scripts/e2e/ui-smoke.mjs \
 
 两个 App 共享同一 PostgreSQL database（`kk_studio_distributed`）与 MinIO
 bucket（`kk-studio-distributed`），节点身份用固定可覆盖的变量表达：
-`DISTRIBUTED_NODE_A_ID`/`DISTRIBUTED_NODE_B_ID`（daemon-id）、
 `DISTRIBUTED_ENV_A_NAME`/`DISTRIBUTED_ENV_B_NAME`（environment name）、
-`DISTRIBUTED_DAEMON_TOKEN`（gateway token，与 `e2e` profile 的
-`e2e-daemon-token` 一致）。全部是 disposable test value；本栈不读取宿主
+`DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN`/`DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN`（各自的 registration token，与预置 seed Card 对应）。全部是 disposable test value；本栈不读取宿主
 MiniMax 凭据，真实模型仍需独立 `--real`。
 
 `--distributed` 运行通过 `deploy/distributed/run.sh` 启停栈，并在报告中记录

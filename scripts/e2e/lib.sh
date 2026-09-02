@@ -22,8 +22,7 @@ BACKEND_URL=${BACKEND_URL:-"http://$BACKEND_HOST:$BACKEND_PORT"}
 FRONTEND_URL=${FRONTEND_URL:-"http://$FRONTEND_HOST:$FRONTEND_PORT"}
 SPRING_PROFILE=${SPRING_PROFILES_ACTIVE:-e2e}
 DAEMON_ENV_NAME=${DAEMON_ENV_NAME:-tool-e2e}
-DAEMON_ID=${DAEMON_ID:-tool-e2e-daemon}
-DAEMON_TOKEN=${DAEMON_TOKEN:-e2e-daemon-token}
+DAEMON_REGISTRATION_TOKEN=${DAEMON_REGISTRATION_TOKEN:-e2e-token-host-tool-e2e}
 DAEMON_ENV_ROOT=${DAEMON_ENV_ROOT:-"$WORK_DIR/environment"}
 DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
 SKILL_DIR=${SKILL_DIR:-"$HOME/.agents/skills"}
@@ -231,10 +230,8 @@ start_daemon() {
   step "Starting daemon env=$DAEMON_ENV_NAME"
   nohup env JAVA_HOME="$java_home" "$java_home/bin/java" \
     -cp "$cp" fun.fengwk.kkstudio.harness.daemon.DaemonMain \
-    --environment-name "$DAEMON_ENV_NAME" \
     --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/ai/environment/daemon/v2" \
-    --gateway-token "$DAEMON_TOKEN" \
-    --daemon-id "$DAEMON_ID" \
+    --registration-token "$DAEMON_REGISTRATION_TOKEN" \
     --note "$DAEMON_NOTE" \
     --environment-root "$DAEMON_ENV_ROOT" \
     --skill-dir "$SKILL_DIR" \

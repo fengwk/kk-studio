@@ -19,12 +19,6 @@ spring:
     configuration:
       map-underscore-to-camel-case: true
 
-
-kk-studio:
-  harness:
-    environment-gateway:
-      daemon-token: e2e-daemon-token
-
 logging:
   level:
     root: info

@@ -104,7 +104,7 @@ dispatcher；这不是 Platform 对 Canvas Infra implementation 的反向依赖�
 
 数据库是唯一 durable database，Web 不在当前 context 内实现 HTTP 认证。HTTP
 认证/TLS 的部署边界在应用外；
-Environment Daemon 的连接身份由 `daemon-token`在 Platform gateway HELLO 协议中校验，trusted contributor directory 是另一个
+Environment Daemon 的连接身份由 PostgreSQL 中的 Environment registration_token 在 Platform gateway HELLO 协议中校验，trusted contributor directory 是另一个
 显式部署信任边界。
 
 ## 核心子域 / API
@@ -415,18 +415,18 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 | `management.endpoints.web.exposure.include` | `health,prometheus,offline,online` |
 | `kk-studio.harness.runtime.workers-enabled` | 是否启动 Work dispatcher；测试默认 false |
 | `kk-studio.harness.contributors.directory` | trusted JAR 目录；空值不加载外部贡献者 |
-| `kk-studio.harness.environment-gateway.*` | Daemon token、入站 frame 和出站 queue/bytes/send timeout |
+| `kk-studio.harness.environment-gateway.*` | 入站 frame 和出站 queue/bytes/send timeout |
 
 `application-dev.yml`默认数据库为 `127.0.0.1:5432/kk_studio`并加载 dev seed；
-`application-e2e.yml`使用 `kk_studio_e2e`和 e2e seed，配置测试 daemon token；
+`application-e2e.yml`使用 `kk_studio_e2e`和 e2e seed；
 `application-canvas-test.yml`在 dev seed 上追加 canvas-test SystemSettings。
 
 ### 安全与第三方边界
 
 - 代码没有 `spring-boot-starter-security`、`SecurityFilterChain`或 Spring Security auth filter；HTTP TLS、用户认证和
   ingress policy 属部署边界，不由当前 Web context伪造。
-- Daemon WebSocket 的共享 `daemon-token`是 deployment secret，不进 SystemSettings、DTO 或日志；Platform gateway
-  在 HELLO 认证时做常量时间比较，连接失败会清理 live state。
+- Daemon WebSocket 的 registration_token 是 deployment secret，保存在数据库 environment.registration_token 中，不进 SystemSettings、DTO 或日志；Platform gateway
+  在 HELLO 认证时基于该 token 映射对应 Environment Card，连接失败会清理 live state。
 - S3 presign Controller 只允许 ComfyUI input namespace 或 server 生成的 Blob key，响应丢弃 bucket/object key；
   浏览器拿到的是有限 expiry 的 signed URL。
 - `TrustedJarContributorLoader`把本地 JAR 作为 trusted code，只从显式 canonical directory 加载，不提供远程下载或热加载。
