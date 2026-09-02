@@ -1,5 +1,5 @@
 import type { AgentDefinitionDTO, ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 
 export interface CapabilityOption {
   value: string
@@ -56,13 +56,13 @@ export function buildPermissionToolCandidates(
 }
 
 /**
- * 构建单个选中 live Environment 的 skill 候选。
+ * 构建单个选中 Environment Card 的 skill 候选。
  *
- * 只接受至多一个 Environment（API 形状上不可能合并多个来源）；未选择或 {@code ready !== true} 一律返回空列表。
+ * 只接受至多一个 Environment Card；未选择或 {@code ready !== true} 一律返回空列表。
  * ready 是服务端统一可用性标记（READY + 连接打开 + 心跳未过期），status 文本只用于展示，不作为可用性判断。
  */
 export function buildSkillCandidates(
-  environment: LiveEnvironmentDTO | undefined,
+  environment: EnvironmentCardDTO | undefined,
 ): CapabilityOption[] {
   if (!environment || environment.ready !== true) {
     return []

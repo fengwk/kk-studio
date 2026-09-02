@@ -1,3 +1,5 @@
+import type { CatalogVersion, InstantTimestamp } from '@/shared/api/contracts/base'
+
 export interface LiveEnvironmentCapabilityDTO {
   id: string
   version: string
@@ -9,40 +11,37 @@ export interface LiveEnvironmentSkillDTO {
 }
 
 /**
- * 完整 Environment binding 的公开表示：canonical 路由名称 + canonical workspace path。
- *
- * 对象本身可空（null 表示未选择 Environment）；非 null 时两字段都必须提供。
- * workspacePath 是 Environment Root 下的 canonical 相对 wire 路径（{@code '.'} 表示 root）。
+ * ToolInvocation 中 resolved environment binding 的公开表示：canonical UUID + canonical workspace path。
  */
 export interface EnvironmentBindingDTO {
-  /** canonical bounded 小写 Environment 路由名称（LiveEnvironmentDTO.name 的同一身份）。 */
-  name: string
-  /** Environment Root 下 canonical 相对 wire workspace 路径（{@code '.'} 表示 root）。 */
+  /** canonical UUID 文本形式的环境 ID。 */
+  environmentId: string
+  /** Environment Root 下 canonical 相对 wire workspace 路径（'.' 表示 root）。 */
   workspacePath: string
 }
 
 /** 单层目录列表中的单个子目录条目。 */
 export interface EnvironmentDirectoryEntryDTO {
-  /** 子目录名（{@code path} 的最后一段）。 */
+  /** 子目录名（path 的最后一段）。 */
   name: string
-  /** 子目录的 canonical 相对路径，可直接继续作为 {@code path} 参数浏览。 */
+  /** 子目录的 canonical 相对路径，可直接继续作为 path 参数浏览。 */
   path: string
 }
 
 /**
  * Environment Root 下单层目录浏览结果（control-plane 只读）。
  *
- * {@code path} / {@code parentPath} 是 canonical 相对 wire 路径（{@code '.'} 表示 root）；
- * {@code displayPath} 是请求 {@code path} 的最后一段（root 为 {@code '.'}），只作展示、
- * 绝不暴露 daemon 本地绝对路径；{@code truncated} 表示条目数超过单层上限被截断；
- * {@code gitBranch} 可空，是浏览目录所在 git 仓库的当前分支。
+ * path / parentPath 是 canonical 相对 wire 路径（'.' 表示 root）；
+ * displayPath 是请求 path 的最后一段（root 为 '.'），只作展示、
+ * 绝不暴露 daemon 本地绝对路径；truncated 表示条目数超过单层上限被截断；
+ * gitBranch 可空，是浏览目录所在 git 仓库的当前分支。
  */
 export interface EnvironmentDirectoryDTO {
-  /** 被浏览目录的 canonical 相对路径（{@code '.'} 表示 root）。 */
+  /** 被浏览目录的 canonical 相对路径（'.' 表示 root）。 */
   path: string
-  /** 被浏览目录的展示名：请求 {@code path} 的最后一段（root 为 {@code '.'}），绝不暴露本地绝对路径。 */
+  /** 被浏览目录的展示名：请求 path 的最后一段（root 为 '.'），绝不暴露本地绝对路径。 */
   displayPath: string
-  /** 父目录的 canonical 相对路径（root 为 {@code '.'}）。 */
+  /** 父目录的 canonical 相对路径（root 为 '.'）。 */
   parentPath: string
   /** 条目数超过单层上限时为 true。 */
   truncated: boolean
@@ -53,17 +52,37 @@ export interface EnvironmentDirectoryDTO {
 }
 
 /**
- * 只读的实时 Environment 注册表条目。
+ * Environment Card DTO（包含稳定 Card 属性与当前 live 连接投影）。
  *
- * name 是 canonical 逻辑路由身份（也是唯一键）；不存在独立的展示名或 UUID。ready 是按统一
- * 可用性规则（READY + 连接打开 + 心跳未过期）计算的可用标记，供 UI 标注 unavailable。
+ * id 是 canonical UUID；name 是可编辑 display name。
+ * registrationToken 仅在 create 或 rotate-token 响应中一次性返回，正常列表和详情查询始终为 null。
  */
-export interface LiveEnvironmentDTO {
+export interface EnvironmentCardDTO {
+  id: string
   name: string
-  rootPath: string | null
+  registrationToken?: string | null
+  /** 当前连接状态：CONNECTING / READY / OFFLINE。 */
   status: string
+  /** 是否就绪。 */
   ready: boolean
-  lastSeen: string | null
+  /** 最近活跃时间。 */
+  lastSeen: InstantTimestamp
+  /** 支持的原子能力列表。 */
   capabilities: LiveEnvironmentCapabilityDTO[]
+  /** daemon 通告的技能列表。 */
   skills: LiveEnvironmentSkillDTO[]
+  /** daemon 实际 root display path。 */
+  rootPath: string | null
+  /** CAS 版本。 */
+  version: CatalogVersion
+  createTime: InstantTimestamp
+  updateTime: InstantTimestamp
+}
+
+export interface EnvironmentCreateDTO {
+  name: string
+}
+
+export interface EnvironmentUpdateDTO {
+  name: string
 }

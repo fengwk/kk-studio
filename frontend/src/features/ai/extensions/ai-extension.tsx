@@ -22,6 +22,10 @@ const EnvironmentsPage = lazy(async () => {
   const module = await import('@/features/ai/environment/EnvironmentsPage')
   return { default: module.EnvironmentsPage }
 })
+const McpServersPage = lazy(async () => {
+  const module = await import('@/features/ai/mcp/McpServersPage')
+  return { default: module.McpServersPage }
+})
 const ResourceEditorModal = lazy(async () => {
   const module = await import('@/features/ai/catalog/AiConsoleResourceEditorModal')
   return { default: module.ResourceEditorModal }
@@ -102,6 +106,16 @@ export function EnvironmentsRoute({ children }: ExtensionComponentProps) {
   return (
     <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingEnvironment')}</div>}>
       <EnvironmentsPage />
+      {children}
+    </Suspense>
+  )
+}
+
+export function McpServersRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingMcpServer')}</div>}>
+      <McpServersPage />
       {children}
     </Suspense>
   )

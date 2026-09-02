@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { CreateChatModal } from '@/features/ai/chat/CreateChatModal'
 import { environmentService } from '@/shared/api/environment-service'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
@@ -12,12 +14,13 @@ vi.mock('@/shared/api/environment-service', () => ({
   },
 }))
 
-const agent = {
+const agentWithEnv: AgentDefinitionDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
   model: 'minimax/MiniMax',
   variant: 'default',
+  environmentId: 'env-dev-1',
   config: {
     toolIds: [],
     skills: [],
@@ -27,6 +30,28 @@ const agent = {
   createTime: null,
   updateTime: null,
 }
+
+const agentWithoutEnv: AgentDefinitionDTO = {
+  ...agentWithEnv,
+  name: 'no-env-assistant',
+  environmentId: null,
+}
+
+const environments: EnvironmentCardDTO[] = [
+  {
+    id: 'env-dev-1',
+    name: 'dev',
+    rootPath: null,
+    status: 'READY',
+    ready: true,
+    lastSeen: null,
+    capabilities: [],
+    skills: [],
+    version: '1',
+    createTime: '2026-07-20T00:00:00.000Z',
+    updateTime: '2026-07-20T00:00:00.000Z',
+  },
+]
 
 describe('CreateChatModal', () => {
   it('renders nothing when closed', () => {
@@ -54,7 +79,7 @@ describe('CreateChatModal', () => {
     render(
       <CreateChatModal
         open
-        agents={[agent]}
+        agents={[agentWithEnv]}
         selectedAgentName=""
         title=""
         pending={false}
@@ -77,22 +102,20 @@ describe('CreateChatModal', () => {
     expect(onTitleChange).toHaveBeenCalled()
     await chooseSelectOption(user, 'Agent', 'assistant')
     expect(onSelectAgent).toHaveBeenCalledWith('assistant')
-    // 可选的默认 Environment（可空）由完整 Environment/Workspace picker 选择。
-    expect(screen.getByRole('button', { name: 'Environment' })).toHaveTextContent('（无）')
     await user.click(screen.getByRole('button', { name: '确认创建' }))
     expect(onSubmit).toHaveBeenCalled()
   })
 
-  it('selects a complete Environment binding instead of silently forcing root', async () => {
+  it('selects workspacePath for agent with bound environment', async () => {
     const user = userEvent.setup()
-    const onSelectEnvironment = vi.fn()
+    const onSelectWorkspacePath = vi.fn()
     vi.mocked(environmentService.listDirectories).mockResolvedValue({
       path: '.',
       displayPath: '.',
       parentPath: '.',
       truncated: false,
       gitBranch: 'main',
-      entries: [],
+      entries: [{ name: 'src', path: 'src' }],
     })
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -101,36 +124,50 @@ describe('CreateChatModal', () => {
       <QueryClientProvider client={queryClient}>
         <CreateChatModal
           open
-          agents={[agent]}
-          environments={[
-            {
-              name: 'dev',
-              rootPath: null,
-              status: 'READY',
-              ready: true,
-              lastSeen: null,
-              capabilities: [],
-              skills: [],
-            },
-          ]}
+          agents={[agentWithEnv]}
+          environments={environments}
           selectedAgentName="assistant"
           title="Chat"
           pending={false}
           onClose={() => undefined}
           onSelectAgent={() => undefined}
-          onSelectEnvironment={onSelectEnvironment}
+          onSelectWorkspacePath={onSelectWorkspacePath}
           onTitleChange={() => undefined}
           onSubmit={(event) => event.preventDefault()}
         />
       </QueryClientProvider>,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Environment' }))
-    const environments = await screen.findByRole('region', { name: '选择 Environment' })
-    await user.click(within(environments).getByRole('option', { name: 'dev' }))
+    await user.click(screen.getByRole('button', { name: '工作区路径' }))
     const directory = await screen.findByRole('region', { name: 'dev 目录' })
-    await user.click(within(directory).getByRole('button', { name: /^使用当前 Workspace/ }))
+    await user.click(within(directory).getByRole('button', { name: /^使用当前/ }))
 
-    expect(onSelectEnvironment).toHaveBeenCalledWith({ name: 'dev', workspacePath: '.' })
+    expect(onSelectWorkspacePath).toHaveBeenCalledWith('.')
+  })
+
+  it('disables directory picker when agent has no environmentId', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CreateChatModal
+          open
+          agents={[agentWithoutEnv]}
+          environments={environments}
+          selectedAgentName="no-env-assistant"
+          title="Chat"
+          pending={false}
+          onClose={() => undefined}
+          onSelectAgent={() => undefined}
+          onTitleChange={() => undefined}
+          onSubmit={(event) => event.preventDefault()}
+        />
+      </QueryClientProvider>,
+    )
+
+    const envButton = screen.getByRole('button', { name: '工作区路径' })
+    expect(envButton).toBeDisabled()
+    expect(screen.getByText('当前 Agent 未绑定环境，无法选择工作区路径。')).toBeInTheDocument()
   })
 })

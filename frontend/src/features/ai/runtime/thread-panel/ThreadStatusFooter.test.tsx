@@ -17,7 +17,7 @@ describe('ThreadStatusFooter', () => {
   it('renders Environment/Workspace and Git as readonly facts', () => {
     render(
       <ThreadStatusFooter
-        environment={{ name: 'local', workspacePath: 'proj/a' }}
+        environment={{ environmentId: 'env-local-id', environmentName: 'local', workspacePath: 'proj/a' }}
         environmentReady
         gitBranch="feature/footer"
       />,
@@ -29,10 +29,23 @@ describe('ThreadStatusFooter', () => {
     expect(footer.querySelector('button')).toBeNull()
   })
 
+  // 验证在缺失 environmentName 时，规范回退为显示 environmentId 作为身份标识。
+  it('falls back to environmentId when environmentName is omitted', () => {
+    render(
+      <ThreadStatusFooter
+        environment={{ environmentId: 'env-uuid-42', workspacePath: 'proj/sub' }}
+        environmentReady
+      />,
+    )
+
+    const footer = screen.getByLabelText('会话状态')
+    expect(footer).toHaveTextContent('env:env-uuid-42 · @/proj/sub')
+  })
+
   it('marks an unavailable binding without replacing it or exposing an absolute path', () => {
     render(
       <ThreadStatusFooter
-        environment={{ name: 'dev', workspacePath: '.' }}
+        environment={{ environmentId: 'env-dev-id', environmentName: 'dev', workspacePath: '.' }}
         environmentReady={false}
       />,
     )
@@ -46,7 +59,7 @@ describe('ThreadStatusFooter', () => {
     const path = 'projects/very-long-directory-name/packages/runtime/thread-panel'
     render(
       <ThreadStatusFooter
-        environment={{ name: 'dev', workspacePath: path }}
+        environment={{ environmentId: 'env-dev-id', environmentName: 'dev', workspacePath: path }}
         environmentReady
       />,
     )
@@ -60,7 +73,7 @@ describe('ThreadStatusFooter', () => {
   it('renders usage, context estimate, and cache hit rate in stable readonly order', () => {
     render(
       <ThreadStatusFooter
-        environment={{ name: 'local', workspacePath: '.' }}
+        environment={{ environmentId: 'env-local-id', environmentName: 'local', workspacePath: '.' }}
         environmentReady
         gitBranch="main"
         branchUsage={{

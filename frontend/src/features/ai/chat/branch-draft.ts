@@ -1,5 +1,4 @@
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
 import type {
   HarnessBranchSettingsDTO,
   HarnessModelSelectionDTO,
@@ -12,11 +11,10 @@ import { parsePayload } from '@/features/ai/runtime/payload-json'
 
 /**
  * 面板编辑的完整 branch target：持久化 branch settings 加上 Thread 级别的 YOLO runtime policy。
- * environment 是可空的完整 Environment binding（{name, workspacePath}，null 表示未绑定），
- * 原子地比较/复制——绝不单独透传 name。
+ * workspacePath 是可空的 canonical workspace path（null 表示未指定工作目录）。
  */
 export interface BranchDraft {
-  environment: EnvironmentBindingDTO | null
+  workspacePath: string | null
   agentName: string
   model: HarnessModelSelectionDTO
   yoloEnabled: boolean
@@ -25,18 +23,14 @@ export interface BranchDraft {
 /**
  * 使用 Chat 默认值（agent + yolo）和 catalog，为空面板构建完整的 branch draft：
  * - agent 的 model ref -> provider/model 选择
- * - variant = agent override 或 model 的 defaultVariant（模型 reasoning effort 只来自所选 catalog Variant）
- * - environment 从调用方传入的 Chat 默认 binding（可 null）开始
- *
- * 当未配置 agent 或无法解析 agent 的 model/variant 时返回 null：
- * 使用空 provider/model/variant 创建 Thread 会被 strict mapper 拒绝，
- * 因此调用方必须显示明确错误或打开 agent picker。
+ * - variant = agent override 或 model 的 defaultVariant
+ * - workspacePath 从调用方传入的 Chat 默认 workspacePath（可 null）开始；如果 agent 未绑定 environmentId，则强制为 null。
  */
 export function materializeBlankBranchDraft(
   agent: AgentDefinitionDTO | undefined,
   yoloEnabled: boolean,
   models: AgentModelView[],
-  environment: EnvironmentBindingDTO | null = null,
+  workspacePath: string | null = null,
 ): BranchDraft | null {
   if (!agent || !agent.model) {
     return null
@@ -50,8 +44,9 @@ export function materializeBlankBranchDraft(
   if (!variantId || !variant) {
     return null
   }
+  const effectiveWorkspacePath = agent.environmentId ? (workspacePath ?? null) : null
   return {
-    environment: copyBinding(environment),
+    workspacePath: effectiveWorkspacePath,
     agentName: agent.name,
     model: {
       providerName: model.providerName,
@@ -63,22 +58,35 @@ export function materializeBlankBranchDraft(
 }
 
 /**
- * 根据明确选中的 Agent + catalog 构建完整 draft（当前 draft 尚无有效 model selection 时使用，例如 Chat agent 已过期）。否则复用已有 frozen draft 的持久化值。
+ * 根据明确选中的 Agent + catalog 构建完整 draft。
+ *
+ * 切换 Agent 规则：
+ * - 如果新 Agent 没有绑定 environmentId，或者新旧 Agent 的 environmentId 不一致，则 workspacePath 必须清空为 null，
+ *   防止旧环境的 workspacePath 被静默带到不同环境；
+ * - 只有新旧 Agent 属于同一 environmentId 时，才保留已有 workspacePath。
  */
 export function materializeAgentBranchDraft(
   agent: AgentDefinitionDTO,
   models: AgentModelView[],
   existing: BranchDraft | null,
   fallbackYoloEnabled?: boolean,
-  fallbackEnvironment: EnvironmentBindingDTO | null = null,
+  fallbackWorkspacePath: string | null = null,
+  previousAgent?: AgentDefinitionDTO | null,
 ): BranchDraft | null {
-  // 完整 materialization（没有有效的已有 draft，例如 Chat agent 已过期）必须保留
-  // Chat 默认值：不能悄悄丢弃用户设置的 yolo=true 或完整 Environment binding。
+  const isSameEnvironment =
+    Boolean(agent.environmentId)
+    && Boolean(previousAgent?.environmentId)
+    && previousAgent?.environmentId === agent.environmentId
+
+  const targetWorkspacePath = isSameEnvironment
+    ? (existing?.workspacePath ?? fallbackWorkspacePath ?? null)
+    : null
+
   const materialized = materializeBlankBranchDraft(
     agent,
     existing?.yoloEnabled ?? fallbackYoloEnabled ?? false,
     models,
-    existing == null ? fallbackEnvironment : existing.environment,
+    targetWorkspacePath,
   )
   if (materialized == null) {
     return null
@@ -86,16 +94,15 @@ export function materializeAgentBranchDraft(
   if (existing == null || existing.model.providerName === '' || existing.model.modelName === '') {
     return materialized
   }
-  // Freeze 规则：保留当前 model selection / environment / yolo；采用新的 agent 名称。
   return {
     ...materialized,
-    environment: copyBinding(existing.environment),
+    workspacePath: targetWorkspacePath,
     model: { ...existing.model },
     yoloEnabled: existing.yoloEnabled,
   }
 }
 
-/** 从持久化的 Thread snapshot 初始化绑定面板 draft（绝不使用 Chat 默认值）。 */
+/** 从持久化的 Thread snapshot 初始化绑定面板 draft。 */
 export function branchDraftFromThread(thread: HarnessThreadDTO): BranchDraft {
   return branchDraftFromBranchSettings(thread.branchSettings, thread.yoloEnabled)
 }
@@ -105,7 +112,7 @@ export function branchDraftFromBranchSettings(
   yoloEnabled: boolean,
 ): BranchDraft {
   return {
-    environment: copyBinding(settings.environment),
+    workspacePath: settings.workspacePath ?? null,
     agentName: settings.agentName,
     model: {
       providerName: settings.model.providerName,
@@ -117,7 +124,7 @@ export function branchDraftFromBranchSettings(
 }
 
 export function branchDraftsEqual(left: BranchDraft, right: BranchDraft): boolean {
-  return sameBinding(left.environment, right.environment)
+  return left.workspacePath === right.workspacePath
     && left.agentName === right.agentName
     && left.model.providerName === right.model.providerName
     && left.model.modelName === right.model.modelName
@@ -125,31 +132,8 @@ export function branchDraftsEqual(left: BranchDraft, right: BranchDraft): boolea
     && left.yoloEnabled === right.yoloEnabled
 }
 
-/** 整个 binding 原子比较：null 或 {name, workspacePath} 逐字段相等。 */
-export function sameBinding(
-  left: EnvironmentBindingDTO | null,
-  right: EnvironmentBindingDTO | null,
-): boolean {
-  if (left === right) {
-    return true
-  }
-  if (left == null || right == null) {
-    return false
-  }
-  return left.name === right.name && left.workspacePath === right.workspacePath
-}
-
-/** 整个 binding 原子复制；null 保持 null。 */
-export function copyBinding(
-  binding: EnvironmentBindingDTO | null,
-): EnvironmentBindingDTO | null {
-  return binding ? { name: binding.name, workspacePath: binding.workspacePath } : null
-}
-
 /**
  * 构建 effective base 与 draft 之间的最小 settings command diff，固定顺序为 SET_ENVIRONMENT/SET_AGENT/SET_MODEL。
- * 每个 command 都通过注入的 id factory 携带自己的稳定 idempotencyKey。
- * YOLO 是 Thread 级直接控制面（PUT /yolo），绝不生成 SET_YOLO command。
  */
 export function buildBranchDiffCommands(
   base: BranchDraft,
@@ -157,11 +141,11 @@ export function buildBranchDiffCommands(
   createCommandId: () => string,
 ): HarnessCommandCreateDTO[] {
   const commands: HarnessCommandCreateDTO[] = []
-  if (!sameBinding(base.environment, draft.environment)) {
+  if (base.workspacePath !== draft.workspacePath) {
     commands.push({
       type: 'SET_ENVIRONMENT',
       idempotencyKey: createCommandId(),
-      environment: copyBinding(draft.environment),
+      workspacePath: draft.workspacePath,
     })
   }
   if (base.agentName !== draft.agentName) {
@@ -189,7 +173,6 @@ function sameModelSelection(left: HarnessModelSelectionDTO, right: HarnessModelS
 
 /**
  * 通过按 sequence 顺序将 QUEUED SET_* command payload 应用到持久化 base，推算 pending branch target。
- * 用于避免重新发送已在处理中、尚未完成的 settings。
  */
 export function projectPendingTarget(
   base: BranchDraft,
@@ -197,7 +180,6 @@ export function projectPendingTarget(
 ): BranchDraft {
   let projected: BranchDraft = {
     ...base,
-    environment: copyBinding(base.environment),
   }
   const ordered = [...queuedCommands]
     .filter((command) => command.state === 'QUEUED' && command.type.startsWith('SET_'))
@@ -212,26 +194,13 @@ function applySettingCommand(base: BranchDraft, command: HarnessThreadCommandDTO
   const payload = parsePayload(command.payloadJson)
   switch (command.type) {
     case 'SET_ENVIRONMENT': {
-      // 整个 binding 原子投影：payload.environment 为 {name, workspacePath} 或 null。
-      const environment = payload.environment
-      if (environment === null) {
-        return { ...base, environment: null }
+      if (payload.workspacePath === null) {
+        return { ...base, workspacePath: null }
       }
-      if (environment && typeof environment === 'object' && !Array.isArray(environment)) {
-        const record = environment as Record<string, unknown>
-        if (
-          typeof record.name === 'string'
-          && record.name.trim() !== ''
-          && typeof record.workspacePath === 'string'
-          && record.workspacePath.trim() !== ''
-        ) {
-          return {
-            ...base,
-            environment: { name: record.name, workspacePath: record.workspacePath },
-          }
-        }
+      if (typeof payload.workspacePath === 'string') {
+        const trimmed = payload.workspacePath.trim()
+        return { ...base, workspacePath: trimmed !== '' ? trimmed : null }
       }
-      // 非法/不完整 binding：绝不把 name 单独透传；保持 base 不变。
       return base
     }
     case 'SET_AGENT': {

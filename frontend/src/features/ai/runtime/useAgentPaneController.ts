@@ -39,7 +39,7 @@ import type {
   RuntimeSessionSummaryDTO,
   RuntimeThreadSummaryDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import type { EnvironmentBindingDTO, LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { useEnvironmentWorkspaceMetadata } from '@/features/ai/environment/useEnvironmentWorkspaceMetadata'
 import {
   buildAcceptanceRequest,
@@ -79,7 +79,7 @@ export type PaneInteraction =
 
 export interface AgentPaneDefaults {
   agentName?: string
-  environment?: EnvironmentBindingDTO | null
+  workspacePath?: string | null
   yoloEnabled?: boolean
 }
 
@@ -87,7 +87,7 @@ export interface UseAgentPaneControllerOptions {
   owner: AgentRuntimeOwnerDTO
   paneId: string
   agents: AgentDefinitionDTO[]
-  environments: LiveEnvironmentDTO[]
+  environments: EnvironmentCardDTO[]
   defaults: AgentPaneDefaults
   focused: boolean
   onFocus?: () => void
@@ -175,7 +175,7 @@ export function useAgentPaneController({
           agent,
           defaults.yoloEnabled ?? false,
           models,
-          defaults.environment,
+          defaults.workspacePath,
         ) != null,
       )
     const materialized = preferred == null
@@ -184,12 +184,12 @@ export function useAgentPaneController({
         preferred,
         defaults.yoloEnabled ?? false,
         models,
-        defaults.environment,
+        defaults.workspacePath,
       )
     if (materialized != null) {
       setLocalDraft(materialized)
     }
-  }, [agents, defaults.agentName, defaults.environment, defaults.yoloEnabled, localDraft, models, target])
+  }, [agents, defaults.agentName, defaults.workspacePath, defaults.yoloEnabled, localDraft, models, target])
 
   /**
    * Retain at most one inactive running Thread projection. The active Thread
@@ -565,23 +565,25 @@ export function useAgentPaneController({
         return
       }
     } else {
+      const prevAgent = agents.find((item) => item.name === localDraft?.agentName)
       setLocalDraft((current) => materializeAgentBranchDraft(
         agent,
         models,
         current,
         defaults.yoloEnabled ?? false,
-        defaults.environment ?? null,
+        defaults.workspacePath ?? null,
+        prevAgent,
       ))
     }
     setInteraction(null)
     setActionError(null)
   }
 
-  function selectEnvironment(environment: EnvironmentBindingDTO | null): void {
+  function selectWorkspacePath(workspacePath: string | null): void {
     if (isBoundTarget(target)) {
-      branchPanel.selectEnvironment(environment)
+      branchPanel.selectWorkspacePath(workspacePath)
     } else {
-      setLocalDraft((current) => current ? { ...current, environment } : current)
+      setLocalDraft((current) => current ? { ...current, workspacePath } : current)
     }
     setInteraction(null)
   }
@@ -669,15 +671,16 @@ export function useAgentPaneController({
       },
     },
   }
-  const environment = activeDraft?.environment ?? null
-  const environmentReadyByName = useMemo(
-    () => new Map(environments.map((item) => [item.name, item.ready])),
-    [environments],
-  )
-  const environmentReady = environment == null
-    ? undefined
-    : environmentReadyByName.get(environment.name) ?? false
-  const { gitBranch } = useEnvironmentWorkspaceMetadata(environment, environmentReady)
+  const workspacePath = activeDraft?.workspacePath ?? null
+  const currentAgent = agents.find((item) => item.name === activeDraft?.agentName)
+  const boundEnvironment = currentAgent?.environmentId
+    ? environments.find((env) => env.id === currentAgent.environmentId) ?? null
+    : null
+  const environmentReady = boundEnvironment ? boundEnvironment.ready : undefined
+  const environmentBinding = boundEnvironment
+    ? { environmentId: boundEnvironment.id, workspacePath: workspacePath ?? '.' }
+    : null
+  const { gitBranch } = useEnvironmentWorkspaceMetadata(environmentBinding, environmentReady)
   const error = actionError
     ?? (isBoundTarget(target) ? branchPanel.yoloError ?? controller.actionError : null)
     ?? (isEntryTarget(target) && treeEntriesQuery.error
@@ -718,7 +721,7 @@ export function useAgentPaneController({
     retryAcceptance,
     abandonPendingAcceptance,
     selectAgent,
-    selectEnvironment,
+    selectWorkspacePath,
     selectEntry,
     selectSession,
     selectThread,
@@ -732,7 +735,8 @@ export function useAgentPaneController({
     sessionSelectionItem,
     threadSelectionItem,
     buildBoundThreadTranscript,
-    environment,
+    boundEnvironment,
+    workspacePath,
     environmentReady,
     gitBranch,
   }
@@ -746,7 +750,6 @@ function needsBackgroundProjection(snapshot: HarnessThreadSnapshotDTO | undefine
 function cloneDraft(draft: BranchDraft): BranchDraft {
   return {
     ...draft,
-    environment: draft.environment ? { ...draft.environment } : null,
     model: { ...draft.model },
   }
 }
@@ -773,7 +776,7 @@ function branchDraftFromEntry(
   const model = isRecord(settings.model) ? settings.model : null
   return {
     ...cloneDraft(fallback),
-    environment: decodeEnvironment(settings.environment, fallback.environment),
+    workspacePath: decodeWorkspacePath(settings.workspacePath, fallback.workspacePath),
     agentName: typeof settings.agentName === 'string' ? settings.agentName : fallback.agentName,
     model: {
       providerName: typeof model?.providerName === 'string'
@@ -815,17 +818,17 @@ function branchDraftFromEntryPath(
   return draft
 }
 
-function decodeEnvironment(
+function decodeWorkspacePath(
   value: unknown,
-  fallback: EnvironmentBindingDTO | null,
-): EnvironmentBindingDTO | null {
-  if (value == null) {
-    return value === null ? null : fallback
+  fallback: string | null,
+): string | null {
+  if (value === null) {
+    return null
   }
-  if (!isRecord(value) || typeof value.name !== 'string' || typeof value.workspacePath !== 'string') {
-    return fallback
+  if (typeof value === 'string') {
+    return value
   }
-  return { name: value.name, workspacePath: value.workspacePath }
+  return fallback
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

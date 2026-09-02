@@ -15,7 +15,7 @@ import {
 } from '@/features/ai/runtime/useAgentPaneController'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { useI18n } from '@/shared/i18n'
 
 export type { AgentPaneDefaults }
@@ -32,7 +32,7 @@ export function AgentPane({
   owner: AgentRuntimeOwnerDTO
   paneId: string
   agents: AgentDefinitionDTO[]
-  environments?: LiveEnvironmentDTO[]
+  environments?: EnvironmentCardDTO[]
   defaults?: AgentPaneDefaults
   focused?: boolean
   onFocus?: () => void
@@ -99,7 +99,15 @@ export function AgentPane({
         slots={{
           footer: (
             <ThreadStatusFooter
-              environment={pane.environment}
+              environment={
+                pane.boundEnvironment
+                  ? {
+                      environmentId: pane.boundEnvironment.id,
+                      environmentName: pane.boundEnvironment.name,
+                      workspacePath: pane.workspacePath ?? '.',
+                    }
+                  : null
+              }
               environmentReady={pane.environmentReady}
               gitBranch={pane.gitBranch}
             />
@@ -151,11 +159,11 @@ export function AgentPane({
     if (pane.interaction === 'environment') {
       return (
         <EnvironmentWorkspacePanel
-          environments={environments}
-          current={pane.environment}
+          environment={pane.boundEnvironment}
+          current={pane.workspacePath}
           pending={pane.pending}
           onClose={pane.closeInteraction}
-          onSelect={pane.selectEnvironment}
+          onSelect={pane.selectWorkspacePath}
         />
       )
     }

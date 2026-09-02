@@ -4,6 +4,7 @@ import {
   ChatsPage,
   CreateChatDialog,
   EnvironmentsRoute,
+  McpServersRoute,
   ModelsRoute,
   ProvidersRoute,
   ResourceDeleteDialog,
@@ -23,6 +24,7 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.models', path: 'models', component: ModelsRoute, priority: 100 },
     { id: 'ai.providers', path: 'providers', component: ProvidersRoute, priority: 100 },
     { id: 'ai.environments', path: 'environments', component: EnvironmentsRoute, priority: 100 },
+    { id: 'ai.mcp-servers', path: 'mcp-servers', component: McpServersRoute, priority: 100 },
   ],
   navigation: [
     { id: 'ai.nav.chats', label: 'Chat', labelKey: 'ai.nav.chats', path: 'chats', priority: 100 },
@@ -35,6 +37,13 @@ export const aiExtension: TrustedReactExtension = {
       labelKey: 'ai.nav.environments',
       path: 'environments',
       priority: 90,
+    },
+    {
+      id: 'ai.nav.mcp-servers',
+      label: 'MCP Server',
+      labelKey: 'ai.nav.mcpServers',
+      path: 'mcp-servers',
+      priority: 85,
     },
   ],
   dialogs: [

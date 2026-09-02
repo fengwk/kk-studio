@@ -247,6 +247,7 @@ describe('AI domain utilities', () => {
       systemPrompt: ' prompt ',
       model: ' minimax/MiniMax-M2.7 ',
       variant: ' default ',
+      environmentId: ' env-uuid-1 ',
       toolIds: [' base.search ', ''],
       skills: [],
       subagents: [' helper '],
@@ -257,6 +258,7 @@ describe('AI domain utilities', () => {
       systemPrompt: 'prompt',
       model: 'minimax/MiniMax-M2.7',
       variant: 'default',
+      environmentId: 'env-uuid-1',
       config: {
         toolIds: ['base.search'],
         skills: [],
@@ -269,6 +271,7 @@ describe('AI domain utilities', () => {
       systemPrompt: 'prompt',
       model: 'minimax/MiniMax-M2.7',
       variant: 'default',
+      environmentId: 'env-uuid-1',
       config: {
         toolIds: ['base.search'],
         skills: [],

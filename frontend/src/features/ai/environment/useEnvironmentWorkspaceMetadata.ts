@@ -10,11 +10,12 @@ export function useEnvironmentWorkspaceMetadata(
 ) {
   const query = useQuery({
     queryKey: queryKeys.environments.directory(
-      binding?.name ?? '',
+      binding?.environmentId ?? '',
       binding?.workspacePath ?? '.',
     ),
-    queryFn: () => environmentService.listDirectories(binding!.name, binding!.workspacePath),
-    enabled: binding != null && ready !== false,
+    queryFn: () =>
+      environmentService.listDirectories(binding!.environmentId, binding!.workspacePath),
+    enabled: binding != null && Boolean(binding.environmentId) && ready !== false,
     retry: false,
     staleTime: 30_000,
   })

@@ -33,6 +33,8 @@ export function ChatCard({
     agent?.name || chat.agentName || t('ai.chat.missingAgent')
   )
 
+  const workspaceLabel = chat.workspacePath ? chat.workspacePath : t('ai.chat.noneEnvironment')
+
   return (
     <article className="info-card">
       <div className="head">
@@ -49,12 +51,8 @@ export function ChatCard({
       <div className="meta-block">
         <MetaRow label={t('ai.chat.agent')} value={agentLabel} />
         <MetaRow
-          label={t('ai.chat.environment')}
-          value={
-            chat.environment
-              ? `${chat.environment.name} · ${chat.environment.workspacePath}`
-              : t('ai.chat.noneEnvironment')
-          }
+          label={t('ai.chat.workspacePath')}
+          value={workspaceLabel}
         />
         <MetaRow label={t('ai.chat.updated')} value={formatBackendDate(chat.updateTime)} />
       </div>

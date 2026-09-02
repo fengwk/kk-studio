@@ -7,7 +7,6 @@ import type {
 } from '@/shared/api/contracts/ai-runtime'
 import {
   buildBranchDiffCommands,
-  copyBinding,
   type BranchDraft,
 } from '@/features/ai/chat/branch-draft'
 import {
@@ -60,7 +59,7 @@ export function createMaterializedThreadId(): string {
 
 export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsDTO {
   return {
-    environment: copyBinding(draft.environment),
+    workspacePath: draft.workspacePath,
     agentName: draft.agentName,
     model: { ...draft.model },
   }
@@ -158,7 +157,6 @@ function materializeTarget(
 export function copyBranchDraft(draft: BranchDraft): BranchDraft {
   return {
     ...draft,
-    environment: copyBinding(draft.environment),
     model: { ...draft.model },
   }
 }

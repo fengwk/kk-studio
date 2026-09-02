@@ -4,10 +4,7 @@ import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { Select } from '@/shared/ui/console/Select'
 import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type {
-  EnvironmentBindingDTO,
-  LiveEnvironmentDTO,
-} from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { useI18n } from '@/shared/i18n'
 
 export function CreateChatModal({
@@ -15,42 +12,55 @@ export function CreateChatModal({
   agents,
   environments = [],
   selectedAgentName,
-  selectedEnvironment = null,
+  selectedWorkspacePath = null,
   title,
   pending,
   formError = '',
   nameError = '',
   onClose,
   onSelectAgent,
-  onSelectEnvironment,
+  onSelectWorkspacePath,
   onTitleChange,
   onSubmit,
 }: {
   open: boolean
   agents: AgentDefinitionDTO[]
-  environments?: LiveEnvironmentDTO[]
+  environments?: EnvironmentCardDTO[]
   selectedAgentName: string
-  selectedEnvironment?: EnvironmentBindingDTO | null
+  selectedWorkspacePath?: string | null
   title: string
   pending: boolean
   formError?: string
   nameError?: string
   onClose: () => void
   onSelectAgent: (agentName: string) => void
-  onSelectEnvironment?: (environment: EnvironmentBindingDTO | null) => void
+  onSelectWorkspacePath?: (workspacePath: string | null) => void
   onTitleChange: (title: string) => void
   onSubmit: FormEventHandler<HTMLFormElement>
 }) {
   const { t } = useI18n()
   const [environmentPanelOpen, setEnvironmentPanelOpen] = useState(false)
+
   useEffect(() => {
     if (!open) {
       setEnvironmentPanelOpen(false)
     }
   }, [open])
+
   if (!open) {
     return null
   }
+
+  const selectedAgent = agents.find((agent) => agent.name === selectedAgentName)
+  const boundEnvironment = selectedAgent?.environmentId
+    ? environments.find((env) => env.id === selectedAgent.environmentId)
+    : undefined
+
+  const triggerLabel = boundEnvironment
+    ? selectedWorkspacePath
+      ? `${boundEnvironment.name} · ${workspaceDisplayPath(selectedWorkspacePath)}`
+      : `${boundEnvironment.name} · ${t('ai.chat.noneEnvironment')}`
+    : t('ai.chat.noneEnvironment')
 
   return (
     <ModalBackdrop onClose={onClose}>
@@ -88,28 +98,29 @@ export function CreateChatModal({
             />
           </label>
           <div className="form-group">
-            <FieldLabel>{t('ai.chat.environment')}</FieldLabel>
+            <FieldLabel>{t('ai.chat.workspacePath')}</FieldLabel>
             <button
               type="button"
               className="environment-binding-trigger"
-              aria-label={t('ai.chat.environment')}
+              aria-label={t('ai.chat.workspacePath')}
               aria-expanded={environmentPanelOpen}
-              disabled={pending}
+              disabled={pending || !boundEnvironment}
               onClick={() => setEnvironmentPanelOpen((current) => !current)}
             >
-              {selectedEnvironment == null
-                ? t('ai.chat.noneEnvironment')
-                : `${selectedEnvironment.name} · ${workspaceDisplayPath(selectedEnvironment.workspacePath)}`}
+              {triggerLabel}
             </button>
+            {!boundEnvironment && (
+              <span className="inline-hint">{t('ai.chat.noEnvironmentBound')}</span>
+            )}
           </div>
           {environmentPanelOpen ? (
             <EnvironmentWorkspacePanel
-              environments={environments}
-              current={selectedEnvironment}
+              environment={boundEnvironment}
+              current={selectedWorkspacePath}
               pending={pending}
               onClose={() => setEnvironmentPanelOpen(false)}
-              onSelect={(environment) => {
-                onSelectEnvironment?.(environment)
+              onSelect={(workspacePath) => {
+                onSelectWorkspacePath?.(workspacePath)
                 setEnvironmentPanelOpen(false)
               }}
             />

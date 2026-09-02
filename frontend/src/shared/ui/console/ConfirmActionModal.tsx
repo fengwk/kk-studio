@@ -7,15 +7,18 @@ import { useI18n } from '@/shared/i18n'
 export function ConfirmActionModal({
   modal,
   pending,
+  error,
   onClose,
 }: {
   modal: ConfirmModalState | null
   pending: boolean
+  error?: string | null
   onClose: () => void
 }) {
   const { t } = useI18n()
   const cancelRef = useRef<HTMLButtonElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
+  const displayError = error ?? modal?.error
 
   useEffect(() => {
     if (!modal) {
@@ -75,6 +78,11 @@ export function ConfirmActionModal({
             {modal.icon === 'refresh' ? <RefreshCw /> : <Trash2 />}
           </div>
           <p className="confirm-modal-description">{modal.description}</p>
+          {displayError ? (
+            <p className="field-error confirm-modal-error" role="alert">
+              {displayError}
+            </p>
+          ) : null}
         </div>
         <div className="modal-footer">
           <button

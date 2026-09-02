@@ -10,7 +10,6 @@ import {
   type CommandBatchPlan,
 } from '@/features/ai/chat/command-batch-plan'
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
-import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
 import type {
   AgentRuntimeOwnerDTO,
   HarnessThreadDTO,
@@ -212,20 +211,28 @@ export function useBoundBranchPanel({
   }
 
   /**
-   * Draft-local agent 选择：解析 catalog（与 Agent picker 同源）；冻结的
-   * model/environment/yolo 选中值保持不变。返回是否解析成功，由调用方决定错误反馈。
+   * Draft-local agent 选择：解析 catalog（与 Agent picker 同源）；
+   * 如果新旧 agent 的 environmentId 不同，workspacePath 重置为 null；否则保持不变。
+   * 返回是否解析成功，由调用方决定错误反馈。
    */
   function selectAgent(agentName: string): boolean {
     const agent = controller.agents.find((candidate) => candidate.name === agentName)
     if (agent == null) {
       return false
     }
-    editDraft({ agentName })
+    const prevAgent = controller.agents.find(
+      (candidate) => candidate.name === boundBranchState?.draft.agentName,
+    )
+    if (prevAgent?.environmentId !== agent.environmentId) {
+      editDraft({ agentName, workspacePath: null })
+    } else {
+      editDraft({ agentName })
+    }
     return true
   }
 
-  function selectEnvironment(environment: EnvironmentBindingDTO | null) {
-    editDraft({ environment })
+  function selectWorkspacePath(workspacePath: string | null) {
+    editDraft({ workspacePath })
   }
 
   /**
@@ -381,7 +388,7 @@ export function useBoundBranchPanel({
     conflict,
     dismissConflict: () => setConflict(null),
     selectAgent,
-    selectEnvironment,
+    selectWorkspacePath,
     setYoloEnabled,
     selectModel,
     resetDraftFromThread,

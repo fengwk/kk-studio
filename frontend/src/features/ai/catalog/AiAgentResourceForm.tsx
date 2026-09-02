@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import {
   buildSkillCandidates,
@@ -17,7 +16,7 @@ import type {
   AgentDefinitionDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { translate, useI18n } from '@/shared/i18n'
 
 function toggleValue(items: string[], value: string): string[] {
@@ -39,18 +38,11 @@ export function AgentForm({
   models: AgentModelView[]
   toolCatalog?: ToolCatalogEntryDTO[]
   agents?: AgentDefinitionDTO[]
-  environments?: LiveEnvironmentDTO[]
+  environments?: EnvironmentCardDTO[]
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>
   onChange: (draft: AgentDraft) => void
 }) {
   const { t } = useI18n()
-  // 瞬态 Skill 目录浏览选择：只用于挑选展示哪个 live Environment 的 skill 名称，
-  // 绝不进入 AgentDraft/提交 DTO；切换 Agent 或重新打开创建编辑器时重置。
-  const [skillCatalogEnvironmentName, setSkillCatalogEnvironmentName] = useState('')
-  const editorSessionKey = mode === 'edit' ? `edit:${draft.name}` : 'create'
-  useEffect(() => {
-    setSkillCatalogEnvironmentName('')
-  }, [editorSessionKey])
   const selectedModel = models.find((model) => modelRef(model) === draft.model)
   const modelUnavailable =
     mode === 'edit' && Boolean(draft.model) && selectedModel === undefined
@@ -83,35 +75,34 @@ export function AgentForm({
     buildToolCandidates(toolCatalog),
     draft.toolIds,
   )
-  // Skill 候选只来自用户显式选中的一个 live Environment（ready===true）；未选择/来源失效时没有 live 候选，
-  // 已勾选的名称仍作为可移除 orphan 保留。
-  const readyEnvironments = environments.filter((environment) => environment.ready === true)
-  const selectedSkillSource = readyEnvironments.find(
-    (environment) => environment.name === skillCatalogEnvironmentName,
-  )
-  const skillSourceUnavailable =
-    skillCatalogEnvironmentName !== '' && selectedSkillSource === undefined
-  const skillSourceOptions = [
-    // 显式可选的空/无选项：用户选择来源后可随时回到「无来源」（只清组件本地浏览状态）。
+
+  const selectedEnvironmentId = (draft.environmentId ?? '').trim()
+  const selectedEnvironment = environments.find((env) => env.id === selectedEnvironmentId)
+  const environmentUnavailable =
+    selectedEnvironmentId !== '' && selectedEnvironment === undefined
+
+  const environmentOptions = [
     { value: '', label: t('ai.catalog.form.none') },
-    ...(skillSourceUnavailable
+    ...(environmentUnavailable
       ? [
           {
-            value: skillCatalogEnvironmentName,
-            label: `${skillCatalogEnvironmentName} (${t('ai.catalog.form.unavailable')})`,
+            value: selectedEnvironmentId,
+            label: `${selectedEnvironmentId} (${t('ai.catalog.form.unavailable')})`,
             disabled: true,
           },
         ]
       : []),
-    ...readyEnvironments.map((environment) => ({
-      value: environment.name,
-      label: environment.name,
+    ...environments.map((env) => ({
+      value: env.id,
+      label: env.ready ? env.name : `${env.name} (${t('ai.catalog.form.unavailable')})`,
     })),
   ]
+
   const skillCandidates = withSelectedOrphans(
-    buildSkillCandidates(selectedSkillSource),
+    buildSkillCandidates(selectedEnvironment),
     draft.skills,
   )
+
   // Subagent 候选来自当前全局 Agent catalog；create 模式下同名候选（该行尚不存在）不展示，
   // edit 模式下当前 agent 已存在，可以正常显示。已勾选但 catalog 缺失的名称保留为可移除 orphan。
   const subagentCatalogCandidates = buildSubagentCandidates(agents)
@@ -179,6 +170,15 @@ export function AgentForm({
         {fieldErrors.variant ? <span className="field-error">{fieldErrors.variant}</span> : null}
       </label>
       <label className="form-group">
+        <FieldLabel>{t('ai.catalog.form.environment')}</FieldLabel>
+        <Select
+          aria-label={t('ai.catalog.form.environment')}
+          value={draft.environmentId}
+          options={environmentOptions}
+          onChange={(environmentId) => onChange({ ...draft, environmentId })}
+        />
+      </label>
+      <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.systemPrompt')}</FieldLabel>
         <textarea
           value={draft.systemPrompt}
@@ -198,17 +198,6 @@ export function AgentForm({
         />
         {fieldErrors.toolIds ? <span className="field-error">{fieldErrors.toolIds}</span> : null}
       </fieldset>
-
-      <label className="form-group">
-        <FieldLabel>{t('ai.catalog.form.skillCatalogSource')}</FieldLabel>
-        <Select
-          aria-label={t('ai.catalog.form.skillCatalogSource')}
-          value={skillCatalogEnvironmentName}
-          options={skillSourceOptions}
-          onChange={(name) => setSkillCatalogEnvironmentName(name)}
-        />
-        <span className="inline-hint">{t('ai.catalog.form.skillCatalogSourceHint')}</span>
-      </label>
 
       <fieldset className={`form-group capability-picker${fieldErrors.skills ? ' is-error' : ''}`}>
         <legend>{t('ai.catalog.card.skills')}</legend>
@@ -259,7 +248,6 @@ function CapabilityChecklist({
   emptyText: string
   onToggle: (value: string) => void
 }) {
-  // options 已含 selected orphan；仅当既无候选也无已选时才显示空态。
   if (options.length === 0) {
     return (
       <div className="capability-options">

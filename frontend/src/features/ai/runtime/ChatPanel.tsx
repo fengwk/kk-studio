@@ -13,7 +13,7 @@ import {
   type ResourceBlobUrls,
 } from '@/features/ai/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import { storageService } from '@/shared/api/storage-service'
-import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentBindingShape } from '@/features/ai/runtime/thread-panel/thread-status-format'
 import type {
   DialogueMessage,
   QueuedThreadMessage,
@@ -27,8 +27,8 @@ import {
 
 /** Bound ChatPanel 的只读 Footer facts；缺失字段整段省略。 */
 export interface ChatPanelLabels {
-  /** 完整 Environment binding（name + workspacePath）；null 表示未绑定。 */
-  environment?: EnvironmentBindingDTO | null
+  /** 完整 Environment binding；null 表示未绑定。 */
+  environment?: EnvironmentBindingShape | null
   environmentReady?: boolean
   gitBranch?: string | null
   /** 当前 root-to-head branch 的已关闭 Turn 累计 usage。 */
