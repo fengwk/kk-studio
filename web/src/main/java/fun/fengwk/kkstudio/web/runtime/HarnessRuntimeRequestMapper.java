@@ -17,8 +17,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetWorkspacePathCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -262,15 +262,15 @@ public final class HarnessRuntimeRequestMapper {
         requireForbidden(dto.hasWorkspacePathField(), "workspacePath", "command type " + type);
         yield new SetModelCommandPayload(toModelSelection(requireNonNull(dto.getModel(), "model")));
       }
-      case "SET_WORKSPACE_PATH" -> {
+      case "SET_ENVIRONMENT" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
         requireForbidden(dto.hasModelField(), "model", "command type " + type);
         if (!dto.hasWorkspacePathField()) {
           throw new IllegalArgumentException(
-              "SET_WORKSPACE_PATH must contain workspacePath (a relative string selects, null unbinds)");
+              "SET_ENVIRONMENT must contain workspacePath (a relative string selects, null unbinds)");
         }
-        yield new SetWorkspacePathCommandPayload(dto.getWorkspacePath());
+        yield new SetEnvironmentCommandPayload(dto.getWorkspacePath());
       }
       case "CUSTOM_MESSAGE" -> throw new IllegalArgumentException(
           "CUSTOM_MESSAGE is not allowed on the product HTTP surface");
@@ -281,7 +281,7 @@ public final class HarnessRuntimeRequestMapper {
   private static void validateHttpCommandShape(List<NewThreadCommand> commands) {
     List<ThreadCommandType> prefixOrder =
         List.of(
-            ThreadCommandType.SET_WORKSPACE_PATH,
+            ThreadCommandType.SET_ENVIRONMENT,
             ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_MODEL);
     int lastSetOrder = -1;
@@ -298,7 +298,7 @@ public final class HarnessRuntimeRequestMapper {
       int order = prefixOrder.indexOf(type);
       if (order <= lastSetOrder) {
         throw new IllegalArgumentException(
-            "HTTP commands must use SET_WORKSPACE_PATH, SET_AGENT, SET_MODEL order");
+            "HTTP commands must use SET_ENVIRONMENT, SET_AGENT, SET_MODEL order");
       }
       lastSetOrder = order;
     }

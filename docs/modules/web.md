@@ -186,7 +186,7 @@ Thread progression 由 Work dispatcher 异步完成。Canvas command 返回带 `
 - version、cursor、sequence 使用 canonical decimal，分别拒绝符号、前导零和超出 long；
 - owner discriminator 只允许 `CHAT`/`CANVAS`；
 - target 只允许 `NEW_SESSION`、`ENTRY`、`THREAD`，每种 target 的字段集严格互斥；
-- product HTTP command 只允许 `SET_WORKSPACE_PATH -> SET_AGENT -> SET_MODEL`前缀和一条最后的
+- product HTTP command 只允许 `SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL`前缀和一条最后的
   `USER_MESSAGE`；Agent 工具选择随最新 Agent definition 的 `config.toolIds` 解析，不通过 branch command
   发送；`CUSTOM_MESSAGE`不开放到 product HTTP surface；
 - User content 只允许 `TEXT`、`ATTACHMENT`、`RESOURCE`，Attachment 由 Platform acceptance transaction 转成 durable

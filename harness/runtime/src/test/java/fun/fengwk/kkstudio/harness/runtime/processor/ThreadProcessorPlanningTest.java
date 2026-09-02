@@ -44,8 +44,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetWorkspacePathCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -199,19 +199,19 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     UUID envCommand =
         seedCommand(
-            fixture.store, baseline.threadId(), new SetWorkspacePathCommandPayload("projects/web"));
+            fixture.store, baseline.threadId(), new SetEnvironmentCommandPayload("projects/web"));
     requestThreadWork(fixture.store, baseline.threadId());
     // final branch 事实 = 消费 SET_MODEL 后的 candidate settings；auto 模式按同源事实构造一致请求。
     fixture.resolver.autoConsistent = true;
 
-    // 一个 claim：continuation 只消费 SET_MODEL（USER / SET_WORKSPACE_PATH 保留为 deferred，不在本 claim wake）。
+    // 一个 claim：continuation 只消费 SET_MODEL（USER / SET_ENVIRONMENT 保留为 deferred，不在本 claim wake）。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
     TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(5).payload();
     assertEquals("model-b", turnStart.settings().model().modelName());
     assertEquals("v2", turnStart.settings().model().variant());
-    // SET_MODEL 被 continuation 消费；USER_MESSAGE / SET_WORKSPACE_PATH 保留。
+    // SET_MODEL 被 continuation 消费；USER_MESSAGE / SET_ENVIRONMENT 保留。
     assertEquals(
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), modelCommand).state());

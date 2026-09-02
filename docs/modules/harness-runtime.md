@@ -85,7 +85,7 @@ Environment、branch settings、status、open turn、runnable flag、execution e
 - `ENTRY`：在既有 Session 的指定 Entry 下创建 Thread，不复制 Entry；
 - `THREAD`：按 `expectedHeadEntryId` + `expectedNextCommandSequence` 接收新 batch。
 
-Command 类型固定为 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_WORKSPACE_PATH`、`SET_AGENT`、`SET_MODEL`。SET 前缀顺序固定为 workspace path → agent → model；Agent 工具选择来自最新 Agent definition 的 `config.toolIds`，不进入 branch 或 command mailbox。初始化 batch 以一条末尾 user-like message 结束；THREAD batch 是一条用户消息或一条 SYSTEM steering。YOLO 不进 mailbox，而由 `setThreadYolo` 直接控制。
+Command 类型固定为 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_ENVIRONMENT`、`SET_AGENT`、`SET_MODEL`。SET 前缀顺序固定为 environment → agent → model；Agent 工具选择来自最新 Agent definition 的 `config.toolIds`，不进入 branch 或 command mailbox。初始化 batch 以一条末尾 user-like message 结束；THREAD batch 是一条用户消息或一条 SYSTEM steering。YOLO 不进 mailbox，而由 `setThreadYolo` 直接控制。
 
 Command 的 durable state 由 marker 派生：无 marker 为 `QUEUED`，有 `appliedTurnStartEntryId` 为 `APPLIED`，有 `stopRequestId/cancelledAt` 为 `CANCELLED`。同 `idempotencyKey` + 同 `requestHash` 是 ordered replay；不同 hash、部分 replay、序号不连续和新 batch cursor 不匹配分别产生 typed conflict。
 

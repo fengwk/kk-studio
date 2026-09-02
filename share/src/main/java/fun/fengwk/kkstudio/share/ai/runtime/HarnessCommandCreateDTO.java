@@ -14,7 +14,7 @@ import java.util.List;
 @Data
 public class HarnessCommandCreateDTO {
 
-  /** SET_WORKSPACE_PATH、SET_AGENT、SET_MODEL 或 USER_MESSAGE。 */
+  /** SET_ENVIRONMENT、SET_AGENT、SET_MODEL 或 USER_MESSAGE。 */
   private String type;
 
   /** canonical UUID string 幂等键。 */
@@ -29,7 +29,7 @@ public class HarnessCommandCreateDTO {
   /** SET_MODEL 的目标模型。 */
   private HarnessModelSelectionDTO model;
 
-  /** SET_WORKSPACE_PATH 的 workspace path；显式 null 表示清除 workspace path。 */
+  /** SET_ENVIRONMENT 的 workspace path；显式 null 表示清除 workspace path。 */
   private String workspacePath;
 
   @Getter(AccessLevel.NONE)

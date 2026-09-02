@@ -295,7 +295,7 @@ sequenceDiagram
 - `NEW_SESSION` 只发送 `USER_MESSAGE`；完整 BranchDraft 写进
   `rootSettings`，避免再发送一组初始 `SET_*`。
 - `ENTRY_DRAFT` 和 `BOUND_THREAD` 在 `USER_MESSAGE` 前按固定顺序追加
-  `SET_WORKSPACE_PATH`、`SET_AGENT`、`SET_MODEL` 的 diff；Agent 工具选择由最新 Agent definition 的
+  `SET_ENVIRONMENT`、`SET_AGENT`、`SET_MODEL` 的 diff；Agent 工具选择由最新 Agent definition 的
   `config.toolIds` 决定，不生成 branch tool command。
 - `BOUND_THREAD` 的 target 是 `THREAD`，带
   `expectedHeadEntryId` 和 `expectedNextCommandSequence`；YOLO 是

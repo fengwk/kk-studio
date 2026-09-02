@@ -24,8 +24,8 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetWorkspacePathCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -297,8 +297,7 @@ class HarnessRuntimeAcceptInitialTest {
   }
 
   /**
-   * SET_* 前缀固定顺序必须是 SET_WORKSPACE_PATH -&gt; SET_AGENT -&gt; SET_MODEL： 用正反两个请求证明该顺序（正向通过 / 反向
-   * IAE）。
+   * SET_* 前缀固定顺序必须是 SET_ENVIRONMENT -&gt; SET_AGENT -&gt; SET_MODEL： 用正反两个请求证明该顺序（正向通过 / 反向 IAE）。
    */
   @Test
   void setPrefixOrderRequiresEnvironmentFirst() {
@@ -309,7 +308,7 @@ class HarnessRuntimeAcceptInitialTest {
                 TestIds.id(120),
                 TestIds.id(121),
                 List.of(
-                    new NewThreadCommand(new SetWorkspacePathCommandPayload(null), TestIds.id(1)),
+                    new NewThreadCommand(new SetEnvironmentCommandPayload(null), TestIds.id(1)),
                     setAgent(TestIds.id(2)),
                     new NewThreadCommand(
                         new SetModelCommandPayload(new ModelSelection("acme", "gpt-x", "default")),
@@ -317,7 +316,7 @@ class HarnessRuntimeAcceptInitialTest {
                     userMessageCommand(TestIds.id(4), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(result.replayed());
-    // 非法：SET_WORKSPACE_PATH 出现在 SET_AGENT 之后（顺序不变量拒绝）。
+    // 非法：SET_ENVIRONMENT 出现在 SET_AGENT 之后（顺序不变量拒绝）。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -327,8 +326,7 @@ class HarnessRuntimeAcceptInitialTest {
                     TestIds.id(123),
                     List.of(
                         setAgent(TestIds.id(1)),
-                        new NewThreadCommand(
-                            new SetWorkspacePathCommandPayload(null), TestIds.id(2)),
+                        new NewThreadCommand(new SetEnvironmentCommandPayload(null), TestIds.id(2)),
                         userMessageCommand(TestIds.id(3), "hi"))),
                 AcceptancePreflight.IDENTITY));
     // 非法：同类型 SET_* 出现两次。
