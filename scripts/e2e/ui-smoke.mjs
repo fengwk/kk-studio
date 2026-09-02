@@ -898,15 +898,14 @@ async function main(argv) {
         name: tempAgentName,
         description: `Temporary e2e agent for ${args.daemonEnv}`,
         systemPrompt: 'You are an e2e test agent.',
-        modelProviderName: 'minimax',
-        modelName: 'MiniMax-M2.7',
+        model: 'minimax/MiniMax-M2.7',
         variant: 'high',
         environmentId: card.id,
         config: { toolIds: [], skills: [], subagents: [] },
       })
       assert(
-        agentCreateRes.status === 200 || agentCreateRes.status === 201,
-        `failed to create temporary agent '${tempAgentName}': ${JSON.stringify(agentCreateRes.json)}`,
+        agentCreateRes.status === 201,
+        `failed to create temporary agent '${tempAgentName}' (expected 201, got ${agentCreateRes.status}): ${JSON.stringify(agentCreateRes.json)}`,
       )
 
       try {

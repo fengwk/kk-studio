@@ -136,6 +136,10 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         self.assertIn("ui.chat.create_environment_workspace", ui_smoke)
         self.assertIn("tempAgentName", ui_smoke)
         self.assertIn("environmentId: card.id", ui_smoke)
+        self.assertIn("model: 'minimax/MiniMax-M2.7'", ui_smoke)
+        self.assertNotIn("modelProviderName", ui_smoke)
+        self.assertIn("agentCreateRes.status === 201", ui_smoke)
+        self.assertNotIn("agentCreateRes.status === 200", ui_smoke)
         self.assertIn("apiDeleteByName(args.backendUrl, 'agents', tempAgentName)", ui_smoke)
         self.assertIn('button[aria-label="工作区路径"]', ui_smoke)
 
