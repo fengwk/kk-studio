@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
@@ -102,8 +103,6 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.math.BigDecimal;
@@ -476,6 +475,36 @@ class DatabaseTurnResolverTest {
         "agent skills require the latest selected environment which is not ready: "
             + ENV_A.environmentId(),
         fixture.rejected(fixture.path(settings(ENV_A, "default"))).error().message());
+  }
+
+  /**
+   * 测试意图：证明当应用注入的时钟 (Clock) 滞后、EnvironmentConnection 内存快照看似 READY 且未超时， 但数据库中
+   * hasReadyLease=false（实际已过期或无活跃 READY 租约）时， DatabaseTurnResolver 依据 PostgreSQL DB 权威谓词确定性拒绝 Agent
+   * skills 规划（返回 not ready）， 绝不依赖滞后的应用时钟错误放行。
+   */
+  @Test
+  void
+      skillsPlanningRejectsWhenDatabaseReadyLeaseIsFalseEvenIfConnectionSnapshotIsReadyAndClockIsLagging() {
+    Fixture fixture =
+        new Fixture(
+            List.of(),
+            List.of("dev"),
+            List.of(hostDescriptor("load_skill")),
+            Clock.fixed(NOW.minus(Duration.ofMinutes(10)), ZoneOffset.UTC));
+
+    // 设置快照为 READY，但 stub DB hasReadyLease 为 false
+    fixture.readyEnvironment(ENV_A, List.of("dev"));
+    when(fixture.environmentRegistry.hasReadyLease(ENV_A.environmentId())).thenReturn(false);
+    fixture.agent.setEnvironmentId(ENV_A.environmentId().value());
+
+    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings(ENV_A, "default")));
+    assertEquals(
+        "agent skills require the latest selected environment which is not ready: "
+            + ENV_A.environmentId(),
+        rejected.error().message());
+
+    // 验证确实调用了 DB-authoritative 权威谓词
+    verify(fixture.environmentRegistry).hasReadyLease(ENV_A.environmentId());
   }
 
   @Test
@@ -1842,7 +1871,6 @@ class DatabaseTurnResolverTest {
               new ProviderFactories(factories),
               catalog,
               environmentRegistry,
-              new SystemSettingsSnapshot(SystemSettings.DEFAULT),
               () -> new CompactionConfig(20_000, null),
               () -> subagentConfig,
               new AgentPromptComposer(() -> subagentConfig),
@@ -2003,6 +2031,7 @@ class DatabaseTurnResolverTest {
               NOW,
               NOW.plusSeconds(60));
       when(environmentRegistry.find(environment.environmentId())).thenReturn(Optional.of(env));
+      when(environmentRegistry.hasReadyLease(environment.environmentId())).thenReturn(false);
     }
 
     private void readyEnvironment(EnvironmentBinding environment) {
@@ -2044,6 +2073,7 @@ class DatabaseTurnResolverTest {
         EnvironmentBinding environment, DaemonEnvironmentInfo environmentInfo) {
       readyEnvironmentWithSkills(
           environment, List.of(), environmentInfo, NOW.minus(Duration.ofSeconds(61)));
+      when(environmentRegistry.hasReadyLease(environment.environmentId())).thenReturn(false);
     }
 
     private void readyEnvironmentWithSkills(
@@ -2061,6 +2091,7 @@ class DatabaseTurnResolverTest {
               lastSeenAt,
               lastSeenAt.plusSeconds(60));
       when(environmentRegistry.find(environment.environmentId())).thenReturn(Optional.of(env));
+      when(environmentRegistry.hasReadyLease(environment.environmentId())).thenReturn(true);
     }
   }
 }
