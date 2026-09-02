@@ -73,19 +73,6 @@ export function isCanonicalWorkspacePathOrNull(workspacePath) {
   return isCanonicalWorkspacePath(workspacePath)
 }
 
-export function isEnvironmentBindingOrNull(binding) {
-  if (binding === null) return true
-  if (typeof binding !== 'object' || binding == null || Array.isArray(binding)) return false
-  if (Object.keys(binding).sort().join(',') !== 'environmentId,workspacePath') return false
-  if (
-    typeof binding.environmentId !== 'string'
-    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(binding.environmentId)
-  ) {
-    return false
-  }
-  return isCanonicalWorkspacePath(binding.workspacePath)
-}
-
 /** 严格校验 Thread 投影 DTO 的 canonical UUID 标识字段并返回 threadId。 */
 export function threadIdOf(thread) {
   const threadId = canonicalUuid(thread?.threadId, 'threadId')

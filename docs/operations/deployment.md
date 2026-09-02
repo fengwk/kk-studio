@@ -287,8 +287,8 @@ App-A 和 App-B，两节点没有 DNS/IP 路径。不变量由
 ```text
 DISTRIBUTED_ENV_A_NAME=distributed-a  # environment name（canonical 路由名）
 DISTRIBUTED_ENV_B_NAME=distributed-b
-DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN=e2e-token-distributed-a
-DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN=e2e-token-distributed-b
+DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN=e2e-token-dist-a
+DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN=e2e-token-dist-b
 DISTRIBUTED_APP_A_PORT=18082
 DISTRIBUTED_APP_B_PORT=18083
 ```
@@ -331,7 +331,7 @@ Daemon command 当前固定：
 
 ```text
 --gateway-uri ws://app:8080/api/ai/environment/daemon/v2
---registration-token ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-docker-reliability}
+--registration-token ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-reliability}
 --note "Isolated Docker reliability environment."
 --environment-root /workspace
 ```

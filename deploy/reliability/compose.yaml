@@ -71,7 +71,7 @@ services:
       - --gateway-uri
       - ws://app:8080/api/ai/environment/daemon/v2
       - --registration-token
-      - ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-docker-reliability}
+      - ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-reliability}
       - --note
       - Isolated Docker reliability environment.
       - --environment-root
