@@ -4,7 +4,7 @@
 
 `harness-tool` 是 Harness 各边界共享的纯 Java Tool 值契约模块。它基于 [`harness-common`](harness-common.md) 的 `InputSchema`、`ResultContent` 与 `ResourceRef`，定义稳定工具身份、模型可见描述、调用与结果内容组合以及严格 JSON codec；不包含执行 SPI、Environment 路由、Daemon wire、Contributor、权限、调度或持久化。
 
-基础 schema、统一结果内容与 Resource 引用位于 [`harness-common`](harness-common.md)，执行 SPI 与 Contributor 目录位于 [`harness-contributor-api`](harness-contributor-api.md)，Environment Capability 与 Daemon v5 wire 位于 [`harness-environment`](harness-environment.md)，durable 执行状态机位于 [`harness-runtime`](harness-runtime.md)。
+基础 schema、统一结果内容与 Resource 引用位于 [`harness-common`](harness-common.md)，执行 SPI 与 Contributor 目录位于 [`harness-contributor-api`](harness-contributor-api.md)，Environment Capability 与 Daemon v6 wire 位于 [`harness-environment`](harness-environment.md)，durable 执行状态机位于 [`harness-runtime`](harness-runtime.md)。
 
 ## Goals / Non-goals
 

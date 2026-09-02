@@ -112,8 +112,8 @@ config、名称和版本，不暴露 credential。
 
 ### Chat 与 owner
 
-`ChatServiceImpl`提供 Chat CRUD。Chat 保存 title、agentName、可空 Environment binding、workspace path、
-`yoloEnabled`、version 和时间；`ChatMutationFactory`负责名称、标题和默认 YOLO 的规范化，`ChatGuard`负责存在性与
+`ChatServiceImpl`提供 Chat CRUD。Chat 保存 title、agentName、可空 `workspacePath`、
+`yoloEnabled`、version 和时间；Agent definition 的可空 `environmentId` 是 Environment 身份来源；`ChatMutationFactory`负责名称、标题和默认 YOLO 的规范化，`ChatGuard`负责存在性与
 Agent 引用校验。更新和删除都需要 CAS version。
 
 Chat 删除不是单行删除：`ChatServiceImpl.deleteChat`先排他锁定 Chat，再调用
@@ -171,9 +171,9 @@ Text/Json/Binary/Resource 物化为 Harness history，任一步失败使调用�
 
 ### Environment
 
-Environment 的连接与 invocation 是本节点 live 状态；跨节点 route ownership 则由 PostgreSQL
-`live_environment` 租约保存。每个 JVM 共享一个 `nodeInstanceId`，route 以
-`(environmentName, ownerNodeId, routeToken)` 围栏更新。`LiveEnvironmentRegistry` 只投影本节点
+Environment 的持久化 Card 保存于 `environment` 表（UUID `id` 为路由主键，`name` 为展示名）；连接与 invocation 是本节点 live 状态；跨节点 route ownership 则由 PostgreSQL
+`environment_connection` 租约保存。每个 JVM 共享一个 `nodeInstanceId`，route 以
+`(environmentId, ownerNodeId, leaseToken)` 围栏更新。`LiveEnvironmentRegistry` 只投影本节点
 `CONNECTING` / `READY` 连接，可用性要求连接打开、状态 READY 且心跳未过期。
 
 `EnvironmentDaemonGateway`同时实现：
@@ -181,7 +181,7 @@ Environment 的连接与 invocation 是本节点 live 状态；跨节点 route o
 - `EnvironmentDaemonEndpoint`：HELLO/WELCOME/READY/HEARTBEAT/close 协议；
 - `EnvironmentSkillLoader`：按冻结 skill binding 读取正文；
 - `EnvironmentCapabilityTransport`：按固定 capability catalog 向 READY Daemon 发送原子 capability；
-- `EnvironmentDirectoryLister`：本地直接执行或经 `environment_query` mailbox 路由的目录查询。
+- `EnvironmentDirectoryLister`：本地直接执行或经 `environment_directory_query` mailbox 路由的目录查询。
 
 同名连接的 bind 是原子三态：新连接 `Accepted`、新鲜持有者存在时 `Rejected`、持有者关闭或心跳过期时
 `Replaced`。每个 Environment 只有一个 active capability invocation；并发 sibling 在 INVOKE 发送前返回
@@ -189,13 +189,13 @@ Environment 的连接与 invocation 是本节点 live 状态；跨节点 route o
 `fs.list-directory` 共享该 slot；control-plane timeout 会发送 `CANCEL`、立即释放 slot，并以有界
 invocation tombstone 吸收迟到 callback。
 
-Gateway 只接受 protocol v5 HELLO 和严格的 `capabilityCatalogVersion`。INVOKE payload 使用
+Gateway 只接受 protocol v6 HELLO 和严格的 `capabilityCatalogVersion`。INVOKE payload 使用
 `capabilityId`、`capabilityVersion`、`workspacePath`、`arguments`、`timeoutMillis`，不携带 model
 Tool name；所有结果通过通用 `STARTED/PARTIAL/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
 `invocationId` 关联。发送不确定时关闭连接并把 active invocation 收敛为 uncertain，不重发可能已经产生副作用的请求。
 
-非 route owner 节点的目录查询写入 `environment_query` 并发 NOTIFY；owner 节点按 lease token claim。
-`EnvironmentQueryCoordinator` 对每个 Environment 使用单一 drain，前一查询 terminal 并完成回填后才 claim 下一条，
+非 route owner 节点的目录查询写入 `environment_directory_query` 并发 NOTIFY；owner 节点按 lease token claim。
+`EnvironmentDirectoryQueryCoordinator` 对每个 Environment 使用单一 drain，前一查询 terminal 并完成回填后才 claim 下一条，
 避免一个 Daemon slot 同时承载多个 mailbox 查询；通知只负责唤醒，定期 resync 负责丢通知恢复。
 
 ### Provider adapters 与 PlatformModelGateway
@@ -451,7 +451,7 @@ endpoint 等 bootstrap property 完整，否则明确启动失败；禁用时对
 | --- | --- |
 | `kk-studio.harness.execution-admission.{model,tool,subagent}` | 进程级容量，默认 `16/64/10`；不进数据库、DTO 或 frontend |
 | `kk-studio.harness.runtime.{workers-enabled,environment-root,workdir}` | worker 开关与本地工作目录；`workdir`必须位于 root 内 |
-| `kk-studio.harness.environment-gateway.{daemon-token,max-message-bytes,queue-capacity,max-bytes,send-timeout}` | Daemon 握手秘密与 WebSocket 安全边界；默认 `16MiB/256/16MiB/10s` |
+| `kk-studio.harness.environment-gateway.{max-message-bytes,queue-capacity,max-bytes,send-timeout}` | WebSocket 安全边界；默认 `16MiB/256/16MiB/10s` |
 | `kk-studio.storage.s3.{endpoint,public-endpoint,region,bucket,access-key,secret-key,public-base-url}` | S3/MinIO 服务端和 presign endpoint；bucket 只能由服务端配置 |
 | `kk-studio.storage.maintenance.{poll-delay,cleanup-lease}` | maintenance 唤醒轮询与 cleanup lease，默认 `30s/5m` |
 | `kk-studio.comfyui.api-key` | ComfyUI secret；非 SystemSettings |

@@ -786,7 +786,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
         expectedNextCommandSequence: completed.nextCommandSequence,
       }),
       commands: [
-        setEnvironmentCommand(state.environment, cid()),
+        setEnvironmentCommand(state.environment.workspacePath, cid()),
         userMessageCommand(`footer environment ${stamp}`, cid()),
       ],
     })
@@ -1001,12 +1001,17 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     assert(modelResponse.status === 201, `create tool-card model: ${JSON.stringify(modelResponse)}`)
     state.model = envelopeData(modelResponse.json)
 
+    const environments = await listEnvironments(apiCtx)
+    const matchedEnv = environments.find((e) => e.name === daemonEnv)
+    assert(matchedEnv, `daemonEnv missing: ${daemonEnv}`)
+
     const agentResponse = await apiCtx.call('POST', '/api/ai/catalog/agents', {
       name: `e2e-ui-tool-card-agent-${suffix}`,
       description: 'Agent used by deterministic Tool card browser contracts.',
       systemPrompt: 'Follow each deterministic Tool request exactly once.',
       model: `${state.model.providerName}/${state.model.name}`,
       variant: 'default',
+      environmentId: matchedEnv.id,
       config: {
         toolIds: ['base.write', 'base.edit', 'base.bash'],
         skills: [],
@@ -1016,19 +1021,11 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     assert(agentResponse.status === 201, `create tool-card agent: ${JSON.stringify(agentResponse)}`)
     state.agent = envelopeData(agentResponse.json)
 
-    // Tool Work 在进入 WAITING_APPROVAL 前需要路由到 READY node 进行 permission preflight，
-    // 因此需要可调度的 live Environment binding；本用例对 write/edit/bash 均执行拒绝（DENY），
-    // 不实际在 node 上执行 capability。
-    const environment = {
-      name: daemonEnv,
-      workspacePath: '.',
-    }
-
     state.chat = await createChat(apiCtx, {
       title: `e2e-ui-tool-card-${stamp}-${suffix}`,
       agentName: state.agent.name,
       yoloEnabled: false,
-      environment,
+      workspacePath: '.',
     })
     const owner = chatOwner(state.chat.id)
     const sessionId = cid()
@@ -1044,7 +1041,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
           modelName: state.model.name,
           variant: 'default',
         },
-        { environment },
+        { workspacePath: '.' },
       ),
       yoloEnabled: false,
       commands: [userMessageCommand(`tool card materialize ${suffix}`, cid())],

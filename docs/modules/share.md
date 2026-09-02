@@ -91,7 +91,7 @@ wire 中语义上必须出现的 nullable 字段显式使用 `@JsonInclude(ALWAY
 - `CanvasResourceDTO` 的 `blobId`、`textContent`、媒体事实；
 - `CanvasResourceNodeDTO` 的 `groupId`、`function`、`run`；
 - `HarnessThreadSnapshotDTO` 的 manual compaction sidecar；
-- `ChatDTO.environment` 与 Function model/run 的 reason/error。
+- `ChatDTO.workspacePath` 与 Function model/run 的 reason/error。
 
 Provider credential 使用 write-only JSON property。System Settings DTO 的公共
 字段只表达非敏感运行策略；`SystemSettingsDtoContractTest` 对敏感字段名和嵌套

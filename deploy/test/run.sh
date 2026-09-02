@@ -198,6 +198,7 @@ if [[ "$WITH_APP" == "true" ]]; then
   step "Checking global Blob upload, Canvas consumption, Function runs, signed media GET, and offline Chat"
   CANVAS_TEST_APP_URL="http://127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}" \
   CANVAS_TEST_IMAGE_FIXTURE="$SCRIPT_DIR/../../platform/src/test/resources/fun/fengwk/kkstudio/platform/canvas/resource/tiny.png" \
+  PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH:-}" \
     python3 - <<'PY'
 import base64
 import hashlib
@@ -209,6 +210,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+from offline_chat_payload import build_offline_chat_batch_request
 
 base_url = os.environ["CANVAS_TEST_APP_URL"]
 image = Path(os.environ["CANVAS_TEST_IMAGE_FIXTURE"]).read_bytes()
@@ -546,31 +548,14 @@ thread_id = str(uuid.uuid4())
 accepted = json_call(
     "POST",
     "/api/ai/runtime/command-batches",
-    {
-        "owner": {"type": "CHAT", "id": chat["id"]},
-        "target": {
-            "type": "NEW_SESSION",
-            "sessionId": session_id,
-            "threadId": thread_id,
-            "rootSettings": {
-                "environment": None,
-                "agentName": "default-assistant",
-                "model": {
-                    "providerName": "stub",
-                    "modelName": "acceptance-stub",
-                    "variant": "default",
-                },
-            },
-            "yoloEnabled": False,
-        },
-        "commands": [
-            {
-                "type": "USER_MESSAGE",
-                "idempotencyKey": new_id(),
-                "contents": [{"type": "TEXT", "text": marker}],
-            }
-        ],
-    },
+    build_offline_chat_batch_request(
+        chat_id=chat["id"],
+        session_id=session_id,
+        thread_id=thread_id,
+        command_id=new_id(),
+        marker=marker,
+        workspace_path=None,
+    ),
 )
 thread = accepted["thread"]
 assert accepted["replayed"] is False, accepted

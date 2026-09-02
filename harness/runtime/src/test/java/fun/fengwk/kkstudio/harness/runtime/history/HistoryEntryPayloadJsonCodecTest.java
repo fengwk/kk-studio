@@ -129,12 +129,12 @@ class HistoryEntryPayloadJsonCodecTest {
   @Test
   void encodesCanonicalFieldOrder() {
     assertEquals(
-        "{\"settings\":{\"environment\":null,\"agentName\":\"coding\",\"model\":{"
+        "{\"settings\":{\"workspacePath\":null,\"agentName\":\"coding\",\"model\":{"
             + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
             + "},\"subagentContext\":null}",
         CODEC.encode(new RootPayload(settings(null))));
     assertEquals(
-        "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\"coding\",\"model\":{"
+        "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":null,\"agentName\":\"coding\",\"model\":{"
             + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}},"
             + "\"ownerThreadId\":\""
             + OWNER_THREAD_ID
@@ -242,9 +242,9 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.ROOT,
-                "{\"settings\":{\"environment\":null,\"agentName\":\"a\",\"model\":{"
+                "{\"settings\":{\"workspacePath\":null,\"agentName\":\"a\",\"model\":{"
                     + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
-                    + "\"settings\":{\"environment\":null,\"agentName\":\"b\",\"model\":{"
+                    + "\"settings\":{\"workspacePath\":null,\"agentName\":\"b\",\"model\":{"
                     + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, "{\"settings\":{}} {}"));
@@ -530,6 +530,13 @@ class HistoryEntryPayloadJsonCodecTest {
                 EntryType.TURN_START,
                 "{\"reason\":\"INPUT\",\"settings\":{\"environmentId\":\"env-1\",\"agentName\":\"a\","
                     + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.TURN_START,
+                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\"a\","
+                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
   }
 
   @Test
@@ -722,7 +729,7 @@ class HistoryEntryPayloadJsonCodecTest {
 
   private static String rootSettingsWith(String reasonField) {
     return reasonField
-        + "\"settings\":{\"environment\":null,\"agentName\":\"a\","
+        + "\"settings\":{\"workspacePath\":null,\"agentName\":\"a\","
         + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}";
   }
 
