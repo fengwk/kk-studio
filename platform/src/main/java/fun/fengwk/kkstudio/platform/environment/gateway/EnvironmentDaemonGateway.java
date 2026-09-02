@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentWorkspacePath;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
@@ -33,27 +33,26 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCode
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonNameConflictException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryEntry;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryListing;
 import fun.fengwk.kkstudio.platform.environment.query.EnvironmentQueryCoordinator;
 import fun.fengwk.kkstudio.platform.environment.registry.BindResult;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryLister;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentSkillLoader;
+import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryEntryDTO;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -72,12 +71,12 @@ import java.util.concurrent.TimeoutException;
 /**
  * Environment daemon 的连接/协议 transport 与能力/技能适配器。
  *
- * <p>使用当前 Daemon wire 协议（VERSION=5）：每个 envelope 都由 HELLO 时绑定的 canonical {@link EnvironmentName}
- * 限定；名称就是唯一路由身份，不存在独立展示名。HELLO 认证时通过 PostgreSQL 路由租约原子抢占：同 daemonId 活跃路由返回 RETRY_LATER；不同 daemonId
- * 活跃路由抛出 {@link DaemonNameConflictException}（终态错误，daemon 收到后停止重连并非零退出）；缺少或过期路由以新 routeToken 接管。
+ * <p>使用当前 Daemon wire 协议（VERSION=6）：HELLO 消息 scope 为 null，payload 携带 {@code registrationToken}；
+ * Gateway 通过 registrationToken 查询数据库验证并获取对应的 Environment，通过 PostgreSQL 路由租约原子抢占连接： 已有活跃路由返回
+ * RETRY_LATER；成功抢占返回 WELCOME 消息下发分配的 {@link EnvironmentId}。
  *
- * <p>READY、HEARTBEAT 与断开连接均以 {@code (environmentName, ownerNodeId, routeToken)} 围栏更新；数据库不可用时
- * fail-closed。只读目录查询支持本地直接派发与跨节点 {@code environment_query} 信箱协调。
+ * <p>READY、HEARTBEAT 与断开连接均以 {@code (environment_id, owner_node_id, lease_token)} 围栏更新；数据库不可用时
+ * fail-closed。只读目录查询支持本地直接派发与跨节点弱交付信箱协调。
  */
 @Service
 public class EnvironmentDaemonGateway
@@ -88,7 +87,8 @@ public class EnvironmentDaemonGateway
 
   private static final int MAX_INVOCATION_TOMBSTONES = 1024;
 
-  private final LiveEnvironmentRegistry environmentRegistry;
+  private final EnvironmentRegistry environmentRegistry;
+  private final EnvironmentRepository environmentRepository;
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonCapabilityInvokeCodec capabilityInvokeCodec =
       new DaemonCapabilityInvokeCodec();
@@ -101,18 +101,21 @@ public class EnvironmentDaemonGateway
   private final EnvironmentReadyListener environmentReadyListener;
   private final EnvironmentQueryCoordinator queryCoordinator;
   private final Map<String, ConnectionState> connections = new HashMap<>();
-  private final Map<EnvironmentName, ConnectionState> environmentConnections = new HashMap<>();
-  private final Map<EnvironmentName, ActiveCapability> activeByEnvironment = new HashMap<>();
+  private final Map<EnvironmentId, ConnectionState> environmentConnections = new HashMap<>();
+  private final Map<EnvironmentId, ActiveCapability> activeByEnvironment = new HashMap<>();
 
   @Autowired
   public EnvironmentDaemonGateway(
-      LiveEnvironmentRegistry environmentRegistry,
+      EnvironmentRegistry environmentRegistry,
+      EnvironmentRepository environmentRepository,
       EnvironmentGatewayProperties properties,
       SystemSettingsSnapshot snapshot,
       Clock clock,
       EnvironmentReadyListener environmentReadyListener,
       @Autowired(required = false) EnvironmentQueryCoordinator queryCoordinator) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
+    this.environmentRepository =
+        Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
     this.clock = Objects.requireNonNull(clock, "clock");
@@ -126,12 +129,20 @@ public class EnvironmentDaemonGateway
   }
 
   public EnvironmentDaemonGateway(
-      LiveEnvironmentRegistry environmentRegistry,
+      EnvironmentRegistry environmentRegistry,
+      EnvironmentRepository environmentRepository,
       EnvironmentGatewayProperties properties,
       SystemSettingsSnapshot snapshot,
       Clock clock,
       EnvironmentReadyListener environmentReadyListener) {
-    this(environmentRegistry, properties, snapshot, clock, environmentReadyListener, null);
+    this(
+        environmentRegistry,
+        environmentRepository,
+        properties,
+        snapshot,
+        clock,
+        environmentReadyListener,
+        null);
   }
 
   /** 心跳过期超时（毫秒）：环境按不可用处理的租约时长。 */
@@ -143,9 +154,9 @@ public class EnvironmentDaemonGateway
     return snapshot.get().environment();
   }
 
-  public synchronized Set<EnvironmentName> localReadyEnvironments() {
-    Set<EnvironmentName> ready = new HashSet<>();
-    for (Map.Entry<EnvironmentName, ConnectionState> entry : environmentConnections.entrySet()) {
+  public synchronized Set<EnvironmentId> localReadyEnvironments() {
+    Set<EnvironmentId> ready = new HashSet<>();
+    for (Map.Entry<EnvironmentId, ConnectionState> entry : environmentConnections.entrySet()) {
       if (entry.getValue().isReady()) {
         ready.add(entry.getKey());
       }
@@ -178,14 +189,14 @@ public class EnvironmentDaemonGateway
     }
     List<Runnable> deferred = new ArrayList<>();
     RuntimeException protocolError = null;
-    EnvironmentName receivedEnvironmentName = null;
+    EnvironmentId receivedEnvironmentId = null;
     synchronized (state) {
       if (state.cleaned) {
         return;
       }
       try {
         DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
-        receivedEnvironmentName = envelope.environmentName();
+        receivedEnvironmentId = envelope.environmentId();
         if (!state.acceptInbound(envelope, envelopeCodec.readPayload(envelope))) {
           return;
         }
@@ -195,7 +206,7 @@ public class EnvironmentDaemonGateway
       }
     }
     if (protocolError != null) {
-      protocolFailure(state, protocolError, receivedEnvironmentName);
+      protocolFailure(state, protocolError, receivedEnvironmentId);
       return;
     }
     runDeferred(deferred);
@@ -238,31 +249,37 @@ public class EnvironmentDaemonGateway
       throw new IllegalArgumentException("Environment capability request workdir must be null");
     }
     UUID invocationId = parseUuid(request.call().id(), "call.id");
-    EnvironmentName environmentName = binding.environmentName();
+    EnvironmentId environmentId = binding.environmentId();
     ConnectionState state;
     ActiveCapability active;
     String invokePayload;
     synchronized (this) {
-      state = environmentConnections.get(environmentName);
-      LiveEnvironment live = environmentRegistry.find(environmentName).orElse(null);
+      state = environmentConnections.get(environmentId);
+      EnvironmentConnection live;
+      try {
+        live = environmentRegistry.find(environmentId).orElse(null);
+      } catch (DataAccessException error) {
+        throw new EnvironmentCapabilityUnavailableException(
+            "database unavailable: " + error.getMessage(), error);
+      }
       if (state == null
           || !state.isReady()
           || live == null
           || !live.isReady(clock.instant(), heartbeatTimeout())
           || !live.ownerNodeId().equals(environmentRegistry.ownerNodeId())
-          || !Objects.equals(live.routeToken(), state.routeToken)) {
+          || !Objects.equals(live.leaseToken(), state.leaseToken)) {
         throw new EnvironmentCapabilityUnavailableException(
-            unavailableMessage(environmentName, descriptor.id().value()));
+            unavailableMessage(environmentId, descriptor.id().value()));
       }
-      if (activeByEnvironment.containsKey(environmentName)) {
+      if (activeByEnvironment.containsKey(environmentId)) {
         throw new EnvironmentCapabilityBusyException(
-            environmentName + " already has an active capability invocation");
+            environmentId + " already has an active capability invocation");
       }
       invokePayload = createInvokePayload(binding, request);
       active =
           new ActiveCapability(
-              environmentName, state.connection.connectionId(), invocationId, listener);
-      activeByEnvironment.put(environmentName, active);
+              environmentId, state.connection.connectionId(), invocationId, listener);
+      activeByEnvironment.put(environmentId, active);
     }
     SendOutcome outcome =
         sendWithOutcome(state, DaemonMessageType.INVOKE, invocationId.toString(), invokePayload);
@@ -271,21 +288,21 @@ public class EnvironmentDaemonGateway
     }
     active.terminal = true;
     synchronized (this) {
-      activeByEnvironment.remove(environmentName, active);
+      activeByEnvironment.remove(environmentId, active);
     }
     if (outcome == SendOutcome.UNCERTAIN) {
       close(state.connection.connectionId());
       throw new EnvironmentCapabilitySendUncertainException(
-          "INVOKE send outcome is uncertain for environment " + environmentName);
+          "INVOKE send outcome is uncertain for environment " + environmentId);
     }
     throw new EnvironmentCapabilityUnavailableException(
-        unavailableMessage(environmentName, descriptor.id().value()));
+        unavailableMessage(environmentId, descriptor.id().value()));
   }
 
   @Override
   public CompletableFuture<EnvironmentSkillLoadResult> loadSkill(
-      EnvironmentName environmentName, String skillName, Duration timeout) {
-    Objects.requireNonNull(environmentName, "environmentName");
+      EnvironmentId environmentId, String skillName, Duration timeout) {
+    Objects.requireNonNull(environmentId, "environmentId");
     String skill = requireNonBlank(skillName, "skillName");
     if (timeout == null || timeout.isZero() || timeout.isNegative()) {
       throw new IllegalArgumentException("timeout must be positive");
@@ -298,7 +315,7 @@ public class EnvironmentDaemonGateway
     EnvironmentCapabilityCall call = new EnvironmentCapabilityCall(callId, argsNode.toString());
     EnvironmentCapabilityExecutionRequest request =
         new EnvironmentCapabilityExecutionRequest(descriptor, call, timeout, null);
-    EnvironmentBinding binding = new EnvironmentBinding(environmentName, ".");
+    EnvironmentBinding binding = new EnvironmentBinding(environmentId, ".");
 
     CompletableFuture<EnvironmentSkillLoadResult> future = new CompletableFuture<>();
     ActiveCapability active;
@@ -330,13 +347,13 @@ public class EnvironmentDaemonGateway
                 public void onError(Throwable error) {
                   future.complete(
                       new EnvironmentSkillLoadResult.Failed(
-                          skill, environmentName + " is offline; " + skill + " is unavailable"));
+                          skill, environmentId + " is offline; " + skill + " is unavailable"));
                 }
               });
     } catch (EnvironmentCapabilityUnavailableException unavailable) {
       return CompletableFuture.completedFuture(
           new EnvironmentSkillLoadResult.Failed(
-              skill, environmentName + " is offline; " + skill + " is unavailable"));
+              skill, environmentId + " is offline; " + skill + " is unavailable"));
     } catch (EnvironmentCapabilityBusyException busy) {
       return CompletableFuture.completedFuture(
           new EnvironmentSkillLoadResult.Failed(skill, busy.getMessage()));
@@ -355,14 +372,14 @@ public class EnvironmentDaemonGateway
             error -> {
               expireCapability(active);
               return new EnvironmentSkillLoadResult.Failed(
-                  skill, environmentName + " is offline; " + skill + " is unavailable");
+                  skill, environmentId + " is offline; " + skill + " is unavailable");
             });
   }
 
   @Override
   public CompletableFuture<EnvironmentDirectoryListResult> listDirectory(
-      EnvironmentName environmentName, String path, Duration timeout) {
-    Objects.requireNonNull(environmentName, "environmentName");
+      EnvironmentId environmentId, String path, Duration timeout) {
+    Objects.requireNonNull(environmentId, "environmentId");
     String directoryPath;
     try {
       directoryPath = EnvironmentWorkspacePath.requireCanonicalRelativePath(path);
@@ -375,9 +392,9 @@ public class EnvironmentDaemonGateway
       throw new IllegalArgumentException("timeout must be positive");
     }
 
-    LiveEnvironment live;
+    EnvironmentConnection live;
     try {
-      live = environmentRegistry.find(environmentName).orElse(null);
+      live = environmentRegistry.find(environmentId).orElse(null);
     } catch (DataAccessException error) {
       return CompletableFuture.completedFuture(
           new EnvironmentDirectoryListResult.Failed(
@@ -388,40 +405,40 @@ public class EnvironmentDaemonGateway
       return CompletableFuture.completedFuture(
           new EnvironmentDirectoryListResult.Failed(
               EnvironmentDirectoryFailureCode.ENVIRONMENT_NOT_FOUND,
-              "environment is not registered: " + environmentName));
+              "environment is not registered: " + environmentId));
     }
     if (!live.isReady(clock.instant(), heartbeatTimeout())) {
       return CompletableFuture.completedFuture(
           new EnvironmentDirectoryListResult.Failed(
               EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
-              environmentName + " is not ready; directory listing is unavailable"));
+              "environment " + environmentId + " is not ready; directory listing is unavailable"));
     }
 
     ConnectionState localState;
     synchronized (this) {
-      localState = environmentConnections.get(environmentName);
+      localState = environmentConnections.get(environmentId);
     }
     if (localState != null
         && localState.isReady()
-        && localState.routeToken != null
-        && localState.routeToken.equals(live.routeToken())
+        && localState.leaseToken != null
+        && localState.leaseToken.equals(live.leaseToken())
         && live.ownerNodeId().equals(environmentRegistry.ownerNodeId())) {
-      return listDirectoryLocal(environmentName, directoryPath, timeout);
+      return listDirectoryLocal(environmentId, directoryPath, timeout);
     }
 
     if (queryCoordinator != null) {
-      return queryCoordinator.executeRemoteDirectoryQuery(environmentName, directoryPath, timeout);
+      return queryCoordinator.executeRemoteDirectoryQuery(environmentId, directoryPath, timeout);
     }
 
     return CompletableFuture.completedFuture(
         new EnvironmentDirectoryListResult.Failed(
             EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
-            environmentName + " is not ready locally"));
+            "environment " + environmentId + " is not ready locally"));
   }
 
   public CompletableFuture<EnvironmentDirectoryListResult> listDirectoryLocal(
-      EnvironmentName environmentName, String path, Duration timeout) {
-    Objects.requireNonNull(environmentName, "environmentName");
+      EnvironmentId environmentId, String path, Duration timeout) {
+    Objects.requireNonNull(environmentId, "environmentId");
     String directoryPath;
     try {
       directoryPath = EnvironmentWorkspacePath.requireCanonicalRelativePath(path);
@@ -442,7 +459,7 @@ public class EnvironmentDaemonGateway
     EnvironmentCapabilityCall call = new EnvironmentCapabilityCall(callId, argsNode.toString());
     EnvironmentCapabilityExecutionRequest request =
         new EnvironmentCapabilityExecutionRequest(descriptor, call, timeout, null);
-    EnvironmentBinding binding = new EnvironmentBinding(environmentName, ".");
+    EnvironmentBinding binding = new EnvironmentBinding(environmentId, ".");
 
     CompletableFuture<EnvironmentDirectoryListResult> future = new CompletableFuture<>();
     ActiveCapability active;
@@ -487,14 +504,16 @@ public class EnvironmentDaemonGateway
                   future.complete(
                       new EnvironmentDirectoryListResult.Failed(
                           EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
-                          environmentName + " is not ready; directory listing is unavailable"));
+                          "environment "
+                              + environmentId
+                              + " is not ready; directory listing is unavailable"));
                 }
               });
     } catch (EnvironmentCapabilityUnavailableException unavailable) {
       return CompletableFuture.completedFuture(
           new EnvironmentDirectoryListResult.Failed(
               EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
-              environmentName + " is not ready; directory listing is unavailable"));
+              "environment " + environmentId + " is not ready; directory listing is unavailable"));
     } catch (EnvironmentCapabilityBusyException busy) {
       return CompletableFuture.completedFuture(
           new EnvironmentDirectoryListResult.Failed(
@@ -522,11 +541,14 @@ public class EnvironmentDaemonGateway
                       : EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE;
               String message =
                   code == EnvironmentDirectoryFailureCode.TIMEOUT
-                      ? environmentName
+                      ? "environment "
+                          + environmentId
                           + " directory listing timed out after "
                           + timeout.toMillis()
                           + "ms"
-                      : environmentName + " is not ready; directory listing is unavailable";
+                      : "environment "
+                          + environmentId
+                          + " is not ready; directory listing is unavailable";
               return new EnvironmentDirectoryListResult.Failed(code, message);
             });
   }
@@ -600,11 +622,9 @@ public class EnvironmentDaemonGateway
     if (!state.helloReceived && envelope.messageType() != DaemonMessageType.HELLO) {
       throw new DaemonProtocolException("HELLO must be the first daemon message");
     }
-    if (state.environmentName != null
-        && !state.environmentName.equals(envelope.environmentName())) {
+    if (state.environmentId != null && !state.environmentId.equals(envelope.environmentId())) {
       throw new DaemonProtocolException(
-          "envelope environmentName does not match bound connection: "
-              + envelope.environmentName());
+          "envelope environmentId does not match bound connection: " + envelope.environmentId());
     }
     switch (envelope.messageType()) {
       case HELLO -> handleHello(state, envelope);
@@ -627,12 +647,14 @@ public class EnvironmentDaemonGateway
       throw new DaemonProtocolException("HELLO may only be sent once per connection");
     }
     requireNoInvocationId(envelope);
+    if (envelope.environmentId() != null) {
+      throw new DaemonProtocolException("HELLO must not declare environmentId");
+    }
     ObjectNode payload = envelopeCodec.readPayload(envelope);
     rejectUnexpectedFields(
         payload,
-        Set.of("daemonId", "protocolVersion", "gatewayToken", "capabilityCatalogVersion"),
+        Set.of("protocolVersion", "registrationToken", "capabilityCatalogVersion"),
         "HELLO payload");
-    String daemonId = requiredText(payload, "daemonId", "HELLO payload");
     if (envelope.protocolVersion() != DaemonProtocol.VERSION
         || requiredLong(payload, "protocolVersion", "HELLO payload") != DaemonProtocol.VERSION) {
       throw new DaemonProtocolException("HELLO protocolVersion must be " + DaemonProtocol.VERSION);
@@ -642,32 +664,36 @@ public class EnvironmentDaemonGateway
       throw new DaemonProtocolException(
           "HELLO capabilityCatalogVersion does not match server catalog");
     }
-    verifyGatewayToken(requiredText(payload, "gatewayToken", "HELLO payload"));
-    EnvironmentName environmentName = envelope.environmentName();
+    String registrationToken = requiredText(payload, "registrationToken", "HELLO payload");
 
-    BindResult bind = environmentRegistry.tryAcquire(environmentName, daemonId, heartbeatTimeout());
-    if (bind instanceof BindResult.Conflict conflict) {
-      throw new DaemonNameConflictException(conflict.message());
+    Environment environment = environmentRepository.getByRegistrationToken(registrationToken);
+    if (environment == null) {
+      throw new RegistrationRejectedException("invalid registration token: " + registrationToken);
     }
+    EnvironmentId environmentId = EnvironmentId.of(environment.getId());
+
+    BindResult bind = environmentRegistry.tryAcquire(environmentId, heartbeatTimeout());
     if (bind instanceof BindResult.RetryLater retryLater) {
       throw new DaemonRetryLaterException(retryLater.message());
     }
     if (bind instanceof BindResult.Acquired acquired) {
       ConnectionState previousState;
       synchronized (this) {
-        previousState = environmentConnections.get(environmentName);
+        previousState = environmentConnections.get(environmentId);
       }
       if (previousState != null && previousState != state) {
         closeConnectionState(previousState);
       }
-      state.routeToken = acquired.routeToken();
-      state.daemonId = daemonId;
-      state.environmentName = environmentName;
+      state.leaseToken = acquired.leaseToken();
+      state.environmentId = environmentId;
       state.helloReceived = true;
       synchronized (this) {
-        environmentConnections.put(environmentName, state);
+        environmentConnections.put(environmentId, state);
       }
-      send(state, DaemonMessageType.WELCOME, null, "{}");
+      ObjectNode welcomePayload = objectMapper.createObjectNode();
+      welcomePayload.put("environmentId", environmentId.toString());
+      welcomePayload.put("name", environment.getName());
+      send(state, DaemonMessageType.WELCOME, null, welcomePayload.toString());
     }
   }
 
@@ -678,34 +704,35 @@ public class EnvironmentDaemonGateway
     if (state.ready) {
       throw new DaemonProtocolException("READY may only be sent once per connection");
     }
-    if (state.routeToken == null) {
-      throw new DaemonProtocolException("routeToken missing on READY");
+    if (state.leaseToken == null) {
+      throw new DaemonProtocolException("leaseToken missing on READY");
     }
     DaemonCapabilities capabilities = capabilitiesCodec.decode(envelope.payloadJson());
     boolean ok =
         environmentRegistry.markReady(
-            state.environmentName, state.routeToken, capabilities, heartbeatTimeout());
+            state.environmentId, state.leaseToken, capabilities, heartbeatTimeout());
     if (!ok) {
-      throw new DaemonProtocolException(
-          "route fence lost for environment " + state.environmentName);
+      throw new DaemonProtocolException("route fence lost for environment " + state.environmentId);
     }
     state.ready = true;
-    EnvironmentName environmentName = state.environmentName;
-    deferred.add(() -> notifyEnvironmentReady(environmentName));
+    EnvironmentId environmentId = state.environmentId;
+    deferred.add(() -> notifyEnvironmentReady(environmentId));
+    if (queryCoordinator != null) {
+      deferred.add(() -> queryCoordinator.onEnvironmentReady(environmentId));
+    }
   }
 
   private void handleHeartbeat(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
     requireNoInvocationId(envelope);
     rejectUnexpectedFields(envelopeCodec.readPayload(envelope), Set.of(), "HEARTBEAT payload");
-    if (state.routeToken == null) {
-      throw new DaemonProtocolException("routeToken missing on HEARTBEAT");
+    if (state.leaseToken == null) {
+      throw new DaemonProtocolException("leaseToken missing on HEARTBEAT");
     }
     boolean ok =
-        environmentRegistry.heartbeat(state.environmentName, state.routeToken, heartbeatTimeout());
+        environmentRegistry.heartbeat(state.environmentId, state.leaseToken, heartbeatTimeout());
     if (!ok) {
-      throw new DaemonProtocolException(
-          "route fence lost for environment " + state.environmentName);
+      throw new DaemonProtocolException("route fence lost for environment " + state.environmentId);
     }
   }
 
@@ -790,7 +817,7 @@ public class EnvironmentDaemonGateway
     requireReady(state);
     UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
     synchronized (this) {
-      ActiveCapability active = activeByEnvironment.get(state.environmentName);
+      ActiveCapability active = activeByEnvironment.get(state.environmentId);
       if (active != null
           && active.invocationId.equals(invocationId)
           && active.connectionId.equals(state.connection.connectionId())) {
@@ -806,7 +833,7 @@ public class EnvironmentDaemonGateway
 
   private boolean isCurrentActive(ActiveCapability active) {
     synchronized (this) {
-      return activeByEnvironment.get(active.environmentName) == active && !active.terminal;
+      return activeByEnvironment.get(active.environmentId) == active && !active.terminal;
     }
   }
 
@@ -814,11 +841,11 @@ public class EnvironmentDaemonGateway
     requireReady(state);
     UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
     synchronized (this) {
-      ActiveCapability active = activeByEnvironment.get(state.environmentName);
+      ActiveCapability active = activeByEnvironment.get(state.environmentId);
       if (active != null
           && active.invocationId.equals(invocationId)
           && active.connectionId.equals(state.connection.connectionId())) {
-        activeByEnvironment.remove(state.environmentName, active);
+        activeByEnvironment.remove(state.environmentId, active);
         active.terminal = true;
         return active;
       }
@@ -843,10 +870,10 @@ public class EnvironmentDaemonGateway
     }
     ConnectionState state;
     synchronized (this) {
-      if (!activeByEnvironment.remove(active.environmentName, active)) {
+      if (!activeByEnvironment.remove(active.environmentId, active)) {
         return;
       }
-      state = environmentConnections.get(active.environmentName);
+      state = environmentConnections.get(active.environmentId);
       if (state == null || !state.connection.connectionId().equals(active.connectionId)) {
         return;
       }
@@ -876,15 +903,15 @@ public class EnvironmentDaemonGateway
       if (state.cleaned
           || state.sendFailed
           || !state.connection.isOpen()
-          || state.environmentName == null
-          || state.routeToken == null) {
+          || state.environmentId == null
+          || state.leaseToken == null) {
         return SendOutcome.NOT_SENT;
       }
       DaemonEnvelope envelope =
           new DaemonEnvelope(
               DaemonProtocol.VERSION,
               type,
-              state.environmentName,
+              state.environmentId,
               invocationId,
               state.outboundSequence++,
               payloadJson);
@@ -902,35 +929,32 @@ public class EnvironmentDaemonGateway
   }
 
   private void protocolFailure(
-      ConnectionState state, RuntimeException error, EnvironmentName receivedEnvironmentName) {
+      ConnectionState state, RuntimeException error, EnvironmentId receivedEnvironmentId) {
     String message = errorMessage(error, "invalid daemon protocol message");
     ObjectNode payload = envelopeCodec.createPayload();
     payload.put("message", message);
-    if (error instanceof DaemonNameConflictException) {
-      payload.put("code", DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT);
+    if (error instanceof RegistrationRejectedException) {
+      payload.put("code", DaemonProtocol.ERROR_CODE_REGISTRATION_REJECTED);
     } else if (error instanceof DaemonRetryLaterException) {
       payload.put("code", DaemonProtocol.ERROR_CODE_RETRY_LATER);
     }
-    enqueueProtocolError(state, receivedEnvironmentName, envelopeCodec.writeJson(payload));
+    enqueueProtocolError(state, receivedEnvironmentId, envelopeCodec.writeJson(payload));
     close(state.connection.connectionId());
   }
 
   private void enqueueProtocolError(
-      ConnectionState state, EnvironmentName receivedEnvironmentName, String payloadJson) {
+      ConnectionState state, EnvironmentId receivedEnvironmentId, String payloadJson) {
     synchronized (state) {
-      EnvironmentName environmentName =
-          state.environmentName == null ? receivedEnvironmentName : state.environmentName;
-      if (state.cleaned
-          || state.sendFailed
-          || !state.connection.isOpen()
-          || environmentName == null) {
+      EnvironmentId environmentId =
+          state.environmentId == null ? receivedEnvironmentId : state.environmentId;
+      if (state.cleaned || state.sendFailed || !state.connection.isOpen()) {
         return;
       }
       DaemonEnvelope envelope =
           new DaemonEnvelope(
               DaemonProtocol.VERSION,
               DaemonMessageType.ERROR,
-              environmentName,
+              environmentId,
               null,
               state.outboundSequence++,
               payloadJson);
@@ -948,8 +972,8 @@ public class EnvironmentDaemonGateway
 
   private void closeConnectionState(ConnectionState state) {
     ActiveCapability lostCapability = null;
-    EnvironmentName environmentName;
-    UUID routeToken;
+    EnvironmentId environmentId;
+    UUID leaseToken;
     boolean closeAfterFlush;
     synchronized (state) {
       if (state.cleaned) {
@@ -957,19 +981,19 @@ public class EnvironmentDaemonGateway
       }
       state.cleaned = true;
       state.sendFailed = true;
-      environmentName = state.environmentName;
-      routeToken = state.routeToken;
+      environmentId = state.environmentId;
+      leaseToken = state.leaseToken;
       closeAfterFlush = state.closeAfterFlush;
     }
     synchronized (this) {
-      if (environmentName != null) {
-        if (routeToken != null) {
-          environmentRegistry.disconnect(environmentName, routeToken, heartbeatTimeout());
+      if (environmentId != null) {
+        if (leaseToken != null) {
+          environmentRegistry.disconnect(environmentId, leaseToken, heartbeatTimeout());
         }
-        environmentConnections.remove(environmentName, state);
-        ActiveCapability active = activeByEnvironment.get(environmentName);
+        environmentConnections.remove(environmentId, state);
+        ActiveCapability active = activeByEnvironment.get(environmentId);
         if (active != null && active.connectionId.equals(state.connection.connectionId())) {
-          activeByEnvironment.remove(environmentName, active);
+          activeByEnvironment.remove(environmentId, active);
           boolean shouldNotify = !active.terminal;
           active.terminal = true;
           if (shouldNotify) {
@@ -990,7 +1014,7 @@ public class EnvironmentDaemonGateway
     }
     if (lostCapability != null) {
       ActiveCapability capability = lostCapability;
-      String env = String.valueOf(environmentName);
+      String env = String.valueOf(environmentId);
       runDeferred(
           List.of(
               () ->
@@ -1002,9 +1026,9 @@ public class EnvironmentDaemonGateway
     }
   }
 
-  private void notifyEnvironmentReady(EnvironmentName environmentName) {
+  private void notifyEnvironmentReady(EnvironmentId environmentId) {
     try {
-      environmentReadyListener.onEnvironmentReady(environmentName);
+      environmentReadyListener.onEnvironmentReady(environmentId);
     } catch (RuntimeException ignored) {
     }
   }
@@ -1018,16 +1042,8 @@ public class EnvironmentDaemonGateway
     }
   }
 
-  private void verifyGatewayToken(String suppliedToken) {
-    byte[] expected = properties.requireDaemonToken().getBytes(StandardCharsets.UTF_8);
-    byte[] supplied = suppliedToken.getBytes(StandardCharsets.UTF_8);
-    if (!MessageDigest.isEqual(expected, supplied)) {
-      throw new DaemonProtocolException("daemon gateway token is invalid");
-    }
-  }
-
-  private static String unavailableMessage(EnvironmentName environmentName, String capabilityId) {
-    return environmentName + " is unavailable; " + capabilityId + " cannot be executed";
+  private static String unavailableMessage(EnvironmentId environmentId, String capabilityId) {
+    return environmentId + " is unavailable; " + capabilityId + " cannot be executed";
   }
 
   private static void requireHello(ConnectionState state) {
@@ -1121,7 +1137,7 @@ public class EnvironmentDaemonGateway
   }
 
   private final class ActiveCapability implements EnvironmentCapabilityExecutionHandle {
-    private final EnvironmentName environmentName;
+    private final EnvironmentId environmentId;
     private final String connectionId;
     private final UUID invocationId;
     private final EnvironmentCapabilityExecutionListener listener;
@@ -1130,11 +1146,11 @@ public class EnvironmentDaemonGateway
     private volatile boolean cancelSent;
 
     private ActiveCapability(
-        EnvironmentName environmentName,
+        EnvironmentId environmentId,
         String connectionId,
         UUID invocationId,
         EnvironmentCapabilityExecutionListener listener) {
-      this.environmentName = environmentName;
+      this.environmentId = environmentId;
       this.connectionId = connectionId;
       this.invocationId = invocationId;
       this.listener = listener;
@@ -1152,7 +1168,7 @@ public class EnvironmentDaemonGateway
       }
       ConnectionState state;
       synchronized (EnvironmentDaemonGateway.this) {
-        state = environmentConnections.get(environmentName);
+        state = environmentConnections.get(environmentId);
       }
       if (state != null && state.connection.connectionId().equals(connectionId)) {
         send(state, DaemonMessageType.CANCEL, invocationId.toString(), "{}");
@@ -1167,9 +1183,8 @@ public class EnvironmentDaemonGateway
 
   private static final class ConnectionState {
     private final EnvironmentDaemonConnection connection;
-    private volatile UUID routeToken;
-    private volatile String daemonId;
-    private volatile EnvironmentName environmentName;
+    private volatile UUID leaseToken;
+    private volatile EnvironmentId environmentId;
     private volatile boolean helloReceived;
     private volatile boolean ready;
     private volatile boolean sendFailed;
@@ -1188,8 +1203,8 @@ public class EnvironmentDaemonGateway
           && !sendFailed
           && ready
           && connection.isOpen()
-          && environmentName != null
-          && routeToken != null;
+          && environmentId != null
+          && leaseToken != null;
     }
 
     private boolean acceptInbound(DaemonEnvelope envelope, JsonNode payload) {
@@ -1223,7 +1238,7 @@ public class EnvironmentDaemonGateway
   private record InboundEnvelopeIdentity(
       int protocolVersion,
       DaemonMessageType messageType,
-      EnvironmentName environmentName,
+      EnvironmentId environmentId,
       String invocationId,
       long sequence,
       JsonNode payload) {
@@ -1232,7 +1247,7 @@ public class EnvironmentDaemonGateway
       return new InboundEnvelopeIdentity(
           envelope.protocolVersion(),
           envelope.messageType(),
-          envelope.environmentName(),
+          envelope.environmentId(),
           envelope.invocationId(),
           envelope.sequence(),
           payload);

@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -267,7 +267,7 @@ class HarnessContractTest {
   @Test
   void boundEnvironmentContract() {
     DummyBoundEnvironment env = new DummyBoundEnvironment();
-    assertEquals("test-env", env.binding().environmentName().value());
+    assertEquals("11111111-1111-1111-1111-111111111111", env.binding().environmentId().toString());
     assertEquals(".", env.binding().workspacePath());
 
     EnvironmentCapabilityDescriptor cap =
@@ -431,7 +431,8 @@ class HarnessContractTest {
   private static final class DummyBoundEnvironment implements BoundEnvironment {
     @Override
     public EnvironmentBinding binding() {
-      return new EnvironmentBinding(new EnvironmentName("test-env"), ".");
+      return new EnvironmentBinding(
+          EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), ".");
     }
 
     @Override

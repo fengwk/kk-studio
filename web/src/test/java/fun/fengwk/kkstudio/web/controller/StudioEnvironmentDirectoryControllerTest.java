@@ -20,7 +20,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryLister;
@@ -39,6 +39,9 @@ import java.util.concurrent.TimeoutException;
  * 400/404/409/504/502 错误映射。
  */
 class StudioEnvironmentDirectoryControllerTest {
+
+  private static final EnvironmentId ENV_ID =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
   private EnvironmentDirectoryLister directoryLister;
   private SystemSettingsSnapshot snapshot;
@@ -81,7 +84,7 @@ class StudioEnvironmentDirectoryControllerTest {
         .thenReturn(
             CompletableFuture.completedFuture(new EnvironmentDirectoryListResult.Loaded(dto)));
 
-    performAsync(get("/api/ai/environments/env-1/directories").param("path", "src"))
+    performAsync(get("/api/ai/environments/" + ENV_ID + "/directories").param("path", "src"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.path").value("src"))
         .andExpect(jsonPath("$.data.displayPath").value("src"))
@@ -91,8 +94,7 @@ class StudioEnvironmentDirectoryControllerTest {
         .andExpect(jsonPath("$.data.entries[0].name").value("main"))
         .andExpect(jsonPath("$.data.entries[0].path").value("src/main"));
 
-    verify(directoryLister)
-        .listDirectory(new EnvironmentName("env-1"), "src", Duration.ofSeconds(5));
+    verify(directoryLister).listDirectory(ENV_ID, "src", Duration.ofSeconds(5));
   }
 
   /** 目录超时在每次 HTTP 请求现读快照：构造后 replace 必须传到 lister。 */
@@ -113,11 +115,10 @@ class StudioEnvironmentDirectoryControllerTest {
             SystemSettings.StorageMedia.DEFAULT,
             SystemSettings.Advanced.DEFAULT));
 
-    performAsync(get("/api/ai/environments/env-1/directories").param("path", "src"))
+    performAsync(get("/api/ai/environments/" + ENV_ID + "/directories").param("path", "src"))
         .andExpect(status().isOk());
 
-    verify(directoryLister)
-        .listDirectory(new EnvironmentName("env-1"), "src", Duration.ofMillis(2_000));
+    verify(directoryLister).listDirectory(ENV_ID, "src", Duration.ofMillis(2_000));
   }
 
   @Test
@@ -127,19 +128,18 @@ class StudioEnvironmentDirectoryControllerTest {
             CompletableFuture.completedFuture(
                 new EnvironmentDirectoryListResult.Loaded(emptyListing("."))));
 
-    performAsync(get("/api/ai/environments/env-1/directories"))
+    performAsync(get("/api/ai/environments/" + ENV_ID + "/directories"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.path").value("."));
 
-    verify(directoryLister).listDirectory(new EnvironmentName("env-1"), ".", Duration.ofSeconds(5));
+    verify(directoryLister).listDirectory(ENV_ID, ".", Duration.ofSeconds(5));
   }
 
   @Test
   void invalidPathMapsToBadRequest() throws Exception {
-    ResultActions actions =
-        failed(EnvironmentDirectoryFailureCode.INVALID_PATH, "path must not contain '..' segments")
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.errorCode.code").value("INVALID_PATH"));
+    failed(EnvironmentDirectoryFailureCode.INVALID_PATH, "path must not contain '..' segments")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errorCode.code").value("INVALID_PATH"));
   }
 
   @Test
@@ -190,22 +190,22 @@ class StudioEnvironmentDirectoryControllerTest {
   void mapsExceptionalCompletionAfterAsyncDispatch() throws Exception {
     when(directoryLister.listDirectory(any(), any(), any()))
         .thenReturn(CompletableFuture.failedFuture(new TimeoutException("daemon timed out")));
-    performAsync(get("/api/ai/environments/env-1/directories").param("path", "src"))
+    performAsync(get("/api/ai/environments/" + ENV_ID + "/directories").param("path", "src"))
         .andExpect(status().isGatewayTimeout())
         .andExpect(jsonPath("$.errorCode.code").value("TIMEOUT"));
 
     when(directoryLister.listDirectory(any(), any(), any()))
         .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("transport failed")));
-    performAsync(get("/api/ai/environments/env-1/directories").param("path", "src"))
+    performAsync(get("/api/ai/environments/" + ENV_ID + "/directories").param("path", "src"))
         .andExpect(status().isBadGateway())
         .andExpect(jsonPath("$.errorCode.code").value("IO_ERROR"));
   }
 
   @Test
-  void invalidEnvironmentNameMapsToBadRequestWithoutCallingLister() throws Exception {
-    performAsync(get("/api/ai/environments/Not-Canonical/directories"))
+  void invalidEnvironmentIdMapsToBadRequestWithoutCallingLister() throws Exception {
+    performAsync(get("/api/ai/environments/Not-Canonical-UUID/directories"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errorCode.code").value("INVALID_ENVIRONMENT_NAME"));
+        .andExpect(jsonPath("$.errorCode.code").value("INVALID_ENVIRONMENT_ID"));
     verify(directoryLister, never()).listDirectory(any(), any(), any());
   }
 
@@ -215,7 +215,8 @@ class StudioEnvironmentDirectoryControllerTest {
         .thenReturn(
             CompletableFuture.completedFuture(
                 new EnvironmentDirectoryListResult.Failed(code, message)));
-    return performAsync(get("/api/ai/environments/env-1/directories").param("path", "src"));
+    return performAsync(
+        get("/api/ai/environments/" + ENV_ID + "/directories").param("path", "src"));
   }
 
   private ResultActions performAsync(MockHttpServletRequestBuilder requestBuilder)

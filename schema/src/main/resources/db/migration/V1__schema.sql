@@ -32,6 +32,40 @@
 -- 1. Business tables (no mutual dependencies)
 ------------------------------------------------------------------------------
 
+create table environment (
+    id                  uuid          primary key,
+    name                varchar(64)   not null,
+    registration_token  varchar(128)  not null,
+    created_at          timestamptz(3) not null default current_timestamp,
+    updated_at          timestamptz(3) not null default current_timestamp,
+    version             bigint        not null default 0,
+    constraint uk_environment_name unique (name),
+    constraint uk_environment_registration_token unique (registration_token),
+    constraint ck_environment_name check (
+        name !~ '^[[:space:]]'
+        and name !~ '[[:space:]]$'
+        and char_length(name) > 0
+        and position('/' in name) = 0
+    ),
+    constraint ck_environment_registration_token check (
+        btrim(registration_token) <> ''
+        and char_length(registration_token) <= 128
+        and registration_token = btrim(registration_token)
+    ),
+    constraint ck_environment_version_nonneg check (version >= 0)
+);
+
+comment on table environment is '稳定 Environment 注册表：UUID 主键跨重启不变，name 是唯一展示与配置标识，registration_token 是 Daemon 握手凭证';
+comment on column environment.id is 'Environment 的全局唯一 UUID（服务端生成，永不变更）';
+comment on column environment.name is 'Environment 唯一名称（NFKC trim，<= 64 字符，不含空白或斜杠）';
+comment on column environment.registration_token is 'Daemon HELLO 握手的注册凭证（部署侧秘密，仅 create/rotate 响应一次性返回，正常查询绝不泄露）';
+comment on column environment.created_at is '创建时间（毫秒精度）';
+comment on column environment.updated_at is '最后更新时间（毫秒精度），应用侧维护';
+comment on column environment.version is 'CAS 乐观锁版本：非负，从 0 开始，每次更新 +1';
+
+create index idx_environment_updated
+    on environment (updated_at, id);
+
 create table agent_provider (
     name            varchar(64)   primary key,
     description     varchar(512),
@@ -80,6 +114,9 @@ create table agent_definition (
     model_provider_name varchar(64) not null,
     model_name      varchar(128)  not null,
     variant         varchar(64),
+    -- 每轮 turn 开始时按此 Environment 解析出当时事实（EnvironmentBinding）；
+    -- 可空表示不绑定 Environment（unbound branch）。
+    environment_id  uuid,
     config          jsonb         not null,
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
@@ -92,6 +129,8 @@ create table agent_definition (
     ),
     constraint fk_agent_definition_model foreign key (model_provider_name, model_name)
         references agent_model (provider_name, name),
+    constraint fk_agent_definition_environment foreign key (environment_id)
+        references environment (id) on delete restrict,
     constraint ck_agent_definition_version_nonneg check (version >= 0)
 );
 
@@ -352,9 +391,8 @@ create table chat (
     -- agent_name 故意不加 FK：它只按名称引用 Agent。Agent 硬删除期间该引用失效
     -- （turn/attempt fail closed），同名重建后既有 Chat 引用解析到当前 AgentDefinition。
     agent_name          varchar(64)   not null,
-    -- 新空面板/线程草稿的默认分支完整 Environment binding（可空；用户发送前可显式更改或清空）。
-    -- 两列必须同存同空（ck_chat_environment_pair），workspace_path 是 Environment Root 下 canonical 相对 wire 路径。
-    environment_name    varchar(64),
+    -- 新空面板/线程草稿的默认分支 workspace path（可空；用户发送前可显式更改或清空）。
+    -- 值为 Environment Root 下 canonical 相对 wire 路径，由应用层 EnvironmentWorkspacePath 校验。
     workspace_path      varchar(2048),
     yolo_enabled        boolean       not null default false,
     created_at          timestamptz(3) not null default current_timestamp,
@@ -366,134 +404,99 @@ create table chat (
         and agent_name !~ '[[:space:]]$'
         and char_length(agent_name) > 0
         and position('/' in agent_name) = 0
-    ),
-    constraint ck_chat_environment_name check (
-        environment_name is null
-        or (
-            environment_name ~ '^[a-z0-9]+(-[a-z0-9]+)*$'
-            and char_length(environment_name) <= 64
-        )
-    ),
-    constraint ck_chat_environment_pair check (
-        (environment_name is null and workspace_path is null)
-        or (environment_name is not null and workspace_path is not null)
     )
 );
 
 create index idx_chat_modified on chat (updated_at, created_at);
 
 ------------------------------------------------------------------------------
--- 1c. Live environment routes and cross-node queries
+-- 1b. Environment connections and directory query mailbox
 ------------------------------------------------------------------------------
 
-create table live_environment (
-    environment_name    varchar(128)   primary key,
-    daemon_id           varchar(128)   not null,
-    owner_node_id       uuid           not null,
-    route_token         uuid           not null,
-    status              varchar(32)    not null,
-    capabilities        jsonb,
-    last_seen_at        timestamptz(3) not null,
-    lease_until         timestamptz(3) not null,
-    constraint ck_live_environment_daemon_id_nonblank check (
-        btrim(daemon_id) <> ''
-    ),
-    constraint ck_live_environment_status check (
+create table environment_connection (
+    environment_id  uuid           primary key,
+    owner_node_id   uuid           not null,
+    lease_token     uuid           not null,
+    status          varchar(32)    not null,
+    runtime_info    jsonb,
+    last_seen_at    timestamptz(3) not null,
+    lease_until     timestamptz(3) not null,
+    constraint fk_environment_connection_environment foreign key (environment_id)
+        references environment (id) on delete cascade,
+    constraint ck_environment_connection_status check (
         status in ('CONNECTING', 'READY')
     ),
-    constraint ck_live_environment_capabilities check (
+    constraint ck_environment_connection_runtime_info check (
         status not in ('CONNECTING', 'READY')
-        or (status = 'CONNECTING' and capabilities is null)
-        or (status = 'READY' and capabilities is not null and jsonb_typeof(capabilities) = 'object')
+        or (status = 'CONNECTING' and runtime_info is null)
+        or (status = 'READY' and runtime_info is not null and jsonb_typeof(runtime_info) = 'object')
     ),
-    constraint ck_live_environment_lease check (
+    constraint ck_environment_connection_lease check (
         lease_until > last_seen_at
     )
 );
 
-comment on table live_environment is '多节点 Live Environment 路由租约：每个活跃 Environment 由持有租约的节点（owner_node_id + route_token）独占路由';
-comment on column live_environment.environment_name is 'Environment 规范路由名称（PK）';
-comment on column live_environment.daemon_id is 'Daemon 实例唯一标识';
-comment on column live_environment.owner_node_id is '当前持有该路由的 App 节点实例 UUID';
-comment on column live_environment.route_token is '当前路由租约代币 UUID（每次接管/重绑生成新 token）';
-comment on column live_environment.status is '路由状态：CONNECTING / READY';
-comment on column live_environment.capabilities is 'READY 状态下 daemon 通告的 JSON 能力对象；CONNECTING 为 null';
-comment on column live_environment.last_seen_at is '最后活跃时间（毫秒精度）';
-comment on column live_environment.lease_until is '租约到期时间（毫秒精度），必须晚于 last_seen_at';
+comment on table environment_connection is 'Environment 的 daemon 连接租约：每个 Environment 由持有租约的节点独占路由（fencing 见 lease_token）';
+comment on column environment_connection.environment_id is 'Environment 的全局唯一 UUID（PK，FK cascade）';
+comment on column environment_connection.owner_node_id is '当前持有该连接路由的 App 节点实例 UUID';
+comment on column environment_connection.lease_token is '当前路由租约代币 UUID（每次接管/重绑生成新 token，fence 旧持有者）';
+comment on column environment_connection.status is '路由状态：CONNECTING / READY';
+comment on column environment_connection.runtime_info is 'READY 状态下 daemon 通告的 JSON 运行信息与能力对象；CONNECTING 为 null';
+comment on column environment_connection.last_seen_at is '最后活跃时间（毫秒精度）';
+comment on column environment_connection.lease_until is '租约到期时间（毫秒精度），必须晚于 last_seen_at';
 
-create index idx_live_environment_lease_until
-    on live_environment (lease_until);
+create index idx_environment_connection_lease_until
+    on environment_connection (lease_until);
 
-create table environment_query (
+create index idx_environment_connection_owner
+    on environment_connection (owner_node_id);
+
+create table environment_directory_query (
     id                  uuid           primary key,
-    environment_name    varchar(128)   not null,
-    capability_id       varchar(128)   not null,
-    arguments           jsonb          not null,
+    environment_id      uuid           not null,
+    path                varchar(2048)  not null,
     status              varchar(32)    not null,
     result              jsonb,
-    error               jsonb,
-    available_at        timestamptz(3),
-    lease_token         uuid,
-    lease_until         timestamptz(3),
-    expires_at          timestamptz(3) not null,
+    failure_code        varchar(64),
+    failure_message     text,
+    deadline_at         timestamptz(3) not null,
     created_at          timestamptz(3) not null default current_timestamp,
-    updated_at          timestamptz(3) not null default current_timestamp,
-    constraint ck_environment_query_capability check (
-        capability_id in ('fs.list-directory')
+    constraint fk_environment_directory_query_environment foreign key (environment_id)
+        references environment (id) on delete cascade,
+    constraint ck_environment_directory_query_status check (
+        status in ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED')
     ),
-    constraint ck_environment_query_arguments check (
-        jsonb_typeof(arguments) = 'object'
+    constraint ck_environment_directory_query_state check (
+        (status = 'PENDING' and result is null and failure_code is null and failure_message is null)
+        or (status = 'RUNNING' and result is null and failure_code is null and failure_message is null)
+        or (status = 'SUCCEEDED' and result is not null and jsonb_typeof(result) = 'object' and failure_code is null and failure_message is null)
+        or (status = 'FAILED' and result is null and failure_code is not null and btrim(failure_code) <> '')
     ),
-    constraint ck_environment_query_status check (
-        status in ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'EXPIRED')
-    ),
-    constraint ck_environment_query_lease_pair check (
-        (lease_token is null) = (lease_until is null)
-    ),
-    constraint ck_environment_query_state check (
-        status not in ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'EXPIRED')
-        or (status = 'PENDING' and available_at is not null and lease_token is null and result is null and error is null)
-        or (status = 'RUNNING' and available_at is null and lease_token is not null and result is null and error is null)
-        or (status = 'COMPLETED' and available_at is null and lease_token is null and result is not null and error is null)
-        or (status = 'FAILED' and available_at is null and lease_token is null and result is null and error is not null)
-        or (status = 'EXPIRED' and available_at is null and lease_token is null and result is null)
-    ),
-    constraint ck_environment_query_result check (
-        result is null or jsonb_typeof(result) = 'object'
-    ),
-    constraint ck_environment_query_error check (
-        error is null or jsonb_typeof(error) = 'object'
-    ),
-    constraint ck_environment_query_expires check (
-        expires_at >= created_at
+    constraint ck_environment_directory_query_deadline check (
+        deadline_at >= created_at
     )
 );
 
-comment on table environment_query is '跨节点只读 Environment 查询信箱：非持有节点提交查询，持有节点 claim 后调用 daemon 完成回填';
-comment on column environment_query.id is '查询请求 UUID（调用方生成）';
-comment on column environment_query.environment_name is '目标 Environment 路由名称';
-comment on column environment_query.capability_id is '只读能力标识（仅白名单 fs.list-directory）';
-comment on column environment_query.arguments is '调用参数（JSON object）';
-comment on column environment_query.status is '查询生命周期：PENDING / RUNNING / COMPLETED / FAILED / EXPIRED';
-comment on column environment_query.result is '成功返回载荷（JSON object）';
-comment on column environment_query.error is '失败错误载荷（JSON object）';
-comment on column environment_query.available_at is 'PENDING 可领取时间（毫秒精度）';
-comment on column environment_query.lease_token is 'RUNNING 执行租约代币 UUID';
-comment on column environment_query.lease_until is 'RUNNING 租约截止时间（毫秒精度）';
-comment on column environment_query.expires_at is '全局过期时间（毫秒精度）';
-comment on column environment_query.created_at is '创建时间（毫秒精度）';
-comment on column environment_query.updated_at is '最后更新时间（毫秒精度）';
+comment on table environment_directory_query is '跨节点弱交付目录查询信箱：requester 插入 PENDING；owner 认领为 RUNNING 并回填 SUCCEEDED/FAILED；requester 以 DELETE RETURNING 原子领取；过期或 crash 直接 DELETE';
+comment on column environment_directory_query.id is '查询请求 UUID（调用方生成）';
+comment on column environment_directory_query.environment_id is '目标 Environment 的全局唯一 UUID';
+comment on column environment_directory_query.path is '待查询的目标相对路径';
+comment on column environment_directory_query.status is '查询生命周期：PENDING / RUNNING / SUCCEEDED / FAILED';
+comment on column environment_directory_query.result is 'SUCCEEDED 状态下的目录列表 JSON object';
+comment on column environment_directory_query.failure_code is 'FAILED 状态下的失败分类码（非空）';
+comment on column environment_directory_query.failure_message is 'FAILED 状态下的错误描述信息';
+comment on column environment_directory_query.deadline_at is '查询硬超时截止时间（毫秒精度）';
+comment on column environment_directory_query.created_at is '创建时间（毫秒精度）';
 
-create index idx_environment_query_claim
-    on environment_query (environment_name, status, available_at, lease_until)
-    where status in ('PENDING', 'RUNNING');
+create index idx_environment_directory_query_claim
+    on environment_directory_query (environment_id, status, deadline_at)
+    where status = 'PENDING';
 
-create index idx_environment_query_expires
-    on environment_query (expires_at)
-    where status in ('PENDING', 'RUNNING');
+create index idx_environment_directory_query_deadline
+    on environment_directory_query (deadline_at);
 
 ------------------------------------------------------------------------------
--- 1b. Singleton system settings (id=1)
+-- 1c. Singleton system settings (id=1)
 --
 -- system_setting 是全局强类型配置聚合的权威存储：恒为一行（id=1），config 保存完整
 -- SystemSettings 六个 section 的 canonical JSON（写路径只接受强类型 DTO，绝无任意 JSON
@@ -682,7 +685,7 @@ create table harness_thread_command (
             'CUSTOM_MESSAGE',
             'SET_AGENT',
             'SET_MODEL',
-            'SET_ENVIRONMENT'
+            'SET_WORKSPACE_PATH'
         )
     ),
     constraint ck_harness_thread_command_request_hash check (
@@ -854,8 +857,10 @@ create table harness_work (
     wake_version bigint not null check (wake_version > 0),
     lease_token varchar(128),
     lease_until timestamptz(3),
-    required_environment_name varchar(64),
+    required_environment_id uuid,
     primary key (target_type, target_id),
+    constraint fk_harness_work_environment foreign key (required_environment_id)
+        references environment (id) on delete restrict,
     constraint ck_harness_work_target_type check (
         target_type in ('THREAD', 'MODEL', 'TOOL')
     ),
@@ -867,8 +872,7 @@ create table harness_work (
         or (length(lease_token) > 0 and btrim(lease_token) = lease_token)
     ),
     constraint ck_harness_work_required_environment check (
-        required_environment_name is null
-        or (target_type = 'TOOL' and length(required_environment_name) > 0 and btrim(required_environment_name) = required_environment_name)
+        required_environment_id is null or target_type = 'TOOL'
     )
 );
 
@@ -879,7 +883,7 @@ comment on column harness_work.available_at is '最早可被 claim 的时间（�
 comment on column harness_work.wake_version is 'wake 计数（从 1 递增）';
 comment on column harness_work.lease_token is '当前 lease token（与 lease_until 同时存在或同时缺失）';
 comment on column harness_work.lease_until is '当前 lease 到期时间（毫秒精度）';
-comment on column harness_work.required_environment_name is '执行该 Work 所需的 live environment 名称（仅 TOOL 可非空；非空时仅持有该 environment 活跃租约的节点可 claim）';
+comment on column harness_work.required_environment_id is '执行该 Work 所需 Environment 的全局唯一 UUID（仅 TOOL 可非空；非空时仅持有该 environment READY 连接租约的节点可 claim）';
 
 create index idx_harness_work_available
     on harness_work (available_at, target_type, target_id);

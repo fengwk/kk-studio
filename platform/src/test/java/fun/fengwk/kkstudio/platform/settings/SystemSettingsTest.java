@@ -321,20 +321,12 @@ class SystemSettingsTest {
         IllegalArgumentException.class,
         () ->
             new SystemSettings.MiniMaxH3(
-                true,
-                null,
-                "env",
-                600_000L,
-                "http://comfy:8188",
-                10_000L,
-                30_000L,
-                2_000L,
-                1_800_000L));
+                true, null, 600_000L, "http://comfy:8188", 10_000L, 30_000L, 2_000L, 1_800_000L));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new SystemSettings.MiniMaxH3(
-                true, "agent", "env", 600_000L, null, 10_000L, 30_000L, 2_000L, 1_800_000L));
+                true, "agent", 600_000L, null, 10_000L, 30_000L, 2_000L, 1_800_000L));
   }
 
   @Test
@@ -346,7 +338,7 @@ class SystemSettingsTest {
         IllegalArgumentException.class,
         () ->
             new SystemSettings.MiniMaxH3(
-                false, null, null, 600_000L, null, 10_000L, 30_000L, 1_800_000L, 1_800_000L));
+                false, null, 600_000L, null, 10_000L, 30_000L, 1_800_000L, 1_800_000L));
     assertThrows(
         IllegalArgumentException.class,
         () -> new SystemSettings.GptImage2(false, 900, 900_000L, 1_200_000L));

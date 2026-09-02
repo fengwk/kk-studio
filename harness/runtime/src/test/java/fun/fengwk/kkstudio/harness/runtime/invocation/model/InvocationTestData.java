@@ -35,7 +35,8 @@ import java.util.Set;
 /** invocation.model 包共享的测试 fixture。 */
 final class InvocationTestData {
 
-  static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
+  static final EnvironmentBinding ENV_ID =
+      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
 
   private InvocationTestData() {}
 

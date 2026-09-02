@@ -19,6 +19,9 @@ public class AgentDefinitionEditablePropertiesDTO {
   /** 可空模型变体 id（≤64 字符）；null/空白表示不覆盖，运行时回退解析 model config 的 defaultVariant。 */
   private String variant;
 
+  /** 可空绑定的 Environment UUID 字符串（null/空白表示清除环境绑定）。 */
+  private String environmentId;
+
   /** 必填结构化执行配置（toolIds/skills/subagents），经严格 codec 校验后持久化为 config JSONB。 */
   private AgentDefinitionConfigDTO config;
 

@@ -249,7 +249,7 @@ class SystemSettingsCodecTest {
                 SystemSettings.DEFAULT.integrations().seedance(),
                 SystemSettings.DEFAULT.integrations().gptImage2(),
                 new SystemSettings.MiniMaxH3(
-                    false, null, null, 600_000L, null, 10_000L, 30_000L, 2_000L, 1_800_000L)),
+                    false, null, 600_000L, null, 10_000L, 30_000L, 2_000L, 1_800_000L)),
             SystemSettings.DEFAULT.storageMedia(),
             SystemSettings.DEFAULT.advanced());
     String canonical = codec.encode(settings);

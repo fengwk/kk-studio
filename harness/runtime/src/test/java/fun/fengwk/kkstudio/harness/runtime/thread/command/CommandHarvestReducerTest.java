@@ -6,8 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -22,10 +20,8 @@ import java.util.UUID;
 class CommandHarvestReducerTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
-  private static final EnvironmentBinding ENV_A =
-      EnvironmentBindings.binding("123e4567-e89b-12d3-a456-426614174000");
-  private static final EnvironmentBinding ENV_B =
-      EnvironmentBindings.binding("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+  private static final String ENV_A = "123e4567-e89b-12d3-a456-426614174000";
+  private static final String ENV_B = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
   private static final BranchSettings BASE =
       new BranchSettings(
           ENV_A, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
@@ -50,8 +46,8 @@ class CommandHarvestReducerTest {
                     5L,
                     new SetModelCommandPayload(
                         new ModelSelection("anthropic", "claude-opus", "thinking"))),
-                queued(id(6L), 6L, new SetEnvironmentCommandPayload(ENV_B)),
-                queued(id(7L), 7L, new SetEnvironmentCommandPayload(null)),
+                queued(id(6L), 6L, new SetWorkspacePathCommandPayload(ENV_B)),
+                queued(id(7L), 7L, new SetWorkspacePathCommandPayload(null)),
                 queued(id(8L), 8L, new CustomMessageCommandPayload(system("instruction")))));
 
     assertEquals(
@@ -72,7 +68,7 @@ class CommandHarvestReducerTest {
                 queued(id(2L), 2L, new SetModelCommandPayload(replacement)),
                 queued(id(3L), 3L, new CustomMessageCommandPayload(system("system")))));
 
-    assertEquals(ENV_A, result.branchSettings().environment());
+    assertEquals(ENV_A, result.branchSettings().workspacePath());
     assertEquals("coding", result.branchSettings().agentName());
     assertEquals(replacement, result.branchSettings().model());
   }

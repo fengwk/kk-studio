@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
 
-/** Environment Daemon gateway 的部署级密钥与 WebSocket 传输边界。 */
+/** Environment Daemon gateway 的传输边界配置。 */
 @Data
 @ConfigurationProperties(prefix = "kk-studio.harness.environment-gateway")
 public class EnvironmentGatewayProperties {
@@ -14,9 +14,6 @@ public class EnvironmentGatewayProperties {
   static final int DEFAULT_QUEUE_CAPACITY = 256;
   static final long DEFAULT_MAX_BYTES = 16L * 1024 * 1024;
   static final Duration DEFAULT_SEND_TIMEOUT = Duration.ofSeconds(10);
-
-  /** 部署级共享密钥，敏感字段：HELLO 握手时用于校验 daemon 身份（常量时间比较），不允许出现在日志或公共输出 中。 */
-  private String daemonToken;
 
   /**
    * Daemon WebSocket 单帧上限（字节）。协议安全边界，不进 SystemSettings。可由 {@code
@@ -32,15 +29,6 @@ public class EnvironmentGatewayProperties {
 
   /** 单帧 WebSocket 发送超时，超时后连接按传输失败关闭，不进 SystemSettings。 */
   private Duration sendTimeout = DEFAULT_SEND_TIMEOUT;
-
-  /** 返回附加 Environment Daemon 所需的部署级密钥。 */
-  public String requireDaemonToken() {
-    if (daemonToken == null || daemonToken.isBlank()) {
-      throw new IllegalArgumentException(
-          "kk-studio.harness.environment-gateway.daemon-token must not be blank");
-    }
-    return daemonToken;
-  }
 
   /** 返回可用于 JSR-356 / Spring WebSocket 缓冲的单帧上限。 */
   public int requireMaxMessageBytes() {

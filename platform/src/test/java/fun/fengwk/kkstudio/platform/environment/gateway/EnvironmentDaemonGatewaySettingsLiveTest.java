@@ -5,7 +5,8 @@ import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
@@ -21,14 +22,14 @@ class EnvironmentDaemonGatewaySettingsLiveTest {
   void heartbeatTimeoutReadsCurrentSnapshot() {
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
     EnvironmentGatewayProperties properties = new EnvironmentGatewayProperties();
-    properties.setDaemonToken("test-token");
     EnvironmentDaemonGateway gateway =
         new EnvironmentDaemonGateway(
-            mock(LiveEnvironmentRegistry.class),
+            mock(EnvironmentRegistry.class),
+            mock(EnvironmentRepository.class),
             properties,
             snapshot,
             Clock.fixed(Instant.parse("2026-08-21T00:00:00Z"), ZoneOffset.UTC),
-            environmentName -> {});
+            environmentId -> {});
 
     assertEquals(Duration.ofMillis(60_000L), gateway.heartbeatTimeout());
     snapshot.replace(withHeartbeatTimeout(15_000L));

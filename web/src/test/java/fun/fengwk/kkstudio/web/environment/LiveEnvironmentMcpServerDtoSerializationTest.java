@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentMcpServerDTO;
 
 import java.time.Instant;
@@ -60,7 +60,7 @@ class LiveEnvironmentMcpServerDtoSerializationTest {
    */
   @Test
   void publicEnvironmentDtoDoesNotExposeInternalMetadata() throws Exception {
-    LiveEnvironmentDTO dto = new LiveEnvironmentDTO();
+    EnvironmentCardDTO dto = new EnvironmentCardDTO();
     dto.setName("local");
     dto.setStatus("READY");
     dto.setReady(true);

@@ -17,7 +17,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
@@ -50,11 +50,13 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryEntry;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryListing;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentSkillLoadResult;
+import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -81,7 +83,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Gateway 仅承担连接/协议传输职责。durable 的 claim/lease/terminal 由 Harness Runtime 负责。路由使用 HELLO 时确定的
- * canonical EnvironmentName；display name 永不参与路由。
+ * canonical EnvironmentId；display name 永不参与路由。
  */
 class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
 
@@ -91,10 +93,22 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
       resetDatabase(conn);
       applyBaseline(conn);
     }
+    SingleConnectionDataSource ds =
+        new SingleConnectionDataSource(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
+    JdbcTemplate jdbc = new JdbcTemplate(ds);
+    jdbc.update(
+        "insert into environment (id, name, registration_token, version) values (?, 'env-1', 'gateway-test-token', 0)",
+        ENVIRONMENT_NAME.value());
+    jdbc.update(
+        "insert into environment (id, name, registration_token, version) values (?, 'env-2', 'other-token', 0)",
+        OTHER_ENVIRONMENT_NAME.value());
   }
 
-  private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("env-1");
-  private static final EnvironmentName OTHER_ENVIRONMENT_NAME = new EnvironmentName("env-2");
+  private static final EnvironmentId ENVIRONMENT_NAME =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+  private static final EnvironmentId OTHER_ENVIRONMENT_NAME =
+      EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
   private static final EnvironmentBinding ENVIRONMENT =
       new EnvironmentBinding(ENVIRONMENT_NAME, ".");
   private static final EnvironmentBinding OTHER_ENVIRONMENT =
@@ -130,7 +144,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
 
   @Test
   void readyNotifiesHandlerAndInvokeSendsProtocolThenMapsCompletion() {
-    List<EnvironmentName> ready = new ArrayList<>();
+    List<EnvironmentId> ready = new ArrayList<>();
     Fixture fixture = fixture(ready::add);
     FakeConnection connection = fixture.connectReady("connection-a");
 
@@ -144,7 +158,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
         messageTypes(connection.envelopes()));
     DaemonEnvelope invoke = connection.envelopes().get(1);
-    assertEquals(ENVIRONMENT_NAME, invoke.environmentName());
+    assertEquals(ENVIRONMENT_NAME, invoke.environmentId());
     assertEquals(INVOCATION_ID.toString(), invoke.invocationId());
     DaemonCapabilityInvokeCodec.InvokeRequest decoded = invokeCodec.decode(invoke.payloadJson());
     assertEquals("fs.read", decoded.capabilityId().value());
@@ -671,7 +685,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         fixture.environmentRegistry.isReady(
             ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
     var registered = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
-    assertEquals(ENVIRONMENT_NAME, registered.name());
+    assertEquals(ENVIRONMENT_NAME, registered.environmentId());
     assertEquals(ADVERTISED_SKILLS, registered.skills());
     assertEquals(
         List.of("fs", "broken"), registered.mcpServers().stream().map(s -> s.name()).toList());
@@ -893,38 +907,23 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void sameNameConcurrentBindIsTerminalConflictWithTypedCode() {
+  void concurrentHelloWhileActiveIsRejectedWithRetryLater() {
     Fixture fixture = fixture();
     FakeConnection first = fixture.connectReady("connection-first");
     FakeConnection second = new FakeConnection("connection-second");
     fixture.gateway.open(second);
-    fixture.gateway.receive(second.connectionId(), helloWithDaemon("d2", 0, ENVIRONMENT_NAME));
-    assertTrue(second.closed);
-    assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(second.envelopes()));
-    assertEquals(
-        DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT,
-        envelopeCodec.readPayload(second.envelopes().get(0)).path("code").asText());
-    assertEquals(
-        ENVIRONMENT_NAME, fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().name());
-    assertEquals(
-        LiveEnvironmentStatus.READY,
-        fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
-    assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(first.envelopes()));
-  }
-
-  @Test
-  void sameNameReconnectFromSameDaemonIdIsRetryLaterWithTypedCode() {
-    Fixture fixture = fixture();
-    FakeConnection first = fixture.connectReady("connection-first-retry");
-    FakeConnection second = new FakeConnection("connection-second-retry");
-    fixture.gateway.open(second);
-    // 相同 daemonId "d1" 且处于活跃状态时，返回 RETRY_LATER
-    fixture.gateway.receive(second.connectionId(), helloWithDaemon("d1", 0, ENVIRONMENT_NAME));
+    fixture.gateway.receive(second.connectionId(), hello(0));
     assertTrue(second.closed);
     assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(second.envelopes()));
     assertEquals(
         DaemonProtocol.ERROR_CODE_RETRY_LATER,
         envelopeCodec.readPayload(second.envelopes().get(0)).path("code").asText());
+    assertEquals(
+        ENVIRONMENT_NAME,
+        fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().environmentId());
+    assertEquals(
+        LiveEnvironmentStatus.READY,
+        fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(first.envelopes()));
   }
 
@@ -934,7 +933,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     FakeConnection first = fixture.connectReady("connection-first");
     fixture.gateway.close(first.connectionId());
     fixture.jdbc.update(
-        "update live_environment set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_name = ?",
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
         ENVIRONMENT_NAME.value());
 
     FakeConnection second = new FakeConnection("connection-second");
@@ -943,7 +942,8 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(second.envelopes()));
     fixture.gateway.receive(second.connectionId(), ready(1, ENVIRONMENT_NAME));
     assertEquals(
-        ENVIRONMENT_NAME, fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().name());
+        ENVIRONMENT_NAME,
+        fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().environmentId());
     assertTrue(
         fixture.environmentRegistry.isReady(
             ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
@@ -957,7 +957,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
 
     fixture.jdbc.update(
-        "update live_environment set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_name = ?",
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
         ENVIRONMENT_NAME.value());
     FakeConnection second = new FakeConnection("connection-lease-taker");
     fixture.gateway.open(second);
@@ -987,7 +987,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     FakeConnection first = fixture.connectReady("connection-dead");
     first.close();
     fixture.jdbc.update(
-        "update live_environment set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_name = ?",
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
         ENVIRONMENT_NAME.value());
 
     FakeConnection second = new FakeConnection("connection-taker");
@@ -998,10 +998,10 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
 
     FakeConnection third = new FakeConnection("connection-sneaky");
     fixture.gateway.open(third);
-    fixture.gateway.receive(third.connectionId(), helloWithDaemon("d3", 0, ENVIRONMENT_NAME));
+    fixture.gateway.receive(third.connectionId(), hello(0));
     assertTrue(third.closed);
     assertEquals(
-        DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT,
+        DaemonProtocol.ERROR_CODE_RETRY_LATER,
         envelopeCodec.readPayload(third.envelopes().get(0)).path("code").asText());
     assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isPresent());
     assertTrue(second.isOpen());
@@ -1015,7 +1015,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         fixture.environmentRegistry.isReady(
             ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
     fixture.jdbc.update(
-        "update live_environment set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_name = ?",
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
         ENVIRONMENT_NAME.value());
 
     EnvironmentSkillLoadResult result =
@@ -1195,7 +1195,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-dir-stale");
     fixture.jdbc.update(
-        "update live_environment set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_name = ?",
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
         ENVIRONMENT_NAME.value());
 
     EnvironmentDirectoryListResult result =
@@ -1325,7 +1325,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
 
     // 篡改数据库中的 owner_node_id 为其他节点
     fixture.jdbc.update(
-        "update live_environment set owner_node_id = ? where environment_name = ?",
+        "update environment_connection set owner_node_id = ? where environment_id = ?",
         UUID.randomUUID(),
         ENVIRONMENT_NAME.value());
 
@@ -1343,9 +1343,9 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     fixture.gateway.open(connection);
     fixture.gateway.receive(connection.connectionId(), hello(0));
 
-    // 在数据库中篡改 route_token
+    // 在数据库中篡改 lease_token
     fixture.jdbc.update(
-        "update live_environment set route_token = ? where environment_name = ?",
+        "update environment_connection set lease_token = ? where environment_id = ?",
         UUID.randomUUID(),
         ENVIRONMENT_NAME.value());
 
@@ -1411,71 +1411,55 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
   }
 
   private String hello(long sequence) {
-    return hello(sequence, ENVIRONMENT_NAME);
+    return helloWithToken(GATEWAY_TOKEN, sequence);
   }
 
-  private String hello(long sequence, EnvironmentName environmentName) {
-    return helloWithDaemon("d1", sequence, environmentName);
-  }
-
-  private String helloWithDaemon(String daemonId, long sequence, EnvironmentName environmentName) {
-    return envelope(
-        environmentName,
-        DaemonMessageType.HELLO,
-        null,
-        sequence,
-        "{\"daemonId\":\""
-            + daemonId
-            + "\",\"protocolVersion\":"
-            + DaemonProtocol.VERSION
-            + ",\"capabilityCatalogVersion\":\""
-            + EnvironmentCapabilityCatalog.version()
-            + "\",\"gatewayToken\":\""
-            + GATEWAY_TOKEN
-            + "\"}");
+  private String hello(long sequence, EnvironmentId environmentName) {
+    return helloWithToken(
+        environmentName.equals(OTHER_ENVIRONMENT_NAME) ? "other-token" : GATEWAY_TOKEN, sequence);
   }
 
   private String helloWithVersion(String protocolVersion, long sequence) {
     return envelope(
-        ENVIRONMENT_NAME,
+        null,
         DaemonMessageType.HELLO,
         null,
         sequence,
-        "{\"daemonId\":\"d1\",\"protocolVersion\":"
+        "{\"protocolVersion\":"
             + protocolVersion
             + ",\"capabilityCatalogVersion\":\""
             + EnvironmentCapabilityCatalog.version()
-            + "\",\"gatewayToken\":\""
+            + "\",\"registrationToken\":\""
             + GATEWAY_TOKEN
             + "\"}");
   }
 
   private String helloWithCatalogVersion(String catalogVersion, long sequence) {
     return envelope(
-        ENVIRONMENT_NAME,
+        null,
         DaemonMessageType.HELLO,
         null,
         sequence,
-        "{\"daemonId\":\"d1\",\"protocolVersion\":"
+        "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"capabilityCatalogVersion\":\""
             + catalogVersion
-            + "\",\"gatewayToken\":\""
+            + "\",\"registrationToken\":\""
             + GATEWAY_TOKEN
             + "\"}");
   }
 
   private String helloWithToken(String token, long sequence) {
     return envelope(
-        ENVIRONMENT_NAME,
+        null,
         DaemonMessageType.HELLO,
         null,
         sequence,
-        "{\"daemonId\":\"d1\",\"protocolVersion\":"
+        "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"capabilityCatalogVersion\":\""
             + EnvironmentCapabilityCatalog.version()
-            + "\",\"gatewayToken\":\""
+            + "\",\"registrationToken\":\""
             + token
             + "\"}");
   }
@@ -1484,7 +1468,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     return ready(sequence, ENVIRONMENT_NAME);
   }
 
-  private String ready(long sequence, EnvironmentName environmentName) {
+  private String ready(long sequence, EnvironmentId environmentName) {
     return envelope(
         environmentName,
         DaemonMessageType.READY,
@@ -1508,7 +1492,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
   }
 
   private String envelope(
-      EnvironmentName environmentName,
+      EnvironmentId environmentName,
       DaemonMessageType messageType,
       String invocationId,
       long sequence,
@@ -1540,7 +1524,88 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
     final JdbcTemplate jdbc = new JdbcTemplate(ds);
     final UUID nodeId = UUID.randomUUID();
-    final LiveEnvironmentRegistry environmentRegistry = new LiveEnvironmentRegistry(jdbc, nodeId);
+    final EnvironmentRegistry environmentRegistry = new EnvironmentRegistry(jdbc, nodeId);
+    final EnvironmentRepository environmentRepository =
+        new EnvironmentRepository() {
+          @Override
+          public List<Environment> listNewestFirst() {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public Environment getById(UUID id) {
+            List<Environment> l =
+                jdbc.query(
+                    "select id, name, registration_token, version, created_at as create_time, updated_at as update_time from environment where id = ?",
+                    (rs, rowNum) -> {
+                      Environment e = new Environment();
+                      e.setId((UUID) rs.getObject("id"));
+                      e.setName(rs.getString("name"));
+                      e.setRegistrationToken(rs.getString("registration_token"));
+                      e.setVersion(rs.getLong("version"));
+                      return e;
+                    },
+                    id);
+            return l.isEmpty() ? null : l.get(0);
+          }
+
+          @Override
+          public Environment getByName(String name) {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public Environment getByRegistrationToken(String token) {
+            List<Environment> l =
+                jdbc.query(
+                    "select id, name, registration_token, version, created_at as create_time, updated_at as update_time from environment where registration_token = ?",
+                    (rs, rowNum) -> {
+                      Environment e = new Environment();
+                      e.setId((UUID) rs.getObject("id"));
+                      e.setName(rs.getString("name"));
+                      e.setRegistrationToken(rs.getString("registration_token"));
+                      e.setVersion(rs.getLong("version"));
+                      return e;
+                    },
+                    token);
+            return l.isEmpty() ? null : l.get(0);
+          }
+
+          @Override
+          public Environment lockById(UUID id) {
+            return getById(id);
+          }
+
+          @Override
+          public Environment lockForKeyShare(UUID id) {
+            return getById(id);
+          }
+
+          @Override
+          public boolean existsByName(String name) {
+            return false;
+          }
+
+          @Override
+          public boolean existsByNameExcludingId(String name, UUID excludeId) {
+            return false;
+          }
+
+          @Override
+          public boolean create(Environment environment) {
+            return false;
+          }
+
+          @Override
+          public boolean updateById(Environment environment, long expectedVersion) {
+            return false;
+          }
+
+          @Override
+          public boolean deleteById(UUID id, long expectedVersion) {
+            return false;
+          }
+        };
     final AtomicReference<Instant> now = new AtomicReference<>();
     final Duration heartbeatTimeout = Duration.ofSeconds(60);
     final EnvironmentDaemonGateway gateway;
@@ -1550,10 +1615,10 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
         EnvironmentCapabilityDescriptor descriptor, EnvironmentReadyListener readyListener) {
       this.descriptor = descriptor;
       EnvironmentGatewayProperties gatewayProperties = new EnvironmentGatewayProperties();
-      gatewayProperties.setDaemonToken(GATEWAY_TOKEN);
       gateway =
           new EnvironmentDaemonGateway(
               environmentRegistry,
+              environmentRepository,
               gatewayProperties,
               new SystemSettingsSnapshot(SystemSettings.DEFAULT),
               new Clock() {

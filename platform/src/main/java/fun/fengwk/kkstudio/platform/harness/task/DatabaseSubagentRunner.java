@@ -165,7 +165,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
             child = resumeChild(runtime, parent, resumeThreadId);
             BranchSettings target =
                 settingsMaterializer.materialize(
-                    selected.name(), child.entryPath().baseSettings().environment());
+                    selected.name(), child.entryPath().baseSettings().workspacePath());
             List<NewThreadCommand> commands =
                 taskCommands(child.entryPath().baseSettings(), target, taskRequest.prompt());
             sourceHeadEntryId = child.thread().headEntryId();
@@ -442,7 +442,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
     int childDepth = parent.depth() + 1;
     BranchSettings settings =
         settingsMaterializer.materialize(
-            subagentType, parent.snapshot().entryPath().baseSettings().environment());
+            subagentType, parent.snapshot().entryPath().baseSettings().workspacePath());
     try {
       AcceptedCommands accepted =
           runtime.acceptCommands(

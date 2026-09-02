@@ -2,15 +2,13 @@ package fun.fengwk.kkstudio.platform.chat.service.impl;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentWorkspacePath;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 
 import java.util.UUID;
 
@@ -48,7 +46,7 @@ public class ChatMutationFactory {
     editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
     chat.setTitle(title);
     chat.setAgentName(parseRequiredAgentName(createDTO.getAgentName()));
-    chat.setEnvironment(parseNullableEnvironmentBinding(createDTO.getEnvironment()));
+    chat.setWorkspacePath(parseNullableWorkspacePath(createDTO.getWorkspacePath()));
     chat.setYoloEnabled(
         createDTO.getYoloEnabled() == null
             ? toolSettingsProvider.get().defaultYolo()
@@ -74,8 +72,8 @@ public class ChatMutationFactory {
     if (updateDTO.getAgentName() != null) {
       chat.setAgentName(parseRequiredAgentName(updateDTO.getAgentName()));
     }
-    if (updateDTO.isEnvironmentProvided()) {
-      chat.setEnvironment(parseNullableEnvironmentBinding(updateDTO.getEnvironment()));
+    if (updateDTO.isWorkspacePathProvided()) {
+      chat.setWorkspacePath(parseNullableWorkspacePath(updateDTO.getWorkspacePath()));
     }
     if (updateDTO.isYoloEnabledProvided()) {
       if (updateDTO.getYoloEnabled() == null) {
@@ -85,26 +83,15 @@ public class ChatMutationFactory {
     }
   }
 
-  /**
-   * 规范化可空的完整 Environment binding：null 表示 clear（无默认环境）；提供时必须为完整 {@code {name, workspacePath}}
-   * 对象（同存同空由对象存在性保证），两字段分别经 {@link EnvironmentName} 与 workspace path validator 严格校验，非法文本按 Chat
-   * 资源契约翻译为 {@link AiValidationException}（HTTP 400）。
-   */
-  private EnvironmentBinding parseNullableEnvironmentBinding(EnvironmentBindingDTO dto) {
-    if (dto == null) {
+  private String parseNullableWorkspacePath(String raw) {
+    if (raw == null) {
       return null;
     }
-    if (dto.getName() == null) {
-      throw new AiValidationException(RESOURCE, "invalid environment: name must not be null");
-    }
-    if (dto.getWorkspacePath() == null) {
-      throw new AiValidationException(
-          RESOURCE, "invalid environment: workspacePath must not be null");
-    }
     try {
-      return new EnvironmentBinding(new EnvironmentName(dto.getName()), dto.getWorkspacePath());
+      return EnvironmentWorkspacePath.requireCanonicalRelativePath(raw);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, "invalid environment: " + error.getMessage());
+      throw new AiValidationException(
+          RESOURCE, "invalid workspacePath: " + error.getMessage(), error);
     }
   }
 

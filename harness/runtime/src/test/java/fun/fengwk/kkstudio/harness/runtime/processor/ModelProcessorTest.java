@@ -120,7 +120,8 @@ import java.util.function.Function;
  */
 class ModelProcessorTest {
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
-  private static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
+  private static final EnvironmentBinding ENV_ID =
+      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
   private static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
   private static final Duration FALLBACK_DELAY = Duration.ofSeconds(7);
@@ -3233,7 +3234,10 @@ class ModelProcessorTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings(ENV_ID, "agent", new ModelSelection("provider", "model", "v1"));
+    return new BranchSettings(
+        ENV_ID == null ? null : ENV_ID.workspacePath(),
+        "agent",
+        new ModelSelection("provider", "model", "v1"));
   }
 
   static final class FakeGateway implements ModelGateway {

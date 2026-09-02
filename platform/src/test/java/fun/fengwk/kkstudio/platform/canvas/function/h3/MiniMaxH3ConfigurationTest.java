@@ -85,33 +85,17 @@ class MiniMaxH3ConfigurationTest {
         IllegalArgumentException.class,
         () ->
             new SystemSettings.MiniMaxH3(
-                true,
-                null,
-                "h3-prompt",
-                600_000L,
-                "http://127.0.0.1:8188",
-                10_000L,
-                30_000L,
-                1_000L,
-                30_000L));
+                true, null, 600_000L, "http://127.0.0.1:8188", 10_000L, 30_000L, 1_000L, 30_000L));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new SystemSettings.MiniMaxH3(
-                true, "h3-agent", "h3-prompt", 600_000L, null, 10_000L, 30_000L, 1_000L, 30_000L));
+                true, "h3-agent", 600_000L, null, 10_000L, 30_000L, 1_000L, 30_000L));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new SystemSettings.MiniMaxH3(
-                true,
-                "h3-agent",
-                "h3-prompt",
-                0L,
-                "http://127.0.0.1:8188",
-                10_000L,
-                30_000L,
-                1_000L,
-                30_000L));
+                true, "h3-agent", 0L, "http://127.0.0.1:8188", 10_000L, 30_000L, 1_000L, 30_000L));
     // comfyPollIntervalMillis 必须严格小于 comfyMaxWaitMillis
     assertThrows(
         IllegalArgumentException.class,
@@ -119,7 +103,6 @@ class MiniMaxH3ConfigurationTest {
             new SystemSettings.MiniMaxH3(
                 true,
                 "h3-agent",
-                "h3-prompt",
                 600_000L,
                 "http://127.0.0.1:8188",
                 10_000L,
@@ -146,14 +129,6 @@ class MiniMaxH3ConfigurationTest {
 
   private static SystemSettings.MiniMaxH3 h3Settings(boolean enabled) {
     return new SystemSettings.MiniMaxH3(
-        enabled,
-        "h3-agent",
-        "h3-prompt",
-        600_000L,
-        "http://127.0.0.1:8188",
-        10_000L,
-        30_000L,
-        1_000L,
-        30_000L);
+        enabled, "h3-agent", 600_000L, "http://127.0.0.1:8188", 10_000L, 30_000L, 1_000L, 30_000L);
   }
 }

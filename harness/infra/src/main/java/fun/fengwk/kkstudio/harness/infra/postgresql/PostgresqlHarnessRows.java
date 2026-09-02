@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.infra.postgresql;
 
 import org.springframework.jdbc.core.RowMapper;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
@@ -142,7 +142,7 @@ final class PostgresqlHarnessRows {
               resultSet.getLong("wake_version"),
               resultSet.getString("lease_token"),
               nullableInstant(resultSet, "lease_until"),
-              decodeNullableEnvironmentName(resultSet.getString("required_environment_name")));
+              nullableEnvironmentId(resultSet.getObject("required_environment_id")));
 
   private PostgresqlHarnessRows() {}
 
@@ -154,8 +154,8 @@ final class PostgresqlHarnessRows {
     return HarnessStoreTime.requireMillisecondPrecision(instant);
   }
 
-  private static EnvironmentName decodeNullableEnvironmentName(String value) {
-    return value == null ? null : new EnvironmentName(value);
+  private static EnvironmentId nullableEnvironmentId(Object value) {
+    return value == null ? null : EnvironmentId.of((UUID) value);
   }
 
   private static Instant instant(ResultSet resultSet, String column) throws SQLException {

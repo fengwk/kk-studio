@@ -52,24 +52,6 @@ class SystemSettingsSchemaProviderTest {
             .get().getSections().stream().map(SystemSettingsSchemaDTO.SectionDTO::getKey).toList());
   }
 
-  @Test
-  void promptEnvironmentNameUpperBoundMatchesEnvironmentNameMaxLength() {
-    // requireOptionalEnvironmentName 委托 EnvironmentName.MAX_LENGTH=64；schema 的 max 必须
-    // 与领域上界一致，否则 UI 允许输入超长值而保存被拒。
-    SystemSettingsSchemaDTO schema = new SystemSettingsSchemaProvider().get();
-    SystemSettingsSchemaDTO.FieldDTO field =
-        schema.getSections().stream()
-            .filter(section -> section.getKey().equals("integrations"))
-            .flatMap(section -> section.getGroups().stream())
-            .flatMap(group -> group.getFields().stream())
-            .filter(
-                candidate ->
-                    candidate.getPath().equals("integrations.minimaxH3.promptEnvironmentName"))
-            .findFirst()
-            .orElseThrow();
-    assertEquals(Integer.valueOf(64), field.getMax());
-  }
-
   private static void collectRecordLeaves(Class<?> type, String prefix, Set<String> paths) {
     for (RecordComponent component : type.getRecordComponents()) {
       String path = prefix.isEmpty() ? component.getName() : prefix + "." + component.getName();

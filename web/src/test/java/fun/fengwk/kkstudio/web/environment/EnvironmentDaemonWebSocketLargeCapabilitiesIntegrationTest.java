@@ -6,12 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
@@ -24,7 +26,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -45,13 +47,14 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@code READY}（skills）帧。
  *
  * <p>若未调高缓冲区配置，内嵌 Tomcat 在收到超长帧时会立刻以 close code 1009 关闭连接，导致实时注册表永远无法进入 READY。本测试发送一个携带远超默认阈值的厚重
- * skills payload 的 {@code READY} 帧，并断言 {@link LiveEnvironmentRegistry#isReady(EnvironmentName)}
- * 在截止时间内变为 {@code true}。任何未来删除或弱化缓冲区初始化逻辑的改动都会在此处暴露，表现为注册表始终不进入 READY 且伴随 close code 1009。
+ * skills payload 的 {@code READY} 帧，并断言 {@link EnvironmentRegistry#isReady(EnvironmentId)} 在截止时间内变为
+ * {@code true}。任何未来删除或弱化缓冲区初始化逻辑的改动都会在此处暴露，表现为注册表始终不进入 READY 且伴随 close code 1009。
  */
 class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPostgresTestSupport {
 
-  private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("env-large-caps");
-  private static final String DAEMON_TOKEN = "test-daemon-token";
+  private static final EnvironmentId ENVIRONMENT_ID =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+  private static final String REGISTRATION_TOKEN = "test-registration-token";
   private static final int TOMCAT_DEFAULT_TEXT_BUFFER_BYTES = 8 * 1024;
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
@@ -59,8 +62,17 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   @LocalServerPort private int port;
 
-  @Autowired private LiveEnvironmentRegistry registry;
+  @Autowired private EnvironmentRegistry registry;
   @Autowired private SystemSettingsSnapshot snapshot;
+  @Autowired private JdbcTemplate jdbcTemplate;
+
+  @BeforeEach
+  void seedEnvironment() {
+    jdbcTemplate.update(
+        "insert into environment (id, name, registration_token, version) values (?, 'env-large-caps', ?, 0) on conflict (id) do nothing",
+        ENVIRONMENT_ID.value(),
+        REGISTRATION_TOKEN);
+  }
 
   @MockitoBean private ResourceStore resourceStore;
   // 该 WebSocket 测试只验证握手边界，因此隔离 READY 后的 durable dispatcher 唤醒。
@@ -129,12 +141,12 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
     Duration heartbeatTimeout =
         Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis());
     while (System.nanoTime() < deadlineNanos) {
-      if (registry.isReady(ENVIRONMENT_NAME, Instant.now(), heartbeatTimeout)) {
+      if (registry.isReady(ENVIRONMENT_ID, Instant.now(), heartbeatTimeout)) {
         return true;
       }
       Thread.sleep(50);
     }
-    return registry.isReady(ENVIRONMENT_NAME, Instant.now(), heartbeatTimeout);
+    return registry.isReady(ENVIRONMENT_ID, Instant.now(), heartbeatTimeout);
   }
 
   private static String readMessageType(String envelopeJson) throws Exception {
@@ -168,25 +180,24 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.HELLO,
-        ENVIRONMENT_NAME,
+        null,
         null,
         sequence,
         "{"
-            + "\"daemonId\":\"daemon-large-caps\","
             + "\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ","
             + "\"capabilityCatalogVersion\":\""
             + EnvironmentCapabilityCatalog.version()
             + "\","
-            + "\"gatewayToken\":\""
-            + DAEMON_TOKEN
+            + "\"registrationToken\":\""
+            + REGISTRATION_TOKEN
             + "\"}");
   }
 
   private static DaemonEnvelope readyEnvelope(String payloadJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION, DaemonMessageType.READY, ENVIRONMENT_NAME, null, 1, payloadJson);
+        DaemonProtocol.VERSION, DaemonMessageType.READY, ENVIRONMENT_ID, null, 1, payloadJson);
   }
 
   private static final class FrameListener implements WebSocket.Listener {

@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
@@ -35,11 +35,13 @@ import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonConnect
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.platform.environment.query.EnvironmentQueryCoordinator;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
+import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -57,11 +59,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** 验证基于 PostgreSQL 的多节点 Environment 路由租约、原子认领、状态围栏与跨节点只读 environment_query 信箱。 */
+/** 验证基于 PostgreSQL 的多节点 Environment 路由租约、原子认领、状态围栏与跨节点只读弱交付目录查询信箱。 */
 class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
-  private static final EnvironmentName DEV = new EnvironmentName("dev-env");
-  private static final String GATEWAY_TOKEN = "test-token";
+  private static final EnvironmentId DEV =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+  private static final String REGISTRATION_TOKEN = "test-token";
   private static final Instant NOW = Instant.parse("2026-08-30T10:00:00Z");
   private static final Duration LEASE_DURATION = Duration.ofSeconds(60);
   private static final DaemonCapabilities CAPABILITIES =
@@ -80,12 +83,13 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   private JdbcTemplate jdbcTemplate;
   private UUID node1;
   private UUID node2;
-  private LiveEnvironmentRegistry registryNode1;
-  private LiveEnvironmentRegistry registryNode2;
+  private EnvironmentRegistry registryNode1;
+  private EnvironmentRegistry registryNode2;
   private EnvironmentQueryCoordinator coordinatorNode1;
   private EnvironmentQueryCoordinator coordinatorNode2;
   private EnvironmentDaemonGateway gatewayNode1;
   private EnvironmentDaemonGateway gatewayNode2;
+  private EnvironmentRepository environmentRepository;
 
   @BeforeEach
   void setUp() throws SQLException {
@@ -99,26 +103,125 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
     this.jdbcTemplate = new JdbcTemplate(ds);
 
+    // 播种稳定 environment 卡片
+    jdbcTemplate.update(
+        "insert into environment (id, name, registration_token, version) values (?, 'dev-env', ?, 0)",
+        DEV.value(),
+        REGISTRATION_TOKEN);
+
+    this.environmentRepository =
+        new EnvironmentRepository() {
+          @Override
+          public List<Environment> listNewestFirst() {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public Environment getById(UUID id) {
+            List<Environment> list =
+                jdbcTemplate.query(
+                    "select id, name, registration_token, version, created_at as create_time, updated_at as update_time from environment where id = ?",
+                    (rs, rowNum) -> {
+                      Environment e = new Environment();
+                      e.setId((UUID) rs.getObject("id"));
+                      e.setName(rs.getString("name"));
+                      e.setRegistrationToken(rs.getString("registration_token"));
+                      e.setVersion(rs.getLong("version"));
+                      return e;
+                    },
+                    id);
+            return list.isEmpty() ? null : list.get(0);
+          }
+
+          @Override
+          public Environment getByName(String name) {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public Environment getByRegistrationToken(String token) {
+            List<Environment> list =
+                jdbcTemplate.query(
+                    "select id, name, registration_token, version, created_at as create_time, updated_at as update_time from environment where registration_token = ?",
+                    (rs, rowNum) -> {
+                      Environment e = new Environment();
+                      e.setId((UUID) rs.getObject("id"));
+                      e.setName(rs.getString("name"));
+                      e.setRegistrationToken(rs.getString("registration_token"));
+                      e.setVersion(rs.getLong("version"));
+                      return e;
+                    },
+                    token);
+            return list.isEmpty() ? null : list.get(0);
+          }
+
+          @Override
+          public Environment lockById(UUID id) {
+            return getById(id);
+          }
+
+          @Override
+          public Environment lockForKeyShare(UUID id) {
+            return getById(id);
+          }
+
+          @Override
+          public boolean existsByName(String name) {
+            return false;
+          }
+
+          @Override
+          public boolean existsByNameExcludingId(String name, UUID excludeId) {
+            return false;
+          }
+
+          @Override
+          public boolean create(Environment environment) {
+            return false;
+          }
+
+          @Override
+          public boolean updateById(Environment environment, long expectedVersion) {
+            return false;
+          }
+
+          @Override
+          public boolean deleteById(UUID id, long expectedVersion) {
+            return false;
+          }
+        };
+
     this.node1 = UUID.randomUUID();
     this.node2 = UUID.randomUUID();
 
-    this.registryNode1 = new LiveEnvironmentRegistry(jdbcTemplate, node1);
-    this.registryNode2 = new LiveEnvironmentRegistry(jdbcTemplate, node2);
+    this.registryNode1 = new EnvironmentRegistry(jdbcTemplate, node1);
+    this.registryNode2 = new EnvironmentRegistry(jdbcTemplate, node2);
 
     this.coordinatorNode1 = new EnvironmentQueryCoordinator(jdbcTemplate, OBJECT_MAPPER, node1);
     this.coordinatorNode2 = new EnvironmentQueryCoordinator(jdbcTemplate, OBJECT_MAPPER, node2);
 
     EnvironmentGatewayProperties properties = new EnvironmentGatewayProperties();
-    properties.setDaemonToken(GATEWAY_TOKEN);
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
 
     this.gatewayNode1 =
         new EnvironmentDaemonGateway(
-            registryNode1, properties, snapshot, Clock.systemUTC(), env -> {}, coordinatorNode1);
+            registryNode1,
+            environmentRepository,
+            properties,
+            snapshot,
+            Clock.systemUTC(),
+            env -> {},
+            coordinatorNode1);
 
     this.gatewayNode2 =
         new EnvironmentDaemonGateway(
-            registryNode2, properties, snapshot, Clock.systemUTC(), env -> {}, coordinatorNode2);
+            registryNode2,
+            environmentRepository,
+            properties,
+            snapshot,
+            Clock.systemUTC(),
+            env -> {},
+            coordinatorNode2);
   }
 
   @Test
@@ -126,99 +229,85 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     FakeConnection conn1 = new FakeConnection("conn-1");
     gatewayNode1.open(conn1);
 
-    gatewayNode1.receive(conn1.connectionId(), hello(0, "daemon-1", DEV));
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
 
-    LiveEnvironment env = registryNode1.find(DEV).orElseThrow();
+    EnvironmentConnection env = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
-    assertEquals("daemon-1", env.daemonId());
     assertEquals(node1, env.ownerNodeId());
-    assertNotNull(env.routeToken());
+    assertNotNull(env.leaseToken());
 
     // 检查是否回复 WELCOME
     List<DaemonEnvelope> envelopes = conn1.envelopes();
     assertEquals(1, envelopes.size());
     assertEquals(DaemonMessageType.WELCOME, envelopes.get(0).messageType());
+    assertEquals(DEV, envelopes.get(0).environmentId());
 
     // 发送 READY
     gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
 
-    LiveEnvironment readyEnv = registryNode1.find(DEV).orElseThrow();
+    EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
     assertNotNull(readyEnv.daemonCapabilities());
   }
 
   @Test
-  void conflictingHelloFromDifferentDaemonIdFailsTerminal() {
-    // 1. Node 1 成功绑定 DEV (daemon-1)
-    FakeConnection conn1 = new FakeConnection("conn-1");
+  void invalidRegistrationTokenFailsTerminal() {
+    FakeConnection conn1 = new FakeConnection("conn-invalid");
     gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, "daemon-1", DEV));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    gatewayNode1.receive(conn1.connectionId(), hello(0, "wrong-token"));
 
-    // 2. Node 2 收到同一 DEV 的 HELLO (daemon-2)
-    FakeConnection conn2 = new FakeConnection("conn-2");
-    gatewayNode2.open(conn2);
-    gatewayNode2.receive(conn2.connectionId(), hello(0, "daemon-2", DEV));
-
-    // 检查 conn2 是否收到 ERROR (ENVIRONMENT_NAME_CONFLICT) 并被关闭
-    List<DaemonEnvelope> envelopes2 = conn2.envelopes();
-    assertEquals(1, envelopes2.size());
-    assertEquals(DaemonMessageType.ERROR, envelopes2.get(0).messageType());
+    List<DaemonEnvelope> envelopes = conn1.envelopes();
+    assertEquals(1, envelopes.size());
+    assertEquals(DaemonMessageType.ERROR, envelopes.get(0).messageType());
     assertTrue(
-        envelopes2
-            .get(0)
-            .payloadJson()
-            .contains(DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT));
-    assertTrue(conn2.closed);
-
-    // Node 1 的路由依然完好
-    LiveEnvironment env = registryNode1.find(DEV).orElseThrow();
-    assertEquals(node1, env.ownerNodeId());
-    assertEquals("daemon-1", env.daemonId());
+        envelopes.get(0).payloadJson().contains(DaemonProtocol.ERROR_CODE_REGISTRATION_REJECTED));
+    assertTrue(conn1.closed);
   }
 
   @Test
-  void retryLaterFromSameDaemonIdWhenActive() {
-    // 1. Node 1 成功绑定 DEV (daemon-1)
+  void retryLaterWhenActiveRouteExists() {
+    // 1. Node 1 成功绑定 DEV
     FakeConnection conn1 = new FakeConnection("conn-1");
     gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, "daemon-1", DEV));
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
     gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
 
-    // 2. 另一个连接（或 Node 2）使用相同的 daemon-1 尝试绑定 DEV
+    // 2. 另一个连接（如 Node 2）尝试绑定 DEV -> RETRY_LATER
     FakeConnection conn2 = new FakeConnection("conn-2");
     gatewayNode2.open(conn2);
-    gatewayNode2.receive(conn2.connectionId(), hello(0, "daemon-1", DEV));
+    gatewayNode2.receive(conn2.connectionId(), hello(0, REGISTRATION_TOKEN));
 
-    // 检查 conn2 是否收到 ERROR (RETRY_LATER)
     List<DaemonEnvelope> envelopes2 = conn2.envelopes();
     assertEquals(1, envelopes2.size());
     assertEquals(DaemonMessageType.ERROR, envelopes2.get(0).messageType());
     assertTrue(envelopes2.get(0).payloadJson().contains(DaemonProtocol.ERROR_CODE_RETRY_LATER));
     assertTrue(conn2.closed);
+
+    // Node 1 的路由依然完好
+    EnvironmentConnection env = registryNode1.find(DEV).orElseThrow();
+    assertEquals(node1, env.ownerNodeId());
   }
 
   @Test
-  void expiredLeaseCanBeTakenOverByNewDaemon() {
+  void expiredLeaseCanBeTakenOver() {
     // 1. Node 1 绑定 DEV
     FakeConnection conn1 = new FakeConnection("conn-1");
     gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, "daemon-1", DEV));
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
     gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     // 2. 模拟租约在数据库中过期
     jdbcTemplate.update(
-        "update live_environment set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_name = ?",
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
         DEV.value());
 
-    // 3. Node 2 上的 daemon-2 尝试绑定 DEV -> 成功接管
+    // 3. Node 2 尝试绑定 DEV -> 成功接管
     FakeConnection conn2 = new FakeConnection("conn-2");
     gatewayNode2.open(conn2);
-    gatewayNode2.receive(conn2.connectionId(), hello(0, "daemon-2", DEV));
+    gatewayNode2.receive(conn2.connectionId(), hello(0, REGISTRATION_TOKEN));
 
-    LiveEnvironment env = registryNode2.find(DEV).orElseThrow();
+    EnvironmentConnection env = registryNode2.find(DEV).orElseThrow();
     assertEquals(node2, env.ownerNodeId());
-    assertEquals("daemon-2", env.daemonId());
     assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
 
     // 检查 conn2 收到 WELCOME
@@ -230,11 +319,11 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void routeFenceRejectsStaleTokenUpdates() {
     FakeConnection conn1 = new FakeConnection("conn-1");
     gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, "daemon-1", DEV));
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
 
-    // 在数据库中篡改 route_token
+    // 在数据库中篡改 lease_token
     jdbcTemplate.update(
-        "update live_environment set route_token = ? where environment_name = ?",
+        "update environment_connection set lease_token = ? where environment_id = ?",
         UUID.randomUUID(),
         DEV.value());
 
@@ -248,19 +337,19 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void disconnectPreservesConnectingWithGracePeriod() {
     FakeConnection conn1 = new FakeConnection("conn-1");
     gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, "daemon-1", DEV));
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
     gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
 
-    LiveEnvironment readyEnv = registryNode1.find(DEV).orElseThrow();
+    EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
 
     // 断开连接
     gatewayNode1.close(conn1.connectionId());
 
-    LiveEnvironment disconnectedEnv = registryNode1.find(DEV).orElseThrow();
+    EnvironmentConnection disconnectedEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.CONNECTING, disconnectedEnv.status());
     assertNull(disconnectedEnv.daemonCapabilities());
-    assertEquals(readyEnv.routeToken(), disconnectedEnv.routeToken());
+    assertEquals(readyEnv.leaseToken(), disconnectedEnv.leaseToken());
     assertEquals(node1, disconnectedEnv.ownerNodeId());
   }
 
@@ -268,7 +357,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void queryLocalRouteDirectly() throws Exception {
     FakeConnection conn1 = new FakeConnection("conn-1");
     gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, "daemon-1", DEV));
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
     gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     CompletableFuture<EnvironmentDirectoryListResult> future =
@@ -318,7 +407,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     // 1. Node 1 拥有 DEV 环境
     FakeConnection conn1 = new FakeConnection("conn-1");
     gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, "daemon-1", DEV));
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
     gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     // 2. Node 2 发起对 DEV 的目录查询
@@ -327,8 +416,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     assertFalse(future.isDone());
 
-    // 3. Node 1 收到 REQUEST_CHANNEL 通知（或 resync）
-    coordinatorNode1.onRequestNotification(DEV.value());
+    // 3. Node 1 收到 REQUEST_CHANNEL 通知
+    coordinatorNode1.onRequestNotification(DEV.toString());
 
     // 检查 Node 1 上的 daemon 是否收到了 INVOKE 帧
     List<DaemonEnvelope> envelopes = conn1.envelopes();
@@ -367,7 +456,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     // 5. Node 2 收到 RESPONSE_CHANNEL 通知
     List<UUID> queryIds =
         jdbcTemplate.query(
-            "select id from environment_query where environment_name = ?",
+            "select id from environment_directory_query where environment_id = ?",
             (rs, rowNum) -> (UUID) rs.getObject("id"),
             DEV.value());
     assertEquals(1, queryIds.size());
@@ -375,81 +464,41 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     coordinatorNode2.onResponseNotification(queryId.toString());
 
-    // 6. Node 2 的 future 成功解析
+    // 6. Node 2 的 future 成功解析（并且由 DELETE RETURNING 消费后，数据库行被物理删除）
     EnvironmentDirectoryListResult result = future.get(5, TimeUnit.SECONDS);
     EnvironmentDirectoryListResult.Loaded loaded =
         assertInstanceOf(EnvironmentDirectoryListResult.Loaded.class, result);
     assertEquals("src", loaded.listing().getPath());
     assertEquals("Main.java", loaded.listing().getEntries().get(0).getName());
-  }
 
-  @Test
-  void crossNodeMailboxSerializesQueriesPerEnvironment() throws Exception {
-    FakeConnection conn1 = new FakeConnection("conn-serial");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, "daemon-1", DEV));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
-
-    CompletableFuture<EnvironmentDirectoryListResult> rootFuture =
-        gatewayNode2.listDirectory(DEV, ".", Duration.ofSeconds(5));
-    CompletableFuture<EnvironmentDirectoryListResult> srcFuture =
-        gatewayNode2.listDirectory(DEV, "src", Duration.ofSeconds(5));
-
-    // 单次通知应启动 drain，但同一 Environment 在首个 terminal 前只能发送一个 INVOKE。
-    coordinatorNode1.onRequestNotification(DEV.value());
-    assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
-        messageTypes(conn1.envelopes()));
-    DaemonEnvelope firstInvoke = conn1.envelopes().get(1);
-
-    completeDirectoryInvocation(conn1, firstInvoke, 2);
-
-    assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.INVOKE),
-        messageTypes(conn1.envelopes()));
-    DaemonEnvelope secondInvoke = conn1.envelopes().get(2);
-    assertFalse(firstInvoke.invocationId().equals(secondInvoke.invocationId()));
-
-    completeDirectoryInvocation(conn1, secondInvoke, 3);
-
-    List<UUID> queryIds =
-        jdbcTemplate.query(
-            "select id from environment_query where environment_name = ? order by created_at, id",
-            (rs, rowNum) -> (UUID) rs.getObject("id"),
-            DEV.value());
-    assertEquals(2, queryIds.size());
-    queryIds.forEach(id -> coordinatorNode2.onResponseNotification(id.toString()));
-
-    EnvironmentDirectoryListResult.Loaded root =
-        assertInstanceOf(
-            EnvironmentDirectoryListResult.Loaded.class, rootFuture.get(5, TimeUnit.SECONDS));
-    EnvironmentDirectoryListResult.Loaded src =
-        assertInstanceOf(
-            EnvironmentDirectoryListResult.Loaded.class, srcFuture.get(5, TimeUnit.SECONDS));
-    assertEquals(".", root.listing().getPath());
-    assertEquals("src", src.listing().getPath());
+    // 确认已 DELETE RETURNING 消费
+    Integer remainingCount =
+        jdbcTemplate.queryForObject(
+            "select count(1) from environment_directory_query where id = ?",
+            Integer.class,
+            queryId);
+    assertEquals(0, remainingCount);
   }
 
   @Test
   void staleOwnerCannotClaimCrossNodeQuery() {
-    // 1. Node 1 曾经拥有 DEV 环境
     FakeConnection conn1 = new FakeConnection("conn-1");
     gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, "daemon-1", DEV));
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
     gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
 
-    // 2. Node 2 发起查询
+    // Node 2 发起查询
     CompletableFuture<EnvironmentDirectoryListResult> future =
         gatewayNode2.listDirectory(DEV, ".", Duration.ofSeconds(5));
 
-    // 3. 模拟 Node 1 租约在数据库中过期/被接管
+    // 模拟 Node 1 租约在数据库中被接管 (owner_node_id 改变)
     jdbcTemplate.update(
-        "update live_environment set owner_node_id = ? where environment_name = ?",
+        "update environment_connection set owner_node_id = ? where environment_id = ?",
         node2,
         DEV.value());
 
     // Node 1 收到通知尝试认领 -> 0 rows claimed
-    coordinatorNode1.onRequestNotification(DEV.value());
+    coordinatorNode1.onRequestNotification(DEV.toString());
 
     // Node 1 的 daemon 不会收到 INVOKE 帧
     assertEquals(1, conn1.envelopes().size()); // 仅 WELCOME
@@ -457,10 +506,10 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void queryTimeoutAndExpiry() throws Exception {
+  void queryTimeoutAndCleanup() throws Exception {
     FakeConnection conn1 = new FakeConnection("conn-1");
     gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, "daemon-1", DEV));
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
     gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     // 发起超短超时查询
@@ -472,52 +521,49 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
     assertEquals(EnvironmentDirectoryFailureCode.TIMEOUT, failed.code());
 
-    // 模拟数据库中将 expires_at 设为过去，并触发 resync 清理
-    jdbcTemplate.update(
-        "update environment_query set created_at = statement_timestamp() - interval '100 seconds', expires_at = statement_timestamp() - interval '1 second'");
-    coordinatorNode2.onResync();
-
-    String status =
-        jdbcTemplate.queryForObject("select status from environment_query limit 1", String.class);
-    assertEquals("EXPIRED", status);
+    // 超时后行已被直接 DELETE
+    Integer count =
+        jdbcTemplate.queryForObject(
+            "select count(1) from environment_directory_query where environment_id = ?",
+            Integer.class,
+            DEV.value());
+    assertEquals(0, count);
   }
 
-  private static String hello(long sequence, String daemonId, EnvironmentName environmentName) {
+  private static String hello(long sequence, String token) {
     return ENVELOPE_CODEC.encode(
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.HELLO,
-            environmentName,
+            null,
             null,
             sequence,
-            "{\"daemonId\":\""
-                + daemonId
-                + "\",\"protocolVersion\":"
+            "{\"protocolVersion\":"
                 + DaemonProtocol.VERSION
                 + ",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
-                + "\",\"gatewayToken\":\""
-                + GATEWAY_TOKEN
+                + "\",\"registrationToken\":\""
+                + token
                 + "\"}"));
   }
 
-  private static String ready(long sequence, EnvironmentName environmentName) {
+  private static String ready(long sequence, EnvironmentId environmentId) {
     return ENVELOPE_CODEC.encode(
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.READY,
-            environmentName,
+            environmentId,
             null,
             sequence,
             CAPABILITIES_CODEC.encode(CAPABILITIES)));
   }
 
-  private static String heartbeat(long sequence, EnvironmentName environmentName) {
+  private static String heartbeat(long sequence, EnvironmentId environmentId) {
     return ENVELOPE_CODEC.encode(
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.HEARTBEAT,
-            environmentName,
+            environmentId,
             null,
             sequence,
             "{}"));
@@ -597,10 +643,6 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     private synchronized List<DaemonEnvelope> envelopes() {
       return List.copyOf(envelopes);
     }
-  }
-
-  private static List<DaemonMessageType> messageTypes(List<DaemonEnvelope> envelopes) {
-    return envelopes.stream().map(DaemonEnvelope::messageType).toList();
   }
 
   private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();

@@ -46,7 +46,7 @@ class CompactionSummaryAssemblerTest {
   private static final Instant NOW = Instant.parse("2026-08-20T00:00:00Z");
   private static final BranchSettings SETTINGS =
       new BranchSettings(
-          EnvironmentBindings.binding("env-1"),
+          EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111").workspacePath(),
           "agent",
           new ModelSelection("provider", "model", "v1"));
 

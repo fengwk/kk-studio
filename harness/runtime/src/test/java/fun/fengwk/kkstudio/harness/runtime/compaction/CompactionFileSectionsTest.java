@@ -48,7 +48,7 @@ class CompactionFileSectionsTest {
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
   private static final BranchSettings SETTINGS =
       new BranchSettings(
-          EnvironmentBindings.binding("env-1"),
+          EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111").workspacePath(),
           "agent",
           new ModelSelection("provider", "model", "v1"));
 

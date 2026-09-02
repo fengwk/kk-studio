@@ -152,7 +152,7 @@ class ModelRequestSpecTest {
   @Test
   void requiresMatchingEnvironmentRoutes() {
     // Environment tool 与 skill source 必须落在同一 environment，避免一次请求混用多个 workspace。
-    EnvironmentBinding other = EnvironmentBindings.binding("env-2");
+    EnvironmentBinding other = EnvironmentBindings.binding("22222222-2222-2222-2222-222222222222");
     assertThrows(
         IllegalArgumentException.class,
         () ->
