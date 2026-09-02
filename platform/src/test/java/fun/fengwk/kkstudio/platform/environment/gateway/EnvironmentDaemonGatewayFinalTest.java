@@ -76,6 +76,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -1038,6 +1039,106 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     assertEquals(
         LiveEnvironmentStatus.CONNECTING,
         fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
+  }
+
+  /**
+   * 测试意图：模拟在 gateway 预读出有效 token 对应的 Environment 后、真正执行 tryAcquire 前， 数据库中的 token 已被并发轮换；此时
+   * tryAcquire 必须原子校验出 token 失效并返回 Rejected， Gateway 必须发送 REGISTRATION_REJECTED
+   * 错误包并关闭连接，且不得创建或认领连接路由。
+   */
+  @Test
+  void helloRejectedWhenTokenRotatedBetweenPreReadAndAtomicAcquire() {
+    Fixture fixture = fixture();
+    AtomicBoolean tokenRotated = new AtomicBoolean(false);
+    EnvironmentRepository repoWrapper =
+        new EnvironmentRepository() {
+          @Override
+          public Environment getByRegistrationToken(String token) {
+            Environment env = fixture.environmentRepository.getByRegistrationToken(token);
+            if (env != null && !tokenRotated.get()) {
+              tokenRotated.set(true);
+              // 模拟在此刻并发完成 token 轮换并写入数据库
+              fixture.jdbc.update(
+                  "update environment set registration_token = 'rotated-new-token' where id = ?",
+                  env.getId());
+            }
+            return env;
+          }
+
+          @Override
+          public Environment getById(UUID id) {
+            return fixture.environmentRepository.getById(id);
+          }
+
+          @Override
+          public Environment lockById(UUID id) {
+            return fixture.environmentRepository.lockById(id);
+          }
+
+          @Override
+          public Environment lockForKeyShare(UUID id) {
+            return fixture.environmentRepository.lockForKeyShare(id);
+          }
+
+          @Override
+          public List<Environment> listNewestFirst() {
+            return fixture.environmentRepository.listNewestFirst();
+          }
+
+          @Override
+          public Environment getByName(String name) {
+            return fixture.environmentRepository.getByName(name);
+          }
+
+          @Override
+          public boolean existsByName(String name) {
+            return false;
+          }
+
+          @Override
+          public boolean existsByNameExcludingId(String name, UUID excludeId) {
+            return false;
+          }
+
+          @Override
+          public boolean create(Environment environment) {
+            return false;
+          }
+
+          @Override
+          public boolean updateById(Environment environment, long expectedVersion) {
+            return false;
+          }
+
+          @Override
+          public boolean deleteById(UUID id, long expectedVersion) {
+            return false;
+          }
+        };
+
+    EnvironmentDaemonGateway raceGateway =
+        new EnvironmentDaemonGateway(
+            fixture.environmentRegistry,
+            repoWrapper,
+            new EnvironmentGatewayProperties(),
+            new SystemSettingsSnapshot(SystemSettings.DEFAULT),
+            Clock.systemUTC(),
+            envId -> {});
+
+    FakeConnection conn = new FakeConnection("conn-race");
+    raceGateway.open(conn);
+    raceGateway.receive(conn.connectionId(), hello(0));
+
+    // 连接必须被关闭
+    assertTrue(conn.closed);
+    // 收到且仅收到 ERROR 包（REGISTRATION_REJECTED），不得收到 WELCOME
+    assertEquals(1, conn.envelopes().size());
+    DaemonEnvelope errorEnv = conn.envelopes().get(0);
+    assertEquals(DaemonMessageType.ERROR, errorEnv.messageType());
+    assertTrue(errorEnv.payloadJson().contains(DaemonProtocol.ERROR_CODE_REGISTRATION_REJECTED));
+
+    // 数据库中绝不能存在该环境的 connection 记录
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
   }
 
   @Test

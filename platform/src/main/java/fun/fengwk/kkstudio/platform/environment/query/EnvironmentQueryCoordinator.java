@@ -90,6 +90,7 @@ public class EnvironmentQueryCoordinator {
           result = ?::jsonb
       where id = ?
         and status = 'RUNNING'
+        and deadline_at > statement_timestamp()
       """;
 
   private static final String FAIL_QUERY_SQL =
@@ -100,6 +101,7 @@ public class EnvironmentQueryCoordinator {
           failure_message = ?
       where id = ?
         and status = 'RUNNING'
+        and deadline_at > statement_timestamp()
       """;
 
   private static final String DELETE_AND_FETCH_TERMINAL_SQL =
@@ -391,7 +393,15 @@ public class EnvironmentQueryCoordinator {
     }
 
     long remainingMillis = Duration.between(Instant.now(), query.deadlineAt).toMillis();
-    Duration timeout = Duration.ofMillis(Math.max(500L, remainingMillis));
+    if (remainingMillis <= 0) {
+      failQuery(
+          query.id,
+          EnvironmentDirectoryFailureCode.TIMEOUT,
+          "directory listing deadline expired before local execution");
+      onFinished.run();
+      return;
+    }
+    Duration timeout = Duration.ofMillis(remainingMillis);
 
     CompletableFuture<EnvironmentDirectoryListResult> execution;
     try {

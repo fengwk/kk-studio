@@ -672,7 +672,27 @@ public class EnvironmentDaemonGateway
     }
     EnvironmentId environmentId = EnvironmentId.of(environment.getId());
 
-    BindResult bind = environmentRegistry.tryAcquire(environmentId, heartbeatTimeout());
+    ConnectionState existing;
+    synchronized (this) {
+      existing = environmentConnections.get(environmentId);
+      if (existing != null && existing.connection.isOpen()) {
+        EnvironmentConnection liveConn = environmentRegistry.find(environmentId).orElse(null);
+        if (liveConn != null
+            && liveConn.isOnline(clock.instant())
+            && Objects.equals(liveConn.leaseToken(), existing.leaseToken)) {
+          throw new DaemonRetryLaterException(
+              "environment "
+                  + environmentId
+                  + " is actively held by another connection on this node");
+        }
+      }
+    }
+
+    BindResult bind =
+        environmentRegistry.tryAcquire(environmentId, registrationToken, heartbeatTimeout());
+    if (bind instanceof BindResult.Rejected rejected) {
+      throw new RegistrationRejectedException(rejected.message());
+    }
     if (bind instanceof BindResult.RetryLater retryLater) {
       throw new DaemonRetryLaterException(retryLater.message());
     }

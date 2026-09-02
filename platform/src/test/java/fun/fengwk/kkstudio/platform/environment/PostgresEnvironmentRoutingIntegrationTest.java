@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.environment;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -352,6 +353,52 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     assertEquals(node1, disconnectedEnv.ownerNodeId());
   }
 
+  /**
+   * 测试意图：证明连接断开进入宽限期后，同节点 daemon 无需手工回拨 lease 即可重新发起 HELLO 成功 并换发新 leaseToken 成为
+   * CONNECTING；而异节点在宽限期内尝试 HELLO 必须被返回 RETRY_LATER 并断开。
+   */
+  @Test
+  void gracePeriodAllowsSameNodeReconnectWithoutManualLeaseRewindWhileBlockingOtherNode() {
+    FakeConnection conn1 = new FakeConnection("conn-1");
+    gatewayNode1.open(conn1);
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+
+    EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
+    assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
+
+    // 断开连接，进入宽限期
+    gatewayNode1.close(conn1.connectionId());
+
+    EnvironmentConnection disconnectedEnv = registryNode1.find(DEV).orElseThrow();
+    assertEquals(LiveEnvironmentStatus.CONNECTING, disconnectedEnv.status());
+    // 宽限期依然在未来
+    assertTrue(disconnectedEnv.leaseUntil().isAfter(Instant.now()));
+
+    // 异节点 Node 2 在宽限期内尝试连接 -> 必须被拒绝（收到 RETRY_LATER 并关闭）
+    FakeConnection conn2 = new FakeConnection("conn-2");
+    gatewayNode2.open(conn2);
+    gatewayNode2.receive(conn2.connectionId(), hello(0, REGISTRATION_TOKEN));
+    assertTrue(conn2.closed);
+    assertEquals(DaemonMessageType.ERROR, conn2.envelopes().get(0).messageType());
+    assertTrue(
+        conn2.envelopes().get(0).payloadJson().contains(DaemonProtocol.ERROR_CODE_RETRY_LATER));
+
+    // 同节点 Node 1 在宽限期内重新连接（不手工回拨 lease_until）-> 必须成功收到 WELCOME
+    FakeConnection conn1b = new FakeConnection("conn-1b");
+    gatewayNode1.open(conn1b);
+    gatewayNode1.receive(conn1b.connectionId(), hello(0, REGISTRATION_TOKEN));
+    assertFalse(conn1b.closed);
+    assertEquals(1, conn1b.envelopes().size());
+    assertEquals(DaemonMessageType.WELCOME, conn1b.envelopes().get(0).messageType());
+
+    // 路由成功被换发新 leaseToken
+    EnvironmentConnection reconnectedEnv = registryNode1.find(DEV).orElseThrow();
+    assertEquals(node1, reconnectedEnv.ownerNodeId());
+    assertNotEquals(readyEnv.leaseToken(), reconnectedEnv.leaseToken());
+    assertEquals(LiveEnvironmentStatus.CONNECTING, reconnectedEnv.status());
+  }
+
   @Test
   void queryLocalRouteDirectly() throws Exception {
     FakeConnection conn1 = new FakeConnection("conn-1");
@@ -521,6 +568,63 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     assertEquals(EnvironmentDirectoryFailureCode.TIMEOUT, failed.code());
 
     // 超时后行已被直接 DELETE
+    Integer count =
+        jdbcTemplate.queryForObject(
+            "select count(1) from environment_directory_query where environment_id = ?",
+            Integer.class,
+            DEV.value());
+    assertEquals(0, count);
+  }
+
+  /**
+   * 测试意图：证明当已认领的 RUNNING 目录查询在完成回调前 deadline 被置为过去（超时）时， 迟到的 complete 或 fail 不得更新终态（受 deadline_at >
+   * statement_timestamp() 保护）， 也不得向响应信道发送通知，过期行由 cleanQuery 删除。
+   */
+  @Test
+  void runningMailboxQueryWithExpiredDeadlineRejectsLateCompletionAndFailure() throws Exception {
+    FakeConnection conn1 = new FakeConnection("conn-1");
+    gatewayNode1.open(conn1);
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+
+    // 提交一个查询，设置较长的 30s 初始超时
+    CompletableFuture<EnvironmentDirectoryListResult> future =
+        gatewayNode2.listDirectory(DEV, ".", Duration.ofSeconds(30));
+
+    // Node 1 认领该查询
+    coordinatorNode1.onRequestNotification(DEV.toString());
+
+    // 验证 Node 1 的 daemon 收到了 INVOKE
+    assertEquals(2, conn1.envelopes().size());
+    DaemonEnvelope invokeEnvelope = conn1.envelopes().get(1);
+    assertEquals(DaemonMessageType.INVOKE, invokeEnvelope.messageType());
+
+    // 验证数据库中该 query 状态为 RUNNING
+    String status =
+        jdbcTemplate.queryForObject(
+            "select status from environment_directory_query where environment_id = ?",
+            String.class,
+            DEV.value());
+    assertEquals("RUNNING", status);
+
+    // 人工将该 RUNNING query 的 deadline_at 调整为过去（同时保证 deadline_at > created_at 满足约束）
+    jdbcTemplate.update(
+        "update environment_directory_query set created_at = statement_timestamp() - interval '10 seconds', deadline_at = statement_timestamp() - interval '5 seconds' where environment_id = ?",
+        DEV.value());
+
+    // daemon 迟到的 COMPLETED 结果到达
+    completeDirectoryInvocation(conn1, invokeEnvelope, 2);
+
+    // 状态必须仍然是 RUNNING，绝不能被迟到的 callback 改成 SUCCEEDED
+    String statusAfterLate =
+        jdbcTemplate.queryForObject(
+            "select status from environment_directory_query where environment_id = ?",
+            String.class,
+            DEV.value());
+    assertEquals("RUNNING", statusAfterLate);
+
+    // 执行过期清理 onResync -> 该 query 必须被清理删除
+    coordinatorNode1.onResync();
     Integer count =
         jdbcTemplate.queryForObject(
             "select count(1) from environment_directory_query where environment_id = ?",

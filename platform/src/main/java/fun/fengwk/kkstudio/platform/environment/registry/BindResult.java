@@ -4,7 +4,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 /** {@link EnvironmentRegistry#tryAcquire} 的类型化绑定结果。 */
-public sealed interface BindResult permits BindResult.Acquired, BindResult.RetryLater {
+public sealed interface BindResult
+    permits BindResult.Acquired, BindResult.RetryLater, BindResult.Rejected {
 
   record Acquired(UUID leaseToken) implements BindResult {
     public Acquired {
@@ -18,11 +19,21 @@ public sealed interface BindResult permits BindResult.Acquired, BindResult.Retry
     }
   }
 
+  record Rejected(String message) implements BindResult {
+    public Rejected {
+      Objects.requireNonNull(message, "message");
+    }
+  }
+
   static BindResult acquired(UUID leaseToken) {
     return new Acquired(leaseToken);
   }
 
   static BindResult retryLater(String message) {
     return new RetryLater(message);
+  }
+
+  static BindResult rejected(String message) {
+    return new Rejected(message);
   }
 }

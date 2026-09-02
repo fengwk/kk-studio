@@ -49,12 +49,12 @@ public record EnvironmentConnection(
   public boolean isReady(Instant now, Duration heartbeatTimeout) {
     Instant current = now != null ? now : Instant.now();
     return status == LiveEnvironmentStatus.READY
-        && !leaseUntil.isBefore(current)
-        && (heartbeatTimeout == null || !lastSeenAt.isBefore(current.minus(heartbeatTimeout)));
+        && leaseUntil.isAfter(current)
+        && (heartbeatTimeout == null || lastSeenAt.isAfter(current.minus(heartbeatTimeout)));
   }
 
   public boolean isOnline(Instant now) {
     Instant current = now != null ? now : Instant.now();
-    return !leaseUntil.isBefore(current);
+    return leaseUntil.isAfter(current);
   }
 }
