@@ -1,0 +1,291 @@
+name: kk-studio-distributed
+
+# 双节点分布式 E2E 测试栈（免费 mock topology）。
+#
+# 网络不变量（scripts/e2e/tests/test_distributed_topology.py 静态验证）：
+# - postgres / minio / http-mock 同时加入 node-a-db 与 node-b-db 两个隔离网络；
+# - app-a 只加入 node-a-db + daemon-a + app-ingress-a，app-b 只加入 node-b-db
+#   + daemon-b + app-ingress-b；daemon-a / daemon-b 各只加入自己的 daemon 网络；
+# - 任何网络都不同时包含 app-a 与 app-b，两节点之间没有 DNS/IP 路径；
+# - 数据库网络是 internal，app 的宿主端口只通过各自的 ingress 网络发布。
+#
+# 复用约束：app 镜像用 deploy/local/Dockerfile，daemon 镜像用
+# deploy/reliability/daemon.Dockerfile，HTTP mock 直接挂载 deploy/test/mock，
+# 不复制任何实现。两个 App 共享同一 PostgreSQL database 与 MinIO bucket。
+#
+# 身份变量（固定默认值，可由宿主环境覆盖；deploy/distributed/run.sh 导出同一组
+# 默认值，最终 Environment 分支集成时可改参数名）：
+#   DISTRIBUTED_NODE_A_ID / DISTRIBUTED_NODE_B_ID   node instance id（同时是 daemon-id）
+#   DISTRIBUTED_ENV_A_NAME / DISTRIBUTED_ENV_B_NAME daemon 注册的 environment name
+#   DISTRIBUTED_DAEMON_TOKEN                        gateway handshake token
+#   DISTRIBUTED_APP_A_PORT / DISTRIBUTED_APP_B_PORT 宿主 app 端口
+#
+# 全部凭据是固定、可丢弃的测试值；宿主 MiniMax 凭据不会被本栈读取，
+# 真实 Provider 仍只能通过 scripts/e2e.sh 显式 --real 同步。
+
+x-app-build: &app-build
+  context: ../..
+  dockerfile: deploy/local/Dockerfile
+  args:
+    KK_STUDIO_BUILD_HTTP_PROXY: ${KK_STUDIO_BUILD_HTTP_PROXY:-}
+    KK_STUDIO_BUILD_HTTPS_PROXY: ${KK_STUDIO_BUILD_HTTPS_PROXY:-}
+    KK_STUDIO_BUILD_NO_PROXY: ${KK_STUDIO_BUILD_NO_PROXY:-}
+    KK_STUDIO_MAVEN_BUILD_OPTS: ${KK_STUDIO_MAVEN_BUILD_OPTS:-}
+
+x-minio-credentials: &minio-credentials
+  MINIO_ROOT_USER: kk-studio-distributed
+  MINIO_ROOT_PASSWORD: kk-studio-distributed-only
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: kk_studio_distributed
+      POSTGRES_USER: kk_studio
+      POSTGRES_PASSWORD: kk_studio
+    ports:
+      - "127.0.0.1:${DISTRIBUTED_PG_PORT:-15433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kk_studio -d kk_studio_distributed"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - node-a-db
+      - node-b-db
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      <<: *minio-credentials
+    ports:
+      - "127.0.0.1:${DISTRIBUTED_MINIO_PORT:-19001}:9000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - minio-data:/data
+    networks:
+      - node-a-db
+      - node-b-db
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      <<: *minio-credentials
+      MINIO_BUCKET: kk-studio-distributed
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${MINIO_BUCKET}"
+        mc anonymous set none "local/$${MINIO_BUCKET}"
+        mc stat "local/$${MINIO_BUCKET}"
+        exec tail -f /dev/null
+    healthcheck:
+      test: ["CMD-SHELL", "mc stat \"local/$${MINIO_BUCKET}\" >/dev/null"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - node-a-db
+
+  http-mock:
+    image: python:3.12-alpine
+    init: true
+    read_only: true
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    command:
+      [
+        "python",
+        "/mock/server.py",
+        "--routes",
+        "/config/routes.json",
+        "--opencli-fake-fixtures",
+        "/fixtures"
+      ]
+    ports:
+      - "127.0.0.1:${DISTRIBUTED_MOCK_PORT:-18090}:8080"
+    volumes:
+      - ../test/mock/server.py:/mock/server.py:ro
+      - ${DISTRIBUTED_MOCK_ROUTES:-../test/mock/routes.json}:/config/routes.json:ro
+      - ../../platform/src/test/resources/fun/fengwk/kkstudio/platform/canvas/resource:/fixtures:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2).read()
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      node-a-db:
+        aliases:
+          - stub.local
+          - opencli-hub
+          - comfyui
+      node-b-db:
+        aliases:
+          - stub.local
+          - opencli-hub
+          - comfyui
+
+  app-a:
+    build: *app-build
+    image: ${DISTRIBUTED_APP_IMAGE:-kk-studio-app:distributed}
+    init: true
+    environment: &app-environment
+      SPRING_PROFILES_ACTIVE: e2e
+      KK_STUDIO_DB_URL: jdbc:postgresql://postgres:5432/kk_studio_distributed
+      KK_STUDIO_DB_USER: kk_studio
+      KK_STUDIO_DB_PASSWORD: kk_studio
+      KK_STUDIO_STORAGE_S3_ENDPOINT: http://minio:9000
+      KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT: http://127.0.0.1:${DISTRIBUTED_MINIO_PORT:-19001}
+      KK_STUDIO_STORAGE_S3_REGION: us-east-1
+      KK_STUDIO_STORAGE_S3_BUCKET: kk-studio-distributed
+      KK_STUDIO_STORAGE_S3_ACCESS_KEY: kk-studio-distributed
+      KK_STUDIO_STORAGE_S3_SECRET_KEY: kk-studio-distributed-only
+      KK_STUDIO_CANVAS_RESOURCE_FFPROBE_BINARY: ffprobe
+      KK_STUDIO_CANVAS_RESOURCE_FFMPEG_BINARY: ffmpeg
+      KK_STUDIO_CANVAS_RESOURCE_TEMP_DIR: /tmp
+    ports:
+      - "127.0.0.1:${DISTRIBUTED_APP_A_PORT:-18082}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_healthy
+      http-mock:
+        condition: service_healthy
+    networks:
+      - node-a-db
+      - daemon-a
+      - app-ingress-a
+
+  app-b:
+    build: *app-build
+    image: ${DISTRIBUTED_APP_IMAGE:-kk-studio-app:distributed}
+    init: true
+    environment: *app-environment
+    ports:
+      - "127.0.0.1:${DISTRIBUTED_APP_B_PORT:-18083}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_healthy
+      http-mock:
+        condition: service_healthy
+    networks:
+      - node-b-db
+      - daemon-b
+      - app-ingress-b
+
+  workspace-init:
+    build:
+      context: ../..
+      dockerfile: deploy/reliability/daemon.Dockerfile
+    image: ${DISTRIBUTED_DAEMON_IMAGE:-kk-studio-daemon:distributed}
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-c"]
+    command: ["chown 10001:10001 /workspace-a /workspace-b"]
+    volumes:
+      - daemon-workspace-a:/workspace-a
+      - daemon-workspace-b:/workspace-b
+    # 只初始化 named volume owner，不需要网络；加入 daemon-a 只是避免 Compose
+    # 隐式 default network，不产生任何 App 间路径。
+    networks:
+      - daemon-a
+
+  daemon-a:
+    image: ${DISTRIBUTED_DAEMON_IMAGE:-kk-studio-daemon:distributed}
+    init: true
+    depends_on:
+      app-a:
+        condition: service_healthy
+      workspace-init:
+        condition: service_completed_successfully
+    command:
+      - --environment-name
+      - ${DISTRIBUTED_ENV_A_NAME:-distributed-a}
+      - --gateway-uri
+      - ws://app-a:8080/api/ai/environment/daemon/v2
+      - --gateway-token
+      - ${DISTRIBUTED_DAEMON_TOKEN:-e2e-daemon-token}
+      - --daemon-id
+      - ${DISTRIBUTED_NODE_A_ID:-node-a}
+      - --note
+      - Distributed test node A (shared data, no app-to-app network).
+      - --environment-root
+      - /workspace
+    volumes:
+      - daemon-workspace-a:/workspace
+    networks:
+      - daemon-a
+
+  daemon-b:
+    image: ${DISTRIBUTED_DAEMON_IMAGE:-kk-studio-daemon:distributed}
+    init: true
+    depends_on:
+      app-b:
+        condition: service_healthy
+      workspace-init:
+        condition: service_completed_successfully
+    command:
+      - --environment-name
+      - ${DISTRIBUTED_ENV_B_NAME:-distributed-b}
+      - --gateway-uri
+      - ws://app-b:8080/api/ai/environment/daemon/v2
+      - --gateway-token
+      - ${DISTRIBUTED_DAEMON_TOKEN:-e2e-daemon-token}
+      - --daemon-id
+      - ${DISTRIBUTED_NODE_B_ID:-node-b}
+      - --note
+      - Distributed test node B (shared data, no app-to-app network).
+      - --environment-root
+      - /workspace
+    volumes:
+      - daemon-workspace-b:/workspace
+    networks:
+      - daemon-b
+
+volumes:
+  postgres-data:
+  minio-data:
+  daemon-workspace-a:
+  daemon-workspace-b:
+
+networks:
+  node-a-db:
+    driver: bridge
+    internal: true
+  node-b-db:
+    driver: bridge
+    internal: true
+  daemon-a:
+    driver: bridge
+    internal: true
+  daemon-b:
+    driver: bridge
+    internal: true
+  app-ingress-a:
+    driver: bridge
+  app-ingress-b:
+    driver: bridge
