@@ -5,6 +5,8 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 
+import java.util.UUID;
+
 /** 全局 Agent definition 仓库。 */
 public interface AgentDefinitionRepository {
 
@@ -12,17 +14,15 @@ public interface AgentDefinitionRepository {
 
   AgentDefinition getByName(String name);
 
-  /** 返回有效的 Agent 并持有其行锁，直到外层事务结束。 */
   AgentDefinition getByNameForUpdate(String name);
 
-  /** 是否有 Agent 的 config.subagents 数组引用该名称。 */
   boolean existsReferencingSubagent(String name);
+
+  boolean existsByEnvironmentId(UUID environmentId);
 
   boolean create(AgentDefinition agentDefinition);
 
-  /** 基于 (name, expectedVersion) 的原子 CAS 更新。 */
   boolean updateByName(AgentDefinition agentDefinition, long expectedVersion);
 
-  /** 基于 (name, expectedVersion) 的硬删除 CAS：行物理删除后同名立即可重建；返回 false 表示 name 缺失或 version 不匹配。 */
   boolean deleteByName(String name, long expectedVersion);
 }

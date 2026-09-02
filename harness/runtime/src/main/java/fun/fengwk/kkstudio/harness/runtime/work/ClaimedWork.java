@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.work;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -15,7 +15,7 @@ public record ClaimedWork(
     long claimedWakeVersion,
     String leaseToken,
     Instant leaseUntil,
-    EnvironmentName requiredEnvironmentName) {
+    EnvironmentId requiredEnvironmentId) {
 
   public ClaimedWork {
     target = Objects.requireNonNull(target, "target");
@@ -24,9 +24,9 @@ public record ClaimedWork(
     }
     leaseToken = WorkValues.requireCanonicalToken(leaseToken);
     leaseUntil = Objects.requireNonNull(leaseUntil, "leaseUntil");
-    if (requiredEnvironmentName != null && target.type() != WorkTargetType.TOOL) {
+    if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
       throw new IllegalArgumentException(
-          "requiredEnvironmentName must be null for target type " + target.type());
+          "requiredEnvironmentId must be null for target type " + target.type());
     }
   }
 

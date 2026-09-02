@@ -17,7 +17,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -54,7 +53,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPa
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
-import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -79,11 +77,10 @@ class HarnessOneShotServiceTest {
     return new UUID(0L, value);
   }
 
-  private static final EnvironmentBinding ENVIRONMENT =
-      TestEnvironmentBindings.binding("h3-prompt");
+  private static final String WORKSPACE_PATH = ".";
   private static final BranchSettings SETTINGS =
       new BranchSettings(
-          ENVIRONMENT, "h3-agent", new ModelSelection("provider", "model", "default"));
+          WORKSPACE_PATH, "h3-agent", new ModelSelection("provider", "model", "default"));
 
   private HarnessRuntime runtime;
   private AgentBranchSettingsMaterializer materializer;
@@ -108,7 +105,7 @@ class HarnessOneShotServiceTest {
     UUID threadId =
         service.submit(
             "h3-agent",
-            ENVIRONMENT,
+            WORKSPACE_PATH,
             "system",
             new AgentMessage(
                 AgentMessageRole.USER,
@@ -136,7 +133,7 @@ class HarnessOneShotServiceTest {
     UUID threadId =
         service.submit(
             "h3-agent",
-            ENVIRONMENT,
+            WORKSPACE_PATH,
             "system",
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("user"))),
             preflight);
@@ -332,7 +329,7 @@ class HarnessOneShotServiceTest {
         () ->
             service.submit(
                 "h3-agent",
-                ENVIRONMENT,
+                WORKSPACE_PATH,
                 "system",
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("wrong role")))));

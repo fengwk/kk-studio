@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
@@ -98,13 +99,10 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.math.BigDecimal;
@@ -122,7 +120,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * DatabaseTurnResolver 契约：精确的 branch 引用（无回退）、不可变的 EnvironmentName 路由、严格有序的工具/skill 能力、唯一的 registry
+ * DatabaseTurnResolver 契约：精确的 branch 引用（无回退）、不可变的 EnvironmentId 路由、严格有序的工具/skill 能力、唯一的 registry
  * Variant 请求预设、语义化消息投影、缓存终结与基础设施异常透传。
  */
 class DatabaseTurnResolverTest {
@@ -136,9 +134,12 @@ class DatabaseTurnResolverTest {
   }
 
   private static final EnvironmentBinding ENV_A =
-      new EnvironmentBinding(new EnvironmentName("env-1"), "projects/web");
-  private static final EnvironmentBinding ENV_B = TestEnvironmentBindings.binding("env-2");
-  private static final EnvironmentBinding ENV_MISSING = TestEnvironmentBindings.binding("env-3");
+      new EnvironmentBinding(
+          EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), "projects/web");
+  private static final EnvironmentBinding ENV_B =
+      new EnvironmentBinding(EnvironmentId.parse("22222222-2222-2222-2222-222222222222"), ".");
+  private static final EnvironmentBinding ENV_MISSING =
+      new EnvironmentBinding(EnvironmentId.parse("33333333-3333-3333-3333-333333333333"), ".");
 
   @Test
   void resolvesExactBranchModelReferencesWithoutFallback() {
@@ -292,7 +293,7 @@ class DatabaseTurnResolverTest {
     assertFalse(none.contains("- note:"), none);
 
     String missing = preambleText(fixture.resolved(fixture.path(settings(ENV_MISSING, "default"))));
-    assertTrue(missing.contains("- name: env-3"), missing);
+    assertTrue(missing.contains("- workspace: ."), missing);
     assertFalse(missing.contains("- system:"), missing);
     assertTrue(missing.contains("- date: 2026-08-01"), missing);
     assertFalse(missing.contains("- note:"), missing);
@@ -314,7 +315,6 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings(ENV_A, "default")));
     String prompt = preambleText(requestSpec);
 
-    assertTrue(prompt.contains("- name: env-1"), prompt);
     assertTrue(prompt.contains("- workspace: projects/web"), prompt);
     assertTrue(prompt.contains("- system: linux"), prompt);
     assertTrue(prompt.contains("- date: 2026-08-01"), prompt);
@@ -329,7 +329,6 @@ class DatabaseTurnResolverTest {
 
     String withoutMetadata =
         preambleText(fixture.resolved(fixture.path(settings(ENV_A, "default"))));
-    assertTrue(withoutMetadata.contains("- name: env-1"), withoutMetadata);
     assertTrue(withoutMetadata.contains("- workspace: projects/web"), withoutMetadata);
     assertFalse(withoutMetadata.contains("- system:"), withoutMetadata);
     assertTrue(withoutMetadata.contains("- date: 2026-08-02"), withoutMetadata);
@@ -401,6 +400,7 @@ class DatabaseTurnResolverTest {
   void missingOrNotReadyLatestEnvironmentDoesNotRejectToolPlanning() {
     // 缺失的 latest 环境：工具按最新名称绑定，规划成功。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
+    fixture.agent.setEnvironmentId(ENV_MISSING.environmentId().value());
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings(ENV_MISSING, "default")));
     assertEquals(ENV_MISSING, requestSpec.toolBindings().getFirst().environment());
 
@@ -425,7 +425,7 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void latestSnapshotEnvironmentWinsOverOlderLiveEnvironment() {
+  void latestSnapshotEnvironmentWinsOverOlderEnvironmentConnection() {
     // 历史 turn 绑定 live Environment，最新 turn 为 null：
     // 请求只按最新快照判定（null 拒绝），绝不回看更旧的 live Environment。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
@@ -441,6 +441,7 @@ class DatabaseTurnResolverTest {
     // 最新为缺失名称：同样只冻结最新名称，绝不回看更旧 live Environment。
     fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.readyEnvironment(ENV_A);
+    fixture.agent.setEnvironmentId(ENV_MISSING.environmentId().value());
     ModelRequestSpec requestSpec =
         fixture.resolved(
             multiTurnPath(settings(ENV_A, "default"), settings(ENV_MISSING, "default")));
@@ -461,9 +462,10 @@ class DatabaseTurnResolverTest {
   void skillsRequireTheLatestSelectedEnvironmentPrecisely() {
     // skills 需要 live descriptors：latest 环境缺失时精确拒绝，绝不回看更旧的 branch settings。
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
+    fixture.agent.setEnvironmentId(ENV_MISSING.environmentId().value());
     assertEquals(
         "agent skills require the latest selected environment which is not live: "
-            + ENV_MISSING.environmentName(),
+            + ENV_MISSING.environmentId(),
         fixture.rejected(fixture.path(settings(ENV_MISSING, "default"))).error().message());
 
     // latest 环境未 READY：同样精确拒绝。
@@ -471,17 +473,48 @@ class DatabaseTurnResolverTest {
     fixture.connectingEnvironment(ENV_A);
     assertEquals(
         "agent skills require the latest selected environment which is not ready: "
-            + ENV_A.environmentName(),
+            + ENV_A.environmentId(),
         fixture.rejected(fixture.path(settings(ENV_A, "default"))).error().message());
   }
 
+  /**
+   * 测试意图：证明当应用注入的时钟 (Clock) 滞后、EnvironmentConnection 内存快照看似 READY 且未超时， 但数据库中
+   * hasReadyLease=false（实际已过期或无活跃 READY 租约）时， DatabaseTurnResolver 依据 PostgreSQL DB 权威谓词确定性拒绝 Agent
+   * skills 规划（返回 not ready）， 绝不依赖滞后的应用时钟错误放行。
+   */
   @Test
-  void routesByExactEnvironmentNameAndNeverFallsBack() {
+  void
+      skillsPlanningRejectsWhenDatabaseReadyLeaseIsFalseEvenIfConnectionSnapshotIsReadyAndClockIsLagging() {
+    Fixture fixture =
+        new Fixture(
+            List.of(),
+            List.of("dev"),
+            List.of(hostDescriptor("load_skill")),
+            Clock.fixed(NOW.minus(Duration.ofMinutes(10)), ZoneOffset.UTC));
+
+    // 设置快照为 READY，但 stub DB hasReadyLease 为 false
+    fixture.readyEnvironment(ENV_A, List.of("dev"));
+    when(fixture.environmentRegistry.hasReadyLease(ENV_A.environmentId())).thenReturn(false);
+    fixture.agent.setEnvironmentId(ENV_A.environmentId().value());
+
+    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings(ENV_A, "default")));
+    assertEquals(
+        "agent skills require the latest selected environment which is not ready: "
+            + ENV_A.environmentId(),
+        rejected.error().message());
+
+    // 验证确实调用了 DB-authoritative 权威谓词
+    verify(fixture.environmentRegistry).hasReadyLease(ENV_A.environmentId());
+  }
+
+  @Test
+  void routesByExactEnvironmentIdAndNeverFallsBack() {
     // 两个独立 canonical 名称；branch 只认精确名称，绝不回看更旧 settings 或 fallback。
     Fixture fixture =
         new Fixture(List.of("bash"), List.of("dev-b"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev-a"));
     fixture.readyEnvironment(ENV_B, List.of("dev-b"));
+    fixture.agent.setEnvironmentId(ENV_B.environmentId().value());
     BranchSettings settings = settings(ENV_B, "default");
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings));
@@ -985,7 +1018,9 @@ class DatabaseTurnResolverTest {
 
   private static BranchSettings settings(EnvironmentBinding environment, String variant) {
     return new BranchSettings(
-        environment, "assistant", new ModelSelection("provider", "model", variant));
+        environment == null ? null : environment.workspacePath(),
+        "assistant",
+        new ModelSelection("provider", "model", variant));
   }
 
   private static EntryPath rootPath(BranchSettings settings) {
@@ -1201,8 +1236,6 @@ class DatabaseTurnResolverTest {
       case "lsp_goto_definition" -> BuiltinToolIds.LSP_GOTO_DEFINITION;
       case "lsp_workspace_symbols" -> BuiltinToolIds.LSP_WORKSPACE_SYMBOLS;
       case "lsp_java_decompile" -> BuiltinToolIds.LSP_JAVA_DECOMPILE;
-      case "mcp_list_tools" -> BuiltinToolIds.MCP_LIST_TOOLS;
-      case "mcp_call_tool" -> BuiltinToolIds.MCP_CALL_TOOL;
       case "load_skill" -> BuiltinToolIds.LOAD_SKILL;
       case TaskTool.NAME -> BuiltinToolIds.TASK;
       case "create_goal" -> BuiltinToolIds.GOAL_CREATE;
@@ -1644,7 +1677,7 @@ class DatabaseTurnResolverTest {
         mock(AgentDefinitionConfigCodec.class);
     private final AgentModelRuntimeConfigParser modelConfigParser =
         mock(AgentModelRuntimeConfigParser.class);
-    private final LiveEnvironmentRegistry environmentRegistry = mock(LiveEnvironmentRegistry.class);
+    private final EnvironmentRegistry environmentRegistry = mock(EnvironmentRegistry.class);
     private final AgentDefinition agent = new AgentDefinition();
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private final AgentProvider provider = new AgentProvider();
@@ -1747,6 +1780,7 @@ class DatabaseTurnResolverTest {
       agent.setName("assistant");
       agent.setSystemPrompt("agent system prompt");
       agent.setConfigJson("agent-config");
+      agent.setEnvironmentId(ENV_A.environmentId().value());
       when(agents.getByName("assistant")).thenReturn(agent);
 
       provider.setName("provider");
@@ -1837,7 +1871,6 @@ class DatabaseTurnResolverTest {
               new ProviderFactories(factories),
               catalog,
               environmentRegistry,
-              new SystemSettingsSnapshot(SystemSettings.DEFAULT),
               () -> new CompactionConfig(20_000, null),
               () -> subagentConfig,
               new AgentPromptComposer(() -> subagentConfig),
@@ -1988,17 +2021,17 @@ class DatabaseTurnResolverTest {
     }
 
     private void connectingEnvironment(EnvironmentBinding environment) {
-      LiveEnvironment env =
-          new LiveEnvironment(
-              environment.environmentName(),
-              "daemon",
+      EnvironmentConnection env =
+          new EnvironmentConnection(
+              environment.environmentId(),
               UUID.randomUUID(),
               UUID.randomUUID(),
               LiveEnvironmentStatus.CONNECTING,
               null,
               NOW,
               NOW.plusSeconds(60));
-      when(environmentRegistry.find(environment.environmentName())).thenReturn(Optional.of(env));
+      when(environmentRegistry.find(environment.environmentId())).thenReturn(Optional.of(env));
+      when(environmentRegistry.hasReadyLease(environment.environmentId())).thenReturn(false);
     }
 
     private void readyEnvironment(EnvironmentBinding environment) {
@@ -2040,6 +2073,7 @@ class DatabaseTurnResolverTest {
         EnvironmentBinding environment, DaemonEnvironmentInfo environmentInfo) {
       readyEnvironmentWithSkills(
           environment, List.of(), environmentInfo, NOW.minus(Duration.ofSeconds(61)));
+      when(environmentRegistry.hasReadyLease(environment.environmentId())).thenReturn(false);
     }
 
     private void readyEnvironmentWithSkills(
@@ -2047,18 +2081,17 @@ class DatabaseTurnResolverTest {
         List<DaemonSkillDescriptor> skills,
         DaemonEnvironmentInfo environmentInfo,
         Instant lastSeenAt) {
-      LiveEnvironment env =
-          new LiveEnvironment(
-              environment.environmentName(),
-              "daemon",
+      EnvironmentConnection env =
+          new EnvironmentConnection(
+              environment.environmentId(),
               UUID.randomUUID(),
               UUID.randomUUID(),
               LiveEnvironmentStatus.READY,
-              new DaemonCapabilities(
-                  DaemonCapabilities.VERSION, environmentInfo, skills, List.of()),
+              new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo, skills),
               lastSeenAt,
               lastSeenAt.plusSeconds(60));
-      when(environmentRegistry.find(environment.environmentName())).thenReturn(Optional.of(env));
+      when(environmentRegistry.find(environment.environmentId())).thenReturn(Optional.of(env));
+      when(environmentRegistry.hasReadyLease(environment.environmentId())).thenReturn(true);
     }
   }
 }

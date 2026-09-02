@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.web.runtime;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -67,9 +65,7 @@ public final class HarnessRuntimeTestFixtures {
 
   public static BranchSettings settings() {
     return new BranchSettings(
-        new EnvironmentBinding(new EnvironmentName("env-1"), "."),
-        "default-assistant",
-        new ModelSelection("openai", "gpt-5", "default"));
+        ".", "default-assistant", new ModelSelection("openai", "gpt-5", "default"));
   }
 
   public static Entry rootEntry() {

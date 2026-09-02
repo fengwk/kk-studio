@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.platform.chat.repo.impl;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.impl.mapper.ChatMapper;
 import fun.fengwk.kkstudio.platform.chat.repo.impl.model.ChatDO;
@@ -64,13 +62,7 @@ public class PostgresqlChatRepository implements ChatRepository {
     target.setId(chat.getId());
     target.setTitle(chat.getTitle());
     target.setAgentName(chat.getAgentName());
-    if (chat.getEnvironment() == null) {
-      target.setEnvironmentName(null);
-      target.setWorkspacePath(null);
-    } else {
-      target.setEnvironmentName(chat.getEnvironment().environmentName().value());
-      target.setWorkspacePath(chat.getEnvironment().workspacePath());
-    }
+    target.setWorkspacePath(chat.getWorkspacePath());
     target.setYoloEnabled(chat.isYoloEnabled());
     return target;
   }
@@ -83,13 +75,7 @@ public class PostgresqlChatRepository implements ChatRepository {
     target.setId(row.getId());
     target.setTitle(row.getTitle());
     target.setAgentName(row.getAgentName());
-    if (row.getEnvironmentName() == null && row.getWorkspacePath() == null) {
-      target.setEnvironment(null);
-    } else {
-      target.setEnvironment(
-          new EnvironmentBinding(
-              new EnvironmentName(row.getEnvironmentName()), row.getWorkspacePath()));
-    }
+    target.setWorkspacePath(row.getWorkspacePath());
     target.setYoloEnabled(row.isYoloEnabled());
     target.setVersion(row.getVersion());
     target.setCreateTime(row.getCreateTime());

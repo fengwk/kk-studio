@@ -7,11 +7,14 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 
 import java.util.List;
 import java.util.TreeSet;
+import java.util.UUID;
 
 /** 解析全局 Agent definition 与 model 引用。 */
 @AllArgsConstructor
@@ -20,9 +23,11 @@ final class AgentDefinitionReferenceResolver {
 
   private static final String DEFINITION_RESOURCE = "agent_definition";
   private static final String MODEL_RESOURCE = "agent_model";
+  private static final String ENVIRONMENT_RESOURCE = "environment";
 
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentModelRepository agentModelRepository;
+  private final EnvironmentRepository environmentRepository;
 
   AgentDefinition requireAgent(String name) {
     AgentDefinition definition = agentDefinitionRepository.getByName(name);
@@ -59,6 +64,17 @@ final class AgentDefinitionReferenceResolver {
           MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + providerName + "/" + modelName);
     }
     return model;
+  }
+
+  /** 锁定并校验可选的 Environment 引用，防止在创建/更新 Agent 时被并发删除。 */
+  void requireEnvironmentForShare(UUID environmentId) {
+    if (environmentId != null) {
+      Environment environment = environmentRepository.lockForKeyShare(environmentId);
+      if (environment == null) {
+        throw new AiResourceNotFoundException(
+            ENVIRONMENT_RESOURCE, ENVIRONMENT_RESOURCE + " not found: " + environmentId);
+      }
+    }
   }
 
   /** 锁定并校验 task allowlist 中的全部 Agent，防止其在当前配置写入事务中被并发删除。 */

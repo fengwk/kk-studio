@@ -25,7 +25,6 @@ const readyEnvironments: LiveEnvironmentDTO[] = [
     lastSeen: null,
     capabilities: [],
     skills: [],
-    mcpServers: [],
   },
   {
     name: 'remote',
@@ -35,7 +34,6 @@ const readyEnvironments: LiveEnvironmentDTO[] = [
     lastSeen: null,
     capabilities: [],
     skills: [],
-    mcpServers: [],
   },
   {
     name: 'connecting',
@@ -45,7 +43,6 @@ const readyEnvironments: LiveEnvironmentDTO[] = [
     lastSeen: null,
     capabilities: [],
     skills: [],
-    mcpServers: [],
   },
 ]
 
@@ -224,7 +221,6 @@ describe('EnvironmentWorkspacePanel', () => {
           lastSeen: null,
           capabilities: [],
           skills: [],
-          mcpServers: [],
         },
       ],
       current: { name: 'local', workspacePath: 'proj' },

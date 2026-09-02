@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -221,7 +221,9 @@ class ToolExecutionGatewayPreflightTest {
 
   @Test
   void environmentWorkspaceBecomesDefaultWorkdirForAskPreview() {
-    EnvironmentBinding binding = new EnvironmentBinding(new EnvironmentName("env-1"), "repo/sub");
+    EnvironmentBinding binding =
+        new EnvironmentBinding(
+            EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), "repo/sub");
     ToolGateway.PreflightResult result =
         environmentPreflight(binding, "{\"path\":\"src/Main.java\"}", PermissionAction.ASK);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
@@ -230,7 +232,9 @@ class ToolExecutionGatewayPreflightTest {
 
   @Test
   void environmentWorkspaceIsTheOnlyPathRuleBase() {
-    EnvironmentBinding binding = new EnvironmentBinding(new EnvironmentName("env-1"), "repo/sub");
+    EnvironmentBinding binding =
+        new EnvironmentBinding(
+            EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), "repo/sub");
     ToolSettings settings =
         new ToolSettings(
             Map.of(

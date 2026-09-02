@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
@@ -766,10 +765,8 @@ class HistoryEntryPayloadJsonCodecTest {
     return new AssistantMessageMetadata(reason, usage, cost);
   }
 
-  private static BranchSettings settings(String environmentName) {
+  private static BranchSettings settings(String workspacePath) {
     return new BranchSettings(
-        environmentName == null ? null : EnvironmentBindings.binding(environmentName),
-        "coding",
-        new ModelSelection("anthropic", "claude-sonnet", "default"));
+        workspacePath, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
   }
 }

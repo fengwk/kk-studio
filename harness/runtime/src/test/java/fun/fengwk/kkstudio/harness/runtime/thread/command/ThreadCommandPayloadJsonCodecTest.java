@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -33,7 +32,7 @@ class ThreadCommandPayloadJsonCodecTest {
             new CustomMessageCommandPayload(system("system")),
             new SetAgentCommandPayload("coding"),
             new SetModelCommandPayload(MODEL),
-            new SetEnvironmentCommandPayload(EnvironmentBindings.binding(ENV)),
+            new SetEnvironmentCommandPayload(ENV),
             new SetEnvironmentCommandPayload(null));
 
     for (ThreadCommandPayload payload : payloads) {
@@ -55,9 +54,8 @@ class ThreadCommandPayloadJsonCodecTest {
         codec.encode(new SetModelCommandPayload(MODEL)));
     assertEquals("{\"agentName\":\"coding\"}", codec.encode(new SetAgentCommandPayload("coding")));
     assertEquals(
-        "{\"environment\":{\"name\":\"" + ENV + "\",\"workspacePath\":\".\"}}",
-        codec.encode(new SetEnvironmentCommandPayload(EnvironmentBindings.binding(ENV))));
-    assertEquals("{\"environment\":null}", codec.encode(new SetEnvironmentCommandPayload(null)));
+        "{\"workspacePath\":\"" + ENV + "\"}", codec.encode(new SetEnvironmentCommandPayload(ENV)));
+    assertEquals("{\"workspacePath\":null}", codec.encode(new SetEnvironmentCommandPayload(null)));
   }
 
   @Test
@@ -206,18 +204,17 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(NullPointerException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, null));
   }
 
+  /** SET_ENVIRONMENT 的显式 null 与 canonical path round-trip 语义。 */
   @Test
-  void preservesEnvironmentClearSemantics() {
+  void preservesWorkspacePathClearSemantics() {
     SetEnvironmentCommandPayload cleared =
         (SetEnvironmentCommandPayload)
-            codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environment\":null}");
-    assertNull(cleared.environment());
+            codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"workspacePath\":null}");
+    assertNull(cleared.workspacePath());
     SetEnvironmentCommandPayload bound =
         (SetEnvironmentCommandPayload)
-            codec.decode(
-                ThreadCommandType.SET_ENVIRONMENT,
-                "{\"environment\":{\"name\":\"" + ENV + "\",\"workspacePath\":\".\"}}");
-    assertEquals(EnvironmentBindings.binding(ENV), bound.environment());
+            codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"workspacePath\":\"" + ENV + "\"}");
+    assertEquals(ENV, bound.workspacePath());
   }
 
   private static AgentMessage user(String text) {

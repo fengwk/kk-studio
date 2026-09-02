@@ -101,8 +101,10 @@ final class HarnessRuntimeTestSupport {
   static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-  static final EnvironmentBinding ENV = EnvironmentBindings.binding("env-1");
-  static final EnvironmentBinding ENV2 = EnvironmentBindings.binding("env-2");
+  static final EnvironmentBinding ENV =
+      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
+  static final EnvironmentBinding ENV2 =
+      EnvironmentBindings.binding("22222222-2222-2222-2222-222222222222");
 
   private HarnessRuntimeTestSupport() {}
 
@@ -914,7 +916,10 @@ final class HarnessRuntimeTestSupport {
   }
 
   static BranchSettings settings() {
-    return new BranchSettings(ENV, "agent", new ModelSelection("provider", "model", "v1"));
+    return new BranchSettings(
+        ENV == null ? null : ENV.workspacePath(),
+        "agent",
+        new ModelSelection("provider", "model", "v1"));
   }
 
   static ModelRequestSpec modelRequest() {

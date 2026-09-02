@@ -25,7 +25,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -200,9 +199,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     UUID envCommand =
         seedCommand(
-            fixture.store,
-            baseline.threadId(),
-            new SetEnvironmentCommandPayload(EnvironmentBindings.binding("env-1")));
+            fixture.store, baseline.threadId(), new SetEnvironmentCommandPayload("projects/web"));
     requestThreadWork(fixture.store, baseline.threadId());
     // final branch 事实 = 消费 SET_MODEL 后的 candidate settings；auto 模式按同源事实构造一致请求。
     fixture.resolver.autoConsistent = true;

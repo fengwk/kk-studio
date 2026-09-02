@@ -6,54 +6,55 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
-
-/** Branch settings 的 immutable snapshot、Environment route identity 和 canonical name 规范化。 */
+/** Branch settings 的 immutable snapshot、canonical workspace path 规范化与 agentName 校验。 */
 class BranchSettingsTest {
 
-  private static final EnvironmentBinding ENV =
-      EnvironmentBindings.binding("123e4567-e89b-12d3-a456-426614174000");
-  private static final EnvironmentBinding OTHER =
-      EnvironmentBindings.binding("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
-
   @Test
-  void preservesEnvironmentAndModel() {
+  void preservesWorkspacePathAndModel() {
     BranchSettings settings =
         new BranchSettings(
-            ENV, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
+            "projects/web", "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
 
-    assertEquals(ENV, settings.environment());
+    assertEquals("projects/web", settings.workspacePath());
     assertEquals("coding", settings.agentName());
   }
 
   @Test
-  void allowsNoEnvironmentButRequiresCanonicalNames() {
+  void allowsNoWorkspaceAndValidatesCanonicalPathShape() {
     BranchSettings settings =
         new BranchSettings(
             null, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
 
-    assertNull(settings.environment());
+    assertNull(settings.workspacePath());
+    // absolute 路径在构造边界拒绝（canonical 相对 wire 路径契约）。
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new BranchSettings(
-                EnvironmentBindings.binding("123E4567-E89B-12D3-A456-426614174000"),
+                "/projects/web",
                 "coding",
-                settings.model()));
+                new ModelSelection("anthropic", "claude-sonnet", "default")));
+    // '..' 段拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new BranchSettings(
+                "../escape",
+                "coding",
+                new ModelSelection("anthropic", "claude-sonnet", "default")));
   }
 
   @Test
-  void replacesEnvironmentRouteIdentityViaWithMethod() {
+  void replacesWorkspacePathViaWithMethod() {
     BranchSettings base =
         new BranchSettings(
-            ENV, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
+            "projects/web", "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
 
-    BranchSettings cleared = base.withEnvironment(null);
-    BranchSettings rebound = cleared.withEnvironment(OTHER);
+    BranchSettings cleared = base.withWorkspacePath(null);
+    BranchSettings rebound = cleared.withWorkspacePath("other/repo");
 
-    assertNull(cleared.environment());
-    assertEquals(OTHER, rebound.environment());
+    assertNull(cleared.workspacePath());
+    assertEquals("other/repo", rebound.workspacePath());
     assertEquals(base.agentName(), rebound.agentName());
     assertEquals(base.model(), rebound.model());
   }

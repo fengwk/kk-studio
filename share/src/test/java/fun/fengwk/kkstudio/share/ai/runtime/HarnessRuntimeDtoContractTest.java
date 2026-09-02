@@ -55,7 +55,7 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("USER_MESSAGE", command.getType());
     assertEquals("00000000-0000-0000-0000-000000000001", command.getIdempotencyKey());
     assertTrue(command.hasContentsField());
-    assertFalse(command.hasEnvironmentField());
+    assertFalse(command.hasWorkspacePathField());
   }
 
   @Test

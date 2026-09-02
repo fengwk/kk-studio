@@ -12,15 +12,13 @@ import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalStart;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonTerminalMessage;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpBridgeCapabilities;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerRegistry;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
 import fun.fengwk.kkstudio.harness.daemon.skill.SkillLoadCapability;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
@@ -72,7 +70,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * invocationId，RUNNING/terminal journal 条目分别重放 STARTED/terminal。
  *
  * <p>Daemon 只拥有两个执行生命周期资源：单线程 scheduler 处理 heartbeat、reconnect 与 timeout，共享的
- * virtual-thread-per-task executor 处理 Coding/MCP 等阻塞调用。transport/JDK 内部线程不在该生命周期内。
+ * virtual-thread-per-task executor 处理 Coding/目录浏览等阻塞调用。transport/JDK 内部线程不在该生命周期内。
  */
 public final class DaemonRuntime implements AutoCloseable {
 
@@ -80,11 +78,10 @@ public final class DaemonRuntime implements AutoCloseable {
   private static final String FALLBACK_FAILURE_MESSAGE = "capability execution failed";
 
   private final DaemonConfig config;
-  private final EnvironmentName environmentName;
+  private volatile EnvironmentId boundEnvironmentId;
   private final DaemonTransport transport;
   private final DaemonCapabilityRegistry capabilityRegistry;
   private final DaemonSkillRegistry skillRegistry;
-  private final McpServerRegistry mcpRegistry;
   private final DaemonInvocationJournal journal;
   private final ScheduledExecutorService scheduler;
   private final ExecutorService taskExecutor;
@@ -114,23 +111,17 @@ public final class DaemonRuntime implements AutoCloseable {
 
   /**
    * 创建完整生产运行时。scheduler 与 virtual-thread-per-task executor 在注册 capability 前创建并注入，成功后由 runtime
-   * 独占生命周期；任一步构造失败都会释放 transport、MCP registry 和已创建的执行资源。
+   * 独占生命周期；任一步构造失败都会释放 transport 和已创建的执行资源。
    */
   public static DaemonRuntime create(
-      DaemonConfig config,
-      CodingToolsConfig toolsConfig,
-      DaemonSkillRegistry skillRegistry,
-      McpServerRegistry mcpRegistry) {
+      DaemonConfig config, CodingToolsConfig toolsConfig, DaemonSkillRegistry skillRegistry) {
     Objects.requireNonNull(toolsConfig, "toolsConfig");
-    Objects.requireNonNull(mcpRegistry, "mcpRegistry");
     return create(
         config,
         skillRegistry,
-        mcpRegistry,
         toolsConfig.resourceStore(),
         (registry, executor, scheduler) -> {
           CodingCapabilities.registerAll(registry, toolsConfig, executor, scheduler);
-          McpBridgeCapabilities.registerAll(registry, mcpRegistry, executor);
           registry.register(new SkillLoadCapability(skillRegistry, executor));
         });
   }
@@ -138,12 +129,10 @@ public final class DaemonRuntime implements AutoCloseable {
   static DaemonRuntime create(
       DaemonConfig config,
       DaemonSkillRegistry skillRegistry,
-      McpServerRegistry mcpRegistry,
       ResourceStore resourceStore,
       CapabilityRegistrar registrar) {
     Objects.requireNonNull(config, "config");
     Objects.requireNonNull(skillRegistry, "skillRegistry");
-    Objects.requireNonNull(mcpRegistry, "mcpRegistry");
     Objects.requireNonNull(registrar, "registrar");
     ScheduledThreadPoolExecutor scheduler = newScheduler();
     ExecutorService taskExecutor = null;
@@ -160,7 +149,6 @@ public final class DaemonRuntime implements AutoCloseable {
               transport,
               capabilityRegistry,
               skillRegistry,
-              mcpRegistry,
               new InMemoryDaemonInvocationJournal(),
               scheduler,
               taskExecutor,
@@ -171,7 +159,6 @@ public final class DaemonRuntime implements AutoCloseable {
     } finally {
       if (!completed) {
         closeQuietly(transport);
-        closeQuietly(mcpRegistry);
         shutdownExecutors(scheduler, taskExecutor);
       }
     }
@@ -191,7 +178,6 @@ public final class DaemonRuntime implements AutoCloseable {
         transport,
         capabilityRegistry,
         skillRegistry,
-        McpServerRegistry.empty(),
         journal,
         scheduler,
         taskExecutor,
@@ -214,31 +200,6 @@ public final class DaemonRuntime implements AutoCloseable {
         transport,
         capabilityRegistry,
         skillRegistry,
-        McpServerRegistry.empty(),
-        journal,
-        scheduler,
-        taskExecutor,
-        resourceStore,
-        false);
-  }
-
-  /** 全参数运行时（含 MCP registry），供集成测试注入完整生命周期。 */
-  DaemonRuntime(
-      DaemonConfig config,
-      DaemonTransport transport,
-      DaemonCapabilityRegistry capabilityRegistry,
-      DaemonSkillRegistry skillRegistry,
-      McpServerRegistry mcpRegistry,
-      DaemonInvocationJournal journal,
-      ScheduledExecutorService scheduler,
-      ExecutorService taskExecutor,
-      ResourceStore resourceStore) {
-    this(
-        config,
-        transport,
-        capabilityRegistry,
-        skillRegistry,
-        mcpRegistry,
         journal,
         scheduler,
         taskExecutor,
@@ -251,18 +212,15 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonTransport transport,
       DaemonCapabilityRegistry capabilityRegistry,
       DaemonSkillRegistry skillRegistry,
-      McpServerRegistry mcpRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor,
       ResourceStore resourceStore,
       boolean requireFixedCapabilityCatalog) {
     this.config = Objects.requireNonNull(config, "config");
-    this.environmentName = Objects.requireNonNull(config.environmentName(), "environmentName");
     this.transport = Objects.requireNonNull(transport, "transport");
     this.capabilityRegistry = Objects.requireNonNull(capabilityRegistry, "capabilityRegistry");
     this.skillRegistry = Objects.requireNonNull(skillRegistry, "skillRegistry");
-    this.mcpRegistry = Objects.requireNonNull(mcpRegistry, "mcpRegistry");
     this.journal = Objects.requireNonNull(journal, "journal");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.taskExecutor = Objects.requireNonNull(taskExecutor, "taskExecutor");
@@ -337,6 +295,10 @@ public final class DaemonRuntime implements AutoCloseable {
   /** 返回终态失败原因；非 FAILED 时为 {@code null}。 */
   public String failureReason() {
     return failureReason;
+  }
+
+  public EnvironmentId boundEnvironmentId() {
+    return boundEnvironmentId;
   }
 
   DaemonInvocationJournal journal() {
@@ -441,6 +403,7 @@ public final class DaemonRuntime implements AutoCloseable {
     if (!started.get() || generation != connectionGeneration.get()) {
       return;
     }
+    this.boundEnvironmentId = null;
     state = DaemonRuntimeState.DISCONNECTED;
     Duration delay;
     synchronized (reconnectLock) {
@@ -461,9 +424,8 @@ public final class DaemonRuntime implements AutoCloseable {
 
   private boolean sendHello(ActiveConnection connection) {
     ObjectNode payload = envelopeCodec.createPayload();
-    payload.put("daemonId", config.daemonId());
     payload.put("protocolVersion", DaemonProtocol.VERSION);
-    payload.put("gatewayToken", config.gatewayToken());
+    payload.put("registrationToken", config.registrationToken());
     payload.put("capabilityCatalogVersion", EnvironmentCapabilityCatalog.version());
     return sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
   }
@@ -471,10 +433,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private boolean sendReady(ActiveConnection connection) {
     DaemonCapabilities capabilities =
         new DaemonCapabilities(
-            DaemonCapabilities.VERSION,
-            environmentInfo,
-            List.copyOf(skillRegistry.descriptors()),
-            mcpRegistry.snapshot());
+            DaemonCapabilities.VERSION, environmentInfo, List.copyOf(skillRegistry.descriptors()));
     return sendOn(
         connection, DaemonMessageType.READY, null, capabilitiesCodec.encode(capabilities));
   }
@@ -543,9 +502,8 @@ public final class DaemonRuntime implements AutoCloseable {
       if (!connection.markWelcomed()) {
         throw new DaemonProtocolException("WELCOME may only be received once per connection");
       }
-      if (!envelopeCodec.readPayload(envelope).isEmpty()) {
-        throw new DaemonProtocolException("WELCOME payload must be empty");
-      }
+      this.boundEnvironmentId =
+          Objects.requireNonNull(envelope.environmentId(), "WELCOME environmentId");
       if (sendReady(connection) && activeConnection.get() == connection) {
         connection.markReady();
         state = DaemonRuntimeState.READY;
@@ -576,11 +534,10 @@ public final class DaemonRuntime implements AutoCloseable {
       throw new DaemonProtocolException("ERROR payload.code is unknown: " + code);
     }
     String codeValue = code.textValue();
-    if (DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT.equals(codeValue)) {
+    if (DaemonProtocol.ERROR_CODE_REGISTRATION_REJECTED.equals(codeValue)) {
       String message = payload.path("message").asText("");
       failTerminal(
-          "environment name is held by another live daemon"
-              + (message.isBlank() ? "" : ": " + message));
+          "environment registration is rejected" + (message.isBlank() ? "" : ": " + message));
       return;
     }
     if (DaemonProtocol.ERROR_CODE_RETRY_LATER.equals(codeValue)) {
@@ -591,9 +548,23 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private void verifyScope(DaemonEnvelope envelope) {
-    if (!environmentName.equals(envelope.environmentName())) {
-      throw new DaemonProtocolException(
-          "envelope environmentName does not match daemon: " + envelope.environmentName());
+    if (envelope.messageType() == DaemonMessageType.HELLO) {
+      if (envelope.environmentId() != null) {
+        throw new DaemonProtocolException("HELLO must not declare environmentId");
+      }
+      return;
+    }
+    if (envelope.messageType() == DaemonMessageType.WELCOME) {
+      if (envelope.environmentId() == null) {
+        throw new DaemonProtocolException("WELCOME must declare non-null environmentId");
+      }
+      return;
+    }
+    if (boundEnvironmentId != null && envelope.environmentId() != null) {
+      if (!boundEnvironmentId.equals(envelope.environmentId())) {
+        throw new DaemonProtocolException(
+            "envelope environmentId does not match daemon: " + envelope.environmentId());
+      }
     }
   }
 
@@ -775,12 +746,17 @@ public final class DaemonRuntime implements AutoCloseable {
     return true;
   }
 
+  /**
+   * Daemon 出站 envelope：HELLO 在认证前没有 Environment scope（必须为 null）；其余消息都由已绑定连接发出（携带本 daemon 的 {@link
+   * EnvironmentId}）。
+   */
   private DaemonEnvelope envelope(
       DaemonMessageType messageType, String invocationId, String payloadJson) {
+    boolean hello = messageType == DaemonMessageType.HELLO;
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         messageType,
-        environmentName,
+        hello ? null : boundEnvironmentId,
         invocationId,
         outboundSequence.getAndIncrement(),
         payloadJson);
@@ -862,7 +838,6 @@ public final class DaemonRuntime implements AutoCloseable {
                         DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"));
               });
       running.clear();
-      closeQuietly(mcpRegistry);
       shutdownExecutors(scheduler, taskExecutor);
     } finally {
       termination.countDown();
@@ -977,7 +952,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private record InboundEnvelopeIdentity(
       int protocolVersion,
       DaemonMessageType messageType,
-      EnvironmentName environmentName,
+      EnvironmentId environmentId,
       String invocationId,
       long sequence,
       JsonNode payload) {
@@ -986,7 +961,7 @@ public final class DaemonRuntime implements AutoCloseable {
       return new InboundEnvelopeIdentity(
           envelope.protocolVersion(),
           envelope.messageType(),
-          envelope.environmentName(),
+          envelope.environmentId(),
           envelope.invocationId(),
           envelope.sequence(),
           payload);

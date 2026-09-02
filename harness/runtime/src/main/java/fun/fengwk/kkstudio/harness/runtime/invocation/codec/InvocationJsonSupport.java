@@ -10,7 +10,8 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentWorkspacePath;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -191,6 +192,20 @@ final class InvocationJsonSupport {
     }
   }
 
+  /** 读取 canonical EnvironmentId 文本字段；非 canonical UUID 文本拒绝。 */
+  static EnvironmentId environmentId(ObjectNode node, String field, String context) {
+    String value = nullableText(node, field, context);
+    if (value == null) {
+      throw new IllegalArgumentException(context + " must declare non-null " + field);
+    }
+    try {
+      return EnvironmentId.parse(value);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical UUID string: " + value, error);
+    }
+  }
+
   static UUID requiredUuid(ObjectNode node, String field, String context) {
     UUID value = nullableUuid(node, field, context);
     if (value == null) {
@@ -199,14 +214,9 @@ final class InvocationJsonSupport {
     return value;
   }
 
-  static EnvironmentName nullableEnvironmentName(ObjectNode node, String field, String context) {
-    String value = nullableText(node, field, context);
-    return value == null ? null : new EnvironmentName(value);
-  }
-
   /**
-   * 读取可空的完整 Environment binding 对象：null 表示未绑定；非 null 必须是恰好 {@code name}/{@code workspacePath}
-   * 两字段的严格对象，且两字段分别经 {@link EnvironmentName} 与 workspace path validator 校验。
+   * 读取可空的完整 Environment binding 对象：null 表示未绑定；非 null 必须是恰好 {@code environmentId}/{@code
+   * workspacePath} 两字段的严格对象，且两字段分别经 {@link EnvironmentId} 与 workspace path validator 校验。
    */
   static EnvironmentBinding nullableEnvironmentBinding(
       ObjectNode node, String field, String context) {
@@ -216,10 +226,11 @@ final class InvocationJsonSupport {
     }
     String bindingContext = context + "." + field;
     ObjectNode binding = object(value, bindingContext);
-    requireFields(binding, bindingContext, "name", "workspacePath");
+    requireFields(binding, bindingContext, "environmentId", "workspacePath");
     return new EnvironmentBinding(
-        new EnvironmentName(text(binding, "name", bindingContext)),
-        text(binding, "workspacePath", bindingContext));
+        environmentId(binding, "environmentId", bindingContext),
+        EnvironmentWorkspacePath.requireCanonicalRelativePath(
+            text(binding, "workspacePath", bindingContext)));
   }
 
   static String jsonObjectText(ObjectNode node, String field, String context) {
@@ -255,18 +266,22 @@ final class InvocationJsonSupport {
     putNullable(node, field, value == null ? null : value.toString());
   }
 
-  static void putNullable(ObjectNode node, String field, EnvironmentName value) {
-    putNullable(node, field, value == null ? null : value.value());
+  /** 编码可空 Environment id：null 输出显式 null；非 null 输出 canonical UUID 文本。 */
+  static void putNullable(ObjectNode node, String field, EnvironmentId value) {
+    putNullable(node, field, value == null ? null : value.toString());
   }
 
-  /** 编码可空完整 Environment binding：null 输出显式 null；非 null 输出严格 {@code {name, workspacePath}} 对象。 */
+  /**
+   * 编码可空完整 Environment binding：null 输出显式 null；非 null 输出严格 {@code {environmentId, workspacePath}}
+   * 对象。
+   */
   static void putNullable(ObjectNode node, String field, EnvironmentBinding value) {
     if (value == null) {
       node.putNull(field);
       return;
     }
     ObjectNode binding = node.putObject(field);
-    binding.put("name", value.environmentName().value());
+    binding.put("environmentId", value.environmentId().toString());
     binding.put("workspacePath", value.workspacePath());
   }
 

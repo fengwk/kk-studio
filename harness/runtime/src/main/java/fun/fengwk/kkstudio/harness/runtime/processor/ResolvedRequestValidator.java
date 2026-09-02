@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -57,24 +58,27 @@ final class ResolvedRequestValidator {
     }
     ModelSelection expectedModel =
         preparation == null ? settings.model() : preparation.executionModel();
+    // BranchSettings 只持久化 canonical workspacePath；environmentId 由 Resolver 每轮解析后与该 path 组合。
+    // runtime 层可校验的一致性维度是 workspacePath：无 workspace 的 branch 不得出现 environment-required binding，
+    // 有 workspace 的 branch 要求 binding/skill source 与该 path 完全一致（binding 之间一致性由 spec 保证）。
     for (ToolBinding binding : spec.toolBindings()) {
       if (binding.environmentRequired()
-          && !Objects.equals(binding.environment(), settings.environment())) {
+          && !workspacePathMatches(binding.environment(), settings.workspacePath())) {
         throw new IllegalStateException(
             "resolved tool environment="
                 + binding.environment()
                 + " does not match candidate branch environment="
-                + settings.environment());
+                + settings.workspacePath());
       }
     }
     for (SkillBinding skill : spec.skillBindings()) {
       if (skill.sourceEnvironment() != null
-          && !skill.sourceEnvironment().equals(settings.environment())) {
+          && !workspacePathMatches(skill.sourceEnvironment(), settings.workspacePath())) {
         throw new IllegalStateException(
             "resolved skill source environment="
                 + skill.sourceEnvironment()
                 + " does not match candidate branch environment="
-                + settings.environment());
+                + settings.workspacePath());
       }
     }
     if (!spec.model().providerName().equals(expectedModel.providerName())
@@ -96,5 +100,13 @@ final class ResolvedRequestValidator {
               + " does not match expected variant "
               + expectedModel.variant());
     }
+  }
+
+  /** binding 的 workspace path 与 branch 的 nullable canonical path 必须完全一致。 */
+  private static boolean workspacePathMatches(EnvironmentBinding binding, String workspacePath) {
+    if (binding == null) {
+      return workspacePath == null;
+    }
+    return workspacePath != null && binding.workspacePath().equals(workspacePath);
   }
 }

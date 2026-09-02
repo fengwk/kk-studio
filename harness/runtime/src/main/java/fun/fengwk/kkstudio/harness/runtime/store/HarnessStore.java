@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -265,11 +265,10 @@ public interface HarnessStore {
     void requestWork(WorkTarget target, Instant requestedAt);
 
     /**
-     * 请求一次带环境亲和性的 wake（TOOL 专用）：新 target 冻结 requiredEnvironmentName，已有行校验亲和性一致并保留当前 lease。 non-null
+     * 请求一次带环境亲和性的 wake（TOOL 专用）：新 target 冻结 requiredEnvironmentId，已有行校验亲和性一致并保留当前 lease。 non-null
      * 仅允许 TOOL 类型；要求 owning Thread 已在本事务锁定；target 不存在或亲和性冲突抛 {@link IllegalArgumentException}。
      */
-    void requestWork(
-        WorkTarget target, Instant requestedAt, EnvironmentName requiredEnvironmentName);
+    void requestWork(WorkTarget target, Instant requestedAt, EnvironmentId requiredEnvironmentId);
 
     /**
      * 领取 targetType 中下一个 due 的 Work（无 node 亲和性）：候选为 availableAt {@code <= now} 且 lease 为空或已过期
@@ -280,7 +279,7 @@ public interface HarnessStore {
 
     /**
      * 领取 targetType 中下一个 due 的 Work：候选为 availableAt {@code <= now} 且 lease 为空或已过期 （leaseUntil
-     * {@code <= now}）且满足环境亲和性（requiredEnvironmentName 为空或当前 nodeInstanceId 持有有效 READY 路由）的行， 按
+     * {@code <= now}）且满足环境亲和性（requiredEnvironmentId 为空或当前 nodeInstanceId 持有有效 READY 连接租约）的行， 按
      * (availableAt, targetId) 升序确定性选取第一条并写入给定 leaseToken / leaseUntil。该 dispatcher primitive
      * 必须是本事务首个 Work 锁操作；无候选返回 {@link Optional#empty()}。
      */

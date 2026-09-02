@@ -548,7 +548,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 14 个原子 capabilities（version=1）+ skills + mcpServers 摘要 + rootPath（daemon canonical Environment Root），且不公开旧 tools 或 READY environment metadata',
+  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 12 个原子 capabilities（version=1）+ skills + rootPath（daemon canonical Environment Root），且不公开旧 tools 或 READY environment metadata',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -569,8 +569,6 @@ registerCase({
       'lsp.goto-definition',
       'lsp.workspace-symbols',
       'lsp.java-decompile',
-      'mcp.list',
-      'mcp.call',
       'skill.load',
     ]
     const actualCapabilities = match.capabilities || []
@@ -582,30 +580,15 @@ registerCase({
       JSON.stringify({ expectedCapabilityIds, actualCapabilities }),
     )
     assert(Array.isArray(match.skills), JSON.stringify(match))
-    assert(Array.isArray(match.mcpServers), JSON.stringify(match))
     assert(
       !Object.hasOwn(match, 'tools')
+        && !Object.hasOwn(match, 'mcpServers')
         && !Object.hasOwn(match, 'operatingSystem')
         && !Object.hasOwn(match, 'workingDirectory')
         && !Object.hasOwn(match, 'timeZone')
         && !Object.hasOwn(match, 'note'),
       JSON.stringify(match),
     )
-    // MCP 摘要只含 name/status/error/tools(name+description)；不暴露命令/headers/URL/完整 schema。
-    for (const server of match.mcpServers) {
-      assert(typeof server.name === 'string' && server.name.length > 0, JSON.stringify(server))
-      assert(server.status === 'READY' || server.status === 'FAILED', JSON.stringify(server))
-      if (server.status === 'READY') {
-        assert(server.error == null, JSON.stringify(server))
-        assert(Array.isArray(server.tools), JSON.stringify(server))
-        for (const tool of server.tools) {
-          assert(typeof tool.name === 'string' && tool.name.length > 0, JSON.stringify(tool))
-          assert(typeof tool.description === 'string' || tool.description == null, JSON.stringify(tool))
-        }
-      } else {
-        assert(Array.isArray(server.tools) && server.tools.length === 0, JSON.stringify(server))
-      }
-    }
     assert(match.ready === true, JSON.stringify(match))
     ctx.vars.daemonEnvironment = match
   },

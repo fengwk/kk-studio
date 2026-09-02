@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.BlockingStore;
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.ControlledExecutor;
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.ModelSeed;
@@ -432,12 +432,12 @@ class HarnessWorkDispatcherDrainTest {
   void nodeInstanceIdIsForwardedAndFiltersAffinityClaim() {
     UUID allowedNodeId = UUID.randomUUID();
     UUID otherNodeId = UUID.randomUUID();
-    EnvironmentName env = new EnvironmentName("env-1");
+    EnvironmentId env = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
     InMemoryHarnessStore store =
         new InMemoryHarnessStore(
-            (nodeInstanceId, environmentName, now) ->
-                allowedNodeId.equals(nodeInstanceId) && env.equals(environmentName));
+            (nodeInstanceId, environmentId2, now) ->
+                allowedNodeId.equals(nodeInstanceId) && env.equals(environmentId2));
 
     ToolSeed toolSeed = seedTool(store);
 
@@ -481,7 +481,7 @@ class HarnessWorkDispatcherDrainTest {
     awaitTrue(() -> !allowedClaims.isEmpty());
     assertEquals(1, allowedClaims.size());
     assertEquals(toolSeed.toolInvocationId(), allowedClaims.get(0).target().id());
-    assertEquals(env, allowedClaims.get(0).requiredEnvironmentName());
+    assertEquals(env, allowedClaims.get(0).requiredEnvironmentId());
     allowedDispatcher.stop();
   }
 }

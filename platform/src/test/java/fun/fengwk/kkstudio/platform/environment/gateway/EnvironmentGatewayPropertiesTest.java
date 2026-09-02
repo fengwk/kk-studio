@@ -7,20 +7,8 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 
-/**
- * Environment Gateway 的部署级边界：{@code daemonToken} 与 WebSocket 单帧上限留在 bootstrap
- * properties（心跳/目录/资源预算仍由 SystemSettings.environment 承载）。
- */
+/** Environment Gateway 的部署级传输边界。 */
 class EnvironmentGatewayPropertiesTest {
-
-  @Test
-  void requiresNonBlankDaemonToken() {
-    EnvironmentGatewayProperties properties = new EnvironmentGatewayProperties();
-
-    assertThrows(IllegalArgumentException.class, properties::requireDaemonToken);
-    properties.setDaemonToken("daemon-token");
-    assertEquals("daemon-token", properties.requireDaemonToken());
-  }
 
   @Test
   void defaultsAndRejectsInvalidMaxMessageBytes() {

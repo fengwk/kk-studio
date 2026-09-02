@@ -20,7 +20,7 @@ import java.util.UUID;
 public interface ChatMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, title, agent_name, environment_name, workspace_path, yolo_enabled, version, "
+      "id, title, agent_name, workspace_path, yolo_enabled, version, "
           + "created_at as create_time, updated_at as update_time";
 
   @Select("select " + COLUMNS + " from chat order by updated_at desc, created_at desc, title asc")
@@ -30,7 +30,6 @@ public interface ChatMapper extends BaseMapper {
         @Result(column = "id", property = "id"),
         @Result(column = "title", property = "title"),
         @Result(column = "agent_name", property = "agentName"),
-        @Result(column = "environment_name", property = "environmentName"),
         @Result(column = "workspace_path", property = "workspacePath"),
         @Result(column = "yolo_enabled", property = "yoloEnabled"),
         @Result(column = "version", property = "version"),
@@ -55,10 +54,10 @@ public interface ChatMapper extends BaseMapper {
   @Insert(
       """
       insert into chat (
-          id, title, agent_name, environment_name, workspace_path, yolo_enabled,
+          id, title, agent_name, workspace_path, yolo_enabled,
           created_at, updated_at, version
       ) values (
-          #{id}, #{title}, #{agentName}, #{environmentName}, #{workspacePath}, #{yoloEnabled},
+          #{id}, #{title}, #{agentName}, #{workspacePath}, #{yoloEnabled},
           current_timestamp, current_timestamp, 0
       )
       """)
@@ -68,8 +67,7 @@ public interface ChatMapper extends BaseMapper {
       """
       update chat
       set title = #{chat.title}, agent_name = #{chat.agentName},
-          environment_name = #{chat.environmentName}, workspace_path = #{chat.workspacePath},
-          yolo_enabled = #{chat.yoloEnabled},
+          workspace_path = #{chat.workspacePath}, yolo_enabled = #{chat.yoloEnabled},
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where id = #{chat.id} and version = #{expectedVersion}
       """)

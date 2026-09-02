@@ -109,7 +109,6 @@ public final class AgentPromptComposer {
   private static String currentEnvironment(CurrentEnvironmentContext context) {
     List<String> fields = new ArrayList<>();
     if (context.binding() != null) {
-      addEnvironmentField(fields, "name", context.binding().environmentName().value());
       addEnvironmentField(fields, "workspace", context.binding().workspacePath());
     }
     if (context.operatingSystem() != null) {

@@ -70,7 +70,6 @@ class EnvironmentDaemonWebSocketHandlerTest {
 
   private static EnvironmentGatewayProperties gatewayProperties(long maxMessageBytes) {
     EnvironmentGatewayProperties properties = new EnvironmentGatewayProperties();
-    properties.setDaemonToken("test-token");
     properties.setMaxMessageBytes(maxMessageBytes);
     return properties;
   }

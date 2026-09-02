@@ -44,8 +44,8 @@ class WebModuleArchitectureTest {
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
           PLATFORM_ENVIRONMENT_PREFIX + "gateway." + "EnvironmentDaemonGateway",
-          PLATFORM_ENVIRONMENT_PREFIX + "registry." + "LiveEnvironment",
-          PLATFORM_ENVIRONMENT_PREFIX + "registry." + "LiveEnvironmentRegistry");
+          PLATFORM_ENVIRONMENT_PREFIX + "registry." + "EnvironmentConnection",
+          PLATFORM_ENVIRONMENT_PREFIX + "registry." + "EnvironmentRegistry");
 
   /**
    * web/pom.xml 禁止直接声明的依赖项：

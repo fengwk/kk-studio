@@ -913,7 +913,7 @@ class ThreadContextClassifierTest {
 
   private static BranchSettings branchSettings() {
     return new BranchSettings(
-        EnvironmentBindings.binding("env-2"),
+        EnvironmentBindings.binding("22222222-2222-2222-2222-222222222222").workspacePath(),
         "agent",
         new ModelSelection("provider", "model", "v1"));
   }

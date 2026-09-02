@@ -354,7 +354,6 @@ public record SystemSettings(
   public record MiniMaxH3(
       boolean enabled,
       String promptAgentName,
-      String promptEnvironmentName,
       long promptMaxWaitMillis,
       String comfyBaseUrl,
       long comfyConnectTimeoutMillis,
@@ -363,7 +362,7 @@ public record SystemSettings(
       long comfyMaxWaitMillis) {
 
     public static final MiniMaxH3 DEFAULT =
-        new MiniMaxH3(false, null, null, 600_000L, null, 10_000L, 30_000L, 2_000L, 1_800_000L);
+        new MiniMaxH3(false, null, 600_000L, null, 10_000L, 30_000L, 2_000L, 1_800_000L);
 
     public MiniMaxH3 {
       SystemSettingsValidation.requirePositiveBounded(
@@ -387,9 +386,6 @@ public record SystemSettings(
       promptAgentName =
           SystemSettingsValidation.requireOptionalAgentName(
               promptAgentName, "integrations.minimaxH3.promptAgentName");
-      promptEnvironmentName =
-          SystemSettingsValidation.requireOptionalEnvironmentName(
-              promptEnvironmentName, "integrations.minimaxH3.promptEnvironmentName");
       comfyBaseUrl =
           SystemSettingsValidation.requirePresentableUrl(
               comfyBaseUrl, "integrations.minimaxH3.comfyBaseUrl");
@@ -397,10 +393,6 @@ public record SystemSettings(
         if (promptAgentName == null) {
           throw new IllegalArgumentException(
               "integrations.minimaxH3.promptAgentName is required when minimaxH3 is enabled");
-        }
-        if (promptEnvironmentName == null) {
-          throw new IllegalArgumentException(
-              "integrations.minimaxH3.promptEnvironmentName is required when minimaxH3 is enabled");
         }
         if (comfyBaseUrl == null) {
           throw new IllegalArgumentException(

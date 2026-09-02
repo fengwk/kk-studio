@@ -4,8 +4,6 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
-import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
-
 import java.time.Instant;
 
 /** Chat 集合的公开读表示。 */
@@ -21,12 +19,9 @@ public class ChatDTO {
   /** 必填可见 Agent 身份；Agent 删除后该值可能过期。 */
   private String agentName;
 
-  /**
-   * 可空的默认分支完整 Environment binding（canonical 路由名称 + workspace path）；null 表示无默认环境
-   * （{@code @JsonInclude(ALWAYS)} 保证 null 显式序列化，前端/契约可区分缺省与显式 null）。
-   */
+  /** 可空的默认分支 workspace path。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private EnvironmentBindingDTO environment;
+  private String workspacePath;
 
   /** 可见的发送权限模式。 */
   private boolean yoloEnabled;

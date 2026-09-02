@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -31,7 +31,8 @@ class EnvironmentCapabilityTransportTest {
           new InputSchema(null, Map.of("path", new StringSchema(null)), Set.of("path"), false),
           Duration.ofSeconds(10));
   private static final EnvironmentBinding BINDING =
-      new EnvironmentBinding(new EnvironmentName("env-a"), "workspace");
+      new EnvironmentBinding(
+          EnvironmentId.parse("123e4567-e89b-12d3-a456-426614174000"), "workspace");
   private static final EnvironmentCapabilityExecutionRequest REQUEST =
       new EnvironmentCapabilityExecutionRequest(
           DESCRIPTOR,

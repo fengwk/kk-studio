@@ -78,7 +78,8 @@ import java.util.function.Consumer;
  */
 final class StoreTestSupport {
 
-  static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
+  static final EnvironmentBinding ENV_ID =
+      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
   static final UUID OWNER_THREAD_ID = TestIds.id(10L);
   static final int CONTEXT_WINDOW = 100_000;
   static final int MAX_OUTPUT_TOKENS = 16_384;
@@ -514,7 +515,10 @@ final class StoreTestSupport {
   }
 
   static BranchSettings branchSettings() {
-    return new BranchSettings(ENV_ID, "agent", new ModelSelection("provider", "model", "v1"));
+    return new BranchSettings(
+        ENV_ID == null ? null : ENV_ID.workspacePath(),
+        "agent",
+        new ModelSelection("provider", "model", "v1"));
   }
 
   static ModelRequestSpec modelRequest() {

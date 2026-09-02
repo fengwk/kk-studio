@@ -28,7 +28,9 @@ class CompactionTurnsTest {
 
   private static final BranchSettings SETTINGS =
       new BranchSettings(
-          EnvironmentBindings.binding("env"), "agent", new ModelSelection("p", "m", "v"));
+          EnvironmentBindings.binding("44444444-4444-4444-4444-444444444444").workspacePath(),
+          "agent",
+          new ModelSelection("p", "m", "v"));
   private static final Instant NOW = Instant.EPOCH;
 
   @Test

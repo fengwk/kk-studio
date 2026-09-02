@@ -103,7 +103,6 @@ class MiniMaxH3CanvasFunctionAdapterTest {
     return new SystemSettings.MiniMaxH3(
         enabled,
         "h3-agent",
-        "h3-prompt",
         600_000L,
         "http://127.0.0.1:8188",
         10_000L,

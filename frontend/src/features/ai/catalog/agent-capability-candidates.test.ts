@@ -35,7 +35,6 @@ function environment(
     lastSeen: null,
     capabilities: [],
     skills,
-    mcpServers: [],
   }
 }
 

@@ -30,7 +30,8 @@ import java.util.Set;
 /** port 契约测试使用的最小化 frozen request fixture。 */
 final class PortTestData {
 
-  private static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
+  private static final EnvironmentBinding ENV_ID =
+      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
 
   private PortTestData() {}
 

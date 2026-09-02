@@ -17,15 +17,15 @@ import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 
-/** 运行时 skill body loader 直接使用 canonical EnvironmentName 路由。 */
+/** 运行时 skill body loader 直接使用 canonical EnvironmentId 路由。 */
 class EnvironmentSkillBodyLoaderTest {
 
   private static final EnvironmentBinding ENVIRONMENT_ID = TestEnvironmentBindings.binding("env-1");
 
   @Test
-  void delegatesCanonicalEnvironmentNameToEnvironmentSkillLoader() {
+  void delegatesCanonicalEnvironmentIdToEnvironmentSkillLoader() {
     EnvironmentSkillLoader delegate = mock(EnvironmentSkillLoader.class);
-    when(delegate.loadSkill(ENVIRONMENT_ID.environmentName(), "dev", Duration.ofSeconds(5)))
+    when(delegate.loadSkill(ENVIRONMENT_ID.environmentId(), "dev", Duration.ofSeconds(5)))
         .thenReturn(
             CompletableFuture.completedFuture(
                 new EnvironmentSkillLoadResult.Loaded("dev", "skill body")));
@@ -33,7 +33,7 @@ class EnvironmentSkillBodyLoaderTest {
     EnvironmentSkillBodyLoader loader = new EnvironmentSkillBodyLoader(delegate);
     SkillBodyLoadResult result = loader.load(ENVIRONMENT_ID, "dev", Duration.ofSeconds(5)).join();
 
-    verify(delegate).loadSkill(ENVIRONMENT_ID.environmentName(), "dev", Duration.ofSeconds(5));
+    verify(delegate).loadSkill(ENVIRONMENT_ID.environmentId(), "dev", Duration.ofSeconds(5));
     assertTrue(result instanceof SkillBodyLoadResult.Loaded);
     SkillBodyLoadResult.Loaded loaded = (SkillBodyLoadResult.Loaded) result;
     assertEquals("dev", loaded.skillName());

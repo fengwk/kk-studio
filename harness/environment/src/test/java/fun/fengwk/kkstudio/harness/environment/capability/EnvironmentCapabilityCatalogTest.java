@@ -12,7 +12,7 @@ import java.util.List;
 /** 固定 atomic capability ID、descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
 
-  /** 14 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
+  /** 12 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
   @Test
   void exposesStableIdsInFixedOrder() {
     List<EnvironmentCapabilityId> expected =
@@ -28,8 +28,6 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
             EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
-            EnvironmentCapabilityIds.MCP_LIST,
-            EnvironmentCapabilityIds.MCP_CALL,
             EnvironmentCapabilityIds.SKILL_LOAD);
 
     assertEquals("1", EnvironmentCapabilityCatalog.version());
@@ -46,8 +44,6 @@ class EnvironmentCapabilityCatalogTest {
             "lsp.goto-definition",
             "lsp.workspace-symbols",
             "lsp.java-decompile",
-            "mcp.list",
-            "mcp.call",
             "skill.load"),
         expected.stream().map(EnvironmentCapabilityId::value).toList());
     assertEquals(
