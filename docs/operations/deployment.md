@@ -35,9 +35,11 @@ flowchart LR
   Jar --> AppImage["kk-studio-app image"]
   AppImage --> Local["deploy/local<br/>app + postgres"]
   AppImage --> Test["deploy/test<br/>postgres + minio + mock + optional app"]
+  AppImage --> Distributed["deploy/distributed<br/>app-a/app-b + daemon-a/daemon-b + shared postgres/minio/mock"]
   DaemonBuild["deploy/reliability/daemon.Dockerfile"] --> DaemonImage["kk-studio-daemon image"]
   AppImage --> Reliability["deploy/reliability"]
   DaemonImage --> Reliability
+  DaemonImage --> Distributed
   Reliability --> App["app :8080"]
   Reliability --> Daemon["daemon -> ws://app:8080/api/ai/environment/daemon/v2"]
   App --> PG["PostgreSQL"]
@@ -48,6 +50,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | local | `postgres`、`app` | app `127.0.0.1:8080`、PostgreSQL `127.0.0.1:5432` | 本地 UI/API 与 durable PostgreSQL |
 | test | `postgres`、`minio`、`minio-init`、`http-mock`、可选 `app` profile | `15432`、`19000`、`18089`、可选 `18088` | Canvas/Storage/Function/离线 Chat smoke |
+| distributed | `postgres`、`minio`、`minio-init`、`http-mock`、`app-a`、`app-b`、`workspace-init`、`daemon-a`、`daemon-b` | app-a `127.0.0.1:18082`、app-b `127.0.0.1:18083`、`15433`、`19001`、`18090` | 双节点零 App-to-App 网络的分布式 E2E mock topology |
 | reliability | `postgres`、`app`、`workspace-init`、`daemon` | 只有 app `127.0.0.1:18091` | Environment daemon、工具隔离和显式 reliability matrix |
 
 每个 stack 使用自己的 Compose project、network 和 named volume；容器内端口
@@ -250,9 +253,63 @@ docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphan
 未显式指定 `CANVAS_TEST_BUILD_NETWORK` 时，build 使用 `host` network，
 并生成 Java proxy options；proxy 值不会写进 runtime image。
 
-## 8. `deploy/reliability`：App + Environment Daemon
+## 8. `deploy/distributed`：双节点零 App-to-App 网络 E2E 栈
 
 ### 8.1 拓扑和网络
+
+[deploy/distributed/compose.yaml](../../deploy/distributed/compose.yaml) 的
+project name 是 `kk-studio-distributed`。它是免费 mock topology：App 镜像复用
+`deploy/local/Dockerfile`，Daemon 镜像复用
+`deploy/reliability/daemon.Dockerfile`，HTTP mock 直接挂载 `deploy/test/mock`
+的 server/routes/fixtures。
+
+| 服务 | 网络 | 职责 |
+| --- | --- | --- |
+| `postgres` | `node-a-db` + `node-b-db` | 两个 App 共享的单一 `kk_studio_distributed` database，宿主 `127.0.0.1:15433` |
+| `minio` / `minio-init` | `node-a-db`（init 也只在此网络） | 两个 App 共享的 `kk-studio-distributed` bucket，宿主 `127.0.0.1:19001` |
+| `http-mock` | `node-a-db` + `node-b-db` | 复用 `deploy/test` mock（`stub.local`/`opencli-hub`/`comfyui` 别名在两个 DB 网络中均可用），宿主 `127.0.0.1:18090` |
+| `app-a` | `node-a-db` + `daemon-a` + `app-ingress-a` | 节点 A 的 App，宿主 `127.0.0.1:18082` |
+| `app-b` | `node-b-db` + `daemon-b` + `app-ingress-b` | 节点 B 的 App，宿主 `127.0.0.1:18083` |
+| `daemon-a` / `daemon-b` | 各自的 `daemon-a` / `daemon-b` | 通过 `ws://app-a:8080/...` / `ws://app-b:8080/...` 连接各自 App |
+| `workspace-init` | `daemon-a`（仅 volume 初始化） | `chown 10001:10001` 两个 daemon workspace volume |
+
+`node-a-db`、`node-b-db`、`daemon-a`、`daemon-b` 都是 `internal: true`；宿主
+端口只经 `app-ingress-a`/`app-ingress-b` 与共享依赖发布。没有任何网络同时包含
+App-A 和 App-B，两节点没有 DNS/IP 路径。不变量由
+`scripts/e2e/tests/distributed_topology.py` 静态验证，
+`deploy/distributed/run.sh verify` 是它的入口。
+
+### 8.2 节点身份与共享数据面
+
+节点身份使用固定、可覆盖的 disposable 变量（最终 Environment 分支集成时可改
+参数名）：
+
+```text
+DISTRIBUTED_NODE_A_ID=node-a          # daemon-id
+DISTRIBUTED_NODE_B_ID=node-b
+DISTRIBUTED_ENV_A_NAME=distributed-a  # environment name（canonical 路由名）
+DISTRIBUTED_ENV_B_NAME=distributed-b
+DISTRIBUTED_DAEMON_TOKEN=e2e-daemon-token  # 与 e2e profile 的 gateway token 一致
+DISTRIBUTED_APP_A_PORT=18082
+DISTRIBUTED_APP_B_PORT=18083
+```
+
+两个 App 共享同一 PostgreSQL database 与 MinIO bucket；`node-a-db` 可被
+`disconnect-db-a` 单独断开，`daemon-a` 网络与 daemon workspace 不受影响。本栈
+不读取宿主 MiniMax 凭据；真实模型仍只能经 `scripts/e2e.sh` 显式 `--real` 同步。
+
+### 8.3 生命周期入口
+
+[deploy/distributed/run.sh](../../deploy/distributed/run.sh) 是唯一生命周期
+入口：`up [--skip-build]`、`status`、`logs`、`disconnect-db-a`、
+`reconnect-db-a`、`verify`、`down [--volumes]`。`up` 等待依赖 health、两个 App
+`/actuator/health` 和两个 Environment `READY` 投影；`disconnect-db-a`/
+`reconnect-db-a` 是按容器与网络精确操作的幂等 helper，不做进程级 kill。
+`scripts/e2e.sh --distributed` 通过该入口启停栈并在退出时清理。
+
+## 9. `deploy/reliability`：App + Environment Daemon
+
+### 9.1 拓扑和网络
 
 [deploy/reliability/compose.yaml](../../deploy/reliability/compose.yaml) 的
 project name 是 `kk-studio-reliability`：
@@ -281,7 +338,7 @@ Daemon command 当前固定：
 --environment-root /workspace
 ```
 
-### 8.2 Daemon image 和 non-root
+### 9.2 Daemon image 和 non-root
 
 [deploy/reliability/daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile)
 分三阶段：
@@ -296,7 +353,7 @@ runtime 具备 JDK/`javap`、Node `22.19.x`、npm `11.19.0`、bash、git；不
 安装 `rg` 或 `fd`。Daemon 只挂载一个 `/workspace` named volume，无宿主
 bind mount；`workspace-init` 完成 owner 初始化后才允许 Daemon 启动。
 
-### 8.3 启动、health、smoke 和关闭
+### 9.3 启动、health、smoke 和关闭
 
 ```bash
 ./scripts/reliability/stack.sh up
@@ -332,9 +389,9 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 经 stdin 送入 Daemon 容器，在容器内编译并运行 Find/Grep/Bash assertions；
 它不经过 Agent、Provider 或 App command batch。
 
-## 9. PostgreSQL、MinIO/S3 和 Environment daemon
+## 10. PostgreSQL、MinIO/S3 和 Environment daemon
 
-### 9.1 PostgreSQL/Flyway
+### 10.1 PostgreSQL/Flyway
 
 三种 stack 都使用 PostgreSQL 17；App 容器内连接 service name 和容器端口，
 宿主端口只是访问映射：
@@ -347,14 +404,14 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 
 Flyway history 保存在 PostgreSQL；删卷才会回到空库。
 
-### 9.2 MinIO/S3
+### 10.2 MinIO/S3
 
 MinIO 只属于 `deploy/test`。`minio-init` 负责创建 private
 `canvas-test` bucket；App 使用 `minio:9000` 访问对象，signed URL 的
 public endpoint 是宿主 `127.0.0.1:19000`。Storage API 只接收 upload
 handle 和 presigned URL contract，不把 bucket/key 暴露给 Frontend。
 
-### 9.3 Environment daemon
+### 10.3 Environment daemon
 
 Environment Daemon 是独立 JVM 进程，连接 App 的
 `/api/ai/environment/daemon/v2` WebSocket gateway。App 负责：
@@ -367,9 +424,9 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
 `daemon-workspace` named volume 保存 anchor/case workspace，Daemon 不通过
 宿主 bind mount 读取任意路径。
 
-## 10. Env groups、secrets 和 proxy boundary
+## 11. Env groups、secrets 和 proxy boundary
 
-### 10.1 运行配置分组
+### 11.1 运行配置分组
 
 | Stack/用途 | 责任组 | 典型变量 |
 | --- | --- | --- |
@@ -377,12 +434,13 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
 | local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SUBAGENT_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*` |
 | test | ports/build/mock | `CANVAS_TEST_*` |
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_CANVAS_RESOURCE_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED` |
+| distributed | node identity/ports | `DISTRIBUTED_NODE_A_ID`、`DISTRIBUTED_NODE_B_ID`、`DISTRIBUTED_ENV_A_NAME`、`DISTRIBUTED_ENV_B_NAME`、`DISTRIBUTED_DAEMON_TOKEN`、`DISTRIBUTED_APP_A_PORT`、`DISTRIBUTED_APP_B_PORT` |
 | reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_ENV_NAME` |
 | supply-chain | reports/images/cache | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`TRIVY_SKIP_DB_UPDATE` |
 | explicit `--real` E2E | host-only credential sync | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
 | explicit Seedance prepare-only | external Hub/workspace | `OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID` |
 
-### 10.2 Secrets
+### 11.2 Secrets
 
 - `.dockerignore` 和 `.gitignore` 排除 `.env`、key/cert/credential 文件、
   `credentials*`、service account JSON 和 `secrets/`。
@@ -403,7 +461,7 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
 - `NVD_API_KEY` 只由 supply-chain 脚本写入临时 mode-600 Maven settings；
   不写入 command line、POM、image 或报告。
 
-### 10.3 Proxy
+### 11.3 Proxy
 
 App image build 支持 `KK_STUDIO_BUILD_HTTP_PROXY`、
 `KK_STUDIO_BUILD_HTTPS_PROXY`、`KK_STUDIO_BUILD_NO_PROXY` 和
@@ -415,7 +473,7 @@ proxy 使用 host build network，非 loopback 默认使用 Docker default netwo
 Proxy 只作用于 build、npm/Maven dependency fetch 或显式 Trivy network；
 它不进入 App/Daemon runtime image，也不作为运行时业务配置。
 
-## 11. 清理和运行边界
+## 12. 清理和运行边界
 
 ```bash
 # local：保留或删除 PostgreSQL 数据
@@ -425,12 +483,15 @@ docker compose -f deploy/local/compose.yaml down -v
 # test：删除容器、网络和 PostgreSQL/MinIO volumes
 docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphans
 
+# distributed：删除双节点栈的容器、网络和 PostgreSQL/MinIO/daemon workspace volumes
+./deploy/distributed/run.sh down --volumes
+
 # reliability：保留或删除 PostgreSQL/workspace named volumes
 ./scripts/reliability/stack.sh down
 ./scripts/reliability/stack.sh down --volumes
 
 # 确认宿主端口
-ss -ltnp | grep -E ':8080|:5432|:15432|:18088|:18089|:19000|:18091' || true
+ss -ltnp | grep -E ':8080|:5432|:15432|:15433|:18082|:18083|:18088|:18089|:18090|:19000|:19001|:18091' || true
 ```
 
 Healthcheck 通过后才能把服务交给上层脚本；任何 app、database、MinIO、

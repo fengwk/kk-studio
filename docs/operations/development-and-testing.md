@@ -232,7 +232,11 @@ docker compose -f deploy/local/compose.yaml config --quiet
 docker compose -f deploy/test/compose.yaml config --quiet
 docker compose -f deploy/test/compose.yaml --profile app config --quiet
 docker compose -f deploy/reliability/compose.yaml config --quiet
+./deploy/distributed/run.sh verify
 ```
+
+`deploy/distributed/run.sh verify` 静态校验双节点 Compose config 和网络不变量，
+不启动任何容器。
 
 `deploy/test/run.sh` 将配置检查、镜像构建、依赖 health、非 root runtime、
 PostgreSQL、MinIO bucket 和 HTTP mock smoke 组合为一个可清理的入口：
@@ -282,6 +286,7 @@ requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局
 ./scripts/e2e.sh --with-canvas-storage
 ./scripts/e2e.sh --with-canvas-function
 ./scripts/e2e.sh --real --with-tools --with-canvas-storage
+./scripts/e2e.sh --distributed
 ./scripts/e2e.sh --ui
 ./scripts/e2e.sh --only CASE_ID
 ./scripts/e2e.sh --level L1
@@ -299,6 +304,7 @@ requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局
 | `--with-branch` | 启用 branch case，并自动打开 `--real` |
 | `--with-canvas-storage` | 启用 Canvas Resource/Blob contract，backend 必须有 S3 配置 |
 | `--with-canvas-function` | 启用 fake Canvas Function；隐含 storage、rebuild 和 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true` |
+| `--distributed` | 启停 `deploy/distributed` 双节点 mock topology，并只运行 distributed cases；不启动宿主单实例栈，不读取宿主 MiniMax 凭据 |
 | `--ui` | 在 API matrix 后执行 Playwright UI matrix |
 | `--only CASE_ID` | 只运行指定 case，可重复 |
 | `--level L1\|L2\|L3\|L4` | 过滤 API level，可重复；UI 不属于此过滤器 |
@@ -310,6 +316,7 @@ requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局
 
 ```text
 --base-url URL
+--base-url-b URL
 --frontend-url URL
 --daemon-env NAME
 --real
@@ -317,6 +324,7 @@ requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局
 --with-branch
 --with-canvas-storage
 --with-canvas-function
+--distributed
 --only CASE_ID
 --level L1|L2|L3|L4
 --list
@@ -414,6 +422,50 @@ node scripts/e2e/ui-smoke.mjs \
   当前固定 `seedance2.0fast`、`duration=4`、`submit=0`、`retry=0`，不创建
   Canvas FunctionRun、不生成或导入视频。Hub URL 没有默认值，必须是无
   userinfo、path、query 和 fragment 的 HTTP(S) origin。
+
+### 8.6 Distributed 双节点 mock topology
+
+`--distributed` 是正交 capability，不重定义 L1-L5：它启停
+[deploy/distributed](../../deploy/distributed/compose.yaml) 的双 App/双 Daemon
+栈，并且与 `--real`、`--with-tools`、`--ui`、`--with-canvas-*` 互斥。拓扑完全
+免费：App 镜像复用 `deploy/local/Dockerfile`，Daemon 镜像复用
+`deploy/reliability/daemon.Dockerfile`，HTTP mock 直接挂载 `deploy/test/mock`，
+不复制任何实现。
+
+```bash
+./deploy/distributed/run.sh up [--skip-build]
+./deploy/distributed/run.sh status
+./deploy/distributed/run.sh logs [services...]
+./deploy/distributed/run.sh disconnect-db-a   # 幂等 DB 故障注入
+./deploy/distributed/run.sh reconnect-db-a
+./deploy/distributed/run.sh verify            # 静态拓扑校验，不启动容器
+./deploy/distributed/run.sh down [--volumes]
+```
+
+网络不变量由 `scripts/e2e/tests/distributed_topology.py` 静态验证：
+
+- PostgreSQL、MinIO、HTTP mock 同时加入 `node-a-db` 与 `node-b-db` 两个隔离
+  internal 网络；
+- App-A 只加入 `node-a-db` + `daemon-a` + `app-ingress-a`；App-B 只加入
+  `node-b-db` + `daemon-b` + `app-ingress-b`；两个 Daemon 各只加入自己的
+  daemon 网络；
+- 没有任何网络同时包含 App-A 和 App-B，两节点没有 DNS/IP 路径；
+- 宿主只发布两个 App 端口（默认 `18082`/`18083`）和 PostgreSQL/MinIO/mock
+  测试端口（默认 `15433`/`19001`/`18090`），全部绑定 `127.0.0.1`。
+
+两个 App 共享同一 PostgreSQL database（`kk_studio_distributed`）与 MinIO
+bucket（`kk-studio-distributed`），节点身份用固定可覆盖的变量表达：
+`DISTRIBUTED_NODE_A_ID`/`DISTRIBUTED_NODE_B_ID`（daemon-id）、
+`DISTRIBUTED_ENV_A_NAME`/`DISTRIBUTED_ENV_B_NAME`（environment name）、
+`DISTRIBUTED_DAEMON_TOKEN`（gateway token，与 `e2e` profile 的
+`e2e-daemon-token` 一致）。全部是 disposable test value；本栈不读取宿主
+MiniMax 凭据，真实模型仍需独立 `--real`。
+
+`--distributed` 运行通过 `deploy/distributed/run.sh` 启停栈，并在报告中记录
+topology、两个 backend URL 和双 app/daemon 容器日志（进 `logs/`，写盘前经
+凭据脱敏）。分布式 case 用 `requires: ['distributed']` 注册，只在显式开关下
+执行；双 URL 上下文由 runner 的 `ctx.baseUrls` 与 `ctx.callNode('a'|'b', ...)`
+提供，普通单实例运行的 case 与报告格式不变。
 
 ## 9. Reliability：确定性回归和 Agent matrix
 
@@ -656,13 +708,16 @@ Trivy JSON、image id/digest、smoke log 和 summary。
 docker compose -f deploy/local/compose.yaml down
 docker compose -f deploy/local/compose.yaml down -v
 docker compose -f deploy/test/compose.yaml --profile app down --volumes --remove-orphans
+./deploy/distributed/run.sh down --volumes
 ./scripts/reliability/stack.sh down
 ./scripts/reliability/stack.sh down --volumes
 ```
 
 `down` 保留 local PostgreSQL named volume；`down -v` 清空它。`deploy/test`
 和 performance 入口每次运行都清理 PostgreSQL/MinIO/test network；reliability
-不带 `--volumes` 保留 PostgreSQL 和 daemon workspace。
+不带 `--volumes` 保留 PostgreSQL 和 daemon workspace；`deploy/distributed`
+栈由 `--distributed` 入口在退出时自动清理，手动 `down --volumes` 删除全部
+容器、网络和 PostgreSQL/MinIO/daemon workspace volumes。
 
 ### 13.2 故障定位表
 
@@ -691,6 +746,7 @@ L2  real Provider text/task/stop (explicit --real)
 L3  real same-session branch (explicit --with-branch)
 L4  Environment/Tool/approval (explicit --with-tools; real tool adds S3)
 L5  Playwright UI (default 36 / registered 39; --ui + gates)
+D   distributed two-node mock topology (explicit --distributed; orthogonal capability)
 R   reliability regression + optional eight-case Agent matrix
 P   offline performance three-scenario threshold
 S   SBOM/audit/image supply-chain gate
