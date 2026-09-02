@@ -513,6 +513,7 @@ function agent() {
     systemPrompt: 'You are helpful',
     model: 'stub/acceptance-stub',
     variant: 'default',
+    environmentId: null,
     config: {
       toolIds: [],
       skills: [],

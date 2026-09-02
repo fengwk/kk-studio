@@ -79,7 +79,7 @@ function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
 ): HarnessBranchSettingsDTO {
   return {
-    environment: null,
+    workspacePath: null,
     agentName: 'assistant',
     model: modelSelection(),
     ...overrides,
@@ -1272,9 +1272,29 @@ describe('useAgentThreadController', () => {
   })
 
   it('exposes runtime facts from the snapshot branch settings', async () => {
+    vi.mocked(agentService.listAgents).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 50,
+      totalCount: 1,
+      results: [
+        {
+          name: 'assistant',
+          description: null,
+          systemPrompt: null,
+          model: 'minimax/MiniMax',
+          variant: 'default',
+          environmentId: 'env-local',
+          config: { toolIds: [], skills: [], subagents: [] },
+          version: '1',
+          createTime: null,
+          updateTime: null,
+        },
+      ],
+    })
     const currentThread = threadFixture({
       branchSettings: branchSettings({
-        environment: { name: 'env-local', workspacePath: 'proj/a' },
+        workspacePath: 'proj/a',
+        agentName: 'assistant',
       }),
     })
     vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
@@ -1283,9 +1303,8 @@ describe('useAgentThreadController', () => {
       wrapper,
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
-    // runtime fact 是完整 binding（name + workspacePath）；可用性由调用方 live map 计算。
     expect(result.current.runtimeLabels.environment).toEqual({
-      name: 'env-local',
+      environmentId: 'env-local',
       workspacePath: 'proj/a',
     })
     expect(result.current.runtimeLabels.contextWindow).toBe(128000)

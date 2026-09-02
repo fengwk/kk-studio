@@ -205,7 +205,7 @@ export function useAgentThreadController(
     [entries, modelAttemptFailures, modelInvocation, realtime.modelStream, realtime.toolStreams, toolInvocations],
   )
   const working = isThreadWorking(thread, timeline)
-  const runtimeLabels = resolveRuntimeLabels(thread, models)
+  const runtimeLabels = resolveRuntimeLabels(thread, models, agents)
 
   useEffect(() => {
     if (initializedReplayThreadRef.current === threadId) {
@@ -665,6 +665,7 @@ export function useAgentThreadController(
 function resolveRuntimeLabels(
   thread: ReturnType<typeof useAgentThreadQueries>['thread'],
   models: AgentModelView[],
+  agents: ReturnType<typeof useAgentThreadQueries>['agents'],
 ) {
   const settings = thread?.branchSettings
   const model = models.find(
@@ -673,11 +674,12 @@ function resolveRuntimeLabels(
       && item.name === settings?.model.modelName,
   )
   const contextWindow = extractContextWindow(model)
-  const environment = settings?.environment
-    ? { name: settings.environment.name, workspacePath: settings.environment.workspacePath }
-    : null
+  const agent = settings?.agentName ? agents.find((item) => item.name === settings.agentName) : undefined
+  const environment =
+    agent?.environmentId && settings?.workspacePath
+      ? { environmentId: agent.environmentId, workspacePath: settings.workspacePath }
+      : null
   return {
-    // 完整 binding 即展示身份（name + workspacePath）。
     environment,
     contextWindow,
   }

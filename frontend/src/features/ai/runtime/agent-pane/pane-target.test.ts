@@ -78,7 +78,7 @@ describe('PaneTarget durable-local FSM', () => {
           sessionId: 's1',
           threadId: 't1',
           rootSettings: {
-            environment: null,
+            workspacePath: null,
             agentName: 'assistant',
             model: { providerName: 'p', modelName: 'm', variant: 'v' },
           },
@@ -91,7 +91,7 @@ describe('PaneTarget durable-local FSM', () => {
         }],
       },
       branchDraft: {
-        environment: null,
+        workspacePath: null,
         agentName: 'assistant',
         model: { providerName: 'p', modelName: 'm', variant: 'v' },
         yoloEnabled: false,
@@ -156,7 +156,7 @@ describe('PaneTarget durable-local FSM', () => {
           sessionId: 's1',
           threadId: 't1',
           rootSettings: {
-            environment: null,
+            workspacePath: null,
             agentName: 'assistant',
             model: { providerName: 'p', modelName: 'm', variant: 'v' },
           },
@@ -169,7 +169,7 @@ describe('PaneTarget durable-local FSM', () => {
         }],
       },
       branchDraft: {
-        environment: null,
+        workspacePath: null,
         agentName: 'assistant',
         model: { providerName: 'p', modelName: 'm', variant: 'v' },
         yoloEnabled: false,
@@ -231,7 +231,7 @@ describe('PaneTarget durable-local FSM', () => {
         idempotencyKey: 'c1',
         model: { providerName: 'p', modelName: 'm', variant: 'v' },
       },
-      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', environment: null },
+      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: null },
       {
         type: 'USER_MESSAGE',
         idempotencyKey: 'c1',
