@@ -13,7 +13,7 @@ import java.time.Instant;
  * （binding 为 null（unknown tool 槽位）时显式序列化 null），而 {@code rendererKey} 在 binding 非 null 时来自
  * binding，否则固定回退为 {@code tool}。{@code approvalJson} / {@code resultJson} / {@code errorJson} 为
  * canonical runtime codec JSON，仅对应阶段非 null；{@code environment} 为 nullable 完整 Environment
- * binding（{@code {name, workspacePath}}）。
+ * binding（{@code {environmentId, workspacePath}}）。
  */
 @Data
 public class ToolInvocationDTO {
@@ -56,7 +56,7 @@ public class ToolInvocationDTO {
   private String toolId;
 
   /**
-   * 完整 Environment binding：绑定环境的工具为冻结的 {@code {name, workspacePath}}，其它为
+   * 完整 Environment binding：绑定环境的工具为冻结的 {@code {environmentId, workspacePath}}，其它为
    * null（{@code @JsonInclude(ALWAYS)} 保证 null 显式序列化）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)

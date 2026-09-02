@@ -911,10 +911,10 @@ async function main(argv) {
       const { json } = await apiJson(args.backendUrl, 'GET', '/api/ai/chat')
       const created = (json?.data || []).find((chat) => chat.title === title)
       assert(
-        created?.environment?.name === args.daemonEnv
-        && created?.environment?.workspacePath === '.',
-        `Create Chat did not persist the confirmed binding: ${JSON.stringify(created)}`,
+        created?.workspacePath === '.',
+        `Create Chat did not persist workspacePath: ${JSON.stringify(created)}`,
       )
+      assert(!Object.hasOwn(created, 'environment'), `Chat leaked environment: ${JSON.stringify(created)}`)
       await shot(caseArt, 'create-chat-environment-workspace')
       expectNoFatal(pageErrors, consoleErrors)
       await apiDeleteByName(args.backendUrl, 'chats', title)

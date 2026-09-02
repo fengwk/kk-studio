@@ -376,7 +376,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 ```
 
 `up` 等待 PostgreSQL health、App `/actuator/health` 和公共
-`GET /api/ai/environment` 的 `status=READY`。`inspect` fail closed 检查：
+`GET /api/ai/environments` 的 `status=READY`。`inspect` fail closed 检查：
 
 - Daemon uid 不是 root；
 - mount 只有 `volume -> /workspace` 且可写；
@@ -418,7 +418,7 @@ Environment Daemon 是独立 JVM 进程，连接 App 的
 
 - Daemon handshake、Environment binding、Tool/Skill capability projection；
 - inbound/outbound frame size、queue capacity、send timeout；
-- `/api/ai/environment` 的 public READY projection。
+- `/api/ai/environments` 的 public READY projection。
 
 Daemon 负责 workspace 内的工具执行和目录访问；reliability stack 用
 `daemon-workspace` named volume 保存 anchor/case workspace，Daemon 不通过

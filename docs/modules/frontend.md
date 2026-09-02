@@ -247,8 +247,7 @@ AI feature 由 `CatalogRuntime`、`ChatRuntime`、`AgentPane` 和
   使用 Model variant、limits、modalities、pricing，Agent 的 `toolIds`、
   `skills`、`subagents` 使用 catalog candidate 校验。CRUD mutation 统一
   在成功后失效对应 query，冲突沿用 ConflictPresenter。
-- Chat list 使用 `ChatRuntime` + `ChatCardsPanel`；创建 Chat 时先选择 READY
-  Environment，再明确确认 workspace，保存完整 `{name, workspacePath}`。
+- Chat list 使用 `ChatRuntime` + `ChatCardsPanel`；Agent definition 绑定 Environment ID，Chat 只持久化 nullable `workspacePath`。
 - Environment 页面读取 live Environment、原子 Capability、Skill 和目录；Capability 只展示
   canonical `id`，不把 capability ID 当作 model Tool name；`"."` 是 workspace root 的 wire 表示，UI 显示为 `@/`。
 - `builtin.ai` 的 `task` renderer 只展示宿主投影的 message；approval 和

@@ -20,7 +20,7 @@ import {
  * - POST /api/ai/runtime/threads/{id}/stop        {stopRequestId,expectedVersion}（同 id 幂等 replay）
  * - POST /api/ai/runtime/threads/{id}/tool-invocations/{toolInvocationId}/approval
  * - WS   /api/events/v1                           应用级 Thread/Canvas 事件订阅
- * - GET  /api/ai/environment                       只读 Environment 注册表（name = canonical 路由身份）
+ * - GET  /api/ai/environments                    只读 Environment 注册表（Card UUID id = canonical 路由身份）
  *
  * 产品 HTTP 写面只接受三种 sealed target：
  * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
@@ -52,18 +52,7 @@ function nonNegativeDecimal(value, field) {
   return raw
 }
 
-function isEnvironmentBindingOrNull(binding) {
-  if (binding === null) return true
-  if (typeof binding !== 'object' || binding == null || Array.isArray(binding)) return false
-  if (Object.keys(binding).sort().join(',') !== 'name,workspacePath') return false
-  if (
-    typeof binding.name !== 'string'
-    || binding.name.length > 64
-    || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(binding.name)
-  ) {
-    return false
-  }
-  const workspacePath = binding.workspacePath
+export function isCanonicalWorkspacePath(workspacePath) {
   if (
     typeof workspacePath !== 'string'
     || workspacePath.length === 0
@@ -79,6 +68,24 @@ function isEnvironmentBindingOrNull(binding) {
     || workspacePath.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
 }
 
+export function isCanonicalWorkspacePathOrNull(workspacePath) {
+  if (workspacePath === null) return true
+  return isCanonicalWorkspacePath(workspacePath)
+}
+
+export function isEnvironmentBindingOrNull(binding) {
+  if (binding === null) return true
+  if (typeof binding !== 'object' || binding == null || Array.isArray(binding)) return false
+  if (Object.keys(binding).sort().join(',') !== 'environmentId,workspacePath') return false
+  if (
+    typeof binding.environmentId !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(binding.environmentId)
+  ) {
+    return false
+  }
+  return isCanonicalWorkspacePath(binding.workspacePath)
+}
+
 /** 严格校验 Thread 投影 DTO 的 canonical UUID 标识字段并返回 threadId。 */
 export function threadIdOf(thread) {
   const threadId = canonicalUuid(thread?.threadId, 'threadId')
@@ -92,42 +99,44 @@ export function threadIdOf(thread) {
   return threadId
 }
 
-/** 创建 Chat（name-based Agent 引用；可选完整 Environment binding；Thread branchSettings 独立）。 */
+/** 创建 Chat（name-based Agent 引用；可选默认分支 workspacePath；Thread branchSettings 独立）。 */
 export async function createChat(
   ctx,
-  { title, agentName, yoloEnabled = false, environment = null },
+  { title, agentName, yoloEnabled = false, workspacePath = null },
 ) {
   const { status, json } = await ctx.call('POST', '/api/ai/chat', {
     title,
     agentName,
     yoloEnabled,
-    environment,
+    workspacePath,
   })
   assert(status === 201, `create Chat status ${status}: ${JSON.stringify(json)}`)
   const chat = envelopeData(json)
   assert(chat?.id && chat?.agentName, `invalid Chat: ${JSON.stringify(chat)}`)
   assert(
-    isEnvironmentBindingOrNull(chat.environment),
-    `Chat environment must be null or a complete binding: ${JSON.stringify(chat)}`,
+    isCanonicalWorkspacePathOrNull(chat.workspacePath),
+    `Chat workspacePath must be null or a canonical relative path: ${JSON.stringify(chat)}`,
   )
+  assert(!Object.hasOwn(chat, 'environment'), `Chat leaked environment: ${JSON.stringify(chat)}`)
   assert(!Object.hasOwn(chat, 'environmentName'), `Chat leaked environmentName: ${JSON.stringify(chat)}`)
+  assert(!Object.hasOwn(chat, 'environmentId'), `Chat leaked environmentId: ${JSON.stringify(chat)}`)
   return chat
 }
 
-/** 由 Agent + Model 引用构造完整 branchSettings（environment 是完整 binding，可 null）。 */
+/** 由 Agent + Model 引用构造完整 branchSettings（workspacePath 为可空相对路径）。 */
 export function branchSettingsOf(
   agent,
   model,
-  { environment = null } = {},
+  { workspacePath = null } = {},
 ) {
   assert(agent?.name, `agent name required: ${JSON.stringify(agent)}`)
   assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
   assert(
-    isEnvironmentBindingOrNull(environment),
-    `environment must be null or a complete binding: ${JSON.stringify(environment)}`,
+    isCanonicalWorkspacePathOrNull(workspacePath),
+    `workspacePath must be null or a canonical relative path: ${JSON.stringify(workspacePath)}`,
   )
   return {
-    environment,
+    workspacePath,
     agentName: agent.name,
     model: {
       providerName: model.providerName,
@@ -433,19 +442,16 @@ export async function snapshotEntries(ctx, threadId) {
   return (await getThreadSnapshot(ctx, threadId)).entries || []
 }
 
-/** 只读 Environment 注册表；name 是 canonical 路由身份（唯一键），ready 是统一可用性标记。 */
+/** 只读 Environment 注册表；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记。 */
 export async function listEnvironments(ctx) {
-  const { json } = await ctx.call('GET', '/api/ai/environment')
+  const { json } = await ctx.call('GET', '/api/ai/environments')
   const environments = envelopeData(json)
   assert(Array.isArray(environments), `expected Environment array: ${JSON.stringify(json)}`)
   for (const environment of environments) {
+    canonicalUuid(environment.id, 'environment.id')
     assert(
-      !Object.hasOwn(environment, 'id'),
-      `Environment must not expose id (name is the only route identity): ${JSON.stringify(environment)}`,
-    )
-    assert(
-      /^[a-z0-9]+(-[a-z0-9]+)*$/.test(String(environment.name || '')),
-      `Environment name must be a canonical bounded lowercase route name: ${JSON.stringify(environment)}`,
+      typeof environment.name === 'string' && environment.name.trim().length > 0,
+      `Environment name must be non-empty string: ${JSON.stringify(environment)}`,
     )
     assert(typeof environment.ready === 'boolean', JSON.stringify(environment))
     assert(typeof environment.status === 'string', JSON.stringify(environment))
@@ -460,13 +466,13 @@ export function userMessageCommand(content, idempotencyKey) {
   return { type: 'USER_MESSAGE', idempotencyKey, contents: [{ type: 'TEXT', text: content }] }
 }
 
-export function setEnvironmentCommand(environment, idempotencyKey) {
+export function setEnvironmentCommand(workspacePath, idempotencyKey) {
   assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
   assert(
-    isEnvironmentBindingOrNull(environment),
-    `environment must be null or a complete binding: ${JSON.stringify(environment)}`,
+    isCanonicalWorkspacePathOrNull(workspacePath),
+    `workspacePath must be null or a canonical relative path: ${JSON.stringify(workspacePath)}`,
   )
-  return { type: 'SET_ENVIRONMENT', idempotencyKey, environment }
+  return { type: 'SET_ENVIRONMENT', idempotencyKey, workspacePath }
 }
 
 export function setAgentCommand(agentName, idempotencyKey) {
