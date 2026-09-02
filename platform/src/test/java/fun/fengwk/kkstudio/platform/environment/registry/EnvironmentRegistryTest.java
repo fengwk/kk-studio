@@ -257,17 +257,26 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   }
 
   /**
-   * 测试意图：证明 hasActiveLease、holdsReadyLease 与 hasActiveLeaseToken 严格依据 PostgreSQL
-   * statement_timestamp() 判定租约活跃性；当数据库中租约过期时，无论外部传入的时钟如何滞后，三者均确定性返回 false。
+   * 测试意图：证明 hasActiveLease、hasReadyLease、holdsReadyLease 与 hasActiveLeaseToken 严格依据 PostgreSQL
+   * statement_timestamp() 判定租约活跃性；当数据库中租约过期时，无论外部传入的时钟如何滞后，各谓词均确定性返回 false。
    */
   @Test
   void dbAuthoritativePredicatesReflectExpiredLeaseRegardlessOfAppClock() {
     BindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
     UUID token1 = ((BindResult.Acquired) r1).leaseToken();
+
+    // CONNECTING 阶段：activeLease 为 true，但 readyLease 均为 false
+    assertTrue(registry1.hasActiveLease(DEV));
+    assertTrue(registry1.hasActiveLeaseToken(DEV, token1));
+    assertFalse(registry1.hasReadyLease(DEV));
+    assertFalse(registry1.holdsReadyLease(DEV, token1));
+
     assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
 
-    // 活跃状态下三个谓词均返回 true
+    // READY 活跃状态下四个谓词均返回 true（hasReadyLease 跨节点均为 true）
     assertTrue(registry1.hasActiveLease(DEV));
+    assertTrue(registry1.hasReadyLease(DEV));
+    assertTrue(registry2.hasReadyLease(DEV));
     assertTrue(registry1.holdsReadyLease(DEV, token1));
     assertTrue(registry1.hasActiveLeaseToken(DEV, token1));
 
@@ -282,6 +291,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
 
     // 此时即使外部认为时间未走，DB 现在时判定必须全部返回 false
     assertFalse(registry1.hasActiveLease(DEV));
+    assertFalse(registry1.hasReadyLease(DEV));
+    assertFalse(registry2.hasReadyLease(DEV));
     assertFalse(registry1.holdsReadyLease(DEV, token1));
     assertFalse(registry1.hasActiveLeaseToken(DEV, token1));
   }

@@ -577,6 +577,85 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   }
 
   /**
+   * 测试意图：证明当远端环境仅处于 CONNECTING 状态（已 HELLO 但未 READY）时， Node 2 调用 listDirectory 必须基于 DB 现在时
+   * hasReadyLease 立即失败返回 ENVIRONMENT_UNAVAILABLE， 绝不得降级到信箱等待超时，且不得向 Node 1 连接发送 INVOKE 帧或在
+   * environment_directory_query 遗留行。
+   */
+  @Test
+  void listDirectoryOnConnectingEnvironmentFailsImmediatelyAsUnavailableWithoutMailboxFallback()
+      throws Exception {
+    FakeConnection conn1 = new FakeConnection("conn-1");
+    gatewayNode1.open(conn1);
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+
+    // 确认数据库连接行为 CONNECTING
+    EnvironmentConnection env = registryNode1.find(DEV).orElseThrow();
+    assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
+
+    // Node 2 发起查询，设置 30s 超时
+    CompletableFuture<EnvironmentDirectoryListResult> future =
+        gatewayNode2.listDirectory(DEV, ".", Duration.ofSeconds(30));
+
+    // 必须立即完成，不得等待 30s
+    EnvironmentDirectoryListResult result = future.get(1, TimeUnit.SECONDS);
+    EnvironmentDirectoryListResult.Failed failed =
+        assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
+    assertEquals(EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE, failed.code());
+
+    // Node 1 的 daemon 绝不能收到 INVOKE（仅有 WELCOME）
+    assertEquals(1, conn1.envelopes().size());
+    assertEquals(DaemonMessageType.WELCOME, conn1.envelopes().get(0).messageType());
+
+    // 信箱表绝不得残留任何查询行
+    Integer count =
+        jdbcTemplate.queryForObject(
+            "select count(1) from environment_directory_query where environment_id = ?",
+            Integer.class,
+            DEV.value());
+    assertEquals(0, count);
+  }
+
+  /**
+   * 测试意图：证明当远端环境虽然曾处于 READY 但数据库租约已过期时， Node 2 调用 listDirectory 必须基于 DB 现在时 hasReadyLease 立即失败返回
+   * ENVIRONMENT_UNAVAILABLE， 绝不得降级到信箱等待超时，且不得向 Node 1 发送 INVOKE 帧或在信箱留行。
+   */
+  @Test
+  void listDirectoryOnExpiredLeaseEnvironmentFailsImmediatelyAsUnavailableWithoutMailboxFallback()
+      throws Exception {
+    FakeConnection conn1 = new FakeConnection("conn-1");
+    gatewayNode1.open(conn1);
+    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+
+    // 模拟数据库租约过期
+    jdbcTemplate.update(
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
+        DEV.value());
+
+    // Node 2 发起查询
+    CompletableFuture<EnvironmentDirectoryListResult> future =
+        gatewayNode2.listDirectory(DEV, ".", Duration.ofSeconds(30));
+
+    // 必须立即完成，返回 ENVIRONMENT_UNAVAILABLE
+    EnvironmentDirectoryListResult result = future.get(1, TimeUnit.SECONDS);
+    EnvironmentDirectoryListResult.Failed failed =
+        assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
+    assertEquals(EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE, failed.code());
+
+    // Node 1 绝不收到任何 INVOKE 帧（仅有 WELCOME）
+    assertEquals(1, conn1.envelopes().size());
+    assertEquals(DaemonMessageType.WELCOME, conn1.envelopes().get(0).messageType());
+
+    // 信箱表绝不得残留任何查询行
+    Integer count =
+        jdbcTemplate.queryForObject(
+            "select count(1) from environment_directory_query where environment_id = ?",
+            Integer.class,
+            DEV.value());
+    assertEquals(0, count);
+  }
+
+  /**
    * 测试意图：证明当已认领的 RUNNING 目录查询在完成回调前 deadline 被置为过去（超时）时， 迟到的 complete 不得更新终态（受 deadline_at >
    * statement_timestamp() 保护）， 也不得向响应信道发送通知，过期行由 resync cleanup 删除。
    */

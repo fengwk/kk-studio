@@ -407,6 +407,22 @@ public class EnvironmentDaemonGateway
               "environment is not registered: " + environmentId));
     }
 
+    boolean hasReady;
+    try {
+      hasReady = environmentRegistry.hasReadyLease(environmentId);
+    } catch (DataAccessException error) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentDirectoryListResult.Failed(
+              EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+              "database unavailable: " + error.getMessage()));
+    }
+    if (!hasReady) {
+      return CompletableFuture.completedFuture(
+          new EnvironmentDirectoryListResult.Failed(
+              EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+              "environment " + environmentId + " is not ready; directory listing is unavailable"));
+    }
+
     ConnectionState localState;
     synchronized (this) {
       localState = environmentConnections.get(environmentId);
