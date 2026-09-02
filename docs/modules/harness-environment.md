@@ -6,7 +6,7 @@
 
 - canonical Environment identity 与冻结 workspace binding；
 - 独立于模型 Tool 的 atomic Capability catalog、执行 SPI 与 transport certainty；
-- Environment Daemon protocol v5 的 envelope、消息类型、READY capabilities、INVOKE/result codec 和目录值对象。
+- Environment Daemon protocol v6 的 envelope、消息类型、READY capabilities、INVOKE/result codec 和目录值对象。
 
 该模块依赖 [`harness-common`](harness-common.md) 的 `InputSchema`、`ResultContent` 与 `ResourceRef` 值对象，但不依赖 `harness-tool`、Runtime、Infra、Platform、Web、Spring、数据库或具体 Daemon 实现。
 

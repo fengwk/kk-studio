@@ -8,10 +8,11 @@ COMPOSE_FILE="$REPO_ROOT/deploy/reliability/compose.yaml"
 PROJECT_NAME=kk-studio-reliability
 RELIABILITY_APP_PORT=${RELIABILITY_APP_PORT:-18091}
 RELIABILITY_ENV_NAME=${RELIABILITY_ENV_NAME:-docker-reliability}
+RELIABILITY_REGISTRATION_TOKEN=${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-reliability}
 APP_URL="http://127.0.0.1:$RELIABILITY_APP_PORT"
 TMP_DIR=
 
-export RELIABILITY_APP_PORT RELIABILITY_ENV_NAME
+export RELIABILITY_APP_PORT RELIABILITY_ENV_NAME RELIABILITY_REGISTRATION_TOKEN
 
 cleanup() {
   if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
@@ -99,7 +100,7 @@ wait_app() {
 }
 
 environment_is_ready() {
-  curl -fsS "$APP_URL/api/ai/environment" 2>/dev/null \
+  curl -fsS "$APP_URL/api/ai/environments" 2>/dev/null \
     | python3 -c '
 import json
 import sys
@@ -112,7 +113,7 @@ raise SystemExit(0 if match and match.get("status") == "READY" and match.get("re
 }
 
 print_environment_status() {
-  curl -fsS "$APP_URL/api/ai/environment" \
+  curl -fsS "$APP_URL/api/ai/environments" \
     | python3 -c '
 import json
 import sys

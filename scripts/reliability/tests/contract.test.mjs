@@ -53,7 +53,7 @@ test('run-agent-matrix contract: NEW_SESSION request is atomic', () => {
   assert.deepEqual(request.commands[0].contents, [{ type: 'TEXT', text: prompt }])
 })
 
-test('run-agent-matrix contract: NEW_SESSION root settings freeze the environment binding', () => {
+test('run-agent-matrix contract: NEW_SESSION root settings persist workspacePath only', () => {
   const chat = fakeChat()
   const agent = fakeAgent()
   const model = fakeModel()
@@ -61,16 +61,16 @@ test('run-agent-matrix contract: NEW_SESSION root settings freeze the environmen
     chat,
     agent,
     testCase: fakeCase(model),
-    daemonEnv: DAEMON_ENV,
+    workspacePath: '.',
     prompt: 'investigate this case',
   })
   assert.deepEqual(
     request.rootSettings,
     branchSettingsOf(agent, model, {
-      environment: { name: DAEMON_ENV, workspacePath: '.' },
+      workspacePath: '.',
     }),
   )
-  assert.deepEqual(Object.keys(request.rootSettings).sort(), ['agentName', 'environment', 'model'])
+  assert.deepEqual(Object.keys(request.rootSettings).sort(), ['agentName', 'model', 'workspacePath'])
 })
 
 test('run-agent-matrix contract: accepted snapshot assertions enforce the canonical envelope', () => {
@@ -78,26 +78,37 @@ test('run-agent-matrix contract: accepted snapshot assertions enforce the canoni
   const model = fakeModel()
   const accepted = acceptedEnvelope(chat, model)
   assert.doesNotThrow(() =>
-    assertThreadSettings(accepted, fakeCase(model), DAEMON_ENV, chat.agentName),
+    assertThreadSettings(accepted, fakeCase(model), '.', chat.agentName),
   )
-  // name-only Environment 不是完整 binding，必须拒绝。
-  const nameOnlyEnvironment = structuredClone(accepted)
-  nameOnlyEnvironment.thread.branchSettings.environment = undefined
-  nameOnlyEnvironment.thread.branchSettings.environmentName = DAEMON_ENV
+  // 不匹配的 workspacePath 必须拒绝。
+  const mismatchedWorkspace = structuredClone(accepted)
+  mismatchedWorkspace.thread.branchSettings.workspacePath = 'other/path'
   assert.throws(
     () => assertThreadSettings(
-      nameOnlyEnvironment,
+      mismatchedWorkspace,
       fakeCase(model),
-      DAEMON_ENV,
+      '.',
       chat.agentName,
     ),
-    /Thread Environment mismatch/,
+    /Thread workspacePath mismatch/,
+  )
+  // 旧的 environment 字段若残留，branch settings shape 校验必须拒绝。
+  const staleEnvironment = structuredClone(accepted)
+  staleEnvironment.thread.branchSettings.environment = { name: DAEMON_ENV, workspacePath: '.' }
+  assert.throws(
+    () => assertThreadSettings(
+      staleEnvironment,
+      fakeCase(model),
+      '.',
+      chat.agentName,
+    ),
+    /Thread branch settings shape mismatch/,
   )
   // 断言必须拒绝非原子形状：无首条 accepted command 时不可能通过身份/游标校验。
   const nonAtomic = structuredClone(accepted)
   nonAtomic.acceptedCommands = []
   assert.throws(
-    () => assertThreadSettings(nonAtomic, fakeCase(model), DAEMON_ENV, chat.agentName),
+    () => assertThreadSettings(nonAtomic, fakeCase(model), '.', chat.agentName),
     /Thread identity mismatch/,
   )
 })
@@ -140,7 +151,7 @@ function acceptedEnvelope(chat, model) {
       version: '1',
       yoloEnabled: true,
       branchSettings: branchSettingsOf(fakeAgent(), model, {
-        environment: { name: DAEMON_ENV, workspacePath: '.' },
+        workspacePath: '.',
       }),
       status: 'PROCESSING',
       processing: true,

@@ -285,11 +285,10 @@ App-A 和 App-B，两节点没有 DNS/IP 路径。不变量由
 参数名）：
 
 ```text
-DISTRIBUTED_NODE_A_ID=node-a          # daemon-id
-DISTRIBUTED_NODE_B_ID=node-b
 DISTRIBUTED_ENV_A_NAME=distributed-a  # environment name（canonical 路由名）
 DISTRIBUTED_ENV_B_NAME=distributed-b
-DISTRIBUTED_DAEMON_TOKEN=e2e-daemon-token  # 与 e2e profile 的 gateway token 一致
+DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN=e2e-token-dist-a
+DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN=e2e-token-dist-b
 DISTRIBUTED_APP_A_PORT=18082
 DISTRIBUTED_APP_B_PORT=18083
 ```
@@ -331,9 +330,8 @@ ws://app:8080/api/ai/environment/daemon/v2
 Daemon command 当前固定：
 
 ```text
---environment-name ${RELIABILITY_ENV_NAME:-docker-reliability}
---gateway-token e2e-daemon-token
---daemon-id docker-reliability-daemon
+--gateway-uri ws://app:8080/api/ai/environment/daemon/v2
+--registration-token ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-reliability}
 --note "Isolated Docker reliability environment."
 --environment-root /workspace
 ```
@@ -376,7 +374,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 ```
 
 `up` 等待 PostgreSQL health、App `/actuator/health` 和公共
-`GET /api/ai/environment` 的 `status=READY`。`inspect` fail closed 检查：
+`GET /api/ai/environments` 的 `status=READY`。`inspect` fail closed 检查：
 
 - Daemon uid 不是 root；
 - mount 只有 `volume -> /workspace` 且可写；
@@ -418,7 +416,7 @@ Environment Daemon 是独立 JVM 进程，连接 App 的
 
 - Daemon handshake、Environment binding、Tool/Skill capability projection；
 - inbound/outbound frame size、queue capacity、send timeout；
-- `/api/ai/environment` 的 public READY projection。
+- `/api/ai/environments` 的 public READY projection。
 
 Daemon 负责 workspace 内的工具执行和目录访问；reliability stack 用
 `daemon-workspace` named volume 保存 anchor/case workspace，Daemon 不通过
@@ -434,8 +432,8 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
 | local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SUBAGENT_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*` |
 | test | ports/build/mock | `CANVAS_TEST_*` |
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_CANVAS_RESOURCE_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED` |
-| distributed | node identity/ports | `DISTRIBUTED_NODE_A_ID`、`DISTRIBUTED_NODE_B_ID`、`DISTRIBUTED_ENV_A_NAME`、`DISTRIBUTED_ENV_B_NAME`、`DISTRIBUTED_DAEMON_TOKEN`、`DISTRIBUTED_APP_A_PORT`、`DISTRIBUTED_APP_B_PORT` |
-| reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_ENV_NAME` |
+| distributed | node identity/ports | `DISTRIBUTED_ENV_A_NAME`、`DISTRIBUTED_ENV_B_NAME`、`DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN`、`DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN`、`DISTRIBUTED_APP_A_PORT`、`DISTRIBUTED_APP_B_PORT` |
+| reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_ENV_NAME`、`RELIABILITY_REGISTRATION_TOKEN` |
 | supply-chain | reports/images/cache | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`TRIVY_SKIP_DB_UPDATE` |
 | explicit `--real` E2E | host-only credential sync | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
 | explicit Seedance prepare-only | external Hub/workspace | `OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID` |
@@ -456,7 +454,7 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
   独立的可选宿主同步。两条路径都只经 HTTP 写入各自专用 database，不把
   credential 放入 Compose environment、Dockerfile、image layer、Daemon
   command 或报告。
-- `e2e-daemon-token` 是 reliability/E2E 隔离配置，用于栈内 gateway handshake；
+- 各测试栈的 registration token 是测试隔离配置，用于栈内 gateway handshake；
   不写入公共 Environment projection 或报告。
 - `NVD_API_KEY` 只由 supply-chain 脚本写入临时 mode-600 Maven settings；
   不写入 command line、POM、image 或报告。

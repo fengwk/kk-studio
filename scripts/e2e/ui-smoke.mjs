@@ -874,50 +874,84 @@ async function main(argv) {
 
   await run(
     'ui.chat.create_environment_workspace',
-    'Create Chat 使用 Environment → Workspace 两阶段 picker 提交完整 binding',
+    'Create Chat 通过 Agent 绑定的单一 Environment Card 选择并确认 workspacePath',
     async (caseArt) => {
       const title = `e2e-ui-create-env-${stamp}`
-      await goto('/chats')
-      await page.getByText('新建 Chat', { exact: true }).click()
-      await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
-      await selectCustomOption(
-        page,
-        page.getByRole('button', { name: 'Agent' }),
-        'default-assistant',
+      const tempAgentName = `e2e-ui-agent-${stamp}`
+
+      // 1. API 找到 args.daemonEnv Card，断言 canonical UUID
+      const envsResponse = await apiJson(args.backendUrl, 'GET', '/api/ai/environments')
+      const envCards = envsResponse.json?.data || []
+      const card = envCards.find((candidate) => candidate.name === args.daemonEnv)
+      assert(
+        card != null,
+        `daemon Environment Card '${args.daemonEnv}' not found in /api/ai/environments: ${JSON.stringify(envCards)}`,
+      )
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+      assert(
+        UUID_RE.test(card.id),
+        `daemon Environment Card id must be canonical UUID (got '${card.id}')`,
       )
 
-      const environmentTrigger = page.getByRole('button', { name: 'Environment', exact: true })
-      await environmentTrigger.click()
-      const environments = page.getByRole('region', { name: '选择 Environment' })
-      await environments.waitFor({ state: 'visible', timeout: 10_000 })
-      await environments.getByRole('option', {
-        name: new RegExp(`^${escapeRegExp(args.daemonEnv)}(?:\\s|$)`),
-      }).click()
-      const directory = page.getByRole('region', { name: `${args.daemonEnv} 目录` })
-      await directory.waitFor({ state: 'visible', timeout: 10_000 })
+      // 2. 创建临时 Agent 并绑定其 environmentId
+      const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/ai/catalog/agents', {
+        name: tempAgentName,
+        description: `Temporary e2e agent for ${args.daemonEnv}`,
+        systemPrompt: 'You are an e2e test agent.',
+        model: 'minimax/MiniMax-M2.7',
+        variant: 'high',
+        environmentId: card.id,
+        config: { toolIds: [], skills: [], subagents: [] },
+      })
       assert(
-        (await environmentTrigger.innerText()).includes('（无）'),
-        'selecting an Environment silently committed workspacePath="." before confirmation',
+        agentCreateRes.status === 201,
+        `failed to create temporary agent '${tempAgentName}' (expected 201, got ${agentCreateRes.status}): ${JSON.stringify(agentCreateRes.json)}`,
       )
-      await directory.getByRole('button', { name: '使用当前 Workspace' }).click()
-      assert(
-        (await environmentTrigger.innerText()).includes(`${args.daemonEnv} · @/`),
-        `complete Environment binding was not shown: ${await environmentTrigger.innerText()}`,
-      )
-      await page.getByRole('button', { name: '确认创建' }).click()
-      // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
-      await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 15_000 })
 
-      const { json } = await apiJson(args.backendUrl, 'GET', '/api/ai/chat')
-      const created = (json?.data || []).find((chat) => chat.title === title)
-      assert(
-        created?.environment?.name === args.daemonEnv
-        && created?.environment?.workspacePath === '.',
-        `Create Chat did not persist the confirmed binding: ${JSON.stringify(created)}`,
-      )
-      await shot(caseArt, 'create-chat-environment-workspace')
-      expectNoFatal(pageErrors, consoleErrors)
-      await apiDeleteByName(args.backendUrl, 'chats', title)
+      try {
+        await goto('/chats')
+        await page.getByText('新建 Chat', { exact: true }).click()
+        await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
+        await selectCustomOption(
+          page,
+          page.getByRole('button', { name: 'Agent' }),
+          tempAgentName,
+        )
+
+        // 3. UI 打开 Workspace Path 目录面板（单 Card 派生，不得查找 Environment option region）
+        const workspaceTrigger = page.locator(
+          'button[aria-label="工作区路径"], button[aria-label="Workspace Path"], button.environment-binding-trigger',
+        ).first()
+        await workspaceTrigger.click()
+
+        const directory = page.locator(
+          `[role="region"][aria-label*="${args.daemonEnv}"], [role="region"][aria-label*="目录"], [role="region"][aria-label*="Workspace"]`,
+        ).first()
+        await directory.waitFor({ state: 'visible', timeout: 10_000 })
+
+        // 点击确认当前 Workspace 路径 "."
+        const confirmBtn = directory.getByRole('button', { name: /使用当前 Workspace/ })
+        await confirmBtn.waitFor({ state: 'visible', timeout: 5_000 })
+        await confirmBtn.click()
+
+        await page.getByRole('button', { name: '确认创建' }).click()
+        // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
+        await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 15_000 })
+
+        const { json } = await apiJson(args.backendUrl, 'GET', '/api/ai/chat')
+        const created = (json?.data || []).find((chat) => chat.title === title)
+        assert(
+          created?.workspacePath === '.',
+          `Create Chat did not persist workspacePath: ${JSON.stringify(created)}`,
+        )
+        assert(!Object.hasOwn(created, 'environment'), `Chat leaked environment: ${JSON.stringify(created)}`)
+        assert(!Object.hasOwn(created, 'environmentId'), `Chat leaked environmentId: ${JSON.stringify(created)}`)
+        await shot(caseArt, 'create-chat-environment-workspace')
+        expectNoFatal(pageErrors, consoleErrors)
+      } finally {
+        await apiDeleteByName(args.backendUrl, 'chats', title)
+        await apiDeleteByName(args.backendUrl, 'agents', tempAgentName)
+      }
     },
     { requiresTools: true },
   )

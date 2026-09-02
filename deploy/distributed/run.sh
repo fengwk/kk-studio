@@ -27,7 +27,9 @@ APP_A_URL="http://127.0.0.1:$DISTRIBUTED_APP_A_PORT"
 APP_B_URL="http://127.0.0.1:$DISTRIBUTED_APP_B_PORT"
 DISTRIBUTED_ENV_A_NAME=${DISTRIBUTED_ENV_A_NAME:-distributed-a}
 DISTRIBUTED_ENV_B_NAME=${DISTRIBUTED_ENV_B_NAME:-distributed-b}
-export DISTRIBUTED_APP_A_PORT DISTRIBUTED_APP_B_PORT DISTRIBUTED_ENV_A_NAME DISTRIBUTED_ENV_B_NAME
+DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN=${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-dist-a}
+DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN=${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-dist-b}
+export DISTRIBUTED_APP_A_PORT DISTRIBUTED_APP_B_PORT DISTRIBUTED_ENV_A_NAME DISTRIBUTED_ENV_B_NAME DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN
 
 SERVICES=(postgres minio minio-init http-mock app-a app-b workspace-init daemon-a daemon-b)
 NODE_A_DB_NETWORK=kk-studio-distributed_node-a-db
@@ -104,7 +106,7 @@ wait_http() {
 environment_status() {
   local app_url=$1
   local env_name=$2
-  curl -fsS "$app_url/api/ai/environment" 2>/dev/null | python3 -c '
+  curl -fsS "$app_url/api/ai/environments" 2>/dev/null | python3 -c '
 import json
 import sys
 

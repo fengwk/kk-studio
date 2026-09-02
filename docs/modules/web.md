@@ -104,7 +104,7 @@ dispatcher；这不是 Platform 对 Canvas Infra implementation 的反向依赖�
 
 数据库是唯一 durable database，Web 不在当前 context 内实现 HTTP 认证。HTTP
 认证/TLS 的部署边界在应用外；
-Environment Daemon 的连接身份由 `daemon-token`在 Platform gateway HELLO 协议中校验，trusted contributor directory 是另一个
+Environment Daemon 的连接身份由 PostgreSQL 中的 Environment registration_token 在 Platform gateway HELLO 协议中校验，trusted contributor directory 是另一个
 显式部署信任边界。
 
 ## 核心子域 / API
@@ -169,8 +169,8 @@ Profile locations 是：
 | Storage | `/api/storage` | upload reserve/complete/delete、Blob original/preview presign |
 | S3 presign | `/api/s3/presigned-{uploads,downloads}` | 仅 `comfyui-inputs/` namespace 的 PUT/GET presign |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
-| Environment query | `GET /api/ai/environment` | live Environment registry read-only projection（capabilities/skills） |
-| Environment directory | `GET /api/ai/environments/{name}/directories` | control-plane 单层目录 async query |
+| Environment | `/api/ai/environments`、`/{id}`、`/{id}/registration-token` | Environment Card CRUD、rotate-token、live projection |
+| Environment directory | `GET /api/ai/environments/{id}/directories` | control-plane 单层目录 async query |
 | ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |
 | ComfyUI runtime | `/api/comfyui/workflows/{apiName}/runs`、`/api/comfyui/runs/{runId}` | stateless run/get/cancel/output download |
 
@@ -329,7 +329,7 @@ version source。建立上游时先注册 consumer 再读取 cursor；fan-out �
 1. 在 Spring WebSocket 和 native JSR-356 session 两侧设置 `max-message-bytes`；
 2. 创建 `SpringWebSocketConnection`和每连接 `DaemonOutboundSender`；
 3. 把 open/receive/close 委托给 Platform `EnvironmentDaemonEndpoint`；
-4. Gateway 只接受 protocol v5 HELLO 及严格的 `capabilityCatalogVersion`，并负责校验通用 capability INVOKE payload；
+4. Gateway 只接受 protocol v6 HELLO 及严格的 `capabilityCatalogVersion`，并负责校验通用 capability INVOKE payload；
 5. Gateway 先解绑 registry、active invocation 和 pending request，再关闭 sender。
 
 `DaemonOutboundSender`使用 `ConcurrentWebSocketSessionDecorator`和每连接一个 virtual-thread sender。入队是非阻塞的，
@@ -343,9 +343,9 @@ send timeout，超时/异常会关闭入队围栏、通知 Gateway 进行 uncert
 
 ### HTTP async boundary：Environment directory
 
-`GET /api/ai/environments/{name}/directories?path=.`是 control-plane read-only 查询，不经过 Tool permission、不会
+`GET /api/ai/environments/{id}/directories?path=.`是 control-plane read-only 查询，不经过 Tool permission、不会
 创建 ToolInvocation，也不把绝对路径返回给浏览器。它通过 `fs.list-directory` generic capability 执行，与 Tool/Skill
-共享该 Environment 的单一 active invocation slot；本节点不是 route owner 时经 PostgreSQL `environment_query` mailbox
+共享该 Environment 的单一 active invocation slot；本节点不是 route owner 时经 PostgreSQL `environment_directory_query` mailbox
 转发到 owner 节点。
 
 Controller 直接返回 `CompletionStage<ResponseEntity<Result<?>>>`：
@@ -415,18 +415,18 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 | `management.endpoints.web.exposure.include` | `health,prometheus,offline,online` |
 | `kk-studio.harness.runtime.workers-enabled` | 是否启动 Work dispatcher；测试默认 false |
 | `kk-studio.harness.contributors.directory` | trusted JAR 目录；空值不加载外部贡献者 |
-| `kk-studio.harness.environment-gateway.*` | Daemon token、入站 frame 和出站 queue/bytes/send timeout |
+| `kk-studio.harness.environment-gateway.*` | 入站 frame 和出站 queue/bytes/send timeout |
 
 `application-dev.yml`默认数据库为 `127.0.0.1:5432/kk_studio`并加载 dev seed；
-`application-e2e.yml`使用 `kk_studio_e2e`和 e2e seed，配置测试 daemon token；
+`application-e2e.yml`使用 `kk_studio_e2e`和 e2e seed；
 `application-canvas-test.yml`在 dev seed 上追加 canvas-test SystemSettings。
 
 ### 安全与第三方边界
 
 - 代码没有 `spring-boot-starter-security`、`SecurityFilterChain`或 Spring Security auth filter；HTTP TLS、用户认证和
   ingress policy 属部署边界，不由当前 Web context伪造。
-- Daemon WebSocket 的共享 `daemon-token`是 deployment secret，不进 SystemSettings、DTO 或日志；Platform gateway
-  在 HELLO 认证时做常量时间比较，连接失败会清理 live state。
+- Daemon WebSocket 的 registration_token 是 deployment secret，保存在数据库 environment.registration_token 中，不进 SystemSettings、DTO 或日志；Platform gateway
+  在 HELLO 认证时基于该 token 映射对应 Environment Card，连接失败会清理 live state。
 - S3 presign Controller 只允许 ComfyUI input namespace 或 server 生成的 Blob key，响应丢弃 bucket/object key；
   浏览器拿到的是有限 expiry 的 signed URL。
 - `TrustedJarContributorLoader`把本地 JAR 作为 trusted code，只从显式 canonical directory 加载，不提供远程下载或热加载。

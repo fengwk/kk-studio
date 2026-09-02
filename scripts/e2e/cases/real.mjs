@@ -548,11 +548,12 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 12 个原子 capabilities（version=1）+ skills + rootPath（daemon canonical Environment Root），且不公开旧 tools 或 READY environment metadata',
+  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影固定 12 个原子 capabilities（version=1）+ skills + rootPath（daemon canonical Environment Root），且不公开旧 tools 或 READY environment metadata',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
     assert(match?.status === 'READY', JSON.stringify(match))
+    canonicalUuid(match.id, 'match.id')
     assert(
       typeof match.rootPath === 'string' && match.rootPath.length > 0,
       JSON.stringify(match),
@@ -599,10 +600,11 @@ registerCase({
   level: 'L4',
   title: 'Environment Root 单层目录浏览 API',
   requires: ['tools'],
-  docs: 'GET /api/ai/environments/{name}/directories（control-plane 只读）：缺省 path="." 浏览 root——canonical 相对 wire path、displayPath 等于请求 path 的最后一段（root 为 "."，只作展示、绝不暴露 daemon 本地绝对路径）、root 的 parentPath="."、truncated 布尔、gitBranch 可空、entries 只含直属子目录（{name,path}：name 是目录名且等于 path 最后一段，path 是请求目录的直接子路径）；显式 path="." 与缺省一致；".." 段 400 INVALID_PATH、不存在目录 404 NOT_FOUND、非法环境名 400 INVALID_ENVIRONMENT_NAME',
+  docs: 'GET /api/ai/environments/{id}/directories（control-plane 只读）：缺省 path="." 浏览 root——canonical 相对 wire path、displayPath 等于请求 path 的最后一段（root 为 "."，只作展示、绝不暴露 daemon 本地绝对路径）、root 的 parentPath="."、truncated 布尔、gitBranch 可空、entries 只含直属子目录（{name,path}：name 是目录名且等于 path 最后一段，path 是请求目录的直接子路径）；显式 path="." 与缺省一致；".." 段 400 INVALID_PATH、不存在目录 404 NOT_FOUND、非法环境 ID 400',
   async run(ctx) {
-    const name = ctx.vars.daemonEnvironment?.name ?? ctx.daemonEnv
-    const base = `/api/ai/environments/${encodeURIComponent(name)}/directories`
+    const envId = ctx.vars.daemonEnvironment?.id
+    assert(envId, 'daemonEnvironment must have canonical UUID id')
+    const base = `/api/ai/environments/${encodeURIComponent(envId)}/directories`
     const { json } = await ctx.call('GET', base)
     const dir = envelopeData(json)
     assert(dir?.path === '.', JSON.stringify(json))
@@ -649,7 +651,7 @@ registerCase({
       { status: 404 },
     )
     assert(String(missing.body).includes('NOT_FOUND'), missing.body)
-    // 非法环境名 => 400，不进入 daemon。
+    // 非法环境 ID（非 UUID）=> 400，不进入 daemon。
     await expectHttpError(
       () => ctx.call('GET', '/api/ai/environments/Not-Canonical/directories'),
       { status: 400 },
@@ -675,6 +677,7 @@ registerCase({
         + 'When asked to inspect a file, call read with that exact path and summarize only its result.',
       model: `${ctx.vars.seedModel.providerName}/${ctx.vars.seedModel.name}`,
       variant: ctx.vars.seedModel.config.defaultVariant,
+      environmentId: ctx.vars.daemonEnvironment.id,
       config: {
         toolIds: ['base.read'],
         skills: [],
@@ -683,6 +686,7 @@ registerCase({
     })
     const toolAgent = envelopeData(agentJson)
     assert(toolAgent?.name, JSON.stringify(agentJson))
+    assert(toolAgent?.environmentId === ctx.vars.daemonEnvironment.id, JSON.stringify(agentJson))
     let chat = null
     try {
       const agentConfig = toolAgent.config
@@ -694,8 +698,8 @@ registerCase({
           && JSON.stringify(agentConfig.subagents) === JSON.stringify([]),
         `temporary tool Agent config must be exactly toolIds=[base.read], skills=[], subagents=[]: ${JSON.stringify(toolAgent)}`,
       )
-      const environment = {
-        name: ctx.vars.daemonEnvironment.name,
+      const expectedEnvironment = {
+        environmentId: ctx.vars.daemonEnvironment.id,
         workspacePath: '.',
       }
       // 固定大文本 fixture（临时 root，不进仓库）：总量 >8KB、每行低于 read 单行截断阈值，
@@ -723,6 +727,7 @@ registerCase({
         title: `e2e-tool-chat-${suffix}`,
         agentName: toolAgent.name,
         yoloEnabled: false,
+        workspacePath: '.',
       })
       const accepted = await createNewSession(ctx, {
         owner: chatOwner(chat.id),
@@ -735,7 +740,7 @@ registerCase({
             modelName: ctx.vars.seedModel.name,
             variant: ctx.vars.seedModel.config.defaultVariant,
           },
-          { environment },
+          { workspacePath: '.' },
         ),
         yoloEnabled: false,
         commands: [
@@ -748,7 +753,7 @@ registerCase({
       })
       const tid = accepted.thread.threadId
       assert(
-        JSON.stringify(accepted.thread.branchSettings.environment) === JSON.stringify(environment),
+        accepted.thread.branchSettings.workspacePath === '.',
         JSON.stringify(accepted.thread.branchSettings),
       )
       // 非 YOLO：等待 durable TOOL_WAITING_APPROVAL 状态（快照 classifier 投影）。
@@ -790,10 +795,10 @@ registerCase({
         `ToolInvocationDTO must not expose toolBackend: ${JSON.stringify(readInvocation)}`,
       )
       assert(
-        JSON.stringify(readInvocation.environment) === JSON.stringify(environment),
+        JSON.stringify(readInvocation.environment) === JSON.stringify(expectedEnvironment),
         `read invocation must freeze the complete Environment binding: ${JSON.stringify({
           readInvocation,
-          environment,
+          expectedEnvironment,
         })}`,
       )
       assert(
