@@ -30,47 +30,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class McpExecutableTool implements Tool {
 
   private final ToolDescriptor descriptor;
-  private final ToolSource toolSource;
+  private final String sourceName;
   private final McpConnectionSpec connection;
   private final McpToolClientFactory clientFactory;
 
-  /** 提供调用所需的稳定字段（远端名与结果 call id）。 */
-  interface ToolSource {
-
-    /** 远端 source tool name。 */
-    String sourceName();
-
-    /** 结果 ToolResult 的 call id 来源；返回 null 时使用请求自带的 ToolCall id。 */
-    String toolCallId();
-  }
-
-  /** 运行期绑定的稳定执行身份：远端 source tool name。 */
-  public record SourceName(String value) implements ToolSource {
-
-    public SourceName {
-      if (value == null || value.isBlank()) {
-        throw new IllegalArgumentException("sourceName must not be blank");
-      }
-    }
-
-    @Override
-    public String sourceName() {
-      return value;
-    }
-
-    @Override
-    public String toolCallId() {
-      return null;
-    }
-  }
-
   public McpExecutableTool(
       ToolDescriptor descriptor,
-      ToolSource toolSource,
+      String sourceName,
       McpConnectionSpec connection,
       McpToolClientFactory clientFactory) {
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
-    this.toolSource = Objects.requireNonNull(toolSource, "toolSource");
+    if (sourceName == null || sourceName.isBlank()) {
+      throw new IllegalArgumentException("sourceName must not be blank");
+    }
+    this.sourceName = sourceName;
     this.connection = Objects.requireNonNull(connection, "connection");
     this.clientFactory = Objects.requireNonNull(clientFactory, "clientFactory");
   }
@@ -94,7 +67,7 @@ public final class McpExecutableTool implements Tool {
     return execution;
   }
 
-  /** 单次执行的异步运行体：持有 per-call client 并保证恰好关闭一次。 */
+  /** 单次执行的异步运行体：持有 per-call client 并保证单一 ownership 至多关闭一次。 */
   private final class Execution implements ToolExecutionHandle, Runnable {
 
     private final ToolExecutionRequest request;
@@ -115,31 +88,45 @@ public final class McpExecutableTool implements Tool {
 
     @Override
     public void run() {
-      try (McpToolClient perCall = clientFactory.create(connection)) {
-        client = perCall;
+      try {
         if (cancelled.get()) {
           return;
         }
-        McpToolCallOutcome outcome =
-            perCall.callTool(toolSource.sourceName(), request.call().argumentsJson(), toolCallId());
+        McpToolClient perCallClient;
+        try {
+          perCallClient = clientFactory.create(connection);
+        } catch (RuntimeException error) {
+          log.warn("MCP client creation or handshake failed for tool: {}", sourceName);
+          if (!cancelled.get()) {
+            listener.onComplete(
+                ToolOutcome.withoutEffects(
+                    McpToolCallOutcome.failure(request.call().id()).result()));
+          }
+          return;
+        }
+
+        this.client = perCallClient;
+        if (cancelled.get()) {
+          return;
+        }
+
+        McpToolCallOutcome outcome;
+        try {
+          outcome =
+              perCallClient.callTool(
+                  sourceName, request.call().argumentsJson(), request.call().id());
+        } catch (RuntimeException error) {
+          log.warn("MCP tool call failed for tool: {}", sourceName);
+          outcome = McpToolCallOutcome.failure(request.call().id());
+        }
+
         if (cancelled.get()) {
           return;
         }
         listener.onComplete(ToolOutcome.withoutEffects(outcome.result()));
-      } catch (RuntimeException error) {
-        if (cancelled.get()) {
-          return;
-        }
-        log.info("MCP tool execution failed for tool {}", toolSource.sourceName(), error);
-        listener.onError(error);
       } finally {
         closeClientOnce();
       }
-    }
-
-    private String toolCallId() {
-      String callId = toolSource.toolCallId();
-      return callId == null || callId.isBlank() ? request.call().id() : callId;
     }
 
     private void closeClientOnce() {
@@ -148,7 +135,8 @@ public final class McpExecutableTool implements Tool {
         try {
           current.close();
         } catch (RuntimeException closeError) {
-          log.debug("failed to close per-call MCP client", closeError);
+          log.debug(
+              "failed to close per-call MCP client: {}", closeError.getClass().getSimpleName());
         }
       }
     }

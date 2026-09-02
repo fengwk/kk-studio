@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.client;
 
+import java.net.URI;
+import java.net.URISyntaxException;
+
 /**
  * 单次 MCP 连接配置（仅 Streamable HTTP）。
  *
@@ -16,12 +19,35 @@ public final class McpConnectionSpec {
     if (url == null || url.isBlank()) {
       throw new IllegalArgumentException("url must not be blank");
     }
+    validateStreamableHttpUrl(url);
     if (timeoutMillis <= 0) {
       throw new IllegalArgumentException("timeoutMillis must be positive");
     }
     this.url = url;
     this.bearerToken = bearerToken == null || bearerToken.isBlank() ? null : bearerToken;
     this.timeoutMillis = timeoutMillis;
+  }
+
+  private static void validateStreamableHttpUrl(String url) {
+    try {
+      URI uri = new URI(url);
+      if (!uri.isAbsolute()) {
+        throw new IllegalArgumentException("url must be an absolute http or https URL");
+      }
+      String scheme = uri.getScheme();
+      if (scheme == null
+          || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
+        throw new IllegalArgumentException("url scheme must be http or https");
+      }
+      if (uri.getHost() == null || uri.getHost().isBlank()) {
+        throw new IllegalArgumentException("url must contain a valid host");
+      }
+      if (uri.getUserInfo() != null || uri.getRawUserInfo() != null) {
+        throw new IllegalArgumentException("url must not contain user-info");
+      }
+    } catch (URISyntaxException error) {
+      throw new IllegalArgumentException("url format is invalid");
+    }
   }
 
   public String url() {

@@ -60,8 +60,8 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
 
   @Test
   public void createsServerWithToolsAndRedactsBearerToken() {
-    // 意图：验证创建成功，工具列表被原子落库，返回 DTO 掩盖真实 token
-    fakeServer.addTool("search_files", "Search files by glob", "{\"type\":\"object\"}");
+    // 意图：验证创建成功，原始 source_name 被原样保存而 model_name 规范化，工具列表落库，DTO 掩盖 token
+    fakeServer.addTool("Search-Files.v1", "Search files by glob", "{\"type\":\"object\"}");
     fakeServer.addTool("read_file", "Read file content", "{\"type\":\"object\"}");
 
     McpServerCreateDTO createDTO = new McpServerCreateDTO();
@@ -81,12 +81,56 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     UUID serverId = UUID.fromString(server.getId());
     List<McpTool> tools = repository.listTools(serverId);
     assertEquals(2, tools.size());
-    assertTrue(
-        tools.stream().anyMatch(t -> t.getModelName().equals("mcp_github_core_search_files")));
+    McpTool rawTool =
+        tools.stream()
+            .filter(t -> t.getSourceName().equals("Search-Files.v1"))
+            .findFirst()
+            .orElseThrow();
+    assertEquals("Search-Files.v1", rawTool.getSourceName()); // 原始名称未被改写！
+    assertEquals("mcp_github_core_search_files_v1", rawTool.getModelName()); // 规范化 model_name
     assertTrue(tools.stream().anyMatch(t -> t.getModelName().equals("mcp_github_core_read_file")));
 
     // 确认名称唯一性拒绝
     assertThrows(AiDuplicateException.class, () -> mcpServerService.createServer(createDTO));
+  }
+
+  @Test
+  public void rejectsBlankOrOverlongRawSourceNameOnDiscovery() {
+    // 意图：验证远端原始名称为空白或超过 128 字符时，发现直接拒绝且不落库
+    fakeServer.addTool("   ", "Blank tool name", "{}");
+
+    McpServerCreateDTO createBlank = new McpServerCreateDTO();
+    createBlank.setName("blank_tool_srv");
+    createBlank.setUrl(fakeServer.endpointUrl());
+    createBlank.setTimeoutMillis(5000L);
+
+    assertThrows(AiValidationException.class, () -> mcpServerService.createServer(createBlank));
+
+    fakeServer.clearTools();
+    fakeServer.addTool("a".repeat(129), "Overlong tool name", "{}");
+
+    McpServerCreateDTO createOverlong = new McpServerCreateDTO();
+    createOverlong.setName("overlong_tool_srv");
+    createOverlong.setUrl(fakeServer.endpointUrl());
+    createOverlong.setTimeoutMillis(5000L);
+
+    assertThrows(AiValidationException.class, () -> mcpServerService.createServer(createOverlong));
+  }
+
+  @Test
+  public void rejectsDuplicateRawSourceNames() {
+    // 意图：远端返回两个相同原始名称的工具，直接拒绝且不落库
+    fakeServer.addTool("fetch_data", "First", "{}");
+    fakeServer.addTool("fetch_data", "Second duplicate", "{}");
+
+    McpServerCreateDTO createDTO = new McpServerCreateDTO();
+    createDTO.setName("dup_source_srv");
+    createDTO.setUrl(fakeServer.endpointUrl());
+    createDTO.setTimeoutMillis(5000L);
+
+    AiValidationException ex =
+        assertThrows(AiValidationException.class, () -> mcpServerService.createServer(createDTO));
+    assertTrue(ex.getMessage().contains("duplicate tools for source name"));
   }
 
   @Test
@@ -274,6 +318,38 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     Page<McpServerDTO> page = mcpServerService.pageServers(new PageQuery(1, 10));
     assertNotNull(page);
     assertTrue(page.getResults().stream().anyMatch(s -> s.getId().equals(created.getId())));
+  }
+
+  @Test
+  public void translatesDatabaseModelNameDuplicateKeyExceptionToValidationException() {
+    // 意图：验证事务写路径触发 mcp_tool.model_name 唯一索引冲突时，翻译为稳定的 AiValidationException 且回滚
+    fakeServer.addTool("echo_dup", "Echo duplicate", "{}");
+
+    UUID srvManualId = UUID.randomUUID();
+    jdbc.update(
+        "insert into mcp_server (id, name, url, timeout_millis) values (?, 'srv_manual', 'http://127.0.0.1/mcp', 5000)",
+        srvManualId);
+
+    // 在 DB 中预先插入占用 mcp_srv_manual_echo_dup 的工具（挂在另一个 server 上）
+    UUID thirdServerId = UUID.randomUUID();
+    jdbc.update(
+        "insert into mcp_server (id, name, url, timeout_millis) values (?, 'srv_third', 'http://127.0.0.1/mcp', 5000)",
+        thirdServerId);
+    jdbc.update(
+        "insert into mcp_tool (id, mcp_server_id, source_name, model_name, description, input_schema) "
+            + "values (?, ?, 'echo_dup', 'mcp_srv_manual_echo_dup', 'Conflict tool', '{}'::jsonb)",
+        UUID.randomUUID(),
+        thirdServerId);
+
+    McpServerUpdateDTO updateDTO = new McpServerUpdateDTO();
+    updateDTO.setUrl(fakeServer.endpointUrl());
+    updateDTO.setExpectedVersion("0");
+
+    AiValidationException ex =
+        assertThrows(
+            AiValidationException.class,
+            () -> mcpServerService.updateServer(srvManualId.toString(), updateDTO));
+    assertTrue(ex.getMessage().contains("mcp tool model name conflicts with an existing tool"));
   }
 
   private void insertFakeAgentDefinitionReferencingTool(String agentToolId) {

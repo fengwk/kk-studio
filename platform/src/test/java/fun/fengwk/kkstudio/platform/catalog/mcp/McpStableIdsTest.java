@@ -60,7 +60,7 @@ class McpStableIdsTest {
 
   @Test
   void canonicalUuidFormattingAndParsing() {
-    // 意图：验证 32 位无连字符 hex UUID 的序列化与解析
+    // 意图：验证 32 位无连字符 hex UUID 的序列化与解析，并严格拒绝大写与非 hex
     UUID id = UUID.randomUUID();
     String canonical = McpStableIds.canonicalUuid(id);
     assertEquals(32, canonical.length());
@@ -73,6 +73,9 @@ class McpStableIdsTest {
     assertFalse(McpStableIds.parseCanonicalUuid(null).isPresent());
     assertFalse(McpStableIds.parseCanonicalUuid("too-short").isPresent());
     assertFalse(McpStableIds.parseCanonicalUuid("xyz-not-a-valid-hex-uuid-string!").isPresent());
+    // 必须拒绝大写 hex 字符
+    assertFalse(McpStableIds.parseCanonicalUuid("ABCDEF0123456789ABCDEF0123456789").isPresent());
+    assertFalse(McpStableIds.parseCanonicalUuid("abcdef0123456789abcdef012345678A").isPresent());
   }
 
   @Test

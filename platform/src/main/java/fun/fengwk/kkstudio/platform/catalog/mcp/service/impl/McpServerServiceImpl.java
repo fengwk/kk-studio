@@ -93,9 +93,12 @@ public class McpServerServiceImpl implements McpServerService {
         throw new IllegalStateException("create mcp server failed");
       }
     } catch (DuplicateKeyException error) {
-      // name 唯一索引竞态兜底；事务已回滚，DB 不变。
-      throw new AiDuplicateException(
-          RESOURCE, RESOURCE + " name already exists: " + normalized.name(), error);
+      if (repository.getByName(normalized.name()).isPresent()) {
+        throw new AiDuplicateException(
+            RESOURCE, RESOURCE + " name already exists: " + normalized.name(), error);
+      }
+      throw new AiValidationException(
+          RESOURCE, "mcp tool model name conflicts with an existing tool", error);
     }
     return McpServerConverter.convert(requireServer(server.getId()));
   }
@@ -117,23 +120,28 @@ public class McpServerServiceImpl implements McpServerService {
     McpToolDiscovery.DiscoveryResult result =
         discovery.discover(merged, existingTools, repository, null);
 
-    return transactionTemplate.execute(
-        status -> {
-          McpServer locked = requireServerForUpdate(serverId);
-          // 重查版本：与事务外快照不一致时 CAS 必然失败，提前给出确定性冲突。
-          ensureExpectedVersion(locked, serverId, rawExpected, expected);
-          applyUpdate(locked, normalized);
-          if (!repository.updateById(locked, expected)) {
-            McpServer reread = requireServer(serverId);
-            throw new AiVersionConflictException(
-                RESOURCE,
-                serverId.toString(),
-                rawExpected,
-                CatalogVersions.format(reread.getVersion()));
-          }
-          applyToolUpserts(serverId, result);
-          return McpServerConverter.convert(requireServer(serverId));
-        });
+    try {
+      return transactionTemplate.execute(
+          status -> {
+            McpServer locked = requireServerForUpdate(serverId);
+            // 重查版本：与事务外快照不一致时 CAS 必然失败，提前给出确定性冲突。
+            ensureExpectedVersion(locked, serverId, rawExpected, expected);
+            applyUpdate(locked, normalized);
+            if (!repository.updateById(locked, expected)) {
+              McpServer reread = requireServer(serverId);
+              throw new AiVersionConflictException(
+                  RESOURCE,
+                  serverId.toString(),
+                  rawExpected,
+                  CatalogVersions.format(reread.getVersion()));
+            }
+            applyToolUpserts(serverId, result);
+            return McpServerConverter.convert(requireServer(serverId));
+          });
+    } catch (DuplicateKeyException error) {
+      throw new AiValidationException(
+          RESOURCE, "mcp tool model name conflicts with an existing tool", error);
+    }
   }
 
   @Override
@@ -147,21 +155,26 @@ public class McpServerServiceImpl implements McpServerService {
     McpToolDiscovery.DiscoveryResult result =
         discovery().discover(current, existingTools, repository, null);
 
-    return transactionTemplate.execute(
-        status -> {
-          McpServer locked = requireServerForUpdate(serverId);
-          ensureExpectedVersion(locked, serverId, expectedVersion, expected);
-          if (!repository.updateById(locked, expected)) {
-            McpServer reread = requireServer(serverId);
-            throw new AiVersionConflictException(
-                RESOURCE,
-                serverId.toString(),
-                expectedVersion,
-                CatalogVersions.format(reread.getVersion()));
-          }
-          applyToolUpserts(serverId, result);
-          return McpServerConverter.convert(requireServer(serverId));
-        });
+    try {
+      return transactionTemplate.execute(
+          status -> {
+            McpServer locked = requireServerForUpdate(serverId);
+            ensureExpectedVersion(locked, serverId, expectedVersion, expected);
+            if (!repository.updateById(locked, expected)) {
+              McpServer reread = requireServer(serverId);
+              throw new AiVersionConflictException(
+                  RESOURCE,
+                  serverId.toString(),
+                  expectedVersion,
+                  CatalogVersions.format(reread.getVersion()));
+            }
+            applyToolUpserts(serverId, result);
+            return McpServerConverter.convert(requireServer(serverId));
+          });
+    } catch (DuplicateKeyException error) {
+      throw new AiValidationException(
+          RESOURCE, "mcp tool model name conflicts with an existing tool", error);
+    }
   }
 
   @Override

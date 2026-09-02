@@ -81,11 +81,10 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
     AgentToolDefinition definition =
         new AgentToolDefinition(
             McpStableIds.agentToolId(tool.getId()), descriptor, ToolVisibility.SELECTABLE);
-    McpExecutableTool.SourceName source = new McpExecutableTool.SourceName(tool.getSourceName());
     McpExecutableTool executable =
         new McpExecutableTool(
             descriptor,
-            source,
+            tool.getSourceName(),
             new McpConnectionSpec(
                 server.getUrl(), server.getBearerToken(), server.getTimeoutMillis()),
             clientFactory);

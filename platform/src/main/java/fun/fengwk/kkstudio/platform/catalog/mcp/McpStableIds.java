@@ -52,17 +52,21 @@ public final class McpStableIds {
     return Objects.requireNonNull(value, "value").toString().replace("-", "");
   }
 
-  /** 解析 32 位小写 hex UUID；非法返回 empty。 */
+  /** 解析 32 位小写 hex UUID；非法（包含大写、非 hex 或长度不为 32）返回 empty。 */
   public static Optional<UUID> parseCanonicalUuid(String value) {
     if (value == null || value.length() != 32) {
       return Optional.empty();
     }
     StringBuilder dashed = new StringBuilder(36);
     for (int index = 0; index < 32; index++) {
+      char current = value.charAt(index);
+      boolean isHex = (current >= '0' && current <= '9') || (current >= 'a' && current <= 'f');
+      if (!isHex) {
+        return Optional.empty();
+      }
       if (index == 8 || index == 12 || index == 16 || index == 20) {
         dashed.append('-');
       }
-      char current = value.charAt(index);
       dashed.append(current);
     }
     try {

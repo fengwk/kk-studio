@@ -162,6 +162,29 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.code").value("version_conflict"));
   }
 
+  @Test
+  public void rejectsInvalidUrlWithBadRequestAndRedactsUrl() throws Exception {
+    String name = "bad_url_mcp_" + System.nanoTime();
+    McpServerCreateDTO create = new McpServerCreateDTO();
+    create.setName(name);
+    create.setUrl("http://user:secret@example.com/mcp");
+    create.setTimeoutMillis(5000L);
+
+    MvcResult result =
+        mockMvc
+            .perform(
+                post("/api/ai/mcp-servers")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(create)))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("validation"))
+            .andReturn();
+
+    String responseBody = result.getResponse().getContentAsString();
+    assertFalse(responseBody.contains("secret"));
+    assertFalse(responseBody.contains("user:secret@example.com"));
+  }
+
   private JsonNode data(MvcResult result) throws Exception {
     return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
   }
