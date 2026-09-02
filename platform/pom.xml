@@ -71,6 +71,10 @@
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-mcp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-open-ai</artifactId>
         </dependency>
         <dependency>
@@ -161,9 +165,29 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
+                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/McpToolNameNormalizer</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>1.00</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
                                         <include>fun/fengwk/kkstudio/platform/environment/gateway/EnvironmentDaemonGateway</include>
                                         <include>fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver</include>
                                         <include>fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway</include>
+                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/McpStableIds</include>
+                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/discovery/McpInputSchemaConverter</include>
+                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/discovery/McpToolDiscovery</include>
+                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/service/McpServerMutationValidator</include>
+                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/service/impl/McpServerServiceImpl</include>
+                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/runtime/McpToolCatalog</include>
+                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/runtime/McpExecutableTool</include>
                                     </includes>
                                     <limits>
                                         <limit>
