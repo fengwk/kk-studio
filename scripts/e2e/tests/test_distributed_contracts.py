@@ -139,8 +139,8 @@ class TestDistributedTopologyContract(unittest.TestCase):
     def test_node_identity_defaults_are_fixed_and_overridable(self):
         """Registration tokens have explicit disposable defaults in compose and CLI options are clean."""
         compose = COMPOSE_FILE.read_text()
-        self.assertIn("${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-distributed-a}", compose)
-        self.assertIn("${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-distributed-b}", compose)
+        self.assertIn("${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-dist-a}", compose)
+        self.assertIn("${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-dist-b}", compose)
         self.assertNotIn("--environment-name", compose)
         self.assertNotIn("--gateway-token", compose)
         self.assertNotIn("--daemon-id", compose)

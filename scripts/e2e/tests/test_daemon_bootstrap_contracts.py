@@ -28,19 +28,19 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         # 1. Four Cards check
         self.assertIn("11111111-1111-1111-1111-111111111111", content)
         self.assertIn("tool-e2e", content)
-        self.assertIn("e2e-token-host-tool-e2e", content)
+        self.assertIn("e2e-token-host-tool", content)
 
         self.assertIn("22222222-2222-2222-2222-222222222222", content)
         self.assertIn("docker-reliability", content)
-        self.assertIn("e2e-token-docker-reliability", content)
+        self.assertIn("e2e-token-reliability", content)
 
         self.assertIn("33333333-3333-3333-3333-333333333333", content)
         self.assertIn("distributed-a", content)
-        self.assertIn("e2e-token-distributed-a", content)
+        self.assertIn("e2e-token-dist-a", content)
 
         self.assertIn("44444444-4444-4444-4444-444444444444", content)
         self.assertIn("distributed-b", content)
-        self.assertIn("e2e-token-distributed-b", content)
+        self.assertIn("e2e-token-dist-b", content)
 
         # 2. Re-runnable without deleting existing environments with FK/lease
         self.assertIn("on conflict (id) do update set", content)
@@ -61,22 +61,22 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         """lib.sh, reliability compose, and distributed compose must only use registration token."""
         lib_content = E2E_LIB_SH.read_text(encoding="utf-8")
         self.assertIn("--registration-token", lib_content)
-        self.assertIn("e2e-token-host-tool-e2e", lib_content)
+        self.assertIn("e2e-token-host-tool", lib_content)
         self.assertNotIn("--environment-name", lib_content)
         self.assertNotIn("--gateway-token", lib_content)
         self.assertNotIn("--daemon-id", lib_content)
 
         rel_content = RELIABILITY_COMPOSE.read_text(encoding="utf-8")
         self.assertIn("--registration-token", rel_content)
-        self.assertIn("e2e-token-docker-reliability", rel_content)
+        self.assertIn("e2e-token-reliability", rel_content)
         self.assertNotIn("--environment-name", rel_content)
         self.assertNotIn("--gateway-token", rel_content)
         self.assertNotIn("--daemon-id", rel_content)
 
         dist_content = DISTRIBUTED_COMPOSE.read_text(encoding="utf-8")
         self.assertIn("--registration-token", dist_content)
-        self.assertIn("e2e-token-distributed-a", dist_content)
-        self.assertIn("e2e-token-distributed-b", dist_content)
+        self.assertIn("e2e-token-dist-a", dist_content)
+        self.assertIn("e2e-token-dist-b", dist_content)
         self.assertNotIn("--environment-name", dist_content)
         self.assertNotIn("--gateway-token", dist_content)
         self.assertNotIn("--daemon-id", dist_content)
