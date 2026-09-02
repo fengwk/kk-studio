@@ -4,7 +4,6 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerDescriptor;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 
 import java.time.Duration;
@@ -18,7 +17,7 @@ public record EnvironmentConnection(
     EnvironmentId environmentId,
     UUID ownerNodeId,
     UUID leaseToken,
-    LiveEnvironmentStatus status,
+    EnvironmentConnectionStatus status,
     DaemonCapabilities daemonCapabilities,
     Instant lastSeenAt,
     Instant leaseUntil) {
@@ -28,7 +27,7 @@ public record EnvironmentConnection(
     ownerNodeId = Objects.requireNonNull(ownerNodeId, "ownerNodeId");
     leaseToken = Objects.requireNonNull(leaseToken, "leaseToken");
     status = Objects.requireNonNull(status, "status");
-    if (status == LiveEnvironmentStatus.READY) {
+    if (status == EnvironmentConnectionStatus.READY) {
       daemonCapabilities = Objects.requireNonNull(daemonCapabilities, "READY daemonCapabilities");
     }
     lastSeenAt = Objects.requireNonNull(lastSeenAt, "lastSeenAt");
@@ -43,17 +42,13 @@ public record EnvironmentConnection(
     return daemonCapabilities == null ? List.of() : daemonCapabilities.skills();
   }
 
-  public List<DaemonMcpServerDescriptor> mcpServers() {
-    return daemonCapabilities == null ? List.of() : daemonCapabilities.mcpServers();
-  }
-
   public String rootPath() {
     return daemonCapabilities == null ? null : daemonCapabilities.environment().rootPath();
   }
 
   public boolean isReady(Instant now, Duration heartbeatTimeout) {
     Instant current = now != null ? now : Instant.now();
-    return status == LiveEnvironmentStatus.READY
+    return status == EnvironmentConnectionStatus.READY
         && !leaseUntil.isBefore(current)
         && (heartbeatTimeout == null || !lastSeenAt.isBefore(current.minus(heartbeatTimeout)));
   }

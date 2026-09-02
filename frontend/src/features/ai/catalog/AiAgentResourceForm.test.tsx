@@ -58,7 +58,6 @@ function liveEnvironment(
     lastSeen: null,
     capabilities: [],
     skills,
-    mcpServers: [],
     ...extra,
   }
 }
@@ -390,14 +389,6 @@ describe('AgentForm current contracts', () => {
           {
             ...liveEnvironment('local', []),
             capabilities: [{ id: 'env-only-capability', version: '1' }],
-            mcpServers: [
-              {
-                name: 'demo-server',
-                status: 'READY',
-                error: null,
-                tools: [{ name: 'mcp_only_tool', description: null }],
-              },
-            ],
           },
         ]}
         toolCatalog={[

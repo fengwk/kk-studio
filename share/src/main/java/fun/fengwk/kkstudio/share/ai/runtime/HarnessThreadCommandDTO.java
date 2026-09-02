@@ -21,7 +21,7 @@ public class HarnessThreadCommandDTO {
 
   /**
    * 命令类型，取 {@code ThreadCommandType} 枚举名：USER_MESSAGE / CUSTOM_MESSAGE / SET_AGENT / SET_MODEL /
-   * SET_ENVIRONMENT。
+   * SET_WORKSPACE_PATH。
    */
   private String type;
 

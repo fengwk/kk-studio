@@ -35,18 +35,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## LangChain4j (MCP client + Skills loader)
+## LangChain4j (Skills loader)
 
-The daemon uses LangChain4j artifacts for the local MCP client
-(`langchain4j-mcp` and its `langchain4j`, `langchain4j-core`,
-`langchain4j-http-client`, `langchain4j-http-client-jdk` dependencies) and for
-skill discovery (`langchain4j-skills`, with `commonmark` /
-`commonmark-ext-yaml-front-matter`). Additionally the MCP client uses the
-OkHttp 4.x family (`okhttp` 4.12.0, `okhttp-sse` 4.12.0).
+The daemon uses LangChain4j artifacts for skill discovery (`langchain4j-skills`,
+with `commonmark` / `commonmark-ext-yaml-front-matter`).
 
-Artifacts from https://github.com/langchain4j/langchain4j and
-https://square.github.io/okhttp/ are licensed under the Apache License,
-Version 2.0:
+Artifacts from https://github.com/langchain4j/langchain4j are licensed under
+the Apache License, Version 2.0:
 
 ```
 Apache License

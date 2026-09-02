@@ -172,8 +172,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
             DaemonCapabilities.VERSION,
             new DaemonEnvironmentInfo(
                 DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"),
-            List.of(fat),
-            List.of()));
+            List.of(fat)));
   }
 
   private static DaemonEnvelope helloEnvelope(long sequence) {

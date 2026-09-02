@@ -12,8 +12,6 @@ import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalStart;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonTerminalMessage;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpBridgeCapabilities;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerRegistry;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
 import fun.fengwk.kkstudio.harness.daemon.skill.SkillLoadCapability;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
@@ -84,7 +82,6 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonTransport transport;
   private final DaemonCapabilityRegistry capabilityRegistry;
   private final DaemonSkillRegistry skillRegistry;
-  private final McpServerRegistry mcpRegistry;
   private final DaemonInvocationJournal journal;
   private final ScheduledExecutorService scheduler;
   private final ExecutorService taskExecutor;
@@ -114,23 +111,17 @@ public final class DaemonRuntime implements AutoCloseable {
 
   /**
    * 创建完整生产运行时。scheduler 与 virtual-thread-per-task executor 在注册 capability 前创建并注入，成功后由 runtime
-   * 独占生命周期；任一步构造失败都会释放 transport、MCP registry 和已创建的执行资源。
+   * 独占生命周期；任一步构造失败都会释放 transport 和已创建的执行资源。
    */
   public static DaemonRuntime create(
-      DaemonConfig config,
-      CodingToolsConfig toolsConfig,
-      DaemonSkillRegistry skillRegistry,
-      McpServerRegistry mcpRegistry) {
+      DaemonConfig config, CodingToolsConfig toolsConfig, DaemonSkillRegistry skillRegistry) {
     Objects.requireNonNull(toolsConfig, "toolsConfig");
-    Objects.requireNonNull(mcpRegistry, "mcpRegistry");
     return create(
         config,
         skillRegistry,
-        mcpRegistry,
         toolsConfig.resourceStore(),
         (registry, executor, scheduler) -> {
           CodingCapabilities.registerAll(registry, toolsConfig, executor, scheduler);
-          McpBridgeCapabilities.registerAll(registry, mcpRegistry, executor);
           registry.register(new SkillLoadCapability(skillRegistry, executor));
         });
   }
@@ -138,12 +129,10 @@ public final class DaemonRuntime implements AutoCloseable {
   static DaemonRuntime create(
       DaemonConfig config,
       DaemonSkillRegistry skillRegistry,
-      McpServerRegistry mcpRegistry,
       ResourceStore resourceStore,
       CapabilityRegistrar registrar) {
     Objects.requireNonNull(config, "config");
     Objects.requireNonNull(skillRegistry, "skillRegistry");
-    Objects.requireNonNull(mcpRegistry, "mcpRegistry");
     Objects.requireNonNull(registrar, "registrar");
     ScheduledThreadPoolExecutor scheduler = newScheduler();
     ExecutorService taskExecutor = null;
@@ -160,7 +149,6 @@ public final class DaemonRuntime implements AutoCloseable {
               transport,
               capabilityRegistry,
               skillRegistry,
-              mcpRegistry,
               new InMemoryDaemonInvocationJournal(),
               scheduler,
               taskExecutor,
@@ -171,7 +159,6 @@ public final class DaemonRuntime implements AutoCloseable {
     } finally {
       if (!completed) {
         closeQuietly(transport);
-        closeQuietly(mcpRegistry);
         shutdownExecutors(scheduler, taskExecutor);
       }
     }
@@ -191,7 +178,6 @@ public final class DaemonRuntime implements AutoCloseable {
         transport,
         capabilityRegistry,
         skillRegistry,
-        McpServerRegistry.empty(),
         journal,
         scheduler,
         taskExecutor,
@@ -214,31 +200,6 @@ public final class DaemonRuntime implements AutoCloseable {
         transport,
         capabilityRegistry,
         skillRegistry,
-        McpServerRegistry.empty(),
-        journal,
-        scheduler,
-        taskExecutor,
-        resourceStore,
-        false);
-  }
-
-  /** 全参数运行时（含 MCP registry），供集成测试注入完整生命周期。 */
-  DaemonRuntime(
-      DaemonConfig config,
-      DaemonTransport transport,
-      DaemonCapabilityRegistry capabilityRegistry,
-      DaemonSkillRegistry skillRegistry,
-      McpServerRegistry mcpRegistry,
-      DaemonInvocationJournal journal,
-      ScheduledExecutorService scheduler,
-      ExecutorService taskExecutor,
-      ResourceStore resourceStore) {
-    this(
-        config,
-        transport,
-        capabilityRegistry,
-        skillRegistry,
-        mcpRegistry,
         journal,
         scheduler,
         taskExecutor,
@@ -251,7 +212,6 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonTransport transport,
       DaemonCapabilityRegistry capabilityRegistry,
       DaemonSkillRegistry skillRegistry,
-      McpServerRegistry mcpRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor,
@@ -261,7 +221,6 @@ public final class DaemonRuntime implements AutoCloseable {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.capabilityRegistry = Objects.requireNonNull(capabilityRegistry, "capabilityRegistry");
     this.skillRegistry = Objects.requireNonNull(skillRegistry, "skillRegistry");
-    this.mcpRegistry = Objects.requireNonNull(mcpRegistry, "mcpRegistry");
     this.journal = Objects.requireNonNull(journal, "journal");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.taskExecutor = Objects.requireNonNull(taskExecutor, "taskExecutor");
@@ -474,10 +433,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private boolean sendReady(ActiveConnection connection) {
     DaemonCapabilities capabilities =
         new DaemonCapabilities(
-            DaemonCapabilities.VERSION,
-            environmentInfo,
-            List.copyOf(skillRegistry.descriptors()),
-            mcpRegistry.snapshot());
+            DaemonCapabilities.VERSION, environmentInfo, List.copyOf(skillRegistry.descriptors()));
     return sendOn(
         connection, DaemonMessageType.READY, null, capabilitiesCodec.encode(capabilities));
   }
@@ -882,7 +838,6 @@ public final class DaemonRuntime implements AutoCloseable {
                         DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"));
               });
       running.clear();
-      closeQuietly(mcpRegistry);
       shutdownExecutors(scheduler, taskExecutor);
     } finally {
       termination.countDown();

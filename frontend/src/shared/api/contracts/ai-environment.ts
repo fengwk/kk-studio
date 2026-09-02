@@ -8,23 +8,6 @@ export interface LiveEnvironmentSkillDTO {
   description: string | null
 }
 
-export interface LiveEnvironmentMcpToolDTO {
-  name: string
-  description: string | null
-}
-
-/**
- * MCP server 摘要（只读展示，不作为可选 Agent 工具）。
- *
- * status 为 READY | FAILED；error 是已限长的通用错误信息，绝不包含 headers/命令/URL/本地路径等敏感细节。
- */
-export interface LiveEnvironmentMcpServerDTO {
-  name: string
-  status: string
-  error: string | null
-  tools: LiveEnvironmentMcpToolDTO[]
-}
-
 /**
  * 完整 Environment binding 的公开表示：canonical 路由名称 + canonical workspace path。
  *
@@ -83,5 +66,4 @@ export interface LiveEnvironmentDTO {
   lastSeen: string | null
   capabilities: LiveEnvironmentCapabilityDTO[]
   skills: LiveEnvironmentSkillDTO[]
-  mcpServers: LiveEnvironmentMcpServerDTO[]
 }

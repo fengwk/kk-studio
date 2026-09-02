@@ -327,7 +327,7 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void rejectsCrossCommandFieldsAndMissingPayloads() {
-    // 每个 command variant 只能携带自己的字段，显式 null 仅对 SET_ENVIRONMENT 表示解绑。
+    // 每个 command variant 只能携带自己的字段，显式 null 仅对 SET_WORKSPACE_PATH 表示清除。
     HarnessCommandCreateDTO user = userCommand("user-with-agent");
     user.setAgentName("forbidden");
     assertCommandRejected(user);

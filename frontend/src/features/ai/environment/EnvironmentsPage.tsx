@@ -6,7 +6,6 @@ import { environmentService } from '@/shared/api/environment-service'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type AppLocale } from '@/shared/i18n'
-import type { LiveEnvironmentMcpServerDTO } from '@/shared/api/contracts/ai-environment'
 
 function formatDateTime24(date: Date, locale: AppLocale): string {
   return date.toLocaleString(locale, {
@@ -67,37 +66,6 @@ function TagRow({ label, names, limit = 3 }: { label: string; names: string[]; l
           {rest > 0 ? <span className="meta-chip is-more">+{rest}</span> : null}
         </div>
       )}
-    </div>
-  )
-}
-
-/** MCP server 摘要行：状态 + 限长错误 + 工具名摘要；只读展示，不作为可选 Agent 工具。 */
-function McpServerRow({
-  server,
-  t,
-}: {
-  server: LiveEnvironmentMcpServerDTO
-  t: (key: string) => string
-}) {
-  const ready = server.status === 'READY'
-  const toolNames = (server.tools ?? []).map((tool) => tool.name).filter(Boolean)
-  return (
-    <div className="meta-row env-tag-row env-mcp-row">
-      <span className="lbl">{t('ai.environment.mcpServers')}</span>
-      <div className="meta-chips env-mcp-server">
-        <span className="meta-chip">{server.name}</span>
-        <span className={`status-pill is-mcp${ready ? ' is-ready' : ' is-offline'}`}>{server.status}</span>
-        {server.error ? (
-          <span className="val val-muted" title={server.error}>
-            {server.error}
-          </span>
-        ) : null}
-        {toolNames.length > 0 ? (
-          <span className="val" title={toolNames.join(', ')}>
-            {toolNames.join(', ')}
-          </span>
-        ) : null}
-      </div>
     </div>
   )
 }
@@ -166,9 +134,6 @@ export function EnvironmentsPage() {
                     <div className="meta-block">
                       <TagRow label={t('ai.environment.capabilities')} names={capabilityIds} />
                       <TagRow label={t('ai.environment.skills')} names={skillNames} />
-                      {(environment.mcpServers ?? []).map((server) => (
-                        <McpServerRow key={server.name} server={server} t={t} />
-                      ))}
                     </div>
                   </article>
                 )

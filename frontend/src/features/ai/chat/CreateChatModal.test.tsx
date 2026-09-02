@@ -111,7 +111,6 @@ describe('CreateChatModal', () => {
               lastSeen: null,
               capabilities: [],
               skills: [],
-              mcpServers: [],
             },
           ]}
           selectedAgentName="assistant"

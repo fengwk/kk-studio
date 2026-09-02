@@ -66,8 +66,6 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
         descriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),
         descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)),
-        descriptor(EnvironmentCapabilityIds.MCP_LIST, Duration.ofSeconds(30)),
-        descriptor(EnvironmentCapabilityIds.MCP_CALL, Duration.ofMinutes(5)),
         descriptor(EnvironmentCapabilityIds.SKILL_LOAD, Duration.ofMinutes(1)));
   }
 
