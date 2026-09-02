@@ -98,6 +98,83 @@ create table agent_definition (
 create index idx_agent_definition_model
     on agent_definition (model_provider_name, model_name);
 
+-- Platform MCP Streamable HTTP server 持久配置。name 是产品侧唯一路由身份且创建后不可变；
+-- url/bearer_token/timeout 是 per-call MCP client 的全部连接配置（Authorization: Bearer header）。
+-- version 是乐观锁 CAS 令牌（非负，每次写操作 +1）；bearer_token 只写不读出（响应绝不回显）。
+create table mcp_server (
+    id              uuid          primary key,
+    name            varchar(32)   not null,
+    url             varchar(2048) not null,
+    bearer_token    varchar(2048),
+    timeout_millis  bigint        not null,
+    created_at      timestamptz(3) not null default current_timestamp,
+    updated_at      timestamptz(3) not null default current_timestamp,
+    version         bigint        not null default 0,
+    constraint ck_mcp_server_name check (
+        name ~ '^[a-z][a-z0-9_]*$'
+    ),
+    constraint ck_mcp_server_url_nonblank check (
+        char_length(url) > 0
+    ),
+    constraint ck_mcp_server_timeout_positive check (
+        timeout_millis > 0
+    ),
+    constraint ck_mcp_server_version_nonneg check (version >= 0),
+    constraint ck_mcp_server_time_order check (updated_at >= created_at)
+);
+
+create unique index uk_mcp_server_name
+    on mcp_server (name);
+
+comment on table mcp_server is 'Platform MCP server 持久配置：仅 Streamable HTTP；per-call client 每次从行配置新建，绝不缓存';
+comment on column mcp_server.id is 'Server 的全局唯一 UUID（应用侧生成）';
+comment on column mcp_server.name is '唯一名（创建后不可变）：^[a-z][a-z0-9_]*$，≤32 字符；同时作为模型工具名 mcp_<server_name>_<tool> 的组成段';
+comment on column mcp_server.url is 'Streamable HTTP MCP endpoint URL（≤2048 字符）；错误信息绝不回显该值';
+comment on column mcp_server.bearer_token is '可空 Bearer token：非空时以 Authorization: Bearer header 发送；只写敏感字段，任何 API 响应不回显';
+comment on column mcp_server.timeout_millis is '正整数毫秒超时：连接、initialize/tools/list 发现与 tools/call 共用';
+comment on column mcp_server.created_at is '创建时间（毫秒精度）';
+comment on column mcp_server.updated_at is '最后更新时间（毫秒精度），应用侧维护，不得早于 created_at';
+comment on column mcp_server.version is '乐观锁行版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据';
+
+-- 从远端 MCP server 发现并冻结的工具行：source_name 是远端原始工具名（同一 server 内唯一，写入后不可变）；
+-- model_name 是全局唯一模型可见工具名（规范化生成，发现冲突/超长直接拒绝）。mcp_tool 随父 server 硬删除级联删除。
+create table mcp_tool (
+    id              uuid          primary key,
+    mcp_server_id   uuid          not null,
+    source_name     varchar(128)  not null,
+    model_name      varchar(64)   not null,
+    description     text          not null,
+    input_schema    jsonb         not null,
+    constraint fk_mcp_tool_server foreign key (mcp_server_id)
+        references mcp_server (id) on delete cascade,
+    constraint ck_mcp_tool_source_name check (
+        char_length(source_name) > 0
+    ),
+    constraint ck_mcp_tool_model_name check (
+        model_name ~ '[A-Za-z][A-Za-z0-9_-]*'
+    ),
+    constraint ck_mcp_tool_description_nonblank check (
+        btrim(description) <> ''
+    ),
+    constraint ck_mcp_tool_input_schema_object check (
+        jsonb_typeof(input_schema) = 'object'
+    )
+);
+
+create unique index uk_mcp_tool_server_source_name
+    on mcp_tool (mcp_server_id, source_name);
+
+create unique index uk_mcp_tool_model_name
+    on mcp_tool (model_name);
+
+comment on table mcp_tool is 'MCP server 发现的远端工具冻结行：稳定 UUID/model_name 支撑 AgentToolId 引用；硬删除随父 server 级联';
+comment on column mcp_tool.id is '工具的全局唯一稳定 UUID（refresh/update 按 (mcp_server_id, source_name) 保留，新工具重新生成）';
+comment on column mcp_tool.mcp_server_id is '所属 MCP server；随父行删除级联硬删除';
+comment on column mcp_tool.source_name is '远端 MCP 工具原始名（同一 server 内唯一，既有行不可变）';
+comment on column mcp_tool.model_name is '全局唯一模型可见工具名：mcp_<server_name>_<normalized_source_tool_name>，须满足 ToolDescriptor name 语法且 ≤64';
+comment on column mcp_tool.description is '远端工具描述（非空白），冻结进 ToolDescriptor';
+comment on column mcp_tool.input_schema is '远端工具 JSON input schema（JSON object），冻结进 ToolDescriptor';
+
 create table comfyui_workflow_api (
     id                uuid          primary key,
     api_name          varchar(64)   not null,
