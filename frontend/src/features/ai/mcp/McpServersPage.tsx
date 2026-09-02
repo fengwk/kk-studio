@@ -11,6 +11,7 @@ import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { NumberInput } from '@/shared/ui/console/NumberInput'
 import { mcpServerService } from '@/shared/api/mcp-server-service'
 import type { McpServerDTO } from '@/shared/api/contracts/ai-mcp'
+import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type AppLocale } from '@/shared/i18n'
@@ -27,13 +28,33 @@ function formatDateTime24(date: Date, locale: AppLocale): string {
   })
 }
 
-function formatIsoTime(value: string | number | null | undefined, locale: AppLocale): string {
-  if (!value) return ''
-  const parsed = typeof value === 'number' ? value : Date.parse(String(value))
-  if (Number.isFinite(parsed)) {
-    return formatDateTime24(new Date(parsed), locale)
+function toEpochMillis(value: unknown): number | null {
+  if (value == null || value === '') {
+    return null
   }
-  return String(value)
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.abs(value) < 100_000_000_000 ? value * 1000 : value
+  }
+  const raw = String(value).trim()
+  if (!raw) {
+    return null
+  }
+  if (/^-?\d+(\.\d+)?$/.test(raw)) {
+    const num = Number(raw)
+    if (Number.isFinite(num)) {
+      return Math.abs(num) < 100_000_000_000 ? num * 1000 : num
+    }
+  }
+  const parsed = Date.parse(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function formatIsoTime(value: InstantTimestamp | undefined, locale: AppLocale): string {
+  const millis = toEpochMillis(value)
+  if (millis == null) {
+    return value ? String(value) : ''
+  }
+  return formatDateTime24(new Date(millis), locale)
 }
 
 interface CreateModalState {

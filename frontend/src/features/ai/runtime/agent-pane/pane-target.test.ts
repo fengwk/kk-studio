@@ -232,6 +232,7 @@ describe('PaneTarget durable-local FSM', () => {
         model: { providerName: 'p', modelName: 'm', variant: 'v' },
       },
       { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: null },
+      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: 'proj/sub' },
       {
         type: 'USER_MESSAGE',
         idempotencyKey: 'c1',
@@ -240,6 +241,18 @@ describe('PaneTarget durable-local FSM', () => {
     ]) {
       setRequest({ ...validRequest, commands: [command] })
       expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+    }
+
+    // 验证 SET_ENVIRONMENT 实施 exact own-key 校验：拒绝 environment/environmentId/environmentName 及任意额外 key
+    for (const rejectedCommand of [
+      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', environment: 'local' },
+      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', environment: { name: 'local', workspacePath: '.' } },
+      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', environmentId: 'env-1' },
+      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', environmentName: 'local' },
+      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', extraField: 'invalid' },
+    ]) {
+      setRequest({ ...validRequest, commands: [rejectedCommand] })
+      expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     }
     setRequest({
       ...validRequest,
@@ -339,6 +352,25 @@ describe('PaneTarget durable-local FSM', () => {
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setPending({ owner: { type: 'OTHER', id: 'chat-1' } })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    // 验证外层 pending.owner 匹配但 request.owner 指向其他 Chat/Canvas 时 fail-closed 拒绝返回 null
+    setPending({
+      owner,
+      request: {
+        ...validRequest,
+        owner: { type: 'CHAT', id: 'chat-other' },
+      },
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    setPending({
+      owner,
+      request: {
+        ...validRequest,
+        owner: { type: 'CANVAS', id: 'canvas-1' },
+      },
+    })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     // 验证持久化 validator 严格 exact shape 校验：fail closed 拒绝携带旧 environment 字段的数据，不向后兼容读取旧 localStorage
     setPending({

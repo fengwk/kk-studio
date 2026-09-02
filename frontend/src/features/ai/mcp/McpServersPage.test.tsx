@@ -68,6 +68,39 @@ describe('McpServersPage', () => {
     expect(screen.getByText('匿名访问')).toBeInTheDocument()
   })
 
+  // 验证后端 Java Instant 以数值秒（JavaTime 默认）或数值毫秒到达时，均能正确格式化为相同的现代年份日期，绝不误解析为 1970
+  it('formats numeric epoch seconds and milliseconds to the same modern date instead of 1970', async () => {
+    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 100,
+      totalCount: 2,
+      results: [
+        server({
+          id: 'srv-seconds',
+          name: 'seconds_server',
+          updateTime: 1750000000,
+        }),
+        server({
+          id: 'srv-millis',
+          name: 'millis_server',
+          updateTime: 1750000000000,
+        }),
+      ],
+    })
+    renderPage()
+
+    expect(await screen.findByText('seconds_server')).toBeInTheDocument()
+    expect(screen.getByText('millis_server')).toBeInTheDocument()
+
+    // 绝不能出现 1970 年
+    expect(screen.queryByText(/1970/)).toBeNull()
+
+    // 秒和毫秒表示应渲染完全一致的现代日期（2025 年）
+    const formattedDates = screen.getAllByText(/2025/)
+    expect(formattedDates.length).toBe(2)
+    expect(formattedDates[0]!.textContent).toBe(formattedDates[1]!.textContent)
+  })
+
   it('creates an MCP server', async () => {
     const user = userEvent.setup()
     vi.mocked(mcpServerService.pageServers).mockResolvedValue({

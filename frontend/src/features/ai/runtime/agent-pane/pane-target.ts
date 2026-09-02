@@ -130,10 +130,16 @@ function isCommand(value: unknown): value is HarnessCommandCreateDTO {
       return nonBlank(value.agentName)
     case 'SET_MODEL':
       return isModelSelection(value.model)
-    case 'SET_ENVIRONMENT':
-      return Object.prototype.hasOwnProperty.call(value, 'workspacePath')
-        && !Object.prototype.hasOwnProperty.call(value, 'environment')
-        && (value.workspacePath === null || typeof value.workspacePath === 'string')
+    case 'SET_ENVIRONMENT': {
+      const keys = Object.keys(value)
+      if (
+        keys.length !== 3
+        || !keys.every((key) => key === 'type' || key === 'idempotencyKey' || key === 'workspacePath')
+      ) {
+        return false
+      }
+      return value.workspacePath === null || typeof value.workspacePath === 'string'
+    }
     default:
       return false
   }
@@ -325,7 +331,12 @@ export function loadPendingAcceptance(
     if (!isPendingAcceptanceValue(parsed)) {
       return null
     }
-    if (parsed.owner.type !== owner.type || parsed.owner.id !== owner.id) {
+    if (
+      parsed.owner.type !== owner.type
+      || parsed.owner.id !== owner.id
+      || parsed.request.owner.type !== owner.type
+      || parsed.request.owner.id !== owner.id
+    ) {
       return null
     }
     return parsed
