@@ -140,6 +140,16 @@ public class EnvironmentRegistry {
       )
       """;
 
+  private static final String HAS_READY_LEASE_SQL =
+      """
+      select exists (
+          select 1 from environment_connection
+          where environment_id = ?
+            and status = 'READY'
+            and lease_until > statement_timestamp()
+      )
+      """;
+
   private static final String HAS_ACTIVE_LEASE_TOKEN_SQL =
       """
       select exists (
@@ -321,6 +331,25 @@ public class EnvironmentRegistry {
     }
     Boolean exists =
         jdbcTemplate.queryForObject(HAS_ACTIVE_LEASE_SQL, Boolean.class, environmentId.value());
+    return Boolean.TRUE.equals(exists);
+  }
+
+  /**
+   * 数据库现在时判定指定环境在任意节点上是否存在未过期的 READY 路由租约。
+   *
+   * <p>本方法用于目录查询等对外请求判断是否有任意可用节点承接路由（若不存在则立即返回环境不可用，避免向无主/未就绪环境派发信箱任务并等待超时）； 区别于 {@link
+   * #holdsReadyLease(EnvironmentId, UUID)} 用于判定<b>当前节点特定 leaseToken</b> 是否持有就绪租约以进行本地 capability
+   * 发送围栏。
+   *
+   * @param environmentId 环境 UUID
+   * @return 若存在未过期的 READY 租约则返回 true，否则返回 false
+   */
+  public boolean hasReadyLease(EnvironmentId environmentId) {
+    if (environmentId == null) {
+      return false;
+    }
+    Boolean exists =
+        jdbcTemplate.queryForObject(HAS_READY_LEASE_SQL, Boolean.class, environmentId.value());
     return Boolean.TRUE.equals(exists);
   }
 
