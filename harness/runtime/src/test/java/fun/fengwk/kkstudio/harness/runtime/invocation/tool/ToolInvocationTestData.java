@@ -19,7 +19,8 @@ import java.util.Set;
 /** invocation.tool 包共享的测试 fixture。 */
 final class ToolInvocationTestData {
 
-  static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
+  static final EnvironmentBinding ENV_ID =
+      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
   static final String CALL_ID = "call-1";
 
   private ToolInvocationTestData() {}

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.task;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
@@ -31,7 +30,7 @@ public final class AgentBranchSettingsMaterializer {
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
   }
 
-  public BranchSettings materialize(String agentName, EnvironmentBinding environment) {
+  public BranchSettings materialize(String agentName, String workspacePath) {
     AgentDefinition agent = agentRepository.getByName(agentName);
     if (agent == null) {
       throw new IllegalArgumentException("subagent not found: " + agentName);
@@ -63,7 +62,7 @@ public final class AgentBranchSettingsMaterializer {
                 new IllegalArgumentException(
                     "subagent model variant not found: " + agentName + " variant=" + variantName));
     return new BranchSettings(
-        environment,
+        workspacePath,
         agent.getName(),
         new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variantName));
   }

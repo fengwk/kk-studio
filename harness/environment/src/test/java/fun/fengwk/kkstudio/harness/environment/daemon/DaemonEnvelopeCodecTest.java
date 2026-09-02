@@ -1,26 +1,30 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 /** Daemon envelope codec 的协议边界测试。 */
 class DaemonEnvelopeCodecTest {
 
+  private static final String ID_TEXT = "123e4567-e89b-12d3-a456-426614174000";
+  private static final EnvironmentId ID = EnvironmentId.parse(ID_TEXT);
+
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
 
-  /** 当前协议版本采用固定 envelope 形状往返；environmentName 编码为 canonical 路由名称文本。 */
+  /** 当前协议版本采用固定 envelope 形状往返；environmentId 编码为 canonical UUID 文本。 */
   @Test
   void encodesAndDecodesSupportedEnvelopes() {
     DaemonEnvelope envelope =
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.INVOKE,
-            new EnvironmentName("environment"),
+            ID,
             "invocation",
             7,
             "{\"request\":\"test\"}");
@@ -29,54 +33,67 @@ class DaemonEnvelopeCodecTest {
     DaemonEnvelope decoded = codec.decode(json);
 
     assertEquals(envelope, decoded);
-    assertEquals("environment", decoded.environmentName().value());
-    assertTrue(json.contains("\"environmentName\":\"environment\""));
+    assertEquals(ID, decoded.environmentId());
+    assertTrue(json.contains("\"environmentId\":\"" + ID_TEXT + "\""));
   }
 
   /** 未知版本、未知类型、负序号、非对象 payload 和未知字段必须分别在 wire 边界拒绝。 */
   @Test
   void rejectsUnsupportedOrMalformedWireEnvelope() {
     assertProtocolError(
-        "{\"protocolVersion\":3,\"messageType\":\"READY\",\"environmentName\":\"e\","
+        "{\"protocolVersion\":3,\"messageType\":\"READY\",\"environmentId\":\""
+            + ID_TEXT
+            + "\",\"sequence\":0,\"payload\":{}}");
+    assertProtocolError(
+        "{\"protocolVersion\":4,\"messageType\":\"READY\",\"environmentId\":\""
+            + ID_TEXT
+            + "\",\"sequence\":0,\"payload\":{}}");
+    assertProtocolError(
+        "{\"protocolVersion\":7,\"messageType\":\"READY\",\"environmentId\":\""
+            + ID_TEXT
+            + "\",\"sequence\":0,\"payload\":{}}");
+    assertProtocolError(
+        current("\"messageType\":\"FUTURE\",\"environmentId\":\"" + ID_TEXT + "\",")
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        "{\"protocolVersion\":4,\"messageType\":\"READY\",\"environmentName\":\"e\","
-            + "\"sequence\":0,\"payload\":{}}");
-    assertProtocolError(
-        "{\"protocolVersion\":6,\"messageType\":\"READY\",\"environmentName\":\"e\","
-            + "\"sequence\":0,\"payload\":{}}");
-    assertProtocolError(
-        current("\"messageType\":\"FUTURE\",\"environmentName\":\"e\",")
-            + "\"sequence\":0,\"payload\":{}}");
-    assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentName\":\"e\",")
+        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
             + "\"sequence\":-1,\"payload\":{}}");
     assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentName\":\"e\",")
+        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
             + "\"sequence\":0,\"payload\":[]}");
     assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentName\":\"e\",")
+        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
             + "\"sequence\":0,\"payload\":{},\"unexpected\":true}");
   }
 
-  /** environmentName 必须存在且为 canonical 有界小写路由名称；缺失、非法文本与非协议字段都拒绝。 */
+  /** READY 等 connection 消息必须携带 canonical UUID scope；缺失、非法文本与旧 environmentName 字段都拒绝。 */
   @Test
-  void rejectsMissingOrNonCanonicalEnvironmentName() {
+  void rejectsMissingOrNonCanonicalEnvironmentId() {
     assertProtocolError(current("\"messageType\":\"READY\",\"sequence\":0,\"payload\":{}}"));
     assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentName\":\"Not-Canonical\",")
+        current("\"messageType\":\"READY\",\"environmentId\":\"not-a-uuid\",")
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentName\":\"e/v\",")
+        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT.toUpperCase() + "\",")
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentName\":7,")
+        current("\"messageType\":\"READY\",\"environmentId\":7,")
             + "\"sequence\":0,\"payload\":{}}");
-    // environmentId 不是任何受支持 envelope 的字段。
+    // environmentName 不是任何受支持 envelope 的字段（旧协议残留）。
     assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentId\":\"")
-            + "123e4567-e89b-12d3-a456-426614174000"
-            + "\",\"environmentName\":\"e\",\"sequence\":0,\"payload\":{}}");
+        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
+            + "\"environmentName\":\"env\",\"sequence\":0,\"payload\":{}}");
+  }
+
+  /** HELLO envelope 不得声明 scope；HELLO 上的 environmentId 字段在边界拒绝。 */
+  @Test
+  void rejectsScopeOnHello() {
+    assertProtocolError(
+        current("\"messageType\":\"HELLO\",\"environmentId\":\"" + ID_TEXT + "\",")
+            + "\"sequence\":0,\"payload\":{}}");
+    DaemonEnvelope hello =
+        codec.decode(current("\"messageType\":\"HELLO\",\"sequence\":0,\"payload\":{}}"));
+    assertNull(hello.environmentId());
   }
 
   /** duplicate field 与 trailing token 由共享 ObjectMapper 在 wire 边界拒绝。 */
@@ -88,9 +105,11 @@ class DaemonEnvelopeCodecTest {
             + ",\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"READY\","
-            + "\"environmentName\":\"e\",\"sequence\":0,\"payload\":{}}");
+            + "\"environmentId\":\""
+            + ID_TEXT
+            + "\",\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentName\":\"e\",")
+        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
             + "\"sequence\":0,\"payload\":{}} trailing");
   }
 
@@ -99,12 +118,7 @@ class DaemonEnvelopeCodecTest {
   void encodesConnectionLevelEnvelopeAndExposesPayloadHelpers() {
     DaemonEnvelope envelope =
         new DaemonEnvelope(
-            DaemonProtocol.VERSION,
-            DaemonMessageType.READY,
-            new EnvironmentName("environment"),
-            null,
-            0,
-            "{\"k\":1}");
+            DaemonProtocol.VERSION, DaemonMessageType.READY, ID, null, 0, "{\"k\":1}");
 
     String json = codec.encode(envelope);
     assertEquals(envelope, codec.decode(json));
@@ -123,22 +137,12 @@ class DaemonEnvelopeCodecTest {
     assertProtocolError(
         "{\"protocolVersion\":\""
             + DaemonProtocol.VERSION
-            + "\",\"messageType\":\"READY\",\"environmentName\":\"e\","
-            + "\"sequence\":0,\"payload\":{}}");
+            + "\",\"messageType\":\"READY\",\"environmentId\":\""
+            + ID_TEXT
+            + "\",\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentName\":\"e\",")
+        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
             + "\"sequence\":1.5,\"payload\":{}}");
-  }
-
-  /** 非 canonical environmentName（control 字符、周边空白、大写）在解码边界拒绝。 */
-  @Test
-  void rejectsUnsafeEnvironmentNameOnDecode() {
-    assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentName\":\"e\\u0000v\",")
-            + "\"sequence\":0,\"payload\":{}}");
-    assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentName\":\" e\",")
-            + "\"sequence\":0,\"payload\":{}}");
   }
 
   private static String current(String fields) {

@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.util.Iterator;
 import java.util.Set;
@@ -16,7 +16,8 @@ import java.util.Set;
  * Daemon envelope 的 JSON codec。
  *
  * <p>codec 在边界拒绝未知版本、未知消息类型、缺失字段、duplicate field、trailing token 和非对象 payload，避免将不完整 wire
- * 消息传给运行时；{@code environmentName} 必须是 canonical 有界小写路由名称。
+ * 消息传给运行时；wire 字段 {@code environmentId} 必须是 canonical UUID 文本。HELLO 的 scope 必须为 null， 其余消息（除握手前的
+ * ERROR）scope 必须非空。
  */
 public final class DaemonEnvelopeCodec {
 
@@ -29,19 +30,16 @@ public final class DaemonEnvelopeCodec {
 
   private static final Set<String> ENVELOPE_FIELDS =
       Set.of(
-          "protocolVersion",
-          "messageType",
-          "environmentName",
-          "invocationId",
-          "sequence",
-          "payload");
+          "protocolVersion", "messageType", "environmentId", "invocationId", "sequence", "payload");
 
-  /** 将 envelope 编码为协议规定的 JSON 字段；environmentName 编码为 canonical 路由名称文本。 */
+  /** 将 envelope 编码为协议规定的 JSON 字段；environmentId 编码为 canonical UUID 文本（null 省略）。 */
   public String encode(DaemonEnvelope envelope) {
     ObjectNode root = OBJECT_MAPPER.createObjectNode();
     root.put("protocolVersion", envelope.protocolVersion());
     root.put("messageType", envelope.messageType().name());
-    root.put("environmentName", envelope.environmentName().value());
+    if (envelope.environmentId() != null) {
+      root.put("environmentId", envelope.environmentId().toString());
+    }
     if (envelope.invocationId() != null) {
       root.put("invocationId", envelope.invocationId());
     }
@@ -78,22 +76,11 @@ public final class DaemonEnvelopeCodec {
       throw new DaemonProtocolException("payload must be a JSON object");
     }
     String invocationId = optionalText(root, "invocationId");
-    EnvironmentName environmentName;
-    try {
-      environmentName = new EnvironmentName(requiredText(root, "environmentName"));
-    } catch (IllegalArgumentException error) {
-      throw new DaemonProtocolException(
-          "environmentName must be a canonical bounded lowercase route name", error);
-    }
+    EnvironmentId environmentId = decodeScope(root, messageType);
     try {
       return new DaemonEnvelope(
-          protocolVersion,
-          messageType,
-          environmentName,
-          invocationId,
-          sequence,
-          writeJson(payload));
-    } catch (IllegalArgumentException error) {
+          protocolVersion, messageType, environmentId, invocationId, sequence, writeJson(payload));
+    } catch (RuntimeException error) {
       throw new DaemonProtocolException("envelope fields are invalid", error);
     }
   }
@@ -127,6 +114,30 @@ public final class DaemonEnvelopeCodec {
       return OBJECT_MAPPER.writeValueAsString(node);
     } catch (JsonProcessingException error) {
       throw new DaemonProtocolException("cannot encode daemon payload", error);
+    }
+  }
+
+  /** scope 契约：HELLO 必须 null，非调用消息按 envelope 自身 nullability 解码（record 校验 final）。 */
+  private static EnvironmentId decodeScope(JsonNode root, DaemonMessageType messageType) {
+    JsonNode value = root.get("environmentId");
+    if (messageType == DaemonMessageType.HELLO) {
+      if (value != null && !value.isNull()) {
+        throw new DaemonProtocolException("HELLO envelope must not declare environmentId");
+      }
+      return null;
+    }
+    if (value == null || value.isNull()) {
+      // WELCOME/READY/HEARTBEAT/调用消息必须携带 scope；握手前 ERROR 可空，由 record 校验。
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new DaemonProtocolException("environmentId must be a canonical UUID string");
+    }
+    try {
+      return EnvironmentId.parse(value.textValue());
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException(
+          "environmentId must be a canonical UUID string: " + value.textValue(), error);
     }
   }
 

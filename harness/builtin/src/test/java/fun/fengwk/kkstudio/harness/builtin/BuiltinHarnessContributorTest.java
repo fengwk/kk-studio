@@ -40,7 +40,7 @@ import java.util.Set;
 /**
  * BuiltinHarnessContributor 的全面目录冻结与完整能力清单测试。
  *
- * <p>验证 exact inventory (17 tools: 12 environment + 2 internal + 3 goal),
+ * <p>验证 exact inventory (15 tools: 10 environment + 2 internal + 3 goal),
  * visibility/requirements/capability 映射, stable IDs, goal state ownership/projector, 和全局唯一性。
  */
 class BuiltinHarnessContributorTest {
@@ -99,7 +99,7 @@ class BuiltinHarnessContributorTest {
   }
 
   @Test
-  void catalogFreezesExactInventoryOf17ToolsAndAssociatedCapabilities() {
+  void catalogFreezesExactInventoryOf15ToolsAndAssociatedCapabilities() {
     Tool loadSkill = stubTool("load_skill", ToolRequirements.environment());
     Tool task = stubTool("task", ToolRequirements.none());
     BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(loadSkill, task);
@@ -111,15 +111,15 @@ class BuiltinHarnessContributorTest {
     assertEquals(contributor.descriptor(), catalog.descriptors().get(0));
     assertTrue(catalog.findDescriptor(new ContributorId("builtin")).isPresent());
 
-    // Tools inventory: exactly 17 tools
+    // Tools inventory: exactly 15 tools
     List<ToolContribution> tools = catalog.tools();
-    assertEquals(17, tools.size(), "exact total 17 tools expected");
+    assertEquals(15, tools.size(), "exact total 15 tools expected");
 
-    // Selectable tools: 12 environment + 3 goal = 15 tools (load_skill and task are INTERNAL)
+    // Selectable tools: 10 environment + 3 goal = 13 tools (load_skill and task are INTERNAL)
     List<ToolContribution> selectables = catalog.selectableTools();
-    assertEquals(15, selectables.size(), "exact 15 selectable tools expected");
+    assertEquals(13, selectables.size(), "exact 13 selectable tools expected");
 
-    // 12 Environment Capability tools
+    // 10 Environment Capability tools
     assertEnvironmentTool(
         catalog,
         "read",
@@ -200,22 +200,6 @@ class BuiltinHarnessContributorTest {
         EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
         ToolSideEffect.READ_ONLY,
         Duration.ofMinutes(2));
-    assertEnvironmentTool(
-        catalog,
-        "mcp_list_tools",
-        BuiltinToolIds.MCP_LIST_TOOLS,
-        "environment.mcp-list-tools",
-        EnvironmentCapabilityIds.MCP_LIST,
-        ToolSideEffect.READ_ONLY,
-        Duration.ofSeconds(30));
-    assertEnvironmentTool(
-        catalog,
-        "mcp_call_tool",
-        BuiltinToolIds.MCP_CALL_TOOL,
-        "environment.mcp-call-tool",
-        EnvironmentCapabilityIds.MCP_CALL,
-        ToolSideEffect.NON_IDEMPOTENT,
-        Duration.ofMinutes(5));
 
     // 2 Internal tools (INTERNAL visibility)
     assertInternalTool(

@@ -116,9 +116,9 @@ public final class LoadSkillTool implements Tool {
             error(
                 callId,
                 "skill source environment mismatch: expected "
-                    + skill.sourceEnvironment().environmentName().value()
+                    + skill.sourceEnvironment().environmentId()
                     + " but got "
-                    + boundEnv.binding().environmentName().value()));
+                    + boundEnv.binding().environmentId()));
         return handle;
       }
       CompletableFuture<SkillBodyLoader.SkillBodyLoadResult> future =

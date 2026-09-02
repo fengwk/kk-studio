@@ -128,8 +128,6 @@ public class SystemSettingsIntegrationsDTO {
 
     private String promptAgentName;
 
-    private String promptEnvironmentName;
-
     private Long promptMaxWaitMillis;
 
     private String comfyBaseUrl;

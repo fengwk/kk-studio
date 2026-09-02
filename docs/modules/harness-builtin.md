@@ -59,8 +59,6 @@ Harness durable schema 的唯一入口是 [`V1__schema.sql`](../../schema/src/ma
 | `environment.lsp-goto-definition` | `base.lsp-goto-definition` | `lsp_goto_definition` | Environment | SELECTABLE | 0 | `lsp.goto-definition`，READ_ONLY |
 | `environment.lsp-workspace-symbols` | `base.lsp-workspace-symbols` | `lsp_workspace_symbols` | Environment | SELECTABLE | 0 | `lsp.workspace-symbols`，READ_ONLY |
 | `environment.lsp-java-decompile` | `base.lsp-java-decompile` | `lsp_java_decompile` | Environment | SELECTABLE | 0 | `lsp.java-decompile`，READ_ONLY |
-| `environment.mcp-list-tools` | `base.mcp-list-tools` | `mcp_list_tools` | Environment | SELECTABLE | 0 | `mcp.list`，READ_ONLY |
-| `environment.mcp-call-tool` | `base.mcp-call-tool` | `mcp_call_tool` | Environment | SELECTABLE | 0 | `mcp.call`，NON_IDEMPOTENT |
 | `runtime.load-skill` | `base.load-skill` | `load_skill` | none | INTERNAL | 0 | 内部 Skill 加载 |
 | `runtime.task` | `base.task` | `task` | none | INTERNAL | 0 | 内部 Subagent 委派 |
 | `goal.create` | `base.goal.create` | `create_goal` | WRITE(`goal.state`) | SELECTABLE | 0 | 创建 Goal snapshot |

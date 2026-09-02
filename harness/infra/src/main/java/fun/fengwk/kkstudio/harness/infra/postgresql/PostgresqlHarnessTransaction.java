@@ -5,7 +5,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
@@ -58,14 +58,14 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             and available_at <= statement_timestamp()
             and (lease_until is null or lease_until <= statement_timestamp())
             and (
-                required_environment_name is null
+                required_environment_id is null
                 or exists (
                     select 1
-                    from live_environment le
-                    where le.environment_name = harness_work.required_environment_name
-                      and le.owner_node_id = ?
-                      and le.status = 'READY'
-                      and le.lease_until > statement_timestamp()
+                    from environment_connection ec
+                    where ec.environment_id = harness_work.required_environment_id
+                      and ec.owner_node_id = ?
+                      and ec.status = 'READY'
+                      and ec.lease_until > statement_timestamp()
                 )
             )
           order by available_at, target_id
@@ -83,13 +83,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   private static final String REQUEST_WORK =
       """
       insert into harness_work (
-          target_type, target_id, available_at, wake_version, lease_token, lease_until, required_environment_name
+          target_type, target_id, available_at, wake_version, lease_token, lease_until, required_environment_id
       ) values (?, ?, ?, 1, null, null, ?)
       on conflict (target_type, target_id) do update
       set available_at = least(harness_work.available_at, excluded.available_at),
           wake_version = harness_work.wake_version + 1
-      where (harness_work.required_environment_name is not distinct from excluded.required_environment_name
-             or excluded.required_environment_name is null)
+      where (harness_work.required_environment_id is not distinct from excluded.required_environment_id
+             or excluded.required_environment_id is null)
       returning *
       """;
 
@@ -1139,14 +1139,14 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   @Override
   public void requestWork(
-      WorkTarget target, Instant requestedAt, EnvironmentName requiredEnvironmentName) {
+      WorkTarget target, Instant requestedAt, EnvironmentId requiredEnvironmentId) {
     checkOpen();
     Objects.requireNonNull(target, "target");
     Objects.requireNonNull(requestedAt, "requestedAt");
     PostgresqlHarnessRows.requireMillisecondPrecision(requestedAt);
-    if (requiredEnvironmentName != null && target.type() != WorkTargetType.TOOL) {
+    if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
       throw new IllegalArgumentException(
-          "requiredEnvironmentName must be null for target type " + target.type());
+          "requiredEnvironmentId must be null for target type " + target.type());
     }
     requireWorkOwnerLocked(target);
     requireCanLockWork(target);
@@ -1157,11 +1157,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 target.type().name(),
                 target.id(),
                 PostgresqlHarnessRows.timestamp(requestedAt),
-                requiredEnvironmentName == null ? null : requiredEnvironmentName.value())
+                requiredEnvironmentId == null ? null : requiredEnvironmentId.value())
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(
-                        "conflicting requiredEnvironmentName for work target " + target));
+                        "conflicting requiredEnvironmentId for work target " + target));
     recordWorkLock(work.target());
     notifyWorkAvailable();
   }
@@ -1209,7 +1209,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             work.wakeVersion(),
             work.leaseToken(),
             work.leaseUntil(),
-            work.requiredEnvironmentName()));
+            work.requiredEnvironmentId()));
   }
 
   @Override

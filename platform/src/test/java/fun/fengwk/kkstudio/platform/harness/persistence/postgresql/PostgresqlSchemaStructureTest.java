@@ -53,8 +53,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_session",
           "chat",
           "chat_session",
-          "live_environment",
-          "environment_query",
+          "environment",
+          "environment_connection",
+          "environment_directory_query",
           "harness_session",
           "harness_entry",
           "harness_thread",
@@ -173,6 +174,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "model_provider_name",
         "model_name",
         "variant",
+        "environment_id",
         "config",
         "created_at",
         "updated_at",
@@ -259,7 +261,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "id",
         "title",
         "agent_name",
-        "environment_name",
         "workspace_path",
         "yolo_enabled",
         "created_at",
@@ -295,30 +296,27 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "cleanup_until",
         "created_at");
     assertColumns(
-        "live_environment",
-        "environment_name",
-        "daemon_id",
+        "environment", "id", "name", "registration_token", "created_at", "updated_at", "version");
+    assertColumns(
+        "environment_connection",
+        "environment_id",
         "owner_node_id",
-        "route_token",
+        "lease_token",
         "status",
-        "capabilities",
+        "runtime_info",
         "last_seen_at",
         "lease_until");
     assertColumns(
-        "environment_query",
+        "environment_directory_query",
         "id",
-        "environment_name",
-        "capability_id",
-        "arguments",
+        "environment_id",
+        "path",
         "status",
         "result",
-        "error",
-        "available_at",
-        "lease_token",
-        "lease_until",
-        "expires_at",
-        "created_at",
-        "updated_at");
+        "failure_code",
+        "failure_message",
+        "deadline_at",
+        "created_at");
   }
 
   @Test
@@ -453,10 +451,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "agent_definition", "config");
     assertColumnType("jsonb", "canvas_node", "function_config_json");
     assertColumnType("jsonb", "canvas_function_run", "state_json");
-    assertColumnType("jsonb", "live_environment", "capabilities");
-    assertColumnType("jsonb", "environment_query", "arguments");
-    assertColumnType("jsonb", "environment_query", "result");
-    assertColumnType("jsonb", "environment_query", "error");
+    assertColumnType("jsonb", "environment_connection", "runtime_info");
+    assertColumnType("jsonb", "environment_directory_query", "result");
     assertColumnType("integer", "canvas_function_run", "attempt");
     assertColumnType("character varying", "canvas_function_run", "lease_token");
   }
@@ -508,13 +504,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "storage_upload", "expires_at");
     assertColumnType("timestamp with time zone", "storage_upload", "cleanup_requested_at");
     assertColumnType("timestamp with time zone", "storage_upload", "created_at");
-    assertColumnType("timestamp with time zone", "live_environment", "last_seen_at");
-    assertColumnType("timestamp with time zone", "live_environment", "lease_until");
-    assertColumnType("timestamp with time zone", "environment_query", "available_at");
-    assertColumnType("timestamp with time zone", "environment_query", "lease_until");
-    assertColumnType("timestamp with time zone", "environment_query", "expires_at");
-    assertColumnType("timestamp with time zone", "environment_query", "created_at");
-    assertColumnType("timestamp with time zone", "environment_query", "updated_at");
+    assertColumnType("timestamp with time zone", "environment", "created_at");
+    assertColumnType("timestamp with time zone", "environment", "updated_at");
+    assertColumnType("timestamp with time zone", "environment_connection", "last_seen_at");
+    assertColumnType("timestamp with time zone", "environment_connection", "lease_until");
+    assertColumnType("timestamp with time zone", "environment_directory_query", "deadline_at");
+    assertColumnType("timestamp with time zone", "environment_directory_query", "created_at");
   }
 
   @Test
@@ -533,9 +528,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "wake_version",
         "lease_token",
         "lease_until",
-        "required_environment_name");
+        "required_environment_id");
 
-    assertColumnType("character varying", "harness_work", "required_environment_name");
+    assertColumnType("uuid", "harness_work", "required_environment_id");
 
     // lease_token 与 lease_until 必须同时被设置或清空。
     assertThrows(SQLException.class, () -> insertWork("THREAD", uuid(920_001L), "token", null));
@@ -556,35 +551,33 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       insertWork(conn, "TOOL", uuid(920_007L), "worker", "current_timestamp");
     }
 
-    // required_environment_name 仅允许 target_type='TOOL' 时非空，且必须非空字符串。
+    // required_environment_id 仅允许 target_type='TOOL' 时非空
+    UUID envId = uuid(888_001L);
     try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_harness_work_required_environment",
-          () -> {
-            try (PreparedStatement ps =
-                conn.prepareStatement(
-                    "insert into harness_work (target_type, target_id, available_at, wake_version, required_environment_name) values ('THREAD', ?, current_timestamp, 1, 'env-1')")) {
-              ps.setObject(1, uuid(920_008L));
-              ps.executeUpdate();
-            }
-          });
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_harness_work_required_environment",
-          () -> {
-            try (PreparedStatement ps =
-                conn.prepareStatement(
-                    "insert into harness_work (target_type, target_id, available_at, wake_version, required_environment_name) values ('TOOL', ?, current_timestamp, 1, '   ')")) {
-              ps.setObject(1, uuid(920_009L));
-              ps.executeUpdate();
-            }
-          });
-      // TOOL target_type 携带合法 required_environment_name 成功插入
       try (PreparedStatement ps =
           conn.prepareStatement(
-              "insert into harness_work (target_type, target_id, available_at, wake_version, required_environment_name) values ('TOOL', ?, current_timestamp, 1, 'env-1')")) {
+              "insert into environment (id, name, registration_token) values (?, 'work-env', 'tok-work')")) {
+        ps.setObject(1, envId);
+        ps.executeUpdate();
+      }
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_harness_work_required_environment",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement(
+                    "insert into harness_work (target_type, target_id, available_at, wake_version, required_environment_id) values ('THREAD', ?, current_timestamp, 1, ?)")) {
+              ps.setObject(1, uuid(920_008L));
+              ps.setObject(2, envId);
+              ps.executeUpdate();
+            }
+          });
+      // TOOL target_type 携带合法 required_environment_id 成功插入
+      try (PreparedStatement ps =
+          conn.prepareStatement(
+              "insert into harness_work (target_type, target_id, available_at, wake_version, required_environment_id) values ('TOOL', ?, current_timestamp, 1, ?)")) {
         ps.setObject(1, uuid(920_010L));
+        ps.setObject(2, envId);
         ps.executeUpdate();
       }
     }
@@ -642,94 +635,85 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   @Test
   void liveEnvironmentTableConstraintsAreEnforced() throws SQLException {
-    UUID node1 = uuid(101L);
-    UUID token1 = uuid(201L);
+    UUID env1 = uuid(101L);
+    UUID node1 = uuid(201L);
+    UUID token1 = uuid(301L);
 
     // 正常 CONNECTING 行可插入
     try (Connection conn = newConnection()) {
       try (PreparedStatement ps =
           conn.prepareStatement(
-              "insert into live_environment (environment_name, daemon_id, owner_node_id, route_token, status, capabilities, last_seen_at, lease_until) "
-                  + "values (?, ?, ?, ?, 'CONNECTING', null, statement_timestamp(), statement_timestamp() + interval '60 seconds')")) {
-        ps.setString(1, "dev");
-        ps.setString(2, "d1");
-        ps.setObject(3, node1);
-        ps.setObject(4, token1);
+              "insert into environment (id, name, registration_token) values (?, 'dev', 'tok1')")) {
+        ps.setObject(1, env1);
+        ps.executeUpdate();
+      }
+      try (PreparedStatement ps =
+          conn.prepareStatement(
+              "insert into environment_connection (environment_id, owner_node_id, lease_token, status, runtime_info, last_seen_at, lease_until) "
+                  + "values (?, ?, ?, 'CONNECTING', null, statement_timestamp(), statement_timestamp() + interval '60 seconds')")) {
+        ps.setObject(1, env1);
+        ps.setObject(2, node1);
+        ps.setObject(3, token1);
         assertEquals(1, ps.executeUpdate());
       }
     }
 
-    // 拒绝空白 daemon_id
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_live_environment_daemon_id_nonblank",
-          () -> {
-            try (PreparedStatement ps =
-                conn.prepareStatement(
-                    "insert into live_environment (environment_name, daemon_id, owner_node_id, route_token, status, capabilities, last_seen_at, lease_until) "
-                        + "values (?, ?, ?, ?, 'CONNECTING', null, statement_timestamp(), statement_timestamp() + interval '60 seconds')")) {
-              ps.setString(1, "prod");
-              ps.setString(2, "   ");
-              ps.setObject(3, node1);
-              ps.setObject(4, token1);
-              ps.executeUpdate();
-            }
-          });
-    }
-
     // 拒绝非法 status
+    UUID env2 = uuid(102L);
     try (Connection conn = newConnection()) {
+      try (PreparedStatement ps =
+          conn.prepareStatement(
+              "insert into environment (id, name, registration_token) values (?, 'prod', 'tok2')")) {
+        ps.setObject(1, env2);
+        ps.executeUpdate();
+      }
       assertTransactionConstraintViolation(
           conn,
-          "ck_live_environment_status",
+          "ck_environment_connection_status",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
-                    "insert into live_environment (environment_name, daemon_id, owner_node_id, route_token, status, capabilities, last_seen_at, lease_until) "
-                        + "values (?, ?, ?, ?, 'INVALID', null, statement_timestamp(), statement_timestamp() + interval '60 seconds')")) {
-              ps.setString(1, "prod");
-              ps.setString(2, "d1");
-              ps.setObject(3, node1);
-              ps.setObject(4, token1);
+                    "insert into environment_connection (environment_id, owner_node_id, lease_token, status, runtime_info, last_seen_at, lease_until) "
+                        + "values (?, ?, ?, 'INVALID', null, statement_timestamp(), statement_timestamp() + interval '60 seconds')")) {
+              ps.setObject(1, env2);
+              ps.setObject(2, node1);
+              ps.setObject(3, token1);
               ps.executeUpdate();
             }
           });
     }
 
-    // CONNECTING 状态下 capabilities 必须为 null
+    // CONNECTING 状态下 runtime_info 必须为 null
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_live_environment_capabilities",
+          "ck_environment_connection_runtime_info",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
-                    "insert into live_environment (environment_name, daemon_id, owner_node_id, route_token, status, capabilities, last_seen_at, lease_until) "
-                        + "values (?, ?, ?, ?, 'CONNECTING', '{}'::jsonb, statement_timestamp(), statement_timestamp() + interval '60 seconds')")) {
-              ps.setString(1, "prod");
-              ps.setString(2, "d1");
-              ps.setObject(3, node1);
-              ps.setObject(4, token1);
+                    "insert into environment_connection (environment_id, owner_node_id, lease_token, status, runtime_info, last_seen_at, lease_until) "
+                        + "values (?, ?, ?, 'CONNECTING', '{}'::jsonb, statement_timestamp(), statement_timestamp() + interval '60 seconds')")) {
+              ps.setObject(1, env2);
+              ps.setObject(2, node1);
+              ps.setObject(3, token1);
               ps.executeUpdate();
             }
           });
     }
 
-    // READY 状态下 capabilities 必须非 null object
+    // READY 状态下 runtime_info 必须非 null object
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_live_environment_capabilities",
+          "ck_environment_connection_runtime_info",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
-                    "insert into live_environment (environment_name, daemon_id, owner_node_id, route_token, status, capabilities, last_seen_at, lease_until) "
-                        + "values (?, ?, ?, ?, 'READY', null, statement_timestamp(), statement_timestamp() + interval '60 seconds')")) {
-              ps.setString(1, "prod");
-              ps.setString(2, "d1");
-              ps.setObject(3, node1);
-              ps.setObject(4, token1);
+                    "insert into environment_connection (environment_id, owner_node_id, lease_token, status, runtime_info, last_seen_at, lease_until) "
+                        + "values (?, ?, ?, 'READY', null, statement_timestamp(), statement_timestamp() + interval '60 seconds')")) {
+              ps.setObject(1, env2);
+              ps.setObject(2, node1);
+              ps.setObject(3, token1);
               ps.executeUpdate();
             }
           });
@@ -739,16 +723,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_live_environment_lease",
+          "ck_environment_connection_lease",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
-                    "insert into live_environment (environment_name, daemon_id, owner_node_id, route_token, status, capabilities, last_seen_at, lease_until) "
-                        + "values (?, ?, ?, ?, 'CONNECTING', null, statement_timestamp(), statement_timestamp() - interval '1 second')")) {
-              ps.setString(1, "prod");
-              ps.setString(2, "d1");
-              ps.setObject(3, node1);
-              ps.setObject(4, token1);
+                    "insert into environment_connection (environment_id, owner_node_id, lease_token, status, runtime_info, last_seen_at, lease_until) "
+                        + "values (?, ?, ?, 'CONNECTING', null, statement_timestamp(), statement_timestamp() - interval '1 second')")) {
+              ps.setObject(1, env2);
+              ps.setObject(2, node1);
+              ps.setObject(3, token1);
               ps.executeUpdate();
             }
           });
@@ -757,63 +740,73 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   @Test
   void environmentQueryTableConstraintsAreEnforced() throws SQLException {
+    UUID env1 = uuid(101L);
     UUID q1 = uuid(301L);
 
     // 正常 PENDING 行可插入
     try (Connection conn = newConnection()) {
       try (PreparedStatement ps =
           conn.prepareStatement(
-              "insert into environment_query (id, environment_name, capability_id, arguments, status, available_at, expires_at) "
-                  + "values (?, 'dev', 'fs.list-directory', '{}'::jsonb, 'PENDING', statement_timestamp(), statement_timestamp() + interval '10 seconds')")) {
+              "insert into environment (id, name, registration_token) values (?, 'dev', 'tok1')")) {
+        ps.setObject(1, env1);
+        ps.executeUpdate();
+      }
+      try (PreparedStatement ps =
+          conn.prepareStatement(
+              "insert into environment_directory_query (id, environment_id, path, status, deadline_at) "
+                  + "values (?, ?, 'src', 'PENDING', statement_timestamp() + interval '10 seconds')")) {
         ps.setObject(1, q1);
+        ps.setObject(2, env1);
         assertEquals(1, ps.executeUpdate());
       }
     }
 
-    // 仅允许白名单 capability_id
+    // 拒绝非法 status
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_environment_query_capability",
+          "ck_environment_directory_query_state",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
-                    "insert into environment_query (id, environment_name, capability_id, arguments, status, available_at, expires_at) "
-                        + "values (?, 'dev', 'fs.delete-file', '{}'::jsonb, 'PENDING', statement_timestamp(), statement_timestamp() + interval '10 seconds')")) {
+                    "insert into environment_directory_query (id, environment_id, path, status, deadline_at) "
+                        + "values (?, ?, 'src', 'INVALID', statement_timestamp() + interval '10 seconds')")) {
               ps.setObject(1, uuid(302L));
+              ps.setObject(2, env1);
               ps.executeUpdate();
             }
           });
     }
 
-    // arguments 必须为 object
+    // SUCCEEDED 必须携带 JSON object result
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_environment_query_arguments",
+          "ck_environment_directory_query_state",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
-                    "insert into environment_query (id, environment_name, capability_id, arguments, status, available_at, expires_at) "
-                        + "values (?, 'dev', 'fs.list-directory', '[]'::jsonb, 'PENDING', statement_timestamp(), statement_timestamp() + interval '10 seconds')")) {
+                    "insert into environment_directory_query (id, environment_id, path, status, deadline_at) "
+                        + "values (?, ?, 'src', 'SUCCEEDED', statement_timestamp() + interval '10 seconds')")) {
               ps.setObject(1, uuid(303L));
+              ps.setObject(2, env1);
               ps.executeUpdate();
             }
           });
     }
 
-    // lease_token 与 lease_until 必须成对出现
+    // FAILED 必须携带 non-blank failure_code
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_environment_query_lease_pair",
+          "ck_environment_directory_query_state",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
-                    "insert into environment_query (id, environment_name, capability_id, arguments, status, lease_token, expires_at) "
-                        + "values (?, 'dev', 'fs.list-directory', '{}'::jsonb, 'RUNNING', ?, statement_timestamp() + interval '10 seconds')")) {
+                    "insert into environment_directory_query (id, environment_id, path, status, failure_code, deadline_at) "
+                        + "values (?, ?, 'src', 'FAILED', '  ', statement_timestamp() + interval '10 seconds')")) {
               ps.setObject(1, uuid(304L));
-              ps.setObject(2, uuid(401L));
+              ps.setObject(2, env1);
               ps.executeUpdate();
             }
           });
@@ -1305,6 +1298,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_canvas_node_canvas",
             "uk_canvas_resource_canvas",
             "uk_canvas_resource_owner_index",
+            "uk_environment_name",
+            "uk_environment_registration_token",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
             "uk_harness_thread_command_idempotency",
@@ -1326,7 +1321,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             st.executeQuery(
                 "select conname from pg_constraint where contype = 'f'"
                     + " and conname in ('fk_agent_model_provider',"
-                    + " 'fk_agent_definition_model', 'fk_canvas_group_canvas',"
+                    + " 'fk_agent_definition_model', 'fk_agent_definition_environment',"
+                    + " 'fk_environment_connection_environment', 'fk_environment_directory_query_environment',"
+                    + " 'fk_harness_work_environment',"
+                    + " 'fk_canvas_group_canvas',"
                     + " 'fk_canvas_node_canvas', 'fk_canvas_node_group',"
                     + " 'fk_canvas_resource_canvas', 'fk_canvas_resource_owner',"
                     + " 'fk_canvas_resource_blob', 'fk_canvas_command_dedup_canvas',"
@@ -1344,6 +1342,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         Set.of(
             "fk_agent_model_provider",
             "fk_agent_definition_model",
+            "fk_agent_definition_environment",
+            "fk_environment_connection_environment",
+            "fk_environment_directory_query_environment",
+            "fk_harness_work_environment",
             "fk_canvas_group_canvas",
             "fk_canvas_node_canvas",
             "fk_canvas_node_group",

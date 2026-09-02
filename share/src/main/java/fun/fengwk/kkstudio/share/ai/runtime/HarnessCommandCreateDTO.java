@@ -29,8 +29,8 @@ public class HarnessCommandCreateDTO {
   /** SET_MODEL 的目标模型。 */
   private HarnessModelSelectionDTO model;
 
-  /** SET_ENVIRONMENT 的完整 binding；显式 null 表示解绑。 */
-  private EnvironmentBindingDTO environment;
+  /** SET_ENVIRONMENT 的 workspace path；显式 null 表示清除 workspace path。 */
+  private String workspacePath;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
@@ -46,7 +46,7 @@ public class HarnessCommandCreateDTO {
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
-  private boolean environmentFieldPresent;
+  private boolean workspacePathFieldPresent;
 
   @JsonSetter("type")
   public void setType(Object value) {
@@ -77,10 +77,10 @@ public class HarnessCommandCreateDTO {
     this.modelFieldPresent = true;
   }
 
-  @JsonSetter("environment")
-  public void setEnvironment(EnvironmentBindingDTO value) {
-    this.environment = value;
-    this.environmentFieldPresent = true;
+  @JsonSetter("workspacePath")
+  public void setWorkspacePath(String value) {
+    this.workspacePath = value;
+    this.workspacePathFieldPresent = true;
   }
 
   @JsonIgnore
@@ -99,8 +99,8 @@ public class HarnessCommandCreateDTO {
   }
 
   @JsonIgnore
-  public boolean hasEnvironmentField() {
-    return environmentFieldPresent;
+  public boolean hasWorkspacePathField() {
+    return workspacePathFieldPresent;
   }
 
   @JsonAnySetter

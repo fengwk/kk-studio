@@ -109,7 +109,7 @@ describe('tool display', () => {
 
   it('caps collapsed result previews at 2500 characters', () => {
     const preview = formatToolResultPreview(
-      'mcp_call_tool',
+      'custom_tool',
       'x'.repeat(3_000),
       { expanded: false, error: false },
     )
@@ -187,7 +187,7 @@ describe('tool display', () => {
     expect(formatToolCallSummary('find', JSON.stringify({})).text).toBe('find {}')
   })
 
-  it('formats lsp summaries with query/target and mcp summaries with server/tool', () => {
+  it('formats lsp and load_skill summaries', () => {
     expect(formatToolCallSummary('lsp_workspace_symbols', JSON.stringify({
       path: 'src/App.java',
       query: 'UserService',
@@ -207,18 +207,6 @@ describe('tool display', () => {
       .toBe('load_skill dev')
     // name 缺失时回退为原始 JSON 文本（{} 是合法解析结果）。
     expect(formatToolCallSummary('load_skill', JSON.stringify({})).text).toBe('load_skill {}')
-    expect(formatToolCallSummary('mcp_list_tools', JSON.stringify({ server: 'fs' })).text)
-      .toBe('mcp_list_tools fs')
-    expect(formatToolCallSummary('mcp_call_tool', JSON.stringify({
-      server: 'fs',
-      tool: 'read',
-      arguments: { path: '/a' },
-    })).text).toBe('mcp_call_tool fs/read {"path":"/a"}')
-    // server 缺失时仍展示 tool；两者都缺失时回退到原始 JSON。
-    expect(formatToolCallSummary('mcp_call_tool', JSON.stringify({ tool: 'read' })).text)
-      .toBe('mcp_call_tool read')
-    expect(formatToolCallSummary('mcp_call_tool', JSON.stringify({})).text)
-      .toBe('mcp_call_tool {}')
   })
 
   it('normalizes tool names and falls back to a placeholder when blank', () => {

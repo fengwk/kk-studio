@@ -502,14 +502,6 @@ public class SystemSettingsSchemaProvider {
                         null,
                         64),
                     field(
-                        "integrations.minimaxH3.promptEnvironmentName",
-                        "settings.field.integrations.minimaxH3.promptEnvironmentName",
-                        null,
-                        FieldType.TEXT,
-                        true,
-                        null,
-                        64),
-                    field(
                         "integrations.minimaxH3.promptMaxWaitMillis",
                         "settings.field.integrations.minimaxH3.promptMaxWaitMillis",
                         null,

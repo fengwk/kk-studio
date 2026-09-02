@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -25,7 +25,13 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
 
   @Override
   HarnessStore createStore() {
-    return PostgresqlHarnessStoreFixture.resetAndCreate();
+    HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
+    JdbcTemplate jdbc = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
+    seedEnvironment(jdbc, EnvironmentId.parse("11111111-1111-1111-1111-111111111111"));
+    seedEnvironment(jdbc, EnvironmentId.parse("22222222-2222-2222-2222-222222222222"));
+    seedEnvironment(jdbc, EnvironmentId.parse("33333333-3333-3333-3333-333333333333"));
+    seedEnvironment(jdbc, EnvironmentId.parse("44444444-4444-4444-4444-444444444444"));
+    return store;
   }
 
   private static Instant now() {
@@ -177,11 +183,8 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     HarnessStore store = createStore();
     JdbcTemplate jdbc = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
     UUID node = UUID.randomUUID();
-    EnvironmentName env = new EnvironmentName("env-1");
-    jdbc.update(
-        "insert into live_environment (environment_name, daemon_id, owner_node_id, route_token, status, capabilities, last_seen_at, lease_until) values (?, 'daemon-1', ?, gen_random_uuid(), 'READY', '{}'::jsonb, statement_timestamp(), statement_timestamp() + interval '60 seconds')",
-        env.value(),
-        node);
+    EnvironmentId env = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    seedEnvironmentConnection(jdbc, env, "daemon-1", node, "READY");
 
     SeededTool seeded = seedTool(store);
     WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
@@ -201,7 +204,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
                         WorkTargetType.TOOL, current, "token", current.plusSeconds(30), node))
             .orElseThrow();
     assertEquals(toolTarget, claimed.target());
-    assertEquals(env, claimed.requiredEnvironmentName());
+    assertEquals(env, claimed.requiredEnvironmentId());
   }
 
   @Test
@@ -213,24 +216,38 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     UUID node2 = UUID.randomUUID();
     UUID node3 = UUID.randomUUID();
 
-    // 播种 live_environment:
+    // 播种 environment_connection:
     // node1: env-1 (READY, fresh lease)
     // node2: env-2 (READY, fresh lease)
     // node1: env-stale (READY, expired lease)
     // node1: env-connecting (CONNECTING, fresh lease)
-    jdbc.update(
-        """
-        insert into live_environment (environment_name, daemon_id, owner_node_id, route_token, status, capabilities, last_seen_at, lease_until)
-        values
-            ('env-1', 'daemon-1', ?, gen_random_uuid(), 'READY', '{}'::jsonb, statement_timestamp(), statement_timestamp() + interval '60 seconds'),
-            ('env-2', 'daemon-2', ?, gen_random_uuid(), 'READY', '{}'::jsonb, statement_timestamp(), statement_timestamp() + interval '60 seconds'),
-            ('env-stale', 'daemon-stale', ?, gen_random_uuid(), 'READY', '{}'::jsonb, statement_timestamp() - interval '20 seconds', statement_timestamp() - interval '10 seconds'),
-            ('env-connecting', 'daemon-conn', ?, gen_random_uuid(), 'CONNECTING', null, statement_timestamp(), statement_timestamp() + interval '60 seconds')
-        """,
+    seedEnvironmentConnection(
+        jdbc,
+        EnvironmentId.parse("11111111-1111-1111-1111-111111111111"),
+        "daemon-1",
         node1,
+        "READY");
+    seedEnvironmentConnection(
+        jdbc,
+        EnvironmentId.parse("22222222-2222-2222-2222-222222222222"),
+        "daemon-2",
         node2,
+        "READY");
+    seedEnvironmentConnection(
+        jdbc,
+        EnvironmentId.parse("33333333-3333-3333-3333-333333333333"),
+        "daemon-stale",
         node1,
-        node1);
+        "READY");
+    jdbc.update(
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '20 seconds', lease_until = statement_timestamp() - interval '10 seconds' where environment_id = ?",
+        UUID.fromString("33333333-3333-3333-3333-333333333333"));
+    seedEnvironmentConnection(
+        jdbc,
+        EnvironmentId.parse("44444444-4444-4444-4444-444444444444"),
+        "daemon-conn",
+        node1,
+        "CONNECTING");
 
     // 播种 5 个 Tool Work
     SeededTool toolSeed1 = seedTool(store);
@@ -248,7 +265,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
           tx.requestWork(
               new WorkTarget(WorkTargetType.TOOL, toolSeed1.toolId()),
               due,
-              new EnvironmentName("env-1"));
+              EnvironmentId.parse("11111111-1111-1111-1111-111111111111"));
         });
     inTransaction(
         store,
@@ -257,7 +274,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
           tx.requestWork(
               new WorkTarget(WorkTargetType.TOOL, toolSeed2.toolId()),
               due,
-              new EnvironmentName("env-2"));
+              EnvironmentId.parse("22222222-2222-2222-2222-222222222222"));
         });
     inTransaction(
         store,
@@ -266,7 +283,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
           tx.requestWork(
               new WorkTarget(WorkTargetType.TOOL, toolSeed3.toolId()),
               due,
-              new EnvironmentName("env-stale"));
+              EnvironmentId.parse("33333333-3333-3333-3333-333333333333"));
         });
     inTransaction(
         store,
@@ -275,7 +292,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
           tx.requestWork(
               new WorkTarget(WorkTargetType.TOOL, toolSeed4.toolId()),
               due,
-              new EnvironmentName("env-connecting"));
+              EnvironmentId.parse("44444444-4444-4444-4444-444444444444"));
         });
     inTransaction(
         store,
@@ -342,5 +359,38 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
                         current.plusSeconds(30),
                         node2))
             .isEmpty());
+  }
+
+  private static void seedEnvironment(JdbcTemplate jdbc, EnvironmentId env) {
+    jdbc.update(
+        """
+        insert into environment (id, name, registration_token, version)
+        values (?, ?, ?, 0)
+        on conflict (id) do nothing
+        """,
+        env.value(),
+        "env-" + env.value().toString().substring(0, 8),
+        "token-" + env.value());
+  }
+
+  /** 按 V1 environment_connection 表形状播种一条 daemon 连接路由，供 claim affinity 断言使用。 */
+  private static void seedEnvironmentConnection(
+      JdbcTemplate jdbc, EnvironmentId env, String daemonId, UUID node, String status) {
+    seedEnvironment(jdbc, env);
+    jdbc.update(
+        """
+        insert into environment_connection (environment_id, owner_node_id, lease_token, status, runtime_info, last_seen_at, lease_until)
+        values (?, ?, gen_random_uuid(), ?, ?::jsonb, statement_timestamp(), statement_timestamp() + interval '60 seconds')
+        on conflict (environment_id) do update
+        set owner_node_id = excluded.owner_node_id,
+            status = excluded.status,
+            runtime_info = excluded.runtime_info,
+            last_seen_at = excluded.last_seen_at,
+            lease_until = excluded.lease_until
+        """,
+        env.value(),
+        node,
+        status,
+        "READY".equals(status) ? "{}" : null);
   }
 }

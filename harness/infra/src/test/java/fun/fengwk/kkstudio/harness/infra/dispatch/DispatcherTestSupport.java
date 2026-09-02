@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.infra.dispatch;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -98,7 +98,7 @@ final class DispatcherTestSupport {
   static final Duration REJECTION_DELAY = Duration.ofSeconds(2);
   static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(10);
   static final EnvironmentBinding ENV_NAME =
-      new EnvironmentBinding(new EnvironmentName("env-1"), ".");
+      new EnvironmentBinding(EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), ".");
 
   private DispatcherTestSupport() {}
 
@@ -236,7 +236,7 @@ final class DispatcherTestSupport {
                       NOW,
                       NOW)));
           tx.requestWork(
-              new WorkTarget(WorkTargetType.TOOL, toolId), NOW, ENV_NAME.environmentName());
+              new WorkTarget(WorkTargetType.TOOL, toolId), NOW, ENV_NAME.environmentId());
           return new ToolSeed(threadId, modelId, toolId);
         });
   }
@@ -618,7 +618,10 @@ final class DispatcherTestSupport {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings(ENV_NAME, "agent", new ModelSelection("provider", "model", "v1"));
+    return new BranchSettings(
+        ENV_NAME == null ? null : ENV_NAME.workspacePath(),
+        "agent",
+        new ModelSelection("provider", "model", "v1"));
   }
 
   private static ModelRequestSpec modelRequest() {

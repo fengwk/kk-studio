@@ -38,23 +38,6 @@ public final class DaemonCapabilitiesCodec {
       node.put("name", skill.name());
       node.put("description", skill.description());
     }
-    ArrayNode servers = root.putArray("mcpServers");
-    for (DaemonMcpServerDescriptor server : capabilities.mcpServers()) {
-      ObjectNode node = servers.addObject();
-      node.put("name", server.name());
-      node.put("status", server.status().name());
-      if (server.error() != null) {
-        node.put("error", server.error());
-      } else {
-        node.putNull("error");
-      }
-      ArrayNode tools = node.putArray("tools");
-      for (DaemonMcpToolDescriptor tool : server.tools()) {
-        ObjectNode toolNode = tools.addObject();
-        toolNode.put("name", tool.name());
-        toolNode.put("description", tool.description());
-      }
-    }
     try {
       return MAPPER.writeValueAsString(root);
     } catch (JsonProcessingException error) {
@@ -72,13 +55,12 @@ public final class DaemonCapabilitiesCodec {
     if (!(value instanceof ObjectNode root)) {
       throw new DaemonProtocolException("READY payload must be an object");
     }
-    rejectUnknown(root, Set.of("version", "environment", "skills", "mcpServers"));
+    rejectUnknown(root, Set.of("version", "environment", "skills"));
     int version = requiredVersion(root);
     DaemonEnvironmentInfo environment = decodeEnvironment(requiredObject(root, "environment"));
     List<DaemonSkillDescriptor> skills = decodeSkills(requiredArray(root, "skills"));
-    List<DaemonMcpServerDescriptor> servers = decodeServers(requiredArray(root, "mcpServers"));
     try {
-      return new DaemonCapabilities(version, environment, skills, servers);
+      return new DaemonCapabilities(version, environment, skills);
     } catch (IllegalArgumentException error) {
       throw new DaemonProtocolException(
           "READY capabilities validation failed: " + error.getMessage(), error);
@@ -151,84 +133,10 @@ public final class DaemonCapabilitiesCodec {
     return List.copyOf(result);
   }
 
-  private static List<DaemonMcpServerDescriptor> decodeServers(JsonNode serversNode) {
-    List<DaemonMcpServerDescriptor> result = new ArrayList<>();
-    int index = 0;
-    for (JsonNode element : serversNode) {
-      if (!(element instanceof ObjectNode node)) {
-        throw new DaemonProtocolException("READY mcpServers[" + index + "] must be an object");
-      }
-      rejectUnknown(node, Set.of("name", "status", "error", "tools"));
-      String name = text(node, "name", "READY mcpServers[" + index + "]");
-      String statusText = text(node, "status", "READY mcpServers[" + index + "]");
-      DaemonMcpServerStatus status;
-      try {
-        status = DaemonMcpServerStatus.valueOf(statusText);
-      } catch (IllegalArgumentException error) {
-        throw new DaemonProtocolException(
-            "READY mcpServers[" + index + "].status must be READY or FAILED");
-      }
-      String error = requiredError(node, "error", "READY mcpServers[" + index + "]");
-      List<DaemonMcpToolDescriptor> tools = decodeTools(requiredArray(node, "tools"), index);
-      DaemonMcpServerDescriptor server;
-      try {
-        server = new DaemonMcpServerDescriptor(name, status, error, tools);
-      } catch (IllegalArgumentException validationError) {
-        throw new DaemonProtocolException(
-            "READY MCP server validation failed for " + name + ": " + validationError.getMessage(),
-            validationError);
-      }
-      result.add(server);
-      index++;
-    }
-    return List.copyOf(result);
-  }
-
-  private static List<DaemonMcpToolDescriptor> decodeTools(JsonNode toolsNode, int serverIndex) {
-    List<DaemonMcpToolDescriptor> result = new ArrayList<>();
-    int index = 0;
-    for (JsonNode element : toolsNode) {
-      if (!(element instanceof ObjectNode node)) {
-        throw new DaemonProtocolException(
-            "READY mcpServers[" + serverIndex + "].tools[" + index + "] must be an object");
-      }
-      rejectUnknown(node, Set.of("name", "description"));
-      String name =
-          text(node, "name", "READY mcpServers[" + serverIndex + "].tools[" + index + "]");
-      String description =
-          text(node, "description", "READY mcpServers[" + serverIndex + "].tools[" + index + "]");
-      DaemonMcpToolDescriptor tool;
-      try {
-        tool = new DaemonMcpToolDescriptor(name, description);
-      } catch (IllegalArgumentException error) {
-        throw new DaemonProtocolException(
-            "READY MCP tool validation failed for " + name + ": " + error.getMessage(), error);
-      }
-      result.add(tool);
-      index++;
-    }
-    return List.copyOf(result);
-  }
-
   private static String text(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value == null || !value.isTextual() || value.textValue().isBlank()) {
       throw new DaemonProtocolException(context + "." + field + " must be non-blank text");
-    }
-    return value.textValue();
-  }
-
-  /** {@code error} 是必填字段：必须是文本或显式 null；缺失即拒绝。 */
-  private static String requiredError(ObjectNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (value == null) {
-      throw new DaemonProtocolException(context + "." + field + " is required");
-    }
-    if (value.isNull()) {
-      return null;
-    }
-    if (!value.isTextual()) {
-      throw new DaemonProtocolException(context + "." + field + " must be text or null");
     }
     return value.textValue();
   }

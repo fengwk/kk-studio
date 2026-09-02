@@ -32,12 +32,15 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** {@link StudioChatController} Chat CRUD 与 owner Session listing 的 HTTP 契约。 */
+/** {@link StudioChatController} HTTP 契约测试。 */
 class StudioChatControllerTest {
+
+  private ChatService chatService;
+  private HarnessOwnerQueryService harnessQueryService;
+  private MockMvc mockMvc;
 
   private static UUID id(long value) {
     return new UUID(0L, value);
@@ -47,29 +50,23 @@ class StudioChatControllerTest {
     return id(value).toString();
   }
 
-  private ChatService chatService;
-  private HarnessOwnerQueryService harnessQueryService;
-  private MockMvc mockMvc;
-
   @BeforeEach
   void setUp() {
     chatService = mock(ChatService.class);
     harnessQueryService = mock(HarnessOwnerQueryService.class);
-    StudioChatController controller = new StudioChatController(chatService, harnessQueryService);
     mockMvc =
-        MockMvcBuilders.standaloneSetup(controller)
+        MockMvcBuilders.standaloneSetup(new StudioChatController(chatService, harnessQueryService))
             .setControllerAdvice(new ResultResponseBodyAdvice())
             .build();
   }
 
   @Test
-  void listChatSessionsReturnsOwnerSummaries() throws Exception {
+  void listChatSessionsForwardsChatIdAndReturnsResults() throws Exception {
     HarnessSessionSummaryDTO summary = new HarnessSessionSummaryDTO();
     summary.setSessionId(idText(2));
-    summary.setCreatedAt(Instant.parse("2026-08-10T00:00:00Z"));
-    summary.setLastActivityAt(Instant.parse("2026-08-10T00:01:00Z"));
     summary.setFirstMessagePreview("hello");
     summary.setThreadCount(2);
+
     when(harnessQueryService.listChatSessions(id(7))).thenReturn(List.of(summary));
 
     mockMvc
@@ -82,7 +79,7 @@ class StudioChatControllerTest {
   }
 
   @Test
-  void createChatCarriesOptionalDefaultEnvironmentName() throws Exception {
+  void createChatCarriesOptionalDefaultWorkspacePath() throws Exception {
     when(chatService.createChat(any(ChatCreateDTO.class)))
         .thenAnswer(
             invocation -> {
@@ -91,7 +88,7 @@ class StudioChatControllerTest {
               dtoOut.setId("1");
               dtoOut.setTitle(dto.getTitle());
               dtoOut.setAgentName(dto.getAgentName());
-              dtoOut.setEnvironment(dto.getEnvironment());
+              dtoOut.setWorkspacePath(dto.getWorkspacePath());
               return dtoOut;
             });
 
@@ -101,17 +98,17 @@ class StudioChatControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"title\":\"t\",\"agentName\":\"default-assistant\","
-                        + "\"environment\":{\"name\":\"env-dev\",\"workspacePath\":\".\"}}"))
+                        + "\"workspacePath\":\"src\"}"))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.environment.name").value("env-dev"));
+        .andExpect(jsonPath("$.data.workspacePath").value("src"));
 
     ArgumentCaptor<ChatCreateDTO> captor = ArgumentCaptor.forClass(ChatCreateDTO.class);
     verify(chatService).createChat(captor.capture());
-    assertEquals("env-dev", captor.getValue().getEnvironment().getName());
+    assertEquals("src", captor.getValue().getWorkspacePath());
   }
 
   @Test
-  void createChatOmittingEnvironmentNameLeavesItNull() throws Exception {
+  void createChatOmittingWorkspacePathLeavesItNull() throws Exception {
     when(chatService.createChat(any(ChatCreateDTO.class))).thenReturn(new ChatDTO());
     mockMvc
         .perform(
@@ -121,17 +118,17 @@ class StudioChatControllerTest {
         .andExpect(status().isCreated());
     ArgumentCaptor<ChatCreateDTO> captor = ArgumentCaptor.forClass(ChatCreateDTO.class);
     verify(chatService).createChat(captor.capture());
-    assertNull(captor.getValue().getEnvironment());
+    assertNull(captor.getValue().getWorkspacePath());
   }
 
   @Test
-  void chatWireJsonEmitsEnvironmentNameExplicitlyIncludingNull() throws Exception {
+  void chatWireJsonEmitsWorkspacePathExplicitlyIncludingNull() throws Exception {
     // @JsonInclude(ALWAYS)：null 显式序列化，前端/契约可区分缺省与显式 null。
     ChatDTO nullEnv = new ChatDTO();
     nullEnv.setId("7");
     nullEnv.setTitle("t");
     nullEnv.setAgentName("default-assistant");
-    nullEnv.setEnvironment(null);
+    nullEnv.setWorkspacePath(null);
     nullEnv.setYoloEnabled(false);
     nullEnv.setVersion("2");
     when(chatService.updateChat(eq("7"), any(ChatUpdateDTO.class))).thenReturn(nullEnv);
@@ -144,13 +141,12 @@ class StudioChatControllerTest {
                     .content("{\"expectedVersion\":\"2\"}"))
             .andExpect(status().isOk())
             .andReturn();
-    // @JsonInclude(ALWAYS)：null 必须显式出现在 wire JSON 中（可区分缺省与显式 null）。
     String body = result.getResponse().getContentAsString();
-    assertTrue(body.contains("\"environment\":null"), body);
+    assertTrue(body.contains("\"workspacePath\":null"), body);
   }
 
   @Test
-  void updateChatDistinguishesExplicitEnvironmentNameNullFromOmission() throws Exception {
+  void updateChatDistinguishesExplicitWorkspacePathNullFromOmission() throws Exception {
     when(chatService.updateChat(eq("7"), any(ChatUpdateDTO.class))).thenReturn(new ChatDTO());
 
     // 显式 null：清空默认环境（provided 标记置位）。
@@ -158,12 +154,12 @@ class StudioChatControllerTest {
         .perform(
             put("/api/ai/chat/7")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"environment\":null,\"expectedVersion\":\"2\"}"))
+                .content("{\"workspacePath\":null,\"expectedVersion\":\"2\"}"))
         .andExpect(status().isOk());
     ArgumentCaptor<ChatUpdateDTO> clearCaptor = ArgumentCaptor.forClass(ChatUpdateDTO.class);
     verify(chatService).updateChat(eq("7"), clearCaptor.capture());
-    assertTrue(clearCaptor.getValue().isEnvironmentProvided());
-    assertNull(clearCaptor.getValue().getEnvironment());
+    assertTrue(clearCaptor.getValue().isWorkspacePathProvided());
+    assertNull(clearCaptor.getValue().getWorkspacePath());
 
     // 缺省字段：provided 标记保持 false，服务端保留当前值。
     mockMvc
@@ -174,6 +170,6 @@ class StudioChatControllerTest {
         .andExpect(status().isOk());
     ArgumentCaptor<ChatUpdateDTO> omitCaptor = ArgumentCaptor.forClass(ChatUpdateDTO.class);
     verify(chatService, times(2)).updateChat(eq("7"), omitCaptor.capture());
-    assertFalse(omitCaptor.getValue().isEnvironmentProvided());
+    assertFalse(omitCaptor.getValue().isWorkspacePathProvided());
   }
 }

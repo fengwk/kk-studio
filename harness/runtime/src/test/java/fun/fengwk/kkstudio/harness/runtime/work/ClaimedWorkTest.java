@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.time.Instant;
 
@@ -16,7 +16,7 @@ class ClaimedWorkTest {
 
   @Test
   void acceptsValidSnapshotFacts() {
-    EnvironmentName env = new EnvironmentName("env-1");
+    EnvironmentId env = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
     ClaimedWork snapshot =
         new ClaimedWork(
             new WorkTarget(WorkTargetType.TOOL, id(7L)),
@@ -29,7 +29,7 @@ class ClaimedWorkTest {
     assertEquals(1L, snapshot.claimedWakeVersion());
     assertEquals("token-1", snapshot.leaseToken());
     assertEquals(Instant.parse("2026-01-01T00:00:30Z"), snapshot.leaseUntil());
-    assertEquals(env, snapshot.requiredEnvironmentName());
+    assertEquals(env, snapshot.requiredEnvironmentId());
 
     ClaimedWork unconstrained =
         new ClaimedWork(
@@ -37,7 +37,7 @@ class ClaimedWorkTest {
             2L,
             "token-2",
             Instant.parse("2026-01-01T00:00:30Z"));
-    assertNull(unconstrained.requiredEnvironmentName());
+    assertNull(unconstrained.requiredEnvironmentId());
   }
 
   @Test
@@ -45,7 +45,7 @@ class ClaimedWorkTest {
     Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, id(7L));
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, id(8L));
-    EnvironmentName env = new EnvironmentName("env-1");
+    EnvironmentId env = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
     assertThrows(NullPointerException.class, () -> new ClaimedWork(null, 1L, "t", t0));
     assertThrows(IllegalArgumentException.class, () -> new ClaimedWork(target, 0L, "t", t0));

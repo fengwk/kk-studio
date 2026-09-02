@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
@@ -9,6 +10,8 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
+
+import java.util.UUID;
 
 /**
  * 规范化可编辑的 Agent 字段，并序列化严格的结构化执行配置。
@@ -50,6 +53,7 @@ final class AgentDefinitionMutationFactory {
     definition.setModelProviderName(mutation.modelProviderName());
     definition.setModelName(mutation.modelName());
     definition.setVariant(mutation.variant());
+    definition.setEnvironmentId(mutation.environmentId());
     definition.setConfigJson(mutation.configJson());
   }
 
@@ -76,6 +80,7 @@ final class AgentDefinitionMutationFactory {
     String systemPrompt = editableSupport.trimToNull(properties.getSystemPrompt());
     // null/blank = 不覆盖；runtime/thread 应用时解析 model.defaultVariant。
     String variant = editableSupport.trimToNull(properties.getVariant());
+    UUID environmentId = parseNullableEnvironmentId(properties.getEnvironmentId());
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
     editableSupport.validateMaxLength(RESOURCE, "description", description, DESCRIPTION_MAX_LENGTH);
     editableSupport.validateMaxLength(RESOURCE, "variant", variant, VARIANT_MAX_LENGTH);
@@ -96,7 +101,20 @@ final class AgentDefinitionMutationFactory {
         modelRef.providerName(),
         modelRef.modelName(),
         variant,
+        environmentId,
         configJson);
+  }
+
+  private static UUID parseNullableEnvironmentId(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return null;
+    }
+    try {
+      return EnvironmentId.parse(raw).value();
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(
+          RESOURCE, "invalid environmentId: " + error.getMessage(), error);
+    }
   }
 
   private static ModelRef parseModelRef(String raw) {
@@ -115,5 +133,6 @@ final class AgentDefinitionMutationFactory {
       String modelProviderName,
       String modelName,
       String variant,
+      UUID environmentId,
       String configJson) {}
 }

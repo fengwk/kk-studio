@@ -5,8 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentWorkspacePath;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
@@ -32,7 +31,6 @@ final class HistoryValueCodecs {
 
   private static final Set<String> BRANCH_SETTINGS_FIELDS =
       orderedSet("environment", "agentName", "model");
-  private static final Set<String> ENVIRONMENT_BINDING_FIELDS = orderedSet("name", "workspacePath");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
@@ -68,20 +66,13 @@ final class HistoryValueCodecs {
 
   static ObjectNode encodeBranchSettings(BranchSettings settings) {
     ObjectNode node = NODES.objectNode();
-    if (settings.environment() == null) {
+    if (settings.workspacePath() == null) {
       node.putNull("environment");
     } else {
-      node.set("environment", encodeEnvironmentBinding(settings.environment()));
+      node.put("environment", settings.workspacePath());
     }
     node.put("agentName", settings.agentName());
     node.set("model", encodeModelSelection(settings.model()));
-    return node;
-  }
-
-  static ObjectNode encodeEnvironmentBinding(EnvironmentBinding binding) {
-    ObjectNode node = NODES.objectNode();
-    node.put("name", binding.environmentName().value());
-    node.put("workspacePath", binding.workspacePath());
     return node;
   }
 
@@ -89,23 +80,21 @@ final class HistoryValueCodecs {
     ObjectNode node = requireObject(value, context);
     requireExactFields(node, BRANCH_SETTINGS_FIELDS, context);
     return new BranchSettings(
-        nullableEnvironmentBinding(node, "environment", context),
+        nullableWorkspacePath(node, "environment", context),
         requiredText(node, "agentName", context),
         decodeModelSelection(node.get("model"), context + ".model"));
   }
 
-  /** 读取可空完整 Environment binding 对象；null 表示未绑定。 */
-  static EnvironmentBinding nullableEnvironmentBinding(
-      ObjectNode node, String field, String context) {
+  /** 读取可空 canonical workspace path（{@code environment} 字段在 BranchSettings wire 上存 path）。 */
+  static String nullableWorkspacePath(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value.isNull()) {
       return null;
     }
-    ObjectNode binding = requireObject(value, context + "." + field);
-    requireExactFields(binding, ENVIRONMENT_BINDING_FIELDS, context + "." + field);
-    return new EnvironmentBinding(
-        new EnvironmentName(requiredText(binding, "name", context + "." + field)),
-        requiredText(binding, "workspacePath", context + "." + field));
+    if (!value.isTextual() || value.textValue().isBlank()) {
+      throw new IllegalArgumentException(context + "." + field + " must be a non-blank string");
+    }
+    return EnvironmentWorkspacePath.requireCanonicalRelativePath(value.textValue());
   }
 
   // ---------- ModelSelection ----------

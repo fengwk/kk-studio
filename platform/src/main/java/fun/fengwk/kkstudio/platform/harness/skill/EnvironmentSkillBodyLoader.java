@@ -27,7 +27,7 @@ public final class EnvironmentSkillBodyLoader implements SkillBodyLoader {
       EnvironmentBinding binding, String skillName, Duration timeout) {
     Objects.requireNonNull(binding, "binding");
     return environmentSkillLoader
-        .loadSkill(binding.environmentName(), skillName, timeout)
+        .loadSkill(binding.environmentId(), skillName, timeout)
         .thenApply(EnvironmentSkillBodyLoader::map);
   }
 

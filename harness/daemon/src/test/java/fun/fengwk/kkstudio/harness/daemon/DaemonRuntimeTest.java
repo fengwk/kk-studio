@@ -33,21 +33,12 @@ import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpCallOutcome;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpConfig;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerClient;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerClientFactory;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerConfig;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerRegistry;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpToolRequest;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpToolSpec;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpTransportType;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
 import fun.fengwk.kkstudio.harness.daemon.skill.SkillLoadCapability;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
@@ -63,8 +54,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCode
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerDescriptor;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMcpServerStatus;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
@@ -102,7 +91,8 @@ import java.util.concurrent.atomic.AtomicReference;
 class DaemonRuntimeTest {
 
   private static final long ASYNC_TEST_TIMEOUT_SECONDS = 5;
-  private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("environment");
+  private static final EnvironmentId ENVIRONMENT_ID =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final Path ENVIRONMENT_ROOT = Path.of(System.getProperty("user.dir"));
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
@@ -117,9 +107,9 @@ class DaemonRuntimeTest {
     }
   }
 
-  /** 名称已被另一 live daemon 持有是终态冲突：daemon 进入 FAILED、停止重连并释放终止闩。 */
+  /** 注册身份已被另一 live daemon 持有是终态冲突：daemon 进入 FAILED、停止重连并释放终止闩。 */
   @Test
-  void nameConflictErrorIsTerminalFailureWithoutReconnect() throws Exception {
+  void registrationRejectedErrorIsTerminalFailureWithoutReconnect() throws Exception {
     FakeTransport transport = new FakeTransport();
     runtime = runtime(transport, new TestCapability());
 
@@ -131,13 +121,13 @@ class DaemonRuntimeTest {
     transport.receiveRaw(
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
-            + ",\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
-            + "\"sequence\":1,\"payload\":{\"code\":\"ENVIRONMENT_NAME_CONFLICT\","
+            + ",\"messageType\":\"ERROR\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
+            + "\"sequence\":1,\"payload\":{\"code\":\"REGISTRATION_REJECTED\","
             + "\"message\":\"environment already bound to another active daemon\"}}");
 
     assertEquals(DaemonRuntimeState.FAILED, runtime.state());
     assertEquals(DaemonRuntimeState.FAILED, runtime.awaitTermination());
-    assertTrue(runtime.failureReason().contains("environment name is held by another live daemon"));
+    assertTrue(runtime.failureReason().contains("environment registration is rejected"));
 
     // FAILED 后不得安排新的重连：连接计数保持现状，不会再有新的 HELLO。
     transport.awaitNoNewConnection(500);
@@ -158,7 +148,7 @@ class DaemonRuntimeTest {
     transport.receiveRaw(
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
-            + ",\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+            + ",\"messageType\":\"ERROR\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
             + "\"sequence\":1,\"payload\":{\"code\":\"RETRY_LATER\","
             + "\"message\":\"server busy, retry later\"}}");
 
@@ -181,7 +171,7 @@ class DaemonRuntimeTest {
     transport.receiveRaw(
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
-            + ",\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+            + ",\"messageType\":\"ERROR\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
             + "\"sequence\":1,\"payload\":{\"message\":\"informational\"}}");
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
@@ -198,8 +188,7 @@ class DaemonRuntimeTest {
     List<DaemonEnvelope> handshake = transport.takeMessages(2);
     assertMessageTypes(handshake, HELLO, READY);
     JsonNode hello = codec.readPayload(handshake.get(0));
-    assertEquals("test-gateway-token", hello.path("gatewayToken").asText());
-    assertEquals("daemon", hello.path("daemonId").asText());
+    assertEquals("test-registration-token", hello.path("registrationToken").asText());
     assertEquals(DaemonProtocol.VERSION, hello.path("protocolVersion").asInt());
     assertEquals(
         EnvironmentCapabilityCatalog.version(), hello.path("capabilityCatalogVersion").asText());
@@ -226,17 +215,14 @@ class DaemonRuntimeTest {
     DaemonConfig config =
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
-            List.of(),
-            null);
+            List.of());
 
     assertThrows(
         IllegalStateException.class,
@@ -244,7 +230,6 @@ class DaemonRuntimeTest {
             DaemonRuntime.create(
                 config,
                 DaemonSkillRegistry.empty(),
-                McpServerRegistry.empty(),
                 null,
                 (registry, executor, scheduler) -> registry.register(new TestCapability())));
   }
@@ -255,56 +240,39 @@ class DaemonRuntimeTest {
     DaemonConfig config =
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
-            List.of(),
-            null);
+            List.of());
     CodingToolsConfig toolsConfig =
         new CodingToolsConfig(
             ENVIRONMENT_ROOT, 2000, 50 * 1024, "bash", new InMemoryResourceStore());
 
-    runtime =
-        DaemonRuntime.create(
-            config, toolsConfig, DaemonSkillRegistry.empty(), McpServerRegistry.empty());
+    runtime = DaemonRuntime.create(config, toolsConfig, DaemonSkillRegistry.empty());
 
     assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
     runtime.close();
     assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
   }
 
-  /** 生产装配在 capability 注册失败时必须释放已经创建的 scheduler/executor，并关闭已启动的 MCP registry。 */
+  /** 生产装配在 capability 注册失败时必须释放已经创建的 scheduler/executor。 */
   @Test
   void productionConstructionFailureReleasesCreatedLifecycleResources() throws Exception {
     DaemonConfig config =
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
-            List.of(),
-            null);
-    FakeMcpServerClient mcpClient =
-        new FakeMcpServerClient(
-            "fs", new McpToolSpec("read_file", "Read a file", "{\"name\":\"read_file\"}"));
-    McpServerRegistry mcpRegistry =
-        new McpServerRegistry(
-            new McpConfig(List.of(serverConfig("fs"))),
-            (server, timeout) -> mcpClient,
-            Duration.ofSeconds(10));
-    mcpRegistry.start();
+            List.of());
     AtomicReference<ExecutorService> executorRef = new AtomicReference<>();
     AtomicReference<ScheduledExecutorService> schedulerRef = new AtomicReference<>();
 
@@ -314,7 +282,6 @@ class DaemonRuntimeTest {
             DaemonRuntime.create(
                 config,
                 DaemonSkillRegistry.empty(),
-                mcpRegistry,
                 null,
                 (registry, executor, scheduler) -> {
                   executorRef.set(executor);
@@ -326,12 +293,11 @@ class DaemonRuntimeTest {
     assertTrue(schedulerRef.get().isShutdown());
     assertTrue(executorRef.get().awaitTermination(1, TimeUnit.SECONDS));
     assertTrue(schedulerRef.get().awaitTermination(1, TimeUnit.SECONDS));
-    assertTrue(mcpClient.closed.get());
   }
 
   /**
-   * Daemon 发出的 READY payload 必须能被 Cloud 共享的 capabilities codec 解码回完整能力对象（skills + MCP server 摘要），避免
-   * Cloud/Daemon 协议漂移。
+   * Daemon 发出的 READY payload 必须能被 Cloud 共享的 capabilities codec 解码回完整能力对象（skills），避免 Cloud/Daemon
+   * 协议漂移。
    */
   @Test
   void readyCapabilitiesPayloadIsFullyDecodableBySharedCodec() throws Exception {
@@ -344,13 +310,11 @@ class DaemonRuntimeTest {
       DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
       FakeTransport transport = new FakeTransport();
       DaemonSkillRegistry skillRegistry = DaemonSkillRegistry.discover(List.of(skillRoot));
-      McpServerRegistry mcpRegistry = readyRegistryWithOneServer();
       runtime =
           runtime(
               transport,
               new TestCapability(),
               skillRegistry,
-              mcpRegistry,
               Duration.ofMinutes(1),
               Duration.ofSeconds(10),
               null);
@@ -363,6 +327,7 @@ class DaemonRuntimeTest {
 
       DaemonCapabilities capabilities = capabilitiesCodec.decode(handshake.get(1).payloadJson());
 
+      assertEquals(6, capabilities.version());
       assertEquals(ZoneId.systemDefault().getId(), capabilities.environment().timeZone());
       assertEquals(
           DaemonOperatingSystemDetector.detectCurrent(),
@@ -370,29 +335,19 @@ class DaemonRuntimeTest {
       assertEquals(
           new DaemonConfig(
                   URI.create("ws://localhost/gateway"),
-                  new EnvironmentName("environment"),
-                  "daemon",
+                  "test-registration-token",
                   Duration.ofMinutes(1),
                   Duration.ZERO,
                   Duration.ofSeconds(1),
                   Duration.ofSeconds(10),
-                  "test-gateway-token",
                   null,
                   ENVIRONMENT_ROOT,
-                  List.of(),
-                  null)
+                  List.of())
               .effectiveNote(capabilities.environment().operatingSystem()),
           capabilities.environment().note());
       assertEquals(1, capabilities.skills().size());
       assertEquals("demo", capabilities.skills().get(0).name());
       assertEquals("Demo skill", capabilities.skills().get(0).description());
-      assertEquals(
-          List.of("fs", "broken"),
-          capabilities.mcpServers().stream().map(server -> server.name()).toList());
-      assertEquals(DaemonMcpServerStatus.READY, capabilities.mcpServers().get(0).status());
-      assertEquals(List.of("read_file"), toolNames(capabilities.mcpServers().get(0)));
-      assertEquals(DaemonMcpServerStatus.FAILED, capabilities.mcpServers().get(1).status());
-      assertTrue(capabilities.mcpServers().get(1).error() != null);
     } finally {
       deleteRecursively(skillRoot);
     }
@@ -486,7 +441,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"arguments\":{},\"timeoutMillis\":100}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
 
@@ -494,7 +449,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{\"capabilityId\":\"test\","
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":2,\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":1,\"arguments\":{},\"timeoutMillis\":100}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
 
@@ -502,7 +457,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":3,\"payload\":{\"capabilityId\":\"test\","
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":3,\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":100,"
             + "\"extra\":true}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
@@ -615,7 +570,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.INVOKE,
-            new EnvironmentName("other-environment"),
+            EnvironmentId.parse("22222222-2222-2222-2222-222222222222"),
             "wrong-scope",
             1,
             "{\"capabilityId\":\"test\",\"arguments\":{}}"));
@@ -625,7 +580,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.INVOKE,
-            ENVIRONMENT_NAME,
+            ENVIRONMENT_ID,
             "bad-payload",
             2,
             "{\"capabilityId\":\"test\",\"arguments\":[]}"));
@@ -635,7 +590,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.INVOKE,
-            ENVIRONMENT_NAME,
+            ENVIRONMENT_ID,
             "invalid-capability-id",
             3,
             "{\"capabilityId\":\"TEST\",\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\","
@@ -656,14 +611,14 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     transport.receiveRaw(
         "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":1,"
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,"
             + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
             + "\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":1000}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
     transport.receiveRaw(
         "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":1,"
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,"
             + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
             + "\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":1000}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
@@ -687,7 +642,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},"
             + "\"timeoutMillis\":1000}}");
 
@@ -696,7 +651,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"CANCEL\","
-            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{}}");
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,\"payload\":{}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
     transport.receive(invoke("valid-after-missing-id", 1));
@@ -1016,17 +971,14 @@ class DaemonRuntimeTest {
           new DaemonRuntime(
               new DaemonConfig(
                   URI.create("ws://localhost/gateway"),
-                  ENVIRONMENT_NAME,
-                  "daemon",
+                  "test-registration-token",
                   Duration.ofMinutes(1),
                   Duration.ZERO,
                   Duration.ofSeconds(1),
                   Duration.ofSeconds(10),
-                  "test-gateway-token",
                   null,
                   root,
-                  List.of(),
-                  null),
+                  List.of()),
               transport,
               registry,
               DaemonSkillRegistry.empty(),
@@ -1596,9 +1548,9 @@ class DaemonRuntimeTest {
     assertFalse(transport.hasMessages());
   }
 
-  /** READY 能力对象只携带 environment、skills/MCP server 摘要，且不含正文/工具 schema。 */
+  /** READY 能力对象只携带 environment、skills 摘要，且不含正文。 */
   @Test
-  void announcesSkillsAlongsideMcpServersInCapabilities() throws Exception {
+  void announcesSkillsInCapabilities() throws Exception {
     Path skillRoot = Files.createTempDirectory("daemon-skills");
     Path skillDir = skillRoot.resolve("demo");
     Files.createDirectories(skillDir);
@@ -1607,13 +1559,11 @@ class DaemonRuntimeTest {
     try {
       FakeTransport transport = new FakeTransport();
       DaemonSkillRegistry skills = DaemonSkillRegistry.discover(List.of(skillRoot));
-      McpServerRegistry mcpRegistry = readyRegistryWithOneServer();
       runtime =
           runtime(
               transport,
               new TestCapability(),
               skills,
-              mcpRegistry,
               Duration.ofMinutes(1),
               Duration.ofSeconds(10),
               null);
@@ -1635,16 +1585,7 @@ class DaemonRuntimeTest {
       assertEquals("Demo skill", payload.path("skills").get(0).path("description").asText());
       assertTrue(payload.path("skills").get(0).path("path").isMissingNode());
       assertTrue(payload.path("skills").get(0).path("content").isMissingNode());
-      assertEquals(2, payload.path("mcpServers").size());
-      assertEquals("READY", payload.path("mcpServers").get(0).path("status").asText());
-      assertEquals(
-          "read_file",
-          payload.path("mcpServers").get(0).path("tools").get(0).path("name").asText());
-      // READY 摘要不携带完整 schema；MCP 工具 schema 只经 mcp_list_tools 返回。
-      assertTrue(
-          payload.path("mcpServers").get(0).path("tools").get(0).path("schema").isMissingNode());
-      assertEquals("FAILED", payload.path("mcpServers").get(1).path("status").asText());
-      assertTrue(payload.path("mcpServers").get(1).path("error").isTextual());
+      assertFalse(payload.has("mcpServers"));
     } finally {
       deleteRecursively(skillRoot);
     }
@@ -1752,7 +1693,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{}}");
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":2,\"payload\":{}}");
     assertFalse(transport.hasMessages());
 
     transport.receive(invoke("current-invoke", 1));
@@ -1804,8 +1745,7 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
 
     transport.receive(
-        new DaemonEnvelope(
-            DaemonProtocol.VERSION, DaemonMessageType.HELLO, ENVIRONMENT_NAME, null, 1, "{}"));
+        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.HELLO, null, null, 1, "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
 
     transport.receive(cancel("unknown-cancel", 1));
@@ -1815,7 +1755,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.INVOKE,
-            ENVIRONMENT_NAME,
+            ENVIRONMENT_ID,
             "invalid-invoke-payload",
             2,
             "{}"));
@@ -1879,17 +1819,14 @@ class DaemonRuntimeTest {
         new DaemonRuntime(
             new DaemonConfig(
                 URI.create("ws://localhost/gateway"),
-                new EnvironmentName("environment"),
-                "daemon",
+                "test-registration-token",
                 Duration.ofMinutes(1),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(10),
-                "test-gateway-token",
                 null,
                 ENVIRONMENT_ROOT,
-                List.of(),
-                null),
+                List.of()),
             transport,
             registry,
             DaemonSkillRegistry.empty(),
@@ -1929,17 +1866,14 @@ class DaemonRuntimeTest {
         new DaemonRuntime(
             new DaemonConfig(
                 URI.create("ws://localhost/gateway"),
-                new EnvironmentName("environment"),
-                "daemon",
+                "test-registration-token",
                 Duration.ofMillis(20),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(10),
-                "test-gateway-token",
                 null,
                 ENVIRONMENT_ROOT,
-                List.of(),
-                null),
+                List.of()),
             transport,
             registry,
             DaemonSkillRegistry.empty(),
@@ -1959,26 +1893,16 @@ class DaemonRuntimeTest {
     }
   }
 
-  /** transport close 抛错不得悬挂 shutdown：终止闩释放，MCP client 仍被关闭，且 close 幂等。 */
+  /** transport close 抛错不得悬挂 shutdown：终止闩释放且 close 幂等。 */
   @Test
   void shutdownConvergesWhenTransportCloseThrows() throws Exception {
     FakeTransport transport = new FakeTransport();
     transport.closeThrows.set(true);
-    FakeMcpServerClient mcpClient =
-        new FakeMcpServerClient(
-            "fs", new McpToolSpec("read_file", "Read a file", "{\"name\":\"read_file\"}"));
-    McpServerRegistry mcpRegistry =
-        new McpServerRegistry(
-            new McpConfig(List.of(serverConfig("fs"))),
-            (config, timeout) -> mcpClient,
-            Duration.ofSeconds(10));
-    mcpRegistry.start();
     runtime =
         runtime(
             transport,
             new TestCapability(),
             DaemonSkillRegistry.empty(),
-            mcpRegistry,
             Duration.ofMinutes(1),
             Duration.ofSeconds(10),
             null);
@@ -1994,7 +1918,6 @@ class DaemonRuntimeTest {
     // transport close 抛错被吸收：termination 闩仍释放，shutdown 不悬挂。
     assertEquals(DaemonRuntimeState.STOPPED, runtime.awaitTermination());
     assertTrue(transport.closed.get());
-    assertTrue(mcpClient.closed.get(), "MCP client must still be closed after transport failure");
   }
 
   /** shutdown 与 Tool 启动交错时，迟到的 execution handle 也必须收到取消且 journal 不得遗留 RUNNING。 */
@@ -2045,17 +1968,14 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             note,
             ENVIRONMENT_ROOT,
-            List.of(),
-            null),
+            List.of()),
         transport,
         registry,
         DaemonSkillRegistry.empty(),
@@ -2072,17 +1992,14 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             environmentRoot,
-            List.of(),
-            null),
+            List.of()),
         transport,
         registry,
         DaemonSkillRegistry.empty(),
@@ -2097,17 +2014,14 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             environmentRoot,
-            List.of(),
-            null),
+            List.of()),
         transport,
         registry,
         DaemonSkillRegistry.empty(),
@@ -2125,17 +2039,14 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
-            List.of(),
-            null),
+            List.of()),
         transport,
         registry,
         skillRegistry,
@@ -2162,17 +2073,14 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
-            List.of(),
-            null),
+            List.of()),
         transport,
         registry,
         DaemonSkillRegistry.empty(),
@@ -2192,17 +2100,14 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
-            List.of(),
-            null),
+            List.of()),
         transport,
         registry,
         DaemonSkillRegistry.empty(),
@@ -2221,17 +2126,14 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
-            List.of(),
-            null),
+            List.of()),
         transport,
         registry,
         DaemonSkillRegistry.empty(),
@@ -2278,112 +2180,27 @@ class DaemonRuntimeTest {
       Duration heartbeatInterval,
       Duration defaultToolTimeout,
       ResourceStore resourceStore) {
-    return runtime(
-        transport,
-        capability,
-        skillRegistry,
-        McpServerRegistry.empty(),
-        heartbeatInterval,
-        defaultToolTimeout,
-        resourceStore);
-  }
-
-  private DaemonRuntime runtime(
-      FakeTransport transport,
-      EnvironmentCapability capability,
-      DaemonSkillRegistry skillRegistry,
-      McpServerRegistry mcpRegistry,
-      Duration heartbeatInterval,
-      Duration defaultToolTimeout,
-      ResourceStore resourceStore) {
     handshakeTransport = transport;
     DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
     registry.register(capability);
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            new EnvironmentName("environment"),
-            "daemon",
+            "test-registration-token",
             heartbeatInterval,
             Duration.ZERO,
             Duration.ofSeconds(1),
             defaultToolTimeout,
-            "test-gateway-token",
             null,
             ENVIRONMENT_ROOT,
-            List.of(),
-            null),
+            List.of()),
         transport,
         registry,
         skillRegistry,
-        mcpRegistry,
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
         Executors.newVirtualThreadPerTaskExecutor(),
         resourceStore);
-  }
-
-  /** fake factory：{@code fs} 初始化为 READY（一个工具），{@code broken} 初始化失败为 FAILED。 */
-  private static McpServerRegistry readyRegistryWithOneServer() {
-    McpServerConfig ready = serverConfig("fs");
-    McpServerConfig failed = serverConfig("broken");
-    McpServerRegistry registry =
-        new McpServerRegistry(
-            new McpConfig(List.of(ready, failed)),
-            new McpServerClientFactory() {
-              @Override
-              public McpServerClient create(McpServerConfig config, Duration defaultTimeout) {
-                if (config.name().equals("broken")) {
-                  throw new IllegalStateException("cannot start broken server");
-                }
-                return new FakeMcpServerClient(
-                    config.name(),
-                    new McpToolSpec("read_file", "Read a file", "{\"name\":\"read_file\"}"));
-              }
-            },
-            Duration.ofSeconds(10));
-    registry.start();
-    return registry;
-  }
-
-  private static McpServerConfig serverConfig(String name) {
-    return new McpServerConfig(
-        name, McpTransportType.STDIO, null, List.of("echo"), null, null, null);
-  }
-
-  private static List<String> toolNames(DaemonMcpServerDescriptor server) {
-    return server.tools().stream().map(tool -> tool.name()).toList();
-  }
-
-  private static final class FakeMcpServerClient implements McpServerClient {
-    private final String name;
-    private final McpToolSpec spec;
-    private final AtomicBoolean closed = new AtomicBoolean();
-
-    private FakeMcpServerClient(String name, McpToolSpec spec) {
-      this.name = name;
-      this.spec = spec;
-    }
-
-    @Override
-    public String name() {
-      return name;
-    }
-
-    @Override
-    public List<McpToolSpec> listTools() {
-      return List.of(spec);
-    }
-
-    @Override
-    public McpCallOutcome call(McpToolRequest request) {
-      return new McpCallOutcome(false, "ok");
-    }
-
-    @Override
-    public void close() {
-      closed.set(true);
-    }
   }
 
   private void deleteRecursively(Path root) throws Exception {
@@ -2429,7 +2246,7 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
-        ENVIRONMENT_NAME,
+        ENVIRONMENT_ID,
         invocationId,
         sequence,
         "{\"capabilityId\":\""
@@ -2451,7 +2268,7 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
-        ENVIRONMENT_NAME,
+        ENVIRONMENT_ID,
         invocationId,
         sequence,
         "{\"capabilityId\":\""
@@ -2476,7 +2293,7 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
-        ENVIRONMENT_NAME,
+        ENVIRONMENT_ID,
         invocationId,
         sequence,
         "{\"capabilityId\":\""
@@ -2507,7 +2324,7 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
-        ENVIRONMENT_NAME,
+        ENVIRONMENT_ID,
         invocationId,
         sequence,
         "{\"capabilityId\":\""
@@ -2527,7 +2344,7 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
-        ENVIRONMENT_NAME,
+        ENVIRONMENT_ID,
         invocationId,
         sequence,
         "{\"capabilityId\":\""
@@ -2543,14 +2360,14 @@ class DaemonRuntimeTest {
 
   private DaemonEnvelope platformMessage(DaemonMessageType messageType, long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION, messageType, ENVIRONMENT_NAME, null, sequence, "{}");
+        DaemonProtocol.VERSION, messageType, ENVIRONMENT_ID, null, sequence, "{}");
   }
 
   private DaemonEnvelope cancel(String invocationId, long sequence) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.CANCEL,
-        ENVIRONMENT_NAME,
+        ENVIRONMENT_ID,
         invocationId,
         sequence,
         "{}");

@@ -6,7 +6,7 @@ import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 
 import java.time.Clock;
 import java.util.Objects;
@@ -17,7 +17,7 @@ public final class SystemPromptPreviewServiceFactory {
 
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentDefinitionConfigCodec agentConfigCodec;
-  private final LiveEnvironmentRegistry environmentRegistry;
+  private final EnvironmentRegistry environmentRegistry;
   private final SubagentConfigProvider configProvider;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
@@ -25,7 +25,7 @@ public final class SystemPromptPreviewServiceFactory {
   public SystemPromptPreviewServiceFactory(
       AgentDefinitionRepository agentDefinitionRepository,
       AgentDefinitionConfigCodec agentConfigCodec,
-      LiveEnvironmentRegistry environmentRegistry,
+      EnvironmentRegistry environmentRegistry,
       SubagentConfigProvider configProvider,
       AgentPromptComposer promptComposer,
       Clock clock) {

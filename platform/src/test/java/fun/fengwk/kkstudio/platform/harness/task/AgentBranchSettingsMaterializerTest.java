@@ -11,7 +11,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
@@ -19,12 +18,11 @@ import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 
 /** 按最新 Agent/Model catalog 为子 Agent 物化 branch settings。 */
 class AgentBranchSettingsMaterializerTest {
 
-  private static final EnvironmentBinding ENV = TestEnvironmentBindings.binding("prod");
+  private static final String WORKSPACE_PATH = "prod";
 
   private AgentDefinitionRepository agentRepository;
   private AgentModelRepository modelRepository;
@@ -61,9 +59,9 @@ class AgentBranchSettingsMaterializerTest {
   void materializesLatestAgentModelAndVariant() {
     stub("alpha", null, validModelConfig());
 
-    BranchSettings settings = materializer.materialize("alpha", ENV);
+    BranchSettings settings = materializer.materialize("alpha", WORKSPACE_PATH);
 
-    assertEquals(ENV, settings.environment());
+    assertEquals(WORKSPACE_PATH, settings.workspacePath());
     assertEquals("alpha", settings.agentName());
     assertEquals(new ModelSelection("openai", "gpt-x", "quality"), settings.model());
   }
@@ -73,7 +71,7 @@ class AgentBranchSettingsMaterializerTest {
   void honorsExplicitAgentVariantOverride() {
     stub("alpha", "fast", validModelConfig());
 
-    BranchSettings settings = materializer.materialize("alpha", ENV);
+    BranchSettings settings = materializer.materialize("alpha", WORKSPACE_PATH);
 
     assertEquals(new ModelSelection("openai", "gpt-x", "fast"), settings.model());
   }
@@ -83,20 +81,26 @@ class AgentBranchSettingsMaterializerTest {
   void rejectsMissingOrInvalidCatalogInputs() {
     when(agentRepository.getByName("ghost")).thenReturn(null);
     IllegalArgumentException missingAgent =
-        assertThrows(IllegalArgumentException.class, () -> materializer.materialize("ghost", ENV));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> materializer.materialize("ghost", WORKSPACE_PATH));
     assertTrue(missingAgent.getMessage().contains("subagent not found: ghost"));
 
     stub("alpha", null, validModelConfig());
     when(modelRepository.getByProviderNameAndName("openai", "gpt-x")).thenReturn(null);
     IllegalArgumentException missingModel =
-        assertThrows(IllegalArgumentException.class, () -> materializer.materialize("alpha", ENV));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> materializer.materialize("alpha", WORKSPACE_PATH));
     assertTrue(
         missingModel.getMessage().contains("subagent model not found: openai/gpt-x"),
         missingModel.getMessage());
 
     stub("alpha", "ghost-variant", validModelConfig());
     IllegalArgumentException missingVariant =
-        assertThrows(IllegalArgumentException.class, () -> materializer.materialize("alpha", ENV));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> materializer.materialize("alpha", WORKSPACE_PATH));
     assertTrue(
         missingVariant
             .getMessage()
@@ -109,7 +113,9 @@ class AgentBranchSettingsMaterializerTest {
   void wrapsCorruptModelConfigsWithCauses() {
     stub("alpha", null, "not-json");
     IllegalArgumentException modelConfigError =
-        assertThrows(IllegalArgumentException.class, () -> materializer.materialize("alpha", ENV));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> materializer.materialize("alpha", WORKSPACE_PATH));
     assertTrue(
         modelConfigError.getMessage().contains("invalid subagent model configuration: alpha"));
     assertInstanceOf(IllegalArgumentException.class, modelConfigError.getCause());

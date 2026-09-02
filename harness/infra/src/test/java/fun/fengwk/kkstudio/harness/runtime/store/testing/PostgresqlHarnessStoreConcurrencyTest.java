@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -535,7 +536,8 @@ class PostgresqlHarnessStoreConcurrencyTest {
       String token, CountDownLatch ready, CountDownLatch start) {
     ready.countDown();
     await(start);
-    return store.transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T0, token, T5));
+    Instant leaseUntil = Instant.ofEpochMilli(System.currentTimeMillis()).plusSeconds(60);
+    return store.transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T0, token, leaseUntil));
   }
 
   private static void await(CountDownLatch latch) {

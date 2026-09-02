@@ -1,14 +1,13 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-/** READY capabilities v4 codec 的严格版本、environment metadata 与能力摘要契约。 */
+/** READY capabilities v6 codec 的严格版本、environment metadata 与能力摘要契约。 */
 class DaemonCapabilitiesCodecTest {
 
   private static final DaemonEnvironmentInfo ENVIRONMENT =
@@ -27,94 +26,76 @@ class DaemonCapabilitiesCodecTest {
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
             ENVIRONMENT,
-            List.of(new DaemonSkillDescriptor("dev", "Developer rules")),
-            List.of(
-                new DaemonMcpServerDescriptor(
-                    "filesystem",
-                    DaemonMcpServerStatus.READY,
-                    null,
-                    List.of(new DaemonMcpToolDescriptor("read_file", "Read a file"))),
-                new DaemonMcpServerDescriptor(
-                    "broken", DaemonMcpServerStatus.FAILED, "cannot start process", List.of())));
+            List.of(new DaemonSkillDescriptor("dev", "Developer rules")));
 
     String encoded = codec.encode(original);
 
     assertEquals(original, codec.decode(encoded));
     assertEquals(
-        "{\"version\":5,"
+        "{\"version\":6,"
             + ENVIRONMENT_JSON
-            + ",\"skills\":[{\"name\":\"dev\",\"description\":\"Developer rules\"}],"
-            + "\"mcpServers\":[{\"name\":\"filesystem\",\"status\":\"READY\",\"error\":null,"
-            + "\"tools\":[{\"name\":\"read_file\",\"description\":\"Read a file\"}]},"
-            + "{\"name\":\"broken\",\"status\":\"FAILED\",\"error\":\"cannot start process\","
-            + "\"tools\":[]}]}",
+            + ",\"skills\":[{\"name\":\"dev\",\"description\":\"Developer rules\"}]}",
         encoded);
   }
 
   @Test
   void encodesEmptyCapabilityLists() {
     assertEquals(
-        "{\"version\":5," + ENVIRONMENT_JSON + ",\"skills\":[],\"mcpServers\":[]}",
-        codec.encode(
-            new DaemonCapabilities(DaemonCapabilities.VERSION, ENVIRONMENT, List.of(), List.of())));
+        "{\"version\":6," + ENVIRONMENT_JSON + ",\"skills\":[]}",
+        codec.encode(new DaemonCapabilities(DaemonCapabilities.VERSION, ENVIRONMENT, List.of())));
   }
 
   @Test
   void rejectsLegacyVersionsAndMissingEnvironment() {
     assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":1,\"skills\":[],\"mcpServers\":[]}"));
+        DaemonProtocolException.class, () -> codec.decode("{\"version\":1,\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
-        () ->
-            codec.decode(
-                "{\"version\":2," + ENVIRONMENT_JSON + ",\"skills\":[],\"mcpServers\":[]}"));
+        () -> codec.decode("{\"version\":2," + ENVIRONMENT_JSON + ",\"skills\":[]}"));
+    assertThrows(
+        DaemonProtocolException.class, () -> codec.decode("{\"version\":4,\"skills\":[]}"));
+    assertThrows(
+        DaemonProtocolException.class, () -> codec.decode("{\"version\":5,\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":4,\"skills\":[],\"mcpServers\":[]}"));
-    assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":5,\"skills\":[],\"mcpServers\":[]}"));
-    assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":5,\"environment\":null,\"skills\":[],\"mcpServers\":[]}"));
+        () -> codec.decode("{\"version\":6,\"environment\":null,\"skills\":[]}"));
   }
 
   @Test
   void rejectsUnknownDuplicateAndTrailingFields() {
     assertThrows(
-        DaemonProtocolException.class, () -> codec.decode(payload("\"secret\":\"x\",", "", "")));
+        DaemonProtocolException.class, () -> codec.decode(payload("\"secret\":\"x\",", "")));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,"
+                "{\"version\":6,"
                     + ENVIRONMENT_JSON
                     + ",\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\"},"
-                    + "\"skills\":[],\"mcpServers\":[]}"));
-    assertThrows(DaemonProtocolException.class, () -> codec.decode(payload("", "", "") + " x"));
+                    + "\"skills\":[]}"));
+    assertThrows(DaemonProtocolException.class, () -> codec.decode(payload("", "") + " x"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\",\"extra\":\"x\"},"
-                    + "\"skills\":[],\"mcpServers\":[]}"));
+                    + "\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"workingDirectory\":\"/workspace\",\"timeZone\":\"UTC\","
-                    + "\"note\":\"Linux environment.\"},\"skills\":[],\"mcpServers\":[]}"));
+                    + "\"note\":\"Linux environment.\"},\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"one\",\"note\":\"two\"},"
-                    + "\"skills\":[],\"mcpServers\":[]}"));
+                    + "\"skills\":[]}"));
   }
 
   @Test
@@ -123,35 +104,31 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,\"environment\":{\"timeZone\":\"UTC\","
-                    + "\"note\":\"Linux environment.\"},\"skills\":[],\"mcpServers\":[]}"));
+                "{\"version\":6,\"environment\":{\"timeZone\":\"UTC\","
+                    + "\"note\":\"Linux environment.\"},\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,\"environment\":{\"operatingSystem\":\"linux\","
-                    + "\"note\":\"Linux environment.\"},\"skills\":[],\"mcpServers\":[]}"));
+                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
+                    + "\"note\":\"Linux environment.\"},\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,\"environment\":{\"operatingSystem\":\"linux\","
-                    + "\"timeZone\":\"UTC\"},\"skills\":[],\"mcpServers\":[]}"));
+                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
+                    + "\"timeZone\":\"UTC\"},\"skills\":[]}"));
   }
 
   @Test
   void rejectsInvalidNestedCapabilityShapes() {
     assertThrows(
         DaemonProtocolException.class,
-        () ->
-            codec.decode(
-                "{\"version\":\"5\"," + ENVIRONMENT_JSON + ",\"skills\":[],\"mcpServers\":[]}"));
+        () -> codec.decode("{\"version\":\"6\"," + ENVIRONMENT_JSON + ",\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
-        () ->
-            codec.decode(
-                "{\"version\":5," + ENVIRONMENT_JSON + ",\"skills\":{},\"mcpServers\":[]}"));
-    assertThrows(DaemonProtocolException.class, () -> codec.decode(payload("", "null", "")));
+        () -> codec.decode("{\"version\":6," + ENVIRONMENT_JSON + ",\"skills\":{}}"));
+    assertThrows(DaemonProtocolException.class, () -> codec.decode(payload("", "null")));
     assertThrows(
         DaemonProtocolException.class,
         () ->
@@ -159,29 +136,7 @@ class DaemonCapabilitiesCodecTest {
                 payload(
                     "",
                     "{\"name\":\"same\",\"description\":\"one\"},"
-                        + "{\"name\":\"same\",\"description\":\"two\"}",
-                    "")));
-    assertThrows(DaemonProtocolException.class, () -> codec.decode(payload("", "", "null")));
-    assertThrows(
-        DaemonProtocolException.class,
-        () ->
-            codec.decode(
-                payload(
-                    "", "", "{\"name\":\"a\",\"status\":\"BROKEN\",\"error\":null,\"tools\":[]}")));
-    assertThrows(
-        DaemonProtocolException.class,
-        () ->
-            codec.decode(
-                payload(
-                    "",
-                    "",
-                    "{\"name\":\"a\",\"status\":\"READY\",\"error\":null,\"tools\":[null]}")));
-    assertThrows(
-        DaemonProtocolException.class,
-        () ->
-            codec.decode(
-                payload(
-                    "", "", "{\"name\":\"a\",\"status\":\"FAILED\",\"error\":1,\"tools\":[]}")));
+                        + "{\"name\":\"same\",\"description\":\"two\"}")));
   }
 
   @Test
@@ -217,13 +172,13 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\"},"
-                    + "\"skills\":[],\"mcpServers\":[]}"));
+                    + "\"skills\":[]}"));
   }
 
   @Test
-  void rejectsDuplicateNamesAndInvalidMcpSummaries() {
+  void rejectsDuplicateSkillNames() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -232,46 +187,7 @@ class DaemonCapabilitiesCodecTest {
                 ENVIRONMENT,
                 List.of(
                     new DaemonSkillDescriptor("same", "one"),
-                    new DaemonSkillDescriptor("same", "two")),
-                List.of()));
-    assertThrows(
-        DaemonProtocolException.class,
-        () ->
-            codec.decode(
-                payload(
-                    "",
-                    "",
-                    "{\"name\":\"a\",\"status\":\"READY\",\"error\":null,\"tools\":[]},"
-                        + "{\"name\":\"a\",\"status\":\"READY\",\"error\":null,\"tools\":[]}")));
-    assertThrows(
-        DaemonProtocolException.class,
-        () ->
-            codec.decode(
-                payload(
-                    "",
-                    "",
-                    "{\"name\":\"a\",\"status\":\"FAILED\",\"error\":\"boom\","
-                        + "\"tools\":[{\"name\":\"t\",\"description\":\"d\"}]}")));
-    assertThrows(
-        DaemonProtocolException.class,
-        () ->
-            codec.decode(
-                payload(
-                    "",
-                    "",
-                    "{\"name\":\"a\",\"status\":\"READY\",\"error\":\"boom\",\"tools\":[]}")));
-  }
-
-  @Test
-  void requiresMcpErrorAndNormalizesBlankFailedError() {
-    assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decode(payload("", "", "{\"name\":\"a\",\"status\":\"FAILED\",\"tools\":[]}")));
-    DaemonCapabilities decoded =
-        codec.decode(
-            payload(
-                "", "", "{\"name\":\"a\",\"status\":\"FAILED\",\"error\":\"  \",\"tools\":[]}"));
-    assertNull(decoded.mcpServers().getFirst().error());
+                    new DaemonSkillDescriptor("same", "two"))));
   }
 
   @Test
@@ -294,32 +210,25 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":4,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\",\"rootPath\":\""
                     + jsonEscape(rootPath)
-                    + "\"},\"skills\":[],\"mcpServers\":[]}"));
+                    + "\"},\"skills\":[]}"));
   }
 
   private static String payloadWithEnvironment(
       String operatingSystem, String timeZoneJson, String noteJson) {
-    return "{\"version\":5,\"environment\":{\"operatingSystem\":\""
+    return "{\"version\":6,\"environment\":{\"operatingSystem\":\""
         + operatingSystem
         + "\",\"timeZone\":\""
         + timeZoneJson
         + "\",\"note\":\""
         + noteJson
-        + "\",\"rootPath\":\"/home/dev\"},\"skills\":[],\"mcpServers\":[]}";
+        + "\",\"rootPath\":\"/home/dev\"},\"skills\":[]}";
   }
 
-  private static String payload(String rootPrefix, String skills, String servers) {
-    return "{\"version\":5,"
-        + rootPrefix
-        + ENVIRONMENT_JSON
-        + ",\"skills\":["
-        + skills
-        + "],\"mcpServers\":["
-        + servers
-        + "]}";
+  private static String payload(String rootPrefix, String skills) {
+    return "{\"version\":6," + rootPrefix + ENVIRONMENT_JSON + ",\"skills\":[" + skills + "]}";
   }
 
   private static String jsonEscape(String value) {

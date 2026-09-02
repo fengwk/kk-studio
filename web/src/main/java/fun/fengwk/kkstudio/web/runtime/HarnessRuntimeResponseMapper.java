@@ -98,7 +98,7 @@ public final class HarnessRuntimeResponseMapper {
   private static HarnessBranchSettingsDTO toBranchSettingsDto(BranchSettings settings) {
     Objects.requireNonNull(settings, "settings");
     HarnessBranchSettingsDTO dto = new HarnessBranchSettingsDTO();
-    dto.setEnvironment(toEnvironmentBindingDto(settings.environment()));
+    dto.setWorkspacePath(settings.workspacePath());
     dto.setAgentName(settings.agentName());
     dto.setModel(toModelSelectionDto(settings.model()));
     return dto;
@@ -320,7 +320,7 @@ public final class HarnessRuntimeResponseMapper {
       return null;
     }
     EnvironmentBindingDTO dto = new EnvironmentBindingDTO();
-    dto.setName(binding.environmentName().value());
+    dto.setEnvironmentId(binding.environmentId().toString());
     dto.setWorkspacePath(binding.workspacePath());
     return dto;
   }

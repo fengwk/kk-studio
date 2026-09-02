@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
@@ -96,7 +96,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
   /** Route-ready 判定谓词接口，供契约测试注入环境就绪状态与 lease 有效性。 */
   @FunctionalInterface
   public interface RouteReadyPredicate {
-    boolean isRouteReady(UUID nodeInstanceId, EnvironmentName environmentName, Instant now);
+    boolean isRouteReady(UUID nodeInstanceId, EnvironmentId environmentId, Instant now);
   }
 
   public InMemoryHarnessStore() {
@@ -1376,22 +1376,22 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
     @Override
     public void requestWork(
-        WorkTarget target, Instant requestedAt, EnvironmentName requiredEnvironmentName) {
+        WorkTarget target, Instant requestedAt, EnvironmentId requiredEnvironmentId) {
       checkOpen();
       Objects.requireNonNull(target, "target");
       Objects.requireNonNull(requestedAt, "requestedAt");
       requireMillisecondPrecision(requestedAt);
-      if (requiredEnvironmentName != null && target.type() != WorkTargetType.TOOL) {
+      if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
         throw new IllegalArgumentException(
-            "requiredEnvironmentName must be null for target type " + target.type());
+            "requiredEnvironmentId must be null for target type " + target.type());
       }
       requireWorkOwnerLocked(target);
       requireCanLockWork(target);
       Work existing = state.works.get(target);
       Work next =
           existing == null
-              ? Work.initial(target, requestedAt, requiredEnvironmentName)
-              : existing.request(requestedAt, requiredEnvironmentName);
+              ? Work.initial(target, requestedAt, requiredEnvironmentId)
+              : existing.request(requestedAt, requiredEnvironmentId);
       state.works.put(target, next);
       recordWorkLock(target);
     }
@@ -1471,8 +1471,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
               .filter(work -> work.leaseToken() == null || !work.leaseUntil().isAfter(now))
               .filter(
                   work ->
-                      work.requiredEnvironmentName() == null
-                          || isRouteReady(nodeInstanceId, work.requiredEnvironmentName(), now))
+                      work.requiredEnvironmentId() == null
+                          || isRouteReady(nodeInstanceId, work.requiredEnvironmentId(), now))
               .sorted(
                   Comparator.comparing(Work::availableAt)
                       .thenComparing(work -> work.target().id(), UuidOrder.COMPARATOR))
@@ -1492,16 +1492,15 @@ public final class InMemoryHarnessStore implements HarnessStore {
               claimed.wakeVersion(),
               claimed.leaseToken(),
               claimed.leaseUntil(),
-              claimed.requiredEnvironmentName()));
+              claimed.requiredEnvironmentId()));
     }
 
-    private boolean isRouteReady(
-        UUID nodeInstanceId, EnvironmentName environmentName, Instant now) {
+    private boolean isRouteReady(UUID nodeInstanceId, EnvironmentId environmentId, Instant now) {
       if (routeReadyPredicate == null) {
         return true;
       }
       return nodeInstanceId != null
-          && routeReadyPredicate.isRouteReady(nodeInstanceId, environmentName, now);
+          && routeReadyPredicate.isRouteReady(nodeInstanceId, environmentId, now);
     }
 
     @Override

@@ -169,7 +169,7 @@ Profile locations 是：
 | Storage | `/api/storage` | upload reserve/complete/delete、Blob original/preview presign |
 | S3 presign | `/api/s3/presigned-{uploads,downloads}` | 仅 `comfyui-inputs/` namespace 的 PUT/GET presign |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
-| Environment query | `GET /api/ai/environment` | live Environment registry read-only projection（capabilities/skills/MCP 摘要） |
+| Environment query | `GET /api/ai/environment` | live Environment registry read-only projection（capabilities/skills） |
 | Environment directory | `GET /api/ai/environments/{name}/directories` | control-plane 单层目录 async query |
 | ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |
 | ComfyUI runtime | `/api/comfyui/workflows/{apiName}/runs`、`/api/comfyui/runs/{runId}` | stateless run/get/cancel/output download |

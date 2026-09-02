@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.junit.jupiter.api.Test;
 
-/** 验证 17 个稳定 AgentToolId 的常量值。 */
+/** 验证 15 个稳定 AgentToolId 的常量值。 */
 class BuiltinToolIdsTest {
 
   @Test
@@ -19,8 +19,6 @@ class BuiltinToolIdsTest {
     assertEquals("base.lsp-goto-definition", BuiltinToolIds.LSP_GOTO_DEFINITION.value());
     assertEquals("base.lsp-workspace-symbols", BuiltinToolIds.LSP_WORKSPACE_SYMBOLS.value());
     assertEquals("base.lsp-java-decompile", BuiltinToolIds.LSP_JAVA_DECOMPILE.value());
-    assertEquals("base.mcp-list-tools", BuiltinToolIds.MCP_LIST_TOOLS.value());
-    assertEquals("base.mcp-call-tool", BuiltinToolIds.MCP_CALL_TOOL.value());
     assertEquals("base.load-skill", BuiltinToolIds.LOAD_SKILL.value());
     assertEquals("base.task", BuiltinToolIds.TASK.value());
     assertEquals("base.goal.create", BuiltinToolIds.GOAL_CREATE.value());

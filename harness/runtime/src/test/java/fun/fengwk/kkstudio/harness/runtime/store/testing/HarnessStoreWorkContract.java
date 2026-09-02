@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentName;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -68,12 +68,12 @@ public abstract class HarnessStoreWorkContract {
   }
 
   private void requestWork(
-      WorkTarget target, Instant requestedAt, EnvironmentName requiredEnvironmentName) {
+      WorkTarget target, Instant requestedAt, EnvironmentId requiredEnvironmentId) {
     inTransaction(
         store,
         tx -> {
           lockWorkOwner(tx, target);
-          tx.requestWork(target, requestedAt, requiredEnvironmentName);
+          tx.requestWork(target, requestedAt, requiredEnvironmentId);
         });
   }
 
@@ -755,25 +755,25 @@ public abstract class HarnessStoreWorkContract {
   void requestWorkFreezesAndPreservesEnvironmentAffinity() {
     SeededTool seeded = seedTool(store);
     WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
-    EnvironmentName env1 = new EnvironmentName("env-1");
-    EnvironmentName env2 = new EnvironmentName("env-2");
+    EnvironmentId env1 = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    EnvironmentId env2 = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
 
     // 1. TOOL target 初始化冻结亲和性
     requestWork(toolTarget, T1, env1);
     Work work = store.transaction(tx -> tx.findWork(toolTarget)).orElseThrow();
-    assertEquals(env1, work.requiredEnvironmentName());
+    assertEquals(env1, work.requiredEnvironmentId());
     assertEquals(1L, work.wakeVersion());
 
     // 2. 无参 requestWork 保留已冻结亲和性
     requestWork(toolTarget, T2);
     work = store.transaction(tx -> tx.findWork(toolTarget)).orElseThrow();
-    assertEquals(env1, work.requiredEnvironmentName());
+    assertEquals(env1, work.requiredEnvironmentId());
     assertEquals(2L, work.wakeVersion());
 
     // 3. 带相同环境名 requestWork 保留亲和性
     requestWork(toolTarget, T3, env1);
     work = store.transaction(tx -> tx.findWork(toolTarget)).orElseThrow();
-    assertEquals(env1, work.requiredEnvironmentName());
+    assertEquals(env1, work.requiredEnvironmentId());
     assertEquals(3L, work.wakeVersion());
 
     // 4. 冲突的环境名被拒绝
@@ -788,11 +788,11 @@ public abstract class HarnessStoreWorkContract {
   void claimNextWorkReturnsClaimedWorkWithEnvironmentAffinity() {
     SeededTool seeded = seedTool(store);
     WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
-    EnvironmentName env = new EnvironmentName("env-1");
+    EnvironmentId env = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
     requestWork(toolTarget, T1, env);
 
     ClaimedWork claimed = claimNext(WorkTargetType.TOOL, T2);
     assertEquals(toolTarget, claimed.target());
-    assertEquals(env, claimed.requiredEnvironmentName());
+    assertEquals(env, claimed.requiredEnvironmentId());
   }
 }

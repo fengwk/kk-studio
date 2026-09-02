@@ -87,7 +87,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].type").value("INTEGER"))
         .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].min").value(1))
         .andExpect(jsonPath("$.data.sections[3].groups[1].fields[3].max").value(1800000))
-        // 领域上界映射：promptEnvironmentName 受 EnvironmentName.MAX_LENGTH=64 约束。
+        // 领域上界映射：promptAgentName 受 MAX_LENGTH=64 约束。
         .andExpect(jsonPath("$.data.sections[3].groups[4].fields[1].max").value(64))
         // ENUM options 由 server 表达。
         .andExpect(jsonPath("$.data.sections[0].groups[0].fields[1].type").value("ENUM"))

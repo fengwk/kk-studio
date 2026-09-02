@@ -300,20 +300,6 @@ function formatKnownToolDetail(
         ['maxTurns', values.maxTurns],
       ])
     }
-    case 'mcp_list_tools':
-      return stringField(values.server)
-    case 'mcp_call_tool': {
-      const server = stringField(values.server)
-      const targetTool = stringField(values.tool)
-      if (!server && !targetTool) {
-        return null
-      }
-      const target = [server, targetTool].filter(Boolean).join('/')
-      const args = values.arguments
-      return args && typeof args === 'object'
-        ? `${target} ${JSON.stringify(args)}`
-        : target
-    }
     default:
       return null
   }

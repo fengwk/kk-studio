@@ -332,7 +332,6 @@ public class SystemSettingsCodec {
     return new SystemSettings.MiniMaxH3(
         requiredBoolean(dto.getEnabled(), "integrations.minimaxH3.enabled"),
         dto.getPromptAgentName(),
-        dto.getPromptEnvironmentName(),
         requiredMillis(dto.getPromptMaxWaitMillis(), "integrations.minimaxH3.promptMaxWaitMillis"),
         dto.getComfyBaseUrl(),
         requiredMillis(
@@ -574,7 +573,6 @@ public class SystemSettingsCodec {
         new SystemSettingsIntegrationsDTO.MiniMaxH3DTO();
     dto.setEnabled(minimaxH3.enabled());
     dto.setPromptAgentName(minimaxH3.promptAgentName());
-    dto.setPromptEnvironmentName(minimaxH3.promptEnvironmentName());
     dto.setPromptMaxWaitMillis(minimaxH3.promptMaxWaitMillis());
     dto.setComfyBaseUrl(minimaxH3.comfyBaseUrl());
     dto.setComfyConnectTimeoutMillis(minimaxH3.comfyConnectTimeoutMillis());
