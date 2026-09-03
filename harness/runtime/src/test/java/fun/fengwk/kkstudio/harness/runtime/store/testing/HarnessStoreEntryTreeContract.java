@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.rootEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.session;
@@ -599,57 +600,30 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void loadContributorCustomEntriesOnPathReturnsEntriesInRootToHeadOrder() {
     Baseline baseline = seedThreadBaseline(store);
-    UUID turnStartId =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
-              return id;
-            });
-
-    UUID custom1Id =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      turnStartId,
-                      new CustomEntryPayload("test.contributor", "type.a", 1, "{\"step\":1}"),
-                      T1));
-              return id;
-            });
-
-    UUID userMsgId =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(id, baseline.sessionId(), custom1Id, userMessagePayload(), T1));
-              return id;
-            });
-
-    UUID custom2Id =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      userMsgId,
-                      new CustomEntryPayload("test.contributor", "type.b", 1, "{\"step\":2}"),
-                      T2));
-              return id;
-            });
+    UUID custom1 =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            new CustomEntryPayload("test.contributor", "type.a", 1, "{\"step\":1}"));
+    UUID intermediateCustom =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            custom1,
+            new CustomEntryPayload("other.contributor", "type.x", 1, "{\"skip\":true}"));
+    UUID custom2 =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            intermediateCustom,
+            new CustomEntryPayload("test.contributor", "type.b", 1, "{\"step\":2}"));
 
     store.transaction(
         tx -> {
-          List<Entry> entries =
-              tx.loadContributorCustomEntriesOnPath(custom2Id, "test.contributor");
+          List<Entry> entries = tx.loadContributorCustomEntriesOnPath(custom2, "test.contributor");
           assertEquals(2, entries.size());
-          assertEquals(List.of(custom1Id, custom2Id), entries.stream().map(Entry::id).toList());
+          assertEquals(List.of(custom1, custom2), entries.stream().map(Entry::id).toList());
           assertThrows(UnsupportedOperationException.class, () -> entries.add(null));
           return null;
         });
@@ -659,87 +633,48 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void loadContributorCustomEntriesOnPathExcludesOtherContributorsAndSiblings() {
     Baseline baseline = seedThreadBaseline(store);
-    UUID turnStartId =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
-              return id;
-            });
-
-    UUID sharedCustom1 =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      turnStartId,
-                      new CustomEntryPayload("contributor.alpha", "state", 1, "{\"common\":true}"),
-                      T1));
-              return id;
-            });
-
-    UUID sharedCustomOther =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      sharedCustom1,
-                      new CustomEntryPayload("contributor.beta", "state", 1, "{\"other\":true}"),
-                      T1));
-              return id;
-            });
-
-    // 分支 1
-    UUID head1 =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      sharedCustomOther,
-                      new CustomEntryPayload("contributor.alpha", "state", 1, "{\"branch\":1}"),
-                      T2));
-              return id;
-            });
-
-    // 分支 2
-    UUID head2 =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      sharedCustomOther,
-                      new CustomEntryPayload("contributor.alpha", "state", 1, "{\"branch\":2}"),
-                      T2));
-              return id;
-            });
+    UUID sharedAlpha =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            new CustomEntryPayload("contributor.alpha", "state", 1, "{\"common\":true}"));
+    UUID sharedBeta =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            sharedAlpha,
+            new CustomEntryPayload("contributor.beta", "state", 1, "{\"other\":true}"));
+    UUID branch1Alpha =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            sharedBeta,
+            new CustomEntryPayload("contributor.alpha", "state", 1, "{\"branch\":1}"));
+    UUID branch2Alpha =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            sharedBeta,
+            new CustomEntryPayload("contributor.alpha", "state", 1, "{\"branch\":2}"));
 
     store.transaction(
         tx -> {
-          List<Entry> branch1Alpha =
-              tx.loadContributorCustomEntriesOnPath(head1, "contributor.alpha");
+          List<Entry> branch1AlphaEntries =
+              tx.loadContributorCustomEntriesOnPath(branch1Alpha, "contributor.alpha");
           assertEquals(
-              List.of(sharedCustom1, head1), branch1Alpha.stream().map(Entry::id).toList());
+              List.of(sharedAlpha, branch1Alpha),
+              branch1AlphaEntries.stream().map(Entry::id).toList());
 
-          List<Entry> branch2Alpha =
-              tx.loadContributorCustomEntriesOnPath(head2, "contributor.alpha");
+          List<Entry> branch2AlphaEntries =
+              tx.loadContributorCustomEntriesOnPath(branch2Alpha, "contributor.alpha");
           assertEquals(
-              List.of(sharedCustom1, head2), branch2Alpha.stream().map(Entry::id).toList());
+              List.of(sharedAlpha, branch2Alpha),
+              branch2AlphaEntries.stream().map(Entry::id).toList());
 
-          List<Entry> branch1Beta =
-              tx.loadContributorCustomEntriesOnPath(head1, "contributor.beta");
-          assertEquals(List.of(sharedCustomOther), branch1Beta.stream().map(Entry::id).toList());
+          List<Entry> branch1BetaEntries =
+              tx.loadContributorCustomEntriesOnPath(branch1Alpha, "contributor.beta");
+          assertEquals(List.of(sharedBeta), branch1BetaEntries.stream().map(Entry::id).toList());
           return null;
         });
   }
@@ -757,19 +692,18 @@ public abstract class HarnessStoreEntryTreeContract {
           return null;
         });
 
-    UUID turnStartId =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
-              return id;
-            });
+    UUID otherCustom =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            new CustomEntryPayload("other.contributor", "state", 1, "{\"ok\":true}"));
 
     store.transaction(
         tx -> {
-          List<Entry> onTurnStart =
-              tx.loadContributorCustomEntriesOnPath(turnStartId, "any.contributor");
-          assertTrue(onTurnStart.isEmpty());
+          List<Entry> onOther =
+              tx.loadContributorCustomEntriesOnPath(otherCustom, "target.contributor");
+          assertTrue(onOther.isEmpty());
           return null;
         });
   }
@@ -804,58 +738,35 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void loadContributorCustomEntriesOnPathNonMatchingHeadActsOnlyAsSentinel() {
     Baseline baseline = seedThreadBaseline(store);
-    UUID turnStartId =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
-              return id;
-            });
-
-    UUID targetCustomId =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      turnStartId,
-                      new CustomEntryPayload("target.contributor", "type", 1, "{\"ok\":true}"),
-                      T1));
-              return id;
-            });
-
-    UUID otherHeadCustomId =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      targetCustomId,
-                      new CustomEntryPayload("other.contributor", "type", 1, "{\"other\":true}"),
-                      T2));
-              return id;
-            });
+    UUID targetCustom =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            new CustomEntryPayload("target.contributor", "type", 1, "{\"ok\":true}"));
+    UUID otherHeadCustom =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            targetCustom,
+            new CustomEntryPayload("other.contributor", "type", 1, "{\"other\":true}"));
 
     store.transaction(
         tx -> {
-          // 查询 target.contributor：应只包含 targetCustomId，不泄漏 head (otherHeadCustomId)
+          // 查询 target.contributor：应只包含 targetCustom，不泄漏 head (otherHeadCustom)
           List<Entry> targetEntries =
-              tx.loadContributorCustomEntriesOnPath(otherHeadCustomId, "target.contributor");
-          assertEquals(List.of(targetCustomId), targetEntries.stream().map(Entry::id).toList());
+              tx.loadContributorCustomEntriesOnPath(otherHeadCustom, "target.contributor");
+          assertEquals(List.of(targetCustom), targetEntries.stream().map(Entry::id).toList());
 
           // 查询第三方 contributor：两者的 entry 均不应泄漏，返回空
           List<Entry> thirdEntries =
-              tx.loadContributorCustomEntriesOnPath(otherHeadCustomId, "third.contributor");
+              tx.loadContributorCustomEntriesOnPath(otherHeadCustom, "third.contributor");
           assertTrue(thirdEntries.isEmpty());
 
           // 查询 other.contributor：此时 head 本身是匹配的，应正确包含 head
           List<Entry> otherEntries =
-              tx.loadContributorCustomEntriesOnPath(otherHeadCustomId, "other.contributor");
-          assertEquals(List.of(otherHeadCustomId), otherEntries.stream().map(Entry::id).toList());
+              tx.loadContributorCustomEntriesOnPath(otherHeadCustom, "other.contributor");
+          assertEquals(List.of(otherHeadCustom), otherEntries.stream().map(Entry::id).toList());
           return null;
         });
   }

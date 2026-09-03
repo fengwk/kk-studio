@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -58,13 +57,13 @@ class PostgresqlContributorCustomPathTest {
               store,
               baseline.sessionId(),
               baseline.rootEntryId(),
-              resolvedTurnStartPayload(baseline.threadId()));
+              new CustomEntryPayload("test.contributor", "state", 1, "{\"cycle\":1}"));
       UUID entry2Id =
           insertChildEntry(
               store,
               baseline.sessionId(),
               entry1Id,
-              new CustomEntryPayload("test.contributor", "state", 1, "{\"cycle\":true}"));
+              new CustomEntryPayload("test.contributor", "state", 1, "{\"cycle\":2}"));
 
       // 通过测试 JDBC 绕过领域校验，将 entry1 的 parent 改为 entry2，构成 entry1 <-> entry2 的两节点 cycle
       try (Connection conn = rawDataSource.getConnection();
@@ -91,17 +90,11 @@ class PostgresqlContributorCustomPathTest {
   @Test
   void coldCacheNarrowQueryExecutesNarrowCteAndZeroFullPathCte() {
     Baseline baseline = seedThreadBaseline(store);
-    UUID turnStartId =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            resolvedTurnStartPayload(baseline.threadId()));
     UUID customId =
         insertChildEntry(
             store,
             baseline.sessionId(),
-            turnStartId,
+            baseline.rootEntryId(),
             new CustomEntryPayload("test.contributor", "type.a", 1, "{\"step\":1}"));
 
     cteCounter.set(0);
@@ -119,17 +112,11 @@ class PostgresqlContributorCustomPathTest {
   @Test
   void warmCacheNarrowQueryReusesCachedPathAndExecutesZeroAdditionalCte() {
     Baseline baseline = seedThreadBaseline(store);
-    UUID turnStartId =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            resolvedTurnStartPayload(baseline.threadId()));
     UUID customId =
         insertChildEntry(
             store,
             baseline.sessionId(),
-            turnStartId,
+            baseline.rootEntryId(),
             new CustomEntryPayload("test.contributor", "type.a", 1, "{\"step\":1}"));
 
     cteCounter.set(0);
