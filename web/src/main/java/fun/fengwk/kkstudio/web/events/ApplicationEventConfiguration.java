@@ -76,10 +76,10 @@ public class ApplicationEventConfiguration {
             // 1. 任务调度唤醒：广播提示有新的 Harness 任务 (THREAD/MODEL/TOOL) 就绪，唤醒调度器执行 drain 排空；调度器通过 FOR UPDATE
             // SKIP LOCKED 并发抢占，无锁竞争
             new PostgresqlNotificationHandler(
-                "harness_runtime_work", ignored -> dispatcher.wake(), dispatcher::wake),
+                HarnessWorkDispatcher.CHANNEL, ignored -> dispatcher.wake(), dispatcher::wake),
             // 2. 画布函数唤醒：广播提示有新的 Canvas 异步函数计算任务就绪，唤醒画布函数调度器
             new PostgresqlNotificationHandler(
-                "canvas_function_work",
+                CanvasFunctionDispatcher.CHANNEL,
                 ignored -> canvasFunctionDispatcher.wake(),
                 canvasFunctionDispatcher::wake),
             // 3. 会话版本失效：Thread 版本号推进，通知 WebSocket 向前端广播版本事件以触发快照对账
@@ -94,7 +94,7 @@ public class ApplicationEventConfiguration {
                 canvasVersionHub::broadcastResync),
             // 5. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
             new PostgresqlNotificationHandler(
-                "system_settings_changed",
+                SystemSettingsChangeHandler.CHANNEL,
                 systemSettingsChangeHandler::onNotification,
                 systemSettingsChangeHandler::onResync),
             // 6. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
