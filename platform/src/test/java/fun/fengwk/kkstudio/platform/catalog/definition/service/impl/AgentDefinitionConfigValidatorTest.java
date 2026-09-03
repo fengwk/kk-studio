@@ -24,15 +24,26 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolClientFactory;
+import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
+import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
-/** Agent 配置的静态校验：工具 ID 必须来自统一 HarnessCatalog 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
+/** Agent 配置的校验：工具 ID 必须来自统一 RuntimeToolCatalog 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
 class AgentDefinitionConfigValidatorTest {
 
   private static final AgentToolId CUSTOM_TOOL_ID = new AgentToolId("test.custom-tool");
@@ -141,6 +152,50 @@ class AgentDefinitionConfigValidatorTest {
     assertTrue(error.getMessage().contains("duplicate tool name"));
   }
 
+  @Test
+  void acceptsDynamicMcpToolId() {
+    // 意图：验证动态 MCP 工具在聚合到 RuntimeToolCatalog 后能够正常通过 Agent 配置校验
+    McpServerRepository repo = mock(McpServerRepository.class);
+    McpToolClientFactory factory = mock(McpToolClientFactory.class);
+    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, factory);
+
+    UUID serverId = UUID.randomUUID();
+    McpServer server = new McpServer();
+    server.setId(serverId);
+    server.setName("test-server");
+    server.setUrl("http://localhost:8080");
+    server.setTimeoutMillis(5000L);
+    server.setVersion(1L);
+
+    UUID toolId = UUID.randomUUID();
+    McpTool mcpTool = new McpTool();
+    mcpTool.setId(toolId);
+    mcpTool.setServerId(serverId);
+    mcpTool.setSourceName("echo");
+    mcpTool.setModelName("mcp_test_server_echo");
+    mcpTool.setDescription("echo tool");
+    mcpTool.setInputSchemaJson(
+        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+
+    when(repo.getToolById(toolId)).thenReturn(Optional.of(mcpTool));
+    when(repo.getById(serverId)).thenReturn(Optional.of(server));
+    when(repo.listAllServers()).thenReturn(List.of(server));
+    when(repo.listTools(serverId)).thenReturn(List.of(mcpTool));
+
+    HarnessToolCatalogAdapter staticAdapter =
+        new HarnessToolCatalogAdapter(HarnessCatalog.from(List.of()));
+    RuntimeToolCatalog composite =
+        new CompositeRuntimeToolCatalog(List.of(staticAdapter, mcpCatalog));
+    AgentDefinitionConfigValidator validator = new AgentDefinitionConfigValidator(composite);
+
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setToolIds(List.of(McpStableIds.agentToolId(toolId).value()));
+    config.setSkills(List.of());
+    config.setSubagents(List.of());
+
+    assertDoesNotThrow(() -> validator.validate(config));
+  }
+
   private static Tool hostTool(String name, String version) {
     return tool(hostDescriptor(name, version));
   }
@@ -202,7 +257,7 @@ class AgentDefinitionConfigValidatorTest {
                 }));
       }
       this.catalog = HarnessCatalog.from(contributors);
-      this.validator = new AgentDefinitionConfigValidator(catalog);
+      this.validator = new AgentDefinitionConfigValidator(new HarnessToolCatalogAdapter(catalog));
     }
 
     @Override

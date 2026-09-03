@@ -73,32 +73,41 @@ public class ApplicationEventConfiguration {
     return new PostgresqlNotificationLoop(
         dataSource,
         List.of(
+            // 1. 任务调度唤醒：广播提示有新的 Harness 任务 (THREAD/MODEL/TOOL) 就绪，唤醒调度器执行 drain 排空；调度器通过 FOR UPDATE
+            // SKIP LOCKED 并发抢占，无锁竞争
             new PostgresqlNotificationHandler(
                 "harness_runtime_work", ignored -> dispatcher.wake(), dispatcher::wake),
+            // 2. 画布函数唤醒：广播提示有新的 Canvas 异步函数计算任务就绪，唤醒画布函数调度器
             new PostgresqlNotificationHandler(
                 "canvas_function_work",
                 ignored -> canvasFunctionDispatcher.wake(),
                 canvasFunctionDispatcher::wake),
+            // 3. 会话版本失效：Thread 版本号推进，通知 WebSocket 向前端广播版本事件以触发快照对账
             new PostgresqlNotificationHandler(
                 ThreadVersionHub.CHANNEL,
                 threadVersionHub::onNotification,
                 threadVersionHub::broadcastResync),
+            // 4. 画布版本失效：Canvas 文档版本号推进，通知 WebSocket 向前端广播版本事件以触发图谱更新
             new PostgresqlNotificationHandler(
                 CanvasVersionHub.CHANNEL,
                 canvasVersionHub::onNotification,
                 canvasVersionHub::broadcastResync),
+            // 5. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
             new PostgresqlNotificationHandler(
                 "system_settings_changed",
                 systemSettingsChangeHandler::onNotification,
                 systemSettingsChangeHandler::onResync),
+            // 6. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
             new PostgresqlNotificationHandler(
                 PostgresqlRealtimeEventSource.CHANNEL,
                 realtimeEventSource::onNotification,
                 realtimeEventSource::onResync),
+            // 7. 跨节点目录请求：向目标环境所属节点发送目录查询信箱请求
             new PostgresqlNotificationHandler(
                 EnvironmentQueryCoordinator.REQUEST_CHANNEL,
                 environmentQueryCoordinator::onRequestNotification,
                 environmentQueryCoordinator::onResync),
+            // 8. 跨节点目录响应：目标环境所属节点执行完成目录查询后发出响应，发起方收到后原子领取结果
             new PostgresqlNotificationHandler(
                 EnvironmentQueryCoordinator.RESPONSE_CHANNEL,
                 environmentQueryCoordinator::onResponseNotification,

@@ -33,7 +33,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * 持久化全局单实例产品的 Canvas HTTP 边界，统一返回 convention {@link Result}。
+ * Canvas 产品的持久化 HTTP 边界，统一返回 convention {@link Result}。
  *
  * <p>所有实体 id 都以 canonical UUID 字符串跨 HTTP 边界；graph 版本是 long（{@code canvas_document.version} 的
  * 公共坐标系）。实时事件经事件通道（{@code /api/events/v1}）订阅，本控制器只提供 snapshot 与命令 HTTP。

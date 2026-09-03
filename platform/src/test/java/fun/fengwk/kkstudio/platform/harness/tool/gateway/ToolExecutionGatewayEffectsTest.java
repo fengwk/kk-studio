@@ -46,6 +46,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
+import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -265,6 +266,7 @@ class ToolExecutionGatewayEffectsTest {
         new ToolGatewayTestSupport.FakeResourceStore();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
+            new HarnessToolCatalogAdapter(catalog),
             catalog,
             (assistantEntryId, contributorId) -> emptyBranch(),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -355,6 +357,7 @@ class ToolExecutionGatewayEffectsTest {
         new ToolGatewayTestSupport.FakeResourceStore();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
+            new HarnessToolCatalogAdapter(catalog),
             catalog,
             (assistantEntryId, contributorId) -> emptyBranch(),
             new ToolGatewayTestSupport.FakeTransport(),
@@ -453,6 +456,7 @@ class ToolExecutionGatewayEffectsTest {
         new ToolGatewayTestSupport.FakeResourceStore();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
+            new HarnessToolCatalogAdapter(catalog),
             catalog,
             loader,
             new ToolGatewayTestSupport.FakeTransport(),
