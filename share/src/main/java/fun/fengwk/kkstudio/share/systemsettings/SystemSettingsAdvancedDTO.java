@@ -21,18 +21,6 @@ public class SystemSettingsAdvancedDTO {
 
   private Long toolDispatchBusyFallbackDelayMillis;
 
-  private Long dispatcherLeaseDurationMillis;
-
-  private Long dispatcherPollIntervalMillis;
-
-  private Long dispatcherRejectionDelayMillis;
-
-  private Integer dispatcherMaxDispatchTasks;
-
-  private Integer dispatcherWorkerConcurrency;
-
-  private Integer dispatcherWorkerQueueCapacity;
-
   private Integer applicationEventQueueCapacity;
 
   private Long applicationEventMaxBytes;

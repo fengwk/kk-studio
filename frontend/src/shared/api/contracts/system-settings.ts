@@ -127,12 +127,6 @@ export interface SystemSettingsAdvancedDTO {
   modelDispatchBusyFallbackDelayMillis: DecimalLong
   toolPreflightFailureDelayMillis: DecimalLong
   toolDispatchBusyFallbackDelayMillis: DecimalLong
-  dispatcherLeaseDurationMillis: DecimalLong
-  dispatcherPollIntervalMillis: DecimalLong
-  dispatcherRejectionDelayMillis: DecimalLong
-  dispatcherMaxDispatchTasks: number
-  dispatcherWorkerConcurrency: number
-  dispatcherWorkerQueueCapacity: number
   applicationEventQueueCapacity: number
   applicationEventMaxBytes: DecimalLong
   applicationEventSendTimeoutMillis: DecimalLong
