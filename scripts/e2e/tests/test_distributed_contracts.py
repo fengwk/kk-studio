@@ -136,6 +136,24 @@ class TestDistributedTopologyContract(unittest.TestCase):
         self.assertIn("KK_STUDIO_STORAGE_S3_BUCKET: kk-studio-distributed", compose)
         self.assertNotIn("app-b-db", compose)
 
+    def test_workspace_init_creates_isolated_markers(self):
+        """Workspace init must create distinct marker directories on daemon volumes for owner proof."""
+        compose = COMPOSE_FILE.read_text()
+        self.assertIn("distributed-a-only", compose)
+        self.assertIn("distributed-b-only", compose)
+        self.assertIn("chown -R 10001:10001", compose)
+
+    def test_three_l5_distributed_cases_registered(self):
+        """Three L5 cases with requires=['distributed'] must be registered in the matrix."""
+        cases_file = REPOSITORY_ROOT / "scripts/e2e/cases/distributed.mjs"
+        self.assertTrue(cases_file.exists())
+        content = cases_file.read_text()
+        self.assertIn("distributed.shared_state", content)
+        self.assertIn("distributed.lease_mailbox_routing", content)
+        self.assertIn("distributed.db_loss_fail_closed", content)
+        self.assertIn("level: 'L5'", content)
+        self.assertIn("requires: ['distributed']", content)
+
     def test_node_identity_defaults_are_fixed_and_overridable(self):
         """Registration tokens have explicit disposable defaults in compose and CLI options are clean."""
         compose = COMPOSE_FILE.read_text()

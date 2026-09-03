@@ -59,7 +59,7 @@ Options:
   --distributed     Run the two-node distributed mock topology (free; no real provider)
   --ui              Enable Playwright UI E2E (screenshots in report)
   --only <caseId>   Run one case id (repeatable)
-  --level <Lx>      Filter by level L1/L2/L3/L4 (repeatable)
+  --level <Lx>      Filter by level L1/L2/L3/L4/L5 (repeatable)
   --list            List matrix cases
   --docs            Print case docs
   -h, --help        Show help
