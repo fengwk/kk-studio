@@ -276,11 +276,10 @@ harness_realtime
 ```
 
 Loop 只拥有一个专用 JDBC connection 和一个 daemon platform thread。连接建立后一次性 `LISTEN`全部 channel，再对
-每个 handler 调 `onResync`；再用 `PGConnection.getNotifications(pollMillis)`拉取通知。PostgreSQL JDBC 的
-`QueryExecutorImpl.processNotifies` 在拉取通知时会暂存底层原 SO_TIMEOUT，临时以 notification poll timeout（5 秒）
-覆盖，并在单次 poll 结束或收到通知后恢复原 SO_TIMEOUT，因此 driver 配置的 5 秒 `socketTimeout` 不会破坏 LISTEN 循环，
-空闲无通知时不会触发意外断连与额外 resync。某个 handler 抛错只隔离该 handler，不终止 loop。连接断开按 backoff 重连，
-重连成功再次 resync。
+每个 handler 调 `onResync`；再用 `PGConnection.getNotifications(pollMillis)`拉取通知。驱动的
+`getNotifications(pollMillis)` 在拉取通知时会临时以 poll timeout（5 秒）覆盖并恢复底层 SO_TIMEOUT，
+因此 driver 配置的 5 秒 `socketTimeout` 不会破坏 LISTEN 循环，空闲无通知时不会触发意外断连与额外 resync。
+某个 handler 抛错只隔离该 handler，不终止 loop。连接断开按 backoff 重连，重连成功再次 resync。
 
 关闭顺序是 `connection.abort` → interrupt loop thread → 最多 5s join；`SmartLifecycle.close`幂等。`harness_runtime_work`
 和 `canvas_function_work`只做 dispatcher wake；version/realtime/settings handler 负责各自 snapshot/resync 逻辑，
@@ -370,8 +369,8 @@ Servlet request thread 不 `join`或等待 future。typed failure 映射为
 gate，生产数据源配置了三个 5 秒网络超时边界以实现快速 fail-closed，均低于默认 10 秒 directory
 request budget：
 1. Hikari 连接池获取等待 `spring.datasource.hikari.connection-timeout` 固定为 5000ms（5 秒）；
-2. PostgreSQL JDBC 连接建立超时 `spring.datasource.hikari.data-source-properties.connectTimeout` 固定为 5 秒，防止断网时阻塞在 TCP 握手；
-3. PostgreSQL JDBC 底层 socket 读写超时 `spring.datasource.hikari.data-source-properties.socketTimeout` 固定为 5 秒，防止断网时阻塞在 socket I/O 读取。
+2. PostgreSQL JDBC 连接建立超时 `spring.datasource.hikari.data-source-properties.connectTimeout` 固定为 5 秒，作为 TCP connect 上限，防止断网时持续等待连接建立；
+3. PostgreSQL JDBC 底层 socket 读超时 `spring.datasource.hikari.data-source-properties.socketTimeout` 固定为 5 秒，防止断网时阻塞在 socket read。
 当连接池无法提供有效连接或数据库网络不可达时，等待最多 5 秒并在默认请求预算内映射
 `ENVIRONMENT_UNAVAILABLE`，绝不回退到内存 route。
 
