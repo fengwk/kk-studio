@@ -52,8 +52,12 @@ final class PostgresqlHarnessStoreFixture {
   }
 
   static HarnessStore create() {
-    PlatformTransactionManager transactionManager = new DataSourceTransactionManager(DATA_SOURCE);
-    return new PostgresqlHarnessStore(DATA_SOURCE, transactionManager, idGenerator());
+    return create(DATA_SOURCE);
+  }
+
+  static HarnessStore create(DataSource dataSource) {
+    PlatformTransactionManager transactionManager = new DataSourceTransactionManager(dataSource);
+    return new PostgresqlHarnessStore(dataSource, transactionManager, idGenerator());
   }
 
   static Supplier<UUID> idGenerator() {
