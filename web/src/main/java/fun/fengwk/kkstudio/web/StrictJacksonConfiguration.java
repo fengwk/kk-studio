@@ -15,12 +15,14 @@ import tools.jackson.databind.ser.std.ToStringSerializer;
 public class StrictJacksonConfiguration {
 
   @Bean
-  public JsonMapperBuilderCustomizer strictDuplicateFieldCustomizer() {
+  public JsonMapperBuilderCustomizer httpJsonCustomizer() {
     return builder -> {
       builder.enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION);
       builder.enable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS);
       builder.changeDefaultPropertyInclusion(
-          incl -> incl.withValueInclusion(JsonInclude.Include.NON_NULL));
+          incl ->
+              incl.withValueInclusion(JsonInclude.Include.NON_NULL)
+                  .withContentInclusion(JsonInclude.Include.NON_NULL));
       builder.disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY);
       SimpleModule longToStringModule = new SimpleModule("LongToStringModule");
       longToStringModule.addSerializer(Long.class, new ToStringSerializer(Long.class));
