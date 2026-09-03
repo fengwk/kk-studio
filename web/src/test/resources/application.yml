@@ -19,6 +19,10 @@ spring:
     hikari:
       minimum-idle: 0
       maximum-pool-size: 4
+      connection-timeout: 5000
+      data-source-properties:
+        connectTimeout: "5"
+        socketTimeout: "5"
 
 mybatis:
   mapper-locations: classpath:**/*Mapper.xml

@@ -276,8 +276,11 @@ harness_realtime
 ```
 
 Loop 只拥有一个专用 JDBC connection 和一个 daemon platform thread。连接建立后一次性 `LISTEN`全部 channel，再对
-每个 handler 调 `onResync`；再用 `PGConnection.getNotifications(pollMillis)`拉取通知。某个 handler 抛错只隔离该
-handler，不终止 loop。连接断开按 backoff 重连，重连成功再次 resync。
+每个 handler 调 `onResync`；再用 `PGConnection.getNotifications(pollMillis)`拉取通知。PostgreSQL JDBC 的
+`QueryExecutorImpl.processNotifies` 在拉取通知时会暂存底层原 SO_TIMEOUT，临时以 notification poll timeout（5 秒）
+覆盖，并在单次 poll 结束或收到通知后恢复原 SO_TIMEOUT，因此 driver 配置的 5 秒 `socketTimeout` 不会破坏 LISTEN 循环，
+空闲无通知时不会触发意外断连与额外 resync。某个 handler 抛错只隔离该 handler，不终止 loop。连接断开按 backoff 重连，
+重连成功再次 resync。
 
 关闭顺序是 `connection.abort` → interrupt loop thread → 最多 5s join；`SmartLifecycle.close`幂等。`harness_runtime_work`
 和 `canvas_function_work`只做 dispatcher wake；version/realtime/settings handler 负责各自 snapshot/resync 逻辑，
@@ -364,8 +367,12 @@ Servlet request thread 不 `join`或等待 future。typed failure 映射为
 `INVALID_PATH/NOT_DIRECTORY -> 400`、`ENVIRONMENT_NOT_FOUND/NOT_FOUND -> 404`、
 `ENVIRONMENT_UNAVAILABLE -> 409`、`TIMEOUT -> 504`、`IO_ERROR -> 502`。timeout 从
 `SystemSettings.environment.directoryListTimeoutMillis`在请求时读取。PostgreSQL 是权威
-gate，生产数据源 Hikari `connection-timeout` 固定为 5000ms（5 秒），低于默认 10 秒 directory
-request budget；当连接池无法提供有效连接时，获取等待最多 5 秒并在默认请求预算内映射
+gate，生产数据源配置了三个 5 秒网络超时边界以实现快速 fail-closed，均低于默认 10 秒 directory
+request budget：
+1. Hikari 连接池获取等待 `spring.datasource.hikari.connection-timeout` 固定为 5000ms（5 秒）；
+2. PostgreSQL JDBC 连接建立超时 `spring.datasource.hikari.data-source-properties.connectTimeout` 固定为 5 秒，防止断网时阻塞在 TCP 握手；
+3. PostgreSQL JDBC 底层 socket 读写超时 `spring.datasource.hikari.data-source-properties.socketTimeout` 固定为 5 秒，防止断网时阻塞在 socket I/O 读取。
+当连接池无法提供有效连接或数据库网络不可达时，等待最多 5 秒并在默认请求预算内映射
 `ENVIRONMENT_UNAVAILABLE`，绝不回退到内存 route。
 
 ### Trusted JAR 启动加载
@@ -400,9 +407,9 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 7. Harness worker dispatcher、processor、event loop、heartbeat scheduler 和 sender 都有明确 owner；worker 关闭不会
    释放 notification loop，事件 channel 关闭也不会留下 Runtime subscription。
 8. HTTP async endpoint 只返回 completion stage，不在 servlet thread 执行阻塞 Daemon round trip；future timeout 和 transport
-   error 都映射为稳定应用 error code。Environment directory 以 PostgreSQL 作为权威 gate，Hikari 5 秒连接获取上限
-   低于默认 10 秒请求预算；当连接池无法提供有效连接时，在预算内映射 `ENVIRONMENT_UNAVAILABLE`，绝不回退到内存
-   route。
+   error 都映射为稳定应用 error code。Environment directory 以 PostgreSQL 作为权威 gate，数据源设置了 Hikari 连接池获取
+   5 秒、JDBC connectTimeout 5 秒与 socketTimeout 5 秒三个超时边界，均低于默认 10 秒请求预算；当连接池无法提供有效连接或数据库
+   发生网络故障时，在预算内快速 fail-closed 并映射 `ENVIRONMENT_UNAVAILABLE`，绝不回退到内存 route。
 9. Trusted JAR list 在 catalog 创建后不可变，jar scan 只从显式目录发生；任何加载异常在 context 可用前关闭已创建
    classloader。
 10. strict JSON field、canonical UUID、canonical decimal、DTO discriminator 和 duplicate detection 在 Web boundary
@@ -417,7 +424,7 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 | 配置 | 当前职责 |
 | --- | --- |
 | `spring.application.name` / `spring.profiles.active` | 应用名 `kk-studio`，默认 `dev` |
-| `spring.datasource` | PostgreSQL 唯一 durable database；Hikari `connection-timeout` 固定为 5000ms，连接池无法提供有效连接时在默认请求预算内映射 `ENVIRONMENT_UNAVAILABLE` |
+| `spring.datasource` | PostgreSQL 唯一 durable database；配置 Hikari `connection-timeout: 5000`、driver `connectTimeout: "5"` 与 `socketTimeout: "5"` 三个 5 秒边界，保证网络分区与连接耗尽时在默认请求预算内 fail-closed 并映射 `ENVIRONMENT_UNAVAILABLE` |
 | `spring.flyway.locations` | dev/e2e/canvas-test 的 migration + seed 组合 |
 | `server.port` / `server.compression.enabled` | 默认 `8080`与 gzip |
 | `management.endpoints.web.exposure.include` | `health,prometheus,offline,online` |
