@@ -409,7 +409,7 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 | 配置 | 当前职责 |
 | --- | --- |
 | `spring.application.name` / `spring.profiles.active` | 应用名 `kk-studio`，默认 `dev` |
-| `spring.datasource` 或 `spring.datasource.multi.primary` | PostgreSQL 唯一 durable database |
+| `spring.datasource` | PostgreSQL 唯一 durable database |
 | `spring.flyway.locations` | dev/e2e/canvas-test 的 migration + seed 组合 |
 | `server.port` / `server.compression.enabled` | 默认 `8080`与 gzip |
 | `management.endpoints.web.exposure.include` | `health,prometheus,offline,online` |

@@ -274,6 +274,38 @@ class PostgresqlNotificationLoopTest {
     assertFalse(stopped.isRunning());
   }
 
+  /**
+   * 测试意图：验证 SmartLifecycle 的 start/stop 语义——stop 仅暂停 loop 线程并断开当前连接， 之后仍可被 start 安全重启；只有
+   * AutoCloseable.close 后才会永久关闭并拒绝 start。
+   */
+  @Test
+  void stopSuspendsNotificationLoopAndCanBeRestartedUntilClosed() throws Exception {
+    FakeConnection connection = new FakeConnection();
+    PostgresqlNotificationLoop loop =
+        new PostgresqlNotificationLoop(
+            new SequencedDataSource(connection::connection),
+            handlers(ignored -> {}, () -> {}),
+            Duration.ofMillis(10),
+            Duration.ofMillis(10));
+    try {
+      loop.start();
+      assertTrue(loop.isRunning());
+      loop.stop();
+      assertFalse(loop.isRunning());
+
+      loop.start();
+      assertTrue(loop.isRunning());
+      loop.stop();
+      assertFalse(loop.isRunning());
+    } finally {
+      loop.close();
+    }
+    assertThrows(
+        IllegalStateException.class,
+        loop::start,
+        "start after close must throw IllegalStateException");
+  }
+
   @Test
   void unsupportedConnectionIsClosedAndStopInterruptsReconnectBackoff() throws Exception {
     FakeConnection unsupported = new FakeConnection();
