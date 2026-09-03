@@ -18,13 +18,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -213,6 +217,59 @@ public abstract class HarnessStoreEntryTreeContract {
           EntryPath path = tx.loadEntryPath(baseline.rootEntryId());
           assertEquals(
               List.of(baseline.rootEntryId()), path.entries().stream().map(Entry::id).toList());
+          return null;
+        });
+  }
+
+  @Test
+  void loadEntryPathWalksDeepChainFromHeadToRoot() {
+    Baseline baseline = seedThreadBaseline(store);
+    List<UUID> expectedIds = new ArrayList<>();
+    expectedIds.add(baseline.rootEntryId());
+    UUID currentParentId = baseline.rootEntryId();
+    Instant time = T1;
+    for (int i = 0; i < 20; i++) {
+      UUID parentId = currentParentId;
+      Instant turnTime = time;
+      UUID[] turnIds =
+          store.transaction(
+              tx -> {
+                UUID turnStartId = tx.nextId();
+                UUID userId = tx.nextId();
+                UUID assistantId = tx.nextId();
+                UUID turnEndId = tx.nextId();
+                tx.insertEntry(
+                    turnStartEntry(turnStartId, baseline.sessionId(), parentId, turnTime));
+                tx.insertEntry(
+                    new Entry(
+                        userId, baseline.sessionId(), turnStartId, userMessagePayload(), turnTime));
+                tx.insertEntry(
+                    new Entry(
+                        assistantId, baseline.sessionId(), userId, assistantPayload(), turnTime));
+                tx.insertEntry(
+                    new Entry(
+                        turnEndId,
+                        baseline.sessionId(),
+                        assistantId,
+                        new TurnEndPayload(
+                            turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                        turnTime));
+                return new UUID[] {turnStartId, userId, assistantId, turnEndId};
+              });
+      expectedIds.add(turnIds[0]);
+      expectedIds.add(turnIds[1]);
+      expectedIds.add(turnIds[2]);
+      expectedIds.add(turnIds[3]);
+      currentParentId = turnIds[3];
+      time = time.plusSeconds(1);
+    }
+    UUID deepHeadId = currentParentId;
+    store.transaction(
+        tx -> {
+          EntryPath path = tx.loadEntryPath(deepHeadId);
+          assertEquals(expectedIds, path.entries().stream().map(Entry::id).toList());
+          assertEquals(baseline.rootEntryId(), path.root().id());
+          assertEquals(deepHeadId, path.head().id());
           return null;
         });
   }

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.tool;
 
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO;
@@ -10,18 +9,18 @@ import fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO;
 import java.util.List;
 import java.util.Objects;
 
-/** 离线可选的 runtime tool catalog 的 Platform 边界。 */
+/** 统一 {@link RuntimeToolCatalog} 的 Platform 查询边界，提供所有可用工具的列表。 */
 @Service
 public class ToolCatalogQueryService {
 
-  private final HarnessCatalog catalog;
+  private final RuntimeToolCatalog toolCatalog;
 
-  public ToolCatalogQueryService(HarnessCatalog catalog) {
-    this.catalog = Objects.requireNonNull(catalog, "catalog");
+  public ToolCatalogQueryService(RuntimeToolCatalog toolCatalog) {
+    this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
   }
 
   public List<ToolCatalogEntryDTO> listTools() {
-    return catalog.selectableTools().stream().map(ToolCatalogQueryService::toDto).toList();
+    return toolCatalog.selectableTools().stream().map(ToolCatalogQueryService::toDto).toList();
   }
 
   private static ToolCatalogEntryDTO toDto(ToolContribution contribution) {

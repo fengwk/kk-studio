@@ -1,7 +1,7 @@
 # 部署与运行
 
-本文描述当前可执行的 Fat JAR、`deploy/local`、`deploy/test` 和
-`deploy/reliability` 运行方式。开发与测试入口见
+本文描述当前可执行的 Fat JAR、`deploy/local`、`deploy/test`、
+`deploy/distributed` 和 `deploy/reliability` 运行方式。开发与测试入口见
 [开发与测试](development-and-testing.md)；Frontend 代码和发布资源的关系见
 [Frontend 模块](../modules/frontend.md)；跨模块边界见
 [系统设计](../system-design.md)。
@@ -10,7 +10,7 @@
 
 - 用同一份源码构建 Spring Boot Fat JAR，并让 React 静态资源由 Web app
   服务。
-- 让 local、test、reliability 三个 Compose project 的网络、数据卷、健康
+- 让 local、test、distributed、reliability 四个 Compose project 的网络、数据卷、健康
   检查、凭证和 proxy 边界可观察、可清理。
 - App 和 Environment Daemon 使用固定 runtime image、non-root user 和
   明确的 health/smoke contract。
@@ -267,7 +267,7 @@ project name 是 `kk-studio-distributed`。它是免费 mock topology：App 镜�
 | 服务 | 网络 | 职责 |
 | --- | --- | --- |
 | `postgres` | `node-a-db` + `node-b-db` | 两个 App 共享的单一 `kk_studio_distributed` database，宿主 `127.0.0.1:15433` |
-| `minio` / `minio-init` | `node-a-db`（init 也只在此网络） | 两个 App 共享的 `kk-studio-distributed` bucket，宿主 `127.0.0.1:19001` |
+| `minio` / `minio-init` | MinIO 加入 `node-a-db` + `node-b-db`；init 只加入 `node-a-db` | 两个 App 共享的 `kk-studio-distributed` bucket，宿主 `127.0.0.1:19001` |
 | `http-mock` | `node-a-db` + `node-b-db` | 复用 `deploy/test` mock（`stub.local`/`opencli-hub`/`comfyui` 别名在两个 DB 网络中均可用），宿主 `127.0.0.1:18090` |
 | `app-a` | `node-a-db` + `daemon-a` + `app-ingress-a` | 节点 A 的 App，宿主 `127.0.0.1:18082` |
 | `app-b` | `node-b-db` + `daemon-b` + `app-ingress-b` | 节点 B 的 App，宿主 `127.0.0.1:18083` |
@@ -282,11 +282,10 @@ App-A 和 App-B，两节点没有 DNS/IP 路径。不变量由
 
 ### 8.2 节点身份与共享数据面
 
-节点身份使用固定、可覆盖的 disposable 变量（最终 Environment 分支集成时可改
-参数名）：
+节点身份使用固定、可覆盖的 disposable 变量：
 
 ```text
-DISTRIBUTED_ENV_A_NAME=distributed-a  # environment name（canonical 路由名）
+DISTRIBUTED_ENV_A_NAME=distributed-a  # environment 展示名
 DISTRIBUTED_ENV_B_NAME=distributed-b
 DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN=e2e-token-dist-a
 DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN=e2e-token-dist-b

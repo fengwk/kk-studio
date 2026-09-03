@@ -59,6 +59,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.platform.harness.GatewayExecutorSafety;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
+import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 
 import java.nio.file.Path;
 import java.time.Clock;
@@ -77,11 +78,12 @@ import java.util.function.Supplier;
 /**
  * 生产 {@link ToolGateway}：基于单一 Contributor {@link Tool} SPI 的权限 preflight 与 admission 路由。
  *
- * <p>{@link #preflight} 是纯判定：先由 catalog 按冻结 definition id 恢复 ToolContribution/AgentToolId， 校验
- * definition、contributor provenance 与 requirements 不变；再用 {@link PermissionEvaluator} + 部署 {@link
- * ToolSettings} + 配置的 workdir/environmentRoot 评估冻结的 call/binding；缺失 contribution 或 definition
- * 漂移直接生成确定性 Deny，绝不进入 evaluator，也不改写 binding/arguments。YOLO 短路由由 Runtime 决定，本类不感知 YOLO 也不查询
- * HarnessStore。
+ * <p>{@link #preflight} 是纯判定：先由 {@link RuntimeToolCatalog} 按冻结 definition id 恢复
+ * ToolContribution/AgentToolId， 校验 definition、contributor provenance 与 requirements 不变；再用 {@link
+ * PermissionEvaluator} + 部署 {@link ToolSettings} + 配置的 workdir/environmentRoot 评估冻结的
+ * call/binding；缺失 contribution 或 definition 漂移直接生成确定性 Deny，绝不进入 evaluator，也不改写
+ * binding/arguments。YOLO 短路由由 Runtime 决定，本类不感知 YOLO 也不查询 HarnessStore。保留的 {@link HarnessCatalog}
+ * 仅用于 custom entry type 的合法性校验。
  *
  * <p>{@link #start} 采用单一执行路径：查找 {@link ToolContribution}，全量校验冻结 definition + contributor provenance
  * + requirements，构建作用域受限的 {@link BranchView} 与可选 {@link BoundEnvironment}，构造 {@link
@@ -109,7 +111,8 @@ public final class ToolExecutionGateway implements ToolGateway {
 
   private static final String PERMISSION_DENIED_MESSAGE = "Tool permission was denied.";
 
-  private final HarnessCatalog catalog;
+  private final RuntimeToolCatalog toolCatalog;
+  private final HarnessCatalog harnessCatalog;
   private final ContributorBranchViewLoader contributorBranchViewLoader;
   private final EnvironmentCapabilityTransport capabilityTransport;
   private final PermissionEvaluator permissionEvaluator;
@@ -123,7 +126,8 @@ public final class ToolExecutionGateway implements ToolGateway {
   private final ConcurrencyAdmission admission;
 
   public ToolExecutionGateway(
-      HarnessCatalog catalog,
+      RuntimeToolCatalog toolCatalog,
+      HarnessCatalog harnessCatalog,
       ContributorBranchViewLoader contributorBranchViewLoader,
       EnvironmentCapabilityTransport capabilityTransport,
       PermissionEvaluator permissionEvaluator,
@@ -136,7 +140,8 @@ public final class ToolExecutionGateway implements ToolGateway {
       Supplier<Duration> retryDelay,
       Clock clock,
       ConcurrencyAdmission admission) {
-    this.catalog = Objects.requireNonNull(catalog, "catalog");
+    this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
+    this.harnessCatalog = Objects.requireNonNull(harnessCatalog, "harnessCatalog");
     this.contributorBranchViewLoader =
         Objects.requireNonNull(contributorBranchViewLoader, "contributorBranchViewLoader");
     this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
@@ -160,7 +165,7 @@ public final class ToolExecutionGateway implements ToolGateway {
 
   private ResolvedContribution validateContribution(ToolBinding binding) {
     AgentToolDefinition frozenDefinition = binding.definition();
-    ToolContribution contribution = catalog.findTool(frozenDefinition.id()).orElse(null);
+    ToolContribution contribution = toolCatalog.findTool(frozenDefinition.id()).orElse(null);
     if (contribution == null) {
       return new ResolvedContribution(
           null,
@@ -332,7 +337,7 @@ public final class ToolExecutionGateway implements ToolGateway {
               currentDescriptor.name(),
               toolRequest.call().id(),
               lease,
-              catalog,
+              harnessCatalog,
               contribution,
               execution.request().binding());
       GatewayHandle handle = new GatewayHandle(bridge, lease);
@@ -630,7 +635,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     private final String toolName;
     private final String expectedCallId;
     private final ConcurrencyAdmission.Lease lease;
-    private final HarnessCatalog catalog;
+    private final HarnessCatalog harnessCatalog;
     private final ToolContribution contribution;
     private final ToolBinding binding;
     private final Object monitor = new Object();
@@ -648,7 +653,7 @@ public final class ToolExecutionGateway implements ToolGateway {
         String toolName,
         String expectedCallId,
         ConcurrencyAdmission.Lease lease,
-        HarnessCatalog catalog,
+        HarnessCatalog harnessCatalog,
         ToolContribution contribution,
         ToolBinding binding) {
       this.listener = Objects.requireNonNull(listener, "listener");
@@ -656,7 +661,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       this.toolName = Objects.requireNonNull(toolName, "toolName");
       this.expectedCallId = Objects.requireNonNull(expectedCallId, "expectedCallId");
       this.lease = Objects.requireNonNull(lease, "lease");
-      this.catalog = Objects.requireNonNull(catalog, "catalog");
+      this.harnessCatalog = Objects.requireNonNull(harnessCatalog, "harnessCatalog");
       this.contribution = Objects.requireNonNull(contribution, "contribution");
       this.binding = Objects.requireNonNull(binding, "binding");
     }
@@ -882,7 +887,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       String contributorId = contribution.id().contributorId().value();
       List<CustomEntryPayload> payloads = new ArrayList<>(outcome.customEntries().size());
       for (AppendCustomEntry entry : outcome.customEntries()) {
-        if (catalog
+        if (harnessCatalog
             .findCustomEntryType(contribution.id().contributorId(), entry.customType())
             .isEmpty()) {
           throw new IllegalArgumentException(

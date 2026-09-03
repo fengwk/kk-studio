@@ -2,23 +2,23 @@ package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.util.List;
 import java.util.Objects;
 
-/** 只依据静态 catalog 校验 Agent 选择；在线 Environment 状态与校验无关。 */
+/** 依据 {@link RuntimeToolCatalog} 校验 Agent 选择；在线 Environment 状态与校验无关。 */
 @Component
 final class AgentDefinitionConfigValidator {
 
-  private final HarnessCatalog catalog;
+  private final RuntimeToolCatalog toolCatalog;
 
-  AgentDefinitionConfigValidator(HarnessCatalog catalog) {
-    this.catalog = Objects.requireNonNull(catalog, "catalog");
+  AgentDefinitionConfigValidator(RuntimeToolCatalog toolCatalog) {
+    this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
   }
 
   void validate(AgentDefinitionConfigDTO config) {
@@ -36,7 +36,7 @@ final class AgentDefinitionConfigValidator {
       } catch (RuntimeException error) {
         throw new IllegalArgumentException("invalid agent tool id: " + value, error);
       }
-      ToolContribution contribution = catalog.findTool(id).orElse(null);
+      ToolContribution contribution = toolCatalog.findTool(id).orElse(null);
       if (contribution == null) {
         throw new IllegalArgumentException("unknown agent tool id: " + id);
       }
