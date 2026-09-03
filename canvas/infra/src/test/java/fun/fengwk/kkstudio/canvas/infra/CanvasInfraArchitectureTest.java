@@ -29,7 +29,8 @@ class CanvasInfraArchitectureTest {
           "com.fasterxml.jackson.core:jackson-databind",
           "fun.fengwk.convention4j:convention4j-spring-boot-starter",
           "fun.fengwk.kk-studio:kk-studio-canvas-core",
-          "org.mybatis.spring.boot:mybatis-spring-boot-starter");
+          "org.mybatis.spring.boot:mybatis-spring-boot-starter",
+          "org.springframework.boot:spring-boot-starter-aspectj");
   private static final List<String> ALLOWED_IMPORT_PREFIXES =
       List.of(
           "com.fasterxml.jackson.",
@@ -55,7 +56,7 @@ class CanvasInfraArchitectureTest {
         violations.isEmpty(), () -> "architecture violations:\n" + String.join("\n", violations));
   }
 
-  /** Infra 的直接生产依赖只允许 Core、Jackson、Spring 与 MyBatis 装配能力。 */
+  /** Infra 的直接生产依赖只允许 Core、Jackson、Spring（含 AspectJ）与 MyBatis 装配能力。 */
   @Test
   void pomDeclaresOnlyCanvasInfraProductionDependencies() throws IOException {
     String text = Files.readString(locateModuleRoot().resolve("pom.xml"), StandardCharsets.UTF_8);

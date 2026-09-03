@@ -145,7 +145,7 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp checkstyle:check
 
 ### 5.3 JaCoCo
 
-effective Maven POM 当前由 parent 提供 JaCoCo `0.8.11`：
+kk-studio 根 POM 直接配置并提供 JaCoCo `0.8.11`：
 
 - `prepare-agent` 注入 test JVM；
 - `test` phase 执行 `report`；
@@ -633,9 +633,9 @@ Runner 使用 Node built-in `fetch`，每个请求 timeout `5000ms`，固定使�
   NVD 官方 JSON 2.0 feed：
   `https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz`。
 - 在线源、Maven Central、npm registry、NVD 或 report generation 不可用时
-  保持 `FAIL`；缺失数据不能生成 `PASS`。当前精确 suppression 文件是
-  [dependency-check-suppressions.xml](../../config/supply-chain/dependency-check-suppressions.xml)，
-  结果仍要求非 suppressed vulnerability 数为零。
+  保持 `FAIL`；缺失数据不能生成 `PASS`。供应链策略实行零 suppression 与零漏洞
+  （zero suppressions / zero vulnerabilities），Dependency-Check 与 npm audit
+  均不配置任何白名单或 suppression 文件，全量依赖漏洞数必须为零。
 - Trivy image 固定为：
   `aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969`
   （脚本当前 immutable digest），并校验版本 `0.74.0`。数据库仓库为
