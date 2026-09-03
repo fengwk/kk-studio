@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.rootEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.session;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
@@ -592,5 +594,180 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void findRootEntryRejectsNullSessionId() {
     assertThrows(NullPointerException.class, () -> store.transaction(tx -> tx.findRootEntry(null)));
+  }
+
+  /** 测试意图：loadContributorCustomEntriesOnPath 覆盖同一路径多个匹配时，严格保持 root-to-head 顺序，且返回不可变列表。 */
+  @Test
+  void loadContributorCustomEntriesOnPathReturnsEntriesInRootToHeadOrder() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID custom1 =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            new CustomEntryPayload("test.contributor", "type.a", 1, "{\"step\":1}"));
+    UUID intermediateCustom =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            custom1,
+            new CustomEntryPayload("other.contributor", "type.x", 1, "{\"skip\":true}"));
+    UUID custom2 =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            intermediateCustom,
+            new CustomEntryPayload("test.contributor", "type.b", 1, "{\"step\":2}"));
+
+    store.transaction(
+        tx -> {
+          List<Entry> entries = tx.loadContributorCustomEntriesOnPath(custom2, "test.contributor");
+          assertEquals(2, entries.size());
+          assertEquals(List.of(custom1, custom2), entries.stream().map(Entry::id).toList());
+          assertThrows(UnsupportedOperationException.class, () -> entries.add(null));
+          return null;
+        });
+  }
+
+  /** 测试意图：loadContributorCustomEntriesOnPath 排除其他 contributor，并排除 sibling 分支上的 custom entry。 */
+  @Test
+  void loadContributorCustomEntriesOnPathExcludesOtherContributorsAndSiblings() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID sharedAlpha =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            new CustomEntryPayload("contributor.alpha", "state", 1, "{\"common\":true}"));
+    UUID sharedBeta =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            sharedAlpha,
+            new CustomEntryPayload("contributor.beta", "state", 1, "{\"other\":true}"));
+    UUID branch1Alpha =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            sharedBeta,
+            new CustomEntryPayload("contributor.alpha", "state", 1, "{\"branch\":1}"));
+    UUID branch2Alpha =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            sharedBeta,
+            new CustomEntryPayload("contributor.alpha", "state", 1, "{\"branch\":2}"));
+
+    store.transaction(
+        tx -> {
+          List<Entry> branch1AlphaEntries =
+              tx.loadContributorCustomEntriesOnPath(branch1Alpha, "contributor.alpha");
+          assertEquals(
+              List.of(sharedAlpha, branch1Alpha),
+              branch1AlphaEntries.stream().map(Entry::id).toList());
+
+          List<Entry> branch2AlphaEntries =
+              tx.loadContributorCustomEntriesOnPath(branch2Alpha, "contributor.alpha");
+          assertEquals(
+              List.of(sharedAlpha, branch2Alpha),
+              branch2AlphaEntries.stream().map(Entry::id).toList());
+
+          List<Entry> branch1BetaEntries =
+              tx.loadContributorCustomEntriesOnPath(branch1Alpha, "contributor.beta");
+          assertEquals(List.of(sharedBeta), branch1BetaEntries.stream().map(Entry::id).toList());
+          return null;
+        });
+  }
+
+  /** 测试意图：当路径上无匹配 custom entry 时返回空列表，包括 head 为 ROOT 或无任何匹配 contributor 的场景。 */
+  @Test
+  void loadContributorCustomEntriesOnPathReturnsEmptyWhenNoMatches() {
+    Baseline baseline = seedThreadBaseline(store);
+    store.transaction(
+        tx -> {
+          List<Entry> onRoot =
+              tx.loadContributorCustomEntriesOnPath(baseline.rootEntryId(), "any.contributor");
+          assertTrue(onRoot.isEmpty());
+          assertThrows(UnsupportedOperationException.class, () -> onRoot.add(null));
+          return null;
+        });
+
+    UUID otherCustom =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            new CustomEntryPayload("other.contributor", "state", 1, "{\"ok\":true}"));
+
+    store.transaction(
+        tx -> {
+          List<Entry> onOther =
+              tx.loadContributorCustomEntriesOnPath(otherCustom, "target.contributor");
+          assertTrue(onOther.isEmpty());
+          return null;
+        });
+  }
+
+  /** 测试意图：unknown head 必须 fail closed，抛出 IllegalArgumentException。 */
+  @Test
+  void loadContributorCustomEntriesOnPathRejectsUnknownHead() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> tx.loadContributorCustomEntriesOnPath(TestIds.id(99999), "any.contributor")));
+  }
+
+  /** 测试意图：loadContributorCustomEntriesOnPath 拒绝 null headEntryId 与 null contributorId。 */
+  @Test
+  void loadContributorCustomEntriesOnPathRejectsNullArguments() {
+    Baseline baseline = seedThreadBaseline(store);
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            store.transaction(
+                tx -> tx.loadContributorCustomEntriesOnPath(null, "any.contributor")));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            store.transaction(
+                tx -> tx.loadContributorCustomEntriesOnPath(baseline.rootEntryId(), null)));
+  }
+
+  /** 测试意图：head 本身为不匹配的 CUSTOM Entry 时只作为 sentinel 参与路径完整性验证，绝不泄漏至结果中。 */
+  @Test
+  void loadContributorCustomEntriesOnPathNonMatchingHeadActsOnlyAsSentinel() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID targetCustom =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            new CustomEntryPayload("target.contributor", "type", 1, "{\"ok\":true}"));
+    UUID otherHeadCustom =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            targetCustom,
+            new CustomEntryPayload("other.contributor", "type", 1, "{\"other\":true}"));
+
+    store.transaction(
+        tx -> {
+          // 查询 target.contributor：应只包含 targetCustom，不泄漏 head (otherHeadCustom)
+          List<Entry> targetEntries =
+              tx.loadContributorCustomEntriesOnPath(otherHeadCustom, "target.contributor");
+          assertEquals(List.of(targetCustom), targetEntries.stream().map(Entry::id).toList());
+
+          // 查询第三方 contributor：两者的 entry 均不应泄漏，返回空
+          List<Entry> thirdEntries =
+              tx.loadContributorCustomEntriesOnPath(otherHeadCustom, "third.contributor");
+          assertTrue(thirdEntries.isEmpty());
+
+          // 查询 other.contributor：此时 head 本身是匹配的，应正确包含 head
+          List<Entry> otherEntries =
+              tx.loadContributorCustomEntriesOnPath(otherHeadCustom, "other.contributor");
+          assertEquals(List.of(otherHeadCustom), otherEntries.stream().map(Entry::id).toList());
+          return null;
+        });
   }
 }

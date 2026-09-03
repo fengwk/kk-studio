@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
@@ -477,6 +478,19 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       Collections.reverse(path);
       return new EntryPath(path);
+    }
+
+    @Override
+    public List<Entry> loadContributorCustomEntriesOnPath(UUID headEntryId, String contributorId) {
+      checkOpen();
+      Objects.requireNonNull(headEntryId, "headEntryId");
+      Objects.requireNonNull(contributorId, "contributorId");
+      return loadEntryPath(headEntryId).entries().stream()
+          .filter(
+              entry ->
+                  entry.payload() instanceof CustomEntryPayload custom
+                      && contributorId.equals(custom.contributorId()))
+          .toList();
     }
 
     @Override
