@@ -121,12 +121,12 @@ fi
 DISTRIBUTED_RUNNER="$SCRIPT_DIR/../deploy/distributed/run.sh"
 
 # --distributed 是正交 capability：默认单实例路径完全不变；只有显式 --distributed
-# 才启停 deploy/distributed 双节点 mock 栈。本切片 distributed 只承载免费基础设施
-# case，与真实 Provider/Daemon/UI/storage 组合留待 Environment 分支集成。
+# 才启停隔离的双节点免费 mock 栈，不与真实 Provider、宿主 Daemon、UI 或 storage
+# capability 组合。
 if [ "$DISTRIBUTED" = "true" ]; then
   for flag in REAL WITH_TOOLS WITH_BRANCH WITH_CANVAS_STORAGE WITH_CANVAS_FUNCTION WITH_UI; do
     if [ "${!flag}" = "true" ]; then
-      die "--distributed cannot be combined with --${flag} capability in this slice"
+      die "--distributed cannot be combined with --${flag} capability"
     fi
   done
   command -v docker >/dev/null 2>&1 || die "docker is required for --distributed"
