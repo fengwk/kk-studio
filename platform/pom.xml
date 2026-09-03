@@ -79,7 +79,7 @@
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-open-ai-official</artifactId>
+            <artifactId>langchain4j-http-client-jdk</artifactId>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>

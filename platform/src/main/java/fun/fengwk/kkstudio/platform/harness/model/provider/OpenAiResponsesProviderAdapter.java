@@ -1,10 +1,9 @@
 package fun.fengwk.kkstudio.platform.harness.model.provider;
 
-import com.openai.client.OpenAIClient;
-import com.openai.models.ReasoningEffort;
+import dev.langchain4j.http.client.jdk.JdkHttpClient;
+import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.openaiofficial.OpenAiOfficialResponsesStreamingChatModel;
-import dev.langchain4j.model.openaiofficial.setup.OpenAiOfficialSetup;
+import dev.langchain4j.model.openai.OpenAiResponsesStreamingChatModel;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
@@ -12,6 +11,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
+import java.time.Duration;
+import java.util.Locale;
 import java.util.Objects;
 
 /** OpenAI Responses API Provider 适配器。 */
@@ -35,34 +36,25 @@ public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
       @Override
       protected StreamingChatModel chatModel(ProviderRequest request) {
         String key = CacheRequestValidator.requireOpenAiAffinity(request.cacheControl());
-        // LangChain4j 会直接读取 SDK 标为必填的 usage breakdown；兼容端点可能省略这些字段。
-        OpenAIClient client =
-            OpenAiOfficialSetup.setupSyncClient(
-                    descriptor.endpoint(),
-                    apiKey,
-                    null,
-                    null,
-                    null,
-                    null,
-                    false,
-                    false,
-                    request.model().modelName(),
-                    descriptor.modelCallTimeoutPolicy().modelCallTimeout(),
-                    null,
-                    null,
-                    null)
-                .withOptions(
-                    options -> options.jsonMapper(OpenAiResponsesUsageJsonMapper.instance()));
-        OpenAiOfficialResponsesStreamingChatModel.Builder builder =
-            OpenAiOfficialResponsesStreamingChatModel.builder()
-                .client(client)
-                .modelName(request.model().modelName());
+        Duration timeout = descriptor.modelCallTimeoutPolicy().modelCallTimeout();
+        JdkHttpClientBuilder httpClientBuilder = JdkHttpClient.builder();
+        if (timeout != null) {
+          httpClientBuilder.connectTimeout(timeout).readTimeout(timeout);
+        }
+        OpenAiResponsesStreamingChatModel.Builder builder =
+            OpenAiResponsesStreamingChatModel.builder()
+                .httpClientBuilder(httpClientBuilder)
+                .baseUrl(descriptor.endpoint())
+                .apiKey(apiKey)
+                .modelName(request.model().modelName())
+                .store(false)
+                .strictTools(true)
+                .strictJsonSchema(true);
         String reasoningEffort =
             request.model().reasoning() ? request.variant().reasoningEffort() : null;
-        if (reasoningEffort != null) {
-          builder.reasoningEffort(ReasoningEffort.of(reasoningEffort));
+        if (reasoningEffort != null && !reasoningEffort.isBlank()) {
+          builder.reasoningEffort(reasoningEffort.trim().toLowerCase(Locale.ROOT));
         }
-        // SDK builder 不接受 null promptCacheKey，因此仅在非 NONE 时显式设置。
         if (key != null) {
           builder.promptCacheKey(key);
         }
