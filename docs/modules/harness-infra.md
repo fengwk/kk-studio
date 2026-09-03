@@ -79,6 +79,8 @@ Harness durable protocol 恰好七张表：
 
 `findRootEntry(sessionId)` 优先复用当前事务缓存中已存在的同 Session EntryPath ROOT；cache miss 时通过 partial unique index `uk_harness_entry_single_root` 进行点查，并将单节点 ROOT 路径写回缓存。
 
+`loadContributorCustomEntriesOnPath` 在 exact full `entryPathCache` 命中时直接在内存中过滤返回；cold cache 使用独立 `WITH RECURSIVE ... CYCLE`，最终只返回 ROOT/head/cycle sentinel 与匹配 CUSTOM，验证到 ROOT/无 cycle/正确 head/同 Session；部分投影绝不写入 full path cache。
+
 ### 事务锁序
 
 所有多实体 Runtime transaction 的锁级别是：
@@ -223,6 +225,7 @@ queued/running handoff 数量，不限制 Model/Tool 外部 execution 并发。`
 - [`PostgresqlHarnessSchemaTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessSchemaTest.java)、[`PostgresqlHarnessStoreTransactionTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreTransactionTest.java)：七表 schema、transaction boundary 和 handle lifecycle。
 - [`PostgresqlEntryPathCacheTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlEntryPathCacheTest.java)：事务内 EntryPath 局部缓存、首次持久化读取/连续 append 的 CTE 计数、事务隔离与 deleteEntries 驱逐。
 - [`PostgresqlAcceptCommandsRootQueryTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlAcceptCommandsRootQueryTest.java)：守护非 ROOT head 的新 batch/ordered replay 为 0 次完整 path CTE，执行开销与 Entry 树深度无关。
+- [`PostgresqlContributorCustomPathTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlContributorCustomPathTest.java)：窄查询守卫，验证 cycle corruption fail-closed、cold cache 0 次 full-path CTE 以及 warm cache reuse 内存复用。
 - [`PostgresqlHarnessStoreConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreConcurrencyTest.java)、[`PostgresqlInvocationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlInvocationTest.java)：并发锁序、Invocation transition 和 terminal facts。
 - [`PostgresqlWorkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkTest.java)、[`PostgresqlWorkNotificationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkNotificationTest.java)：claim/lease/wake/NOTIFY/poll 语义。
 - [`HarnessWorkDispatcherLifecycleTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherLifecycleTest.java)、[`HarnessWorkDispatcherDrainTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherDrainTest.java)、[`HarnessWorkDispatcherHandoffTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherHandoffTest.java)：single drain、round-robin、bounded handoff、rejection 和 stop。
