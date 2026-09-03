@@ -436,7 +436,7 @@ public record SystemSettings(
     }
   }
 
-  /** advanced section：processor/dispatcher/executor/事件通道/工作通知的进程级运行预算。 */
+  /** advanced section：processor/executor/事件通道/工作通知的进程级运行预算。 */
   public record Advanced(
       long resourceMaxBytes,
       long processorLeaseDurationMillis,
@@ -445,12 +445,6 @@ public record SystemSettings(
       long modelDispatchBusyFallbackDelayMillis,
       long toolPreflightFailureDelayMillis,
       long toolDispatchBusyFallbackDelayMillis,
-      long dispatcherLeaseDurationMillis,
-      long dispatcherPollIntervalMillis,
-      long dispatcherRejectionDelayMillis,
-      int dispatcherMaxDispatchTasks,
-      int dispatcherWorkerConcurrency,
-      int dispatcherWorkerQueueCapacity,
       int applicationEventQueueCapacity,
       long applicationEventMaxBytes,
       long applicationEventSendTimeoutMillis,
@@ -467,12 +461,6 @@ public record SystemSettings(
             1_000L,
             1_000L,
             1_000L,
-            30_000L,
-            1_000L,
-            1_000L,
-            64,
-            16,
-            64,
             512,
             2L * 1024 * 1024,
             10_000L,
@@ -499,18 +487,6 @@ public record SystemSettings(
           toolPreflightFailureDelayMillis, "advanced.toolPreflightFailureDelayMillis");
       SystemSettingsValidation.requirePositiveMillis(
           toolDispatchBusyFallbackDelayMillis, "advanced.toolDispatchBusyFallbackDelayMillis");
-      SystemSettingsValidation.requirePositiveMillis(
-          dispatcherLeaseDurationMillis, "advanced.dispatcherLeaseDurationMillis");
-      SystemSettingsValidation.requirePositiveMillis(
-          dispatcherPollIntervalMillis, "advanced.dispatcherPollIntervalMillis");
-      SystemSettingsValidation.requirePositiveMillis(
-          dispatcherRejectionDelayMillis, "advanced.dispatcherRejectionDelayMillis");
-      SystemSettingsValidation.requireAtLeast(
-          dispatcherMaxDispatchTasks, 1, "advanced.dispatcherMaxDispatchTasks");
-      SystemSettingsValidation.requireAtLeast(
-          dispatcherWorkerConcurrency, 1, "advanced.dispatcherWorkerConcurrency");
-      SystemSettingsValidation.requireAtLeast(
-          dispatcherWorkerQueueCapacity, 1, "advanced.dispatcherWorkerQueueCapacity");
       SystemSettingsValidation.requireAtLeast(
           applicationEventQueueCapacity, 1, "advanced.applicationEventQueueCapacity");
       SystemSettingsValidation.requirePositiveMillis(
