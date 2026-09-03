@@ -98,6 +98,12 @@ class HarnessRuntimeConfigurationTest {
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> "false");
+    registry.add("kk-studio.harness.dispatcher.max-dispatch-tasks", () -> "7");
+    registry.add("kk-studio.harness.dispatcher.lease-duration", () -> "45s");
+    registry.add("kk-studio.harness.dispatcher.poll-interval", () -> "2s");
+    registry.add("kk-studio.harness.dispatcher.rejection-delay", () -> "250ms");
+    registry.add("kk-studio.harness.dispatcher.worker.concurrency", () -> "3");
+    registry.add("kk-studio.harness.dispatcher.worker.queue-capacity", () -> "5");
   }
 
   @Autowired private HarnessRuntimeProperties properties;
@@ -142,9 +148,12 @@ class HarnessRuntimeConfigurationTest {
     assertNotNull(systemPromptPreviewService);
     assertNotNull(harnessWorkDispatcher);
     assertNotNull(harnessDispatcherProperties);
-    assertEquals(64, harnessDispatcherProperties.getMaxDispatchTasks());
-    assertEquals(16, harnessDispatcherProperties.getWorker().getConcurrency());
-    assertEquals(64, harnessDispatcherProperties.getWorker().getQueueCapacity());
+    assertEquals(7, harnessDispatcherProperties.getMaxDispatchTasks());
+    assertEquals(Duration.ofSeconds(45), harnessDispatcherProperties.getLeaseDuration());
+    assertEquals(Duration.ofSeconds(2), harnessDispatcherProperties.getPollInterval());
+    assertEquals(Duration.ofMillis(250), harnessDispatcherProperties.getRejectionDelay());
+    assertEquals(3, harnessDispatcherProperties.getWorker().getConcurrency());
+    assertEquals(5, harnessDispatcherProperties.getWorker().getQueueCapacity());
     assertNotNull(postgresqlNotificationLoop);
     assertNotNull(environmentReadyListener);
     assertEquals(
@@ -185,10 +194,10 @@ class HarnessRuntimeConfigurationTest {
   void workerExecutorIsBoundedWithAbortPolicy() {
     assertInstanceOf(ThreadPoolExecutor.class, workerExecutor);
     ThreadPoolExecutor pool = (ThreadPoolExecutor) workerExecutor;
-    assertEquals(16, pool.getCorePoolSize());
-    assertEquals(16, pool.getMaximumPoolSize());
+    assertEquals(3, pool.getCorePoolSize());
+    assertEquals(3, pool.getMaximumPoolSize());
     assertInstanceOf(LinkedBlockingQueue.class, pool.getQueue());
-    assertEquals(64, pool.getQueue().remainingCapacity());
+    assertEquals(5, pool.getQueue().remainingCapacity());
     assertInstanceOf(ThreadPoolExecutor.AbortPolicy.class, pool.getRejectedExecutionHandler());
   }
 

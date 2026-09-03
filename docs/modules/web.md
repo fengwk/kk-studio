@@ -428,6 +428,7 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 | `server.port` / `server.compression.enabled` | 默认 `8080`与 gzip |
 | `management.endpoints.web.exposure.include` | `health,prometheus,offline,online` |
 | `kk-studio.harness.runtime.workers-enabled` | 是否启动 Work dispatcher；测试默认 false |
+| `kk-studio.harness.dispatcher.*` | Work claim/handoff 租约、轮询、拒绝退避及 bounded worker 容量 |
 | `kk-studio.harness.contributors.directory` | trusted JAR 目录；空值不加载外部贡献者 |
 | `kk-studio.harness.environment-gateway.*` | 入站 frame 和出站 queue/bytes/send timeout |
 

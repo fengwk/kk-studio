@@ -227,9 +227,14 @@ erDiagram
         UUID model_invocation_id FK
         UUID assistant_entry_id FK
         int call_index
-        jsonb definition
-        jsonb contributor
+        jsonb call
+        jsonb binding
         varchar status
+        int attempt
+        jsonb approval
+        jsonb result
+        jsonb effects
+        jsonb error
     }
 
     Work {
@@ -250,23 +255,28 @@ erDiagram
 | 包名 (`fun.fengwk.kkstudio.harness.runtime.*`) | 核心类与接口 | 职责描述 |
 |---|---|---|
 | **`root`** | `HarnessRuntime`, `AcceptCommandsControl`, `StopControl`, `ChangeGate` | 外部同步门面与控制入口；原子控制批处理命令提交、停止与变更观察。 |
-| **`store`** | `HarnessStore`, `HarnessStore.Transaction`, `LockKey` | 持久化抽象接口，声明强类型事务与全局锁序。 |
-| **`session`** | `Session`, `AgentMessage`, `AgentMessageRole` | 会话聚合根与基础消息角色契约。 |
-| **`entry`** | `BranchSettings`, `ModelSelection` | 分支运行时上下文设置（环境路径、Agent 标识、模型配置）。 |
+| **`store`** | `HarnessStore`, `HarnessStore.Transaction`, `HarnessStoreTime`, `UuidOrder` | 单一持久化端口、强类型事务与 canonical 时间/UUID 顺序。 |
+| **`session`** | `Session`, `AgentMessage`, `AgentMessageContent`, `AgentMessageJsonCodec` | 会话聚合根、不可变消息内容与确定性 JSON 协议。 |
+| **`entry`** | `BranchSettings`, `ModelSelection`, `TurnStartReason`, `TurnEndOutcome` | 分支设置与 Turn 边界共享值类型。 |
 | **`history`** | `Entry`, `EntryPath`, `EntryPayload`, `TurnPathValidator` | 追加型历史语法树、不可变路径校验、Turn Grammar 守卫。 |
-| **`thread`** | `ThreadState`, `ThreadCommand`, `ThreadContext` | 线程状态投影、命令信箱定义、6 种运行时上下文状态机。 |
-| **`work`** | `Work`, `ClaimedWork`, `WorkTargetType` | 分布式可调度任务信箱、排他租约与抢占结果。 |
-| **`invocation.model`** | `ModelInvocation`, `ModelRequestSpec`, `ModelRequestMaterializer` | 模型调用实体、不可变请求规格、历史到请求纯投影转换器。 |
-| **`invocation.tool`** | `ToolInvocation`, `ToolBinding`, `ContributorBinding`, `ToolEffectBatch` | 工具调用实体、绑定规格、插件溯源与自定义状态副作用批处理。 |
-| **`invocation.codec`** | Codec 系列 | 调用实体与绑定的 JSON 编解码器。 |
-| **`model`** | `ModelDescriptor`, `ModelVariant`, `ModelCost`, `ModelUsage` | 语言模型元数据描述、成本用量核算与采样变体。 |
-| **`model.provider`** | `ProviderRequest`, `ProviderResponse`, `ProviderType` | 语言模型服务商中立的请求/响应实体与流式事件。 |
+| **`thread`** | `ThreadState`, `ThreadContext`, `ThreadContextClassifier`, `ProviderMessageProjector` | durable Thread 状态、live/historical 上下文分类与 Provider 消息投影。 |
+| **`thread.command`** | `ThreadCommand`, `ThreadCommandPayload`, `CommandHarvestReducer` | 有序命令信箱、payload 协议与确定性 harvest reducer。 |
+| **`work`** | `Work`, `ClaimedWork`, `WorkTarget`, `WorkTargetType` | `THREAD/MODEL/TOOL` 共享的 durable Work 信箱、租约与 claim 结果。 |
+| **`invocation.model`** | `ModelInvocation`, `ModelRequestSpec`, `ModelRequestMaterializer`, `StreamCheckpoint` | 模型调用的 durable 当前状态、冻结请求事实与流式断点。 |
+| **`invocation.tool`** | `ToolInvocation`, `ToolBinding`, `ContributorBinding`, `ToolEffectBatch` | 工具调用的 durable 当前状态、冻结绑定、审批与自定义副作用批。 |
+| **`invocation.codec`** | `ModelRequestSpecJsonCodec`, `ToolBindingJsonCodec`, `ToolEffectBatchJsonCodec` | Model/Tool Invocation 值列的严格确定性 JSON 协议。 |
+| **`model`** | `ModelDescriptor`, `ModelVariant`, `ModelCost`, `ModelUsage`, `ModelInvocationError` | 模型元数据、成本用量与 typed invocation error。 |
+| **`model.cache`** | `PromptCachePolicy`, `PromptCacheCapability`, `ProviderCacheControl` | Provider prompt cache 能力、模式、断点与保留策略。 |
+| **`model.codec`** | `ModelDescriptorJsonCodec` | 共享 Model value object 的 JSON 编解码。 |
+| **`model.provider`** | `ProviderRequest`, `ProviderResponse`, `ProviderStream`, `ProviderAdapter` | Provider 中立的请求、响应、流式事件与 adapter 契约。 |
+| **`model.provider.codec`** | `ProviderRequestJsonCodec`, `ProviderResponseJsonCodec` | Provider 请求与响应的严格确定性 JSON 协议。 |
+| **`tool`** | `ToolInvocationError`, `ToolInvocationErrorJsonCodec` | Tool 边界的 typed invocation error 与 JSON 协议。 |
 | **`processor`** | `ThreadProcessor`, `ModelProcessor`, `ToolProcessor`, `TurnPlan` | 状态机引擎；消费 Work 租约并驱动离散持久化跃迁。 |
 | **`port`** | `TurnResolver`, `ModelGateway`, `ToolGateway`, `RealtimeEventSink` | 外部能力接入端口（SPI）。 |
 | **`compaction`** | `CompactionPlanner`, `CompactionConfig`, `CompactionTurns` | 历史上下文自动与手动修剪规划器、软硬阈值判定。 |
 | **`permission`** | `PermissionEvaluator`, `ToolSettings`, `BashSurfaceAnalyzer` | 工具执行权限求值器、通配符规则匹配与命令表面分析。 |
-| **`cache`** | `PromptCacheAffinityKeyFactory`, `PromptCachePolicy` | 上下文缓存亲和键生成与服务商缓存策略适配。 |
-| **`retry`** | `InvocationRetryPolicy`, `BackoffPolicy` | 可重试异常指数退避与重试次数约束。 |
+| **`cache`** | `PromptCacheAffinityKeyFactory`, `PromptCacheRequestFinalizer` | Prompt cache 亲和键派生与请求最终化。 |
+| **`retry`** | `InvocationRetryPolicy`, `InvocationRetryBackoffStrategy`, `InvocationRetryPolicyProvider` | Model/Tool Invocation 共享的确定性重试策略。 |
 | **`admission`** | `ConcurrencyAdmission` | 进程内基于信号量的并发容量准入控制器。 |
-| **`resource`** | `ResourceStore`, `ResourceSink`, `ResourceSource` | 外部化二进制与文件资源存储抽象。 |
-| **`realtime`** | `RealtimeEvent`, `RealtimeEventSink` | 瞬态流式增量与事件下发管道。 |
+| **`resource`** | `ResourceStore` | 宿主资源存储能力端口。 |
+| **`realtime`** | `RealtimeEvent`, `RealtimeEventType`, `RealtimeEventJsonCodec` | PostgreSQL notification 承载的有界 live overlay 事件模型。 |

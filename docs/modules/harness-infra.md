@@ -185,7 +185,13 @@ executorRejectionDelay
 maxDispatchTasks
 ```
 
-所有 Duration 必须是正的整毫秒；`maxDispatchTasks` 只限制 dispatcher 本地 queued/running handoff 数量，不限制 Model/Tool 外部 execution 并发。`PostgresqlHarnessStore` 的 UUID 由注入 `Supplier<UUID>` 提供。
+生产组合根通过 `HarnessDispatcherProperties` 将 `kk-studio.harness.dispatcher.*`
+映射为上述配置，并单独构建 bounded worker executor；这些值属于部署启动边界，不进入
+SystemSettings、DTO 或 frontend。
+
+所有 Duration 必须是正的整毫秒；`maxDispatchTasks` 只限制 dispatcher 本地
+queued/running handoff 数量，不限制 Model/Tool 外部 execution 并发。`PostgresqlHarnessStore`
+的 UUID 由注入 `Supplier<UUID>` 提供。
 
 外部可替换：
 
