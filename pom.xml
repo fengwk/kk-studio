@@ -28,7 +28,8 @@
         <project.build.sourceEncoding>utf-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>utf-8</project.reporting.outputEncoding>
         <kk-studio.version>1.0.0</kk-studio.version>
-        <spring-boot.version>3.5.16</spring-boot.version>
+        <spring-boot.version>4.0.8</spring-boot.version>
+        <mybatis-spring-boot-starter.version>4.0.1</mybatis-spring-boot-starter.version>
         <jackson.version>2.22.1</jackson.version>
         <netty.version>4.1.137.Final</netty.version>
         <log4j.version>2.26.1</log4j.version>

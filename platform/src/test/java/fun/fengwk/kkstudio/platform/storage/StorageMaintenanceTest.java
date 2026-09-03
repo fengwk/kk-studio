@@ -126,6 +126,43 @@ class StorageMaintenanceTest {
     }
   }
 
+  /**
+   * 测试意图：验证 SmartLifecycle 的 start/stop 可重复调用语义——stop 仅暂停后台维护并释放当前 executor， 之后仍可被 start 安全重启；只有
+   * AutoCloseable.close 后才会永久关闭并拒绝 start。
+   */
+  @Test
+  void stopSuspendsMaintenanceAndCanBeRestartedUntilClosed() throws Exception {
+    CountingUploadService uploads = new CountingUploadService(1);
+    CountingBlobManager blobs = new CountingBlobManager(1);
+    StorageMaintenance maintenance =
+        new StorageMaintenance(provider(uploads), provider(blobs), properties(Duration.ofHours(1)));
+    try {
+      maintenance.start();
+      assertTrue(uploads.await());
+      assertTrue(blobs.await());
+      assertTrue(maintenance.isRunning());
+
+      maintenance.stop();
+      assertFalse(maintenance.isRunning());
+
+      int callsBefore = uploads.calls.get();
+      maintenance.wake();
+      assertEquals(callsBefore, uploads.calls.get(), "wake while stopped must be a no-op");
+
+      maintenance.start();
+      assertTrue(maintenance.isRunning());
+
+      maintenance.stop();
+      assertFalse(maintenance.isRunning());
+    } finally {
+      maintenance.close();
+    }
+    assertThrows(
+        IllegalStateException.class,
+        maintenance::start,
+        "start after close must throw IllegalStateException");
+  }
+
   @Test
   void stopCallbackRunsAndServiceFailuresAreIsolated() throws Exception {
     StorageMaintenance stopped =
