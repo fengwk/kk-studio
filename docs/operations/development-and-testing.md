@@ -265,13 +265,13 @@ python3 scripts/security/check-sensitive-data.py
 git diff --check
 ```
 
-`--docs` 必须以 `Total registered: 75` 结束；精确 case inventory、标题和
+`--docs` 必须以 `Total registered: 78` 结束；精确 case inventory、标题和
 requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局、Markdown
 链接、H1、源码路径和旧词守卫。敏感数据门禁扫描当前 tracked 文件和非 ignored
 未跟踪文件，覆盖高置信密钥、Webhook、个人绝对路径和已知私有环境标识；命中时
 只输出规则与 `path:line`。该入口不扫描 Git 历史，历史审计是公开策略中的独立步骤。
 
-## 8. E2E：API levels、flags 和当前 75-case matrix
+## 8. E2E：API levels、flags 和当前 78-case matrix
 
 ### 8.1 入口和 flags
 
@@ -304,10 +304,10 @@ requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局
 | `--with-branch` | 启用 branch case，并自动打开 `--real` |
 | `--with-canvas-storage` | 启用 Canvas Resource/Blob contract，backend 必须有 S3 配置 |
 | `--with-canvas-function` | 启用 fake Canvas Function；隐含 storage、rebuild 和 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true` |
-| `--distributed` | 启停 `deploy/distributed` 双节点 mock topology，并只运行 distributed cases；不启动宿主单实例栈，不读取宿主 MiniMax 凭据 |
+| `--distributed` | 启停 `deploy/distributed` 双节点 mock topology，并在可适用免费矩阵上启用分布式 cases；不启动宿主单实例栈，不读取宿主 MiniMax 凭据 |
 | `--ui` | 在 API matrix 后执行 Playwright UI matrix |
 | `--only CASE_ID` | 只运行指定 case，可重复 |
-| `--level L1\|L2\|L3\|L4` | 过滤 API level，可重复；UI 不属于此过滤器 |
+| `--level L1\|L2\|L3\|L4\|L5` | 过滤 API level，可重复；UI 不属于此过滤器 |
 | `--list` | 只列出 API matrix |
 | `--docs` | 只打印 API case 的标题、requires 和 contract 文档 |
 | `-h/--help` | 打印入口帮助 |
@@ -326,7 +326,7 @@ requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局
 --with-canvas-function
 --distributed
 --only CASE_ID
---level L1|L2|L3|L4
+--level L1|L2|L3|L4|L5
 --list
 --docs
 --report-root DIR
@@ -356,6 +356,7 @@ Daemon environment root 默认是其下的 `environment`，可由
 | L2 | 3 | `--real` | 真实文本 turn、真实 task delegation、stop partial/replay/continue |
 | L3 | 1 | `--real --with-branch` | 同 Session `ENTRY` 分支 Thread |
 | L4 | 3 | `--with-tools`；真实 Tool turn 还需 `--real --with-tools --with-canvas-storage` | Environment READY 与 14 个原子 capability 投影、directories、approval 后 Resource 外部化 |
+| L5 | 3 | `--distributed` | 双节点分布式 mock topology：跨节点 Environment CRUD 共享状态、双向 directory mailbox 路由、DB loss fail-closed 与有界 recovery |
 | UI/L5 | 注册 39，默认 36 | `--ui`；额外 `--with-tools`、`--real` | Playwright 页面、Composer、debug、settings 和 runtime UI |
 
 L1 的默认关闭 categories 是 storage upload、attachment 和 fake Function；
@@ -370,9 +371,10 @@ L1 的 categories 是 seed/catalog、Thread command、CRUD、i18n、settings/eve
 model attempt 和 Canvas API；storage、attachment 和 fake Function 由显式开关
 启用。L2 的 categories 是真实文本 turn、task delegation 和 stop/partial/replay；
 L3 是同一 Session 的 `ENTRY` 分支；L4 是 Environment READY 与原子 capability
-投影、directory、approval 和 Resource externalization。对应 gates 分别是 `--real`、
-`--real --with-branch`、`--with-tools`，需要真实 Tool history 时再加
-`--with-canvas-storage`。
+投影、directory、approval 和 Resource externalization；L5 是双节点分布式 mock topology，
+覆盖跨节点 Environment CRUD 共享状态、双向 owner mailbox marker 目录路由、
+DB loss fail-closed 与有界 recovery。对应 gates 分别是 `--real`、`--real --with-branch`、
+`--with-tools`、`--distributed`，需要真实 Tool history 时再加 `--with-canvas-storage`。
 
 精确的 API case ID、标题和 `requires` 只由
 `node scripts/e2e/run-matrix.mjs --list` 与 `--docs` 提供。
@@ -380,7 +382,7 @@ L3 是同一 Session 的 `ENTRY` 分支；L4 是 Environment READY 与原子 cap
 ### 8.4 UI matrix：注册 39，默认 36
 
 UI 由 `scripts/e2e/ui-smoke.mjs`、`scripts/e2e/ui/composer-matrix.mjs` 和
-`scripts/e2e/ui/workspace-contracts.mjs` 注册；它不是 75 个 API case 的一部分。
+`scripts/e2e/ui/workspace-contracts.mjs` 注册；它不是 78 个 API case 的一部分。
 UI categories 是页面/runtime、Composer/debug 和 Workspace contract；`--ui` 是
 总 gate，默认执行 36 项无成本/无 daemon 用例；`--with-tools` 增加 2 项
 （Environment Workspace 创建与 ToolCard approval/layout），`--real` 增加 1 项真实
@@ -461,9 +463,26 @@ MiniMax 凭据，真实模型仍需独立 `--real`。
 
 `--distributed` 运行通过 `deploy/distributed/run.sh` 启停栈，并在报告中记录
 topology、两个 backend URL 和双 app/daemon 容器日志（进 `logs/`，写盘前经
-凭据脱敏）。分布式 case 用 `requires: ['distributed']` 注册，只在显式开关下
-执行；双 URL 上下文由 runner 的 `ctx.baseUrls` 与 `ctx.callNode('a'|'b', ...)`
+凭据脱敏）。在适用免费矩阵的基础上，3 个 `level: 'L5'`、`requires: ['distributed']`
+的分布式 case 随显式开关启用；双 URL 上下文由 runner 的 `ctx.baseUrls`、
+`ctx.callNode('a'|'b', ...)` 与受限白名单控制 helper `ctx.runDistributedCommand`
 提供，普通单实例运行的 case 与报告格式不变。
+
+三条 L5 分布式契约：
+1. **跨节点 CRUD 共享状态（`distributed.shared_state`）**：在 node A POST 随机临时 Environment Card，
+   在 node B GET 与更新，回 node A 验证更新内容与 CAS version，再跨节点删除并在两节点验证 404；
+   使用 `finally` 尽力清理，禁止将一次性 registrationToken 写入 artifact/log。
+2. **双向 owner mailbox marker（`distributed.lease_mailbox_routing`）**：固定环境
+   `distributed-a`（`33333333-3333-3333-3333-333333333333`）连 app-a，
+   `distributed-b`（`44444444-4444-4444-4444-444444444444`）连 app-b；两个 App 均投影
+   两者 READY；从 node B 查询 env A 根目录必须命中 `distributed-a-only`、从 node A 查询 env B
+   根目录必须命中 `distributed-b-only`，强制走 PostgreSQL directory mailbox 且 marker 绝不混淆。
+3. **DB loss fail-closed 与 recovery（`distributed.db_loss_fail_closed`）**：先证明
+   node B -> env A mailbox 成功；通过受限白名单 helper 调 `disconnect-db-a` 断开 node A DB 网络；
+   断网后从 node A 调 env A directories 必须返回 HTTP 409 且 envelope 含 `ENVIRONMENT_UNAVAILABLE`，
+   证明本地 websocket/内存状态不能绕过 DB；`finally` 中无条件执行 `reconnect-db-a`，随后有界轮询
+   node A DB API 与 node B -> env A directory，恢复并再次读取 A marker，证明 DB-authoritative route/mailbox
+   恢复而非缓存。
 
 ## 9. Reliability：确定性回归和 Agent matrix
 

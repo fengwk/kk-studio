@@ -32,7 +32,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { httpJson, pageResults } from './lib/http.mjs'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
-import { createBaseUrls, createNodeCall } from './lib/distributed.mjs'
+import { createBaseUrls, createNodeCall, runDistributedCommand } from './lib/distributed.mjs'
 import { redactSecrets } from './lib/redact.mjs'
 import { ALL_CASES } from './lib/registry.mjs'
 import { createDurationTimer } from './lib/time.mjs'
@@ -55,6 +55,7 @@ await import('./cases/chat-attachment.mjs')
 await import('./cases/canvas-api.mjs')
 await import('./cases/thread-queued-batch.mjs')
 await import('./cases/real.mjs')
+await import('./cases/distributed.mjs')
 
 class CaseContext {
   constructor({
@@ -80,7 +81,10 @@ class CaseContext {
     this.vars = {}
     // distributed capability：只在同时给出两个节点 URL 时可用。
     this.baseUrls = createBaseUrls(baseUrl, baseUrlB)
-    if (this.baseUrls) this.callNode = createNodeCall(this.baseUrls)
+    if (this.baseUrls) {
+      this.callNode = createNodeCall(this.baseUrls)
+      this.runDistributedCommand = (command) => runDistributedCommand(command)
+    }
   }
 
   artifactsDir() {
@@ -446,7 +450,7 @@ async function main(argv) {
     console.log(`Usage: node scripts/e2e/run-matrix.mjs [options]
   --base-url --base-url-b --frontend-url --real --with-tools --with-branch
   --with-canvas-storage --with-canvas-function --distributed
-  --only <id> --level L1 --list --docs --report-root DIR`)
+  --only <id> --level L1/L2/L3/L4/L5 --list --docs --report-root DIR`)
     return 0
   }
   if (args.list || args.docs) {
