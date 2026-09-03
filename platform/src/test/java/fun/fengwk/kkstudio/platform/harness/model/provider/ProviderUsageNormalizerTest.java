@@ -7,9 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.openai.core.ObjectMappers;
-import com.openai.models.responses.Response;
-import com.openai.models.responses.ResponseUsage;
 import dev.langchain4j.http.client.sse.ServerSentEvent;
 import dev.langchain4j.model.anthropic.AnthropicChatResponseMetadata;
 import dev.langchain4j.model.anthropic.AnthropicTokenUsage;
@@ -17,9 +14,8 @@ import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatResponseMetadata;
 import dev.langchain4j.model.googleai.GoogleAiGeminiTokenUsage;
 import dev.langchain4j.model.openai.OpenAiChatResponseMetadata;
+import dev.langchain4j.model.openai.OpenAiResponsesChatResponseMetadata;
 import dev.langchain4j.model.openai.OpenAiTokenUsage;
-import dev.langchain4j.model.openaiofficial.OpenAiOfficialResponsesChatResponseMetadata;
-import dev.langchain4j.model.openaiofficial.OpenAiOfficialTokenUsage;
 import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.TokenUsage;
 import org.junit.jupiter.api.Test;
@@ -279,25 +275,26 @@ class ProviderUsageNormalizerTest {
   /** OpenAI Responses SDK 与 Chat 语义对齐：cached/reasoning 独立扣除。 */
   @Test
   void openAiResponsesSubtractsCachedAndReasoning() {
-    OpenAiOfficialTokenUsage usage =
-        OpenAiOfficialTokenUsage.builder()
+    OpenAiTokenUsage usage =
+        OpenAiTokenUsage.builder()
             .inputTokenCount(200)
             .outputTokenCount(100)
             .totalTokenCount(400)
             .inputTokensDetails(
-                OpenAiOfficialTokenUsage.InputTokensDetails.builder().cachedTokens(50).build())
+                OpenAiTokenUsage.InputTokensDetails.builder().cachedTokens(50).build())
             .outputTokensDetails(
-                OpenAiOfficialTokenUsage.OutputTokensDetails.builder().reasoningTokens(20).build())
+                OpenAiTokenUsage.OutputTokensDetails.builder().reasoningTokens(20).build())
             .build();
-    OpenAiOfficialResponsesChatResponseMetadata metadata =
-        OpenAiOfficialResponsesChatResponseMetadata.builder()
+    OpenAiResponsesChatResponseMetadata metadata =
+        OpenAiResponsesChatResponseMetadata.builder()
             .id("resp-1")
             .tokenUsage(usage)
             .finishReason(FinishReason.STOP)
             .serviceTier("default")
-            .rawResponse(
-                responseFixture(
-                    "{\"input_tokens\":80,\"output_tokens\":120,\"total_tokens\":200}", null))
+            .rawServerSentEvents(
+                List.of(
+                    sse(
+                        "{\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":80,\"output_tokens\":120,\"total_tokens\":200}}}")))
             .build();
 
     ProviderUsageNormalizer.NormalizedUsage result =
@@ -311,10 +308,10 @@ class ProviderUsageNormalizerTest {
   /** Responses null total ⇒ 0，行为与 Chat 一致。 */
   @Test
   void openAiResponsesReportsZeroProviderTotalWhenSdkOmitsIt() {
-    OpenAiOfficialTokenUsage usage =
-        OpenAiOfficialTokenUsage.builder().inputTokenCount(100).outputTokenCount(50).build();
-    OpenAiOfficialResponsesChatResponseMetadata metadata =
-        OpenAiOfficialResponsesChatResponseMetadata.builder()
+    OpenAiTokenUsage usage =
+        OpenAiTokenUsage.builder().inputTokenCount(100).outputTokenCount(50).build();
+    OpenAiResponsesChatResponseMetadata metadata =
+        OpenAiResponsesChatResponseMetadata.builder()
             .tokenUsage(usage)
             .finishReason(FinishReason.STOP)
             .build();
@@ -325,20 +322,19 @@ class ProviderUsageNormalizerTest {
     assertEquals(new ModelUsage(100, 50, 0, 0, 0, 0, 0), result.modelUsage());
   }
 
-  /** Responses 序列化 rawResponse().usage()，保留 generated model additional properties。 */
+  /** Responses 从 raw SSE 中提取 usage 节点，保留未知/额外属性，排除整包字段。 */
   @Test
   void openAiResponsesRawUsagePreservesAdditionalProperties() throws Exception {
-    OpenAiOfficialTokenUsage usage =
-        OpenAiOfficialTokenUsage.builder().inputTokenCount(10).outputTokenCount(20).build();
-    Response rawResponse =
-        responseFixture(
-            "{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30,\"model_extra\":\"generated\",\"model_count\":42}",
-            null);
-    OpenAiOfficialResponsesChatResponseMetadata metadata =
-        OpenAiOfficialResponsesChatResponseMetadata.builder()
+    OpenAiTokenUsage usage =
+        OpenAiTokenUsage.builder().inputTokenCount(10).outputTokenCount(20).build();
+    OpenAiResponsesChatResponseMetadata metadata =
+        OpenAiResponsesChatResponseMetadata.builder()
             .tokenUsage(usage)
             .finishReason(FinishReason.STOP)
-            .rawResponse(rawResponse)
+            .rawServerSentEvents(
+                List.of(
+                    sse(
+                        "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"output\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30,\"model_extra\":\"generated\",\"model_count\":42}}}")))
             .build();
 
     ProviderUsageNormalizer.NormalizedUsage result =
@@ -350,25 +346,26 @@ class ProviderUsageNormalizerTest {
     assertEquals(30, parsed.path("total_tokens").asInt());
     assertEquals("generated", parsed.path("model_extra").asText());
     assertEquals(42, parsed.path("model_count").asInt());
-    // 不应序列化整个 rawResponse（id/output 等字段不会泄露到 rawUsageJson）。
+    // 不应序列化整个 response payload（id/output 等字段不会泄露到 rawUsageJson）。
     assertTrue(parsed.path("id").isMissingNode(), () -> result.rawUsageJson());
     assertTrue(parsed.path("output").isMissingNode(), () -> result.rawUsageJson());
   }
 
-  /** Responses 在 rawResponse.usage 缺失时回退 typed OpenAiOfficialTokenUsage JSON。 */
+  /** Responses 在 raw SSE 缺失 usage 时回退 typed OpenAiTokenUsage JSON，使用 Responses API 字段名。 */
   @Test
-  void openAiResponsesFallsBackToTypedUsageWhenRawResponseHasNone() throws Exception {
-    OpenAiOfficialTokenUsage usage =
-        OpenAiOfficialTokenUsage.builder()
+  void openAiResponsesFallsBackToTypedUsageWhenRawSseHasNoUsage() throws Exception {
+    OpenAiTokenUsage usage =
+        OpenAiTokenUsage.builder()
             .inputTokenCount(7)
             .outputTokenCount(11)
             .totalTokenCount(18)
             .build();
-    OpenAiOfficialResponsesChatResponseMetadata metadata =
-        OpenAiOfficialResponsesChatResponseMetadata.builder()
+    OpenAiResponsesChatResponseMetadata metadata =
+        OpenAiResponsesChatResponseMetadata.builder()
             .tokenUsage(usage)
             .finishReason(FinishReason.STOP)
-            .rawResponse(responseFixture(null, null))
+            .rawServerSentEvents(
+                List.of(sse("{\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}")))
             .build();
 
     ProviderUsageNormalizer.NormalizedUsage result =
@@ -380,6 +377,57 @@ class ProviderUsageNormalizerTest {
     assertEquals(18, parsed.path("total_tokens").asInt());
     assertTrue(parsed.path("inputTokenCount").isMissingNode(), () -> result.rawUsageJson());
     assertTrue(parsed.path("outputTokenCount").isMissingNode(), () -> result.rawUsageJson());
+  }
+
+  /** Responses 在完全没有 raw SSE 时回退 typed OpenAiTokenUsage JSON。 */
+  @Test
+  void openAiResponsesWithoutRawSseFallsBackToTypedUsage() throws Exception {
+    OpenAiTokenUsage usage =
+        OpenAiTokenUsage.builder()
+            .inputTokenCount(7)
+            .outputTokenCount(11)
+            .totalTokenCount(18)
+            .build();
+    OpenAiResponsesChatResponseMetadata metadata =
+        OpenAiResponsesChatResponseMetadata.builder()
+            .tokenUsage(usage)
+            .finishReason(FinishReason.STOP)
+            .build();
+
+    ProviderUsageNormalizer.NormalizedUsage result =
+        ProviderUsageNormalizer.normalize(ProviderType.OPENAI_RESPONSES, metadata);
+
+    JsonNode parsed = OBJECT_MAPPER.readTree(result.rawUsageJson());
+    assertEquals(7, parsed.path("input_tokens").asInt());
+    assertEquals(11, parsed.path("output_tokens").asInt());
+    assertEquals(18, parsed.path("total_tokens").asInt());
+  }
+
+  /** Responses SSE 出现多个 usage 节点时，raw JSON 保存为 array。 */
+  @Test
+  void openAiResponsesMultipleUsageFromSseBecomesArray() throws Exception {
+    OpenAiResponsesChatResponseMetadata metadata =
+        OpenAiResponsesChatResponseMetadata.builder()
+            .tokenUsage(OpenAiTokenUsage.builder().inputTokenCount(10).outputTokenCount(5).build())
+            .finishReason(FinishReason.STOP)
+            .rawServerSentEvents(
+                List.of(
+                    sse(
+                        "{\"type\":\"response.output_item.added\",\"item\":{\"usage\":{\"input_tokens\":10}}}"),
+                    sse(
+                        "{\"type\":\"response.completed\",\"response\":{\"usage\":{\"output_tokens\":5}}}")))
+            .build();
+
+    ProviderUsageNormalizer.NormalizedUsage result =
+        ProviderUsageNormalizer.normalize(ProviderType.OPENAI_RESPONSES, metadata);
+
+    JsonNode parsed = OBJECT_MAPPER.readTree(result.rawUsageJson());
+    assertTrue(parsed.isArray(), () -> "expected array, got " + result.rawUsageJson());
+    assertEquals(2, parsed.size());
+    assertEquals(10, parsed.get(0).path("input_tokens").asInt());
+    assertEquals(5, parsed.get(1).path("output_tokens").asInt());
+    assertNull(rawUsageFields(result.rawUsageJson()).get("type"));
+    assertNull(rawUsageFields(result.rawUsageJson()).get("response"));
   }
 
   // ---------- Google Gemini ----------
@@ -695,18 +743,18 @@ class ProviderUsageNormalizerTest {
   /** typed provider 字段 JSON 在 OpenAI Responses fallback 时使用 Responses API 字段名与嵌套 details。 */
   @Test
   void openAiResponsesTypedUsageJsonIncludesNestedDetails() throws Exception {
-    OpenAiOfficialTokenUsage usage =
-        OpenAiOfficialTokenUsage.builder()
+    OpenAiTokenUsage usage =
+        OpenAiTokenUsage.builder()
             .inputTokenCount(20)
             .outputTokenCount(40)
             .totalTokenCount(60)
             .inputTokensDetails(
-                OpenAiOfficialTokenUsage.InputTokensDetails.builder().cachedTokens(5).build())
+                OpenAiTokenUsage.InputTokensDetails.builder().cachedTokens(5).build())
             .outputTokensDetails(
-                OpenAiOfficialTokenUsage.OutputTokensDetails.builder().reasoningTokens(7).build())
+                OpenAiTokenUsage.OutputTokensDetails.builder().reasoningTokens(7).build())
             .build();
-    OpenAiOfficialResponsesChatResponseMetadata metadata =
-        OpenAiOfficialResponsesChatResponseMetadata.builder()
+    OpenAiResponsesChatResponseMetadata metadata =
+        OpenAiResponsesChatResponseMetadata.builder()
             .tokenUsage(usage)
             .finishReason(FinishReason.STOP)
             .build();
@@ -779,34 +827,6 @@ class ProviderUsageNormalizerTest {
 
   private static ServerSentEvent sse(String data) {
     return new ServerSentEvent("message", data);
-  }
-
-  private static ResponseUsage responseUsageFixture(long input, long output, long total) {
-    try {
-      String json =
-          String.format(
-              "{\"input_tokens\":%d,\"output_tokens\":%d,\"total_tokens\":%d}",
-              input, output, total);
-      return ObjectMappers.jsonMapper().readValue(json, ResponseUsage.class);
-    } catch (Exception error) {
-      throw new AssertionError("cannot build ResponseUsage fixture", error);
-    }
-  }
-
-  private static Response responseFixture(String usageJson, String extraPropertiesJson) {
-    try {
-      StringBuilder sb = new StringBuilder("{\"id\":\"resp\",\"created_at\":1.0");
-      if (usageJson != null) {
-        sb.append(",\"usage\":").append(usageJson);
-      }
-      if (extraPropertiesJson != null) {
-        sb.append(",").append(extraPropertiesJson);
-      }
-      sb.append("}");
-      return ObjectMappers.jsonMapper().readValue(sb.toString(), Response.class);
-    } catch (Exception error) {
-      throw new AssertionError("cannot build Response fixture", error);
-    }
   }
 
   private static JsonNode rawUsageFields(String json) {
