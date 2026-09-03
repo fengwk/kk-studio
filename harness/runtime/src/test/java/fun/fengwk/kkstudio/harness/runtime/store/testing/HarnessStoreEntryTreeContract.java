@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
@@ -592,5 +593,270 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void findRootEntryRejectsNullSessionId() {
     assertThrows(NullPointerException.class, () -> store.transaction(tx -> tx.findRootEntry(null)));
+  }
+
+  /** 测试意图：loadContributorCustomEntriesOnPath 覆盖同一路径多个匹配时，严格保持 root-to-head 顺序，且返回不可变列表。 */
+  @Test
+  void loadContributorCustomEntriesOnPathReturnsEntriesInRootToHeadOrder() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID turnStartId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              return id;
+            });
+
+    UUID custom1Id =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      baseline.sessionId(),
+                      turnStartId,
+                      new CustomEntryPayload("test.contributor", "type.a", 1, "{\"step\":1}"),
+                      T1));
+              return id;
+            });
+
+    UUID userMsgId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(id, baseline.sessionId(), custom1Id, userMessagePayload(), T1));
+              return id;
+            });
+
+    UUID custom2Id =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      baseline.sessionId(),
+                      userMsgId,
+                      new CustomEntryPayload("test.contributor", "type.b", 1, "{\"step\":2}"),
+                      T2));
+              return id;
+            });
+
+    store.transaction(
+        tx -> {
+          List<Entry> entries =
+              tx.loadContributorCustomEntriesOnPath(custom2Id, "test.contributor");
+          assertEquals(2, entries.size());
+          assertEquals(List.of(custom1Id, custom2Id), entries.stream().map(Entry::id).toList());
+          assertThrows(UnsupportedOperationException.class, () -> entries.add(null));
+          return null;
+        });
+  }
+
+  /** 测试意图：loadContributorCustomEntriesOnPath 排除其他 contributor，并排除 sibling 分支上的 custom entry。 */
+  @Test
+  void loadContributorCustomEntriesOnPathExcludesOtherContributorsAndSiblings() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID turnStartId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              return id;
+            });
+
+    UUID sharedCustom1 =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      baseline.sessionId(),
+                      turnStartId,
+                      new CustomEntryPayload("contributor.alpha", "state", 1, "{\"common\":true}"),
+                      T1));
+              return id;
+            });
+
+    UUID sharedCustomOther =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      baseline.sessionId(),
+                      sharedCustom1,
+                      new CustomEntryPayload("contributor.beta", "state", 1, "{\"other\":true}"),
+                      T1));
+              return id;
+            });
+
+    // 分支 1
+    UUID head1 =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      baseline.sessionId(),
+                      sharedCustomOther,
+                      new CustomEntryPayload("contributor.alpha", "state", 1, "{\"branch\":1}"),
+                      T2));
+              return id;
+            });
+
+    // 分支 2
+    UUID head2 =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      baseline.sessionId(),
+                      sharedCustomOther,
+                      new CustomEntryPayload("contributor.alpha", "state", 1, "{\"branch\":2}"),
+                      T2));
+              return id;
+            });
+
+    store.transaction(
+        tx -> {
+          List<Entry> branch1Alpha =
+              tx.loadContributorCustomEntriesOnPath(head1, "contributor.alpha");
+          assertEquals(
+              List.of(sharedCustom1, head1), branch1Alpha.stream().map(Entry::id).toList());
+
+          List<Entry> branch2Alpha =
+              tx.loadContributorCustomEntriesOnPath(head2, "contributor.alpha");
+          assertEquals(
+              List.of(sharedCustom1, head2), branch2Alpha.stream().map(Entry::id).toList());
+
+          List<Entry> branch1Beta =
+              tx.loadContributorCustomEntriesOnPath(head1, "contributor.beta");
+          assertEquals(List.of(sharedCustomOther), branch1Beta.stream().map(Entry::id).toList());
+          return null;
+        });
+  }
+
+  /** 测试意图：当路径上无匹配 custom entry 时返回空列表，包括 head 为 ROOT 或无任何匹配 contributor 的场景。 */
+  @Test
+  void loadContributorCustomEntriesOnPathReturnsEmptyWhenNoMatches() {
+    Baseline baseline = seedThreadBaseline(store);
+    store.transaction(
+        tx -> {
+          List<Entry> onRoot =
+              tx.loadContributorCustomEntriesOnPath(baseline.rootEntryId(), "any.contributor");
+          assertTrue(onRoot.isEmpty());
+          assertThrows(UnsupportedOperationException.class, () -> onRoot.add(null));
+          return null;
+        });
+
+    UUID turnStartId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              return id;
+            });
+
+    store.transaction(
+        tx -> {
+          List<Entry> onTurnStart =
+              tx.loadContributorCustomEntriesOnPath(turnStartId, "any.contributor");
+          assertTrue(onTurnStart.isEmpty());
+          return null;
+        });
+  }
+
+  /** 测试意图：unknown head 必须 fail closed，抛出 IllegalArgumentException。 */
+  @Test
+  void loadContributorCustomEntriesOnPathRejectsUnknownHead() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> tx.loadContributorCustomEntriesOnPath(TestIds.id(99999), "any.contributor")));
+  }
+
+  /** 测试意图：loadContributorCustomEntriesOnPath 拒绝 null headEntryId 与 null contributorId。 */
+  @Test
+  void loadContributorCustomEntriesOnPathRejectsNullArguments() {
+    Baseline baseline = seedThreadBaseline(store);
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            store.transaction(
+                tx -> tx.loadContributorCustomEntriesOnPath(null, "any.contributor")));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            store.transaction(
+                tx -> tx.loadContributorCustomEntriesOnPath(baseline.rootEntryId(), null)));
+  }
+
+  /** 测试意图：head 本身为不匹配的 CUSTOM Entry 时只作为 sentinel 参与路径完整性验证，绝不泄漏至结果中。 */
+  @Test
+  void loadContributorCustomEntriesOnPathNonMatchingHeadActsOnlyAsSentinel() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID turnStartId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              return id;
+            });
+
+    UUID targetCustomId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      baseline.sessionId(),
+                      turnStartId,
+                      new CustomEntryPayload("target.contributor", "type", 1, "{\"ok\":true}"),
+                      T1));
+              return id;
+            });
+
+    UUID otherHeadCustomId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      baseline.sessionId(),
+                      targetCustomId,
+                      new CustomEntryPayload("other.contributor", "type", 1, "{\"other\":true}"),
+                      T2));
+              return id;
+            });
+
+    store.transaction(
+        tx -> {
+          // 查询 target.contributor：应只包含 targetCustomId，不泄漏 head (otherHeadCustomId)
+          List<Entry> targetEntries =
+              tx.loadContributorCustomEntriesOnPath(otherHeadCustomId, "target.contributor");
+          assertEquals(List.of(targetCustomId), targetEntries.stream().map(Entry::id).toList());
+
+          // 查询第三方 contributor：两者的 entry 均不应泄漏，返回空
+          List<Entry> thirdEntries =
+              tx.loadContributorCustomEntriesOnPath(otherHeadCustomId, "third.contributor");
+          assertTrue(thirdEntries.isEmpty());
+
+          // 查询 other.contributor：此时 head 本身是匹配的，应正确包含 head
+          List<Entry> otherEntries =
+              tx.loadContributorCustomEntriesOnPath(otherHeadCustomId, "other.contributor");
+          assertEquals(List.of(otherHeadCustomId), otherEntries.stream().map(Entry::id).toList());
+          return null;
+        });
   }
 }

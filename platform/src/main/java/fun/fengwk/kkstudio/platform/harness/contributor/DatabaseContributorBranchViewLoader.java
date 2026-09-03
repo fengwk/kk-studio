@@ -25,6 +25,9 @@ public class DatabaseContributorBranchViewLoader implements ContributorBranchVie
     Objects.requireNonNull(assistantEntryId, "assistantEntryId");
     Objects.requireNonNull(contributorId, "contributorId");
     return store.transaction(
-        tx -> new ScopedBranchView(tx.loadEntryPath(assistantEntryId).entries(), contributorId));
+        tx ->
+            new ScopedBranchView(
+                tx.loadContributorCustomEntriesOnPath(assistantEntryId, contributorId),
+                contributorId));
   }
 }
