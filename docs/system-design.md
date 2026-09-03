@@ -1,9 +1,10 @@
 # 系统设计
 
-`kk-studio` 是一个由 Web 组合根承载的单实例工作台。系统有两个并列产品域：
+`kk-studio` 是一个由一个或多个 Web 应用节点承载的工作台。系统有两个并列产品域：
 Harness / AI 负责可恢复的 Agent Thread 执行，Studio / Canvas 负责图形、Resource
-与 Function 运行。两者共享 PostgreSQL、全局 Blob Storage、应用事件 WebSocket
-和浏览器入口，但不共享领域状态机。
+与 Function 运行。节点共享 PostgreSQL 与全局 Blob Storage；App 节点之间没有
+IP/DNS 依赖，调度、租约、路由、查询信箱与通知均经 PostgreSQL 协调。两个产品域
+共享应用事件 WebSocket 和浏览器入口，但不共享领域状态机。
 
 ## 核心概念与全局不变量
 
@@ -12,8 +13,9 @@ Harness / AI 负责可恢复的 Agent Thread 执行，Studio / Canvas 负责图�
 | Durable truth | PostgreSQL 保存会影响恢复、重试、查询、删除和版本对账的业务事实；进程内对象只保存执行期 reservation、连接和 live projection。 |
 | Snapshot | REST Snapshot 是 Thread 和 Canvas 的权威读取面；通知和 WebSocket 只负责低延迟唤醒或可丢失 overlay。 |
 | Work | Harness 与 Canvas 都把可调度事实放在 PostgreSQL，并以 claim、lease、token 和 poll 处理丢通知、断线和进程退出。 |
+| Node coordination | App 节点之间无网络边；PostgreSQL 是唯一协调介质。数据库不可达时 claim、lease、route 与 mailbox 判定全部 fail closed。 |
 | Version | Harness Thread version 与 Canvas document version 是独立单调坐标；HTTP mapper 使用 canonical UUID 和 decimal cursor。 |
-| Composition root | `web` 是唯一生产 Spring Boot root；`platform`、Core、Runtime 和 Contributor API 不创建第二个 root。 |
+| Composition root | 每个 App 节点都由 `web` 作为唯一生产 Spring Boot root；`platform`、Core、Runtime 和 Contributor API 不创建第二个 root。 |
 | Byte boundary | Blob metadata 与引用在 PostgreSQL；对象字节在受控 Blob Storage；浏览器只取得短期签名 URL。 |
 
 跨域写入必须在单个定义清晰的事务边界内完成，失败时不留下半成品事实；
@@ -24,7 +26,7 @@ gap 都只能产生 no-op、resync 或可恢复的内部失败，不能覆盖新
 flowchart LR
     Browser[Browser]
     Frontend[frontend<br/>React AI + Canvas]
-    Web[web<br/>composition root]
+    Web[web app node(s)<br/>composition root]
     Share[share<br/>public DTO / wire]
     Platform[platform<br/>application services]
     Schema[schema<br/>Flyway resources]
@@ -40,7 +42,7 @@ flowchart LR
     HarnessBuiltin[Harness Builtin]
     PG[(PostgreSQL<br/>durable truth)]
     S3[(S3<br/>blob bytes)]
-    Env["/daemon/v2 endpoint · current protocol"]
+    Env["/api/ai/environment/daemon/v2<br/>Environment Daemon"]
     Trusted[Trusted contributor JARs]
 
     Browser --> Frontend
@@ -98,15 +100,18 @@ flowchart LR
   version 或 live overlay；客户端可在首次连接、重连或 gap 后重新对账。
 - **受约束的并发。** durable Work 使用 PostgreSQL claim/lease/fencing；Provider、
   Tool 和 subagent 使用有界的进程内 admission，不以隐式线程队列代替容量控制。
+- **无 App-to-App 网络协调。** 多个 App 节点只共享 PostgreSQL 与 Blob Storage；
+  PostgreSQL route lease、mailbox、Work 和 NOTIFY 覆盖跨节点接管与唤醒。
 - **明确的字节边界。** PostgreSQL 保存 Blob 的 hash、媒体事实、引用和生命周期；
   S3 保存 original/preview 字节，浏览器只获得短期签名 URL。
-- **单一组合根。** `web` 负责 Spring Bean、Notification loop、dispatcher、Contributor
-  snapshot、HTTP、WebSocket 与静态资源的生产装配。
+- **单一组合根。** 每个 App 节点由 `web` 负责 Spring Bean、Notification loop、
+  dispatcher、Contributor snapshot、HTTP、WebSocket 与静态资源的生产装配。
 
 ## Non-goals
 
 - PostgreSQL `NOTIFY` 不承担持久化、重放或审计职责；丢失通知必须可以由 poll 或
   Snapshot 收敛。
+- App 节点不通过 HTTP、RPC、DNS 或共享内存彼此协调。
 - `canvas-core` 不连接 PostgreSQL、S3、HTTP、Spring 或 Harness；Canvas Link 也
   不是自动 DAG 调度器。
 - Realtime overlay 不替代 durable Snapshot；浏览器本地 Pane、布局和 draft 不写入
@@ -125,11 +130,11 @@ Canvas、Harness、owner relation、System Settings 和全局 Storage 的表、�
 PostgreSQL trigger。`schema/src/main/resources/db/seed/**` 提供 dev、e2e、
 canvas-test profile seed。
 
-PostgreSQL 中的关键事实分为四组：
+PostgreSQL 中的关键事实分为五组：
 
 | 事实组 | 代表内容 |
 | --- | --- |
-| 产品聚合 | `agent_*`、`chat`、`canvas_*`、`system_setting` |
+| 产品聚合 | `agent_*`、`mcp_*`、`chat`、`canvas_*`、`environment`、`system_setting` |
 | Harness 协议 | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work` |
 | Environment 路由 | `environment_connection` route lease、`environment_directory_query` 跨节点只读查询信箱 |
 | 归属关系 | `chat_session`、`canvas_session`、`session_blob_ref` |
@@ -176,7 +181,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `harness/builtin` | 第一方内置 17 工具、goal.state 与 context projector | 依赖 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment`、Jackson |
 | `harness/infra` | PostgreSQL HarnessStore、Work dispatcher、realtime、Resource store | 依赖 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Spring JDBC、PostgreSQL |
 | `harness/daemon` | 独立 Environment 进程适配器 | 依赖 `harness-common`、`harness-environment`、Jackson、JGit、LangChain4j adapters，绝不依赖 `harness-tool` |
-| `platform` | Catalog、Storage、Chat/Canvas application service、Resolver、Model/Tool/Environment Gateway | 适配 Share、Core/Runtime ports，不成为组合根 |
+| `platform` | Catalog、MCP、Storage、Chat/Canvas application service、Resolver、Model/Tool/Environment Gateway | 适配 Share、Core/Runtime ports，不成为组合根 |
 | `web` | Spring Boot、HTTP、浏览器事件、daemon WebSocket、生产生命周期 | 唯一 composition root |
 
 依赖方向保持为：
@@ -208,19 +213,21 @@ Common、Builtin 模块。
 
 ## 3. Web composition root
 
-`web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java` 是唯一
-`@SpringBootApplication` 入口。它在 Web runtime 与 event package 中完成以下
-装配：
+`web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java` 是每个 App
+节点唯一的 `@SpringBootApplication` 入口。它在 Web runtime 与 event package
+中完成以下装配：
 
 1. `HarnessRuntimeConfiguration` 注入 `UUID::randomUUID`、PostgreSQL
    `HarnessStore`、Resource store、Model/Tool processor、dispatcher 和
    `PostgresqlRealtimeEventSink`。
 2. Platform 提供 `BuiltinHarnessContributor` bean；`ContributorCatalogConfiguration`
    收集 Spring `HarnessContributor` 与 `TrustedJarContributorLoader`
-   加载的受信任 JAR 贡献者，并在启动时冻结 `HarnessCatalog`。
-3. `HarnessRuntimeLifecycle` 按 `workers-enabled` 启停 Harness dispatcher；
+   加载的受信任 JAR 贡献者，并在启动时冻结静态 `HarnessCatalog`。
+3. Platform 将 `HarnessCatalog` 的静态工具与 PostgreSQL 现读的 `McpToolCatalog`
+   聚合成唯一 `RuntimeToolCatalog`，供工具列出、Agent 校验、turn 规划与执行使用。
+4. `HarnessRuntimeLifecycle` 按 `workers-enabled` 启停 Harness dispatcher；
    `ApplicationEventConfiguration` 装配唯一 PostgreSQL notification loop。
-4. HTTP Controller、DTO mapper、错误 advice、浏览器事件 WebSocket 和 SPA fallback
+5. HTTP Controller、DTO mapper、错误 advice、浏览器事件 WebSocket 和 SPA fallback
    共享同一应用生命周期。
 
 `platform` 只提供应用服务和 port adapter，不声明 `@SpringBootApplication`，也不
@@ -242,7 +249,7 @@ POST /api/ai/runtime/command-batches
   -> HarnessWorkDispatcher claim THREAD
   -> ThreadProcessor（一 claim 一 durable action）
   -> DatabaseTurnResolver
-       latest Catalog / Environment -> frozen ModelRequestSpec
+       latest RuntimeToolCatalog / Environment -> frozen ModelRequestSpec
   -> ModelProcessor + ModelGateway
   -> ToolProcessor + ToolGateway / Environment
   -> ThreadProcessor apply Entry/head、TURN_END、continuation
@@ -284,8 +291,8 @@ Harness command acceptance 不推进 Canvas Graph version。
 | Storage | `storage_blob`、`storage_upload`、`session_blob_ref`、Canvas Resource 引用 | S3 stream、预签名 URL、`StorageMaintenance` |
 | Settings | `system_setting(id=1, config, version)` | `SystemSettingsSnapshot` 与 after-commit 回读 |
 | Realtime | Thread/Canvas version、Invocation checkpoint、Work 状态 | PostgreSQL `NOTIFY`、应用事件 WebSocket、Tool partial |
-| Environment | Thread ROOT/TURN_START 的 `workspacePath` 快照、ToolInvocation 的 `{environmentId, workspacePath}`；`environment_connection` route lease；`environment_directory_query` mailbox | 本节点 `LiveEnvironmentRegistry`、Daemon 连接与心跳 |
-| Contributor | Entry 中的 `CUSTOM(contributorId, customType, schemaVersion, data)` | 启动期冻结 `HarnessCatalog`、统一 Tool 与 projector |
+| Environment | Thread ROOT/TURN_START 的 `workspacePath` 快照、ToolInvocation 的 `{environmentId, workspacePath}`；`environment_connection` route lease；`environment_directory_query` mailbox | `EnvironmentDaemonGateway` 持有本节点连接、invocation 与心跳投影 |
+| Contributor / Tool | Entry 中的 `CUSTOM(contributorId, customType, schemaVersion, data)`；MCP server/tool 配置 | 启动期冻结 `HarnessCatalog` 元数据；`RuntimeToolCatalog` 聚合静态工具与 DB-backed MCP 工具 |
 
 Settings 的写入使用完整 section + `expectedVersion` CAS。提交成功后回读
 `system_setting` 并原子替换进程快照；跨节点通过 `system_settings_changed` 通知
@@ -389,8 +396,10 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
   和过期上限；`/api/storage` 不允许调用方选择对象 key。
 - Tool 与 Environment 边界的 `ResourceRef` 只属于瞬时执行。写入 Entry 前必须由
   `GlobalStorageToolResultHistoryMaterializer` 摄入 Blob，无法摄入则 fail closed。
-- Environment 请求由 HELLO 绑定的 canonical name 路由；同名 live connection
-  被占用时拒绝第二个持有者。
+- Environment HELLO 通过 registration token 解析 canonical `EnvironmentId`；
+  未过期 route lease 被占用时拒绝第二个持有者。
+- MCP 只支持 Streamable HTTP；server credential 不进入响应或日志，工具调用使用
+  per-call client，协议或连接失败只返回稳定通用错误。
 - Trusted contributor loader 只位于
   `web/src/main/java/fun/fengwk/kkstudio/web/runtime/contributor/`，从配置目录加载并在启动时
   形成冻结 snapshot；Platform 和 Runtime 不直接接触 classloader。
@@ -405,7 +414,7 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
 | 架构守护 | 包、POM、自动配置、唯一 schema、composition root、admission | `canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCoreArchitectureTest.java`、`canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/CanvasInfraArchitectureTest.java`、`web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java`、`platform/src/test/java/fun/fengwk/kkstudio/platform/harness/PlatformArchitectureTest.java`、`web/src/test/java/fun/fengwk/kkstudio/web/WebModuleArchitectureTest.java` |
 | PostgreSQL 集成 | schema、锁、CAS、claim/lease/fencing、NOTIFY、Snapshot 投影、Blob 引用 | `canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/`、`harness/infra/src/test/java/`、`platform/src/test/java/`、`web/src/test/java/` |
 | Spring/组合测试 | Controller、Flyway、Platform orchestration、实时通道与 Storage | `web/src/test/java/`、`platform/src/test/java/` |
-| E2E | REST/WS、Canvas Patch/Snapshot、Harness quiescent recovery | `scripts/e2e.sh`、`scripts/e2e/run-matrix.mjs`、`frontend/src/` |
+| E2E | REST/WS、Canvas Patch/Snapshot、Harness quiescent recovery、分布式 DB fail-closed | `scripts/e2e.sh`、`scripts/e2e/run-matrix.mjs`、`frontend/src/` |
 
 ### 阅读导航
 

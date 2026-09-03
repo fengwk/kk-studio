@@ -235,6 +235,9 @@ SpringApplication.run(WebApplication)
   -> ContributorCatalogConfiguration
        -> Spring contributors + TrustedJarContributorLoader
        -> immutable HarnessCatalog
+  -> RuntimeToolCatalogConfiguration
+       -> HarnessToolCatalogAdapter + DB-backed McpToolCatalog
+       -> primary CompositeRuntimeToolCatalog
   -> ApplicationEventConfiguration
        -> notification loop + version hubs + ApplicationEventHub
   -> WebSocket handlers and Controllers become available
@@ -481,6 +484,7 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 - `web/src/main/java/fun/fengwk/kkstudio/web/advice/`
 - `web/src/main/java/fun/fengwk/kkstudio/web/i18n/StudioMessageService.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/controller/`
+- `web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioMcpRuntimeToolIntegrationTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/advice/`
 - `web/src/test/java/fun/fengwk/kkstudio/web/StudioI18nIntegrationTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/FlywayAutoConfigurationIntegrationTest.java`
@@ -517,7 +521,8 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 
 这些测试覆盖 Web composition 的真实风险：唯一 root 与依赖方向、Flyway single baseline、PostgreSQL notification
 reconnect/resync、worker NOTIFY/poll 两条唤醒路径、ack-before-event、bounded sender、Environment large READY frame、
-HTTP async error mapping、strict DTO、trusted JAR classloader lifecycle、locale fallback 和静态 SPA fallback。
+HTTP async error mapping、dynamic MCP discovery/planning/execution、strict DTO、trusted JAR classloader lifecycle、
+locale fallback 和静态 SPA fallback。
 
 ---
 
