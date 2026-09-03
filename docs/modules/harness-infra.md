@@ -71,6 +71,14 @@ Harness durable protocol 恰好七张表：
 - `harness_tool_invocation` 以 `(assistant_entry_id, call_index)` 唯一，`effects` 非 SUCCEEDED 时必须是空 batch，Tool batch apply 后删除；
 - 时间列为 `timestamptz(3)`，应用拥有 version/id/time，数据库不自动推进 Runtime version。
 
+`loadEntryPath` 使用单次 `WITH RECURSIVE ... CYCLE` 按 root-to-head 读取不可变路径，保证一次往返完成且避免父子环路。`PostgresqlHarnessTransaction` 维护 transaction-local 的 `Map<UUID, EntryPath>` positive cache：
+- 首次持久化读取未命中时执行单次 CTE 并缓存结果，同事务内重复读取直接命中缓存；
+- 连续 `insertEntry` 时从已缓存 parent path 派生追加并写入缓存，同事务后续读取子节点 0 次 CTE；
+- 具备严格的 transaction 隔离，各事务独立维护自身缓存；
+- `deleteEntries` 与 `deleteSession` 均按 session 驱逐缓存，避免脏读。
+
+`findRootEntry(sessionId)` 优先复用当前事务缓存中已存在的同 Session EntryPath ROOT；cache miss 时通过 partial unique index `uk_harness_entry_single_root` 进行点查，并将单节点 ROOT 路径写回缓存。
+
 ### 事务锁序
 
 所有多实体 Runtime transaction 的锁级别是：
@@ -213,6 +221,8 @@ queued/running handoff 数量，不限制 Model/Tool 外部 execution 并发。`
 
 - [`InfraModuleArchitectureTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/InfraModuleArchitectureTest.java)：Infra 生产依赖仅允许 Common/Runtime/Tool/Environment/Spring JDBC/PostgreSQL。
 - [`PostgresqlHarnessSchemaTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessSchemaTest.java)、[`PostgresqlHarnessStoreTransactionTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreTransactionTest.java)：七表 schema、transaction boundary 和 handle lifecycle。
+- [`PostgresqlEntryPathCacheTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlEntryPathCacheTest.java)：事务内 EntryPath 局部缓存、首次持久化读取/连续 append 的 CTE 计数、事务隔离与 deleteEntries 驱逐。
+- [`PostgresqlAcceptCommandsRootQueryTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlAcceptCommandsRootQueryTest.java)：守护非 ROOT head 的新 batch/ordered replay 为 0 次完整 path CTE，执行开销与 Entry 树深度无关。
 - [`PostgresqlHarnessStoreConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreConcurrencyTest.java)、[`PostgresqlInvocationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlInvocationTest.java)：并发锁序、Invocation transition 和 terminal facts。
 - [`PostgresqlWorkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkTest.java)、[`PostgresqlWorkNotificationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkNotificationTest.java)：claim/lease/wake/NOTIFY/poll 语义。
 - [`HarnessWorkDispatcherLifecycleTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherLifecycleTest.java)、[`HarnessWorkDispatcherDrainTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherDrainTest.java)、[`HarnessWorkDispatcherHandoffTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherHandoffTest.java)：single drain、round-robin、bounded handoff、rejection 和 stop。
