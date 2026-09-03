@@ -37,7 +37,7 @@ class StudioDomainErrorAdviceTest {
   }
 
   @Test
-  void scopesAdviceToCatalogControllersOnly() {
+  void scopesAdviceToSupportedControllers() {
     RestControllerAdvice advice =
         StudioDomainErrorAdvice.class.getAnnotation(RestControllerAdvice.class);
 
