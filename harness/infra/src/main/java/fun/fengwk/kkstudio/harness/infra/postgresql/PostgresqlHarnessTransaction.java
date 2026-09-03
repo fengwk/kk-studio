@@ -124,6 +124,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   private final Supplier<UUID> idGenerator;
   private final Set<LockKey> locked = new HashSet<>();
   private final Map<UUID, Integer> highestToolCallIndexByAssistant = new HashMap<>();
+  private final Map<UUID, EntryPath> entryPathCache = new HashMap<>();
   private final Thread owner = Thread.currentThread();
   private RuntimeException databaseFailure;
   private LockRank highestLockRank;
@@ -138,6 +139,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   void close() {
     closed = true;
+    entryPathCache.clear();
   }
 
   void rethrowDatabaseFailure() {
@@ -209,12 +211,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (findSession(entry.sessionId()).isEmpty()) {
       throw new IllegalArgumentException("session " + entry.sessionId() + " does not exist");
     }
+    EntryPath candidatePath;
     if (entry.payload().type().isRoot()) {
       if (hasRoot(entry.sessionId())) {
         throw new IllegalArgumentException(
             "session " + entry.sessionId() + " already has a ROOT entry");
       }
-      new EntryPath(List.of(entry));
+      candidatePath = new EntryPath(List.of(entry));
     } else {
       if (!hasRoot(entry.sessionId())) {
         throw new IllegalArgumentException(
@@ -223,7 +226,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       EntryPath parentPath = loadEntryPath(entry.parentEntryId());
       List<Entry> nextPath = new ArrayList<>(parentPath.entries());
       nextPath.add(entry);
-      new EntryPath(nextPath);
+      candidatePath = new EntryPath(nextPath);
     }
     update(
         """
@@ -237,6 +240,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         entry.payload().type().name(),
         PostgresqlHarnessRows.ENTRY_PAYLOADS.encode(entry.payload()),
         PostgresqlHarnessRows.timestamp(entry.createdAt()));
+    entryPathCache.put(entry.id(), candidatePath);
   }
 
   @Override
@@ -249,6 +253,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   public EntryPath loadEntryPath(UUID headEntryId) {
     checkOpen();
     Objects.requireNonNull(headEntryId, "headEntryId");
+    EntryPath cached = entryPathCache.get(headEntryId);
+    if (cached != null) {
+      return cached;
+    }
     List<Entry> entries = queryList(LOAD_ENTRY_PATH, PostgresqlHarnessRows.ENTRY, headEntryId);
     if (entries.isEmpty()) {
       throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
@@ -259,7 +267,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         throw new IllegalArgumentException("entry parent cycle detected at " + entry.id());
       }
     }
-    return new EntryPath(entries);
+    EntryPath path = new EntryPath(entries);
+    entryPathCache.put(headEntryId, path);
+    return path;
   }
 
   @Override
@@ -1071,6 +1081,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   public int deleteEntries(UUID sessionId) {
     checkOpen();
     Objects.requireNonNull(sessionId, "sessionId");
+    entryPathCache.values().removeIf(path -> path.root().sessionId().equals(sessionId));
     int total = 0;
     while (true) {
       // 叶子优先：同一语句只删除父不在批内的行（parent FK 顺序天然成立），逐层剥到 ROOT。
@@ -1098,6 +1109,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   public boolean deleteSession(UUID sessionId) {
     checkOpen();
     Objects.requireNonNull(sessionId, "sessionId");
+    entryPathCache.values().removeIf(path -> path.root().sessionId().equals(sessionId));
     return update("delete from harness_session where id = ?", sessionId) == 1;
   }
 
