@@ -24,11 +24,11 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 
-/** 验证使用 Harness append-only Entry path 构造冻结 contributor branch view。 */
+/** 验证通过窄 Store 查询加载 scoped contributor state，不加载完整 EntryPath。 */
 class DatabaseContributorBranchViewLoaderTest {
 
   @Test
-  void loadsTheFrozenEntryPathInsideAStoreTransaction() {
+  void loadsScopedContributorStateViaNarrowStoreQueryWithoutFullEntryPath() {
     HarnessStore store = mock(HarnessStore.class);
     HarnessStore.Transaction transaction = mock(HarnessStore.Transaction.class);
     UUID entryId = new UUID(0L, 11L);
