@@ -14,6 +14,8 @@ import java.util.Objects;
 @Component
 public class SystemSettingsChangeHandler {
 
+  public static final String CHANNEL = "system_settings_changed";
+
   private final SystemSettingsRepository repository;
   private final SystemSettingsSnapshot snapshot;
 
