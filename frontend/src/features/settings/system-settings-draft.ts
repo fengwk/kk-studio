@@ -96,7 +96,6 @@ export interface GptImage2IntegrationDraft {
 export interface MiniMaxH3IntegrationDraft {
   enabled: boolean
   promptAgentName: string
-  promptEnvironmentName: string
   promptMaxWaitMillis: DraftNumericField
   comfyBaseUrl: string
   comfyConnectTimeoutMillis: DraftNumericField
@@ -294,7 +293,6 @@ function integrationsToDraft(
     minimaxH3: {
       enabled: dto.minimaxH3.enabled,
       promptAgentName: dto.minimaxH3.promptAgentName ?? '',
-      promptEnvironmentName: dto.minimaxH3.promptEnvironmentName ?? '',
       promptMaxWaitMillis: dto.minimaxH3.promptMaxWaitMillis,
       comfyBaseUrl: dto.minimaxH3.comfyBaseUrl ?? '',
       comfyConnectTimeoutMillis: dto.minimaxH3.comfyConnectTimeoutMillis,
@@ -428,9 +426,6 @@ export function assembleSettingsUpdate(
       minimaxH3: {
         enabled: draft.integrations.minimaxH3.enabled,
         promptAgentName: nullableText(draft.integrations.minimaxH3.promptAgentName),
-        promptEnvironmentName: nullableText(
-          draft.integrations.minimaxH3.promptEnvironmentName,
-        ),
         promptMaxWaitMillis: requiredLong(
           draft.integrations.minimaxH3.promptMaxWaitMillis,
         ),

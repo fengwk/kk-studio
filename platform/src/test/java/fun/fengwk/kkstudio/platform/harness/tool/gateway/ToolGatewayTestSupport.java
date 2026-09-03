@@ -53,6 +53,8 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
+import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
+import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 
 import java.nio.file.Path;
@@ -259,7 +261,28 @@ final class ToolGatewayTestSupport {
       int resourceMaxBytes,
       ToolSettings settings,
       ConcurrencyAdmission admission) {
+    return gateway(
+        new HarnessToolCatalogAdapter(catalog),
+        catalog,
+        transport,
+        store,
+        executor,
+        resourceMaxBytes,
+        settings,
+        admission);
+  }
+
+  static ToolExecutionGateway gateway(
+      RuntimeToolCatalog toolCatalog,
+      HarnessCatalog catalog,
+      FakeTransport transport,
+      FakeResourceStore store,
+      ExecutorService executor,
+      int resourceMaxBytes,
+      ToolSettings settings,
+      ConcurrencyAdmission admission) {
     return new ToolExecutionGateway(
+        toolCatalog,
         catalog,
         DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
@@ -284,6 +307,7 @@ final class ToolGatewayTestSupport {
       Path workdir,
       Path environmentRoot) {
     return new ToolExecutionGateway(
+        new HarnessToolCatalogAdapter(catalog),
         catalog,
         DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
@@ -307,6 +331,7 @@ final class ToolGatewayTestSupport {
       ExecutorService executor,
       ToolSettings settings) {
     return new ToolExecutionGateway(
+        new HarnessToolCatalogAdapter(catalog),
         catalog,
         DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
