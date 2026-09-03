@@ -67,7 +67,7 @@ export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsD
 
 /**
  * Builds the complete frozen request before the network call. NEW_SESSION intentionally
- * contains only USER_MESSAGE: the final draft is applied directly into rootSettings.
+ * contains only USER_MESSAGE: the final draft is encoded directly in rootSettings.
  */
 export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenCommandBatchRequest {
   const createId = input.createId ?? createIdempotencyKey

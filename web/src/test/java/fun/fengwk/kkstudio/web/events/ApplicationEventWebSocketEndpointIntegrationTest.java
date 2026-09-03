@@ -90,7 +90,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
 
   @Test
   void subscribeExistingThreadReturnsSubscribedAckWithCursor() throws Exception {
-    // 经真实 API 创建 Chat，并以唯一 command-batch 用户提交创建 Session/Thread；再经 WS 订阅验证 ack。
+    // 经真实 API 创建 Chat，并单次提交 command-batch 创建 Session/Thread；再经 WS 订阅验证 ack。
     HttpClient http = HttpClient.newHttpClient();
     HttpResponse<String> chatResponse =
         http.send(

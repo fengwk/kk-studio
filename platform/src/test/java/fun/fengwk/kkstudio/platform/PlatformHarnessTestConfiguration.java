@@ -21,7 +21,7 @@ public class PlatformHarnessTestConfiguration {
 
   @Bean
   public EnvironmentReadyListener environmentReadyListener() {
-    return environmentName -> {};
+    return ignoredEnvironmentId -> {};
   }
 
   @Bean

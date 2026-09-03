@@ -79,8 +79,8 @@ public interface HarnessStore {
     /**
      * 锁定 Session 行并返回（FOR UPDATE：串行化该 Session 的删除 / 归属独占类写操作）；不存在返回 {@link Optional#empty()}
      * 且不产生锁。要求 Session -&gt; Thread 锁序。仅用于删除 / 归属独占操作，<b>不得</b>用于命令接受与 sibling Thread
-     * 的正常执行路径——NEW_SESSION / ENTRY creation 与 THREAD 写入一律使用 {@link #lockSessionForKeyShare}，避免同
-     * Session 的 sibling 被 Session 级锁串行化。
+     * 的正常执行路径——NEW_SESSION / ENTRY 初始创建与 THREAD 写入一律使用 {@link #lockSessionForKeyShare}，避免同 Session
+     * 的 sibling 被 Session 级锁串行化。
      */
     Optional<Session> lockSessionForUpdate(UUID id);
 

@@ -1605,7 +1605,7 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
   }
 
   private Fixture fixture() {
-    return fixture(environmentName -> {});
+    return fixture(ignoredEnvironmentId -> {});
   }
 
   private Fixture fixture(EnvironmentReadyListener readyListener) {

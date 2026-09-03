@@ -503,7 +503,7 @@ registerCase({
           && !Object.hasOwn(chat, 'environment'),
         JSON.stringify(chat),
       )
-      // 先创建 Thread（NEW_SESSION creation），再更新 Chat 默认值，最后 reread 同一 Thread：
+      // 先创建 Thread（NEW_SESSION 初始创建），再更新 Chat 默认值，最后 reread 同一 Thread：
       // 更新 Chat 不影响既有 Thread 的 branchSettings（Thread 快照是运行时事实）。
       const requested = {
         workspacePath: null,
@@ -652,7 +652,7 @@ registerCase({
     const second = await makeSession('second')
     const third = await makeSession('third')
     try {
-      // create 快照可能已含 processor 消费；只断言结构，不锁定瞬时 status。
+      // accepted projection 可能已含 processor 消费；只断言结构，不锁定瞬时 status。
       const firstThread = first.accepted.thread
       assert(/^\d+$/.test(String(firstThread.version)), JSON.stringify(firstThread))
       assert(firstThread.sessionId && firstThread.headEntryId, JSON.stringify(firstThread))
@@ -665,7 +665,7 @@ registerCase({
         })
       }
 
-      // NEW_SESSION creation 是 Chat owner 归属的唯一入口：连续三次创建产生三个 Session。
+      // NEW_SESSION 初始创建是 Chat owner 归属的唯一入口：连续三次创建产生三个 Session。
       const sessions = await listChatSessions(ctx, chat.id)
       const sessionIds = sessions.map((item) => String(item.sessionId))
       assert(sessionIds.includes(String(first.accepted.thread.sessionId)), 'first Session missing')
