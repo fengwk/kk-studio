@@ -137,6 +137,62 @@ class PostgresqlNotificationLoopPostgresqlIntegrationTest {
     }
   }
 
+  @Test
+  void idlePollExceedingDriverSocketTimeoutDoesNotTriggerResyncAndReceivesNotification()
+      throws Exception {
+    AtomicInteger resyncs = new AtomicInteger();
+    CountDownLatch firstResync = new CountDownLatch(1);
+    CountDownLatch notificationReceived = new CountDownLatch(1);
+    AtomicReference<String> payload = new AtomicReference<>();
+
+    try (HikariDataSource dataSource = newDataSource()) {
+      PostgresqlNotificationLoop loop =
+          new PostgresqlNotificationLoop(
+              dataSource,
+              List.of(
+                  new PostgresqlNotificationHandler(
+                      CHANNEL,
+                      value -> {
+                        payload.set(value);
+                        notificationReceived.countDown();
+                      },
+                      () -> {
+                        resyncs.incrementAndGet();
+                        firstResync.countDown();
+                      })),
+              Duration.ofSeconds(5),
+              Duration.ofMillis(10));
+      try {
+        loop.start();
+        assertTrue(firstResync.await(5, TimeUnit.SECONDS), "initial listener resync must finish");
+        assertEquals(1, resyncs.get(), "initial resync must happen exactly once on startup");
+
+        // 底层 PostgreSQL driver 设置了 socketTimeout=1 秒，而当前通知轮询周期为 5 秒。
+        // PostgreSQL JDBC 的 QueryExecutorImpl.processNotifies 会在拉取通知时暂存原有 socket SO_TIMEOUT，
+        // 并以 poll timeout（5 秒）临时覆盖，轮询结束或返回通知后再恢复原 SO_TIMEOUT。
+        // 此处让当前线程空闲等待 1.5 秒（> 1 秒 driver socketTimeout，但在 5 秒轮询上限内），
+        // 验证空闲期并未因底层 driver 1 秒 socketTimeout 触发超时断连和非预期的额外 resync。
+        Thread.sleep(1500);
+        assertEquals(
+            1,
+            resyncs.get(),
+            "idle poll exceeding driver socketTimeout must not trigger reconnect or extra resync");
+        assertTrue(loop.isRunning(), "loop must stay running across the idle poll");
+
+        // 空闲结束后发送通知，验证该连接依然健康可用并能正常接收并投递通知
+        notify("after-idle");
+        assertTrue(
+            notificationReceived.await(5, TimeUnit.SECONDS),
+            "listener must receive subsequent NOTIFY after idle poll");
+        assertEquals("after-idle", payload.get(), "payload must match after idle poll");
+        assertEquals(
+            1, resyncs.get(), "no extra resync must occur after successful notification delivery");
+      } finally {
+        loop.close();
+      }
+    }
+  }
+
   private static HikariDataSource newDataSource() {
     HikariConfig config = new HikariConfig();
     config.setJdbcUrl(POSTGRES.getJdbcUrl());
@@ -147,6 +203,10 @@ class PostgresqlNotificationLoopPostgresqlIntegrationTest {
     config.setConnectionTimeout(5_000);
     config.setPoolName("notification-loop-integration");
     config.addDataSourceProperty("ApplicationName", APPLICATION_NAME);
+    // 配置更短的 driver connectTimeout 与 socketTimeout（1 秒），
+    // 验证 notification loop 在底层 socketTimeout 短于通知轮询周期（5 秒）时不受干扰。
+    config.addDataSourceProperty("connectTimeout", "1");
+    config.addDataSourceProperty("socketTimeout", "1");
     return new HikariDataSource(config);
   }
 
