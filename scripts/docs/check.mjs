@@ -4,7 +4,20 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+function resolveRepositoryRoot() {
+  const args = process.argv.slice(2)
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--root' && i + 1 < args.length) {
+      return path.resolve(args[i + 1])
+    }
+  }
+  if (process.env.KK_STUDIO_REPO_ROOT) {
+    return path.resolve(process.env.KK_STUDIO_REPO_ROOT)
+  }
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+}
+
+const repositoryRoot = resolveRepositoryRoot()
 const docsRoot = path.join(repositoryRoot, 'docs')
 
 const moduleDocuments = [
@@ -354,11 +367,88 @@ function checkForbiddenReferencesAndTerms() {
   }
 }
 
+function extractPomModules(pomRelativePath) {
+  const source = read(pomRelativePath)
+  const modulesBlock = source.match(/<modules>([\s\S]*?)<\/modules>/u)
+  if (!modulesBlock) {
+    return []
+  }
+  return [...modulesBlock[1].matchAll(/<module>\s*([^<\s]+)\s*<\/module>/gu)].map(
+    (match) => match[1],
+  )
+}
+
+function checkRepositoryStructure() {
+  const obsoleteHarnessPrompt = path.join(repositoryRoot, 'harness/prompt')
+  if (existsSync(obsoleteHarnessPrompt)) {
+    addError(
+      `obsolete top-level harness/prompt module directory must not exist: ${relativeFromRoot(obsoleteHarnessPrompt)}`,
+    )
+  }
+
+  const legitimatePromptPackage = path.join(
+    repositoryRoot,
+    'harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt',
+  )
+  if (!existsSync(legitimatePromptPackage)) {
+    addError(
+      `expected shared prompt package missing: ${relativeFromRoot(legitimatePromptPackage)}`,
+    )
+  }
+
+  const expectedRootModules = ['share', 'schema', 'canvas', 'harness', 'platform', 'web']
+  const rootPomPath = path.join(repositoryRoot, 'pom.xml')
+  if (existsSync(rootPomPath)) {
+    const actualRootModules = extractPomModules('pom.xml')
+    if (JSON.stringify(actualRootModules) !== JSON.stringify(expectedRootModules)) {
+      addError(
+        `pom.xml modules mismatch: expected [${expectedRootModules.join(', ')}], found [${actualRootModules.join(', ')}]`,
+      )
+    }
+    for (const moduleName of expectedRootModules) {
+      const moduleDir = path.join(repositoryRoot, moduleName)
+      if (!existsSync(moduleDir)) {
+        addError(`missing root module directory: ${moduleName}`)
+      }
+    }
+  }
+
+  const expectedHarnessModules = [
+    'common',
+    'tool',
+    'environment',
+    'runtime',
+    'contributor-api',
+    'builtin',
+    'infra',
+    'daemon',
+  ]
+  const harnessPomPath = path.join(repositoryRoot, 'harness/pom.xml')
+  if (existsSync(harnessPomPath)) {
+    const actualHarnessModules = extractPomModules('harness/pom.xml')
+    if (JSON.stringify(actualHarnessModules) !== JSON.stringify(expectedHarnessModules)) {
+      addError(
+        `harness/pom.xml modules mismatch: expected [${expectedHarnessModules.join(', ')}], found [${actualHarnessModules.join(', ')}]`,
+      )
+    }
+    if (actualHarnessModules.includes('prompt')) {
+      addError('harness/pom.xml must not declare obsolete module: prompt')
+    }
+    for (const moduleName of expectedHarnessModules) {
+      const moduleDir = path.join(repositoryRoot, 'harness', moduleName)
+      if (!existsSync(moduleDir)) {
+        addError(`missing harness module directory: harness/${moduleName}`)
+      }
+    }
+  }
+}
+
 checkFixedLayout()
 checkHeadings()
 checkLinks()
 checkInlineSourcePaths()
 checkForbiddenReferencesAndTerms()
+checkRepositoryStructure()
 
 if (errors.length > 0) {
   console.error(`FAIL docs (${errors.length} error${errors.length === 1 ? '' : 's'})`)

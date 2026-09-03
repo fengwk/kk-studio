@@ -79,7 +79,18 @@ class RuntimeModuleArchitectureTest {
         Files.exists(forbiddenKernelModule),
         "harness/kernel module directory must not exist: " + forbiddenKernelModule);
 
+    Path forbiddenPromptModule = moduleRoot.resolveSibling("prompt");
+    assertFalse(
+        Files.exists(forbiddenPromptModule),
+        "harness/prompt module directory must not exist: " + forbiddenPromptModule);
+
     Path harnessRoot = moduleRoot.getParent();
+    Path legitimateCommonPromptPackage =
+        harnessRoot.resolve("common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt");
+    assertTrue(
+        Files.isDirectory(legitimateCommonPromptPackage),
+        "harness/common prompt package must exist: " + legitimateCommonPromptPackage);
+
     assertHarnessModules(harnessRoot.resolve("pom.xml"));
     Path rootPom = harnessRoot.getParent().resolve("pom.xml");
     assertManagedInternalDependency(rootPom, "kk-studio-harness-common");
