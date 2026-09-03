@@ -28,8 +28,14 @@ spring:
     # 替换为 PostgreSQL {password}
     password: {password}
     hikari:
-      # DB-authoritative gate 的连接获取等待必须低于默认 10s directory budget
+      # 边界 1（连接池获取）：从连接池借出连接的最长等待（毫秒），低于默认 10s directory budget
       connection-timeout: 5000
+      data-source-properties:
+        # 边界 2（TCP connect）：PostgreSQL JDBC 建立物理 TCP 连接上限（秒），防止断网时持续等待
+        connectTimeout: "5"
+        # 边界 3（socket read）：PostgreSQL JDBC 底层 socket 读超时（秒），确保断网时阻塞的 SQL 在 5 秒内 fail-closed；
+        # LISTEN 循环中 getNotifications(pollMillis) 会临时以 poll timeout 覆盖并恢复 SO_TIMEOUT，不破坏通知循环
+        socketTimeout: "5"
 
 mybatis:
   mapper-locations: classpath:**/*Mapper.xml
