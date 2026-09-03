@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
@@ -108,6 +109,37 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       from entry_path
       order by depth desc
       """;
+
+  private static final String LOAD_CONTRIBUTOR_CUSTOM_ENTRIES_ON_PATH =
+      """
+      with recursive custom_entry_path as (
+          select id, session_id, parent_entry_id, entry_type, payload, created_at, 0 as depth
+          from harness_entry
+          where id = ?
+          union all
+          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, cep.depth + 1
+          from harness_entry e
+          join custom_entry_path cep on e.id = cep.parent_entry_id
+          where cep.parent_entry_id is not null
+      ) cycle id set is_cycle using path
+      select id, session_id, parent_entry_id, entry_type, payload, created_at, depth, is_cycle
+      from custom_entry_path
+      where depth = 0
+         or entry_type = 'ROOT'
+         or is_cycle
+         or (entry_type = 'CUSTOM' and payload ->> 'contributorId' = ?)
+      order by depth desc
+      """;
+
+  private record PathEntryRow(Entry entry, int depth, boolean isCycle) {}
+
+  private static final RowMapper<PathEntryRow> PATH_ENTRY_ROW =
+      (resultSet, rowNumber) -> {
+        Entry entry = PostgresqlHarnessRows.ENTRY.mapRow(resultSet, rowNumber);
+        int depth = resultSet.getInt("depth");
+        boolean isCycle = resultSet.getBoolean("is_cycle");
+        return new PathEntryRow(entry, depth, isCycle);
+      };
 
   private static final Comparator<ThreadCommand> COMMAND_LOCK_ORDER =
       Comparator.comparing(ThreadCommand::threadId, UuidOrder.COMPARATOR)
@@ -292,6 +324,54 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     EntryPath path = new EntryPath(entries);
     entryPathCache.put(headEntryId, path);
     return path;
+  }
+
+  @Override
+  public List<Entry> loadContributorCustomEntriesOnPath(UUID headEntryId, String contributorId) {
+    checkOpen();
+    Objects.requireNonNull(headEntryId, "headEntryId");
+    Objects.requireNonNull(contributorId, "contributorId");
+    EntryPath cached = entryPathCache.get(headEntryId);
+    if (cached != null) {
+      return cached.entries().stream()
+          .filter(
+              entry ->
+                  entry.payload() instanceof CustomEntryPayload custom
+                      && contributorId.equals(custom.contributorId()))
+          .toList();
+    }
+    List<PathEntryRow> rows =
+        queryList(
+            LOAD_CONTRIBUTOR_CUSTOM_ENTRIES_ON_PATH, PATH_ENTRY_ROW, headEntryId, contributorId);
+    if (rows.isEmpty()) {
+      throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
+    }
+    for (PathEntryRow row : rows) {
+      if (row.isCycle()) {
+        throw new IllegalArgumentException("entry parent cycle detected at " + row.entry().id());
+      }
+    }
+    PathEntryRow rootRow = rows.get(0);
+    if (!rootRow.entry().payload().type().isRoot()) {
+      throw new IllegalArgumentException("entry path for " + headEntryId + " does not reach root");
+    }
+    PathEntryRow headRow = rows.get(rows.size() - 1);
+    if (headRow.depth() != 0 || !headRow.entry().id().equals(headEntryId)) {
+      throw new IllegalArgumentException("entry path does not end with head " + headEntryId);
+    }
+    UUID sessionId = rootRow.entry().sessionId();
+    for (PathEntryRow row : rows) {
+      if (!row.entry().sessionId().equals(sessionId)) {
+        throw new IllegalArgumentException("entry path crosses sessions: " + row.entry().id());
+      }
+    }
+    return rows.stream()
+        .map(PathEntryRow::entry)
+        .filter(
+            entry ->
+                entry.payload() instanceof CustomEntryPayload custom
+                    && contributorId.equals(custom.contributorId()))
+        .toList();
   }
 
   @Override

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -107,6 +108,19 @@ public interface HarnessStore {
      * turn 结构）。head 不存在抛 {@link IllegalArgumentException}。
      */
     EntryPath loadEntryPath(UUID headEntryId);
+
+    /**
+     * 读取指定 head Entry 的 root-to-head 祖先链上、payload 为 {@link CustomEntryPayload} 且 contributorId
+     * 精确匹配的 Entry 列表。
+     *
+     * <p>保持 root-to-head 顺序；不含 sibling 和其他 contributor；返回不可变列表。head 不存在或祖先链 cycle / 未到 ROOT fail
+     * closed（抛出 {@link IllegalArgumentException}）；参数为 null 拒绝。
+     *
+     * @param headEntryId 祖先链起点 head Entry ID，不能为 null
+     * @param contributorId 精确匹配的 Contributor ID，不能为 null
+     * @return 匹配的不可变 Entry 列表（保持 root-to-head 顺序）
+     */
+    List<Entry> loadContributorCustomEntriesOnPath(UUID headEntryId, String contributorId);
 
     /**
      * 读取指定 Session 的全部不可变 Entry，包含非当前 head 路径上的历史分支。按 {@code createdAt} 升序，相同时按 PostgreSQL 兼容的无符号
