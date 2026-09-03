@@ -362,8 +362,7 @@ Servlet request thread 不 `join`或等待 future。typed failure 映射为
 `ENVIRONMENT_UNAVAILABLE -> 409`、`TIMEOUT -> 504`、`IO_ERROR -> 502`。timeout 从
 `SystemSettings.environment.directoryListTimeoutMillis`在请求时读取。PostgreSQL 是权威
 gate，生产数据源 Hikari `connection-timeout` 固定为 5000ms（5 秒），低于默认 10 秒 directory
-request budget；因此 DB loss 时同步 gate 检查立即 fail-closed 返回 `ENVIRONMENT_UNAVAILABLE`，绝不绕过
-DB 或等到客户端超时。
+request budget；当连接池无法提供有效连接时，获取等待最多 5 秒并在默认请求预算内映射 `ENVIRONMENT_UNAVAILABLE`，绝不回退到内存 route。
 
 ### Trusted JAR 启动加载
 
@@ -397,7 +396,7 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 7. Harness worker dispatcher、processor、event loop、heartbeat scheduler 和 sender 都有明确 owner；worker 关闭不会
    释放 notification loop，事件 channel 关闭也不会留下 Runtime subscription。
 8. HTTP async endpoint 只返回 completion stage，不在 servlet thread 执行阻塞 Daemon round trip；future timeout 和 transport
-   error 都映射为稳定应用 error code。Environment directory 以 PostgreSQL 作为权威 gate，Hikari 5 秒连接获取上限低于默认 10 秒请求预算，DB loss 确保 fail-closed 返回 unavailable，而不是绕过 DB 或等待客户端超时。
+   error 都映射为稳定应用 error code。Environment directory 以 PostgreSQL 作为权威 gate，Hikari 5 秒连接获取上限低于默认 10 秒请求预算；当连接池无法提供有效连接时，获取等待最多 5 秒并在默认请求预算内映射 `ENVIRONMENT_UNAVAILABLE`，绝不回退到内存 route。
 9. Trusted JAR list 在 catalog 创建后不可变，jar scan 只从显式目录发生；任何加载异常在 context 可用前关闭已创建
    classloader。
 10. strict JSON field、canonical UUID、canonical decimal、DTO discriminator 和 duplicate detection 在 Web boundary
@@ -412,7 +411,7 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 | 配置 | 当前职责 |
 | --- | --- |
 | `spring.application.name` / `spring.profiles.active` | 应用名 `kk-studio`，默认 `dev` |
-| `spring.datasource` | PostgreSQL 唯一 durable database；Hikari `connection-timeout` 固定为 5000ms 保证 DB loss fail-closed |
+| `spring.datasource` | PostgreSQL 唯一 durable database；Hikari `connection-timeout` 固定为 5000ms，连接池无法提供有效连接时在默认请求预算内映射 `ENVIRONMENT_UNAVAILABLE` |
 | `spring.flyway.locations` | dev/e2e/canvas-test 的 migration + seed 组合 |
 | `server.port` / `server.compression.enabled` | 默认 `8080`与 gzip |
 | `management.endpoints.web.exposure.include` | `health,prometheus,offline,online` |
