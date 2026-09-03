@@ -58,5 +58,5 @@
 - 精确的 E2E case inventory 由
   `node scripts/e2e/run-matrix.mjs --list` 和 `--docs` 生成，不在文档中复制
   case ID 清单。
-- 从仓库根目录运行 `node scripts/docs/check.mjs` 检查固定布局、链接、标题和
-  禁止旧路径。
+- 从仓库根目录运行 `node scripts/docs/check.mjs` 检查固定布局、模块拓扑、
+  链接、标题和禁止旧路径。

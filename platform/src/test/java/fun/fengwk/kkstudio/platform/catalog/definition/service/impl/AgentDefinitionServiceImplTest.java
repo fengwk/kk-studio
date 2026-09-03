@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
@@ -203,7 +204,8 @@ public class AgentDefinitionServiceImplTest {
         factory,
         resolver,
         variants,
-        new AgentDefinitionConfigValidator(HarnessCatalog.from(List.of())),
+        new AgentDefinitionConfigValidator(
+            new HarnessToolCatalogAdapter(HarnessCatalog.from(List.of()))),
         new AgentDefinitionConfigCodec(new ObjectMapper()));
   }
 

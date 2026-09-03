@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
+import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.time.Clock;
@@ -57,6 +58,7 @@ public class HarnessToolGatewayConfiguration {
   @ConditionalOnBean(ResourceStore.class)
   @ConditionalOnMissingBean(ToolGateway.class)
   public ToolExecutionGateway toolExecutionGateway(
+      RuntimeToolCatalog runtimeToolCatalog,
       HarnessCatalog harnessCatalog,
       ContributorBranchViewLoader contributorBranchViewLoader,
       EnvironmentCapabilityTransport capabilityTransport,
@@ -73,6 +75,7 @@ public class HarnessToolGatewayConfiguration {
     int resourceMaxBytes =
         Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
     return new ToolExecutionGateway(
+        runtimeToolCatalog,
         harnessCatalog,
         contributorBranchViewLoader,
         capabilityTransport,
