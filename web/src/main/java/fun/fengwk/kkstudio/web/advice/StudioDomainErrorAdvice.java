@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
+import fun.fengwk.kkstudio.web.controller.StudioEnvironmentController;
 import fun.fengwk.kkstudio.web.controller.StudioMcpServerController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -29,7 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * AI catalog domain 错误模型的 Web 层统一翻译器。
+ * AI Catalog、Chat、MCP 与 Environment domain 错误模型的 Web 层统一翻译器。
  *
  * <p>每个 handler 都返回项目 {@link Result} 信封，其中包含由类型化错误的 {@link
  * fun.fengwk.kkstudio.platform.error.DomainErrorCode} 派生的稳定机器可读 {@code code}。HTTP 状态遵循以下语义：
@@ -42,8 +43,8 @@ import java.util.Map;
  *       → 409
  * </ul>
  *
- * <p>数据库唯一性 / 完整性竞争条件有意不在此处翻译：四个 catalog 服务自行包装 {@link
- * org.springframework.dao.DuplicateKeyException} 并上报类型化错误，因此全局 advice 不会影响无关 controller。
+ * <p>数据库唯一性 / 完整性竞争条件有意不在此处翻译：相关服务自行包装 {@link org.springframework.dao.DuplicateKeyException}
+ * 并上报类型化错误，因此全局 advice 不会影响无关 controller。
  */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(
@@ -52,7 +53,8 @@ import java.util.Map;
       StudioAgentModelController.class,
       StudioAgentDefinitionController.class,
       StudioChatController.class,
-      StudioMcpServerController.class
+      StudioMcpServerController.class,
+      StudioEnvironmentController.class
     })
 public class StudioDomainErrorAdvice {
 

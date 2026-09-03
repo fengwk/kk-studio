@@ -21,9 +21,12 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
+import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
+import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
+import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.List;
 import java.util.UUID;
@@ -41,7 +44,9 @@ class StudioEnvironmentControllerTest {
     StudioEnvironmentController controller = new StudioEnvironmentController(environmentService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new ResultResponseBodyAdvice())
+            .setControllerAdvice(
+                new StudioDomainErrorAdvice(new StudioMessageService()),
+                new ResultResponseBodyAdvice())
             .build();
   }
 
@@ -58,6 +63,40 @@ class StudioEnvironmentControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].id").value(ENV_ID.toString()))
         .andExpect(jsonPath("$.data[0].name").value("dev"));
+  }
+
+  /** 验证查询已存在的 Environment 返回 200 与对应的卡片信息。 */
+  @Test
+  void getEnvironmentReturnsOk() throws Exception {
+    EnvironmentCardDTO card = new EnvironmentCardDTO();
+    card.setId(ENV_ID.toString());
+    card.setName("dev");
+    when(environmentService.get(eq(EnvironmentId.of(ENV_ID)))).thenReturn(card);
+
+    mockMvc
+        .perform(get("/api/ai/environments/" + ENV_ID))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
+        .andExpect(jsonPath("$.data.name").value("dev"));
+  }
+
+  /**
+   * 验证当服务层抛出 AiResourceNotFoundException 时，由统一 StudioDomainErrorAdvice 映射为 HTTP 404 与
+   * RESOURCE_NOT_FOUND (code="resource_not_found") 错误信封，而不是泄露为 500。
+   */
+  @Test
+  void getMissingEnvironmentReturnsNotFound() throws Exception {
+    when(environmentService.get(eq(EnvironmentId.of(ENV_ID))))
+        .thenThrow(
+            new AiResourceNotFoundException("environment", "environment not found: " + ENV_ID));
+
+    mockMvc
+        .perform(get("/api/ai/environments/" + ENV_ID))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.status").value(404))
+        .andExpect(jsonPath("$.code").value("resource_not_found"))
+        .andExpect(jsonPath("$.errors.resource").value("environment"))
+        .andExpect(jsonPath("$.errors.detail").value("environment not found: " + ENV_ID));
   }
 
   @Test
