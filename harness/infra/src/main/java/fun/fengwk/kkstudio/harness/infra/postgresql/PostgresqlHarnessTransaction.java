@@ -35,7 +35,6 @@ import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -91,6 +90,23 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       where (harness_work.required_environment_id is not distinct from excluded.required_environment_id
              or excluded.required_environment_id is null)
       returning *
+      """;
+
+  private static final String LOAD_ENTRY_PATH =
+      """
+      with recursive entry_path as (
+          select id, session_id, parent_entry_id, entry_type, payload, created_at, 1 as depth
+          from harness_entry
+          where id = ?
+          union all
+          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, ep.depth + 1
+          from harness_entry e
+          join entry_path ep on e.id = ep.parent_entry_id
+          where ep.parent_entry_id is not null
+      ) cycle id set is_cycle using path
+      select id, session_id, parent_entry_id, entry_type, payload, created_at
+      from entry_path
+      order by depth desc
       """;
 
   private static final Comparator<ThreadCommand> COMMAND_LOCK_ORDER =
@@ -232,19 +248,18 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   @Override
   public EntryPath loadEntryPath(UUID headEntryId) {
     checkOpen();
-    List<Entry> path = new ArrayList<>();
-    Set<UUID> visited = new HashSet<>();
-    UUID cursor = headEntryId;
-    while (cursor != null) {
-      if (!visited.add(cursor)) {
-        throw new IllegalArgumentException("entry parent cycle detected at " + cursor);
-      }
-      Entry entry = requireExistingEntry(cursor);
-      path.add(entry);
-      cursor = entry.payload().type().isRoot() ? null : entry.parentEntryId();
+    Objects.requireNonNull(headEntryId, "headEntryId");
+    List<Entry> entries = queryList(LOAD_ENTRY_PATH, PostgresqlHarnessRows.ENTRY, headEntryId);
+    if (entries.isEmpty()) {
+      throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
     }
-    Collections.reverse(path);
-    return new EntryPath(path);
+    Set<UUID> visited = new HashSet<>();
+    for (Entry entry : entries) {
+      if (!visited.add(entry.id())) {
+        throw new IllegalArgumentException("entry parent cycle detected at " + entry.id());
+      }
+    }
+    return new EntryPath(entries);
   }
 
   @Override

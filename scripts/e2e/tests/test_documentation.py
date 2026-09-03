@@ -1,4 +1,4 @@
-"""Run the permanent documentation checker as a repository-level contract."""
+"""Run the permanent documentation checker as a contract."""
 
 import subprocess
 import unittest
@@ -12,7 +12,7 @@ class TestDocumentation(unittest.TestCase):
     """The documentation checker must accept the committed fixed layout."""
 
     def test_documentation_checker_passes(self):
-        """The CLI covers layout, links, headings, source paths, and forbidden terms."""
+        """The CLI covers layout, links, headings, source paths, forbidden terms, and structure."""
         result = subprocess.run(
             ["node", "scripts/docs/check.mjs"],
             cwd=REPOSITORY_ROOT,

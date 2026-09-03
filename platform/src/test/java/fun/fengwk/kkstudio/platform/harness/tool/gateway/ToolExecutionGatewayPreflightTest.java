@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
@@ -32,12 +33,23 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolClientFactory;
+import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
+import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -125,6 +137,7 @@ class ToolExecutionGatewayPreflightTest {
             new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR));
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
+            new HarnessToolCatalogAdapter(catalog),
             catalog,
             ToolGatewayTestSupport.FAILING_CONTRIBUTOR_BRANCH_LOADER,
             new ToolGatewayTestSupport.FakeTransport(),
@@ -358,6 +371,70 @@ class ToolExecutionGatewayPreflightTest {
                 false,
                 null));
     return gateway.preflight(request);
+  }
+
+  @Test
+  void preflightAcceptsDynamicMcpTool() {
+    // 意图：验证动态 MCP 工具在通过 RuntimeToolCatalog 聚合后能够顺利通过 Gateway preflight
+    McpServerRepository repo = mock(McpServerRepository.class);
+    McpToolClientFactory factory = mock(McpToolClientFactory.class);
+    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, factory);
+
+    UUID serverId = UUID.randomUUID();
+    McpServer server = new McpServer();
+    server.setId(serverId);
+    server.setName("mcp-server");
+    server.setUrl("http://localhost:8080");
+    server.setTimeoutMillis(5000L);
+    server.setVersion(1L);
+
+    UUID toolId = UUID.randomUUID();
+    McpTool mcpTool = new McpTool();
+    mcpTool.setId(toolId);
+    mcpTool.setServerId(serverId);
+    mcpTool.setSourceName("echo");
+    mcpTool.setModelName("mcp_server_echo");
+    mcpTool.setDescription("echo tool");
+    mcpTool.setInputSchemaJson(
+        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+
+    when(repo.getToolById(toolId)).thenReturn(Optional.of(mcpTool));
+    when(repo.getById(serverId)).thenReturn(Optional.of(server));
+    when(repo.listAllServers()).thenReturn(List.of(server));
+    when(repo.listTools(serverId)).thenReturn(List.of(mcpTool));
+
+    HarnessCatalog harnessCatalog = HarnessCatalog.from(List.of());
+    RuntimeToolCatalog toolCatalog =
+        new CompositeRuntimeToolCatalog(
+            List.of(new HarnessToolCatalogAdapter(harnessCatalog), mcpCatalog));
+
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            toolCatalog,
+            harnessCatalog,
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.DirectQueueExecutor(),
+            ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
+            ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
+            new ConcurrencyAdmission(Integer.MAX_VALUE));
+
+    ToolContribution contribution =
+        toolCatalog.findTool(McpStableIds.agentToolId(toolId)).orElseThrow();
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall("call-mcp", "mcp_server_echo", "{}"),
+            new ToolBinding(
+                contribution.definition(),
+                new ContributorBinding(
+                    contribution.id().contributorId().value(),
+                    contribution.id().localName(),
+                    List.of()),
+                false,
+                null));
+
+    ToolGateway.PreflightResult result = gateway.preflight(request);
+    assertInstanceOf(ToolGateway.Allow.class, result);
   }
 
   private static AgentToolDefinition hostDefinition(ToolDescriptor descriptor) {

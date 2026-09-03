@@ -14,7 +14,7 @@ name: kk-studio-distributed
 # 不复制任何实现。两个 App 共享同一 PostgreSQL database 与 MinIO bucket。
 #
 # 身份变量（固定默认值，可由宿主环境覆盖；deploy/distributed/run.sh 导出同一组
-# 默认值，最终 Environment 分支集成时可改参数名）：
+# 默认值）：
 #   DISTRIBUTED_ENV_A_NAME / DISTRIBUTED_ENV_B_NAME daemon 对应的 environment name
 #   DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN / DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN
 #   DISTRIBUTED_APP_A_PORT / DISTRIBUTED_APP_B_PORT 宿主 app 端口

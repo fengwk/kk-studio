@@ -768,14 +768,6 @@ export const settingsCatalog = {
     'en-US': 'Agent name delegated for MiniMax-H3 prompt generation. Leave empty to use the default agent.',
     'zh-CN': 'MiniMax-H3 生成提示词所委派的 Agent 名称。留空表示使用当前默认 Agent。',
   },
-  'settings.field.integrations.minimaxH3.promptEnvironmentName': {
-    'en-US': 'Prompt environment name',
-    'zh-CN': '提示词环境名',
-  },
-  'settings.field.integrations.minimaxH3.promptEnvironmentName.hint': {
-    'en-US': 'Environment name for MiniMax-H3 prompt execution. Leave empty to use the default environment.',
-    'zh-CN': 'MiniMax-H3 提示词生成所运行的环境名称。留空表示使用默认运行环境。',
-  },
   'settings.field.integrations.minimaxH3.promptMaxWaitMillis': {
     'en-US': 'Prompt max wait (ms)',
     'zh-CN': '提示词最大等待（毫秒）',

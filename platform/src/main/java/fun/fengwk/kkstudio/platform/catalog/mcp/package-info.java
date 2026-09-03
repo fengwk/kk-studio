@@ -3,6 +3,6 @@
  * {@code McpToolCatalog}。
  *
  * <p>仅支持 Streamable HTTP 传输；全部工具 NON_IDEMPOTENT；per-call MCP client（绝不缓存）；错误对外只暴露 稳定通用文本，绝不泄漏 URL /
- * token / header。集成 wiring 由后续切片完成。
+ * token / header。动态 {@code McpToolCatalog} 通过 {@code CompositeRuntimeToolCatalog} 聚合入统一运行时目录。
  */
 package fun.fengwk.kkstudio.platform.catalog.mcp;
