@@ -200,6 +200,9 @@ error/Tool approval/Tool result 分别经对应 JSON codec 编码；Thread statu
 duration 来自 `StorageBlob`权威行；TEXT Resource 没有 Blob。Canvas id、command id、resource id 和 graph version
 在这里做 canonical 解析和 wire 投影，不把 bucket/object key写入 DTO。
 
+`StrictJacksonConfiguration`使 Boot `JsonMapper`默认省略 null 并按 DTO 声明顺序输出；只有显式
+`@JsonInclude(ALWAYS)`的 nullable wire 字段仍输出 null，同时继续拒绝重复键并把 Long 写为字符串。
+
 ### DTO error advice 与 i18n
 
 四个 `@Order(HIGHEST_PRECEDENCE)`、按 `assignableTypes`限定范围的 advice 保持稳定 error envelope：
@@ -362,7 +365,8 @@ Servlet request thread 不 `join`或等待 future。typed failure 映射为
 `ENVIRONMENT_UNAVAILABLE -> 409`、`TIMEOUT -> 504`、`IO_ERROR -> 502`。timeout 从
 `SystemSettings.environment.directoryListTimeoutMillis`在请求时读取。PostgreSQL 是权威
 gate，生产数据源 Hikari `connection-timeout` 固定为 5000ms（5 秒），低于默认 10 秒 directory
-request budget；当连接池无法提供有效连接时，获取等待最多 5 秒并在默认请求预算内映射 `ENVIRONMENT_UNAVAILABLE`，绝不回退到内存 route。
+request budget；当连接池无法提供有效连接时，获取等待最多 5 秒并在默认请求预算内映射
+`ENVIRONMENT_UNAVAILABLE`，绝不回退到内存 route。
 
 ### Trusted JAR 启动加载
 
@@ -396,7 +400,9 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 7. Harness worker dispatcher、processor、event loop、heartbeat scheduler 和 sender 都有明确 owner；worker 关闭不会
    释放 notification loop，事件 channel 关闭也不会留下 Runtime subscription。
 8. HTTP async endpoint 只返回 completion stage，不在 servlet thread 执行阻塞 Daemon round trip；future timeout 和 transport
-   error 都映射为稳定应用 error code。Environment directory 以 PostgreSQL 作为权威 gate，Hikari 5 秒连接获取上限低于默认 10 秒请求预算；当连接池无法提供有效连接时，获取等待最多 5 秒并在默认请求预算内映射 `ENVIRONMENT_UNAVAILABLE`，绝不回退到内存 route。
+   error 都映射为稳定应用 error code。Environment directory 以 PostgreSQL 作为权威 gate，Hikari 5 秒连接获取上限
+   低于默认 10 秒请求预算；当连接池无法提供有效连接时，在预算内映射 `ENVIRONMENT_UNAVAILABLE`，绝不回退到内存
+   route。
 9. Trusted JAR list 在 catalog 创建后不可变，jar scan 只从显式目录发生；任何加载异常在 context 可用前关闭已创建
    classloader。
 10. strict JSON field、canonical UUID、canonical decimal、DTO discriminator 和 duplicate detection 在 Web boundary
