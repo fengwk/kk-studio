@@ -77,6 +77,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> "true");
+    registry.add("kk-studio.harness.dispatcher.poll-interval", () -> "10s");
   }
 
   @Autowired
@@ -201,18 +202,5 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
         .validateMigrationNaming(true)
         .load()
         .migrate();
-    try (Statement statement = connection.createStatement()) {
-      statement.executeUpdate(
-          """
-          update system_setting
-          set config = jsonb_set(
-                  config,
-                  '{advanced,dispatcherPollIntervalMillis}',
-                  '10000'::jsonb),
-              version = version + 1,
-              updated_at = now()
-          where id = 1
-          """);
-    }
   }
 }

@@ -49,7 +49,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.environment.maxResourceBytes").isString())
         .andExpect(jsonPath("$.data.integrations.openCliHub.baseUrl").doesNotExist())
         .andExpect(jsonPath("$.data.storageMedia.s3Enabled").value(false))
-        .andExpect(jsonPath("$.data.advanced.dispatcherMaxDispatchTasks").value(64))
+        .andExpect(jsonPath("$.data.advanced.applicationEventQueueCapacity").value(512))
         .andExpect(jsonPath("$.data.createTime").exists())
         .andExpect(jsonPath("$.data.updateTime").exists());
   }

@@ -923,14 +923,6 @@ export const settingsCatalog = {
     'en-US': 'Lease and heartbeat budgets for thread processors.',
     'zh-CN': '线程处理器的租约与心跳预算。',
   },
-  'settings.section.advanced.dispatcher.title': {
-    'en-US': 'Dispatcher',
-    'zh-CN': '分发器',
-  },
-  'settings.section.advanced.dispatcher.description': {
-    'en-US': 'Dispatch concurrency, queue and rejection budgets.',
-    'zh-CN': '分发并发、队列与拒绝预算。',
-  },
   'settings.section.advanced.applicationEvent.title': {
     'en-US': 'Application events',
     'zh-CN': '应用事件',
@@ -1002,54 +994,6 @@ export const settingsCatalog = {
   'settings.field.advanced.toolDispatchBusyFallbackDelayMillis.hint': {
     'en-US': 'Delay in milliseconds before fallback when the tool dispatch queue is busy.',
     'zh-CN': '工具调度队列繁忙时触发降级处理前的等待毫秒数。',
-  },
-  'settings.field.advanced.dispatcherLeaseDurationMillis': {
-    'en-US': 'Dispatcher lease duration (ms)',
-    'zh-CN': '分发器租约时长（毫秒）',
-  },
-  'settings.field.advanced.dispatcherLeaseDurationMillis.hint': {
-    'en-US': 'Distributed lock lease duration in milliseconds for the primary task dispatcher.',
-    'zh-CN': '调度器主节点分布式锁与租约的有效时长毫秒数。',
-  },
-  'settings.field.advanced.dispatcherPollIntervalMillis': {
-    'en-US': 'Dispatcher poll interval (ms)',
-    'zh-CN': '分发器轮询间隔（毫秒）',
-  },
-  'settings.field.advanced.dispatcherPollIntervalMillis.hint': {
-    'en-US': 'Polling interval in milliseconds for the dispatcher checking queued tasks.',
-    'zh-CN': '调度器轮询待分发任务队列的时间间隔毫秒数。',
-  },
-  'settings.field.advanced.dispatcherRejectionDelayMillis': {
-    'en-US': 'Rejection delay (ms)',
-    'zh-CN': '拒绝延迟（毫秒）',
-  },
-  'settings.field.advanced.dispatcherRejectionDelayMillis.hint': {
-    'en-US': 'Delay in milliseconds before re-enqueueing a task rejected due to resource limits.',
-    'zh-CN': '任务因资源不足被调度器拒绝后的重新入队等待延迟毫秒数。',
-  },
-  'settings.field.advanced.dispatcherMaxDispatchTasks': {
-    'en-US': 'Max dispatch tasks',
-    'zh-CN': '最大分发任务数',
-  },
-  'settings.field.advanced.dispatcherMaxDispatchTasks.hint': {
-    'en-US': 'Maximum number of tasks the dispatcher can batch and dispatch in a single polling cycle.',
-    'zh-CN': '调度器单次轮询批处理中允许分发派发的最大任务数。',
-  },
-  'settings.field.advanced.dispatcherWorkerConcurrency': {
-    'en-US': 'Worker concurrency',
-    'zh-CN': '工作线程并发',
-  },
-  'settings.field.advanced.dispatcherWorkerConcurrency.hint': {
-    'en-US': 'Number of concurrent worker threads used internally by the task dispatcher.',
-    'zh-CN': '调度器内部并发工作线程数。',
-  },
-  'settings.field.advanced.dispatcherWorkerQueueCapacity': {
-    'en-US': 'Worker queue capacity',
-    'zh-CN': '工作队列容量',
-  },
-  'settings.field.advanced.dispatcherWorkerQueueCapacity.hint': {
-    'en-US': 'Maximum task queue capacity for dispatcher worker threads.',
-    'zh-CN': '调度器工作线程池任务等待队列的容量上限。',
   },
   'settings.field.advanced.applicationEventQueueCapacity': {
     'en-US': 'Event queue capacity',
