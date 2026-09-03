@@ -47,7 +47,7 @@ const thread: HarnessThreadDTO = {
 }
 
 describe('AgentPane acceptance pipeline', () => {
-  it('materializes NEW_SESSION in one request with root settings and only USER_MESSAGE', () => {
+  it('creates NEW_SESSION in one request with root settings and only USER_MESSAGE', () => {
     const plan = buildAcceptanceRequest({
       owner: { type: 'CHAT', id: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },

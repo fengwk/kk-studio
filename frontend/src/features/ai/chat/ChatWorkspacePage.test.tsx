@@ -208,7 +208,7 @@ describe('ChatWorkspacePage', () => {
     expect(layout).not.toContain('"target"')
   })
 
-  it('materializes a NEW_SESSION first send as one request and binds the pane to its response', async () => {
+  it('creates a NEW_SESSION first send as one request and binds the pane to its response', async () => {
     const user = userEvent.setup()
     renderWorkspace()
     const composer = await screen.findByLabelText('给 AI 发送消息')

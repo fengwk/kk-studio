@@ -49,11 +49,11 @@ export function createIdempotencyKey(): string {
   return createUuid()
 }
 
-export function createMaterializedSessionId(): string {
+export function createSessionId(): string {
   return createUuid()
 }
 
-export function createMaterializedThreadId(): string {
+export function createThreadId(): string {
   return createUuid()
 }
 
@@ -67,7 +67,7 @@ export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsD
 
 /**
  * Builds the complete frozen request before the network call. NEW_SESSION intentionally
- * contains only USER_MESSAGE: the final draft is materialized directly into rootSettings.
+ * contains only USER_MESSAGE: the final draft is applied directly into rootSettings.
  */
 export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenCommandBatchRequest {
   const createId = input.createId ?? createIdempotencyKey
@@ -96,7 +96,7 @@ export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenComma
           ...buildBranchDiffCommands(input.base, input.draft, createId),
           message,
         ]
-  const target = materializeTarget(input.target, input.draft, input.thread)
+  const target = buildTarget(input.target, input.draft, input.thread)
   const request: AgentCommandBatchRequestDTO = {
     owner: { ...input.owner },
     target,
@@ -120,7 +120,7 @@ export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenComma
   }
 }
 
-function materializeTarget(
+function buildTarget(
   target: PaneTarget,
   draft: BranchDraft,
   thread: HarnessThreadDTO | null | undefined,
@@ -128,8 +128,8 @@ function materializeTarget(
   if (target.kind === 'NEW_SESSION_DRAFT') {
     return {
       type: 'NEW_SESSION' as const,
-      sessionId: createMaterializedSessionId(),
-      threadId: createMaterializedThreadId(),
+      sessionId: createSessionId(),
+      threadId: createThreadId(),
       rootSettings: createBranchSettings(draft),
       yoloEnabled: draft.yoloEnabled,
     }
@@ -139,7 +139,7 @@ function materializeTarget(
       type: 'ENTRY' as const,
       sessionId: target.sessionId,
       startEntryId: target.startEntryId,
-      threadId: createMaterializedThreadId(),
+      threadId: createThreadId(),
       yoloEnabled: draft.yoloEnabled,
     }
   }

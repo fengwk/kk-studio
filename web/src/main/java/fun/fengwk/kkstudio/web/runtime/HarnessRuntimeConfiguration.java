@@ -321,11 +321,11 @@ public class HarnessRuntimeConfiguration {
         toolProcessor);
   }
 
-  /** READY 事件只唤醒 Work dispatcher；实际 Environment 事实由 {@link TurnResolver} 在 resolve 时读取。 */
+  /** READY 事件唤醒 Runtime 侧 Work dispatcher；实际 Environment 事实由 {@link TurnResolver} 在 resolve 时读取。 */
   @Bean
   public EnvironmentReadyListener harnessEnvironmentReadyListener(
       ObjectProvider<HarnessWorkDispatcher> dispatcherProvider) {
-    return environmentName -> dispatcherProvider.ifAvailable(HarnessWorkDispatcher::wake);
+    return ignoredEnvironmentId -> dispatcherProvider.ifAvailable(HarnessWorkDispatcher::wake);
   }
 
   @Bean

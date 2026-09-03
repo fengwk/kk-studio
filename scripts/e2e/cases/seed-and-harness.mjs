@@ -162,7 +162,7 @@ registerCase({
 registerCase({
   id: 'thread.new_session_submission_atomic',
   level: 'L1',
-  title: 'NEW_SESSION 原子物化返回完整 accepted 快照',
+  title: 'NEW_SESSION 原子创建返回完整 accepted 快照',
   docs: 'POST /api/ai/runtime/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、version >= 1；accepted command 的 sequence=1；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
@@ -686,9 +686,9 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.entry_materialization_same_session',
+  id: 'thread.entry_creation_same_session',
   level: 'L1',
-  title: 'ENTRY 同 Session 分支物化',
+  title: 'ENTRY 同 Session 分支创建',
   docs: 'ENTRY target 在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）：sessionId 不变、accepted command sequence=1；quiescent 后分支 Thread snapshot path 必须包含 startEntry 与分支 USER；原 Thread head/version/nextCommandSequence 不变；ENTRY 非法 startEntryId（不存在 404/跨 Session 400）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
@@ -799,7 +799,7 @@ registerCase({
   id: 'thread.session_entry_tree',
   level: 'L1',
   title: '完整 Session Entry Tree 保留非当前历史分支',
-  docs: 'GET /api/ai/runtime/sessions/{sessionId}/entries 返回 Session 全部 immutable Entries；ENTRY 物化新 Thread 形成分叉后，snapshot 仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系；listSessionThreads 反映两条 Thread',
+  docs: 'GET /api/ai/runtime/sessions/{sessionId}/entries 返回 Session 全部 immutable Entries；ENTRY 创建新 Thread 形成分叉后，snapshot 仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系；listSessionThreads 反映两条 Thread',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -911,7 +911,7 @@ registerCase({
   id: 'thread.entry_cross_session_rejected',
   level: 'L1',
   title: '跨 Session ENTRY 被拒绝',
-  docs: 'ENTRY target 使用另一 Session 的 entry id => 400（start entry 不在目标 Session）；两个原 Thread projection/session entries/thread list 均不变；预分配 rejectedThreadId 的 snapshot 404（未物化）',
+  docs: 'ENTRY target 使用另一 Session 的 entry id => 400（start entry 不在目标 Session）；两个原 Thread projection/session entries/thread list 均不变；预分配 rejectedThreadId 的 snapshot 404（未创建）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1010,7 +1010,7 @@ registerCase({
       JSON.stringify(await listSessionThreads(ctx, secondSessionId)) === JSON.stringify(beforeSecondThreads),
       'second Session thread list must not change',
     )
-    // rejectedThreadId 未物化：snapshot 404。
+    // rejectedThreadId 未创建：snapshot 404。
     await expectHttpError(
       () => ctx.call('GET', `/api/ai/runtime/threads/${rejectedThreadId}/snapshot`),
       { status: 404 },
@@ -1384,7 +1384,7 @@ registerCase({
     assert(String(fresh.thread.version) === String(disabled.version), JSON.stringify(fresh.thread))
     assert(fresh.queuedCommands.length === 0, JSON.stringify(fresh.queuedCommands))
     // setThreadYolo 绝不追加/修改 Entry：快照 entries 与 YOLO 开关前后一致。
-    // （materialize 的命令已被消费，entries 含 ROOT + turn 链；此处只证明 YOLO 零副作用。）
+    // （创建批中的命令已被消费，entries 含 ROOT + turn 链；此处只证明 YOLO 零副作用。）
     const beforeYoloEntries = fresh.entries
     const afterYoloSnapshot = await getThreadSnapshot(ctx, threadId)
     assert(
