@@ -265,7 +265,7 @@ registerCase({
   level: 'L2',
   title: '真实流式 /stop 持久化 partial、exact replay 并继续新一轮',
   requires: ['real'],
-  docs: '仅 minimax/MiniMax-M2.7：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 物化空闲 Thread（不调用真实 Provider）；随后 THREAD batch SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> status STOPPED、version+1、stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同 stoppedTurnEndEntryId、version 不再变化；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
+  docs: '仅 minimax/MiniMax-M2.7：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 创建空闲 Thread（不调用真实 Provider）；随后 THREAD batch SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> status STOPPED、version+1、stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同 stoppedTurnEndEntryId、version 不再变化；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
   async run(ctx) {
     await requireRealMiniMaxM27(ctx)
     assert(
@@ -292,7 +292,7 @@ registerCase({
       owner: chatOwner(chat.id),
       sessionId,
       threadId: tid,
-      // bootstrap 用 missing Agent 确定性 PLANNING_FAILED 物化空闲 Thread（不调用真实 Provider）；
+      // bootstrap 用 missing Agent 确定性 PLANNING_FAILED 创建空闲 Thread（不调用真实 Provider）；
       // 真实 turn 由随后的 THREAD batch 显式 SET_AGENT/SET_MODEL + initialPrompt 启动。
       rootSettings: branchSettingsOf(
         { name: `e2e-stop-partial-missing-${cid().slice(0, 8)}` },
@@ -463,7 +463,7 @@ registerCase({
 registerCase({
   id: 'branch.same_session_entry_thread',
   level: 'L3',
-  title: 'ENTRY 同 Session 分支物化（真实分支 turn）',
+  title: 'ENTRY 同 Session 分支创建（真实分支 turn）',
   requires: ['real', 'branch'],
   docs: '在 real.text_turn 的同一 Session 历史 assistant Entry 下用 ENTRY target 开新 Thread（不复制 Entry）：sessionId 不变、新 Thread root-to-head 路径包含 startEntry 与分支 USER、分支 turn 继续产生独立 assistant；原 Thread head/version/nextCommandSequence 不变',
   async run(ctx) {

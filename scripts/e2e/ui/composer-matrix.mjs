@@ -1113,7 +1113,7 @@ async function createDurableHistoryFixture(
       agentName: target.agent.name,
       yoloEnabled: false,
     })
-    // 主 Thread：NEW_SESSION 用不存在的 Agent 确定性物化（第一条消息随物化批入队），
+    // 主 Thread：NEW_SESSION 用不存在的 Agent 确定性创建（第一条消息随创建批入队），
     // 后续 messages 每条一个 THREAD batch（产品 HTTP 面一个 batch 只允许恰一条 USER_MESSAGE）。
     const owner = chatOwner(state.chat.id)
     const sessionId = cid()
@@ -1380,7 +1380,7 @@ async function createHoldingQueueFixture(
     const owner = chatOwner(state.chat.id)
     const sessionId = cid()
     const threadId = cid()
-    // 先以不存在的 Agent 确定性物化空闲 Thread，再在 mock 上通过 THREAD batch 启动真实 hold turn。
+    // 先以不存在的 Agent 确定性创建空闲 Thread，再在 mock 上通过 THREAD batch 启动真实 hold turn。
     await createNewSession(apiCtx, {
       owner,
       sessionId,

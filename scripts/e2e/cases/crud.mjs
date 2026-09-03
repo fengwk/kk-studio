@@ -503,7 +503,7 @@ registerCase({
           && !Object.hasOwn(chat, 'environment'),
         JSON.stringify(chat),
       )
-      // 先创建 Thread（NEW_SESSION materialization），再更新 Chat 默认值，最后 reread 同一 Thread：
+      // 先创建 Thread（NEW_SESSION creation），再更新 Chat 默认值，最后 reread 同一 Thread：
       // 更新 Chat 不影响既有 Thread 的 branchSettings（Thread 快照是运行时事实）。
       const requested = {
         workspacePath: null,
@@ -623,7 +623,7 @@ registerCase({
   id: 'crud.chat.session_ownership_list',
   level: 'L1',
   title: 'Chat Session 摘要与 Session Thread 列表',
-  docs: 'NEW_SESSION 原子物化即建立 Chat owner 归属；GET /api/ai/chat/{chatId}/sessions 返回 Session 摘要（新到旧，firstMessagePreview 精确等于首条 USER 文本、threadCount=1）；同批 NEW_SESSION 幂等重放 replayed=true 且不新增 Session/Thread relation；GET /api/ai/runtime/sessions/{sessionId}/threads 返回 Thread 摘要；未知 Chat sessions => 404',
+  docs: 'NEW_SESSION 原子创建即建立 Chat owner 归属；GET /api/ai/chat/{chatId}/sessions 返回 Session 摘要（新到旧，firstMessagePreview 精确等于首条 USER 文本、threadCount=1）；同批 NEW_SESSION 幂等重放 replayed=true 且不新增 Session/Thread relation；GET /api/ai/runtime/sessions/{sessionId}/threads 返回 Thread 摘要；未知 Chat sessions => 404',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -633,7 +633,7 @@ registerCase({
       yoloEnabled: true,
     })
     const modelSelection = modelSelectionFor(agent)
-    const materializedThreadIds = []
+    const createdThreadIds = []
     const makeSession = async (title) => {
       const threadId = cid()
       const commands = [userMessageCommand(`${title} ${suffix}`, cid())]
@@ -645,33 +645,33 @@ registerCase({
         yoloEnabled: true,
         commands,
       })
-      materializedThreadIds.push(threadId)
+      createdThreadIds.push(threadId)
       return { accepted, commands }
     }
     const first = await makeSession('first')
     const second = await makeSession('second')
     const third = await makeSession('third')
     try {
-      // materialize 快照可能已含 processor 消费；只断言结构，不锁定瞬时 status。
+      // create 快照可能已含 processor 消费；只断言结构，不锁定瞬时 status。
       const firstThread = first.accepted.thread
       assert(/^\d+$/.test(String(firstThread.version)), JSON.stringify(firstThread))
       assert(firstThread.sessionId && firstThread.headEntryId, JSON.stringify(firstThread))
 
-      // 精确 preview 断言依赖 USER entry 已 durable 物化：先等三个 Thread 的 turn 收敛。
-      for (const threadId of materializedThreadIds) {
+      // 精确 preview 断言依赖 USER entry 已持久化：先等三个 Thread 的 turn 收敛。
+      for (const threadId of createdThreadIds) {
         await waitForQuiescentThread(ctx, threadId, {
           timeoutMs: 60_000,
           intervalMs: 100,
         })
       }
 
-      // NEW_SESSION materialization 是 Chat owner 归属的唯一入口：连续三次物化产生三个 Session。
+      // NEW_SESSION creation 是 Chat owner 归属的唯一入口：连续三次创建产生三个 Session。
       const sessions = await listChatSessions(ctx, chat.id)
       const sessionIds = sessions.map((item) => String(item.sessionId))
       assert(sessionIds.includes(String(first.accepted.thread.sessionId)), 'first Session missing')
       assert(sessionIds.includes(String(second.accepted.thread.sessionId)), 'second Session missing')
       assert(sessionIds.includes(String(third.accepted.thread.sessionId)), 'third Session missing')
-      // 新到旧：最近物化（third）排在最前。
+      // 新到旧：最近创建（third）排在最前。
       assert(
         sessionIds[0] === String(third.accepted.thread.sessionId),
         `expected newest-first: ${JSON.stringify(sessions)}`,
@@ -713,7 +713,7 @@ registerCase({
         `replay must not add Thread relation: ${JSON.stringify(sessionsAfterReplay)}`,
       )
 
-      // Session Thread 摘要包含物化 Thread。
+      // Session Thread 摘要包含创建的 Thread。
       const sessionThreads = await listSessionThreads(ctx, thirdAccepted.thread.sessionId)
       const threadIds = sessionThreads.map((item) => String(item.threadId))
       assert(
@@ -729,7 +729,7 @@ registerCase({
       )
     } finally {
       // 再次确认全部 Thread 已收敛，避免测试结束时的异步事件污染后续 case。
-      for (const threadId of materializedThreadIds) {
+      for (const threadId of createdThreadIds) {
         await waitForQuiescentThread(ctx, threadId, {
           timeoutMs: 60_000,
           intervalMs: 100,

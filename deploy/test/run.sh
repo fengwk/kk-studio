@@ -542,7 +542,7 @@ chat = json_call(
 )
 assert chat["agentName"] == "default-assistant", chat
 marker = "offline-chat-smoke-" + uuid.uuid4().hex[:8]
-# 唯一产品写入口：NEW_SESSION 一次原子物化 Session + ROOT + Thread 并接受首条 USER_MESSAGE。
+# 唯一产品写入口：NEW_SESSION 一次原子创建 Session + ROOT + Thread 并接受首条 USER_MESSAGE。
 session_id = str(uuid.uuid4())
 thread_id = str(uuid.uuid4())
 accepted = json_call(

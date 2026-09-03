@@ -390,7 +390,7 @@ class HarnessRuntimeAcceptInitialTest {
   }
 
   @Test
-  void entryRejectsMissingSessionWithoutMaterializingThread() {
+  void entryRejectsMissingSessionWithoutCreatingThread() {
     // ENTRY 必须锚定现存 Session；缺失时在创建 Thread/Command/Work 前确定性失败。
     UUID missingSessionId = TestIds.id(210);
     HarnessRuntimeNotFoundException error =
