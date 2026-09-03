@@ -48,7 +48,7 @@ composition root。Web 不实现 Catalog、Canvas、Harness、Storage 或 Enviro
 | Application/domain | `kk-studio-platform`、`kk-studio-share`、`kk-studio-canvas-infra` |
 | Harness composition | `kk-studio-harness-environment`、`kk-studio-harness-runtime`、`kk-studio-harness-infra`、`kk-studio-harness-contributor-api` |
 | Web transport | `convention4j-spring-boot-starter-web`、`spring-boot-starter-websocket` |
-| Database bootstrap | `kk-studio-schema` runtime、`flyway-core`、`flyway-database-postgresql` |
+| Database bootstrap | `kk-studio-schema` runtime、`spring-boot-starter-flyway`、`flyway-database-postgresql` |
 | Integration tests | convention test starter、Testcontainers PostgreSQL/JUnit |
 
 `WebModuleArchitectureTest`要求 web 直接声明 Canvas infra、Harness infra、Contributor API、Runtime、Environment，同时禁止
