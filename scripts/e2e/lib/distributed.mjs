@@ -1,6 +1,21 @@
 /** 双节点 distributed capability 的最小上下文工具（Node 原生，无依赖）。 */
 
+import { execFileSync } from 'node:child_process'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const DEFAULT_REPO_ROOT = path.resolve(__dirname, '../../..')
+
 export const NODE_IDS = ['a', 'b']
+
+/** 分布式测试栈受限控制命令白名单（只允许 DB 故障注入与状态检查，拒绝任意命令）。 */
+export const ALLOWED_DISTRIBUTED_COMMANDS = Object.freeze([
+  'disconnect-db-a',
+  'reconnect-db-a',
+  'status',
+])
 
 /**
  * 构造双节点 baseUrls。baseUrl 是 node A，baseUrlB 是 node B；
@@ -35,4 +50,25 @@ export function assertDistributedContext(ctx) {
       throw new Error(`case '${ctx.caseId}' is missing base URL for node ${node}`)
     }
   }
+}
+
+/**
+ * 执行受限的分布式测试控制命令（固定白名单守卫，复用 deploy/distributed/run.sh）。
+ * 严禁通过 options 覆盖命令白名单。
+ */
+export function runDistributedCommand(command, options = {}) {
+  if (!ALLOWED_DISTRIBUTED_COMMANDS.includes(command)) {
+    throw new Error(
+      `runDistributedCommand: command '${command}' is not allowed, expected one of: ${ALLOWED_DISTRIBUTED_COMMANDS.join(', ')}`,
+    )
+  }
+  const repoRoot = options.repoRoot || DEFAULT_REPO_ROOT
+  const exec = options.exec || execFileSync
+  const scriptPath = path.join(repoRoot, 'deploy/distributed/run.sh')
+  return exec(scriptPath, [command], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    timeout: options.timeout || 30_000,
+    stdio: options.stdio || ['ignore', 'pipe', 'pipe'],
+  })
 }

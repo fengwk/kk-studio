@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createBaseUrls, createNodeCall } from '../lib/distributed.mjs'
+import {
+  ALLOWED_DISTRIBUTED_COMMANDS,
+  createBaseUrls,
+  createNodeCall,
+  runDistributedCommand,
+} from '../lib/distributed.mjs'
 import { redactSecrets } from '../lib/redact.mjs'
 
 test('createBaseUrls requires both node URLs and normalizes trailing slashes', () => {
@@ -91,4 +96,59 @@ test('redactSecrets masks credential values and keeps ordinary text', () => {
     'plain text and baseUrl=https://host.example/v1 stay',
   )
   assert.equal(redactSecrets(null), null)
+})
+
+test('runDistributedCommand forwards whitelisted commands with exact arguments and repoRoot', () => {
+  // Test intent: verify whitelisted commands call deploy/distributed/run.sh with exact arguments and execution options.
+  const invocations = []
+  const mockExec = (cmd, args, opts) => {
+    invocations.push({ cmd, args, opts })
+    return 'ok\n'
+  }
+  const customRoot = '/fake/repo/root'
+
+  for (const whitelisted of ALLOWED_DISTRIBUTED_COMMANDS) {
+    const out = runDistributedCommand(whitelisted, { repoRoot: customRoot, exec: mockExec, timeout: 5000 })
+    assert.equal(out, 'ok\n')
+  }
+
+  assert.equal(invocations.length, ALLOWED_DISTRIBUTED_COMMANDS.length)
+  assert.equal(invocations[0].cmd, '/fake/repo/root/deploy/distributed/run.sh')
+  assert.deepEqual(invocations[0].args, ['disconnect-db-a'])
+  assert.equal(invocations[0].opts.cwd, customRoot)
+  assert.equal(invocations[0].opts.timeout, 5000)
+  assert.deepEqual(invocations[1].args, ['reconnect-db-a'])
+  assert.deepEqual(invocations[2].args, ['status'])
+})
+
+test('runDistributedCommand rejects arbitrary or disallowed commands fail-closed', () => {
+  // Test intent: runner control helper must enforce a strict whitelist and reject arbitrary shell execution.
+  const invocations = []
+  const mockExec = (cmd, args, opts) => {
+    invocations.push({ cmd, args, opts })
+    return 'ok\n'
+  }
+
+  for (const disallowed of ['down', 'up', 'rm -rf /', 'sh', 'logs', '']) {
+    assert.throws(
+      () => runDistributedCommand(disallowed, { exec: mockExec }),
+      /is not allowed, expected one of/,
+    )
+  }
+  assert.equal(invocations.length, 0, 'disallowed commands must never reach the exec runner')
+})
+
+test('runDistributedCommand whitelist is strictly fixed and ignores any options.allowedCommands', () => {
+  // Test intent: verify that caller options cannot expand or replace the immutable whitelist.
+  const invocations = []
+  const mockExec = (cmd, args, opts) => {
+    invocations.push({ cmd, args, opts })
+    return 'ok\n'
+  }
+
+  assert.throws(
+    () => runDistributedCommand('down', { allowedCommands: ['down'], exec: mockExec }),
+    /is not allowed, expected one of/,
+  )
+  assert.equal(invocations.length, 0, 'overriding allowedCommands must be strictly ignored')
 })

@@ -204,7 +204,10 @@ services:
     image: ${DISTRIBUTED_DAEMON_IMAGE:-kk-studio-daemon:distributed}
     user: "0:0"
     entrypoint: ["/bin/bash", "-c"]
-    command: ["chown 10001:10001 /workspace-a /workspace-b"]
+    command:
+      [
+        "mkdir -p /workspace-a/distributed-a-only /workspace-b/distributed-b-only && chown -R 10001:10001 /workspace-a /workspace-b",
+      ]
     volumes:
       - daemon-workspace-a:/workspace-a
       - daemon-workspace-b:/workspace-b
