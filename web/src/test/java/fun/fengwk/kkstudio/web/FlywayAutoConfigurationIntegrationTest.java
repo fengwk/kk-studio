@@ -3,14 +3,12 @@ package fun.fengwk.kkstudio.web;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.postgresql.Driver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -19,12 +17,15 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import javax.sql.DataSource;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.sql.Statement;
 
-/** 验证 Spring Boot 的 Flyway 自动配置会迁移应用的数据源。 */
+/**
+ * 验证 Spring Boot 4 的 Flyway 自动配置在启动全新 PostgreSQL 数据库时自动执行迁移。
+ *
+ * <p>PostgreSQL 容器仅启动空库，严禁测试前进行任何手工 Flyway 迁移、SQL 引导或容器初始化脚本。 真实 {@link SpringBootTest} 必须依赖 Spring
+ * Boot 的 Flyway auto-configuration 成功就绪， 并确保依赖数据库表的 bean（如装配期读取 {@code system_setting} 的组件）能够正常启动。
+ */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, classes = WebTestApplication.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class FlywayAutoConfigurationIntegrationTest {
@@ -35,20 +36,6 @@ class FlywayAutoConfigurationIntegrationTest {
 
   static {
     POSTGRES.start();
-    // 上下文创建期装配 bean 会读取 system_setting 默认行：按测试注入的 Flyway 位置（V1+dev seed）预先迁移，
-    // 保证缺行不导致启动失败；Boot 自动迁移随后对已应用版本是幂等 no-op。
-    try (Connection conn =
-        DriverManager.getConnection(
-            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())) {
-      Flyway.configure()
-          .dataSource(new SingleConnectionDataSource(conn, true))
-          .locations("classpath:db/migration", "classpath:db/seed/dev")
-          .validateMigrationNaming(true)
-          .load()
-          .migrate();
-    } catch (SQLException error) {
-      throw new ExceptionInInitializerError(error);
-    }
   }
 
   @Autowired private DataSource dataSource;

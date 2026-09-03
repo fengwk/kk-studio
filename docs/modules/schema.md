@@ -52,8 +52,8 @@ schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql
 schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql
 ```
 
-Web 以 runtime scope 依赖 `kk-studio-schema`、`flyway-core` 和
-`flyway-database-postgresql`；Platform、Harness Infra、Canvas Infra 在测试中
+Web 依赖 `spring-boot-starter-flyway`、`flyway-database-postgresql` 以及 runtime scope 的
+`kk-studio-schema`；Platform、Harness Infra、Canvas Infra 在测试中
 以 test scope 依赖 schema 与 Flyway。Schema 不反向依赖任何模块。
 
 ## 核心模型与 API
