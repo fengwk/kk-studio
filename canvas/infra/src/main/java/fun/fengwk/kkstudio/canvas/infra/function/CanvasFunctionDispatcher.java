@@ -21,6 +21,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Slf4j
 public final class CanvasFunctionDispatcher implements SmartLifecycle, AutoCloseable {
 
+  public static final String CHANNEL = "canvas_function_work";
+
   private final CanvasFunctionWorkStore workStore;
   private final CanvasFunctionRuntimeProperties properties;
   private final Clock clock;
