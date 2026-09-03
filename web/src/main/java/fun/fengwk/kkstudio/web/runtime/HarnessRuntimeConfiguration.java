@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
+import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.resource.ManagedResourceDownloadService;
 import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
@@ -72,7 +73,7 @@ import java.util.concurrent.TimeUnit;
  * fail-fast 单线程 drain executor 与 bounded AbortPolicy worker executor。
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(HarnessRuntimeProperties.class)
+@EnableConfigurationProperties({HarnessRuntimeProperties.class, HarnessDispatcherProperties.class})
 public class HarnessRuntimeConfiguration {
 
   @Bean
@@ -259,16 +260,9 @@ public class HarnessRuntimeConfiguration {
   /** bounded worker executor：固定并发 + 有界队列 + AbortPolicy（fail-fast，绝不静默丢弃 handoff task）。 */
   @Bean(name = "harnessDispatcherWorkerExecutor", destroyMethod = "shutdown")
   public ExecutorService harnessDispatcherWorkerExecutor(
-      SystemSettingsSnapshot systemSettingsSnapshot) {
-    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
-    int concurrency = advanced.dispatcherWorkerConcurrency();
-    int queueCapacity = advanced.dispatcherWorkerQueueCapacity();
-    if (concurrency <= 0) {
-      throw new IllegalArgumentException("dispatcher worker concurrency must be positive");
-    }
-    if (queueCapacity <= 0) {
-      throw new IllegalArgumentException("dispatcher worker queue capacity must be positive");
-    }
+      HarnessDispatcherProperties dispatcherProperties) {
+    int concurrency = dispatcherProperties.getWorker().getConcurrency();
+    int queueCapacity = dispatcherProperties.getWorker().getQueueCapacity();
     return new ThreadPoolExecutor(
         concurrency,
         concurrency,
@@ -289,7 +283,7 @@ public class HarnessRuntimeConfiguration {
   public HarnessWorkDispatcher harnessWorkDispatcher(
       @Qualifier("nodeInstanceId") UUID nodeInstanceId,
       HarnessStore store,
-      SystemSettingsSnapshot systemSettingsSnapshot,
+      HarnessDispatcherProperties dispatcherProperties,
       Clock clock,
       @Qualifier("harnessDispatcherDrainExecutor") Executor drainExecutor,
       @Qualifier("harnessDispatcherWorkerExecutor") Executor workerExecutor,
@@ -297,17 +291,15 @@ public class HarnessRuntimeConfiguration {
       ThreadProcessor threadProcessor,
       ModelProcessor modelProcessor,
       ToolProcessor toolProcessor) {
-    // dispatcher 的 lease/poll/rejection/预算：读取共享启动快照的 SystemSettings.Advanced。
-    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
-    Duration dispatcherLease = Duration.ofMillis(advanced.dispatcherLeaseDurationMillis());
+    Duration dispatcherLease = dispatcherProperties.getLeaseDuration();
     HarnessWorkDispatcherConfig config =
         new HarnessWorkDispatcherConfig(
             dispatcherLease,
             dispatcherLease,
             dispatcherLease,
-            Duration.ofMillis(advanced.dispatcherPollIntervalMillis()),
-            Duration.ofMillis(advanced.dispatcherRejectionDelayMillis()),
-            advanced.dispatcherMaxDispatchTasks());
+            dispatcherProperties.getPollInterval(),
+            dispatcherProperties.getRejectionDelay(),
+            dispatcherProperties.getMaxDispatchTasks());
     return new HarnessWorkDispatcher(
         nodeInstanceId,
         store,

@@ -105,9 +105,6 @@ class SystemSettingsTest {
     assertEquals(16L * 1024 * 1024, advanced.resourceMaxBytes());
     assertEquals(30_000L, advanced.processorLeaseDurationMillis());
     assertEquals(10_000L, advanced.processorHeartbeatIntervalMillis());
-    assertEquals(64, advanced.dispatcherMaxDispatchTasks());
-    assertEquals(16, advanced.dispatcherWorkerConcurrency());
-    assertEquals(64, advanced.dispatcherWorkerQueueCapacity());
     assertEquals(512, advanced.applicationEventQueueCapacity());
     assertEquals(2L * 1024 * 1024, advanced.applicationEventMaxBytes());
     assertEquals(10_000L, advanced.applicationEventSendTimeoutMillis());
@@ -250,12 +247,6 @@ class SystemSettingsTest {
                 base.modelDispatchBusyFallbackDelayMillis(),
                 base.toolPreflightFailureDelayMillis(),
                 base.toolDispatchBusyFallbackDelayMillis(),
-                base.dispatcherLeaseDurationMillis(),
-                base.dispatcherPollIntervalMillis(),
-                base.dispatcherRejectionDelayMillis(),
-                base.dispatcherMaxDispatchTasks(),
-                base.dispatcherWorkerConcurrency(),
-                base.dispatcherWorkerQueueCapacity(),
                 base.applicationEventQueueCapacity(),
                 base.applicationEventMaxBytes(),
                 base.applicationEventSendTimeoutMillis(),

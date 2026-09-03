@@ -381,16 +381,6 @@ public class SystemSettingsCodec {
         requiredMillis(
             dto.getToolDispatchBusyFallbackDelayMillis(),
             "advanced.toolDispatchBusyFallbackDelayMillis"),
-        requiredMillis(
-            dto.getDispatcherLeaseDurationMillis(), "advanced.dispatcherLeaseDurationMillis"),
-        requiredMillis(
-            dto.getDispatcherPollIntervalMillis(), "advanced.dispatcherPollIntervalMillis"),
-        requiredMillis(
-            dto.getDispatcherRejectionDelayMillis(), "advanced.dispatcherRejectionDelayMillis"),
-        requiredInt(dto.getDispatcherMaxDispatchTasks(), "advanced.dispatcherMaxDispatchTasks"),
-        requiredInt(dto.getDispatcherWorkerConcurrency(), "advanced.dispatcherWorkerConcurrency"),
-        requiredInt(
-            dto.getDispatcherWorkerQueueCapacity(), "advanced.dispatcherWorkerQueueCapacity"),
         requiredInt(
             dto.getApplicationEventQueueCapacity(), "advanced.applicationEventQueueCapacity"),
         requiredMillis(dto.getApplicationEventMaxBytes(), "advanced.applicationEventMaxBytes"),
@@ -604,12 +594,6 @@ public class SystemSettingsCodec {
     dto.setModelDispatchBusyFallbackDelayMillis(advanced.modelDispatchBusyFallbackDelayMillis());
     dto.setToolPreflightFailureDelayMillis(advanced.toolPreflightFailureDelayMillis());
     dto.setToolDispatchBusyFallbackDelayMillis(advanced.toolDispatchBusyFallbackDelayMillis());
-    dto.setDispatcherLeaseDurationMillis(advanced.dispatcherLeaseDurationMillis());
-    dto.setDispatcherPollIntervalMillis(advanced.dispatcherPollIntervalMillis());
-    dto.setDispatcherRejectionDelayMillis(advanced.dispatcherRejectionDelayMillis());
-    dto.setDispatcherMaxDispatchTasks(advanced.dispatcherMaxDispatchTasks());
-    dto.setDispatcherWorkerConcurrency(advanced.dispatcherWorkerConcurrency());
-    dto.setDispatcherWorkerQueueCapacity(advanced.dispatcherWorkerQueueCapacity());
     dto.setApplicationEventQueueCapacity(advanced.applicationEventQueueCapacity());
     dto.setApplicationEventMaxBytes(advanced.applicationEventMaxBytes());
     dto.setApplicationEventSendTimeoutMillis(advanced.applicationEventSendTimeoutMillis());

@@ -131,12 +131,6 @@ export interface SystemSettingsAdvancedDraft {
   modelDispatchBusyFallbackDelayMillis: DraftNumericField
   toolPreflightFailureDelayMillis: DraftNumericField
   toolDispatchBusyFallbackDelayMillis: DraftNumericField
-  dispatcherLeaseDurationMillis: DraftNumericField
-  dispatcherPollIntervalMillis: DraftNumericField
-  dispatcherRejectionDelayMillis: DraftNumericField
-  dispatcherMaxDispatchTasks: DraftNumericField
-  dispatcherWorkerConcurrency: DraftNumericField
-  dispatcherWorkerQueueCapacity: DraftNumericField
   applicationEventQueueCapacity: DraftNumericField
   applicationEventMaxBytes: DraftNumericField
   applicationEventSendTimeoutMillis: DraftNumericField
@@ -212,12 +206,6 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
       modelDispatchBusyFallbackDelayMillis: dto.advanced.modelDispatchBusyFallbackDelayMillis,
       toolPreflightFailureDelayMillis: dto.advanced.toolPreflightFailureDelayMillis,
       toolDispatchBusyFallbackDelayMillis: dto.advanced.toolDispatchBusyFallbackDelayMillis,
-      dispatcherLeaseDurationMillis: dto.advanced.dispatcherLeaseDurationMillis,
-      dispatcherPollIntervalMillis: dto.advanced.dispatcherPollIntervalMillis,
-      dispatcherRejectionDelayMillis: dto.advanced.dispatcherRejectionDelayMillis,
-      dispatcherMaxDispatchTasks: String(dto.advanced.dispatcherMaxDispatchTasks),
-      dispatcherWorkerConcurrency: String(dto.advanced.dispatcherWorkerConcurrency),
-      dispatcherWorkerQueueCapacity: String(dto.advanced.dispatcherWorkerQueueCapacity),
       applicationEventQueueCapacity: String(dto.advanced.applicationEventQueueCapacity),
       applicationEventMaxBytes: dto.advanced.applicationEventMaxBytes,
       applicationEventSendTimeoutMillis: dto.advanced.applicationEventSendTimeoutMillis,
@@ -483,20 +471,6 @@ export function assembleSettingsUpdate(
       ),
       toolDispatchBusyFallbackDelayMillis: requiredLong(
         draft.advanced.toolDispatchBusyFallbackDelayMillis,
-      ),
-      dispatcherLeaseDurationMillis: requiredLong(
-        draft.advanced.dispatcherLeaseDurationMillis,
-      ),
-      dispatcherPollIntervalMillis: requiredLong(
-        draft.advanced.dispatcherPollIntervalMillis,
-      ),
-      dispatcherRejectionDelayMillis: requiredLong(
-        draft.advanced.dispatcherRejectionDelayMillis,
-      ),
-      dispatcherMaxDispatchTasks: requiredInt(draft.advanced.dispatcherMaxDispatchTasks),
-      dispatcherWorkerConcurrency: requiredInt(draft.advanced.dispatcherWorkerConcurrency),
-      dispatcherWorkerQueueCapacity: requiredInt(
-        draft.advanced.dispatcherWorkerQueueCapacity,
       ),
       applicationEventQueueCapacity: requiredInt(draft.advanced.applicationEventQueueCapacity),
       applicationEventMaxBytes: requiredLong(draft.advanced.applicationEventMaxBytes),

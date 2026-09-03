@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
+import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -112,6 +113,7 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private HarnessRuntime harnessRuntime;
   @Autowired private SystemPromptPreviewService systemPromptPreviewService;
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
+  @Autowired private HarnessDispatcherProperties harnessDispatcherProperties;
   @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
   @Autowired private EnvironmentReadyListener environmentReadyListener;
 
@@ -139,6 +141,10 @@ class HarnessRuntimeConfigurationTest {
     assertNotNull(harnessRuntime);
     assertNotNull(systemPromptPreviewService);
     assertNotNull(harnessWorkDispatcher);
+    assertNotNull(harnessDispatcherProperties);
+    assertEquals(64, harnessDispatcherProperties.getMaxDispatchTasks());
+    assertEquals(16, harnessDispatcherProperties.getWorker().getConcurrency());
+    assertEquals(64, harnessDispatcherProperties.getWorker().getQueueCapacity());
     assertNotNull(postgresqlNotificationLoop);
     assertNotNull(environmentReadyListener);
     assertEquals(

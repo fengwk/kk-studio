@@ -205,15 +205,15 @@ describe('system settings server editor', () => {
     const lease = await screen.findByLabelText('处理器租约时长（毫秒）')
     await userEvent.clear(lease)
     await userEvent.type(lease, '45000')
-    const tasks = screen.getByLabelText('最大分发任务数')
-    await userEvent.clear(tasks)
-    await userEvent.type(tasks, '32')
+    const queue = screen.getByLabelText('事件队列容量')
+    await userEvent.clear(queue)
+    await userEvent.type(queue, '256')
 
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(screen.getByText('已是最新')).toBeInTheDocument())
     const sent = mocks.update.mock.calls[0]![0] as SystemSettingsUpdateDTO
     expect(sent.advanced.processorLeaseDurationMillis).toBe('45000')
-    expect(sent.advanced.dispatcherMaxDispatchTasks).toBe(32)
+    expect(sent.advanced.applicationEventQueueCapacity).toBe(256)
   })
 
   it('shows a conflict dialog on 409 and reloads only after user confirmation', async () => {

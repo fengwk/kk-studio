@@ -69,7 +69,7 @@ describe('systemSettingsService', () => {
     const sent = vi.mocked(client.put).mock.calls[0][1] as typeof payload
     expect(sent.expectedVersion).toBe('1')
     expect(sent.advanced.processorLeaseDurationMillis).toBe('30000')
-    expect(sent.advanced.dispatcherMaxDispatchTasks).toBe(64)
+    expect(sent.advanced.applicationEventQueueCapacity).toBe(512)
     expect(sent.aiRuntime.retryMaxRetries).toBe(3)
     expect(sent.tool.defaultYolo).toBe(false)
   })
