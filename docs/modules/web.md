@@ -206,7 +206,7 @@ duration 来自 `StorageBlob`权威行；TEXT Resource 没有 Blob。Canvas id�
 
 | advice | controller 范围 | HTTP 映射 |
 | --- | --- | --- |
-| `StudioDomainErrorAdvice` | Catalog + Chat | validation 400、not found 404、version conflict/duplicate/in-use 409 |
+| `StudioDomainErrorAdvice` | Catalog、Chat、MCP、Environment | validation 400、not found 404、version conflict/duplicate/in-use 409 |
 | `StudioResponseStatusErrorAdvice` | Canvas、Chat、ComfyUI、Harness | `ResponseStatusException`按 status 输出；Runtime not found 404、conflict 409、非法输入 400 |
 | `StudioStorageErrorAdvice` | Storage | validation 400、not found 404、verification/conflict 409 |
 | `StudioSystemSettingsErrorAdvice` | SystemSettings | validation 400、row missing 404、CAS conflict 409，并带 expected/actual version |
