@@ -1,5 +1,9 @@
 spring:
 
+  autoconfigure:
+    exclude:
+      - fun.fengwk.convention4j.springboot.starter.web.error.WebErrorAutoConfiguration
+
   application:
     name: kk-studio
 
@@ -7,19 +11,20 @@ spring:
     enabled: false
 
   datasource:
-    multi:
-      primary:
-        primary: true
-        driver-class-name: org.postgresql.Driver
-        url: jdbc:postgresql://127.0.0.1:1/unused
-        username: unused
-        password: unused
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://127.0.0.1:1/unused
+    username: unused
+    password: unused
+    # 多个缓存 Spring TestContext 共享同一 Testcontainers PostgreSQL；禁止每个上下文预热 10 个连接。
+    hikari:
+      minimum-idle: 0
+      maximum-pool-size: 4
 
-  mybatis:
-    mapper-locations: classpath:**/*Mapper.xml
-    type-aliases-package: fun.fengwk.kkstudio.**.model
-    configuration:
-      map-underscore-to-camel-case: true
+mybatis:
+  mapper-locations: classpath:**/*Mapper.xml
+  type-aliases-package: fun.fengwk.kkstudio.**.model
+  configuration:
+    map-underscore-to-camel-case: true
 
 
 kk-studio:

@@ -92,10 +92,10 @@ class HarnessRuntimeConfigurationTest {
 
   @DynamicPropertySource
   static void overrideDataSource(DynamicPropertyRegistry registry) {
-    registry.add("spring.datasource.multi.primary.driver-class-name", Driver.class::getName);
-    registry.add("spring.datasource.multi.primary.url", POSTGRES::getJdbcUrl);
-    registry.add("spring.datasource.multi.primary.username", POSTGRES::getUsername);
-    registry.add("spring.datasource.multi.primary.password", POSTGRES::getPassword);
+    registry.add("spring.datasource.driver-class-name", Driver.class::getName);
+    registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+    registry.add("spring.datasource.username", POSTGRES::getUsername);
+    registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> "false");
   }
 

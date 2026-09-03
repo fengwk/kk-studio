@@ -1,5 +1,9 @@
 spring:
 
+  autoconfigure:
+    exclude:
+      - fun.fengwk.convention4j.springboot.starter.web.error.WebErrorAutoConfiguration
+
   application:
     # 应用名称
     name: kk-studio
@@ -23,6 +27,12 @@ spring:
     username: {username}
     # 替换为 PostgreSQL {password}
     password: {password}
+
+mybatis:
+  mapper-locations: classpath:**/*Mapper.xml
+  type-aliases-package: fun.fengwk.kkstudio.**.model
+  configuration:
+    map-underscore-to-camel-case: true
 
 server:
   port: 8080

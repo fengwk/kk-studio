@@ -24,7 +24,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
-/** 验证 Spring Boot 的 Flyway 自动配置会迁移应用的多数据源。 */
+/** 验证 Spring Boot 的 Flyway 自动配置会迁移应用的数据源。 */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, classes = WebTestApplication.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class FlywayAutoConfigurationIntegrationTest {
@@ -56,17 +56,17 @@ class FlywayAutoConfigurationIntegrationTest {
 
   @DynamicPropertySource
   static void configureDatabase(DynamicPropertyRegistry registry) {
-    registry.add("spring.datasource.multi.primary.driver-class-name", Driver.class::getName);
-    registry.add("spring.datasource.multi.primary.url", POSTGRES::getJdbcUrl);
-    registry.add("spring.datasource.multi.primary.username", POSTGRES::getUsername);
-    registry.add("spring.datasource.multi.primary.password", POSTGRES::getPassword);
+    registry.add("spring.datasource.driver-class-name", Driver.class::getName);
+    registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+    registry.add("spring.datasource.username", POSTGRES::getUsername);
+    registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("spring.flyway.enabled", () -> "true");
     registry.add("spring.flyway.locations", () -> "classpath:db/migration,classpath:db/seed/dev");
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> "false");
   }
 
   @Test
-  void webContextAutoMigratesBaselineAndDevSeedThroughMultiDataSource() throws Exception {
+  void webContextAutoMigratesBaselineAndDevSeedThroughDataSource() throws Exception {
     // 启动真实 web 上下文走的是 Boot 自动配置，而不是直接操作 Flyway 测试基座。
     assertTrue(serverPort > 0);
     try (Connection conn = dataSource.getConnection();
@@ -88,7 +88,7 @@ class FlywayAutoConfigurationIntegrationTest {
           st.executeQuery(
               "select count(*) from agent_definition where name = 'default-assistant'")) {
         assertTrue(seed.next());
-        assertEquals(1L, seed.getLong(1), "dev seed must be visible through the multi-data-source");
+        assertEquals(1L, seed.getLong(1), "dev seed must be visible through the data-source");
       }
       try (ResultSet ownerSessionTables =
           st.executeQuery(

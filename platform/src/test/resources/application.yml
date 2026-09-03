@@ -7,20 +7,17 @@ spring:
     enabled: false
 
   datasource:
-    multi:
-      primary:
-        primary: true
-        # 默认占位；PostgresSpringTestSupport / 集成测试通过 DynamicPropertySource 覆盖
-        driver-class-name: org.postgresql.Driver
-        url: jdbc:postgresql://127.0.0.1:1/unused
-        username: unused
-        password: unused
+    # 默认占位；PostgresSpringTestSupport / 集成测试通过 DynamicPropertySource 覆盖
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://127.0.0.1:1/unused
+    username: unused
+    password: unused
 
-  mybatis:
-    mapper-locations: classpath:**/*Mapper.xml
-    type-aliases-package: fun.fengwk.kkstudio.**.model
-    configuration:
-      map-underscore-to-camel-case: true
+mybatis:
+  mapper-locations: classpath:**/*Mapper.xml
+  type-aliases-package: fun.fengwk.kkstudio.**.model
+  configuration:
+    map-underscore-to-camel-case: true
 
 
 kk-studio:
