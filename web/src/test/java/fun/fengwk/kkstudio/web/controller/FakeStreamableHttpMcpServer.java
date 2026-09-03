@@ -12,26 +12,37 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
-/** Web 控制器测试专用的轻量级 Streamable HTTP MCP Server Mock。 */
-class FakeStreamableHttpMcpServer implements AutoCloseable {
+/** Web 控制器与集成测试专用的轻量级 Streamable HTTP MCP Server Mock。 */
+public class FakeStreamableHttpMcpServer implements AutoCloseable {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   private final HttpServer server;
   private final List<DiscoveredTool> tools = new CopyOnWriteArrayList<>();
+  private final List<String> receivedAuthHeaders = new CopyOnWriteArrayList<>();
+  private final List<String> receivedToolCallNames = new CopyOnWriteArrayList<>();
+  private final List<String> receivedArguments = new CopyOnWriteArrayList<>();
+  private final AtomicInteger toolCallCount = new AtomicInteger(0);
 
   record DiscoveredTool(String name, String description, JsonNode inputSchema) {}
 
-  FakeStreamableHttpMcpServer() throws IOException {
+  public FakeStreamableHttpMcpServer() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
         "/mcp",
         new HttpHandler() {
           @Override
           public void handle(HttpExchange exchange) throws IOException {
+            String auth = exchange.getRequestHeaders().getFirst("Authorization");
+            if (auth != null) {
+              receivedAuthHeaders.add(auth);
+            }
+
             if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
               sendResponse(exchange, 405, "Method Not Allowed");
               return;
@@ -107,6 +118,38 @@ class FakeStreamableHttpMcpServer implements AutoCloseable {
               return;
             }
 
+            if ("tools/call".equals(method)) {
+              toolCallCount.incrementAndGet();
+              JsonNode params = request.get("params");
+              String callName = "";
+              JsonNode argumentsNode = null;
+              if (params != null) {
+                if (params.has("name")) {
+                  callName = params.get("name").asText();
+                  receivedToolCallNames.add(callName);
+                }
+                if (params.has("arguments")) {
+                  argumentsNode = params.get("arguments");
+                  receivedArguments.add(argumentsNode.toString());
+                }
+              }
+              ObjectNode resp = MAPPER.createObjectNode();
+              resp.put("jsonrpc", "2.0");
+              if (id != null) {
+                resp.set("id", id);
+              }
+              ObjectNode result = resp.putObject("result");
+              ArrayNode contentArr = result.putArray("content");
+              ObjectNode textContent = contentArr.addObject();
+              textContent.put("type", "text");
+              String echoText =
+                  "echo: " + (argumentsNode != null ? argumentsNode.toString() : callName);
+              textContent.put("text", echoText);
+              result.put("isError", false);
+              sendJson(exchange, 200, resp);
+              return;
+            }
+
             ObjectNode defaultResp = MAPPER.createObjectNode();
             defaultResp.put("jsonrpc", "2.0");
             if (id != null) {
@@ -119,17 +162,37 @@ class FakeStreamableHttpMcpServer implements AutoCloseable {
     server.start();
   }
 
-  String endpointUrl() {
+  public String endpointUrl() {
     return "http://127.0.0.1:" + server.getAddress().getPort() + "/mcp";
   }
 
-  void addTool(String name, String description, String inputSchemaJson) {
+  public void addTool(String name, String description, String inputSchemaJson) {
     try {
       JsonNode schema = MAPPER.readTree(inputSchemaJson);
       tools.add(new DiscoveredTool(name, description, schema));
     } catch (Exception e) {
       throw new IllegalArgumentException("invalid json", e);
     }
+  }
+
+  public void clearTools() {
+    tools.clear();
+  }
+
+  public int toolCallCount() {
+    return toolCallCount.get();
+  }
+
+  public List<String> receivedToolCallNames() {
+    return new ArrayList<>(receivedToolCallNames);
+  }
+
+  public List<String> receivedArguments() {
+    return new ArrayList<>(receivedArguments);
+  }
+
+  public List<String> receivedAuthHeaders() {
+    return new ArrayList<>(receivedAuthHeaders);
   }
 
   private static void sendJson(HttpExchange exchange, int statusCode, JsonNode json)

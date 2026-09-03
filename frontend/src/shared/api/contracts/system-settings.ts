@@ -92,7 +92,6 @@ export interface GptImage2IntegrationDTO {
 export interface MiniMaxH3IntegrationDTO {
   enabled: boolean
   promptAgentName: string | null
-  promptEnvironmentName: string | null
   promptMaxWaitMillis: DecimalLong
   comfyBaseUrl: string | null
   comfyConnectTimeoutMillis: DecimalLong

@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
@@ -93,6 +94,12 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolClientFactory;
+import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
@@ -103,6 +110,9 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
+import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
+import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.math.BigDecimal;
@@ -845,6 +855,84 @@ class DatabaseTurnResolverTest {
     assertFalse(projected.contains("retry-only-secret"));
     assertFalse(projected.contains("terminal-only-secret"));
     assertFalse(projected.contains("provider exploded"));
+  }
+
+  @Test
+  void resolvesDynamicMcpToolAndPreservesStaticProjectors() {
+    // 意图：验证动态 MCP 工具能通过 RuntimeToolCatalog 正常解析到 ModelRequestSpec 的 tool bindings 中，同时
+    // HarnessCatalog 中的静态 context projectors 依然正常工作
+    McpServerRepository repo = mock(McpServerRepository.class);
+    McpToolClientFactory factory = mock(McpToolClientFactory.class);
+    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, factory);
+
+    UUID serverId = UUID.randomUUID();
+    McpServer server = new McpServer();
+    server.setId(serverId);
+    server.setName("srv");
+    server.setUrl("http://localhost:8080");
+    server.setTimeoutMillis(5000L);
+    server.setVersion(1L);
+
+    UUID toolId = UUID.randomUUID();
+    McpTool mcpTool = new McpTool();
+    mcpTool.setId(toolId);
+    mcpTool.setServerId(serverId);
+    mcpTool.setSourceName("echo");
+    mcpTool.setModelName("mcp_srv_echo");
+    mcpTool.setDescription("echo tool");
+    mcpTool.setInputSchemaJson(
+        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+
+    when(repo.getToolById(toolId)).thenReturn(Optional.of(mcpTool));
+    when(repo.getById(serverId)).thenReturn(Optional.of(server));
+    when(repo.listAllServers()).thenReturn(List.of(server));
+    when(repo.listTools(serverId)).thenReturn(List.of(mcpTool));
+
+    HarnessContributor projectorContributor =
+        HarnessContributor.of(
+            new ContributorDescriptor(new ContributorId("proj"), "Proj", "1", Set.of()),
+            registrar ->
+                registrar.registerContextProjector(
+                    "meta",
+                    branch -> List.of(new ContextFragment("projected-context-fragment")),
+                    0));
+    HarnessCatalog catalogWithProjector = HarnessCatalog.from(List.of(projectorContributor));
+
+    RuntimeToolCatalog composite =
+        new CompositeRuntimeToolCatalog(
+            List.of(new HarnessToolCatalogAdapter(catalogWithProjector), mcpCatalog));
+
+    AgentToolId mcpAgentToolId = McpStableIds.agentToolId(toolId);
+    Fixture fixture =
+        new Fixture(
+            List.of(mcpAgentToolId.value()),
+            List.of(),
+            List.of(),
+            Set.of(),
+            ProviderType.OPENAI,
+            ProviderType.OPENAI,
+            PromptCacheCapability.unsupported(),
+            true,
+            catalogWithProjector,
+            composite,
+            Clock.fixed(NOW, ZoneOffset.UTC));
+
+    EntryPath path = fixture.path(settings(null, "default"));
+    ModelRequestSpec spec = fixture.resolved(path);
+
+    // 验证 MCP 工具已成功解析为 ToolBinding
+    assertEquals(1, spec.toolBindings().size());
+    ToolBinding toolBinding = spec.toolBindings().get(0);
+    assertEquals(mcpAgentToolId, toolBinding.definition().id());
+    assertEquals("mcp_srv_echo", toolBinding.definition().descriptor().name());
+
+    // 验证 static context projector 依旧被 HarnessCatalog 正确投影进 preamble
+    List<ProviderMessage> projectedPreamble =
+        new ProviderMessageProjector().project(spec.preambleMessages());
+    boolean foundProjected =
+        projectedPreamble.stream()
+            .anyMatch(pm -> textOf(pm).contains("projected-context-fragment"));
+    assertTrue(foundProjected, "Preamble must contain text from static context projector");
   }
 
   @Test
@@ -1777,6 +1865,32 @@ class DatabaseTurnResolverTest {
         boolean includeProviderFactory,
         HarnessCatalog providedCatalog,
         Clock clock) {
+      this(
+          tools,
+          skills,
+          hostDescriptors,
+          internalHostToolNames,
+          persistedProviderType,
+          factoryType,
+          cacheCapability,
+          includeProviderFactory,
+          providedCatalog,
+          null,
+          clock);
+    }
+
+    private Fixture(
+        List<String> tools,
+        List<String> skills,
+        List<ToolDescriptor> hostDescriptors,
+        Set<String> internalHostToolNames,
+        ProviderType persistedProviderType,
+        ProviderType factoryType,
+        PromptCacheCapability cacheCapability,
+        boolean includeProviderFactory,
+        HarnessCatalog providedCatalog,
+        RuntimeToolCatalog providedToolCatalog,
+        Clock clock) {
       agent.setName("assistant");
       agent.setSystemPrompt("agent system prompt");
       agent.setConfigJson("agent-config");
@@ -1861,6 +1975,11 @@ class DatabaseTurnResolverTest {
         catalog = HarnessCatalog.from(contributors);
       }
 
+      RuntimeToolCatalog toolCatalog =
+          providedToolCatalog != null
+              ? providedToolCatalog
+              : new HarnessToolCatalogAdapter(catalog);
+
       resolver =
           new DatabaseTurnResolver(
               agents,
@@ -1869,6 +1988,7 @@ class DatabaseTurnResolverTest {
               agentConfigCodec,
               modelConfigParser,
               new ProviderFactories(factories),
+              toolCatalog,
               catalog,
               environmentRegistry,
               () -> new CompactionConfig(20_000, null),
