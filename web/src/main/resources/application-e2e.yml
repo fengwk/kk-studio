@@ -5,19 +5,16 @@ spring:
     validate-migration-naming: true
 
   datasource:
-    multi:
-      primary:
-        primary: true
-        driver-class-name: org.postgresql.Driver
-        url: ${KK_STUDIO_DB_URL:jdbc:postgresql://127.0.0.1:5432/kk_studio_e2e}
-        username: ${KK_STUDIO_DB_USER:kk_studio}
-        password: ${KK_STUDIO_DB_PASSWORD:kk_studio}
+    driver-class-name: org.postgresql.Driver
+    url: ${KK_STUDIO_DB_URL:jdbc:postgresql://127.0.0.1:5432/kk_studio_e2e}
+    username: ${KK_STUDIO_DB_USER:kk_studio}
+    password: ${KK_STUDIO_DB_PASSWORD:kk_studio}
 
-  mybatis:
-    mapper-locations: classpath:**/*Mapper.xml
-    type-aliases-package: fun.fengwk.kkstudio.**.model
-    configuration:
-      map-underscore-to-camel-case: true
+mybatis:
+  mapper-locations: classpath:**/*Mapper.xml
+  type-aliases-package: fun.fengwk.kkstudio.**.model
+  configuration:
+    map-underscore-to-camel-case: true
 
 logging:
   level:

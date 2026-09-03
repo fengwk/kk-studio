@@ -11,6 +11,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 NVD_SETTINGS_SERVER_ID=kk-studio-supply-chain-nvd
 NVD_DATAFEED_URL=https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz
+NPM_AUDIT_REGISTRY=https://registry.npmjs.org
 TRIVY_IMAGE=aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 TRIVY_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-db:2
 TRIVY_JAVA_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-java-db:1
@@ -359,7 +360,10 @@ run_npm_audit() {
     local output_file="$RUN_DIR/frontend-audit/audit.json"
     echo "==> Running npm audit (dev dependencies are included by default)"
 
-    if npm --prefix "$REPO_ROOT/frontend" audit --audit-level=low --json \
+    if npm --prefix "$REPO_ROOT/frontend" audit \
+        --audit-level=low \
+        "--registry=$NPM_AUDIT_REGISTRY" \
+        --json \
         >"$output_file" 2>"$RUN_DIR/logs/npm-audit.log"
     then
         if json_object_file_is_non_empty "$output_file"; then

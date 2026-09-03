@@ -5,17 +5,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.openai.core.ObjectMappers;
-import com.openai.models.responses.ResponseUsage;
 import dev.langchain4j.http.client.sse.ServerSentEvent;
 import dev.langchain4j.model.anthropic.AnthropicChatResponseMetadata;
 import dev.langchain4j.model.anthropic.AnthropicTokenUsage;
 import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.googleai.GoogleAiGeminiTokenUsage;
 import dev.langchain4j.model.openai.OpenAiChatResponseMetadata;
+import dev.langchain4j.model.openai.OpenAiResponsesChatResponseMetadata;
 import dev.langchain4j.model.openai.OpenAiTokenUsage;
-import dev.langchain4j.model.openaiofficial.OpenAiOfficialResponsesChatResponseMetadata;
-import dev.langchain4j.model.openaiofficial.OpenAiOfficialTokenUsage;
 import dev.langchain4j.model.output.TokenUsage;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -62,11 +59,10 @@ import java.util.Objects;
  * <p>只承载 usage 元数据，禁止保存 prompt 或响应正文：
  *
  * <ul>
- *   <li>OpenAI Chat / Anthropic：从 typed metadata {@code rawServerSentEvents().data()} JSON
- *       中递归提取所有名为 {@code usage} 的 object/array 节点；0 个时回退 typed provider 字段 JSON； 1 个直接
- *       object/array；多个保存为 array；忽略 {@code [DONE]} 和非 JSON 行。
- *   <li>OpenAI Responses：只序列化 {@code rawResponse().usage()}（保留 generated model additional
- *       properties），禁止序列化整个 rawResponse。
+ *   <li>OpenAI Chat / OpenAI Responses / Anthropic：从 typed metadata {@code
+ *       rawServerSentEvents().data()} JSON 中递归提取所有名为 {@code usage} 的 object/array 节点（包括 final
+ *       {@code response.completed} 事件）；0 个时回退 typed provider 字段 JSON； 1 个直接 object/array；多个保存为
+ *       array；忽略 {@code [DONE]} 和非 JSON 行。保留 unknown usage properties，禁止序列化整个 response payload。
  *   <li>Google / 无 raw transport：生成 Provider 原字段名的 typed usage object （{@code
  *       promptTokenCount/candidatesTokenCount/cachedContentTokenCount/
  *       thoughtsTokenCount/totalTokenCount}）；null metadata/usage ⇒ {@code "{}"}。
@@ -75,10 +71,6 @@ import java.util.Objects;
  * <p>所有结果必须合法 JSON object 或 array。
  */
 final class ProviderUsageNormalizer {
-
-  // 用 OpenAI SDK 自带的 Jackson 配置，确保 ResponseUsage 的 JsonField /
-  // additionalProperties 序列化为原生 JSON。
-  private static final ObjectMapper OPENAI_OBJECT_MAPPER = ObjectMappers.jsonMapper();
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -119,7 +111,7 @@ final class ProviderUsageNormalizer {
     if (providerType == ProviderType.OPENAI && metadata instanceof OpenAiChatResponseMetadata oa) {
       tier = oa.serviceTier();
     } else if (providerType == ProviderType.OPENAI_RESPONSES
-        && metadata instanceof OpenAiOfficialResponsesChatResponseMetadata oa) {
+        && metadata instanceof OpenAiResponsesChatResponseMetadata oa) {
       tier = oa.serviceTier();
     }
     return tier == null || tier.isBlank() ? null : tier;
@@ -130,11 +122,8 @@ final class ProviderUsageNormalizer {
       return new ModelUsage(0, 0, 0, 0, 0, 0, 0);
     }
     return switch (providerType) {
-      case OPENAI -> usage instanceof OpenAiTokenUsage openAi
+      case OPENAI, OPENAI_RESPONSES -> usage instanceof OpenAiTokenUsage openAi
           ? openAiUsage(openAi)
-          : genericUsage(usage);
-      case OPENAI_RESPONSES -> usage instanceof OpenAiOfficialTokenUsage openAi
-          ? openAiOfficialUsage(openAi)
           : genericUsage(usage);
       case ANTHROPIC -> usage instanceof AnthropicTokenUsage anthropic
           ? anthropicUsage(anthropic)
@@ -156,21 +145,6 @@ final class ProviderUsageNormalizer {
   }
 
   private static ModelUsage openAiUsage(OpenAiTokenUsage usage) {
-    long input = valueOrZero(usage.inputTokenCount());
-    long output = valueOrZero(usage.outputTokenCount());
-    long cacheRead =
-        usage.inputTokensDetails() == null
-            ? 0
-            : valueOrZero(usage.inputTokensDetails().cachedTokens());
-    long reasoning =
-        usage.outputTokensDetails() == null
-            ? 0
-            : valueOrZero(usage.outputTokensDetails().reasoningTokens());
-    long providerTotal = valueOrZero(usage.totalTokenCount());
-    return openAiDerivedUsage(input, output, cacheRead, reasoning, providerTotal);
-  }
-
-  private static ModelUsage openAiOfficialUsage(OpenAiOfficialTokenUsage usage) {
     long input = valueOrZero(usage.inputTokenCount());
     long output = valueOrZero(usage.outputTokenCount());
     long cacheRead =
@@ -262,7 +236,23 @@ final class ProviderUsageNormalizer {
   private static String openAiChatRawUsageJson(ChatResponseMetadata metadata, TokenUsage usage) {
     List<JsonNode> usages = collectUsageNodes(sseDataOf(metadata));
     if (usages.isEmpty()) {
-      return typedProviderUsageJson(usage);
+      return typedProviderUsageJson(ProviderType.OPENAI, usage);
+    }
+    if (usages.size() == 1) {
+      return writeJsonString(usages.get(0));
+    }
+    ArrayNode array = OBJECT_MAPPER.createArrayNode();
+    for (JsonNode node : usages) {
+      array.add(node);
+    }
+    return writeJsonString(array);
+  }
+
+  private static String openAiResponsesRawUsageJson(
+      ChatResponseMetadata metadata, TokenUsage usage) {
+    List<JsonNode> usages = collectUsageNodes(sseDataOf(metadata));
+    if (usages.isEmpty()) {
+      return typedProviderUsageJson(ProviderType.OPENAI_RESPONSES, usage);
     }
     if (usages.size() == 1) {
       return writeJsonString(usages.get(0));
@@ -277,7 +267,7 @@ final class ProviderUsageNormalizer {
   private static String anthropicRawUsageJson(ChatResponseMetadata metadata, TokenUsage usage) {
     List<JsonNode> usages = collectUsageNodes(sseDataOf(metadata));
     if (usages.isEmpty()) {
-      return typedProviderUsageJson(usage);
+      return typedProviderUsageJson(ProviderType.ANTHROPIC, usage);
     }
     if (usages.size() == 1) {
       return writeJsonString(usages.get(0));
@@ -287,6 +277,10 @@ final class ProviderUsageNormalizer {
       array.add(node);
     }
     return writeJsonString(array);
+  }
+
+  private static String googleRawUsageJson(TokenUsage usage) {
+    return typedProviderUsageJson(ProviderType.GOOGLE, usage);
   }
 
   private static List<JsonNode> collectUsageNodes(List<String> dataLines) {
@@ -316,6 +310,8 @@ final class ProviderUsageNormalizer {
     }
     List<ServerSentEvent> events = null;
     if (metadata instanceof OpenAiChatResponseMetadata oa) {
+      events = oa.rawServerSentEvents();
+    } else if (metadata instanceof OpenAiResponsesChatResponseMetadata oa) {
       events = oa.rawServerSentEvents();
     } else if (metadata instanceof AnthropicChatResponseMetadata anth) {
       events = anth.rawServerSentEvents();
@@ -349,25 +345,29 @@ final class ProviderUsageNormalizer {
     }
   }
 
-  private static String typedProviderUsageJson(TokenUsage usage) {
+  private static String typedProviderUsageJson(ProviderType providerType, TokenUsage usage) {
     if (usage == null) {
       return "{}";
     }
     // KISS：直接对每个 SDK typed usage 按 Provider API 的 JSON 字段名展开，禁止反射或万能抽取器。
-    if (usage instanceof OpenAiTokenUsage openAi) {
-      return openAiChatTypedUsageJson(openAi);
-    }
-    if (usage instanceof OpenAiOfficialTokenUsage openAi) {
-      return openAiResponsesTypedUsageJson(openAi);
-    }
-    if (usage instanceof AnthropicTokenUsage anthropic) {
-      return anthropicTypedUsageJson(anthropic);
-    }
-    if (usage instanceof GoogleAiGeminiTokenUsage google) {
-      return googleTypedUsageJson(google);
-    }
+    return switch (providerType) {
+      case OPENAI -> usage instanceof OpenAiTokenUsage openAi
+          ? openAiChatTypedUsageJson(openAi)
+          : genericTypedUsageJson(usage);
+      case OPENAI_RESPONSES -> usage instanceof OpenAiTokenUsage openAi
+          ? openAiResponsesTypedUsageJson(openAi)
+          : genericTypedUsageJson(usage);
+      case ANTHROPIC -> usage instanceof AnthropicTokenUsage anthropic
+          ? anthropicTypedUsageJson(anthropic)
+          : genericTypedUsageJson(usage);
+      case GOOGLE -> usage instanceof GoogleAiGeminiTokenUsage google
+          ? googleTypedUsageJson(google)
+          : genericTypedUsageJson(usage);
+    };
+  }
+
+  private static String genericTypedUsageJson(TokenUsage usage) {
     ObjectNode node = OBJECT_MAPPER.createObjectNode();
-    // 非 Provider 特定的通用 TokenUsage：保留 SDK 内部 camelCase 字段名。
     putIfPresent(node, "inputTokenCount", usage.inputTokenCount());
     putIfPresent(node, "outputTokenCount", usage.outputTokenCount());
     putIfPresent(node, "totalTokenCount", usage.totalTokenCount());
@@ -401,7 +401,7 @@ final class ProviderUsageNormalizer {
   }
 
   /** OpenAI Responses API JSON 字段名：{@code input_tokens} / {@code output_tokens}。 */
-  private static String openAiResponsesTypedUsageJson(OpenAiOfficialTokenUsage openAi) {
+  private static String openAiResponsesTypedUsageJson(OpenAiTokenUsage openAi) {
     ObjectNode node = OBJECT_MAPPER.createObjectNode();
     putIfPresent(node, "input_tokens", openAi.inputTokenCount());
     putIfPresent(node, "output_tokens", openAi.outputTokenCount());
@@ -433,22 +433,6 @@ final class ProviderUsageNormalizer {
     return writeJsonString(node);
   }
 
-  private static String openAiResponsesRawUsageJson(
-      ChatResponseMetadata metadata, TokenUsage usage) {
-    if (metadata instanceof OpenAiOfficialResponsesChatResponseMetadata oa) {
-      ResponseUsage responseUsage =
-          oa.rawResponse() == null ? null : oa.rawResponse().usage().orElse(null);
-      if (responseUsage != null) {
-        try {
-          return OPENAI_OBJECT_MAPPER.writeValueAsString(responseUsage);
-        } catch (JsonProcessingException error) {
-          throw new IllegalArgumentException("cannot serialize OpenAI Responses usage", error);
-        }
-      }
-    }
-    return typedProviderUsageJson(usage);
-  }
-
   /** Google Gemini API JSON 字段名：{@code promptTokenCount} / {@code candidatesTokenCount} 等。 */
   private static String googleTypedUsageJson(GoogleAiGeminiTokenUsage google) {
     ObjectNode node = OBJECT_MAPPER.createObjectNode();
@@ -458,16 +442,6 @@ final class ProviderUsageNormalizer {
     putIfPresent(node, "thoughtsTokenCount", google.thoughtsTokenCount());
     putIfPresent(node, "totalTokenCount", google.totalTokenCount());
     return writeJsonString(node);
-  }
-
-  private static String googleRawUsageJson(TokenUsage usage) {
-    if (usage == null) {
-      return "{}";
-    }
-    if (usage instanceof GoogleAiGeminiTokenUsage google) {
-      return googleTypedUsageJson(google);
-    }
-    return typedProviderUsageJson(usage);
   }
 
   private static void putIfPresent(ObjectNode node, String name, Integer value) {

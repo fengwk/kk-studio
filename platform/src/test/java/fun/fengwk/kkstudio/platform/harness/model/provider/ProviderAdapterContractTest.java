@@ -303,6 +303,36 @@ class ProviderAdapterContractTest {
     }
   }
 
+  /** OpenAI Responses 在发往端点时必须显式设置 store=false，且工具定义需带 strict=true。 */
+  @Test
+  @Timeout(30)
+  void openAiResponsesEmitsStoreFalseAndStrictTools() throws Exception {
+    String probe = "{\"error\":{\"message\":\"probe\",\"type\":\"invalid_request_error\"}}";
+    try (ProbeServer server = new ProbeServer(probe)) {
+      server.start();
+      ModelProvider provider =
+          new OpenAiResponsesProviderAdapter("test-api-key")
+              .create(
+                  new ProviderDescriptor(
+                      "provider",
+                      ProviderType.OPENAI_RESPONSES,
+                      server.endpoint("/v1"),
+                      timeoutPolicy(Duration.ofSeconds(5))));
+      RecordedRequest recorded =
+          runAndAwait(provider, request(ProviderCacheControl.none()), server, error -> {});
+      JsonNode body = jsonBody(recorded);
+      assertFalse(
+          body.path("store").asBoolean(true), () -> "store must be false, body=" + recorded.body());
+      JsonNode tools = body.path("tools");
+      assertTrue(
+          tools.isArray() && tools.size() > 0,
+          () -> "tools must be present, body=" + recorded.body());
+      assertTrue(
+          tools.get(0).path("strict").asBoolean(false),
+          () -> "tool must be strict, body=" + recorded.body());
+    }
+  }
+
   /**
    * Anthropic BREAKPOINTS 仅在 SHORT 形态下接受，必须显式声明 SYSTEM/TOOLS 中至少一个；NONE 两项均不启用，body 中不出现 {@code
    * cache_control}；LONG/隐式空 control 抛 INVALID_REQUEST。

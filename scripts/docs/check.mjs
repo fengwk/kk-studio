@@ -44,7 +44,6 @@ const checkableTopLevels = new Set([
   'AGENTS.md',
   'README.md',
   'canvas',
-  'config',
   'deploy',
   'frontend',
   'harness',

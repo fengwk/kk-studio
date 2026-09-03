@@ -79,13 +79,13 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
 
   @Override
   public void stop() {
-    close();
+    closeInternal(false);
   }
 
   @Override
   public void stop(Runnable callback) {
     try {
-      close();
+      closeInternal(false);
     } finally {
       callback.run();
     }
@@ -103,13 +103,19 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
 
   @Override
   public void close() {
+    closeInternal(true);
+  }
+
+  private void closeInternal(boolean permanentClose) {
     Connection connection;
     Thread thread;
     synchronized (lifecycleLock) {
-      if (closed) {
+      if (closed || (!running && !permanentClose)) {
         return;
       }
-      closed = true;
+      if (permanentClose) {
+        closed = true;
+      }
       running = false;
       connection = activeConnection;
       thread = loopThread;

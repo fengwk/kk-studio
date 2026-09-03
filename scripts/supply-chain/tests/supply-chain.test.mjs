@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url'
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const SCRIPT = path.join(REPOSITORY_ROOT, 'scripts/supply-chain.sh')
 const POM = path.join(REPOSITORY_ROOT, 'pom.xml')
+const CANVAS_INFRA_POM = path.join(REPOSITORY_ROOT, 'canvas/infra/pom.xml')
 const PLATFORM_POM = path.join(REPOSITORY_ROOT, 'platform/pom.xml')
 const WEB_POM = path.join(REPOSITORY_ROOT, 'web/pom.xml')
 const SUPPRESSIONS = path.join(
@@ -26,6 +27,7 @@ const SUPPRESSIONS = path.join(
 )
 const NVD_DATAFEED_ARGUMENT =
     '-DnvdDatafeedUrl=https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz'
+const NPM_AUDIT_REGISTRY = 'https://registry.npmjs.org'
 
 function createFakeToolchain() {
     const root = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-supply-chain-test-'))
@@ -74,10 +76,35 @@ fi
         path.join(bin, 'npm'),
         `#!/usr/bin/env bash
 set -euo pipefail
+if [[ -n "\${FAKE_NPM_ARGS_FILE:-}" ]]; then
+    printf '%s\\n' "$@" >>"$FAKE_NPM_ARGS_FILE"
+fi
 case " $* " in
-    *" sbom "*) printf '%s\\n' '{"bomFormat":"CycloneDX","components":[{"name":"fake-frontend"}]}' ;;
-    *" audit "*) printf '%s\\n' '{"auditReportVersion":2,"vulnerabilities":{}}' ;;
-    *) exit 3 ;;
+    *" sbom "*)
+        printf '%s\\n' '{"bomFormat":"CycloneDX","components":[{"name":"fake-frontend"}]}'
+        ;;
+    *" audit "*)
+        registry=
+        for arg in "$@"; do
+            case "$arg" in
+                --registry=*) registry="\${arg#*=}" ;;
+            esac
+        done
+        configured_mirror="\${npm_config_registry:-\${NPM_CONFIG_REGISTRY:-}}"
+        effective_registry="\${registry:-\$configured_mirror}"
+        if [[ -n "$configured_mirror" && "$effective_registry" != "https://registry.npmjs.org" && "$effective_registry" != "https://registry.npmjs.org/" ]]; then
+            printf '%s\\n' 'npm error audit 404 Not Found - POST https://registry.npmmirror.com/-/npm/v1/security/advisories/bulk - [NOT_IMPLEMENTED]' >&2
+            exit 1
+        fi
+        if [[ "\${FAKE_NPM_REPORT_VULNERABILITY:-}" == true ]]; then
+            printf '%s\\n' '{"auditReportVersion":2,"vulnerabilities":{"browserslist":{"name":"browserslist","severity":"high"}}}'
+            exit 1
+        fi
+        printf '%s\\n' '{"auditReportVersion":2,"vulnerabilities":{}}'
+        ;;
+    *)
+        exit 3
+        ;;
 esac
 `,
     )
@@ -234,11 +261,11 @@ test('keeps online plugins inside the explicitly activated root-only profile', (
 test('locks tool versions, policy thresholds, and secret indirection', () => {
     // Intent: policy changes must be reviewable as a small static diff and keys must stay out of POM/CLI text.
     const pom = readFileSync(POM, 'utf8')
+    const canvasInfraPom = readFileSync(CANVAS_INFRA_POM, 'utf8')
     const platformPom = readFileSync(PLATFORM_POM, 'utf8')
     const webPom = readFileSync(WEB_POM, 'utf8')
     const script = readFileSync(SCRIPT, 'utf8')
-    const suppressions = readFileSync(SUPPRESSIONS, 'utf8')
-    assert.match(pom, /<spring-boot\.version>3\.5\.16<\/spring-boot\.version>/)
+    assert.match(pom, /<spring-boot\.version>4\.0\.8<\/spring-boot\.version>/)
     assert.match(pom, /<jackson\.version>2\.22\.1<\/jackson\.version>/)
     assert.match(pom, /<netty\.version>4\.1\.137\.Final<\/netty\.version>/)
     assert.match(pom, /<log4j\.version>2\.26\.1<\/log4j\.version>/)
@@ -275,49 +302,61 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(pom, /<format>HTML<\/format>[\s\S]*<format>JSON<\/format>[\s\S]*<format>SARIF<\/format>/)
     assert.match(pom, /<failBuildOnCVSS>0<\/failBuildOnCVSS>/)
     assert.match(pom, /<ossIndexAnalyzerEnabled>false<\/ossIndexAnalyzerEnabled>/)
-    assert.match(script, /audit --audit-level=low/)
+    assert.match(script, /NPM_AUDIT_REGISTRY=https:\/\/registry\.npmjs\.org/)
+    assert.match(script, /audit[\s\S]*--audit-level=low/)
+    assert.match(script, /audit[\s\S]*--registry="?\$NPM_AUDIT_REGISTRY"?/)
     assert.match(script, /sbom[\s\S]*--package-lock-only/)
     assert.match(script, /all\)\s*\n\s*run_sbom\s*\n\s*run_audit\s*\n\s*run_image/)
     assert.doesNotMatch(pom, /nvdApiServerId|<nvdApiKey>|NVD_API_KEY/)
-    const suppressionBlocks = [...suppressions.matchAll(/<suppress>([\s\S]*?)<\/suppress>/g)].map(
-        match => match[1],
-    )
-    assert.equal(suppressionBlocks.length, 12)
+
+    // Zero suppressions and strict build hygiene policy assertions
+    assert.equal(existsSync(SUPPRESSIONS), false)
+    assert.doesNotMatch(pom, /<suppressionFile>|suppressionFile/)
+    assert.doesNotMatch(pom, /<parent>/)
+    assert.doesNotMatch(pom, /convention4j-parent/)
+    assert.doesNotMatch(pom, /auto-mapper-processor|mapstruct-processor|auto-service/)
+    assert.doesNotMatch(canvasInfraPom, /spring-boot-starter-aop/)
+    assert.doesNotMatch(platformPom, /spring-boot-starter-aop/)
+    assert.doesNotMatch(webPom, /spring-boot-starter-aop/)
     assert.match(
-        suppressions,
-        /<gav>org\.jetbrains\.kotlin:kotlin-stdlib:1\.9\.25<\/gav>[\s\S]*<cve>CVE-2020-29582<\/cve>/,
+        pom,
+        /<exclusion>[\s\S]*?<artifactId>spring-boot-starter-aop<\/artifactId>[\s\S]*?<\/exclusion>/,
     )
-    assert.match(suppressions, /Kotlin before 1\.4\.21/)
-    assert.match(suppressions, /versionEndExcluding 2\.1\.0/)
+    assert.match(canvasInfraPom, /<artifactId>spring-boot-starter-aspectj<\/artifactId>/)
+    const canvasAspectjBlock = canvasInfraPom.match(
+        /<dependency>[\s\S]*?<artifactId>spring-boot-starter-aspectj<\/artifactId>[\s\S]*?<\/dependency>/,
+    )?.[0]
+    assert.ok(canvasAspectjBlock)
+    assert.doesNotMatch(canvasAspectjBlock, /<scope>test<\/scope>/)
+    assert.doesNotMatch(canvasAspectjBlock, /<scope>/)
+    assert.match(platformPom, /<artifactId>spring-boot-starter-aspectj<\/artifactId>/)
+    assert.match(pom, /<convention4j\.version>1\.2\.2<\/convention4j\.version>/)
+    assert.match(pom, /<artifactId>convention4j-spring-boot-starter<\/artifactId>/)
+    assert.match(pom, /<artifactId>convention4j-spring-boot-starter-web<\/artifactId>/)
+    assert.match(pom, /<artifactId>convention4j-spring-boot-starter-test<\/artifactId>/)
+    assert.match(pom, /<artifactId>convention4j-comfyui<\/artifactId>/)
     assert.match(
-        suppressions,
-        /https:\/\/blog\.jetbrains\.com\/blog\/2021\/02\/03\/jetbrains-security-bulletin-q4-2020\//,
+        pom,
+        /<artifactId>mybatis-spring-boot-starter<\/artifactId>[\s\S]*?<version>\$\{mybatis-spring-boot-starter\.version\}<\/version>/,
     )
-    const kotlinSuppressionPairs = suppressionBlocks
-        .filter(block => block.includes('org.jetbrains.kotlin:'))
-        .map(
-            block =>
-                `${block.match(/<gav>([^<]+)<\/gav>/)[1]}|${block.match(/<cve>([^<]+)<\/cve>/)[1]}`,
-        )
-        .sort()
-    assert.deepEqual(kotlinSuppressionPairs, [
-        'org.jetbrains.kotlin:kotlin-reflect:1.9.25|CVE-2020-29582',
-        'org.jetbrains.kotlin:kotlin-reflect:1.9.25|CVE-2026-53914',
-        'org.jetbrains.kotlin:kotlin-stdlib-common:1.9.25|CVE-2020-29582',
-        'org.jetbrains.kotlin:kotlin-stdlib-common:1.9.25|CVE-2026-53914',
-        'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.25|CVE-2020-29582',
-        'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.25|CVE-2026-53914',
-        'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.25|CVE-2020-29582',
-        'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.25|CVE-2026-53914',
-        'org.jetbrains.kotlin:kotlin-stdlib:1.9.25|CVE-2020-29582',
-        'org.jetbrains.kotlin:kotlin-stdlib:1.9.25|CVE-2026-53914',
-    ])
-    for (const block of suppressionBlocks) {
-        assert.match(block, /<notes>[\s\S]+<\/notes>/)
-        assert.match(block, /<cve>CVE-\d{4}-\d+<\/cve>/)
-        assert.match(block, /<gav>[^<*?]+:[^<*?]+:[^<*?]+<\/gav>/)
-        assert.doesNotMatch(block, /<cpe>|<cvss>|regex\s*=/)
-    }
+    assert.match(
+        pom,
+        /<artifactId>lombok<\/artifactId>[\s\S]*?<scope>provided<\/scope>/,
+    )
+    assert.match(
+        pom,
+        /<artifactId>maven-compiler-plugin<\/artifactId>[\s\S]*?<version>3\.14\.0<\/version>[\s\S]*?<compilerArgs>[\s\S]*?<arg>-parameters<\/arg>/,
+    )
+    assert.match(
+        pom,
+        /<artifactId>maven-surefire-plugin<\/artifactId>[\s\S]*?<version>3\.5\.3<\/version>/,
+    )
+    assert.match(
+        pom,
+        /<artifactId>jacoco-maven-plugin<\/artifactId>[\s\S]*?<version>0\.8\.11<\/version>/,
+    )
+    assert.match(pom, /<goal>prepare-agent<\/goal>/)
+    assert.match(pom, /<goal>report<\/goal>/)
     assert.match(script, /chmod 600/)
     assert.match(script, /nvdApiServerId/)
     assert.match(script, /nvdDatafeedUrl/)
@@ -371,6 +410,59 @@ test('uses the official NVD feed without a server id when no key is set', () => 
         const args = readFileSync(argsFile, 'utf8').split('\n').filter(Boolean)
         assert.equal(args.includes(NVD_DATAFEED_ARGUMENT), true)
         assert.equal(args.some(arg => arg.includes('nvdApiServerId')), false)
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+test('pins npm audit to the official registry and ignores configured developer mirrors', () => {
+    // Intent: developer or CI mirror configuration must not redirect the security audit to unsupported endpoints.
+    const toolchain = createFakeToolchain()
+    const reportRoot = path.join(toolchain.root, 'npm-mirror-reports')
+    const npmArgsFile = path.join(toolchain.root, 'npm-args.txt')
+    try {
+        const result = runScript(['audit'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            FAKE_NPM_ARGS_FILE: npmArgsFile,
+            npm_config_registry: 'https://registry.npmmirror.com/',
+            NPM_CONFIG_REGISTRY: 'https://registry.npmmirror.com/',
+        })
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+        const args = readFileSync(npmArgsFile, 'utf8').split('\n').filter(Boolean)
+        assert.equal(args.includes('audit'), true)
+        assert.equal(args.includes(`--registry=${NPM_AUDIT_REGISTRY}`), true)
+        assert.equal(args.includes('--audit-level=low'), true)
+        assert.equal(args.includes('--json'), true)
+        assert.equal(args.some(arg => arg.startsWith('--omit')), false)
+
+        const summary = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
+        )
+        assert.equal(summary.status, 'PASS')
+        assert.equal(summary.checks.find(check => check.name === 'npm-audit').status, 'PASS')
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+test('fails closed when npm audit reports a vulnerability', () => {
+    // Intent: frontend audit findings must fail closed and record a failure in summary.
+    const toolchain = createFakeToolchain()
+    const reportRoot = path.join(toolchain.root, 'npm-vulnerability-reports')
+    try {
+        const result = runScript(['audit'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            FAKE_NPM_REPORT_VULNERABILITY: 'true',
+        })
+        assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`)
+        const summary = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
+        )
+        assert.equal(summary.status, 'FAIL')
+        assert.equal(summary.checks.find(check => check.name === 'npm-audit').status, 'FAIL')
+        assert.match(summary.failures.join('\n'), /npm audit found vulnerabilities/)
     } finally {
         rmSync(toolchain.root, { recursive: true, force: true })
     }

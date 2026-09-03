@@ -25,8 +25,8 @@ import java.sql.SQLException;
  * 非 Harness 业务集成测试的共享 Spring PostgreSQL Testcontainers 支持。
  *
  * <p>复用 {@link fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport}
- * 上声明的单一 {@code postgres:17-alpine} 容器，并将权威的多数据源配置连接到该容器，使 {@code PlatformTestApplication} 把 {@code
- * spring.datasource.multi.primary} 绑定到 PostgreSQL 而不是 H2。
+ * 上声明的单一 {@code postgres:17-alpine} 容器，并将数据源配置连接到该容器，使 {@code PlatformTestApplication} 把 {@code
+ * spring.datasource} 绑定到 PostgreSQL 而不是 H2。
  *
  * <p>禁用自动 Flyway；本类在静态初始化阶段即执行 baseline 迁移，保证任何 Spring 上下文创建前 {@code system_setting} 等表与默认行已经
  * 存在（SystemSettingsSnapshot 在上下文启动时读取权威配置）。{@link #resetAndApplySchema} 在每个测试前再次重置并迁移，保持测试隔离。
@@ -56,11 +56,11 @@ public abstract class PostgresSpringTestSupport {
   }
 
   @DynamicPropertySource
-  static void overrideMultiDataSource(DynamicPropertyRegistry registry) {
-    registry.add("spring.datasource.multi.primary.driver-class-name", Driver.class::getName);
-    registry.add("spring.datasource.multi.primary.url", POSTGRES::getJdbcUrl);
-    registry.add("spring.datasource.multi.primary.username", POSTGRES::getUsername);
-    registry.add("spring.datasource.multi.primary.password", POSTGRES::getPassword);
+  static void overrideDataSource(DynamicPropertyRegistry registry) {
+    registry.add("spring.datasource.driver-class-name", Driver.class::getName);
+    registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+    registry.add("spring.datasource.username", POSTGRES::getUsername);
+    registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("spring.flyway.enabled", () -> FLYWAY_DISABLED);
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> WORKERS_DISABLED);
   }
@@ -74,6 +74,9 @@ public abstract class PostgresSpringTestSupport {
     try (Connection conn = newConnection()) {
       resetDatabase(conn);
       migrateDatabase(conn);
+    }
+    if (storageMaintenance != null) {
+      storageMaintenance.start();
     }
   }
 

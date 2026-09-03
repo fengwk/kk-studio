@@ -94,13 +94,13 @@ public final class StorageMaintenance
 
   @Override
   public void stop() {
-    close();
+    stopInternal(false);
   }
 
   @Override
   public void stop(Runnable callback) {
     try {
-      close();
+      stopInternal(false);
     } finally {
       callback.run();
     }
@@ -118,12 +118,18 @@ public final class StorageMaintenance
 
   @Override
   public void close() {
+    stopInternal(true);
+  }
+
+  private void stopInternal(boolean permanentClose) {
     ScheduledExecutorService current;
     synchronized (lifecycleLock) {
-      if (closed) {
+      if (closed || (!running && !permanentClose)) {
         return;
       }
-      closed = true;
+      if (permanentClose) {
+        closed = true;
+      }
       running = false;
       ScheduledFuture<?> future = pollFuture;
       if (future != null) {
