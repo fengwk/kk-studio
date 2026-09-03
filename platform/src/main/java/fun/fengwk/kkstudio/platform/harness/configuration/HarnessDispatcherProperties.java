@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.platform.harness.configuration;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+
 import java.time.Duration;
 
 /**
@@ -65,52 +67,38 @@ public class HarnessDispatcherProperties {
     }
   }
 
-  public Duration getLeaseDuration() {
-    if (leaseDuration == null || leaseDuration.isNegative() || leaseDuration.isZero()) {
-      throw new IllegalArgumentException(
-          "kk-studio.harness.dispatcher.lease-duration must be positive");
+  private static Duration validateDuration(Duration duration, String propertyName) {
+    if (duration == null) {
+      throw new IllegalArgumentException(propertyName + " must not be null");
     }
-    return leaseDuration;
+    return HarnessStoreTime.requireWholeMillisecondDuration(duration, propertyName);
+  }
+
+  public Duration getLeaseDuration() {
+    return validateDuration(leaseDuration, "kk-studio.harness.dispatcher.lease-duration");
   }
 
   public void setLeaseDuration(Duration leaseDuration) {
-    if (leaseDuration == null || leaseDuration.isNegative() || leaseDuration.isZero()) {
-      throw new IllegalArgumentException(
-          "kk-studio.harness.dispatcher.lease-duration must be positive");
-    }
-    this.leaseDuration = leaseDuration;
+    this.leaseDuration =
+        validateDuration(leaseDuration, "kk-studio.harness.dispatcher.lease-duration");
   }
 
   public Duration getPollInterval() {
-    if (pollInterval == null || pollInterval.isNegative() || pollInterval.isZero()) {
-      throw new IllegalArgumentException(
-          "kk-studio.harness.dispatcher.poll-interval must be positive");
-    }
-    return pollInterval;
+    return validateDuration(pollInterval, "kk-studio.harness.dispatcher.poll-interval");
   }
 
   public void setPollInterval(Duration pollInterval) {
-    if (pollInterval == null || pollInterval.isNegative() || pollInterval.isZero()) {
-      throw new IllegalArgumentException(
-          "kk-studio.harness.dispatcher.poll-interval must be positive");
-    }
-    this.pollInterval = pollInterval;
+    this.pollInterval =
+        validateDuration(pollInterval, "kk-studio.harness.dispatcher.poll-interval");
   }
 
   public Duration getRejectionDelay() {
-    if (rejectionDelay == null || rejectionDelay.isNegative() || rejectionDelay.isZero()) {
-      throw new IllegalArgumentException(
-          "kk-studio.harness.dispatcher.rejection-delay must be positive");
-    }
-    return rejectionDelay;
+    return validateDuration(rejectionDelay, "kk-studio.harness.dispatcher.rejection-delay");
   }
 
   public void setRejectionDelay(Duration rejectionDelay) {
-    if (rejectionDelay == null || rejectionDelay.isNegative() || rejectionDelay.isZero()) {
-      throw new IllegalArgumentException(
-          "kk-studio.harness.dispatcher.rejection-delay must be positive");
-    }
-    this.rejectionDelay = rejectionDelay;
+    this.rejectionDelay =
+        validateDuration(rejectionDelay, "kk-studio.harness.dispatcher.rejection-delay");
   }
 
   public int getMaxDispatchTasks() {

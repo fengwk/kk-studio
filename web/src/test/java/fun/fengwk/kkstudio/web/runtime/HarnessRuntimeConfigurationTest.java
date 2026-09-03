@@ -190,6 +190,10 @@ class HarnessRuntimeConfigurationTest {
         "application notification loop remains active for Thread/Canvas when workers are disabled");
   }
 
+  /**
+   * 验证 Dispatcher 的 worker executor 是由配置确定的有界平台线程池：固定并发、有界阻塞队列、 AbortPolicy 拒绝策略（fail-fast
+   * 触发退避归还），以及平台线程工厂命名规范。
+   */
   @Test
   void workerExecutorIsBoundedWithAbortPolicy() {
     assertInstanceOf(ThreadPoolExecutor.class, workerExecutor);
@@ -199,6 +203,10 @@ class HarnessRuntimeConfigurationTest {
     assertInstanceOf(LinkedBlockingQueue.class, pool.getQueue());
     assertEquals(5, pool.getQueue().remainingCapacity());
     assertInstanceOf(ThreadPoolExecutor.AbortPolicy.class, pool.getRejectedExecutionHandler());
+    Thread thread = pool.getThreadFactory().newThread(() -> {});
+    assertNotNull(thread);
+    assertFalse(thread.isVirtual());
+    assertTrue(thread.getName().startsWith("harness-dispatch-worker-"));
   }
 
   @Test
