@@ -550,4 +550,47 @@ public abstract class HarnessStoreEntryTreeContract {
         store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().headEntryId());
     assertEquals(turnStartEntryId, committedHead);
   }
+
+  /** 测试意图：findRootEntry 成功返回已持久化的 ROOT Entry，且返回 Entry 必为 ROOT 类型。 */
+  @Test
+  void findRootEntryReturnsRootWhenPresent() {
+    Baseline baseline = seedThreadBaseline(store);
+    store.transaction(
+        tx -> {
+          Entry root = tx.findRootEntry(baseline.sessionId()).orElseThrow();
+          assertEquals(baseline.rootEntryId(), root.id());
+          assertEquals(baseline.sessionId(), root.sessionId());
+          assertTrue(root.payload().type().isRoot());
+          return null;
+        });
+  }
+
+  /** 测试意图：仅创建 Session 但未插入 ROOT Entry 时，findRootEntry 返回 empty。 */
+  @Test
+  void findRootEntryReturnsEmptyWhenSessionHasNoRoot() {
+    UUID sessionId = TestIds.id(1);
+    store.transaction(
+        tx -> {
+          tx.insertSession(session(sessionId));
+          assertTrue(tx.findRootEntry(sessionId).isEmpty());
+          return null;
+        });
+  }
+
+  /** 测试意图：对不存在的未知 Session，findRootEntry 返回 empty。 */
+  @Test
+  void findRootEntryReturnsEmptyForUnknownSession() {
+    UUID unknownSessionId = TestIds.id(999);
+    store.transaction(
+        tx -> {
+          assertTrue(tx.findRootEntry(unknownSessionId).isEmpty());
+          return null;
+        });
+  }
+
+  /** 测试意图：findRootEntry 拒绝 null sessionId 入参。 */
+  @Test
+  void findRootEntryRejectsNullSessionId() {
+    assertThrows(NullPointerException.class, () -> store.transaction(tx -> tx.findRootEntry(null)));
+  }
 }

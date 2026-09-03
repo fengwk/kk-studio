@@ -31,6 +31,7 @@ class HarnessStoreContractTest {
               "findSession",
               "insertEntry",
               "findEntry",
+              "findRootEntry",
               "loadEntryPath",
               "loadEntriesBySessionId",
               "insertThread",

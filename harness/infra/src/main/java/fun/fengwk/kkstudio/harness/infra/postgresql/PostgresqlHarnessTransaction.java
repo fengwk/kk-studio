@@ -250,6 +250,28 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
+  public Optional<Entry> findRootEntry(UUID sessionId) {
+    checkOpen();
+    Objects.requireNonNull(sessionId, "sessionId");
+    for (EntryPath path : entryPathCache.values()) {
+      if (path.root().sessionId().equals(sessionId)) {
+        return Optional.of(path.root());
+      }
+    }
+    Optional<Entry> found =
+        queryOne(
+            """
+            select *
+            from harness_entry
+            where session_id = ? and entry_type = 'ROOT'
+            """,
+            PostgresqlHarnessRows.ENTRY,
+            sessionId);
+    found.ifPresent(root -> entryPathCache.putIfAbsent(root.id(), new EntryPath(List.of(root))));
+    return found;
+  }
+
+  @Override
   public EntryPath loadEntryPath(UUID headEntryId) {
     checkOpen();
     Objects.requireNonNull(headEntryId, "headEntryId");
@@ -1390,14 +1412,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       throw new IllegalArgumentException(
           "appliedTurnStartEntryId must reference a TURN_START entry");
     }
-    UUID turnStartSessionId = loadEntryPath(appliedTurnStartEntryId).root().sessionId();
     ThreadState thread =
         findThread(command.threadId())
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(
                         "thread " + command.threadId() + " does not exist"));
-    if (!turnStartSessionId.equals(thread.sessionId())) {
+    if (!turnStart.sessionId().equals(thread.sessionId())) {
       throw new IllegalArgumentException(
           "applied turn start must be in the command thread's session");
     }
@@ -1461,7 +1482,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   private void requireValidModelBranch(ModelInvocation invocation, ThreadState thread) {
     EntryPath requestHeadPath = loadEntryPath(invocation.requestHeadEntryId());
-    UUID requestHeadSessionId = requestHeadPath.root().sessionId();
     boolean turnStartOnRequestHeadPath =
         requestHeadPath.entries().stream()
             .anyMatch(entry -> entry.id().equals(invocation.turnStartEntryId()));
@@ -1469,10 +1489,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       throw new IllegalArgumentException(
           "turnStartEntryId must be on the requestHeadEntryId entry path");
     }
-    UUID threadSessionId = loadEntryPath(thread.headEntryId()).root().sessionId();
-    if (!threadSessionId.equals(requestHeadSessionId)) {
-      throw new IllegalArgumentException(
-          "thread head session must match the request head path session");
+    if (!thread.sessionId().equals(requestHeadPath.head().sessionId())) {
+      throw new IllegalArgumentException("thread session must match the request head path session");
     }
   }
 

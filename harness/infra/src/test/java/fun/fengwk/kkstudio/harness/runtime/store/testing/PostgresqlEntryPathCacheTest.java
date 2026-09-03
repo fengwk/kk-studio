@@ -21,13 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseli
 
 import javax.sql.DataSource;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -46,7 +40,8 @@ class PostgresqlEntryPathCacheTest {
     PostgresqlHarnessStoreFixture.reset();
     cteCounter.set(0);
     DataSource countingDataSource =
-        countingDataSource(PostgresqlHarnessStoreFixture.dataSource(), cteCounter);
+        PostgresqlEntryPathCteCounter.countingDataSource(
+            PostgresqlHarnessStoreFixture.dataSource(), cteCounter);
     store = PostgresqlHarnessStoreFixture.create(countingDataSource);
   }
 
@@ -148,59 +143,5 @@ class PostgresqlEntryPathCacheTest {
 
   private static List<UUID> entryIds(EntryPath path) {
     return path.entries().stream().map(Entry::id).toList();
-  }
-
-  private static DataSource countingDataSource(DataSource target, AtomicInteger counter) {
-    return (DataSource)
-        Proxy.newProxyInstance(
-            target.getClass().getClassLoader(),
-            new Class<?>[] {DataSource.class},
-            (proxy, method, args) -> {
-              Object result = invoke(target, method, args);
-              if (result instanceof Connection connection) {
-                return countingConnection(connection, counter);
-              }
-              return result;
-            });
-  }
-
-  private static Connection countingConnection(Connection target, AtomicInteger counter) {
-    return (Connection)
-        Proxy.newProxyInstance(
-            target.getClass().getClassLoader(),
-            new Class<?>[] {Connection.class},
-            (proxy, method, args) -> {
-              Object result = invoke(target, method, args);
-              if (result instanceof PreparedStatement ps
-                  && args != null
-                  && args.length > 0
-                  && args[0] instanceof String sql
-                  && sql.toLowerCase(Locale.ROOT).contains("with recursive entry_path")) {
-                return countingPreparedStatement(ps, counter);
-              }
-              return result;
-            });
-  }
-
-  private static PreparedStatement countingPreparedStatement(
-      PreparedStatement target, AtomicInteger counter) {
-    return (PreparedStatement)
-        Proxy.newProxyInstance(
-            target.getClass().getClassLoader(),
-            new Class<?>[] {PreparedStatement.class},
-            (proxy, method, args) -> {
-              if (method.getName().startsWith("execute")) {
-                counter.incrementAndGet();
-              }
-              return invoke(target, method, args);
-            });
-  }
-
-  private static Object invoke(Object target, Method method, Object[] args) throws Throwable {
-    try {
-      return method.invoke(target, args);
-    } catch (InvocationTargetException error) {
-      throw error.getTargetException();
-    }
   }
 }

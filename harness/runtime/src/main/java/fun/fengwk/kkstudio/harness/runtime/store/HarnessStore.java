@@ -95,6 +95,14 @@ public interface HarnessStore {
     Optional<Entry> findEntry(UUID id);
 
     /**
+     * 按 sessionId 读取该 Session 唯一的 ROOT Entry。Session 不存在或尚无 ROOT 时返回 {@link Optional#empty()}。
+     *
+     * @param sessionId Session ID，不能为 null
+     * @return 唯一的 ROOT Entry
+     */
+    Optional<Entry> findRootEntry(UUID sessionId);
+
+    /**
      * 从 head Entry 向上回溯到 ROOT，返回 root-to-head 的不可变 {@link EntryPath}（构造时校验同 Session、 parent 连续与
      * turn 结构）。head 不存在抛 {@link IllegalArgumentException}。
      */
