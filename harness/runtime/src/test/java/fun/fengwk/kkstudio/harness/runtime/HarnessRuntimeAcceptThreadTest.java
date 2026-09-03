@@ -78,6 +78,7 @@ class HarnessRuntimeAcceptThreadTest {
 
     assertFalse(result.replayed());
     assertEquals(baseline.sessionId(), result.session().id());
+    assertEquals(baseline.rootEntryId(), result.rootEntry().id());
     assertEquals(1, result.acceptedCommands().size());
     assertEquals(1L, result.acceptedCommands().getFirst().sequence());
 
@@ -128,6 +129,8 @@ class HarnessRuntimeAcceptThreadTest {
             thread(baseline.threadId(), baseline.rootEntryId(), 1, batch),
             AcceptancePreflight.IDENTITY);
     assertTrue(replay.replayed());
+    assertEquals(baseline.rootEntryId(), first.rootEntry().id());
+    assertEquals(baseline.rootEntryId(), replay.rootEntry().id());
     assertEquals(first.acceptedCommands(), replay.acceptedCommands());
     ThreadState threadState =
         store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());

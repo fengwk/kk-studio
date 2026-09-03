@@ -358,6 +358,7 @@ class HarnessRuntimeAcceptInitialTest {
 
     assertFalse(result.replayed());
     assertEquals(baseline.sessionId(), result.session().id());
+    assertEquals(baseline.rootEntryId(), result.rootEntry().id());
     ThreadState thread = store.transaction(tx -> tx.findThread(TestIds.id(203)).orElseThrow());
     // head 直接指向既有 start Entry：不复制 Entry，Session 内仍只有 ROOT。
     assertEquals(baseline.rootEntryId(), thread.headEntryId());
@@ -385,6 +386,8 @@ class HarnessRuntimeAcceptInitialTest {
     AcceptedCommands first = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
     AcceptedCommands replay = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
     assertTrue(replay.replayed());
+    assertEquals(baseline.rootEntryId(), first.rootEntry().id());
+    assertEquals(baseline.rootEntryId(), replay.rootEntry().id());
     assertEquals(first.thread().version(), replay.thread().version());
     assertEquals(first.thread().nextCommandSequence(), replay.thread().nextCommandSequence());
   }

@@ -444,18 +444,25 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     private boolean hasRoot(UUID sessionId) {
-      for (Entry entry : state.entries.values()) {
-        if (entry.sessionId().equals(sessionId) && entry.payload().type().isRoot()) {
-          return true;
-        }
-      }
-      return false;
+      return findRootEntry(sessionId).isPresent();
     }
 
     @Override
     public Optional<Entry> findEntry(UUID id) {
       checkOpen();
       return Optional.ofNullable(state.entries.get(id));
+    }
+
+    @Override
+    public Optional<Entry> findRootEntry(UUID sessionId) {
+      checkOpen();
+      Objects.requireNonNull(sessionId, "sessionId");
+      for (Entry entry : state.entries.values()) {
+        if (entry.sessionId().equals(sessionId) && entry.payload().type().isRoot()) {
+          return Optional.of(entry);
+        }
+      }
+      return Optional.empty();
     }
 
     @Override
@@ -731,12 +738,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
         throw new IllegalArgumentException(
             "appliedTurnStartEntryId must reference a TURN_START entry");
       }
-      UUID turnStartSessionId = loadEntryPath(appliedTurnStartEntryId).root().sessionId();
       ThreadState thread = state.threads.get(command.threadId());
       if (thread == null) {
         throw new IllegalArgumentException("thread " + command.threadId() + " does not exist");
       }
-      if (!turnStartSessionId.equals(thread.sessionId())) {
+      if (!turnStart.sessionId().equals(thread.sessionId())) {
         throw new IllegalArgumentException(
             "consumed turn start must be in the command thread's session");
       }
@@ -863,12 +869,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     /**
-     * turnStartEntryId 必须位于 requestHeadEntryId 的 EntryPath 上，且该 path 的 session 必须与 Thread 当前 head 的
-     * session 一致。仅 insert 使用：创建时的 requestHead CAS 依赖 Thread 当前 head，relocation 后不应重复校验。
+     * turnStartEntryId 必须位于 requestHeadEntryId 的 EntryPath 上，且该 path 的 session 必须与 Thread session
+     * 一致。仅 insert 使用：创建时的 requestHead CAS 依赖 Thread 当前 head，relocation 后不应重复校验。
      */
     private void requireValidModelBranch(ModelInvocation invocation) {
       EntryPath requestHeadPath = loadEntryPath(invocation.requestHeadEntryId());
-      UUID requestHeadSessionId = requestHeadPath.root().sessionId();
       boolean turnStartOnBasisPath =
           requestHeadPath.entries().stream()
               .anyMatch(entry -> entry.id().equals(invocation.turnStartEntryId()));
@@ -877,10 +882,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
             "turnStartEntryId must be on the requestHeadEntryId entry path");
       }
       ThreadState thread = state.threads.get(invocation.threadId());
-      UUID threadSessionId = loadEntryPath(thread.headEntryId()).root().sessionId();
-      if (!threadSessionId.equals(requestHeadSessionId)) {
+      if (!thread.sessionId().equals(requestHeadPath.head().sessionId())) {
         throw new IllegalArgumentException(
-            "thread head session must match the requestHead path session");
+            "thread session must match the requestHead path session");
       }
     }
 

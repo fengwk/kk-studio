@@ -137,7 +137,7 @@ final class AcceptCommandsControl {
                       () ->
                           new HarnessRuntimeNotFoundException(
                               "entry " + target.startEntryId() + " does not exist"));
-          if (!tx.loadEntryPath(startEntry.id()).root().sessionId().equals(target.sessionId())) {
+          if (!startEntry.sessionId().equals(target.sessionId())) {
             throw new IllegalArgumentException(
                 "start entry "
                     + target.startEntryId()
@@ -256,11 +256,7 @@ final class AcceptCommandsControl {
     tx.updateThread(advanced);
     tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     return new AcceptedCommands(
-        session,
-        tx.loadEntryPath(advanced.headEntryId()).root(),
-        advanced,
-        List.copyOf(inserted),
-        false);
+        session, requireRootEntry(tx, session.id()), advanced, List.copyOf(inserted), false);
   }
 
   /**
@@ -345,7 +341,7 @@ final class AcceptCommandsControl {
                     new IllegalStateException(
                         "session " + sessionId + " disappeared while thread existed"));
     return new AcceptedCommands(
-        session, tx.loadEntryPath(thread.headEntryId()).root(), thread, List.copyOf(ordered), true);
+        session, requireRootEntry(tx, sessionId), thread, List.copyOf(ordered), true);
   }
 
   /**
@@ -399,7 +395,15 @@ final class AcceptCommandsControl {
                     new IllegalStateException(
                         "session " + thread.sessionId() + " disappeared while thread existed"));
     return new AcceptedCommands(
-        session, tx.loadEntryPath(thread.headEntryId()).root(), thread, List.copyOf(ordered), true);
+        session, requireRootEntry(tx, thread.sessionId()), thread, List.copyOf(ordered), true);
+  }
+
+  private static Entry requireRootEntry(HarnessStore.Transaction tx, UUID sessionId) {
+    return tx.findRootEntry(sessionId)
+        .orElseThrow(
+            () ->
+                new IllegalStateException(
+                    "root entry for session " + sessionId + " disappeared while session existed"));
   }
 
   private static void requirePreflightShape(
