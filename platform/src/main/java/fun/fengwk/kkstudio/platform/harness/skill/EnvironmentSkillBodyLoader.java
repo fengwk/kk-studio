@@ -12,7 +12,7 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
-/** 为平台工具适配 {@link EnvironmentSkillLoader}：路由只使用冻结 binding 的 {@code environmentName}。 */
+/** 为平台工具适配 {@link EnvironmentSkillLoader}：路由只使用冻结 binding 的 {@code environmentId}。 */
 @Component
 public final class EnvironmentSkillBodyLoader implements SkillBodyLoader {
   private final EnvironmentSkillLoader environmentSkillLoader;
