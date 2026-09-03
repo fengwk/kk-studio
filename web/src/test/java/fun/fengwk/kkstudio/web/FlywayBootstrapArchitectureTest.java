@@ -126,8 +126,15 @@ class FlywayBootstrapArchitectureTest {
     assertTrue(rootPom.contains("<artifactId>kk-studio-schema</artifactId>"));
 
     String webPom = Files.readString(root.resolve("web/pom.xml"), StandardCharsets.UTF_8);
-    assertTrue(webPom.contains("<artifactId>flyway-core</artifactId>"));
-    assertTrue(webPom.contains("<artifactId>flyway-database-postgresql</artifactId>"));
+    assertTrue(
+        webPom.contains("<artifactId>spring-boot-starter-flyway</artifactId>"),
+        "web must declare spring-boot-starter-flyway to activate Boot 4 Flyway auto-configuration");
+    assertTrue(
+        webPom.contains("<artifactId>flyway-database-postgresql</artifactId>"),
+        "web must declare flyway-database-postgresql for PostgreSQL database support");
+    assertFalse(
+        webPom.contains("<artifactId>flyway-core</artifactId>"),
+        "web must not declare flyway-core directly; the starter already transitively provides it");
     assertTrue(
         webPom.contains(
             "<artifactId>kk-studio-schema</artifactId>\n            <scope>runtime</scope>"),
