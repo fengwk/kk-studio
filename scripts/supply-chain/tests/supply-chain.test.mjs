@@ -323,6 +323,12 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
         /<exclusion>[\s\S]*?<artifactId>spring-boot-starter-aop<\/artifactId>[\s\S]*?<\/exclusion>/,
     )
     assert.match(canvasInfraPom, /<artifactId>spring-boot-starter-aspectj<\/artifactId>/)
+    const canvasAspectjBlock = canvasInfraPom.match(
+        /<dependency>[\s\S]*?<artifactId>spring-boot-starter-aspectj<\/artifactId>[\s\S]*?<\/dependency>/,
+    )?.[0]
+    assert.ok(canvasAspectjBlock)
+    assert.doesNotMatch(canvasAspectjBlock, /<scope>test<\/scope>/)
+    assert.doesNotMatch(canvasAspectjBlock, /<scope>/)
     assert.match(platformPom, /<artifactId>spring-boot-starter-aspectj<\/artifactId>/)
     assert.match(pom, /<convention4j\.version>1\.2\.2<\/convention4j\.version>/)
     assert.match(pom, /<artifactId>convention4j-spring-boot-starter<\/artifactId>/)
