@@ -27,6 +27,8 @@ spring:
     username: {username}
     # 替换为 PostgreSQL {password}
     password: {password}
+    hikari:
+      connection-timeout: 5000
 
 mybatis:
   mapper-locations: classpath:**/*Mapper.xml
