@@ -59,10 +59,10 @@ docker compose -f deploy/local/compose.yaml down -v
 `down` 会把容器连同 `ports:` 配置产生的宿主映射一并释放，监听立即消失；
 `down -v` 在此基础上再删除命名卷，确认无残留的命令见下文「清理宿主网络监听」。
 
-## 端口与并行 smoke
+## 端口、容量与并行 smoke
 
-并行跑第二套实例用于烟测时，只覆盖下表中的环境变量即可。容器内端口固定
-不变，只能换宿主侧。
+并行跑第二套实例用于烟测时，只需覆盖下表中的宿主映射变量；容器内端口固定不变。
+同一张表也列出 Local App 可覆盖的部署级容量与传输边界。
 
 | 变量 | 默认 | 含义 |
 | --- | --- | --- |
@@ -74,6 +74,12 @@ docker compose -f deploy/local/compose.yaml down -v
 | `KK_STUDIO_PG_USER` | `kk_studio` | 初始用户名 |
 | `KK_STUDIO_PG_PASSWORD` | `kk_studio` | 初始密码 |
 | `KK_STUDIO_SPRING_PROFILES_ACTIVE` | `dev` | 传递给 `SPRING_PROFILES_ACTIVE` |
+| `KK_STUDIO_HARNESS_DISPATCHER_MAX_DISPATCH_TASKS` | `64` | 本地 queued/running Processor handoff 总量上限 |
+| `KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION` | `30s` | Work 初始 claim 租约时长 |
+| `KK_STUDIO_HARNESS_DISPATCHER_POLL_INTERVAL` | `1s` | 丢失通知时的兜底轮询间隔 |
+| `KK_STUDIO_HARNESS_DISPATCHER_REJECTION_DELAY` | `1s` | worker executor 拒绝 handoff 后的重排延迟 |
+| `KK_STUDIO_HARNESS_DISPATCHER_WORKER_CONCURRENCY` | `16` | bounded worker executor 平台线程并发数 |
+| `KK_STUDIO_HARNESS_DISPATCHER_WORKER_QUEUE_CAPACITY` | `64` | bounded worker executor 队列容量 |
 | `KK_STUDIO_MODEL_MAX_CONCURRENCY` | `16` | 单进程 Model invocation admission 上限；启动配置，不进入 SystemSettings |
 | `KK_STUDIO_TOOL_MAX_CONCURRENCY` | `64` | 单进程 Tool invocation admission 上限；启动配置，不进入 SystemSettings |
 | `KK_STUDIO_SUBAGENT_MAX_CONCURRENCY` | `10` | Subagent 固定虚拟线程执行器容量；启动配置，不进入 SystemSettings |

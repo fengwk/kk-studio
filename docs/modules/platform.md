@@ -439,16 +439,18 @@ Function dispatcher claim + RUNNING lease
 | `integrations.openCliHub` | disabled、base URL 未配置；request 120s、long poll 130s、JSON 512 KiB、error 4 KiB | adapter 创建与执行参数 |
 | `integrations.seedance/gptImage2/minimaxH3` | 各自 enabled/paid 开关、workspace、prompt/ComfyUI timeout 和 polling 约束 | adapter 的启动快照与执行读取点 |
 | `storageMedia` | S3 disabled；upload 3600s；presign 600s/3600s；media process 30s；thumbnail 512/quality 80 | S3 bean topology 和媒体处理 |
-| `advanced` | resource 16 MiB；processor lease/heartbeat 30s/10s；dispatcher worker 16、queue 64；event queue 512、2 MiB、10s、heartbeat 20s；notification poll/reconnect 20s/5s | 组合根装配的 restart-required 软策略 |
+| `advanced` | resource 16 MiB；processor lease/heartbeat 30s/10s、失败/回退 1s；event queue 512、2 MiB、10s、heartbeat 20s；notification poll/reconnect 5s/1s | 组合根装配的 restart-required 软策略 |
 
-SystemSettings 永不承载数据库连接、filesystem root/workdir/temp、ffmpeg binary、Daemon token/identity、Provider
-credential、ComfyUI API key、H3 bearer token 或 OpenCLI instance identity。启用 S3 或 ComfyUI 时，启动快照要求对应
-endpoint 等 bootstrap property 完整，否则明确启动失败；禁用时对应 bean 不装配。
+SystemSettings 永不承载 Dispatcher 容量与调度节奏、数据库连接、filesystem
+root/workdir/temp、ffmpeg binary、Daemon token/identity、Provider credential、ComfyUI API
+key、H3 bearer token 或 OpenCLI instance identity。启用 S3 或 ComfyUI 时，启动快照要求对应 endpoint
+等 bootstrap property 完整，否则明确启动失败；禁用时对应 bean 不装配。
 
 ### 部署级 `@ConfigurationProperties`
 
 | key | 边界 |
 | --- | --- |
+| `kk-studio.harness.dispatcher.*` | Work claim/handoff 租约、轮询、拒绝退避和 bounded worker 容量；默认 `64/30s/1s/1s/16/64`；不进数据库、DTO 或 frontend |
 | `kk-studio.harness.execution-admission.{model,tool,subagent}` | 进程级容量，默认 `16/64/10`；不进数据库、DTO 或 frontend |
 | `kk-studio.harness.runtime.{workers-enabled,environment-root,workdir}` | worker 开关与本地工作目录；`workdir`必须位于 root 内 |
 | `kk-studio.harness.environment-gateway.{max-message-bytes,queue-capacity,max-bytes,send-timeout}` | WebSocket 安全边界；默认 `16MiB/256/16MiB/10s` |

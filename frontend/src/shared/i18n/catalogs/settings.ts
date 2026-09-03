@@ -904,8 +904,8 @@ export const settingsCatalog = {
   },
   // --- Advanced ---
   'settings.section.advanced.description': {
-    'en-US': 'Process-level runtime budgets for processing, dispatching, events and work notification.',
-    'zh-CN': '任务处理、分发、事件与工作通知的进程级运行预算。',
+    'en-US': 'Process-level runtime budgets for processors, events and work notification.',
+    'zh-CN': '处理器、事件与工作通知的进程级运行预算。',
   },
   'settings.section.advanced.resource.title': {
     'en-US': 'Resource budget',
@@ -920,8 +920,8 @@ export const settingsCatalog = {
     'zh-CN': '处理器',
   },
   'settings.section.advanced.processor.description': {
-    'en-US': 'Lease and heartbeat budgets for thread processors.',
-    'zh-CN': '线程处理器的租约与心跳预算。',
+    'en-US': 'Lease, heartbeat, resolution failure and dispatch fallback budgets for processors.',
+    'zh-CN': '处理器的租约、心跳、解析失败与分发回退预算。',
   },
   'settings.section.advanced.applicationEvent.title': {
     'en-US': 'Application events',

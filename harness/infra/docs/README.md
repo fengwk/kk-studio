@@ -8,9 +8,10 @@
 
 - **物理马达，业务无感知（Zero Business Knowledge）**：
   调度器本身完全不理解 Agent、Session、Entry、Prompt 或模型调用的业务含义。它仅负责从 PostgreSQL 的 `harness_work` 任务表中领取（Claim）到期任务，并以有界并发安全交接（Handoff）给对应的 Processor（`ThreadProcessor`、`ModelProcessor`、`ToolProcessor`）。
-- **进程级装配在 infra，状态机留在 runtime**：
-  - `harness-runtime` 承载无线程副作用的纯领域状态机；
-  - `harness-infra` 承载持有真实线程池、定时调度器与并发控制门标的调度器实例。
+- **状态机、调度协议与进程装配分层**：
+  - `harness-runtime` 定义领域状态机、Processor 与 Store/外部能力端口；
+  - `harness-infra` 实现 PostgreSQL claim/lease 协议与 `HarnessWorkDispatcher`；
+  - `web` 组合根创建并持有实际的 drain/worker/poll executor，再注入 Dispatcher。
 - **无本地任务囤积（No Local Task Hoarding）**：
   绝不一次性拉取大量任务到本地内存排队，严格按本地可用并发预算按需 Claim，避免因本地排队过长导致数据库租约超时引发其他节点错误抢占。
 
@@ -93,7 +94,7 @@ Dispatcher 不采用“收到一次唤醒就仅拉取一个任务”的低效模
   - 每个任务被工作线程池接受时原子递增 `dispatchCapacity`，工作结束在 `finally` 中原子递减并再次反向触发 `wake()`。
 - **全队列判空收敛（`consecutiveEmpty`）**：
   - 调度器目标包含 `THREAD`、`MODEL`、`TOOL` 三类；
-  - 只有当三类任务在单次扫描中**连续全部返回空**时（`consecutiveEmpty == 3`），才判定当前数据库已完全抽干，退出本次扫描。
+  - 只有当三类任务在单次扫描中**连续全部返回空**时（`consecutiveEmpty == 3`），才判定当前节点没有可领取的到期任务，退出本次扫描。
 
 ### 3.3 公平轮询调度（Fair Round-Robin）
 
@@ -103,8 +104,8 @@ Dispatcher 不采用“收到一次唤醒就仅拉取一个任务”的低效模
 
 ### 3.4 分布式租约与环境亲和抢占协议
 
-- **短事务无锁抢占**：
-  `claimNextWork` 仅对 `harness_work` 单行执行 `SELECT ... FOR UPDATE SKIP LOCKED` 并打上当前的 `lease_token`（UUID）与到期时间戳 `lease_until`，事务微秒级提交，绝不跨实体加锁。
+- **短事务抢占**：
+  `claimNextWork` 在单个短事务内通过 `FOR UPDATE SKIP LOCKED` 选择并更新一条 `harness_work`，写入当前 `lease_token`（UUID）与到期时间戳 `lease_until`；该路径不持有 Thread 或 Invocation 锁。
 - **环境路由绑定（Environment Affinity）**：
   对于标记了 `required_environment_id` 的 `TOOL` 任务，SQL 内部通过关联 `environment_connection` 校验：
   - `status = 'READY'`；
@@ -118,7 +119,7 @@ Dispatcher 不采用“收到一次唤醒就仅拉取一个任务”的低效模
 1. **安全归还（`returnClaim`）**：
    通过原子短事务检查任务所有权，将数据库记录的 `available_at` 推迟一个退避时间（`rejectionDelay`，默认 1 秒），清除租约标记，给其他节点或本地恢复争取缓冲；
 2. **立即熔断退出（`break`）**：
-   **强制退出当前 Drain 循环**。如果不熔断，循环会在下一微秒继续去数据库 Claim 下一个任务并再次被线程池拒绝，在数毫秒内发起数千次无效数据库事务打崩系统。
+   **强制退出当前 Drain 循环**。否则调度器会继续重复 claim 与 reject 短事务，形成热循环并持续向数据库施压。
 
 ---
 
@@ -128,9 +129,9 @@ Dispatcher 不采用“收到一次唤醒就仅拉取一个任务”的低效模
 
 | YAML 配置路径 | 环境变量映射 | 默认值 | 约束与用途 |
 |---|---|---|---|
-| `kk-studio.harness.dispatcher.max-dispatch-tasks` | `KK_STUDIO_HARNESS_DISPATCHER_MAX_DISPATCH_TASKS` | `64` | 本地调度器允许同时处理的任务最大容量上限（$\ge 1$） |
-| `kk-studio.harness.dispatcher.lease-duration` | `KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION` | `30s` | 任务初始 Claim 获得的分布式租约时长（正数 Duration） |
-| `kk-studio.harness.dispatcher.poll-interval` | `KK_STUDIO_HARNESS_DISPATCHER_POLL_INTERVAL` | `1s` | 丢失通知时的保底定期轮询间隔（正数 Duration） |
-| `kk-studio.harness.dispatcher.rejection-delay` | `KK_STUDIO_HARNESS_DISPATCHER_REJECTION_DELAY` | `1s` | 线程池背压拒绝后的延迟退避时长（正数 Duration） |
-| `kk-studio.harness.dispatcher.worker.concurrency` | `KK_STUDIO_HARNESS_DISPATCHER_WORKER_CONCURRENCY` | `16` | 后台执行短事务状态迁移的平台线程池并发数（$\ge 1$） |
+| `kk-studio.harness.dispatcher.max-dispatch-tasks` | `KK_STUDIO_HARNESS_DISPATCHER_MAX_DISPATCH_TASKS` | `64` | 本地 queued/running Processor handoff 总量上限（$\ge 1$） |
+| `kk-studio.harness.dispatcher.lease-duration` | `KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION` | `30s` | 任务初始 Claim 获得的分布式租约时长（正整毫秒 Duration） |
+| `kk-studio.harness.dispatcher.poll-interval` | `KK_STUDIO_HARNESS_DISPATCHER_POLL_INTERVAL` | `1s` | 丢失通知时的保底定期轮询间隔（正整毫秒 Duration） |
+| `kk-studio.harness.dispatcher.rejection-delay` | `KK_STUDIO_HARNESS_DISPATCHER_REJECTION_DELAY` | `1s` | 线程池背压拒绝后的延迟退避时长（正整毫秒 Duration） |
+| `kk-studio.harness.dispatcher.worker.concurrency` | `KK_STUDIO_HARNESS_DISPATCHER_WORKER_CONCURRENCY` | `16` | Processor handoff 平台线程池并发数（$\ge 1$） |
 | `kk-studio.harness.dispatcher.worker.queue-capacity` | `KK_STUDIO_HARNESS_DISPATCHER_WORKER_QUEUE_CAPACITY` | `64` | 后台工作线程池阻塞队列容量（$\ge 1$） |

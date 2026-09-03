@@ -8,8 +8,8 @@ import java.nio.file.Path;
 /**
  * Harness Runtime 的纯 bootstrap 部署配置：进程内 worker 开关与沙箱路径。
  *
- * <p>processor/dispatcher/compaction/subagent 等运行软策略已迁移到数据库 SystemSettings（Advanced / AiRuntime /
- * Tool section），不再由本类承载。
+ * <p>Processor、compaction 与 subagent 等运行软策略由数据库 SystemSettings 承载；Dispatcher 容量与调度节奏由独立的 {@link
+ * HarnessDispatcherProperties} 承载。
  */
 @Data
 @ConfigurationProperties(prefix = "kk-studio.harness.runtime")

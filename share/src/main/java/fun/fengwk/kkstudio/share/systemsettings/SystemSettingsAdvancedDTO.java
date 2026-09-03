@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.share.systemsettings;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
-/** advanced section：processor/dispatcher/executor/事件通道/工作通知的进程级运行预算。 */
+/** advanced section：processor/executor/事件通道/工作通知的进程级运行预算。 */
 @Data
 public class SystemSettingsAdvancedDTO {
 

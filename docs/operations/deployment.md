@@ -174,12 +174,13 @@ classpath:db/seed/canvas-test`。Flyway 通过
 | host mapping | `KK_STUDIO_APP_HOST`、`KK_STUDIO_APP_PORT`、`KK_STUDIO_PG_HOST`、`KK_STUDIO_PG_PORT` |
 | database identity | `KK_STUDIO_PG_DATABASE`、`KK_STUDIO_PG_USER`、`KK_STUDIO_PG_PASSWORD` |
 | Spring profile | `KK_STUDIO_SPRING_PROFILES_ACTIVE` |
+| Harness dispatcher | `KK_STUDIO_HARNESS_DISPATCHER_MAX_DISPATCH_TASKS`、`KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION`、`KK_STUDIO_HARNESS_DISPATCHER_POLL_INTERVAL`、`KK_STUDIO_HARNESS_DISPATCHER_REJECTION_DELAY`、`KK_STUDIO_HARNESS_DISPATCHER_WORKER_CONCURRENCY`、`KK_STUDIO_HARNESS_DISPATCHER_WORKER_QUEUE_CAPACITY` |
 | admission | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SUBAGENT_MAX_CONCURRENCY` |
 | Environment gateway | `KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES`、`KK_STUDIO_ENVIRONMENT_GATEWAY_QUEUE_CAPACITY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_BYTES`、`KK_STUDIO_ENVIRONMENT_GATEWAY_SEND_TIMEOUT` |
 | trusted runtime | `KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY`、Canvas Function runtime variables、`KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` |
 
-Admission、gateway frame/queue cap 和 trusted contributor directory 属于启动配置，
-不由 SystemSettings editor 修改。
+Dispatcher、Admission、gateway frame/queue cap 和 trusted contributor directory
+属于启动配置，不由 SystemSettings editor 修改。
 
 ## 7. `deploy/test`：Canvas/Storage offline stack
 
@@ -429,6 +430,7 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
 | Stack/用途 | 责任组 | 典型变量 |
 | --- | --- | --- |
 | local | host mapping/database/profile | `KK_STUDIO_APP_*`、`KK_STUDIO_PG_*`、`KK_STUDIO_SPRING_PROFILES_ACTIVE` |
+| local | Harness dispatcher | `KK_STUDIO_HARNESS_DISPATCHER_*` |
 | local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SUBAGENT_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*` |
 | test | ports/build/mock | `CANVAS_TEST_*` |
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_CANVAS_RESOURCE_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED` |
