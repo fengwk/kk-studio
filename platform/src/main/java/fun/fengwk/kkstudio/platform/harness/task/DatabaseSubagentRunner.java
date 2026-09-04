@@ -564,6 +564,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
     }
   }
 
+  /** 向注册表发布当前子 Agent 执行快照并向调用监听器推送状态片段。 */
   private void publishStatus(
       ToolExecutionListener listener,
       String callId,
@@ -788,6 +789,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
     return value.toString();
   }
 
+  /** 最多以最新 Thread version 重试三次停止子 Agent，目标已不存在时视为完成。 */
   private void cancelChild(HarnessRuntime runtime, UUID threadId, UUID taskInvocationId) {
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
@@ -802,6 +804,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
     }
   }
 
+  /** 根据终态运行结果格式化任务报告并通知调用监听器完成。 */
   private void complete(
       ToolExecutionListener listener,
       String callId,
@@ -880,8 +883,13 @@ public class DatabaseSubagentRunner implements SubagentRunner {
   private record RunResult(RunState state, String report) {}
 
   private enum RunState {
+    /** 子 Agent 任务顺利完成。 */
     COMPLETED("completed"),
+
+    /** 子 Agent 任务执行失败或无法产出正常报告。 */
     ERROR("error"),
+
+    /** 子 Agent 任务已被取消。 */
     CANCELLED("cancelled");
 
     private final String wireName;

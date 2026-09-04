@@ -128,6 +128,7 @@ public class PlatformCanvasResourceLifecycle implements CanvasResourceLifecycle 
     }
   }
 
+  /** 对已释放 pin 涉及的资源去重检查，仅删除既无剩余 pin 又无节点 owner 的资源。 */
   private void collectUnowned(UUID canvasId, List<CanvasFunctionResourcePin> refs) {
     Set<UUID> resourceIds = new LinkedHashSet<>();
     for (CanvasFunctionResourcePin ref : refs) {
@@ -143,6 +144,7 @@ public class PlatformCanvasResourceLifecycle implements CanvasResourceLifecycle 
     }
   }
 
+  /** 先删除 Canvas Resource 行，再释放其可选 Blob 引用，任何失败均向上抛出。 */
   private void deleteResource(CanvasResource resource) {
     if (!resourceRepository.delete(resource.canvasId(), resource.id())) {
       throw new IllegalStateException("delete canvas resource failed: " + resource.id());

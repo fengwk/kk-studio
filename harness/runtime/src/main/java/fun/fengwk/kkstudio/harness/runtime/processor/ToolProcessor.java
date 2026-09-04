@@ -700,6 +700,7 @@ public final class ToolProcessor implements AutoCloseable {
     return terminalDispatch(claim, dispatched, (tool, now) -> tool.unknown(error, now));
   }
 
+  /** 在同一事务中先建立 THREAD wake，再以当前 Claim 为最终围栏写入 Tool 终态并完成 TOOL Work。 */
   private boolean terminalDispatch(
       ClaimedWork claim,
       Prepare.Dispatched dispatched,

@@ -352,6 +352,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     }
   }
 
+  /** 调用贡献者 Tool，将同步异常或空句柄转为错误回调，并把有效句柄的取消动作绑定到 Gateway。 */
   private void runTool(
       Tool tool,
       ToolExecutionRequest request,
@@ -373,6 +374,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     handle.attach(toolHandle::cancel);
   }
 
+  /** 提交等待激活门控的本地任务，将线程池拒绝映射为重试，其他提交异常映射为结果不确定。 */
   private StartResult submitLocalExecution(
       Execution execution,
       GatedToolExecutionListener bridge,
@@ -1010,8 +1012,13 @@ public final class ToolExecutionGateway implements ToolGateway {
   }
 
   private enum SignalKind {
+    /** 局部中间执行结果信号。 */
     PARTIAL,
+
+    /** 工具通过完成回调提交终态结果的信号。 */
     COMPLETE,
+
+    /** 工具通过异常回调报告失败、取消或不确定结果的信号。 */
     ERROR
   }
 

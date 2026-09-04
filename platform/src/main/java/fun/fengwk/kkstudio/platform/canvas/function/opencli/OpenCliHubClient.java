@@ -225,6 +225,7 @@ public class OpenCliHubClient {
     return new HubResourceStream(response.body(), contentLength, mediaType.strip());
   }
 
+  /** 发送 HTTP 请求并校验解包 OpenCLI Hub 标准响应信封中的业务数据。 */
   private JsonNode sendEnvelope(HttpRequest request) {
     HttpResponse<InputStream> response;
     try {
@@ -626,11 +627,22 @@ public class OpenCliHubClient {
   }
 
   public enum ExecutionStatus {
+    /** OpenCLI 任务已提交等待调度。 */
     PENDING,
+
+    /** OpenCLI 任务正在执行。 */
     RUNNING,
+
+    /** OpenCLI 任务执行成功。 */
     SUCCEEDED,
+
+    /** OpenCLI 任务执行失败。 */
     FAILED,
+
+    /** OpenCLI 任务执行超时。 */
     TIMED_OUT,
+
+    /** OpenCLI 任务已被取消。 */
     CANCELLED;
 
     public boolean terminal() {

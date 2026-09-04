@@ -313,6 +313,7 @@ public final class ModelProcessor implements AutoCloseable {
     };
   }
 
+  /** 在事务内按 Thread -> Model -> Work 锁序锁定并校验状态，依据 durable status 路由准备结果。 */
   private Prepare prepare(HarnessStore.Transaction tx, ClaimedWork claim) {
     Instant now = clock.instant();
     UUID invocationId = claim.target().id();
@@ -485,6 +486,7 @@ public final class ModelProcessor implements AutoCloseable {
     return terminalDispatch(claim, dispatched, (model, now) -> model.unknown(error, now));
   }
 
+  /** 在同一事务中先建立 THREAD wake，再以当前 Claim 为最终围栏写入 Model 终态并完成 MODEL Work。 */
   private boolean terminalDispatch(
       ClaimedWork claim,
       Prepare.Dispatched dispatched,

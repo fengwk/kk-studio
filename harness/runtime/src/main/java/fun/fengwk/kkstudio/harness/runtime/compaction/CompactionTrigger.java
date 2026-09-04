@@ -1,15 +1,13 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
-/**
- * 触发一次压缩的 durable 原因。
- *
- * <p>{@code THRESHOLD} 是上下文超 soft threshold，且 Agent 尚有 continuation obligation 或下一真实 user input
- * 已排队的常规压缩；{@code OVERFLOW} 是最近一次非压缩 model turn 命中 hard context wall（{@link
- * fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind#OVERFLOW} 或严格 LENGTH
- * 近满窗口）后的立即压缩； {@code MANUAL} 是用户通过手动控制显式发起的压缩。
- */
+/** 触发一次压缩的 durable 原因。 */
 public enum CompactionTrigger {
+  /** 上下文超出软阈值且存在继续义务或排队用户输入时触发的常规压缩。 */
   THRESHOLD,
+
+  /** 模型报告上下文溢出，或长度截断且窗口已近满时立即触发的紧急压缩。 */
   OVERFLOW,
+
+  /** 用户显式发起的手动压缩请求。 */
   MANUAL
 }

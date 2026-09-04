@@ -747,23 +747,42 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private enum PendingKind {
+    /** 暂存待处理的流式增量事件。 */
     EVENT,
+
+    /** 暂存待处理的成功完成响应。 */
     SUCCEEDED,
+
+    /** 暂存待处理的调用失败错误。 */
     FAILED,
+
+    /** 暂存待处理的结果不确定错误。 */
     UNKNOWN
   }
 
-  /** 一次回调落地后的本地结果：事件已 checkpoint / retry 已排程 / terminal 已写 / ownership 已丢失。 */
+  /** 一次回调信号落地后的本地应用结果。 */
   private enum Applied {
+    /** 事件已成功推进 checkpoint 或流式序列号。 */
     PROGRESSED,
+
+    /** 触发瞬态重试，对应 Work 已完成延迟重排。 */
     RETRY,
+
+    /** 终态已持久化落盘，本地执行结束。 */
     TERMINAL,
+
+    /** Claim 所有权已丢失或调用已被废弃，当前信号未被应用。 */
     LOST
   }
 
   private enum TerminalKind {
+    /** 收敛为明确的失败终态。 */
     FAILED,
+
+    /** 收敛为取消终态。 */
     CANCELLED,
+
+    /** 收敛为结果不确定的终态。 */
     UNKNOWN
   }
 

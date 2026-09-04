@@ -29,6 +29,7 @@ final class ClaimAdmissionGuard {
     return admitted.get();
   }
 
+  /** 仅释放仍由指定 token 持有的准入槽，避免清除并发替换后的 claim。 */
   void release(UUID invocationId, String token) {
     tokens.remove(invocationId, token);
   }
