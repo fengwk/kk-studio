@@ -2,30 +2,30 @@
 
 ## 定位
 
-`harness-builtin` 是系统第一方内置能力模块，提供唯一的 `BuiltinHarnessContributor`（ID 为 `builtin`）。它将系统内置的 15 个统一 Tool、`goal.state` 自定义 Entry ownership 与 Goal 上下文投影器注册到 `HarnessCatalog`。
+`harness-builtin` 是系统第一方内置能力模块，提供全局唯一的 `BuiltinHarnessContributor`（标识为 `builtin`）。模块集中向 `HarnessCatalog` 注册系统内置的 15 个统一工具、`goal.state` 自定义条目所有权以及 Goal 上下文投影器。
 
-15 个内置工具包括：
-- 10 个模型可见、声明 `environmentRequired=true` 的 Environment capability Tool；
-- 2 个内部 Tool：`load_skill` 与 `task`；
-- 3 个模型可见、通过 `AppendCustomEntry` effect 维护 branch Goal 的 Tool。
+15 个内置工具分为三类：
+- 10 个面向模型可见、声明 `environmentRequired=true` 的环境能力工具；
+- 2 个内部工具：`load_skill` 与 `task`；
+- 3 个面向模型可见、通过 `AppendCustomEntry` 副作用维护分支目标的 Goal 管理工具。
 
-所有内置工具的全局稳定 AgentToolId 统一保持 `base.*` 前缀，并在 [`BuiltinToolIds`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinToolIds.java) 中集中定义。
+所有内置工具在全局拥有稳定的 `AgentToolId`，统一以 `base.*` 为前缀，并在 [`BuiltinToolIds`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinToolIds.java) 中集中定义。
 
-## Goals / Non-goals
+## 职责
 
-### Goals
+### 核心职责
 
-- 通过单一 `BuiltinHarnessContributor` 和统一 Tool SPI 注册全部 15 个工具。
-- 将 Goal 表达为 branch-scoped `builtin/goal.state` 全量快照，不建独立数据库表，通过 `AppendCustomEntry` 由 Core 原子追加。
-- 提供 `goal.context` 投影器，仅将当前 branch 活跃的 Goal 投影到下一次 Model planning 的 SYSTEM 上下文中。
-- 将内部 `load_skill` 与 `task` 作为普通 `INTERNAL` Tool 注册，为 Skill 加载与 Subagent 任务执行提供标准化契约。
+- 通过单一 `BuiltinHarnessContributor` 和统一 Tool SPI 注册全部 15 个内置工具。
+- 将 Goal 表达为分支作用域的 `builtin/goal.state` 全量快照，通过 `AppendCustomEntry` 副作用由 Core 原子追加至会话树。
+- 提供 `goal.context` 纯上下文投影器，仅将当前分支活跃的 Goal 投影至下一次模型规划的 SYSTEM 上下文中。
+- 将内部工具 `load_skill` 与 `task` 作为标准 `INTERNAL` 工具注册，为 Skill 加载与 Subagent 任务执行提供标准化契约。
 
-### Non-goals
+### 协作边界
 
-- 不为 Goal 建立独立数据库表；Goal durable fact 只存在于 `harness_entry` 的 CUSTOM payload 中。
-- 不在 Builtin 模块实现 Environment 网络 transport 或 Daemon capability；`EnvironmentCapabilityTool` 只委托执行期 `BoundEnvironment`。
-- 不提供热插拔或动态卸载；作为第一方核心能力在系统启动时一次性装配。
-- 不实现 host-side 独立 dispatcher 或 approval 工作流；调度和持久化状态机由 Harness Core 负责。
+- Goal 的持久化事实完全存储于 `harness_entry` 协议表的 CUSTOM 载荷中，复用 Harness 统一的会话树存储体系。
+- 环境通信网络传输与守护进程能力由执行环境及 Daemon 模块实现，`EnvironmentCapabilityTool` 在执行期直接委托注入的 `BoundEnvironment` 调度环境能力。
+- 第一方内置能力采用启动期一次性静态装配模式，生命周期与应用进程保持一致。
+- 执行任务的分发调度、审批工作流与持久化状态机由 Harness Core 统一驱动。
 
 ## 依赖边界
 
@@ -35,27 +35,30 @@ BuiltinHarnessContributor
   -> harness-environment（CapabilityCatalog / BoundEnvironment 使用的 descriptor）
   -> harness-tool（AgentToolId / ToolDescriptor / ToolResult）
   -> harness-common（PromptTemplate / Loader、ResultContent / InputSchema）
+
+依赖约束：仅允许依赖 harness-common、harness-contributor-api、harness-tool、harness-environment 与 Jackson；
+          运行时存储调度、基础设施通信、守护进程、Spring 容器与外部数据库均置于模块外部。
 ```
 
-POM 见 [`pom.xml`](../../harness/builtin/pom.xml)，包级职责见 [`package-info.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/package-info.java)。Builtin 模块依赖 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment` 与 Jackson；不依赖 runtime、infra、daemon、platform、web、Spring 或外部数据库。
+POM 见 [`pom.xml`](../../harness/builtin/pom.xml)，包级职责见 [`package-info.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/package-info.java)。
 
-Harness durable schema 的唯一入口是 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)；其中只有 Harness 七张协议表，没有 Goal 专用表。
+持久化存储方案统一依托 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 定义的 Harness 七张核心协议表，Goal 状态直接复用通用条目表承载。
 
 ## 包架构
 
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
-| `fun.fengwk.kkstudio.harness.builtin` | 系统第一方内置能力根包，提供唯一的 `BuiltinHarnessContributor`、`BuiltinToolIds` 全局常量与完成态句柄 | 集中注册 15 个统一内置工具、Goal custom type 与投影器；不实现底层环境 transport 或 durable 调度 |
-| `fun.fengwk.kkstudio.harness.builtin.environment` | 内置 Environment capability 工具实现（`EnvironmentCapabilityTool`）与 prompt 模板加载 | 委托执行期 `BoundEnvironment` 执行环境能力；不实现 Daemon wire 协议或进程管理 |
-| `fun.fengwk.kkstudio.harness.builtin.goal` | 内置 Goal 状态管理工具（`create_goal`、`get_goal`、`update_goal`）、纯上下文投影器（`GoalContextProjector`）、快照模型（`GoalState`）与严格确定性 JSON 编解码器（`GoalStateCodec`） | 依托 `harness_entry` CUSTOM payload 存储，不建立独立数据库表；通过 `AppendCustomEntry` 由 Core 原子追加 |
-| `fun.fengwk.kkstudio.harness.builtin.skill` | 内部 Skill 加载工具（`LoadSkillTool`）及正文加载契约 | 仅供当前 Thread Agent 选中的 Skill 按需加载，不暴露本地文件系统绝对路径 |
-| `fun.fengwk.kkstudio.harness.builtin.subagent` | 内部 Subagent 委派工具适配器（`TaskTool`）、任务请求契约（`SubagentTaskRequest`）、执行端口（`SubagentRunner`）与动态配置接入 | 负责参数校验与委派转发，委托 `SubagentRunner` 执行；不在此处实现多轮调度引擎或持久化状态机 |
+| `fun.fengwk.kkstudio.harness.builtin` | 系统第一方内置能力根包，提供唯一的 `BuiltinHarnessContributor`、`BuiltinToolIds` 全局常量与完成态句柄 | 集中注册 15 个统一内置工具、Goal 自定义类型与投影器；底层网络传输与持久化调度由外层模块负责 |
+| `fun.fengwk.kkstudio.harness.builtin.environment` | 内置 Environment capability 工具实现（`EnvironmentCapabilityTool`）与 prompt 模板加载 | 委托执行期注入的 `BoundEnvironment` 执行环境能力；传输协议解析与宿主进程管理由环境守护进程承接 |
+| `fun.fengwk.kkstudio.harness.builtin.goal` | 内置 Goal 状态管理工具（`create_goal`、`get_goal`、`update_goal`）、纯上下文投影器（`GoalContextProjector`）、快照模型（`GoalState`）与严格确定性 JSON 编解码器（`GoalStateCodec`） | 依托通用 `harness_entry` 的 CUSTOM 载荷存储，通过 `AppendCustomEntry` 由 Core 原子追加 |
+| `fun.fengwk.kkstudio.harness.builtin.skill` | 内部 Skill 加载工具（`LoadSkillTool`）及正文加载契约 | 仅供当前 Thread Agent 选中的 Skill 按需加载，通过环境绑定安全读取而隐藏宿主绝对路径 |
+| `fun.fengwk.kkstudio.harness.builtin.subagent` | 内部 Subagent 委派工具适配器（`TaskTool`）、任务请求契约（`SubagentTaskRequest`）、执行端口（`SubagentRunner`）与动态配置接入 | 负责参数校验与委派转发，委托 `SubagentRunner` 执行；多轮调度引擎与持久化状态机由运行时负责 |
 
 ## 核心模型 / API
 
 ### BuiltinHarnessContributor 注册清单
 
-[`BuiltinHarnessContributor`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor.java) 接收 `loadSkillTool` 与 `taskTool`（由 Platform 装配提供），其 descriptor 为 `ContributorId("builtin")`、version `"1"`、无 requires。它共注册 15 个 Tool、1 个 Custom Entry Type 和 1 个 Context Projector：
+[`BuiltinHarnessContributor`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor.java) 接收 `loadSkillTool` 与 `taskTool`（由 Platform 装配注入），其描述符为 `ContributorId("builtin")`、version `"1"`、无 `requires` 依赖。它统一注册 15 个 Tool、1 个 Custom Entry Type 和 1 个 Context Projector：
 
 | localName | AgentToolId | model name | requirements | visibility | priority | 说明 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -76,12 +79,12 @@ Harness durable schema 的唯一入口是 [`V1__schema.sql`](../../schema/src/ma
 | `goal.update` | `base.goal.update` | `update_goal` | WRITE(`goal.state`) | SELECTABLE | 0 | 结束 Goal |
 
 此外注册：
-- Custom Entry Type：`goal.state-type`，customType 为 `goal.state`，priority 0；
-- Context Projector：`goal.context`，[`GoalContextProjector`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalContextProjector.java)，priority 0。
+- Custom Entry Type：`goal.state-type`，customType 为 `goal.state`，priority 为 0；
+- Context Projector：`goal.context`，[`GoalContextProjector`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalContextProjector.java)，priority 为 0。
 
 ### Goal state 快照与 Codec
 
-[`GoalState`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalState.java) 是完整替换快照：
+[`GoalState`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalState.java) 是完整替换的状态快照：
 
 ```text
 objective:   non-blank string
@@ -92,9 +95,9 @@ createdAt:   Instant
 updatedAt:   Instant
 ```
 
-`GoalStatus.ACTIVE` 是唯一非 terminal 状态；`COMPLETE` 和 `BLOCKED` 是 terminal。`updatedAt >= createdAt`，时间戳在工具执行时截断到毫秒。
+`GoalStatus.ACTIVE` 是唯一的活跃状态；`COMPLETE` 与 `BLOCKED` 为终结状态。快照要求 `updatedAt >= createdAt`，时间戳在工具执行时统一截断至毫秒精度。
 
-[`GoalStateCodec`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStateCodec.java) 要求 payload `schemaVersion=1`，`dataJson` 包含且仅包含以下字段：
+[`GoalStateCodec`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStateCodec.java) 要求载荷的 `schemaVersion=1`，`dataJson` 包含且仅包含以下结构：
 
 ```json
 {
@@ -107,21 +110,21 @@ updatedAt:   Instant
 }
 ```
 
-未知字段、缺失字段、duplicate/trailing、非法 status、非法时间戳、非正 budget 或领域不变量失败均立即拒绝。
+编解码器基于 fail-closed 原则工作：遇到未知字段、缺失必填项、重复键、尾随字符、非法状态枚举、格式错误时间戳、非正预算数值或违反领域不变量时，均立即抛出异常并拒绝处理。
 
 ### Branch scope 与 Goal 工具
 
-每个 Goal 工具从已 scoped 到 `builtin` 的 [`BranchView.latestCustomEntry`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 查询 `goal.state`，只使用当前 Tool 所在 Assistant Entry 的 root-to-head 路径：
+每个 Goal 工具通过限定于 `builtin` 作用域的 [`BranchView.latestCustomEntry`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 查询 `goal.state`，读取当前 Tool 所在 Assistant Entry 自根节点至当前节点的路径：
 
-- [`CreateGoalTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/CreateGoalTool.java)：要求 `objective`，可选正 `tokenBudget`。创建 `ACTIVE` 快照；若 branch 已有 Goal，保留原 `createdAt`，返回 JSON `goal` envelope 和一个 `AppendCustomEntry` WRITE intent。
-- [`GetGoalTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GetGoalTool.java)：无参数。只读当前 branch 的最新快照；不存在时返回无 goal 提示文本。不返回 intent，不改变 branch。
-- [`UpdateGoalTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/UpdateGoalTool.java)：要求 `status` 为 `complete` 或 `blocked`，且 `reason` 非空。必须已有 `ACTIVE` Goal；terminal Goal 不能再次 update。保持 objective/tokenBudget/createdAt 不变，替换 status/reason/updatedAt，并返回一个 WRITE intent。
-- [`GoalContextProjector`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalContextProjector.java)：只在 latest Goal 状态为 ACTIVE 时生成一条 `AgentMessage.system`，内容由 `active-goal-context.md` 模板与 canonical `goal` envelope 构造。缺失、COMPLETE 或 BLOCKED 均返回空列表。
+- [`CreateGoalTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/CreateGoalTool.java)：要求提供非空 `objective`，可选正整数 `tokenBudget`。创建 `ACTIVE` 状态快照；若当前分支已存在 Goal，保留原始 `createdAt`，返回包含 JSON `goal` 包裹对象的结果与一个 `AppendCustomEntry` 的 WRITE 意图。
+- [`GetGoalTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GetGoalTool.java)：无入参要求。只读查询当前分支的最新快照；快照不存在时返回提示文本。仅产生查询结果，无追加意图，分支状态保持不变。
+- [`UpdateGoalTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/UpdateGoalTool.java)：要求 `status` 为 `complete` 或 `blocked`，且附带非空 `reason`。操作前提为当前分支已存在 `ACTIVE` 状态 Goal；对已终结的目标尝试更新将直接被拒绝。该工具保持 objective、tokenBudget 与 createdAt 不变，更新 status、reason 与 updatedAt，并返回一个 WRITE 追加意图。
+- [`GoalContextProjector`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalContextProjector.java)：仅在最新快照状态为 `ACTIVE` 时生成一条 `AgentMessage.system`，内容基于 `active-goal-context.md` 模板与规范的 `goal` 包裹对象构造。快照不存在或已处于终结状态时均返回空列表。
 
 ### Skill 与 Subagent 工具
 
-- [`LoadSkillTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillTool.java)：内部 Tool，依据 `ThreadSelectedSkillLookup` 与 `SkillBodyLoader` 按需加载 Skill 正文内容。
-- [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java)：内部 Tool，通过外部 `SubagentRunner` 创建/恢复 Subagent Session 与 Thread，在有界并发限制下执行子任务并返回汇总报告。
+- [`LoadSkillTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillTool.java)：作为内部工具（`ToolVisibility.INTERNAL`）注册，依据 `ThreadSelectedSkillLookup` 与 `SkillBodyLoader` 按需加载 Skill 正文内容。
+- [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java)：作为内部工具（`ToolVisibility.INTERNAL`）注册，委托外部注入的 `SubagentRunner` 创建或恢复 Subagent Session 与 Thread，在有界并发与深度控制下执行子任务并返回汇总报告。
 
 ## 执行 / 状态 trace
 
@@ -147,20 +150,20 @@ sequenceDiagram
 
 ## 不变量、failure / recovery
 
-- Goal state 只存在于 `harness_entry` CUSTOM，entry key 为 `(contributorId=builtin, customType=goal.state, schemaVersion=1)`；没有独立 Goal 表或 side channel。
-- create/update 的 successful result 必须携带一个 `AppendCustomEntry`，get 和所有 error result 必须没有 intents。
-- Tool 参数先通过 descriptor schema，再由 `GoalToolSupport` 执行严格对象与参数校验；未知/重复字段 fail closed。
-- `GoalState` active 不得有 reason，terminal 必须有 reason；tokenBudget 只能是正数或 null；时间不能回退。
-- update 只允许 `ACTIVE -> COMPLETE/BLOCKED`；create 可以在当前 branch 完整替换 active 快照，但保留 creation time。
-- Core 在 Tool terminal apply 前校验 `builtin:goal.state` ownership 和 WRITE access；校验或 Resource materialization 失败时不追加 CUSTOM Entry。
-- fork 读取严格按 branch path；不在该 branch path 上的快照对 sibling branch 完全隔离。
-- projector 对 terminal 或 missing state 静默返回空，不把已结束的 Goal 作为 active instruction。
+- **存储结构契约**：Goal 状态完全以快照形式持久化于 `harness_entry` 的 CUSTOM 节点中，条目键固定为 `(contributorId=builtin, customType=goal.state, schemaVersion=1)`，实现统一且可追溯的持久化存储。
+- **操作与副作用配对**：创建与更新操作执行成功时必须携带且仅携带一个 `AppendCustomEntry` 副作用；查询操作以及所有错误结果严禁附带任何追加副作用。
+- **参数严格校验**：工具调用参数首先经过 `ToolDescriptor` 的模式校验，再由 `GoalToolSupport` 执行强类型与领域校验；遇到未知属性或非法参数时严格执行 fail-closed 拦截。
+- **领域状态不变量**：`GoalState` 维持严格的领域不变量：`ACTIVE` 状态的 `reason` 必须为 null；终结状态（`COMPLETE` 与 `BLOCKED`）必须提供非空 `reason`；`tokenBudget` 限定为正整数或 null；`updatedAt` 时间戳不得早于 `createdAt`。
+- **单向状态流转**：状态流转严格遵循单向终结约束：更新操作仅允许从 `ACTIVE` 流转至 `COMPLETE` 或 `BLOCKED`；创建操作支持在当前分支覆盖替换活跃快照，并保留原始创建时间戳。
+- **原子追加校验**：在工具执行终结并写入前，Core 严格校验 `builtin:goal.state` 的所有权与 WRITE 访问声明；若校验未通过或资源外部化失败，整个操作原子回滚，避免残留不一致的状态条目。
+- **分支路径隔离**：分支读取沿自身祖先路径进行；分叉后新增的快照不会出现在兄弟路径中。
+- **活跃上下文投影**：快照不存在或已处于终结状态时，投影器静默返回空列表，确保仅将真正活跃的目标注入模型提示词上下文。
 
 ## 配置 / 扩展
 
 - Goal 的 schema、Tool description 和 active context 均由 classpath prompt resources 提供，入口是 [`GoalPrompts.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalPrompts.java)。
 - Environment 工具 prompt 模板来自 `harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/environment/prompts/`，入口是 [`EnvironmentPrompts.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentPrompts.java)。
-- Subagent 配置由 `SubagentConfigProvider` 每次决策点从系统设置现读，包括深度、并发度与超时限制。
+- Subagent 配置由 `SubagentConfigProvider` 在每次决策点从系统配置中实时读取，包含 `maxDepth`、单父级 `maxConcurrency`、全局 `maxTotalConcurrency`、`idleTimeout` 与 `maxTurns`。
 
 ## 测试与源码入口
 
@@ -175,7 +178,7 @@ sequenceDiagram
 ### 关键测试守卫
 
 - [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java)：完整 15 工具清单、Tool descriptor/version/schema、ownership 与 Catalog 注册测试。
-- [`BuiltinModuleArchitectureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinModuleArchitectureTest.java)：Builtin 只依赖 common/contributor-api/tool/environment/Jackson，不依赖 runtime/infra/daemon/platform/web。
+- [`BuiltinModuleArchitectureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinModuleArchitectureTest.java)：单向依赖方向与模块契约边界守卫。
 - [`BuiltinToolIdsTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinToolIdsTest.java)：全局 `base.*` 稳定标识校验。
 - [`GoalFeatureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalFeatureTest.java)：branch latest snapshot、fork/sibling 隔离、replacement 时间戳、active projector 静默。
 - [`GoalStateCodecTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStateCodecTest.java)：strict JSON schema codec 与 domain 不变量校验。
