@@ -8,7 +8,7 @@ import java.util.Objects;
 /**
  * 已 claim Work 行的不可变快照：target、worker 必须随 lease token 一同回传到 {@link Work#complete(String, long,
  * Instant)} / {@link Work#reschedule(String, long, Instant, Instant)} 的 claimed wakeVersion，以及
- * lease horizon 与可选环境亲和性。
+ * lease horizon 与可选环境亲和性（{@code requiredEnvironmentId} 仅允许 TOOL 类型非空）。
  */
 public record ClaimedWork(
     WorkTarget target,

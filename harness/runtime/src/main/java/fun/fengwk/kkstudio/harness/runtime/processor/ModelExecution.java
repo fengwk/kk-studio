@@ -34,16 +34,16 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
- * 一次 claim 的进程内 Model execution：Gateway listener 门控缓冲、durable fence 与 lease heartbeat。
+ * 一次 claim 的进程内 Model execution：Gateway Listener 回调门控缓冲、所有权围栏与 lease heartbeat。
  *
- * <p>listener 回调在 durable RUNNING 落地前只进缓冲区；两阶段激活（{@link #activate}）：attach handle -&gt; 持久化
- * markRunning -&gt; {@code handle.activate()}（Gateway 打开回调 gate）成功后按到达顺序重放。激活仲裁（abandon -&gt;
+ * <p>Listener 回调在持久化 RUNNING 落地前由回调门控缓冲；两阶段激活（{@link #activate}）：先安全 attach handle，再持久化
+ * markRunning，最后调用外部 {@code handle.activate()}（通知 Gateway 打开回调门控），成功后按到达顺序重放缓冲信号。激活仲裁（abandon -&gt;
  * activate 竞态）：activation 开始前 abandon 获胜则 activate 绝不调用；开始后 abandon 把 cancel 推迟到 activate 返回，外部调用序
- * 恒为 ACTIVATE -&gt; CANCEL。所有回调都先在校验 RUNNING + attempt 与 claim ownership 的短事务中落地（text/thinking 单调
- * checkpoint，tool-call fragment 只推 sequence 不入 checkpoint），commit 后才 best-effort 发布 {@link
- * RealtimeEvent.ModelDelta}。terminal 回调一次生效， duplicate / late / stale 一律 no-op；lost ownership 立即关
- * gate、cancel handle 并停止 heartbeat，且不反写任何 durable 状态。{@code handle.activate()} 抛异常即激活失败：恰好一次
- * UNKNOWN terminal，激活前缓冲的信号全部丢弃。
+ * 恒为 ACTIVATE -&gt; CANCEL（外部 activate / cancel 绝不持有 monitor 避免死锁）。所有回调都先在校验 RUNNING + attempt 与
+ * claim ownership 的短事务中落地（text/thinking 单调 checkpoint，tool-call fragment 只推 sequence 不入
+ * checkpoint），commit 后才 best-effort 发布 {@link RealtimeEvent.ModelDelta}。terminal 回调一次生效， duplicate
+ * / late / stale 一律 no-op；lost ownership 立即关闭回调门控、cancel handle 并停止 heartbeat，且不反写任何持久化状态。{@code
+ * handle.activate()} 抛异常即激活失败：恰好一次 UNKNOWN terminal，激活前缓冲的信号全部丢弃。
  */
 @Slf4j
 final class ModelExecution implements ModelGateway.Listener {
@@ -122,11 +122,11 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   /**
-   * Gateway admission 返回 Started 后调用。先安全 attach handle + durable markRunning（失败即 abandon 并
-   * LOST），随后才 调用外部 {@code handle.activate()} 打开回调 gate。激活仲裁：monitor 内声明 activation 开始；abandon
-   * 在开始前获胜则 handle 已由 abandon 取消且 activate 绝不调用；已开始后 abandon 推迟 cancel，由本方法在 activation 返回后补上，外部调用序
-   * 恒为 ACTIVATE -&gt; CANCEL（外部 activate / cancel 绝不持 monitor）。activate 抛异常即激活失败：恰好一次 UNKNOWN
-   * terminal；lost / stale / Stop 获胜关闭 listener 并 cancel handle，不写任何 durable 状态。
+   * Gateway admission 返回 Started 后调用。先安全 attach handle + 持久化 markRunning（失败即 abandon 并
+   * LOST），随后才调用外部 {@code handle.activate()} 打开回调门控。激活仲裁：monitor 内声明 activation 开始；abandon 在开始前获胜则
+   * handle 已由 abandon 取消且 activate 绝不调用；已开始后 abandon 推迟 cancel，由本方法在 activation 返回后补上，外部调用序 恒为
+   * ACTIVATE -&gt; CANCEL（外部 activate / cancel 绝不持 monitor 避免与 Listener 回调死锁）。activate
+   * 抛异常即激活失败：恰好一次 UNKNOWN terminal；lost / stale / Stop 获胜关闭回调门控并 cancel handle，不写任何持久化状态。
    */
   ProcessResult activate(ModelGateway.Handle startedHandle) {
     if (!attachHandle(startedHandle)) {
@@ -148,7 +148,7 @@ final class ModelExecution implements ModelGateway.Listener {
       // abandon 已在 activation 开始前获胜：handle 已由 abandon cancel，activate 绝不调用。
       return ProcessResult.LOST_OWNERSHIP;
     }
-    // 两阶段激活：durable markRunning 落地之后、打开自身 listener 门之前，才允许 Gateway 打开回调 gate / 启动外部执行。
+    // 两阶段激活：持久化 markRunning 落地之后、打开自身 Listener 回调门控之前，才允许 Gateway 打开回调门控或启动外部执行。
     RuntimeException activationError = null;
     try {
       startedHandle.activate();
@@ -161,7 +161,7 @@ final class ModelExecution implements ModelGateway.Listener {
       return ProcessResult.LOST_OWNERSHIP;
     }
     if (activationError != null) {
-      // 异常渲染（toString）绝不能 bypass 状态转换：先收敛 durable UNKNOWN，再记录。
+      // 异常渲染（toString）绝不能绕过状态转换：先收敛持久化 UNKNOWN，再记录。
       ProcessResult result =
           activationFailure(
               new ModelInvocationError(
@@ -240,9 +240,9 @@ final class ModelExecution implements ModelGateway.Listener {
 
   /**
    * monitor 内只做决定与赋值：若 execution 已 abandoned（heartbeat / close / cancel 竞态）或 handle 已存在则返回 false
-   * （绝不 markRunning）；外部 {@link ModelGateway.Handle#cancel} 的调用**必须在 monitor 之外**（cancel 可能同步触发
-   * listener 回调 / 阻塞等待确认，锁内调用会与需要 monitor 的回调路径死锁），因此锁内只置标记，锁外统一 best-effort cancel。 activation
-   * 已开始后的 abandon 由 {@link #abandon} 推迟 cancel，与 {@link #activate} 的 deferred cancel 合计仍恰好一次。
+   * （绝不 markRunning）；外部 {@link ModelGateway.Handle#cancel} 必须在 monitor 之外调用（cancel 可能同步触发 Listener
+   * 回调或阻塞等待确认，锁内调用会与需要 monitor 的回调路径死锁），因此锁内只置标记，锁外统一 best-effort cancel。 activation 已开始后的 abandon
+   * 由 {@link #abandon} 推迟 cancel，与 {@link #activate} 的 deferred cancel 合计仍恰好一次。
    */
   private boolean attachHandle(ModelGateway.Handle startedHandle) {
     Objects.requireNonNull(startedHandle, "startedHandle");

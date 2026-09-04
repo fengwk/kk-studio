@@ -32,15 +32,15 @@ import java.util.function.BiFunction;
  * Target Tool processor：消费 dispatcher 已 claim 的 TOOL Work，驱动一次 Tool invocation 的完整生命周期。
  *
  * <p>只依赖单一 {@link HarnessStore} + {@link ToolGateway} + {@link RealtimeEventSink}，不自行全局 poll；不做任何
- * Entry / head / ToolResult Entry / Usage 写入。所有 durable mutation 都在短事务内通过 store 锁序（Thread -&gt;
+ * Entry / head / ToolResult Entry / Usage 写入。所有持久化状态写入都在短事务内通过 store 锁序（Thread -&gt;
  * ModelInvocation -&gt; ToolInvocation -&gt; Work；同事务需要 THREAD Work 时先 request/upsert 并锁定 THREAD
- * Work， 再 lockClaimed TOOL Work）与 claim ownership 校验完成，lost / stale 一律完整 no-op。
+ * Work，再 lockClaimed TOOL Work）与 claim ownership 所有权校验完成，lost / stale 一律完整 no-op。
  *
  * <p>状态机：READY + approval null 在 ensure 完整 lease margin 后于事务外执行 {@link ToolGateway#preflight}
  * （preflight 期间由本地 heartbeat 维持 lease）；锁内 YOLO 快照为 true 时跳过 preflight 直接 Allow（不调用 evaluator /
- * gateway），Allow 在同一短事务顺序转换 markApprovalNotRequired -&gt; beginDispatch （Thread version 只 +1）后进入
- * admission；Ask 转 WAITING_APPROVAL（version+1 + complete，不 request THREAD）； Deny 转 FAILED（version+1
- * + THREAD wake + complete）；preflight 抛异常保持 READY / approval null / version 不变， 按 {@code
+ * gateway），Allow 在同一短事务顺序转换 markApprovalNotRequired -&gt; beginDispatch（Thread version 只 +1）后进入
+ * admission；Ask 转 WAITING_APPROVAL（version+1 + complete，不 request THREAD）；Deny 转 FAILED（version+1 +
+ * THREAD wake + complete）；preflight 抛异常保持 READY / approval null / version 不变，按 {@code
  * preflightFailureDelay} reschedule。READY + completed approval 同事务 beginDispatch + version+1 后直接
  * admission。WAITING_APPROVAL 只 complete TOOL Work；DISPATCHING / RUNNING 旧 lease 恢复为
  * UNKNOWN（DISPATCHING 消费 proposed attempt，RUNNING 保留）+ version+1 + THREAD wake + complete，绝不重放
@@ -48,8 +48,8 @@ import java.util.function.BiFunction;
  *
  * <p>admission 与回调并发协议与 {@link ModelProcessor} 一致：claimOwned Work-only 前置校验 -&gt; per-invocation
  * guard -&gt; registry；Started 后 handle 先安全 attach 再短事务校验 lease + DISPATCHING + proposed attempt 后
- * markRunning； listener 在 durable RUNNING 前门控缓冲。heartbeat 只 renew 当前 Work lease；进程内 registry 以
- * invocationId 为键， {@link #cancel} 提供唯一本地取消入口，{@link #close} 取消全部并停止各自 heartbeat（不 shutdown 注入的
+ * markRunning；Listener 回调在持久化 RUNNING 落地前由回调门控缓冲。heartbeat 只 renew 当前 Work lease；进程内 registry 以
+ * invocationId 为键，{@link #cancel} 提供唯一本地取消入口，{@link #close} 取消全部并停止各自 heartbeat（不 shutdown 注入的
  * scheduler），closed 后 {@link #process} 拒绝新 claim。
  */
 @Slf4j

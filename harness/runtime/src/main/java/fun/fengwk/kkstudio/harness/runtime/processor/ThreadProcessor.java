@@ -74,36 +74,36 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Target Thread processor：消费 dispatcher 已 claim 的 THREAD Work，每个 claim 恰好执行一个 durable action 的
+ * Target Thread processor：消费 dispatcher 已 claim 的 THREAD Work，每个 claim 恰好执行一个持久化 action 的
  * single-action reducer（KISS），下一 action 一律由同事务 {@code requestWork} 驱动，绝不内部循环。
  *
  * <p>处理流程：先用纯 {@link ThreadContextClassifier} 把当前 Thread 分类为唯一的 live/historical 适用性上下文 （{@link
  * ThreadContext}，unlocked 读：Model 只按 (threadId, open TURN_START) 查找，Tool siblings 只在 Model 结果恰为当前
  * Assistant head 时加载），再按上下文恰执行一个动作：(a) MODEL_TERMINAL_PENDING —— head 恰为 basis 且未挂结果的 terminal
- * ModelInvocation 原子 apply；(b) TOOL_TERMINAL_PENDING —— 当前 head 恰为本 Thread ModelInvocation 产出 的
+ * ModelInvocation 原子 apply；(b) TOOL_TERMINAL_PENDING —— 当前 head 恰为本 Thread ModelInvocation 产出的
  * Assistant Entry、且其 Tool siblings 全部 terminal 时按 callIndex 原子 apply；(c) MODEL_ACTIVE / TOOL_ACTIVE
  * —— 当前 applicable invocation 非 terminal 时完成 claim；(d) CONTINUATION_DUE —— HISTORY phase gap 启动
  * TURN_PREFIX，其它 continueModel obligation 启动 CONTINUATION；(e) queued USER_MESSAGE/CUSTOM_MESSAGE
- * 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。旧 / 历史 open Turn 只在启动 新 INPUT Turn 时被
+ * 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。旧 / 历史 open Turn 只在启动新 INPUT Turn 时被
  * normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
  *
  * <p>Turn 启动采用 speculative plan：短事务锁 Thread、读取 queued Command 快照与 cutoff、校验 claim（并对近过期 lease 做
  * {@link ProcessorLeaseSupport#ensureLeaseMargin} 保证首次 Resolver heartbeat 前不会过期）、分配 candidate Entry
- * ID 并构造完整合法 candidate EntryPath（不写任何 durable 状态）；事务外调用 {@link TurnResolver}（期间由本地 {@link
- * WorkHeartbeat} 维持 lease）；第二短事务以 source head / cutoff 内 Command 精确快照 / claim ownership 做
- * CAS，一次性原子提交 TURN_START + Message + Command markers + Thread 更新 + ModelInvocation/MODEL
- * Work（resolved） 或 AssistantError + FAILED TURN_END（rejected）。Resolved 请求在提交前先经 {@link
- * ResolvedRequestValidator} 按 candidate branch 事实（route / model / variant / tools /
- * compaction）做机械一致性校验，不一致即抛错且零 durable mutation（绝不转 typed rejection）。任何 CAS / claim 损失一律抛内部 {@link
- * ClaimLostSignal} 使事务完整回滚（零部分 mutation），由 {@link #process} 映射为 LOST_OWNERSHIP；Resolver 异常 / null /
- * heartbeat 调度失败按单一正失败延迟 reschedule，绝不静默丢弃 Work。duplicate / stale THREAD claim 是 no-op。
+ * ID 并构造完整合法 candidate EntryPath（不写任何持久化状态）；事务外调用 {@link TurnResolver}（期间由本地 {@link WorkHeartbeat}
+ * 维持 lease）；第二短事务以 source head / cutoff 内 Command 精确快照 / claim ownership 做 CAS，一次性原子提交 TURN_START +
+ * Message + Command markers + Thread 更新 + ModelInvocation/MODEL Work（resolved）或 AssistantError +
+ * FAILED TURN_END（rejected）。Resolved 请求在提交前先经 {@link ResolvedRequestValidator} 按 candidate branch
+ * 事实（route / model / variant / tools / compaction）做机械一致性校验，不一致即抛错且零持久化状态写入（绝不转 typed rejection）。任何
+ * CAS / claim 损失一律抛内部 {@link ClaimLostSignal} 使事务完整回滚（零部分写入），由 {@link #process} 映射为
+ * LOST_OWNERSHIP；Resolver 异常 / null / heartbeat 调度失败按单一正失败延迟 reschedule，绝不静默丢弃 Work。duplicate /
+ * stale THREAD claim 是 no-op。
  *
- * <p>锁序与 final fence：Model terminal apply / Tool sibling batch / resolve commit 都在同一事务内先完成全部低序
- * mutation（Thread -&gt; Commands -&gt; ModelInvocation -&gt; ToolInvocation siblings），claimed
- * THREAD Work 的最终 fence 最后执行；fence 失败抛出内部 {@link ClaimLostSignal} 使事务完整回滚，再由 {@link #process} 映射为
- * LOST_OWNERSHIP，绝不存在带 durable mutation 的 LOST 提交。commit 与 applyModel 在同层 Work 中按 (type, id) 升序请求（先
- * THREAD wake 再 MODEL / TOOL Work）。历史 / 非 applicable open Turn（head 不在 applicable 位置） 在分类阶段只使用
- * unlocked 读，绝不先锁 Model/Tool 再落到 Commands / INPUT normalization。
+ * <p>锁序与最终所有权围栏（final fence）：Model terminal apply / Tool sibling batch / resolve commit
+ * 都在同一事务内先完成全部低序 写入（Thread -&gt; Commands -&gt; ModelInvocation -&gt; ToolInvocation
+ * siblings），claimed THREAD Work 的最终所有权围栏最后执行；围栏失败抛出内部 {@link ClaimLostSignal} 使事务完整回滚，再由 {@link
+ * #process} 映射为 LOST_OWNERSHIP，绝不存在带持久化变更的 LOST 提交。commit 与 applyModel 在同层 Work 中按 (type, id)
+ * 升序请求（先 THREAD wake 再 MODEL / TOOL Work）。历史 / 非 applicable open Turn（head 不在 applicable
+ * 位置）在分类阶段只使用 unlocked 读，绝不先锁 Model/Tool 再落到 Commands / INPUT normalization。
  *
  * <p>每次成功 action 都在同一事务 complete 当前 THREAD claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
  * complete，依赖 wakeVersion 保留新 wake。Model terminal apply 按 planner 决策落地：active Tool phase 仅为 READY
@@ -112,18 +112,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * compaction 关闭结果）在同一事务追加 TURN_END 与严格物化校验（attach-then-delete）并物理删除 ModelInvocation，且仅在已有 queued
  * user demand、HISTORY / OVERFLOW obligation、fallback 或 hard overflow 已确定时请求 THREAD；完全结束的 idle run
  * 不因 soft threshold 自唤醒。失败 / 停止 / complete COMPACTION 由 planner 判定不 spin。 Tool sibling batch 追加
- * outcome 后 追加 continueModel=true TURN_END、同事务删除 children+parent，固定先请求 THREAD 再 complete，下一 claim
- * 才做 continuation。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
+ * outcome 后追加 continueModel=true TURN_END、同事务删除 children+parent，固定先请求 THREAD 再 complete，下一 claim 才做
+ * continuation。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
  * （terminal apply 会按 queued 快照重建 wake）；rejected 在保留 deferred messages 或闭合即出现 compaction action 时先请求
  * THREAD 再 complete。
  *
- * <p>durable mutation 时间会抬升到事务内已锁定 Thread/path/Model/Tool 事实的时间下界；Work ownership、renew、
- * complete、request 与 reschedule 始终使用未抬升的本地 lease clock，避免未来 durable 时间改变 lease 语义。
+ * <p>持久化变更时间会抬升到事务内已锁定 Thread/path/Model/Tool 事实的时间下界；Work ownership、renew、 complete、request 与
+ * reschedule 始终使用未抬升的本地 lease clock，避免未来持久化时间改变 lease 语义。
  *
- * <p>压缩触发正交：soft threshold 在尚未完成的 continuation 边界或下一条真实 user demand 到达时 gate；hard overflow
- * 立即压缩并只恢复一次； {@link #compactThread} 以 expectedVersion 同步提交 MANUAL plan。所有 trigger 共用 MODEL Work、一次
- * fallback 与 deterministic no-gain；切分先 HISTORY 再以 continueModel obligation 机械启动 TURN_PREFIX。压缩消费零
- * queued Command，另一 Thread 拥有的共享历史 turn 不压缩。
+ * <p>压缩触发正交：soft threshold 在尚未完成的 continuation 边界或下一条真实 user demand 到达时门控；hard overflow 立即压缩并只恢复一次；
+ * {@link #compactThread} 以 expectedVersion 同步提交 MANUAL plan。所有 trigger 共用 MODEL Work、一次 fallback 与
+ * deterministic no-gain；切分先 HISTORY 再以 continueModel obligation 机械启动 TURN_PREFIX。压缩消费零 queued
+ * Command，另一 Thread 拥有的共享历史 turn 不压缩。
  */
 @Slf4j
 public final class ThreadProcessor {
@@ -176,12 +176,13 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 处理一次 dispatcher 已 claim 的 THREAD Work（single-action durable reducer）。
+   * 处理一次 dispatcher 已 claim 的 THREAD Work（single-action 持久化 reducer）。
    *
    * <p>先用 Work-only 短事务验证 claim 当前真实 owned，再进 per-thread admission guard（同一 claim 重复 / 并发投递一律 LOST
-   * no-op；不同新 token 抢占 guard）。随后恰执行一次 durable action：单短事务分类并执行；若该 action 是 speculative plan 则事务外
-   * resolve + 第二事务 CAS 提交。action 在事务内完成当前 claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
-   * complete。事务内 final fence / CAS 丢失抛出的 {@link ClaimLostSignal} 在事务完整回滚后在此捕获并映射为 LOST_OWNERSHIP。
+   * no-op；不同新 token 抢占 guard）。随后恰执行一次持久化 action：单短事务分类并执行；若该 action 是 speculative plan 则事务外 resolve
+   * + 第二事务 CAS 提交。action 在事务内完成当前 claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
+   * complete。事务内最终所有权围栏（final fence） / CAS 丢失抛出的 {@link ClaimLostSignal} 在事务完整回滚后在此捕获并映射为
+   * LOST_OWNERSHIP。
    */
   public ThreadProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");
