@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -443,12 +443,166 @@ function checkRepositoryStructure() {
   }
 }
 
+function checkNoHarnessModuleDocs() {
+  const harnessRoot = path.join(repositoryRoot, 'harness')
+  if (!existsSync(harnessRoot)) {
+    return
+  }
+  const directDocs = path.join(harnessRoot, 'docs')
+  if (existsSync(directDocs)) {
+    addError(`forbidden harness docs path: ${relativeFromRoot(directDocs)}`)
+    if (statSync(directDocs).isDirectory()) {
+      for (const file of walkFiles(directDocs)) {
+        addError(`forbidden harness docs path: ${relativeFromRoot(file)}`)
+      }
+    }
+  }
+  for (const entry of readdirSync(harnessRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue
+    }
+    const moduleDocs = path.join(harnessRoot, entry.name, 'docs')
+    if (existsSync(moduleDocs)) {
+      addError(`forbidden harness module docs path: ${relativeFromRoot(moduleDocs)}`)
+      if (statSync(moduleDocs).isDirectory()) {
+        for (const file of walkFiles(moduleDocs)) {
+          addError(`forbidden harness module docs path: ${relativeFromRoot(file)}`)
+        }
+      }
+    }
+  }
+}
+
+const harnessProductionModules = [
+  'common',
+  'tool',
+  'contributor-api',
+  'builtin',
+  'environment',
+  'daemon',
+  'runtime',
+  'infra',
+]
+
+function walkJavaSourceDirectories(directory) {
+  if (!existsSync(directory)) {
+    return []
+  }
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (!entry.isDirectory() || entry.name === 'target' || entry.name === 'generated') {
+      return []
+    }
+    const absolutePath = path.join(directory, entry.name)
+    return [absolutePath, ...walkJavaSourceDirectories(absolutePath)]
+  })
+}
+
+function checkHarnessPackageInfo() {
+  for (const moduleName of harnessProductionModules) {
+    const srcMainJava = path.join(repositoryRoot, 'harness', moduleName, 'src/main/java')
+    if (!existsSync(srcMainJava)) {
+      continue
+    }
+    const dirs = [srcMainJava, ...walkJavaSourceDirectories(srcMainJava)]
+    for (const dir of dirs) {
+      let entries = []
+      try {
+        entries = readdirSync(dir, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      const productionJavaFiles = entries.filter((entry) => {
+        return (
+          entry.isFile() &&
+          entry.name.endsWith('.java') &&
+          entry.name !== 'package-info.java' &&
+          entry.name !== 'module-info.java'
+        )
+      })
+      if (productionJavaFiles.length === 0) {
+        continue
+      }
+
+      const relativePackagePath = path.relative(srcMainJava, dir).split(path.sep).join('/')
+      const expectedPackageName = relativePackagePath.split('/').join('.')
+      const packageInfoPath = path.join(dir, 'package-info.java')
+      const relativePackageInfoPath = relativeFromRoot(packageInfoPath)
+
+      if (!existsSync(packageInfoPath)) {
+        addError(`missing package-info.java: ${relativePackageInfoPath}`)
+        continue
+      }
+
+      const content = read(relativePackageInfoPath)
+      const packageMatch = content.match(/\bpackage\s+([a-zA-Z0-9_.]+)\s*;/u)
+      if (!packageMatch) {
+        addError(`missing package declaration in ${relativePackageInfoPath}`)
+        continue
+      }
+      const declaredPackage = packageMatch[1]
+      if (declaredPackage !== expectedPackageName) {
+        addError(
+          `package declaration mismatch in ${relativePackageInfoPath}: expected '${expectedPackageName}', found '${declaredPackage}'`,
+        )
+        continue
+      }
+
+      const beforePackage = content.slice(0, packageMatch.index)
+      const javadocMatch = beforePackage.match(/\/\*\*([\s\S]*?)\*\//u)
+      if (!javadocMatch) {
+        addError(`missing package Javadoc in ${relativePackageInfoPath}`)
+        continue
+      }
+      const javadocText = javadocMatch[1].replace(/^\s*\* ?/gm, '').trim()
+      if (javadocText.length === 0) {
+        addError(`empty package Javadoc in ${relativePackageInfoPath}`)
+      }
+    }
+  }
+}
+
+function checkEnvironmentRouteDocs() {
+  const runtimeDocPath = 'docs/modules/harness-runtime.md'
+  const runtimeDoc = read(runtimeDocPath)
+  if (!runtimeDoc.includes('requiredEnvironmentId')) {
+    addError(`${runtimeDocPath}: must document literal 'requiredEnvironmentId'`)
+  }
+  const onlyToolWorkNonEmptyPattern =
+    /(?:仅|只|only).*(?:TOOL.*Work|Work.*TOOL|target.*TOOL).*(?:非空|non-null)|(?:TOOL.*Work|Work.*TOOL|target.*TOOL).*(?:仅|只|only).*(?:非空|non-null)|(?:TOOL.*Work|Work.*TOOL|target.*TOOL).*(?:非空|non-null).*(?:THREAD|MODEL).*(?:空|null)/iu
+  if (!onlyToolWorkNonEmptyPattern.test(runtimeDoc)) {
+    addError(
+      `${runtimeDocPath}: must document that requiredEnvironmentId is only permitted/non-null for TOOL Work`,
+    )
+  }
+
+  const infraDocPath = 'docs/modules/harness-infra.md'
+  const infraDoc = read(infraDocPath)
+  const requiredInfraTerms = ['required_environment_id', 'owner_node_id', 'READY', 'lease_until']
+  for (const term of requiredInfraTerms) {
+    if (!infraDoc.includes(term)) {
+      addError(`${infraDocPath}: must document required term '${term}'`)
+    }
+  }
+  const infraParagraphs = infraDoc.split(/\n\s*\n/)
+  const claimFencePattern =
+    /(?=.*(?:environment|环境|route|亲和|required_environment_id))(?=.*(?:dispatcher|node))(?=.*(?:lease|租约|lease_until))(?=.*claim)(?=.*(?:围栏|fence))/isu
+  const hasClaimFence = infraParagraphs.some((paragraph) => claimFencePattern.test(paragraph))
+  if (!hasClaimFence) {
+    addError(
+      `${infraDocPath}: must document Dispatcher node and active lease claim fence`,
+    )
+  }
+}
+
 checkFixedLayout()
 checkHeadings()
 checkLinks()
 checkInlineSourcePaths()
 checkForbiddenReferencesAndTerms()
 checkRepositoryStructure()
+checkNoHarnessModuleDocs()
+checkHarnessPackageInfo()
+checkEnvironmentRouteDocs()
 
 if (errors.length > 0) {
   console.error(`FAIL docs (${errors.length} error${errors.length === 1 ? '' : 's'})`)
