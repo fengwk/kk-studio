@@ -66,8 +66,10 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Environment Daemon 的连接、协议和本地 Environment Capability 执行基座。
  *
- * <p>Invocation journal 是进程内去重事实源；WebSocket 仅传递消息。连接断开后 Daemon 会重新握手；若 gateway 再次发送相同
- * invocationId，RUNNING/terminal journal 条目分别重放 STARTED/terminal。
+ * <p>Invocation journal 是进程内执行事实源；WebSocket 连接仅作为消息传输管道。连接断开后 Daemon 保留 journal 事实并重新握手与重连； 若
+ * Gateway 再次发送相同 {@code invocationId}，RUNNING 与 terminal journal 条目分别重放 STARTED 与 terminal 报文。
+ *
+ * <p>每次连接尝试由独立的 {@code connectionGeneration} 标识，隔离跨连接事件干扰；入站消息在单个代际内执行严格单调序列检查。
  *
  * <p>Daemon 只拥有两个执行生命周期资源：单线程 scheduler 处理 heartbeat、reconnect 与 timeout，共享的
  * virtual-thread-per-task executor 处理 Coding/目录浏览等阻塞调用。transport/JDK 内部线程不在该生命周期内。
@@ -337,6 +339,7 @@ public final class DaemonRuntime implements AutoCloseable {
       return;
     }
     state = DaemonRuntimeState.CONNECTING;
+    // 每次尝试连接递增代际，使旧连接的延迟回调与已过时代际事件失效。
     long generation = connectionGeneration.incrementAndGet();
     DaemonTransportListener listener = new RuntimeTransportListener(generation);
     try {
@@ -349,6 +352,7 @@ public final class DaemonRuntime implements AutoCloseable {
                   handleDisconnected(generation);
                   return;
                 }
+                // 若运行时已关闭或代际已过时，安全释放新连接。
                 if (!started.get() || generation != connectionGeneration.get()) {
                   try {
                     connection.close();
@@ -392,6 +396,7 @@ public final class DaemonRuntime implements AutoCloseable {
 
   private void handleDisconnected(long generation) {
     ActiveConnection connection = activeConnection.get();
+    // 仅当断开事件与当前活跃连接代际一致时执行清理。
     if (connection != null) {
       if (connection.generation() != generation
           || !activeConnection.compareAndSet(connection, null)) {
@@ -403,6 +408,7 @@ public final class DaemonRuntime implements AutoCloseable {
     if (!started.get() || generation != connectionGeneration.get()) {
       return;
     }
+    // 连接失效不影响 Invocation journal；重置绑定并按指数退避安排重连。
     this.boundEnvironmentId = null;
     state = DaemonRuntimeState.DISCONNECTED;
     Duration delay;
@@ -511,7 +517,10 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
-  /** 处理 gateway ERROR。名称冲突错误是终态的；RETRY_LATER 触发退避重连；其余 ERROR 不改变 invocation 事实。 */
+  /**
+   * 处理 Gateway ERROR。注册凭证被拒（REGISTRATION_REJECTED）是终态的；RETRY_LATER 触发退避重连；其余 ERROR 不改变 Invocation
+   * journal 事实。
+   */
   private void handleError(ActiveConnection connection, DaemonEnvelope envelope) {
     ObjectNode payload = envelopeCodec.readPayload(envelope);
     List<String> unexpected = new ArrayList<>();
@@ -579,6 +588,8 @@ public final class DaemonRuntime implements AutoCloseable {
     if (!started.get()) {
       return;
     }
+    // 原子去重：若 journal 已存在该 invocationId，重放既有状态（RUNNING 重放 STARTED(replayed=true)，终态重放对应 terminal
+    // 报文）。
     DaemonInvocationJournalStart start = journal.start(envelope.invocationId());
     if (!start.created()) {
       replay(start.entry(), envelope.invocationId());
@@ -621,6 +632,7 @@ public final class DaemonRuntime implements AutoCloseable {
         }
         return;
       }
+      // 仅当工作区、能力元数据与运行时预检全部通过后才发出 STARTED。
       sendOn(connection, DaemonMessageType.STARTED, envelope.invocationId(), "{}");
       EnvironmentCapabilityExecutionHandle handle =
           capability.execute(request, new InvocationListener(invocation));
@@ -663,6 +675,14 @@ public final class DaemonRuntime implements AutoCloseable {
     send(terminal.messageType(), invocationId, terminal.payloadJson());
   }
 
+  /**
+   * 原子终态仲裁与结果派发。
+   *
+   * <p>存在 {@link RunningInvocation} 时，正常完成、执行失败、调度器超时、主动取消与停机先通过 {@link
+   * RunningInvocation#claimTerminal(boolean)} 仲裁本地执行资源；预检失败等尚未建立本地执行的路径直接进入 journal。两类路径最终都以 {@link
+   * DaemonInvocationJournal#complete(String, DaemonTerminalMessage)} 的 RUNNING 到终态原子跃迁作为唯一提交点；
+   * 只有提交成功者发送终态报文。
+   */
   private void terminal(String invocationId, DaemonTerminalMessage message, boolean cancelHandle) {
     RunningInvocation invocation = running.get(invocationId);
     if (invocation != null && !invocation.claimTerminal(cancelHandle)) {
@@ -908,6 +928,18 @@ public final class DaemonRuntime implements AutoCloseable {
       return connection;
     }
 
+    /**
+     * 在当前连接代际内校验并记录入站 envelope sequence。
+     *
+     * <p>严格约束：
+     *
+     * <ul>
+     *   <li>序列号必须从基线开始严格相邻单调递增（sequence == last + 1）；
+     *   <li>相同序列号且 envelope 完全相同判定为网络重放（duplicate），静默接受；
+     *   <li>相同序列号但内容不一致判定为序号冲突复用，抛出协议异常；
+     *   <li>序列号回退或出现空洞跳号均判定为协议违规，拒绝处理。
+     * </ul>
+     */
     private synchronized void acceptInboundEnvelope(InboundEnvelopeIdentity identity) {
       if (lastInboundIdentity == null
           || identity.sequence() == lastInboundIdentity.sequence() + 1) {
@@ -996,6 +1028,12 @@ public final class DaemonRuntime implements AutoCloseable {
       return terminal.get();
     }
 
+    /**
+     * 尝试原子抢占终态仲裁权（terminal-once 互斥点）。
+     *
+     * @param cancelHandle 是否在抢占成功后同时取消底层执行句柄
+     * @return 若当前线程首次将 terminal 标记置为 true 返回 true，否则返回 false（表明已有其它终态路径抢占）
+     */
     private boolean claimTerminal(boolean cancelHandle) {
       if (!terminal.compareAndSet(false, true)) {
         return false;

@@ -37,22 +37,22 @@ import java.util.function.BiFunction;
  * Target Model processor：消费 dispatcher 已 claim 的 MODEL Work，驱动一次 Model invocation 的完整生命周期。
  *
  * <p>只依赖单一 {@link HarnessStore} + {@link ModelGateway} + {@link RealtimeEventSink}，不自行全局 poll；不做任何
- * Entry / head / Usage 写入。所有 durable mutation 都在短事务内通过 store 锁序（Thread -&gt; ModelInvocation -&gt;
- * Work；同事务需要 THREAD Work 时先 request/upsert 并锁定 THREAD Work，再 lockClaimed MODEL Work）与 claim
- * ownership 校验完成，lost / stale 一律完整 no-op。
+ * Entry / head / Usage 写入。所有持久化状态写入都在短事务内通过 store 锁序（Thread -&gt; ModelInvocation -&gt; Work；同事务需要
+ * THREAD Work 时先 request/upsert 并锁定 THREAD Work，再 lockClaimed MODEL Work）与 claim ownership
+ * 所有权校验完成，lost / stale 一律完整 no-op。
  *
- * <p>admission 后 listener 由 {@link ModelExecution} 门控缓冲，callback 不可能早于 durable RUNNING 落地；heartbeat
- * 只 renew 当前 Work lease。进程内 execution registry 以 invocationId 为键，{@link #cancel} 提供唯一本地取消入口， {@link
- * #close} 取消全部并停止各自 heartbeat（不 shutdown 注入的 scheduler），closed 后 {@link #process} 拒绝新 claim；close 与
- * process 竞态下，registry 插入后启动 heartbeat 前会再次检查 closed，已关闭时立即 abandon 并把仍 owned 的 DISPATCHING 安全
- * bounce 回 READY + reschedule，绝不启动 Gateway，也不留下新 execution。
+ * <p>admission 后 Listener 回调由 {@link ModelExecution} 回调门控缓冲，任何 Listener 回调都不可能早于持久化 RUNNING
+ * 落地；heartbeat 只 renew 当前 Work lease。进程内 execution registry 以 invocationId 为键，{@link #cancel}
+ * 提供唯一本地取消入口， {@link #close} 取消全部并停止各自 heartbeat（不 shutdown 注入的 scheduler），closed 后 {@link
+ * #process} 拒绝新 claim；close 与 process 竞态下，registry 插入后启动 heartbeat 前会再次检查 closed，已关闭时立即 abandon 并把仍
+ * owned 的 DISPATCHING 安全 bounce 回 READY + reschedule，绝不启动 Gateway，也不留下新 execution。
  *
- * <p>duplicate admission fencing：任何 guard 替换 / active supersede 之前先用 Work-only 短事务校验传入 claim 当前真实
- * owned（伪造 / 错误 / 已过期 token 一律 LOST_OWNERSHIP no-op，不 cancel 合法 active execution）；通过后再进
+ * <p>重复准入所有权围栏（duplicate admission fencing）：任何 guard 替换 / active supersede 之前先用 Work-only 短事务校验传入
+ * claim 当前真实 owned（伪造 / 错误 / 已过期 token 一律 LOST_OWNERSHIP no-op，不 cancel 合法 active execution）；通过后再进
  * per-invocation guard 覆盖 prepare 到 registry 插入。同一 claim（同 lease token）重复 / 并发投递一律 LOST_OWNERSHIP
- * no-op（不 cancel、不 mutation）；只有不同新 token（已通过 Work-only 校验，旧 lease 必然过期）才 supersede 旧本地 execution 并按
- * durable DISPATCHING / RUNNING 恢复 UNKNOWN。heartbeat 启动后、{@link ModelGateway#start} 前还有一道无 mutation
- * 的 stale-start fence（durable 仍 DISPATCHING + attempt 匹配 + claim 仍 owned），失败立即 abandon 并 LOST，绝不启动
+ * no-op（不 cancel、不持久化变更）；只有不同新 token（已通过 Work-only 校验，旧 lease 必然过期）才 supersede 旧本地 execution 并按 持久化
+ * DISPATCHING / RUNNING 状态恢复 UNKNOWN。heartbeat 启动后、{@link ModelGateway#start} 前还有一道无状态写入
+ * 的陈旧启动围栏（stale-start fence：持久化仍 DISPATCHING + attempt 匹配 + claim 仍 owned），失败立即 abandon 并 LOST，绝不启动
  * Provider（覆盖另一 JVM 实例 recovery 后本实例本地 abandoned 检查不可见的场景）。
  */
 @Slf4j

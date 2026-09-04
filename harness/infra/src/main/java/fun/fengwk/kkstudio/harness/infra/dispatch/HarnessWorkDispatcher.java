@@ -32,27 +32,29 @@ import java.util.function.Consumer;
 /**
  * Work dispatcher：{@code HarnessStore.Transaction.claimNextWork} 的首个生产调用方。
  *
- * <p>职责边界（KISS）：dispatcher 只做 claim、按类型路由、bounded handoff、合并 wake、periodic poll 与 lifecycle。它绝不读取
- * Thread / Invocation business state（claim 是 Work-only 短事务），绝不解释 Processor 的 typed 结果改写 durable 状态
- * —— handoff 类型是 {@link Consumer}，Processor 的 complete / reschedule / delete 由 Processor 自己决定。
+ * <p>职责边界（KISS）：dispatcher 只做 Work claim、按类型路由、bounded handoff、合并 wake、periodic poll 与 stop
+ * 生命周期。它绝不读取 Thread / Invocation 业务状态（claim 是 claim-only 短事务），绝不解释 Processor 的 typed 结果改写 durable
+ * 状态 —— handoff 类型是 {@link Consumer}，Processor 的 complete / reschedule / delete 由 Processor
+ * 自己在所有权围栏保护下决定。
  *
- * <p>claim 协议：每次 claim 使用 {@link HarnessStoreTime#millisecondClock} 包装后的新毫秒 now、新 UUID token 与对应类型的
- * leaseDuration；THREAD / MODEL / TOOL 按固定显式列表 round-robin，cursor 是实例字段并 跨 wake / drain
- * 保留（maxDispatchTasks=1 时也不会持续偏爱 THREAD）。每个 claim 成功后必须二选一：worker executor 已接受 handoff task；或
- * ownership-fenced 归还（同一短事务先 {@code lockClaimedWork}，仍 owned 才按正 {@code executorRejectionDelay}
- * {@code rescheduleWork}，lost 则 no-op；清理失败只 log，保留 lease 待过期后由其他实例恢复）。executor rejection 后立即结束当前
+ * <p>Work claim 协议：每次 claim 使用 {@link HarnessStoreTime#millisecondClock} 包装后的新毫秒 now、新 UUID token
+ * 与对应类型的 leaseDuration，并向底层传递当前 dispatcher 实例的 {@link #nodeInstanceId}，以驱动 Environment route
+ * 亲和性路由围栏； THREAD / MODEL / TOOL 按固定显式列表 round-robin 轮询，cursor 是实例字段并跨 wake / drain
+ * 保留（maxDispatchTasks=1 时也不会持续偏爱 THREAD）。 每个 claim 成功后必须二选一：worker executor 已接受 handoff
+ * task；或通过所有权围栏归还（同一短事务先由 {@code lockClaimedWork} 确认仍 owned，才按正 {@code executorRejectionDelay} 执行
+ * {@code rescheduleWork}，lost 则 no-op；清理失败只 log，保留 lease 待过期后由其他实例恢复）。 executor rejection 后立即结束当前
  * drain，禁止 claim-&gt;reject 热循环。
  *
  * <p>单 drain 协议：drain 任务由注入的单线程 {@code drainExecutor} 串行执行；{@code wakeRequested} + {@code
- * drainRunning} CAS + finally recheck 保证并发 wake 只触发单 drain 且不丢 wake —— drain 开始即清
- * wakeRequested，drain 内到达的 wake 由 do-while 吸收，drain 收尾窗口到达的 wake 由 finally recheck 重新提交。 periodic
+ * drainRunning} CAS + finally recheck 保证并发 wake 合并为单 drain 且不丢 wake —— drain 开始即清
+ * wakeRequested，drain 内到达的 wake 由 do-while 吸收， drain 收尾窗口到达的 wake 由 finally recheck 重新提交。periodic
  * poll 用 fixed-delay 调度，{@link #stop} 取消 future。
  *
  * <p>Processor handoff task 语义：task finally 总是释放本地 capacity 并再次 wake；Processor {@code process} 抛
  * RuntimeException 只 log，绝不猜测 complete / reschedule / delete（保留 lease 待过期恢复）；Error 不吞但 finally
  * 必须执行。{@link #stop} 不 shutdown 注入的 drain / worker / poll executor，不 interrupt 已接受 task，不等待
  * Processor task 完成；stop 后不启动新的 drain iteration，已进入数据库的 claim 若在 handoff 前观察到 stop，则会被
- * ownership-fenced 归还。
+ * ownership-fenced 所有权围栏归还。
  *
  * <p>三个注入 executor 全部由调用方持有生命周期；drainExecutor 必须串行执行任务（例如单线程池），workerExecutor 的队列 + 运行中 handoff
  * task 总数由 {@code maxDispatchTasks} 约束。两个 {@link Executor} 必须使用 fail-fast submission contract：成功
@@ -69,7 +71,9 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
   private static final List<WorkTargetType> ROUND_ROBIN_TYPES =
       List.of(WorkTargetType.THREAD, WorkTargetType.MODEL, WorkTargetType.TOOL);
 
+  /** 当前 Dispatcher 实例在节点集群中的唯一标识，传递给底层用于 Environment route 亲和性路由围栏校验。 */
   private final UUID nodeInstanceId;
+
   private final HarnessStore store;
   private final HarnessWorkDispatcherConfig config;
   private final Clock clock;
@@ -113,7 +117,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
         toolProcessor);
   }
 
-  /** 显式指定 nodeInstanceId 的生产 wiring 构造。 */
+  /** 显式指定 nodeInstanceId 的生产 wiring 构造，用于绑定节点特定的 Environment route 路由围栏。 */
   public HarnessWorkDispatcher(
       UUID nodeInstanceId,
       HarnessStore store,
@@ -416,7 +420,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     }
   }
 
-  /** Ownership-fenced 归还：同短事务 lockClaimedWork 仍 owned 才按正延迟 reschedule；lost 则 no-op。 */
+  /** 所有权围栏归还（Ownership-fenced）：同短事务 lockClaimedWork 校验仍 owned 才按正延迟 reschedule；lost 则 no-op。 */
   private void returnClaim(ClaimedWork claim) {
     try {
       store.transaction(

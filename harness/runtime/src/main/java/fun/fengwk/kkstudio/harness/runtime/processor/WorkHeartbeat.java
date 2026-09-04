@@ -16,15 +16,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 单个 claim 的进程内 lease heartbeat（后续 Thread / Tool processor 复用）。
+ * 单个 claim 的进程内 lease heartbeat（供 Thread / Model / Tool processor 复用）。
  *
  * <p>只 renew 当前 Work 的 lease，不触碰 Thread / Invocation / version；任何 renew 失败（行删除 / token 不匹配 / lease
- * 过期）都视为 lost ownership：停止 heartbeat 并通知 owner 立即关闭本地执行。
+ * 过期）都视为 lost ownership（所有权围栏拦截）：停止 heartbeat 并通知 owner 立即关闭本地执行。
  *
- * <p>线程安全：{@link #start} 最多成功一次，{@link #stop} 与 {@link #start} 在同一个锁内交错，stop 先于 start 时 start
+ * <p>线程安全：{@link #start} 最多成功一次，{@link #stop} 与 {@link #start} 在同一个锁内互斥交错，stop 先于 start 时 start
  * 直接拒绝且不会提交 periodic task；start 已提交的 periodic task 在 stop 时必然被 cancel（不泄漏）。{@link #beat} 与 {@link
- * #start} / {@link #stop} 同一锁互斥：检查 / renew / 失败标记在锁内完成，stop 返回后绝无在途 beat 继续 renew lease；lost
- * ownership 的 {@code onLostOwnership} 通知在锁外执行。
+ * #start} / {@link #stop} 在同一锁内互斥：检查 / renew / 失败标记在锁内完成，stop 返回后绝无在途 beat 继续 renew lease；所有权丢失时 的
+ * {@code onLostOwnership} 通知在锁外执行（避免持有内部锁时触发 owner 级 cancel/close 导致死锁）。
  */
 @Slf4j
 final class WorkHeartbeat {
@@ -88,7 +88,7 @@ final class WorkHeartbeat {
   }
 
   /**
-   * 单次 lease renewal：检查 / renew / 失败标记全部在锁内完成（与 {@link #start} / {@link #stop} 互斥，保证 stop 返回后 绝无在途
+   * 单次 lease renewal：检查 / renew / 失败标记全部在锁内完成（与 {@link #start} / {@link #stop} 互斥，保证 stop 返回后绝无在途
    * renew）；{@link #onLostOwnership} 通知在锁外执行（回调可能触发 close / cancel，不能在持锁路径上调用）。
    */
   private void beat(ClaimedWork claim) {

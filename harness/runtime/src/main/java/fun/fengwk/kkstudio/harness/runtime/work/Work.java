@@ -7,14 +7,17 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 一次 Work mailbox target 的 durable 当前调度状态。
+ * 一次 Work mailbox target 的持久化当前调度状态。
  *
- * <p>每次 request 时 {@code wakeVersion} 递增，从而阻止旧的 Processor 完成删除一个更新的 wake； {@code leaseToken}/{@code
- * leaseUntil} fence 掉过期的 worker，且两者总是同时存在或同时缺失。所有转换都是纯函数：返回下一个状态，或返回 {@link Optional#empty()}
- * 表示删除，绝不会修改接收者。
+ * <p>每次 request 时 {@code wakeVersion} 递增，从而阻止旧的 Processor 完成删除一个更新的 wake； {@code leaseToken} /
+ * {@code leaseUntil} 形成所有权围栏拦截过期的 worker，且两者总是同时存在或同时缺失。所有转换都是纯函数：返回下一个状态，或返回 {@link
+ * Optional#empty()} 表示删除，绝不会修改接收者。
  *
- * <p>{@code requiredEnvironmentId} 冻结该 Work 必须路由的环境 id；仅允许 targetType 为 {@link WorkTargetType#TOOL}
- * 时非空。一旦创建不可变，后续 request 冲突将被拒绝。
+ * <p>环境亲和性（Environment affinity）：{@code requiredEnvironmentId} 冻结该 Work 必须路由的环境 id；仅允许 targetType 为
+ * {@link WorkTargetType#TOOL} 时非空；THREAD/MODEL 必须为空，server-side TOOL 可为空。它在首次创建时冻结，并在后续 {@link
+ * #request}、{@link #claim}、{@link #renew}、{@link #complete} 与 {@link #reschedule} 纯函数状态跃迁中完整保留； 后续
+ * request 若传入冲突环境需求将被拒绝。Runtime 仅携带该路由要求，PostgreSQL/Dispatcher claim 由 Infra 层按当前节点匹配 READY 且 lease
+ * 未过期的 Environment route 实施所有权围栏（契约由 {@code WorkTest} 与 Store contract 守卫）。
  */
 public record Work(
     WorkTarget target,

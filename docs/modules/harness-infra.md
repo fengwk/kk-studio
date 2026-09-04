@@ -45,6 +45,15 @@ LocalFileResourceStore
 
 Schema 的单一权威定义是 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 的 Harness execution protocol section；Infra 不维护 schema mirror。架构守卫 [`InfraModuleArchitectureTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/InfraModuleArchitectureTest.java) 限制生产依赖和 package。
 
+## 包架构
+
+| 包路径 | 职责范围 | 核心类型 | 边界契约与外部依赖 |
+| --- | --- | --- | --- |
+| `fun.fengwk.kkstudio.harness.infra.dispatch` | Work 调度循环与 Processor 分发 | [`HarnessWorkDispatcher`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcher.java), [`HarnessWorkDispatcherConfig`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherConfig.java) | claim-only 短事务、round-robin 轮询、wake 合并、bounded handoff、executor rejection 归还 claim、stop 生命周期与 Environment `nodeInstanceId` 传递；依赖 `HarnessStore` 与 Processor |
+| `fun.fengwk.kkstudio.harness.infra.postgresql` | PostgreSQL 持久化存储与通知实现 | [`PostgresqlHarnessStore`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessStore.java), [`PostgresqlHarnessTransaction`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessTransaction.java), [`PostgresqlHarnessRows`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessRows.java), [`PostgresqlRealtimeEventSink`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSink.java), [`PostgresqlRealtimeEventSource`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSource.java), [`RealtimeNotificationCodec`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodec.java) | 七表 durable protocol、严格事务锁序防御、首个数据库故障 poisoning、事务内 EntryPath 局部缓存、Work claim/lease/wake、Environment route 路由围栏与 NOTIFY 编解码；依赖 Spring JDBC、PostgreSQL driver 与 Jackson |
+| `fun.fengwk.kkstudio.harness.infra.realtime` | 实时事件传输抽象端口 | [`RealtimeEventSource`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/realtime/RealtimeEventSource.java) | 实时事件 live projection overlay 订阅端口与生命周期围栏定义，通知损坏或失联触发 resync，durable snapshot 为唯一恢复事实源；仅依赖 `harness-runtime` |
+| `fun.fengwk.kkstudio.harness.infra.resource` | 本地文件内容寻址对象存储 | [`LocalFileResourceStore`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/resource/LocalFileResourceStore.java) | 固定根目录、SHA-256 十六进制扁平命名、create-only 原子硬链接发布、NOFOLLOW 打开与精确 size/sha 校验；实现 `ResourceStore`，依赖 JDK NIO 与 `harness-common` |
+
 ## 核心模型 / API
 
 ### PostgreSQL HarnessStore、transaction 与七表
@@ -98,7 +107,9 @@ Session (KEY SHARE / FOR UPDATE)
 
 ### harness_work claim / lease / wake
 
-`harness_work` 的主键是 `(target_type,target_id)`。`requestWork` 使用 upsert：
+`harness_work` 的主键是 `(target_type,target_id)`，列包含 `available_at`、`wake_version`、`lease_token`、`lease_until` 与 `required_environment_id`。
+
+`requestWork` 在 owning Thread 已锁定时由 Runtime transaction 调用，使用 upsert：
 
 ```text
 available_at = least(current, requested)
@@ -106,27 +117,42 @@ wake_version = current + 1
 lease_token / lease_until 保持不变
 ```
 
-`claimNextWork` 是 Work-only 短事务，按 `available_at,target_id` 选取一条 due 且 lease 缺失/过期的目标，使用 `FOR UPDATE SKIP LOCKED` 写入新 token/until。`lockClaimedWork` 校验 token 和 `lease_until > now`；`completeWork` 在 claimed wakeVersion 仍是最新时删除 Work，有新 wake 时清除 lease 保留行；`rescheduleWork` 清除 lease 并设置 requested time。
+其中：
+- `harness_work.required_environment_id` 仅用于 TOOL Work（非 TOOL 传入非空值直接抛 `IllegalArgumentException`）；
+- request 对已冻结 affinity 的冲突拒绝：upsert 的 update 语句包含条件 `where (harness_work.required_environment_id is not distinct from excluded.required_environment_id or excluded.required_environment_id is null)`。若已存在的 Work 已经绑定了 `required_environment_id`，而后续 request 传入了不一致的非空 affinity，UPDATE 条件不匹配导致 0 行更新，`writeOne` 抛出 `IllegalArgumentException("conflicting requiredEnvironmentId for work target ...")` 明确拒绝冲突，防止执行中发生环境漂移。
 
-同一 Store transaction 内先由 `requestWork` upsert Work，再执行
-`pg_notify('harness_runtime_work', ...)`；PostgreSQL 只在该 transaction commit
-后向 listener 投递通知。通知只是 availability hint；通知丢失由 fixed-delay
-poll、重连 wake 和 lease expiry claim 收敛。
+`claimNextWork` 是 Work-only 短事务，按如下规则选取一条 candidate 并原子写入新 `lease_token` 与 `lease_until`：
+- candidate 按 `available_at <= statement_timestamp()` 且 `(lease_until is null or lease_until <= statement_timestamp())` 筛选，按 `available_at, target_id` 升序排序，使用 `FOR UPDATE SKIP LOCKED` 跳过正在被其它 claim 事务锁定的行；尚未到期的既有 lease 由前述条件过滤，不由 `SKIP LOCKED` 判断；
+- Environment route 路由围栏：
+  - `required_environment_id` 为空时，无 Environment affinity，任何活跃 Dispatcher 节点均可 claim；
+  - `required_environment_id` 非空时，只有 `environment_connection.environment_id` 匹配、`owner_node_id` 等于 Dispatcher 的当前 `nodeInstanceId`、状态 `READY` 且 `lease_until > statement_timestamp()` 的节点可 claim；
+  - 路由不确定（连接不存在、处于非 `READY` 状态、连接 lease 过期、归属其他节点）时严格 fail closed，该 candidate 不被选中；数据库查询失败则抛错并使整个 claim 事务失败，不提交任何租约；
+  - 围栏层次区分：Environment route 路由围栏（面向外部网络拓扑与节点环境绑定的路由准入）与底层 PostgreSQL 行级悲观并发控制 `FOR UPDATE SKIP LOCKED`（行级跳锁，避免节点间加锁排队等待）以及应用层 Work lease 租约（`lease_token` / `lease_until` 所有权围栏）属于完全不同层次的机制，互不替代；避免把 `SKIP LOCKED` 误称为分布式锁或 leader 机制。
+
+所有权围栏与生命周期原语：
+- `lockClaimedWork` 校验 token 一致且 `lease_until > now`（所有权围栏）；
+- `renewWork` 在已持有 Work 锁前提下延长租约；
+- `completeWork` 是 final Work fence：claimed wakeVersion 仍是最新时删除 Work；若执行期间有新 wake 导致 `wake_version` 推进，则保留 Work 行并清除 lease 待后续调度；若已失去所有权则抛错回滚事务；
+- `rescheduleWork` 清除 lease 并设置 requested time，保留当前 wakeVersion。
+
+同一 Store transaction 内先由 `requestWork` upsert Work，再执行 `pg_notify('harness_runtime_work', ...)`；PostgreSQL 只在该 transaction commit 后向 listener 投递通知。通知只是 availability hint；通知丢失由 fixed-delay poll、重连 wake 和 lease expiry claim 收敛。
 
 ### Dispatcher lifecycle / fencing
 
 [`HarnessWorkDispatcher`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcher.java) 只做：
 
 ```text
-wake merge -> round-robin claim THREAD/MODEL/TOOL
+wake merge -> round-robin claim THREAD/MODEL/TOOL (passing nodeInstanceId)
   -> bounded worker handoff
   -> Processor.process(ClaimedWork)
   -> task finally wake
 ```
 
+Dispatcher 拥有明确的 `nodeInstanceId`（构造时生成或指定），并在每次 claim-only 短事务中将其传递给 `claimNextWork`，以驱动 Environment route 路由围栏。
+
 `start()` 注册 fixed-delay poll 并立即 wake，重复 start 无副作用；`stop()` 取消 poll，不 shutdown 注入 executor、不 interrupt 已接受 task、不等待 Processor。drain 使用 `wakeRequested` + `drainRunning` CAS，收尾窗口再次检查 wake。THREAD/MODEL/TOOL 使用实例级 round-robin cursor，避免容量为 1 时固定偏向 THREAD。
 
-worker executor 必须 fail-fast reject；禁止 `CallerRunsPolicy`、Discard 和静默替换。handoff 被拒绝时，dispatcher 先 ownership-fenced `lockClaimedWork`，仍 owned 才以 `executorRejectionDelay` reschedule，然后结束当前 drain，避免 claim→reject 热循环。Processor 抛 RuntimeException 时 dispatcher 只记录并保留 lease 待过期恢复，不猜测 complete/reschedule/delete。
+worker executor 必须 fail-fast reject；禁止 `CallerRunsPolicy`、Discard 和静默替换。handoff 被拒绝时，dispatcher 先通过所有权围栏 `lockClaimedWork` 确认仍 owned，才以 `executorRejectionDelay` 延迟调用 `rescheduleWork` 归还 claim，然后结束当前 drain，避免 claim→reject 热循环。Processor 抛 RuntimeException 时 dispatcher 只记录日志并保留 lease 待过期恢复，不猜测 complete/reschedule/delete。
 
 ### Realtime source / sink
 
@@ -174,6 +200,8 @@ PostgreSQL connection 断开不改变 Entry/Invocation/Work；Work lease 过期�
 
 - Store callback 正常返回才完成当前 transaction；Runtime exception/Error 使当前边界回滚；数据库 failure 在 callback 返回前重新抛出。
 - `requestWork` 必须在 owning Thread 已锁定时执行；dispatcher claim 是唯一允许先获取 Work lock 的单 Work primitive。
+- `harness_work.required_environment_id` 仅用于 TOOL Work；路由围栏要求 `environment_connection` 匹配、Dispatcher 当前节点持有、状态 `READY` 且 lease 未过期；路由不确定时不返回候选，数据库失败时 claim 事务抛错回滚。
+- `requestWork` 对已冻结的 `required_environment_id` 严格冲突拒绝，已存在 Work 绑定 affinity 后不允许传入冲突的不同非空 affinity。
 - claim token、leaseUntil、wakeVersion 任何一项不匹配都不允许过期 worker 完成新 wake；lost claim 是正常 no-op/recovery 条件。
 - NOTIFY 丢失、乱序或重复不影响 correctness；poll 和 lease expiration 提供收敛。
 - Processor 的 durable mutation 先于 Work final fence；final fence 失败时事务整体回滚。

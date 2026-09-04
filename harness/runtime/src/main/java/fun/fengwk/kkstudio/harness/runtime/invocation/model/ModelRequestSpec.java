@@ -33,7 +33,7 @@ public record ModelRequestSpec(
     List<SubagentBinding> subagentBindings,
     ProviderCacheControl cacheControl) {
 
-  /** 构造不具备子 Agent 委派能力的请求。 */
+  /** 构造不具备 Subagent 委派能力的请求。 */
   public ModelRequestSpec(
       ProviderType providerType,
       ModelDescriptor model,

@@ -21,7 +21,7 @@ import java.util.UUID;
 import java.util.function.Function;
 
 /**
- * 单一 durable 存储根：Harness 持久化原语的唯一入口。
+ * 单一持久化存储根：Harness 持久化原语的唯一入口。
  *
  * <p>本接口不是 Repository / Specification / generic save / UnitOfWork 框架：不提供任何业务 use-case 方法（例如
  * applyTerminalModel、applyToolBatch、startTurn、stop、approve、decideNextAction、harvest、
@@ -29,20 +29,21 @@ import java.util.function.Function;
  * append-only 不可变记录。
  *
  * <p>事务语义（所有实现必须遵守）：回调正常返回即提交（除非实现选择加入调用方已有的外层事务，此时提交/回滚由外层事务决定），抛出 {@link RuntimeException} 或
- * {@link Error} 时 完整回滚并原样重抛；回调返回 null 合法（void 场景）。事务句柄只能由执行回调的同一线程在回调内使用； 跨线程使用或回调结束后的任何句柄调用都必须被实现以
+ * {@link Error} 时完整回滚并原样重抛；回调返回 null 合法（void 场景）。事务句柄只能由执行回调的同一线程在回调内使用； 跨线程使用或回调结束后的任何句柄调用都必须被实现以
  * {@link IllegalStateException} 拒绝。实现必须拒绝重入（回调内再次调用同一 Store 的 {@link
  * #transaction}）。并发由实现决定：生产实现允许并发事务，测试参考实现使用全局 monitor 串行化。
  *
- * <p>多实体锁顺序（所有多行事务必须遵守，防止死锁）：先按 {@link UuidOrder} 升序锁 Thread，再锁其 Commands，再锁其 ModelInvocation， 再按
- * callIndex 升序锁同 Assistant Entry 的 ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work 时，同层 Work 必须按
- * (type, id) 升序（例如先 THREAD Work 再 MODEL Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；dispatcher
- * claim、heartbeat/lease 等单 Work 调度事务是唯一例外，它们不得创建新的业务 wake。实现必须在实际获取新锁前以 {@link
- * IllegalStateException} 拒绝逆序；重复访问本事务已持有的锁合法。
+ * <p>多实体锁顺序（所有多行事务必须遵守，用于收敛已知锁逆序与数据库死锁路径）：若涉及 Session 锁，先锁 Session（{@link #lockSessionForKeyShare}
+ * 或 {@link #lockSessionForUpdate}），再按 {@link UuidOrder} 升序锁 Thread，再锁其 Commands，再锁其
+ * ModelInvocation，再按 callIndex 升序锁同 Assistant Entry 的 ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work
+ * 时，同层 Work 必须按 (type, id) 升序（例如先 THREAD Work 再 MODEL Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning
+ * Thread；dispatcher claim、heartbeat/lease 等单 Work 调度事务是唯一例外，它们不得创建新的业务 wake。实现必须在实际获取新锁前以 {@link
+ * IllegalStateException} 拒绝已知逆序；重复访问本事务已持有的锁合法。
  *
  * <p>读取约定：所有 find/lock 返回 {@link Optional}；所有 list 返回不可变列表；list 入参被防御性拷贝且拒绝 null 元素。唯一键 / 引用完整性违反抛
  * {@link IllegalArgumentException}；未锁定即更新抛 {@link IllegalStateException}。
  *
- * <p>时间精度：映射到 SQL timestamp 列的 durable 时间，以及 Work primitive 的 {@link Instant} 参数，统一使用毫秒精度；任何非 null
+ * <p>时间精度：映射到 SQL timestamp 列的持久化时间，以及 Work primitive 的 {@link Instant} 参数，统一使用毫秒精度；任何非 null
  * 值若包含亚毫秒部分，实现必须以 {@link IllegalArgumentException} 拒绝，禁止静默截断或四舍五入。
  */
 public interface HarnessStore {

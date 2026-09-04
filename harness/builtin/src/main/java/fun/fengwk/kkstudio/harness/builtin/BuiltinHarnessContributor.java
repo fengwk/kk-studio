@@ -26,8 +26,8 @@ import java.util.Set;
 /**
  * 第一方内置功能包 Contributor。
  *
- * <p>注册 12 个模型可见 Environment capability 工具、{@code load_skill} 与 {@code task} internal 工具、Goal
- * 工具、{@code goal.state} 自定义 Entry 类型与上下文投影器。
+ * <p>注册 10 个模型可见 Environment capability 工具、{@code load_skill} 与 {@code task} internal 工具、Goal
+ * 工具、{@code goal.state} 自定义 Entry 类型与上下文投影器（共 15 个内置工具）。
  */
 public final class BuiltinHarnessContributor implements HarnessContributor {
 

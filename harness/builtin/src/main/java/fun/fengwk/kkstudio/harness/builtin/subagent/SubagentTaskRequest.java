@@ -4,14 +4,14 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 委派给 SubagentRunner 执行的子 Agent 任务请求。
+ * 委派给 SubagentRunner 执行的 Subagent 任务请求。
  *
- * @param invocationId 当前 invocation ID
- * @param threadId 当前 thread ID
+ * @param invocationId 当前 Invocation ID
+ * @param threadId 当前 Thread ID
  * @param prompt 任务 prompt 正文
- * @param subagentType 子 Agent 类型标识
+ * @param subagentType Subagent 类型标识
  * @param maxTurns 最大 turns 限制（可为空）
- * @param sessionId 要恢复的子会话 ID（可为空）
+ * @param sessionId 要恢复的 Subagent Session ID（可为空）
  */
 public record SubagentTaskRequest(
     UUID invocationId,

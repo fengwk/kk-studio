@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/** 以普通 durable Harness Thread 运行隔离子 Agent 的内部 task 工具薄适配器。 */
+/** 以普通 durable Harness Thread 运行隔离 Subagent 的内部 task 工具适配器。 */
 public final class TaskTool implements Tool {
 
   public static final String NAME = "task";

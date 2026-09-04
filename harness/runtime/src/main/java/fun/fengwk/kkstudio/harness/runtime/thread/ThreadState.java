@@ -6,7 +6,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * durable Thread 当前状态。
+ * 持久化 Thread 当前状态。
  *
  * <p>持久化 Thread 自身拥有的字段：所属 Session、creation request hash 身份键、head Entry cursor、Thread YOLO runtime
  * policy、下一条 Command sequence 以及对外可见的 snapshot version。{@code sessionId} 与 {@code

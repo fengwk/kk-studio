@@ -8,7 +8,7 @@ import java.util.Objects;
  * READY 中冻结的类型化本地环境 metadata；只包含 prompt 所需的 OS、时区、rootPath 与稳定说明。
  *
  * <p>{@code note} 会进入受信任的模型 SYSTEM Prompt，只能来自 Daemon 固定默认值或可信操作者配置，禁止包含凭证、秘密或不可信外部文本。格式校验与下游 XML
- * escape 不能替代这一信任边界。{@code rootPath} 是 daemon 实际 canonical Environment Root 的展示路径，只读披露、不参与路径解析。
+ * escape 不能替代这一信任边界。{@code rootPath} 是 Daemon 实际 canonical Environment Root 的展示路径，只读披露、不参与路径解析。
  */
 public record DaemonEnvironmentInfo(
     DaemonOperatingSystem operatingSystem, String timeZone, String note, String rootPath) {
