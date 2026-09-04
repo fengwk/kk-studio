@@ -194,7 +194,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** MODEL_ACTIVE 兼容性 baseline：打开的 turn，在 TURN_START requestHead 上挂一个 RUNNING 的 Model。 */
+  /** MODEL_ACTIVE baseline：打开的 turn，在 TURN_START requestHead 上挂一个 RUNNING 的 Model。 */
   static ModelBaseline seedRunningModel(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
@@ -554,8 +554,8 @@ final class HarnessRuntimeTestSupport {
   }
 
   /**
-   * 仅测试用的委托 store：其事务在 Thread 行被锁定的那一刻推进可变 {@code clock}， 因此测试可证明控制面在锁等待后才读取时间戳（如果使用锁前的旧 instant
-   * 会让行的 updatedAt 倒退）。
+   * 仅测试用的委托 store：其事务在 Thread 行被锁定的那一刻推进可变 {@code clock}， 因此测试可证明控制面在锁等待后才读取时间戳；使用锁前的 instant 会让行的
+   * updatedAt 倒退。
    */
   static HarnessStore storeAdvancingClockOnThreadLock(
       InMemoryHarnessStore delegate, TestClock clock, Instant advanceTo) {

@@ -391,15 +391,14 @@ class ApplicationEventWebSocketHandlerTest {
 
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
 
-    // 关闭后不得再登记订阅/建立上游（修复前该帧会建立 hub 上游并泄漏）。
+    // 关闭后的帧不得再登记订阅或建立上游。
     verify(threadVersionSource, never()).subscribe(any(), any());
   }
 
   @Test
   void connectionCloseDuringSubscribeWaitsForTheInFlightSubscribe() throws Exception {
-    // 确定性复现「建立中 connection close」竞态：subscribe 卡在 hub 建立上游时连接关闭。
-    // 修复后 close 在 closeLock 上等待 in-flight subscribe 完成再关闭新登记订阅（建立、登记、关闭互斥），
-    // 因此 closeDone 在 establish 放行前不可能触发；修复前 close 立即完成，随后 subscribe 登记后无人关闭（泄漏）。
+    // subscribe 卡在 hub 建立上游时关闭连接。closeLock 让建立、登记与关闭互斥：
+    // close 必须等待 in-flight subscribe 完成，再关闭新登记的订阅。
     AutoCloseable versionHandle = mock(AutoCloseable.class);
     CountDownLatch establishing = new CountDownLatch(1);
     CountDownLatch establishDone = new CountDownLatch(1);
@@ -430,7 +429,7 @@ class ApplicationEventWebSocketHandlerTest {
                 return null;
               });
       assertTrue(closeTaskStarted.await(5, TimeUnit.SECONDS), "close task must start");
-      // establish 未放行时 close 不可能完成（修复后 close 等待 in-flight subscribe 退出 closeLock）。
+      // establish 未放行时，close 必须等待 in-flight subscribe 退出 closeLock。
       assertFalse(
           closeDone.await(2, TimeUnit.SECONDS), "close must wait for the in-flight subscribe");
 
@@ -440,15 +439,13 @@ class ApplicationEventWebSocketHandlerTest {
     } finally {
       executor.shutdownNow();
     }
-    verify(versionHandle).close(); // close 后不得遗留 hub 订阅（修复前该订阅泄漏、上游永不释放）
+    verify(versionHandle).close(); // close 后不得遗留 hub 订阅。
   }
 
   @Test
   void concurrentDuplicateSubscribeRegistersOnlyOneSubscription() throws Exception {
-    // 复现「重复 subscribe 并发窗口」：第二个帧在第一个订阅 ack 入队后、登记（put）前到达（ack-latch 钉住
-    // 第一个帧，第二个帧的幂等检查必然看到未登记状态并进入 hub.subscribe）。修复后两帧经 closeLock 串行：
-    // 第二个帧在第一个登记完成后看到已登记订阅幂等返回，只登记一个订阅；修复前两个帧各登记一个 hub 订阅，
-    // 后 put 覆盖先 put，先登记的那个永不关闭，unsubscribe 后上游仍存活（泄漏）。
+    // 第二个帧在第一个订阅 ack 入队后、登记前到达。closeLock 串行两个帧，
+    // 第二个帧只能看到已登记状态并幂等返回，不能建立或覆盖另一份订阅。
     AutoCloseable versionHandle = mock(AutoCloseable.class);
     when(threadVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(5L, versionHandle));

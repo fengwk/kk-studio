@@ -90,7 +90,7 @@ class PermissionEvaluatorTest {
         evaluator.describePathTarget("../", workdir));
   }
 
-  /** 同一绝对 target 只按 effective workdir 相对命中；environment-relative alias 不再是 pattern 坐标。 */
+  /** 同一绝对 target 只按 effective workdir 计算规则坐标。 */
   @Test
   void absoluteTargetMatchesOnlyEffectiveWorkdirRelativeRules() {
     Path workdir = Path.of("/tmp/permission-environment/repo");
@@ -226,14 +226,15 @@ class PermissionEvaluatorTest {
             .arguments());
   }
 
-  /** 管理输入兼容 PiBase 简写，持久输出统一为 ordered rule list。 */
+  /** 规范的 ToolSettings 配置在 canonicalize 与 decode 时保持结构一致。 */
   @Test
-  void canonicalizesToolSettingsShorthand() throws Exception {
+  void canonicalizesAndDecodesToolSettings() throws Exception {
     ToolSettingsCodec codec = new ToolSettingsCodec(objectMapper);
     String canonical =
         codec.canonicalize(
-            "{\"permission\":{\"base.write\":\"ask\",\"base.bash\":{\"*\":\"ask\",\"git"
-                + " *\":\"allow\"}},\"defaultYolo\":true}");
+            "{\"permission\":{\"base.write\":[{\"pattern\":\"*\",\"action\":\"ask\"}],"
+                + "\"base.bash\":[{\"pattern\":\"*\",\"action\":\"ask\"},{\"pattern\":\"git *\",\"action\":\"allow\"}]},"
+                + "\"defaultYolo\":true}");
     JsonNode root = objectMapper.readTree(canonical);
 
     assertTrue(root.path("defaultYolo").asBoolean());
@@ -243,7 +244,10 @@ class PermissionEvaluatorTest {
         "git *", root.path("permission").path("base.bash").get(1).path("pattern").asText());
     assertEquals(PermissionAction.ALLOW, codec.decode(canonical).rulesFor(BASH).get(1).action());
 
-    JsonNode global = objectMapper.readTree(codec.canonicalize("{\"permission\":\"ask\"}"));
+    JsonNode global =
+        objectMapper.readTree(
+            codec.canonicalize(
+                "{\"permission\":{\"*\":[{\"pattern\":\"*\",\"action\":\"ask\"}]}}"));
     assertEquals("*", global.path("permission").path("*").get(0).path("pattern").asText());
     assertEquals("ask", global.path("permission").path("*").get(0).path("action").asText());
   }

@@ -50,7 +50,7 @@ describe('composer draft storage', () => {
     storeComposerDraft(scope, [createTextPart('  first\nsecond  ')], storage)
 
     expect(JSON.parse(storage.getItem(composerDraftStorageKey(scope)) ?? '')).toEqual({
-      version: 2,
+      version: 1,
       parts: [{ type: 'text', text: '  first\nsecond  ' }],
     })
     expect(partsToText(loadStoredComposerDraft(scope, storage))).toBe('  first\nsecond  ')
@@ -122,7 +122,7 @@ describe('composer draft storage', () => {
     const scope = 'thread:t1'
     storage.setItem(
       composerDraftStorageKey(scope),
-      '{"version":2,"parts":[{"type":"resource","blobId":"b","name":"n","unknown":true}]}',
+      '{"version":1,"parts":[{"type":"resource","blobId":"b","name":"n","unknown":true}]}',
     )
 
     expect(loadStoredComposerDraft(scope, storage)).toEqual([])

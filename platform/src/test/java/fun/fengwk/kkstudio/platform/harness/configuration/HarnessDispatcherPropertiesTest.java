@@ -9,7 +9,7 @@ import java.time.Duration;
 
 class HarnessDispatcherPropertiesTest {
 
-  /** 部署未覆盖配置时必须保持迁移前的容量与调度默认值不变。 */
+  /** 部署未覆盖配置时使用明确的容量与调度默认值。 */
   @Test
   void providesStableDeploymentDefaults() {
     HarnessDispatcherProperties properties = new HarnessDispatcherProperties();

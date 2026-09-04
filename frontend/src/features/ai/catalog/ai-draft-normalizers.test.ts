@@ -111,7 +111,7 @@ describe('ai-draft-normalizers', () => {
   it('normalizes model and agent default variants', () => {
     const normalizedModel = normalizeModelDraftDefaultVariant({
       ...emptyModelDraft(),
-      defaultVariant: 'legacy',
+      defaultVariant: 'missing',
       variants: [newVariantDraft({ id: 'default' }), newVariantDraft({ id: 'creative' })],
     })
     expect(normalizedModel.defaultVariant).toBe('default')
@@ -121,7 +121,7 @@ describe('ai-draft-normalizers', () => {
         ...emptyAgentDraft(),
         name: 'assistant',
         model: 'anthropic/Claude-Sonnet-4.5',
-        variant: 'legacy',
+        variant: 'missing',
       },
       [
         model({

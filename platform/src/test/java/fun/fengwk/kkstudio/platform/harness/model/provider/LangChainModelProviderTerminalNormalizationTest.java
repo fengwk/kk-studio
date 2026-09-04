@@ -44,8 +44,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * terminal completion 归一化（onCompleteResponse -&gt; toResponse）的失败语义与 canonical 形状。
  *
- * <p>覆盖两条回归：FILTERED 完成丢弃残余 tool calls（canonical 约束，绝不创建 ToolInvocation）；terminal 归一化 （tool call
- * 归一化等）抛出的运行时失败是 invalid provider terminal shape，必须映射 INVALID_RESPONSE 而非 INVALID_REQUEST。
+ * <p>FILTERED 完成必须丢弃残余 tool calls；terminal 归一化抛出的运行时失败属于 invalid provider terminal shape，必须映射
+ * INVALID_RESPONSE。
  */
 class LangChainModelProviderTerminalNormalizationTest {
 
@@ -108,6 +108,39 @@ class LangChainModelProviderTerminalNormalizationTest {
         });
 
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, failure.get().kind());
+  }
+
+  @Test
+  void completionGeneratesCanonicalIdWhenProviderOmitsToolCallId() {
+    AtomicReference<ProviderResponse> completed = new AtomicReference<>();
+    ChatResponse response =
+        openAiChatResponse(FinishReason.STOP)
+            .aiMessage(
+                AiMessage.builder()
+                    .text("text")
+                    .toolExecutionRequests(
+                        List.of(
+                            ToolExecutionRequest.builder().name("bash").arguments("{}").build()))
+                    .build())
+            .build();
+    LangChainModelProvider provider = stubProvider(response);
+    provider.stream(
+        request(),
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onComplete(ProviderResponse providerResponse, ProviderStream stream) {
+            completed.set(providerResponse);
+          }
+
+          @Override
+          public void onError(ProviderException providerError, ProviderStream stream) {}
+        });
+
+    String callId = completed.get().toolCalls().get(0).id();
+    assertTrue(callId.matches("tool_call_0_[0-9a-f]{32}"), callId);
   }
 
   private static LangChainModelProvider stubProvider(ChatResponse response) {

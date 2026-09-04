@@ -39,7 +39,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Function start/checkpoint/terminal/resource swap 的短事务边界（全部事务内锁定 node + document 行）。 */
+/**
+ * Canvas Function 状态机的短事务边界。
+ *
+ * <p>外部计算不持有数据库事务。本类只负责启动、检查点、取消和终态收敛，并在同一事务内维护 Run、资源 pin 与画布版本。针对同一画布的写入按 document、node 的固定顺序加锁。
+ *
+ * <p>Worker 写回必须同时匹配 {@code requestId} 和 {@code leaseToken}；租约失效后不能再更新状态。启动时会冻结输入资源并创建 INPUT/OUTPUT
+ * pin。成功时预分配的输出资源接管节点所有权，失败或取消时丢弃未挂接输出；所有终态都会释放本次 Run 的 pin。
+ */
 @Component
 public class CanvasFunctionRunTransactions {
 
@@ -77,6 +84,11 @@ public class CanvasFunctionRunTransactions {
     this.clock = Clock.tick(Objects.requireNonNull(clock, "clock"), Duration.ofMillis(1));
   }
 
+  /**
+   * 启动新的 FunctionRun；相同 {@code requestId} 已存在时直接返回。
+   *
+   * <p>事务内冻结输入清单、创建输入和输出 pin，并将画布版本推进一次。
+   */
   @Transactional
   public CanvasFunctionStartResult start(UUID canvasId, UUID nodeId, String requestId) {
     Objects.requireNonNull(canvasId, "canvasId");
@@ -155,6 +167,7 @@ public class CanvasFunctionRunTransactions {
     return new CanvasFunctionStartResult(ready, created);
   }
 
+  /** 将活跃 Run 收敛为 CANCELLED，并清理未挂接输出和本次 Run 的 pin。 */
   @Transactional
   public CanvasFunctionRun cancel(UUID canvasId, UUID nodeId, String requestId) {
     Objects.requireNonNull(canvasId, "canvasId");
@@ -184,15 +197,15 @@ public class CanvasFunctionRunTransactions {
       throw conflict("FunctionRun changed while cancelling");
     }
     resourceLifecycle.discardUnownedTarget(canvasId, frozen.targetResourceId());
+    resourceLifecycle.releaseRunPins(canvasId, nodeId, current.requestId());
     bumpVersion(document);
     return terminal;
   }
 
   /**
-   * Adapter checkpoint：基于当前 frozen run + stage/adapterState 生成 next state，锁定 document/node 并验证仍是同一
-   * RUNNING request + leaseToken，checkpoint fencing 后随 canvas version 与 node patch 在同一事务收敛。
-   * document/node 消失、run 不再由该 claim 持有或 fencing 失败一律以 {@link CanvasFunctionInternalCancellation} 终止
-   * adapter，绝不把旧 run 写回。
+   * 写入运行阶段快照。
+   *
+   * <p>文档、节点或租约不再匹配时抛出 {@link CanvasFunctionInternalCancellation}，通知当前 Worker 停止写回。
    */
   @Transactional
   public CanvasFunctionFrozenRun checkpoint(
@@ -251,6 +264,11 @@ public class CanvasFunctionRunTransactions {
     return next;
   }
 
+  /**
+   * 将 Run 收敛为 SUCCEEDED。
+   *
+   * <p>输出必须是启动时预分配的未挂接资源，且媒体类型与冻结模型一致。
+   */
   @Transactional
   public boolean completeSuccess(
       CanvasFunctionFrozenRun frozen, String leaseToken, List<UUID> orderedResourceIds) {
@@ -291,10 +309,12 @@ public class CanvasFunctionRunTransactions {
     if (!runRepository.transitionTerminal(terminal, leaseToken)) {
       throw new IllegalStateException("FunctionRun success CAS failed after row lock");
     }
+    resourceLifecycle.releaseRunPins(frozen.canvasId(), frozen.nodeId(), frozen.requestId());
     bumpVersion(document);
     return true;
   }
 
+  /** 在租约仍有效时将 Run 收敛为 FAILED，并清理未挂接输出和本次 Run 的 pin。 */
   @Transactional
   public boolean failIfRunning(UUID nodeId, String requestId, String leaseToken, String error) {
     Objects.requireNonNull(nodeId, "nodeId");
@@ -320,10 +340,12 @@ public class CanvasFunctionRunTransactions {
       throw new IllegalStateException("FunctionRun failure CAS failed after row lock");
     }
     resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
+    resourceLifecycle.releaseRunPins(frozen.canvasId(), frozen.nodeId(), frozen.requestId());
     bumpVersion(document);
     return true;
   }
 
+  /** 冻结并校验本次运行使用的输入资源清单。 */
   private List<CanvasFunctionFrozenReference> freezeManifest(
       UUID canvasId,
       UUID targetNodeId,

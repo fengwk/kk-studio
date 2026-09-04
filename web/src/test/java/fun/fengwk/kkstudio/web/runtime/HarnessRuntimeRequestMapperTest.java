@@ -361,7 +361,7 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void rejectsTargetUnionViolationsAndUnknownType() {
-    // NEW_SESSION/ENTRY/THREAD 的字段集合互斥，未知 target 不做兼容降级。
+    // NEW_SESSION/ENTRY/THREAD 的字段集合互斥，未知 target 必须拒绝。
     HarnessCommandTargetDTO newSession = newSessionTarget();
     newSession.setStartEntryId(idText(8));
     assertTargetRejected(newSession);

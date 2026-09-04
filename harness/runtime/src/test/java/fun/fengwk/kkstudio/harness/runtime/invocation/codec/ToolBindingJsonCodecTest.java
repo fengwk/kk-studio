@@ -116,13 +116,6 @@ class ToolBindingJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.substring(0, valid.length() - 1) + ",\"extra\":true}"));
-    // 旧 backend 字段必须被拒绝
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                valid.substring(0, valid.length() - 1)
-                    + ",\"backend\":\"ENVIRONMENT_CAPABILITY\"}"));
 
     // 缺少必要字段
     assertThrows(

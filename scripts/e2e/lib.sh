@@ -230,7 +230,7 @@ start_daemon() {
   step "Starting daemon env=$DAEMON_ENV_NAME"
   nohup env JAVA_HOME="$java_home" "$java_home/bin/java" \
     -cp "$cp" fun.fengwk.kkstudio.harness.daemon.DaemonMain \
-    --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/ai/environment/daemon/v2" \
+    --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/ai/environment/daemon/v1" \
     --registration-token "$DAEMON_REGISTRATION_TOKEN" \
     --note "$DAEMON_NOTE" \
     --environment-root "$DAEMON_ENV_ROOT" \

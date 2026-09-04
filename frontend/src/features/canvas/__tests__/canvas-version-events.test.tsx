@@ -69,13 +69,13 @@ describe('useCanvasVersionEvents', () => {
     const { sockets, onSnapshot, rerender } = renderEvents({ version: '7' })
 
     // codec 已拒绝数字/前导零/负数/畸形 data 与缺失/不匹配的 cursor；hook 层
-    // 只负责与最后已知版本比较，旧版本事件不触发同步。
+    // 只负责与最后已知版本比较，较低版本事件不触发同步。
     versionEvent(sockets, '7')
     versionEvent(sockets, '6')
     versionEvent(sockets, '8')
     expect(onSnapshot).toHaveBeenCalledTimes(1)
 
-    // 本地版本前进后，迟到的旧事件不再触发同步。
+    // 本地版本前进后，迟到版本事件不再触发同步。
     rerender({ version: '8' })
     versionEvent(sockets, '8')
     expect(onSnapshot).toHaveBeenCalledTimes(1)

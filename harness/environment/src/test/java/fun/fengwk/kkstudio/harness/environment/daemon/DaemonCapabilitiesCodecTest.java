@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-/** READY capabilities v6 codec 的严格版本、environment metadata 与能力摘要契约。 */
+/** READY capabilities v1 codec 的严格版本、environment metadata 与能力摘要契约。 */
 class DaemonCapabilitiesCodecTest {
 
   private static final DaemonEnvironmentInfo ENVIRONMENT =
@@ -32,7 +32,7 @@ class DaemonCapabilitiesCodecTest {
 
     assertEquals(original, codec.decode(encoded));
     assertEquals(
-        "{\"version\":6,"
+        "{\"version\":1,"
             + ENVIRONMENT_JSON
             + ",\"skills\":[{\"name\":\"dev\",\"description\":\"Developer rules\"}]}",
         encoded);
@@ -41,24 +41,21 @@ class DaemonCapabilitiesCodecTest {
   @Test
   void encodesEmptyCapabilityLists() {
     assertEquals(
-        "{\"version\":6," + ENVIRONMENT_JSON + ",\"skills\":[]}",
+        "{\"version\":1," + ENVIRONMENT_JSON + ",\"skills\":[]}",
         codec.encode(new DaemonCapabilities(DaemonCapabilities.VERSION, ENVIRONMENT, List.of())));
   }
 
   @Test
-  void rejectsLegacyVersionsAndMissingEnvironment() {
+  void rejectsUnsupportedVersionsAndMissingEnvironment() {
     assertThrows(
-        DaemonProtocolException.class, () -> codec.decode("{\"version\":1,\"skills\":[]}"));
+        DaemonProtocolException.class,
+        () -> codec.decode("{\"version\":0," + ENVIRONMENT_JSON + ",\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () -> codec.decode("{\"version\":2," + ENVIRONMENT_JSON + ",\"skills\":[]}"));
     assertThrows(
-        DaemonProtocolException.class, () -> codec.decode("{\"version\":4,\"skills\":[]}"));
-    assertThrows(
-        DaemonProtocolException.class, () -> codec.decode("{\"version\":5,\"skills\":[]}"));
-    assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":6,\"environment\":null,\"skills\":[]}"));
+        () -> codec.decode("{\"version\":1,\"environment\":null,\"skills\":[]}"));
   }
 
   @Test
@@ -69,7 +66,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":6,"
+                "{\"version\":1,"
                     + ENVIRONMENT_JSON
                     + ",\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\"},"
@@ -79,21 +76,21 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\",\"extra\":\"x\"},"
                     + "\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"workingDirectory\":\"/workspace\",\"timeZone\":\"UTC\","
                     + "\"note\":\"Linux environment.\"},\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"one\",\"note\":\"two\"},"
                     + "\"skills\":[]}"));
   }
@@ -104,19 +101,19 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":6,\"environment\":{\"timeZone\":\"UTC\","
+                "{\"version\":1,\"environment\":{\"timeZone\":\"UTC\","
                     + "\"note\":\"Linux environment.\"},\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"note\":\"Linux environment.\"},\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\"},\"skills\":[]}"));
   }
 
@@ -124,10 +121,10 @@ class DaemonCapabilitiesCodecTest {
   void rejectsInvalidNestedCapabilityShapes() {
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":\"6\"," + ENVIRONMENT_JSON + ",\"skills\":[]}"));
+        () -> codec.decode("{\"version\":\"1\"," + ENVIRONMENT_JSON + ",\"skills\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":6," + ENVIRONMENT_JSON + ",\"skills\":{}}"));
+        () -> codec.decode("{\"version\":1," + ENVIRONMENT_JSON + ",\"skills\":{}}"));
     assertThrows(DaemonProtocolException.class, () -> codec.decode(payload("", "null")));
     assertThrows(
         DaemonProtocolException.class,
@@ -172,7 +169,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\"},"
                     + "\"skills\":[]}"));
   }
@@ -210,7 +207,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":6,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\",\"rootPath\":\""
                     + jsonEscape(rootPath)
                     + "\"},\"skills\":[]}"));
@@ -218,7 +215,7 @@ class DaemonCapabilitiesCodecTest {
 
   private static String payloadWithEnvironment(
       String operatingSystem, String timeZoneJson, String noteJson) {
-    return "{\"version\":6,\"environment\":{\"operatingSystem\":\""
+    return "{\"version\":1,\"environment\":{\"operatingSystem\":\""
         + operatingSystem
         + "\",\"timeZone\":\""
         + timeZoneJson
@@ -228,7 +225,7 @@ class DaemonCapabilitiesCodecTest {
   }
 
   private static String payload(String rootPrefix, String skills) {
-    return "{\"version\":6," + rootPrefix + ENVIRONMENT_JSON + ",\"skills\":[" + skills + "]}";
+    return "{\"version\":1," + rootPrefix + ENVIRONMENT_JSON + ",\"skills\":[" + skills + "]}";
   }
 
   private static String jsonEscape(String value) {

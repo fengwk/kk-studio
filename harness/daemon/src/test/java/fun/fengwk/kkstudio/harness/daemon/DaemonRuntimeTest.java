@@ -327,7 +327,7 @@ class DaemonRuntimeTest {
 
       DaemonCapabilities capabilities = capabilitiesCodec.decode(handshake.get(1).payloadJson());
 
-      assertEquals(6, capabilities.version());
+      assertEquals(DaemonCapabilities.VERSION, capabilities.version());
       assertEquals(ZoneId.systemDefault().getId(), capabilities.environment().timeZone());
       assertEquals(
           DaemonOperatingSystemDetector.detectCurrent(),

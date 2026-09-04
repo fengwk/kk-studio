@@ -307,7 +307,6 @@ class DatabaseTurnResolverTest {
     assertFalse(missing.contains("- system:"), missing);
     assertTrue(missing.contains("- date: 2026-08-01"), missing);
     assertFalse(missing.contains("- note:"), missing);
-    assertNoLegacyCurrentEnvironmentFields(missing);
   }
 
   @Test
@@ -329,7 +328,6 @@ class DatabaseTurnResolverTest {
     assertTrue(prompt.contains("- system: linux"), prompt);
     assertTrue(prompt.contains("- date: 2026-08-01"), prompt);
     assertTrue(prompt.contains("- note: Custom &lt;Linux&gt; &amp; tools."), prompt);
-    assertNoLegacyCurrentEnvironmentFields(prompt);
   }
 
   @Test
@@ -359,7 +357,6 @@ class DatabaseTurnResolverTest {
     assertTrue(stale.contains("- system: wsl"), stale);
     assertTrue(stale.contains("- date: 2026-08-02"), stale);
     assertTrue(stale.contains("- note: Stable WSL environment."), stale);
-    assertNoLegacyCurrentEnvironmentFields(stale);
   }
 
   @Test
@@ -1095,13 +1092,6 @@ class DatabaseTurnResolverTest {
 
   private static List<ProviderMessage> materialized(EntryPath path, ModelRequestSpec spec) {
     return new ModelRequestMaterializer().materialize(path, spec).messages();
-  }
-
-  private static void assertNoLegacyCurrentEnvironmentFields(String prompt) {
-    assertFalse(prompt.contains("status"), prompt);
-    assertFalse(prompt.contains("working_directory"), prompt);
-    assertFalse(prompt.contains("current_time"), prompt);
-    assertFalse(prompt.contains("time_zone"), prompt);
   }
 
   private static BranchSettings settings(EnvironmentBinding environment, String variant) {

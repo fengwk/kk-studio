@@ -217,7 +217,7 @@ Environment 的持久化 Card 保存于 `environment` 表（UUID `id` 为路由�
 `fs.list-directory` 共享该 slot；control-plane timeout 会发送 `CANCEL`、立即释放 slot，并以有界
 invocation tombstone 吸收迟到 callback。
 
-Gateway 只接受 protocol v6 HELLO 和严格的 `capabilityCatalogVersion`。INVOKE payload 使用
+Gateway 只接受 protocol v1 HELLO 和严格的 `capabilityCatalogVersion`。INVOKE payload 使用
 `capabilityId`、`capabilityVersion`、`workspacePath`、`arguments`、`timeoutMillis`，不携带 model
 Tool name；所有结果通过通用 `STARTED/PARTIAL/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
 `invocationId` 关联。发送不确定时关闭连接并把 active invocation 收敛为 uncertain，不重发可能已经产生副作用的请求。

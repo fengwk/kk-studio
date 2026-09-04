@@ -378,17 +378,17 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
   }
 
   @Test
-  void assistantWithCallsButEmptySiblingsIsInvariantViolationNotNormalization() {
+  void assistantWithCallsButEmptySiblingsIsInvariantViolation() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
     var seeded = seedSucceededToolPhase(fixture.store, baseline, List.of("call-1", "call-2"));
     UUID assistantId = seeded.assistantEntryId();
-    // 即使已有 queued USER，也绝不降级为历史 normalization：空 siblings 是不变量违反。
+    // 即使已有 queued USER，空 siblings 仍是不变量违反。
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
 
-    // assistant 有 2 个 call 但没有 sibling：不变量违反（旧行为静默历史 normalization）-> ISE 回滚，resolver 不被调用。
+    // assistant 有 2 个 call 但没有 sibling：ISE 回滚，resolver 不被调用。
     assertThrows(IllegalStateException.class, () -> fixture.nextClaim(baseline.threadId()));
     assertEquals(4, path(fixture.store, baseline.threadId()).entries().size());
     assertEquals(assistantId, thread(fixture.store, baseline.threadId()).headEntryId());

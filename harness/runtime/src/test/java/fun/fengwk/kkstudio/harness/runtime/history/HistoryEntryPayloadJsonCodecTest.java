@@ -264,28 +264,28 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":5,\"settings\":{\"environment\":null,\"agentName\":\"a\","
+                "{\"reason\":5,\"settings\":{\"workspacePath\":null,\"agentName\":\"a\","
                     + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\"a\","
+                "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":null,\"agentName\":\"a\","
                     + "\"model\":[\"p\"]}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":5,"
+                "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":null,\"agentName\":5,"
                     + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":{\"name\":\"Not-A-Name\",\"workspacePath\":\".\"},"
+                "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":\"../outside\","
                     + "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\","
                     + "\"variant\":\"v\"}}"));
     assertThrows(
@@ -293,14 +293,14 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":5,"
+                "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":5,"
                     + "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\" \","
+                "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":null,\"agentName\":\" \","
                     + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
@@ -514,32 +514,6 @@ class HistoryEntryPayloadJsonCodecTest {
   }
 
   @Test
-  void rejectsOldTurnSettingsAndOldEnvironmentId() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.MESSAGE,
-                "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]},"
-                    + "\"turnSettings\":{\"agentName\":\"a\",\"yoloEnabled\":true},"
-                    + "\"assistantMetadata\":null,\"toolResultMetadata\":null}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environmentId\":\"env-1\",\"agentName\":\"a\","
-                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\"a\","
-                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
-  }
-
-  @Test
   void rejectsWrongTypeDispatchAndMalformedJson() {
     String rootJson = CODEC.encode(new RootPayload(settings(null)));
     String messageJson = CODEC.encode(new MessagePayload(user("hi"), null, null));
@@ -654,7 +628,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 EntryType.CUSTOM_MESSAGE,
                 "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
                     + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]},"
-                    + "\"details\":{},\"old\":1}"));
+                    + "\"details\":{},\"unexpected\":1}"));
   }
 
   @Test

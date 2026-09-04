@@ -78,13 +78,13 @@ describe('PermissionEditor UI', () => {
 
   it('retains a persisted tool ID missing from the catalog as an unavailable option', async () => {
     const user = userEvent.setup()
-    renderEditor([{ tool: 'legacy.read', rules: [{ pattern: '*', action: 'ask' }] }])
+    renderEditor([{ tool: 'missing.read', rules: [{ pattern: '*', action: 'ask' }] }])
 
-    const group = screen.getByLabelText('权限分组 legacy.read')
+    const group = screen.getByLabelText('权限分组 missing.read')
     const select = within(group).getByLabelText('工具')
-    expect(select).toHaveAttribute('data-value', 'legacy.read')
+    expect(select).toHaveAttribute('data-value', 'missing.read')
     await user.click(select)
-    expect(screen.getByRole('option', { name: 'legacy.read (不可用)' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'missing.read (不可用)' })).toBeInTheDocument()
   })
 
   it('edits the action of a rule via the select', async () => {

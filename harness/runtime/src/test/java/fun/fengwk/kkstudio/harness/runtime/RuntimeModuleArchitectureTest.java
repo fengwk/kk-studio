@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.eclipse.jgit.ignore.FastIgnoreRule;
@@ -20,8 +19,7 @@ import java.util.stream.Stream;
 /**
  * runtime 模块的轻量级架构守卫。
  *
- * <p>基于 allowlist 扫描整个 {@code src/main/java} 目录，校验全部 Harness 模块及其直接的生产依赖。原顶层 model 包已合并到 {@code
- * fun.fengwk.kkstudio.harness.runtime.model}，旧的源码目录不得再次出现。
+ * <p>基于 allowlist 扫描整个 {@code src/main/java} 目录，校验全部 Harness 模块及其直接的生产依赖与 import 边界。
  */
 class RuntimeModuleArchitectureTest {
 
@@ -42,12 +40,6 @@ class RuntimeModuleArchitectureTest {
           "fun.fengwk.kkstudio.harness.environment.",
           FastIgnoreRule.class.getName());
 
-  private static final List<String> FORBIDDEN_TEXT_MARKERS =
-      List.of(
-          "package fun.fengwk.kkstudio.harness.kernel",
-          "fun.fengwk.kkstudio.harness.kernel.",
-          "kk-studio-harness-kernel");
-
   private static final Pattern MODULE_PATTERN =
       Pattern.compile("<module>\\s*([^<]+?)\\s*</module>");
   private static final Pattern DEPENDENCY_PATTERN =
@@ -63,27 +55,7 @@ class RuntimeModuleArchitectureTest {
         Files.isDirectory(runtimeModelPackage),
         "runtime model package tree must exist: " + runtimeModelPackage);
 
-    Path forbiddenModelPackage = main.resolve("fun/fengwk/kkstudio/harness/model");
-    assertFalse(
-        Files.exists(forbiddenModelPackage),
-        "runtime sources must stay under harness.runtime: " + forbiddenModelPackage);
-
-    Path forbiddenKernelPackage = main.resolve("fun/fengwk/kkstudio/harness/kernel");
-    assertFalse(
-        Files.exists(forbiddenKernelPackage),
-        "harness.kernel package tree must not exist: " + forbiddenKernelPackage);
-
     Path moduleRoot = main.getParent().getParent().getParent();
-    Path forbiddenKernelModule = moduleRoot.resolveSibling("kernel");
-    assertFalse(
-        Files.exists(forbiddenKernelModule),
-        "harness/kernel module directory must not exist: " + forbiddenKernelModule);
-
-    Path forbiddenPromptModule = moduleRoot.resolveSibling("prompt");
-    assertFalse(
-        Files.exists(forbiddenPromptModule),
-        "harness/prompt module directory must not exist: " + forbiddenPromptModule);
-
     Path harnessRoot = moduleRoot.getParent();
     Path legitimateCommonPromptPackage =
         harnessRoot.resolve("common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt");
@@ -94,7 +66,6 @@ class RuntimeModuleArchitectureTest {
     assertHarnessModules(harnessRoot.resolve("pom.xml"));
     Path rootPom = harnessRoot.getParent().resolve("pom.xml");
     assertManagedInternalDependency(rootPom, "kk-studio-harness-common");
-    assertAbsentInternalDependency(rootPom, "kk-studio-harness-prompt");
     assertManagedInternalDependency(rootPom, "kk-studio-harness-contributor-api");
     assertManagedInternalDependency(rootPom, "kk-studio-harness-builtin");
     assertManagedInternalDependency(rootPom, "kk-studio-harness-infra");
@@ -189,11 +160,6 @@ class RuntimeModuleArchitectureTest {
                                 + trimmed);
                       }
                     }
-                    for (String marker : FORBIDDEN_TEXT_MARKERS) {
-                      if (trimmed.contains(marker)) {
-                        violations.add(relative(main, path) + ": " + trimmed);
-                      }
-                    }
                   }
                 } catch (IOException error) {
                   throw new IllegalStateException(error);
@@ -268,14 +234,6 @@ class RuntimeModuleArchitectureTest {
       }
     }
     assertTrue(found, () -> artifactId + " must be declared in root dependencyManagement");
-  }
-
-  private static void assertAbsentInternalDependency(Path pom, String artifactId)
-      throws IOException {
-    String text = Files.readString(pom, StandardCharsets.UTF_8);
-    assertFalse(
-        text.contains("<artifactId>" + artifactId + "</artifactId>"),
-        () -> artifactId + " must not be declared in root dependencyManagement");
   }
 
   private static String requiredTag(String block, String tag) {

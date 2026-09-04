@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util'
 
 import {
   assert,
+  assertExactFields,
   envelopeData,
   expectHttpError,
   httpJson,
@@ -47,7 +48,7 @@ registerCase({
   id: 'seed.structured_model_config',
   level: 'L1',
   title: 'Model 公开契约与 Pi 默认目录一致',
-  docs: 'GET /api/ai/catalog/models：按 providerName/name 完整匹配 Pi 0.82.1 快照；禁止资源 bigint ID 与旧 JSON 字段',
+  docs: 'GET /api/ai/catalog/models：按 providerName/name 完整匹配 Pi 0.82.1 快照与公开字段集合',
   async run(ctx) {
     const { json } = await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=50')
     const models = pageResults(json)
@@ -75,11 +76,12 @@ registerCase({
       })}`,
     )
     for (const model of models) {
+      assertExactFields(
+        model,
+        ['providerName', 'name', 'description', 'config', 'version', 'createTime', 'updateTime'],
+        'AgentModelDTO',
+      )
       assert(model.providerName && model.name, JSON.stringify(model))
-      assert(!('id' in model) && !('providerId' in model), JSON.stringify(model))
-      assert('config' in model, `missing config keys=${Object.keys(model)}`)
-      assert(!('configJson' in model), 'forbidden internal configJson field must not be public')
-      assert(!('capabilitiesJson' in model), 'forbidden internal capabilitiesJson field must not be public')
       assert(model.config?.defaultVariant, JSON.stringify(model.config))
       assert(
         Array.isArray(model.config?.variants) && model.config.variants.length > 0,
@@ -107,8 +109,22 @@ registerCase({
     const agents = pageResults(agentsJson)
     assert(agents.length > 0, 'no agents')
     const agent = agents.find((candidate) => candidate.name === 'default-assistant') || agents[0]
+    assertExactFields(
+      agent,
+      [
+        'name',
+        'description',
+        'systemPrompt',
+        'model',
+        'variant',
+        'config',
+        'version',
+        'createTime',
+        'updateTime',
+      ],
+      'AgentDefinitionDTO',
+    )
     assert(agent.name && agent.model && agent.variant && agent.config, JSON.stringify(agent))
-    assert(!('id' in agent) && !('modelId' in agent), JSON.stringify(agent))
     ctx.vars.agent = agent
 
     const { json: providersJson } = await ctx.call(
@@ -128,7 +144,21 @@ registerCase({
     for (const [name, providerType] of expectedProviderTypes) {
       const provider = providers.find((candidate) => candidate.name === name)
       assert(provider?.providerType === providerType, JSON.stringify({ name, providerType, provider }))
-      assert(!('id' in provider), JSON.stringify(provider))
+      assertExactFields(
+        provider,
+        [
+          'name',
+          'description',
+          'providerType',
+          'configured',
+          'modelCallTimeoutMillis',
+          'modelCallIdleTimeoutMillis',
+          'version',
+          'createTime',
+          'updateTime',
+        ],
+        'AgentProviderDTO',
+      )
     }
     ctx.vars.provider = providers.find((provider) => provider.name === 'minimax')
   },
@@ -1076,7 +1106,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知类型、额外字段、旧 environment 字段、缺失 workspacePath 与非法路径 => 400',
+  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知类型、额外字段、缺失 workspacePath 与非法路径 => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1271,7 +1301,7 @@ registerCase({
         }),
       { status: 400, messageIncludes: /workspacePath/i },
     )
-    // 严格 wire：旧的 environment 字段必须被拒绝（400 unknown HTTP command field: environment）。
+    // 严格 wire：未预期的字段必须被拒绝（400 unknown HTTP command field: unexpected）。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -1285,11 +1315,11 @@ registerCase({
             {
               type: 'SET_ENVIRONMENT',
               idempotencyKey: cid(),
-              environment: { name: 'Not-A-Name', workspacePath: '.' },
+              unexpected: { workspacePath: '.' },
             },
           ],
         }),
-      { status: 400, messageIncludes: /environment/i },
+      { status: 400, messageIncludes: /unexpected/i },
     )
     // 非法 canonical 相对路径也必须被拒绝（例如包含 ..）。
     await expectHttpError(
@@ -1425,7 +1455,11 @@ registerCase({
     )
     const model = pageResults(json)[0]
     assert(model?.providerName && model?.name && model?.config?.defaultVariant, JSON.stringify(model))
-    assert(!('id' in model) && !('providerId' in model), JSON.stringify(model))
+    assertExactFields(
+      model,
+      ['providerName', 'name', 'description', 'config', 'version', 'createTime', 'updateTime'],
+      'AgentModelDTO',
+    )
   },
 })
 

@@ -379,13 +379,6 @@ function extractPomModules(pomRelativePath) {
 }
 
 function checkRepositoryStructure() {
-  const obsoleteHarnessPrompt = path.join(repositoryRoot, 'harness/prompt')
-  if (existsSync(obsoleteHarnessPrompt)) {
-    addError(
-      `obsolete top-level harness/prompt module directory must not exist: ${relativeFromRoot(obsoleteHarnessPrompt)}`,
-    )
-  }
-
   const legitimatePromptPackage = path.join(
     repositoryRoot,
     'harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt',
@@ -423,6 +416,22 @@ function checkRepositoryStructure() {
     'infra',
     'daemon',
   ]
+  const harnessRoot = path.join(repositoryRoot, 'harness')
+  if (existsSync(harnessRoot)) {
+    const actualHarnessDirectories = readdirSync(harnessRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name !== 'target')
+      .map((entry) => entry.name)
+      .sort()
+    const expectedHarnessDirectories = [...expectedHarnessModules].sort()
+    if (
+      JSON.stringify(actualHarnessDirectories) !== JSON.stringify(expectedHarnessDirectories)
+    ) {
+      addError(
+        `harness directories mismatch: expected [${expectedHarnessDirectories.join(', ')}], found [${actualHarnessDirectories.join(', ')}]`,
+      )
+    }
+  }
+
   const harnessPomPath = path.join(repositoryRoot, 'harness/pom.xml')
   if (existsSync(harnessPomPath)) {
     const actualHarnessModules = extractPomModules('harness/pom.xml')
@@ -430,9 +439,6 @@ function checkRepositoryStructure() {
       addError(
         `harness/pom.xml modules mismatch: expected [${expectedHarnessModules.join(', ')}], found [${actualHarnessModules.join(', ')}]`,
       )
-    }
-    if (actualHarnessModules.includes('prompt')) {
-      addError('harness/pom.xml must not declare obsolete module: prompt')
     }
     for (const moduleName of expectedHarnessModules) {
       const moduleDir = path.join(repositoryRoot, 'harness', moduleName)

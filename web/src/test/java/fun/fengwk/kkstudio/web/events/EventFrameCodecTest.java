@@ -41,12 +41,12 @@ class EventFrameCodecTest {
   }
 
   @Test
-  void rejectsLegacyOpFrames() {
+  void rejectsFramesWithoutTypeAndVersion() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                "{\"op\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+                "{\"action\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
                     + THREAD
                     + "\"}}"));
   }
@@ -102,7 +102,7 @@ class EventFrameCodecTest {
             CODEC.decode(
                 "{\"version\":1,\"type\":\"subscribe\",\"resource\":"
                     + resource
-                    + ",\"op\":\"x\"}"));
+                    + ",\"extra\":\"x\"}"));
   }
 
   @Test

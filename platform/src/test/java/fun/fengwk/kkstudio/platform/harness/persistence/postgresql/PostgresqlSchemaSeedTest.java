@@ -304,7 +304,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                   + " 'default-assistant'");
           st.executeUpdate(
               "insert into agent_model (provider_name, name, description, config) "
-                  + "values ('stub', 'obsolete-stub-model', 'obsolete', '{}'::jsonb)");
+                  + "values ('stub', 'extraneous-stub-model', 'extraneous', '{}'::jsonb)");
         }
         assertSingleLong(
             conn,
@@ -328,7 +328,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 + " 'dev seed' and success = true",
             2L);
 
-        // 6. 断言 seed 数据被确定性收敛恢复：tampered 属性恢复，多余的 obsolete model 被清除
+        // 6. 断言 seed 数据被确定性收敛恢复：tampered 属性恢复，多余的 extraneous model 被清除
         assertDevSeedPresent(conn);
         assertSingleLong(conn, "select count(*) from agent_model where provider_name = 'stub'", 1L);
       }

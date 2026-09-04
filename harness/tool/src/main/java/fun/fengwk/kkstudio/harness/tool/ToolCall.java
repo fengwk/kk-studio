@@ -18,7 +18,7 @@ public record ToolCall(String id, String toolName, String argumentsJson) {
   }
 
   /**
-   * 静默归一化参数（如 {@code filePath}→{@code path}、整数字符串→integer），再用 schema 校验，同时校验工具名称一致。
+   * 静默归一化参数（数字字符串→integer/number），再用 schema 严格校验，同时校验工具名称一致。
    *
    * @return 持有归一化后参数的新 {@code ToolCall}；执行路径必须使用该返回值，不得再读取原始 JSON。
    */

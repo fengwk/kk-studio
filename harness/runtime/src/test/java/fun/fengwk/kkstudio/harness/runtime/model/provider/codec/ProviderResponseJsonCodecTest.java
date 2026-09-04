@@ -155,7 +155,7 @@ class ProviderResponseJsonCodecTest {
   /** 未知 stop reason 与非文本 enum 值必须被拒绝，不得降级处理。 */
   @Test
   void rejectsUnknownOrWrongTypedStopReason() {
-    assertRejected(root -> root.put("stopReason", "LEGACY_STOP"));
+    assertRejected(root -> root.put("stopReason", "UNKNOWN_STOP"));
     assertRejected(root -> root.put("stopReason", 1));
   }
 

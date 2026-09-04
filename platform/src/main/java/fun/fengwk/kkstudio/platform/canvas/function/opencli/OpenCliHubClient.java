@@ -31,7 +31,14 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
-/** 零媒体聚合的 OpenCLI Hub HTTP client。 */
+/**
+ * OpenCLI Hub 的 HTTP 协议客户端。
+ *
+ * <p>负责资源上传、作业提交与查询、尽力取消以及产物下载。上传使用定长分块发布者，下载将响应流交给调用方关闭；JSON 和错误响应始终按配置上限读取。
+ *
+ * <p>远端资源 URL 必须与 Hub 同源并位于 {@code /api/resources/} 下。客户端还会规范化上传文件名，校验响应
+ * envelope、输出长度和截断标记，避免把不完整结果交给下游。
+ */
 public class OpenCliHubClient {
 
   private static final Pattern EXECUTION_ID = Pattern.compile("[A-Za-z0-9-]{1,64}");
@@ -75,6 +82,7 @@ public class OpenCliHubClient {
     origin = settings.baseUrl() == null ? null : normalizeOrigin(URI.create(settings.baseUrl()));
   }
 
+  /** 以定长 multipart 流上传资源，并校验 Hub 返回的虚拟资源路径。 */
   public UploadedResource upload(
       String filename, String mediaType, long size, InputStream content) {
     requireEnabled();
@@ -145,6 +153,7 @@ public class OpenCliHubClient {
     return parseExecution(sendEnvelope(request));
   }
 
+  /** 查询执行状态；{@code waitSeconds > 0} 时使用长轮询超时。 */
   public Execution getExecution(String executionId, int waitSeconds) {
     requireEnabled();
     String id = validateExecutionId(executionId);
@@ -157,6 +166,7 @@ public class OpenCliHubClient {
     return parseExecution(sendEnvelope(request));
   }
 
+  /** 仅尝试取消 PENDING 作业；Hub 查询或取消失败不会改变调用方的本地终态。 */
   public void cancelPendingBestEffort(String executionId) {
     try {
       Execution execution = getExecution(executionId, 0);
@@ -175,6 +185,7 @@ public class OpenCliHubClient {
     }
   }
 
+  /** 打开通过同源校验的产物响应流；调用方必须关闭返回值。 */
   public HubResourceStream openResource(ExecutionResource resource) {
     requireEnabled();
     Objects.requireNonNull(resource, "resource");
@@ -348,6 +359,7 @@ public class OpenCliHubClient {
     }
   }
 
+  /** 将产物 URL 限制为 Hub 同源的 {@code /api/resources/} 路径。 */
   private URI resolveResourceUri(String value) {
     if (value == null || value.isBlank()) {
       throw malformed("execution resource has no contentUrl/downloadUrl");
@@ -404,6 +416,7 @@ public class OpenCliHubClient {
     return "https".equalsIgnoreCase(scheme) ? 443 : 80;
   }
 
+  /** 规范化上传文件名，并限制字符集、扩展名和总长度。 */
   private static String safeBasename(String filename) {
     if (filename == null) {
       throw new IllegalArgumentException("filename must not be null");
@@ -670,6 +683,7 @@ public class OpenCliHubClient {
     }
   }
 
+  /** 单订阅的定长输入流发布者；按 demand 分块读取，并在完成、失败或取消时关闭源流。 */
   private static final class FixedInputStreamPublisher implements Flow.Publisher<ByteBuffer> {
 
     private final InputStream input;

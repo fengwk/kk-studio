@@ -181,17 +181,16 @@ describe('system settings schema validation', () => {
     )
   })
 
-  it('rejects obsolete MiniMax H3 prompt environment field if declared in schema', () => {
-    // MiniMax H3 已废弃 prompt environment 字段；若服务端 schema 意外下发该废弃字段，
+  it('rejects unknown integration field if declared in schema', () => {
+    // 若服务端 schema 声明了 draft 未支持的未知属性，
     // validateSystemSettingsSchema 必须在读取 draft 时 fail-closed 报错，防止渲染出无效表单控件。
-    const obsoleteField = ['prompt', 'Environment', 'Name'].join('')
     const schema = makeSettingsSchema()
     const freshDraft = settingsSectionsToDraft(makeSettingsDto())
     const integrations = schema.sections.find((s) => s.key === 'integrations')!
     const minimaxGroup = integrations.groups.find((g) => g.key === 'integrations.minimaxH3')!
     minimaxGroup.fields.push({
-      path: `integrations.minimaxH3.${obsoleteField}`,
-      labelKey: 'settings.field.integrations.minimaxH3.obsolete',
+      path: 'integrations.minimaxH3.unknownField',
+      labelKey: 'settings.field.integrations.minimaxH3.unknown',
       hintKey: null,
       type: 'TEXT',
       nullable: true,
@@ -200,7 +199,7 @@ describe('system settings schema validation', () => {
       options: null,
     })
     expect(validateSystemSettingsSchema(schema, freshDraft)).toBe(
-      `unknown system settings draft path: integrations.minimaxH3.${obsoleteField}`,
+      'unknown system settings draft path: integrations.minimaxH3.unknownField',
     )
   })
 

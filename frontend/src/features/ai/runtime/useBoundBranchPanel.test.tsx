@@ -524,7 +524,7 @@ describe('useBoundBranchPanel', () => {
     )
   })
 
-  it('keeps the newer optimistic draft and suppresses yoloError when an obsolete intermediate request fails', async () => {
+  it('keeps the newer optimistic draft and suppresses yoloError when a superseded request fails', async () => {
     let rejectFirst: ((error: Error) => void) | null = null
     let releaseSecond: (() => void) | null = null
     const calls: Array<{ expectedVersion: string; yoloEnabled: boolean }> = []

@@ -92,12 +92,12 @@ test('run-agent-matrix contract: accepted snapshot assertions enforce the canoni
     ),
     /Thread workspacePath mismatch/,
   )
-  // 旧的 environment 字段若残留，branch settings shape 校验必须拒绝。
-  const staleEnvironment = structuredClone(accepted)
-  staleEnvironment.thread.branchSettings.environment = { name: DAEMON_ENV, workspacePath: '.' }
+  // 携带未预期字段时，branch settings shape 校验必须拒绝。
+  const unexpectedShape = structuredClone(accepted)
+  unexpectedShape.thread.branchSettings.unexpected = 'invalid'
   assert.throws(
     () => assertThreadSettings(
-      staleEnvironment,
+      unexpectedShape,
       fakeCase(model),
       '.',
       chat.agentName,

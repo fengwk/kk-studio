@@ -2,7 +2,7 @@
 
 ## 定位
 
-Environment Daemon 是独立运行的宿主进程，负责在受限的环境根目录（Environment root）内提供代码能力执行、本地技能发现与按需加载、目录安全浏览以及 Daemon WebSocket 协议 v6 通信。它引入 `harness-common` 的基础值对象与 `harness-environment` 的能力 SPI 及通信协议编解码器，与上层的 Model、Tool、Runtime 状态机及业务数据库保持解耦。
+Environment Daemon 是独立运行的宿主进程，负责在受限的环境根目录（Environment root）内提供代码能力执行、本地技能发现与按需加载、目录安全浏览以及 Daemon WebSocket 协议 v1 通信。它引入 `harness-common` 的基础值对象与 `harness-environment` 的能力 SPI 及通信协议编解码器，与上层的 Model、Tool、Runtime 状态机及业务数据库保持解耦。
 
 [`DaemonMain`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonMain.java) 是进程入口；[`DaemonRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java) 统筹网络连接、执行日志（journal）、能力异步调度、重连退避、超时判定以及进程生命周期。Daemon 进程内以 Invocation journal 维护执行状态的权威事实；WebSocket 连接作为纯消息传输管道，连接的中断与重建不会破坏正在进行的执行状态，支持重连后幂等重放。
 
@@ -112,9 +112,9 @@ lsp.goto-definition, lsp.workspace-symbols, lsp.java-decompile
 
 ```text
 DISCONNECTED -> CONNECTING
-  -> HELLO(protocolVersion=6, registrationToken, capabilityCatalogVersion)
+  -> HELLO(protocolVersion=1, registrationToken, capabilityCatalogVersion)
   <- WELCOME(environmentId)
-  -> READY(capabilities version=6, environment + skills)
+  -> READY(capabilities version=1, environment + skills)
   -> READY + HEARTBEAT
 ```
 

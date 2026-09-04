@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 
-/** SubagentConfig 的进程级并发/预算参数校验；观察参数不再包含轮询间隔。 */
+/** SubagentConfig 的进程级并发与预算参数校验。 */
 class SubagentConfigTest {
 
   private static final Duration ONE_MS = Duration.ofMillis(1);

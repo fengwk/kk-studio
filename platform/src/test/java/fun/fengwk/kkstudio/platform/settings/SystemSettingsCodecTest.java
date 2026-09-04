@@ -269,11 +269,26 @@ class SystemSettingsCodecTest {
   }
 
   @Test
-  void caseInsensitiveEnumStillDecodes() throws Exception {
-    // canonical 现网格式保存大写枚举名；小写别名必须仍可解码（ACCEPT_CASE_INSENSITIVE_ENUMS 保持不变）。
-    ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
-    ((ObjectNode) root.get("aiRuntime")).put("retryBackoffStrategy", "exponential");
-    assertEquals(SystemSettings.DEFAULT, codec.decode(mapper.writeValueAsString(root)));
+  void rejectsNonCanonicalEnumValues() throws Exception {
+    ObjectNode invalidStrategy = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
+    ((ObjectNode) invalidStrategy.get("aiRuntime")).put("retryBackoffStrategy", "exponential");
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode(mapper.writeValueAsString(invalidStrategy)));
+
+    ObjectNode invalidPermission =
+        (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
+    ObjectNode firstRule =
+        (ObjectNode)
+            invalidPermission
+                .path("tool")
+                .path("permission")
+                .path(BuiltinToolIds.WRITE.value())
+                .get(0);
+    firstRule.put("action", "ASK");
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode(mapper.writeValueAsString(invalidPermission)));
   }
 
   @Test

@@ -13,7 +13,7 @@ test('offline reassessment accepts an intact case-local absolute write path', ()
   const previous = {
     status: 'fail',
     failureCategory: 'model',
-    error: 'old relative-only policy rejected the write path',
+    error: 'prior result rejected the write path',
     errorDetails: null,
     turnStarted: true,
     tests: { precheck: 'expected-fail-confirmed', postcheck: 'pass', diffCheck: 'pass' },
@@ -65,7 +65,7 @@ test('offline reassessment exits nonzero when the reassessed matrix still fails'
     taskClass: repair.taskClass,
     status: 'fail',
     failureCategory: 'oracle',
-    error: 'old failure',
+    error: 'prior failure',
     errorDetails: null,
     turnStarted: true,
     costKnown: true,

@@ -47,11 +47,13 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 基于持久工作流配置的无状态 ComfyUI 运行服务。
+ * 基于已配置工作流的 ComfyUI 运行门面。
  *
- * <p>运行期不持久化任何 run / task；{@code runId} 直接等于 ComfyUI prompt / job id。S3 文件输入走 {@link
- * S3StorageService#download(String, long)} 实现大小上限保护；选择器走 {@link
- * ComfyuiWorkflowApiSelectorValidator} 静态规则 + JsonPath compile 校验。
+ * <p>服务解析绑定、校验并转换输入、提交工作流、查询或取消作业，并归一化终态输出。它不在本地保存 Run；对外的 {@code runId} 直接使用 ComfyUI 返回的 prompt
+ * ID。
+ *
+ * <p>文件输入先按大小上限从 S3 读取，再上传到 ComfyUI。参数转换由绑定类型驱动，结果选择器先经过语法校验，产物通过 {@code (nodeId, mediaType,
+ * index)} 定位。
  *
  * @author fengwk
  */
@@ -94,6 +96,7 @@ public class ComfyuiRuntimeService {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
   }
 
+  /** 解析绑定并提交工作流；文件输入会先从 S3 中转到 ComfyUI。 */
   public ComfyuiWorkflowRunDTO run(String apiName, ComfyuiWorkflowRunRequestDTO request) {
     ComfyUIClient client = requireClient();
     ComfyuiWorkflowApiBindings configured =
@@ -149,6 +152,7 @@ public class ComfyuiRuntimeService {
         .build();
   }
 
+  /** 查询作业；仅在终态归一化输出，并按已校验的 JsonPath 选择器投影结果。 */
   public ComfyuiWorkflowJobDTO getJob(String runId, String select) {
     String validatedSelector = ComfyuiWorkflowApiSelectorValidator.validate(select);
     ComfyUIJob job = getRawJob(runId);
@@ -184,6 +188,7 @@ public class ComfyuiRuntimeService {
         .build();
   }
 
+  /** 向 ComfyUI 发送取消作业指令。 */
   public ComfyuiWorkflowCancelDTO cancel(String runId) {
     boolean cancelled =
         Boolean.TRUE.equals(
@@ -193,6 +198,7 @@ public class ComfyuiRuntimeService {
     return ComfyuiWorkflowCancelDTO.builder().runId(runId).cancelled(cancelled).build();
   }
 
+  /** 按 {@code (nodeId, mediaType, index)} 定位并下载产物。 */
   public ComfyuiFileDownload downloadFile(
       String runId, String nodeId, String mediaType, int index) {
     if (index < 0) {
@@ -473,6 +479,7 @@ public class ComfyuiRuntimeService {
         : result.getName();
   }
 
+  /** 要求上传文件名是长度受限且不含路径分隔符或控制字符的基名。 */
   private static String resolveFilename(String requestedFilename, String key) {
     String filename = trimToNull(requestedFilename);
     if (filename == null) {

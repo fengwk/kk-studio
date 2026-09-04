@@ -8,9 +8,8 @@ export const DEFAULT_CANVAS_VIEWPORT: StoredCanvasViewport = { x: 0, y: 0, zoom:
 export const MIN_CANVAS_ZOOM = 0.25
 export const MAX_CANVAS_ZOOM = 2
 
-// v6 迁移 UUID 实体 id：v5 的十进制 id 时代条目不再读取。
 export function canvasViewportStorageKey(canvasId: string): string {
-  return `kkstudio.canvas.viewport.v6:${canvasId}`
+  return `kkstudio.canvas.viewport.v1:${canvasId}`
 }
 
 export function hasStoredCanvasViewport(

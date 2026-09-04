@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 
 import java.util.List;
 
-/** Thread command payload codec：严格 canonical 形态、无类型 JSON 与旧字段拒绝。 */
+/** Thread command payload codec：严格 canonical 形态、无类型 JSON 与未知字段拒绝。 */
 class ThreadCommandPayloadJsonCodecTest {
 
   private static final String ENV = "123e4567-e89b-12d3-a456-426614174000";
@@ -94,33 +94,9 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.SET_AGENT, "{\"agentName\":\" a\"}"));
-    // 旧 wire 的 name-only 字段（environmentName）不再是合法输入，必须拒绝。
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":5}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"Not-A-Name\"}"));
-    // 旧 wire：environment 对象不是合法输入，必须被拒绝。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                ThreadCommandType.SET_ENVIRONMENT, "{\"environment\":{\"name\":\"" + ENV + "\"}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                ThreadCommandType.SET_ENVIRONMENT,
-                "{\"environment\":{\"name\":\"Not-A-Name\",\"workspacePath\":\".\"}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                ThreadCommandType.SET_ENVIRONMENT,
-                "{\"environment\":{\"name\":\"" + ENV + "\",\"workspacePath\":\"/abs\"}}"));
+        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"unexpected\":1}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.USER_MESSAGE, "{\"message\":[]}"));
@@ -145,10 +121,7 @@ class ThreadCommandPayloadJsonCodecTest {
   }
 
   @Test
-  void rejectsOldEnvironmentIdFieldAndWrongTypeDispatch() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentId\":\"env-1\"}"));
+  void rejectsWrongTypeDispatch() {
     String userJson = codec.encode(new UserMessageCommandPayload(user("hello")));
     assertThrows(
         IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, userJson));

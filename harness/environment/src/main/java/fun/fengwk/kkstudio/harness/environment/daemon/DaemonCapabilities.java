@@ -12,7 +12,7 @@ public record DaemonCapabilities(
     int version, DaemonEnvironmentInfo environment, List<DaemonSkillDescriptor> skills) {
 
   /** READY capabilities 协议版本；与 {@link DaemonCapabilitiesCodec} 共享。 */
-  public static final int VERSION = 6;
+  public static final int VERSION = 1;
 
   public DaemonCapabilities {
     if (version != VERSION) {

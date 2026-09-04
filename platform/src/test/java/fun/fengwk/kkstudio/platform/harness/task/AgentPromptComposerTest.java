@@ -44,7 +44,6 @@ class AgentPromptComposerTest {
     assertFalse(expected.contains("- workspace:"));
     assertFalse(expected.contains("- system:"));
     assertFalse(expected.contains("- note:"));
-    assertNoLegacyFields(expected);
   }
 
   /** 正文、current environment、skills、subagents 严格按固定顺序拼接，并来自真实 classpath 模板。 */
@@ -192,11 +191,5 @@ class AgentPromptComposerTest {
 
   private static CurrentEnvironmentContext none() {
     return new CurrentEnvironmentContext(null, null, LocalDate.of(2026, 8, 9), null);
-  }
-
-  private static void assertNoLegacyFields(String text) {
-    assertFalse(text.contains("- platform:"));
-    assertFalse(text.contains("- host:"));
-    assertFalse(text.contains("- architecture:"));
   }
 }

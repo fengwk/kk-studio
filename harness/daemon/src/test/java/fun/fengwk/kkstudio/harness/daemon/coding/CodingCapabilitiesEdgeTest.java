@@ -290,13 +290,13 @@ class CodingCapabilitiesEdgeTest {
       "kkstudio.daemon.bash"
     };
     String[] old = new String[names.length];
-    Path legacyRoot = Files.createDirectory(environmentRoot.resolve("legacy-root"));
+    Path customRoot = Files.createDirectory(environmentRoot.resolve("custom-root"));
     for (int index = 0; index < names.length; index++) {
       old[index] = System.getProperty(names[index]);
     }
     try {
-      System.setProperty(names[0], legacyRoot.toString());
-      System.setProperty(names[1], legacyRoot.toString());
+      System.setProperty(names[0], customRoot.toString());
+      System.setProperty(names[1], customRoot.toString());
       System.setProperty(names[2], environmentRoot.resolve("local-resources").toString());
       System.setProperty(names[3], "4");
       System.setProperty(names[4], "custom-bash");

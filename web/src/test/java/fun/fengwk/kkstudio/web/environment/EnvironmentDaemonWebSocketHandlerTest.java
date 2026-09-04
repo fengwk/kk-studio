@@ -24,7 +24,7 @@ class EnvironmentDaemonWebSocketHandlerTest {
 
   @Test
   void exposesTheAiEnvironmentDaemonPath() {
-    assertEquals("/api/ai/environment/daemon/v2", EnvironmentDaemonWebSocketHandler.PATH);
+    assertEquals("/api/ai/environment/daemon/v1", EnvironmentDaemonWebSocketHandler.PATH);
   }
 
   /** 关闭事件先且只向 Gateway 解绑一次；sender 随后独立关闭。 */

@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -232,9 +233,8 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
   }
 
   @Test
-  public void reserveAcceptsStringSizeBytesRequest() throws Exception {
+  public void reserveRejectsStringSizeBytesRequest() throws Exception {
     byte[] content = "sized".getBytes(StandardCharsets.UTF_8);
-    // 请求侧 sizeBytes 保持 Long，JSON string 由 Jackson coercion 解析，与 number 等价。
     mockMvc
         .perform(
             post("/api/storage/uploads")
@@ -245,9 +245,7 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
                      "sizeBytes":"%d","sha256":"%s"}
                     """
                         .formatted(content.length, sha256Hex(content))))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.state").value("PENDING"))
-        .andExpect(jsonPath("$.data.blobId").value(nullValue()));
+        .andExpect(status().isBadRequest());
   }
 
   @Test
@@ -365,11 +363,11 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
 
   private String reserveBody(String filename, String mediaType, long size, String sha256)
       throws Exception {
-    StorageUploadReserveRequestDTO request = new StorageUploadReserveRequestDTO();
-    request.setFilename(filename);
-    request.setMediaType(mediaType);
-    request.setSizeBytes(size);
-    request.setSha256(sha256);
+    ObjectNode request = objectMapper.createObjectNode();
+    request.put("filename", filename);
+    request.put("mediaType", mediaType);
+    request.put("sizeBytes", size);
+    request.put("sha256", sha256);
     return objectMapper.writeValueAsString(request);
   }
 

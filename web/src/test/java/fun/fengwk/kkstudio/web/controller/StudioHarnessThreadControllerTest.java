@@ -41,7 +41,7 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 import java.util.List;
 import java.util.UUID;
 
-/** Harness Thread 控制/查询 API：snapshot availability、compact、yolo/stop/approval 与旧路由逆证。 */
+/** Harness Thread 控制/查询 API：snapshot availability、compact、yolo、stop 与 approval。 */
 class StudioHarnessThreadControllerTest {
 
   private static UUID id(long value) {
@@ -209,25 +209,5 @@ class StudioHarnessThreadControllerTest {
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
     verify(runtime).decideToolApproval(captor.capture());
     assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
-  }
-
-  @Test
-  void oldCommandHeadAndThreadEntryRoutesHaveNoCompatibilityAlias() throws Exception {
-    // 逆证：旧 mailbox/head/thread-entry 路由不应被保留为兼容 alias。
-    mockMvc
-        .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{}"))
-        .andExpect(status().isNotFound());
-    mockMvc
-        .perform(
-            put("/api/ai/runtime/threads/" + idText(1) + "/head")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{}"))
-        .andExpect(status().isNotFound());
-    mockMvc
-        .perform(get("/api/ai/runtime/threads/" + idText(1) + "/entries"))
-        .andExpect(status().isNotFound());
   }
 }

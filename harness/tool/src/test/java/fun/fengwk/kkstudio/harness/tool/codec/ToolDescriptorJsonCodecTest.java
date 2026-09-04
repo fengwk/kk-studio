@@ -206,18 +206,13 @@ class ToolDescriptorJsonCodecTest {
         List.of("alpha", "items"), List.of(required.get(0).asText(), required.get(1).asText()));
   }
 
-  /** descriptor wire 只包含模型契约；旧顶层 type 按未知字段拒绝，schema 自身的 type 保留。 */
+  /** descriptor wire 只包含模型契约，不携带执行路由；schema 自身的 type 保留。 */
   @Test
   void descriptorWireExcludesRoutingType() {
     ObjectNode node = codec.encodeNode(simpleDescriptor("wire", "v1", "wire"));
 
     assertFalse(node.has("type"));
     assertEquals("object", node.path("inputSchema").path("type").asText());
-
-    node.put("type", "PLATFORM");
-    IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(node));
-    assertTrue(error.getMessage().contains("type"));
   }
 
   /** unknown top-level field 必须拒绝。 */

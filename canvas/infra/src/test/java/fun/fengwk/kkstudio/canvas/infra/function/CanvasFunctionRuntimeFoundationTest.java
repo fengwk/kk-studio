@@ -100,9 +100,14 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         CanvasFunctionRunException.class,
         () -> runtimeTransactions.start(canvasId, nodeId, REQUEST_2));
 
+    CanvasFunctionFrozenRun firstFrozen = decode(first);
+    CanvasResource cancelledTarget =
+        addBlobResource(canvasId, null, null, firstFrozen.targetResourceId());
     runtimeTransactions.cancel(canvasId, nodeId, REQUEST_1);
     CanvasFunctionRun cancelledReplay = runtimeTransactions.cancel(canvasId, nodeId, REQUEST_1);
     assertEquals(CanvasFunctionRunStatus.CANCELLED, cancelledReplay.status());
+    assertTrue(pinRepository.findByRun(canvasId, nodeId, first.requestId()).isEmpty());
+    assertTrue(resourceRepository.findById(canvasId, cancelledTarget.id()).isEmpty());
     assertEquals(2L, version(canvasId), "terminal cancel replay must not bump version");
     CanvasFunctionRun replacement = runtimeTransactions.start(canvasId, nodeId, REQUEST_2).run();
     assertNotEquals(first.requestId(), replacement.requestId());
@@ -134,6 +139,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertEquals(
         CanvasFunctionRunStatus.SUCCEEDED,
         runRepository.findByNodeId(targetNodeId).orElseThrow().status());
+    assertTrue(pinRepository.findByRun(canvasId, targetNodeId, frozen.requestId()).isEmpty());
     assertEquals(2L, version(canvasId), "start and terminal swap each bump once");
   }
 
@@ -167,7 +173,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertFalse(current.stateJson().contains("jobId"));
   }
 
-  /** checkpoint/failure 必须由当前 lease token fencing；旧 token 只产生内部取消或 no-op。 */
+  /** checkpoint/failure 必须由当前 lease token fencing；失效 token 只产生内部取消或 no-op。 */
   @Test
   void checkpointAndFailureRequireTheCurrentLease() {
     UUID canvasId = addDocument();
@@ -188,10 +194,11 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     CanvasFunctionRun failed = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.FAILED, failed.status());
     assertEquals("safe failure", failed.error());
+    assertTrue(pinRepository.findByRun(canvasId, nodeId, failed.requestId()).isEmpty());
     assertEquals(3L, version(canvasId));
   }
 
-  /** completeSuccess 的旧 token 必须在读取/交换 target 前失效，不能污染可见资源。 */
+  /** completeSuccess 的失效 token 必须在读取/交换 target 前被拒绝，不能污染可见资源。 */
   @Test
   void completeSuccessWithStaleLeaseIsANoOp() {
     UUID canvasId = addDocument();
@@ -206,6 +213,28 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertEquals(CanvasFunctionRunStatus.RUNNING, current.status());
     assertEquals(claim.leaseToken(), current.leaseToken());
     assertTrue(resourceRepository.findById(canvasId, target.id()).isPresent());
+    assertEquals(1L, version(canvasId));
+  }
+
+  /** 节点不再是 Function 后，迟到的成功与失败写回都必须保持 no-op。 */
+  @Test
+  void terminalWritebacksStopAfterNodeIsNoLongerAFunction() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-node-fence");
+    CanvasFunctionFrozenRun frozen = decode(claim.run());
+    jdbc.update(
+        "update canvas_node set model_key = null, function_config_json = null where id = ?",
+        nodeId);
+
+    assertFalse(
+        runtimeTransactions.completeSuccess(
+            frozen, claim.leaseToken(), List.of(frozen.targetResourceId())));
+    assertFalse(
+        runtimeTransactions.failIfRunning(
+            nodeId, REQUEST_1, claim.leaseToken(), "ignored failure"));
+    assertEquals(
+        CanvasFunctionRunStatus.RUNNING, runRepository.findByNodeId(nodeId).orElseThrow().status());
     assertEquals(1L, version(canvasId));
   }
 

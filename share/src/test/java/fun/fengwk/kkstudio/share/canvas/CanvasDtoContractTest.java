@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.canvas;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -47,6 +48,18 @@ class CanvasDtoContractTest {
           version.getType(),
           field + " must be String so the wire is always a decimal string");
     }
+  }
+
+  /** expectedVersion 只接收 JSON string；显式 null 留给请求校验层处理。 */
+  @Test
+  void applyCommandsExpectedVersionRejectsNonStringScalars() {
+    ApplyCanvasCommandsRequestDTO request = new ApplyCanvasCommandsRequestDTO();
+
+    request.setExpectedVersion("7");
+    assertEquals("7", request.getExpectedVersion());
+    request.setExpectedVersion(null);
+    assertNull(request.getExpectedVersion());
+    assertThrows(IllegalArgumentException.class, () -> request.setExpectedVersion(7L));
   }
 
   @Test

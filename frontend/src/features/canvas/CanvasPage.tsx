@@ -26,7 +26,7 @@ export function CanvasPage() {
     defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
   }))
 
-  // 只接受 canonical UUID 深链；非 UUID id（包括旧十进制 id）重定向回库。
+  // 只接受 canonical UUID 深链；非规范 UUID 标识一律重定向回库。
   if (canvasId !== undefined && !isCanonicalUuid(canvasId)) {
     return <Navigate to="/canvas" replace />
   }

@@ -223,8 +223,8 @@ describe('Canvas snapshot projection', () => {
     }])[0]?.selected).toBe(true)
     expect(groupIdFromFlowId(`group:${GROUP_A}`)).toBe(GROUP_A)
     expect(groupIdFromFlowId(`group:0${GROUP_A}`)).toBeNull()
-    // 旧十进制 group flow id 一律拒绝（不再有 decimal 解码路径）。
-    expect(groupIdFromFlowId('group:4')).toBeNull()
+    // 非 canonical UUID flow id 一律拒绝。
+    expect(groupIdFromFlowId('group:invalid-group-id')).toBeNull()
     expect(groupIdFromFlowId('group:')).toBeNull()
     expect(groupIdFromFlowId(NODE_IMAGE)).toBeNull()
   })

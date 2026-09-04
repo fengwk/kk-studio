@@ -76,18 +76,14 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
- * 生产 {@link ToolGateway}：基于单一 Contributor {@link Tool} SPI 的权限 preflight 与 admission 路由。
+ * 生产工具执行网关，连接 Harness Runtime、运行时工具目录和 Contributor {@link Tool} SPI。
  *
- * <p>{@link #preflight} 是纯判定：先由 {@link RuntimeToolCatalog} 按冻结 definition id 恢复
- * ToolContribution/AgentToolId， 校验 definition、contributor provenance 与 requirements 不变；再用 {@link
- * PermissionEvaluator} + 部署 {@link ToolSettings} + 配置的 workdir/environmentRoot 评估冻结的
- * call/binding；缺失 contribution 或 definition 漂移直接生成确定性 Deny，绝不进入 evaluator，也不改写
- * binding/arguments。YOLO 短路由由 Runtime 决定，本类不感知 YOLO 也不查询 HarnessStore。保留的 {@link HarnessCatalog}
- * 仅用于 custom entry type 的合法性校验。
+ * <p>{@link #preflight} 只校验冻结绑定与当前目录是否一致，并执行权限判定。{@link #start} 获取并发租约，装配分支视图与可选环境绑定，再提交异步执行。
  *
- * <p>{@link #start} 采用单一执行路径：查找 {@link ToolContribution}，全量校验冻结 definition + contributor provenance
- * + requirements，构建作用域受限的 {@link BranchView} 与可选 {@link BoundEnvironment}，构造 {@link
- * ToolExecutionContext}， 并通过两阶段门控回调桥提交 {@link Tool#execute} 执行。
+ * <p>工具在句柄 {@link ToolGateway.Handle#activate()} 前不会开始执行。回调桥以有界 FIFO
+ * 串行派发信号，并保证单次终态；取消、拒绝、启动失败或终态都会释放租约。远程发送结果不确定时上报 {@code unknown}，不按普通失败处理。
+ *
+ * <p>终态结果进入 Runtime 前会校验 call ID、自定义条目注册与 WRITE 声明，并按大小限制外部化内容。
  */
 @Slf4j
 public final class ToolExecutionGateway implements ToolGateway {
@@ -234,6 +230,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     return true;
   }
 
+  /** 只读校验冻结工具绑定，并返回当前权限策略的判定。 */
   @Override
   public PreflightResult preflight(ToolInvocationRequest request) {
     Objects.requireNonNull(request, "request");
@@ -265,6 +262,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     return workdir;
   }
 
+  /** 获取并发租约并准备异步执行；实际工具调用等待返回句柄被激活。 */
   @Override
   public StartResult start(Execution execution, Listener listener) {
     Objects.requireNonNull(execution, "execution");
@@ -625,10 +623,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     }
   }
 
-  /**
-   * Tool 回调门控桥：支持单一 {@link ToolExecutionListener}，提供两阶段激活、缓冲保护、 FIFO 串行分发、自定义 effects 所有权与 WRITE
-   * 声明校验、Managed Resource 外部化与 terminal-once 回调语义。
-   */
+  /** 在激活前缓冲回调，激活后串行派发，并将一次终态作为租约释放边界。 */
   private static final class GatedToolExecutionListener implements ToolExecutionListener {
     private final ToolGateway.Listener listener;
     private final ToolResultExternalizer externalizer;
@@ -877,6 +872,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       };
     }
 
+    /** 仅接受已注册且由当前工具声明 WRITE 权限的自定义条目。 */
     private ToolEffectBatch mapEffects(ToolOutcome outcome) {
       if (outcome.customEntries().isEmpty()) {
         return ToolEffectBatch.EMPTY;
@@ -913,6 +909,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       return new ToolEffectBatch(payloads);
     }
 
+    /** 将执行异常映射为终态；远程发送不确定性必须保持为 {@code unknown}。 */
     private boolean processError(Throwable error) {
       if (error == null) {
         return unknown(null, "tool reported a null error; outcome cannot be confirmed");

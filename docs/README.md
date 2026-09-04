@@ -29,7 +29,7 @@
 | harness-common | [modules/harness-common.md](modules/harness-common.md) | Prompt、JSON、ResourceRef、ResultContent 与 InputSchema 基础契约 |
 | harness-contributor-api | [modules/harness-contributor-api.md](modules/harness-contributor-api.md) | Trusted Java Contributor SPI 与 catalog |
 | harness-daemon | [modules/harness-daemon.md](modules/harness-daemon.md) | Environment Daemon 与本地工具执行 |
-| harness-environment | [modules/harness-environment.md](modules/harness-environment.md) | Environment binding、Capability 与 Daemon v6 wire |
+| harness-environment | [modules/harness-environment.md](modules/harness-environment.md) | Environment binding、Capability 与 Daemon v1 wire |
 | harness-infra | [modules/harness-infra.md](modules/harness-infra.md) | Harness Store、Work、通知和 ResourceStore |
 | harness-runtime | [modules/harness-runtime.md](modules/harness-runtime.md) | Agent Runtime 状态机与 processors |
 | harness-tool | [modules/harness-tool.md](modules/harness-tool.md) | Tool identity、descriptor、call/result 与 Tool JSON codecs |

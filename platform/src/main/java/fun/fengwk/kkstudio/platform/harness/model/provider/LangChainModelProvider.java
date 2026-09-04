@@ -697,7 +697,7 @@ abstract class LangChainModelProvider implements ModelProvider {
       }
       String canonical =
           id == null || id.isBlank()
-              ? "compat_" + index + "_" + UUID.randomUUID().toString().replace("-", "")
+              ? "tool_call_" + index + "_" + UUID.randomUUID().toString().replace("-", "")
               : id;
       ids.put(index, canonical);
       return canonical;

@@ -299,10 +299,10 @@ class HarnessContractTest {
   @Test
   void toolExecutionRequestNormalizesAndResolvesTimeout() {
     ToolCall rawCall =
-        new ToolCall("call-1", "test_tool", "{\"filePath\":\"README.md\",\"offset\":\"20\"}");
+        new ToolCall("call-1", "test_tool", "{\"offset\":\"20\",\"path\":\"README.md\"}");
     ToolExecutionRequest request = new ToolExecutionRequest(DESCRIPTOR, rawCall, Duration.ZERO);
 
-    // 校验 call 已被归一化：filePath 转为 path，整数字符串转为 integer
+    // 校验 call 已被归一化：整数字符串转为 integer
     assertEquals("{\"offset\":20,\"path\":\"README.md\"}", request.call().argumentsJson());
     // 请求超时为 ZERO 时使用 descriptor 的默认超时
     assertEquals(Duration.ofSeconds(30), request.effectiveTimeout());
