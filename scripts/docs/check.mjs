@@ -419,7 +419,11 @@ function checkRepositoryStructure() {
   const harnessRoot = path.join(repositoryRoot, 'harness')
   if (existsSync(harnessRoot)) {
     const actualHarnessDirectories = readdirSync(harnessRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name !== 'target')
+      // Dot-prefixed directories are local IDE/tool metadata, not repository modules.
+      .filter(
+        (entry) =>
+          entry.isDirectory() && entry.name !== 'target' && !entry.name.startsWith('.'),
+      )
       .map((entry) => entry.name)
       .sort()
     const expectedHarnessDirectories = [...expectedHarnessModules].sort()
