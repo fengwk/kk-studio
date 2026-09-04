@@ -83,7 +83,7 @@ public interface ToolGateway {
           ToolGateway.Rejected,
           ToolGateway.Indeterminate {}
 
-  /** 调用已接受并开始；{@code handle} 提供 best effort 取消。 */
+  /** 准入成功并已准备 {@code handle}；外部执行须等待 {@link Handle#activate()}，尚未开始。 */
   record Started(Handle handle) implements StartResult {
     public Started {
       handle = Objects.requireNonNull(handle, "handle");

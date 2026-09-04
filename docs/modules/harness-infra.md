@@ -122,11 +122,11 @@ lease_token / lease_until 保持不变
 - request 对已冻结 affinity 的冲突拒绝：upsert 的 update 语句包含条件 `where (harness_work.required_environment_id is not distinct from excluded.required_environment_id or excluded.required_environment_id is null)`。若已存在的 Work 已经绑定了 `required_environment_id`，而后续 request 传入了不一致的非空 affinity，UPDATE 条件不匹配导致 0 行更新，`writeOne` 抛出 `IllegalArgumentException("conflicting requiredEnvironmentId for work target ...")` 明确拒绝冲突，防止执行中发生环境漂移。
 
 `claimNextWork` 是 Work-only 短事务，按如下规则选取一条 candidate 并原子写入新 `lease_token` 与 `lease_until`：
-- candidate 按 `available_at <= statement_timestamp()` 且 `(lease_until is null or lease_until <= statement_timestamp())` 筛选，按 `available_at, target_id` 升序排序，使用 `FOR UPDATE SKIP LOCKED` 悲观跳过被并发事务锁定或已被持有的行；
+- candidate 按 `available_at <= statement_timestamp()` 且 `(lease_until is null or lease_until <= statement_timestamp())` 筛选，按 `available_at, target_id` 升序排序，使用 `FOR UPDATE SKIP LOCKED` 跳过正在被其它 claim 事务锁定的行；尚未到期的既有 lease 由前述条件过滤，不由 `SKIP LOCKED` 判断；
 - Environment route 路由围栏：
   - `required_environment_id` 为空时，无 Environment affinity，任何活跃 Dispatcher 节点均可 claim；
   - `required_environment_id` 非空时，只有 `environment_connection.environment_id` 匹配、`owner_node_id` 等于 Dispatcher 的当前 `nodeInstanceId`、状态 `READY` 且 `lease_until > statement_timestamp()` 的节点可 claim；
-  - 路由不确定（连接不存在、处于非 `READY` 状态、连接 lease 过期、归属其他节点）或数据库失败时严格 fail closed（该 candidate 不被选中）；
+  - 路由不确定（连接不存在、处于非 `READY` 状态、连接 lease 过期、归属其他节点）时严格 fail closed，该 candidate 不被选中；数据库查询失败则抛错并使整个 claim 事务失败，不提交任何租约；
   - 围栏层次区分：Environment route 路由围栏（面向外部网络拓扑与节点环境绑定的路由准入）与底层 PostgreSQL 行级悲观并发控制 `FOR UPDATE SKIP LOCKED`（行级跳锁，避免节点间加锁排队等待）以及应用层 Work lease 租约（`lease_token` / `lease_until` 所有权围栏）属于完全不同层次的机制，互不替代；避免把 `SKIP LOCKED` 误称为分布式锁或 leader 机制。
 
 所有权围栏与生命周期原语：
@@ -200,7 +200,7 @@ PostgreSQL connection 断开不改变 Entry/Invocation/Work；Work lease 过期�
 
 - Store callback 正常返回才完成当前 transaction；Runtime exception/Error 使当前边界回滚；数据库 failure 在 callback 返回前重新抛出。
 - `requestWork` 必须在 owning Thread 已锁定时执行；dispatcher claim 是唯一允许先获取 Work lock 的单 Work primitive。
-- `harness_work.required_environment_id` 仅用于 TOOL Work；路由围栏要求 `environment_connection` 匹配、Dispatcher 当前节点持有、状态 `READY` 且 lease 未过期；路由不确定或数据库失败时 fail closed。
+- `harness_work.required_environment_id` 仅用于 TOOL Work；路由围栏要求 `environment_connection` 匹配、Dispatcher 当前节点持有、状态 `READY` 且 lease 未过期；路由不确定时不返回候选，数据库失败时 claim 事务抛错回滚。
 - `requestWork` 对已冻结的 `required_environment_id` 严格冲突拒绝，已存在 Work 绑定 affinity 后不允许传入冲突的不同非空 affinity。
 - claim token、leaseUntil、wakeVersion 任何一项不匹配都不允许过期 worker 完成新 wake；lost claim 是正常 no-op/recovery 条件。
 - NOTIFY 丢失、乱序或重复不影响 correctness；poll 和 lease expiration 提供收敛。

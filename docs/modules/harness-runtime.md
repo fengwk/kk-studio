@@ -132,7 +132,7 @@ READY -> DISPATCHING -> RUNNING
   └─> READY（retry）
 ```
 
-只有确认 Provider start 才使 attempt +1；BUSY 或确定未发送的拒绝不增加 attempt。`RUNNING -> READY` 只追加一个 retryable failure、清除 checkpoint，retry 重新 materialize 同一 spec。
+只有 Gateway admission 返回 `Started` 且持久化 `markRunning` 成功才使 attempt +1；BUSY 或确定未发送的拒绝不增加 attempt。`RUNNING -> READY` 只追加一个 retryable failure、清除 checkpoint，retry 重新 materialize 同一 spec。
 
 `ModelRequestSpec` 是本次调用的唯一 durable request contract：
 

@@ -1,5 +1,5 @@
 /**
- * 受信任 Java Contributor 的构建期发现、注册 SPI 与启动期目录冻结机制。
+ * 受信任 Java Contributor 的启动期汇集、注册 SPI 与不可变目录冻结机制。
  *
  * <p>本包提供 Harness 扩展点接入体系：
  *
