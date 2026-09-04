@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.common.schema;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -12,36 +11,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** {@link InputNormalizer} 的 schema 驱动静默归一化测试。 */
+/** {@link InputNormalizer} 的 schema 驱动数字容错归一化测试。 */
 class InputNormalizerTest {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
-  /** filePath 且无 path 时，仅当 schema 声明 path 才改写为 path 并删除 filePath。 */
-  @Test
-  void mapsFilePathToPathOnlyWhenSchemaDeclaresPath() {
-    InputSchema withPath =
-        new InputSchema(null, Map.of("path", new StringSchema(null)), Set.of(), false);
-    assertEquals(
-        "{\"path\":\"README.md\"}",
-        InputNormalizer.normalize("{\"filePath\":\"README.md\"}", withPath));
-
-    // schema 未声明 path 时 filePath 保持原样，由校验器以 additionalProperties 拒绝。
-    InputSchema withoutPath =
-        new InputSchema(null, Map.of("filePath", new StringSchema(null)), Set.of(), false);
-    assertEquals(
-        "{\"filePath\":\"README.md\"}",
-        InputNormalizer.normalize("{\"filePath\":\"README.md\"}", withoutPath));
-  }
-
-  /** path 与 filePath 同时存在时不改写，filePath 仍由校验器以 additionalProperties 拒绝。 */
-  @Test
-  void keepsFilePathWhenPathIsAlsoPresent() {
-    InputSchema schema =
-        new InputSchema(null, Map.of("path", new StringSchema(null)), Set.of(), false);
-    String arguments = "{\"filePath\":\"a.txt\",\"path\":\"b.txt\"}";
-    assertEquals(arguments, InputNormalizer.normalize(arguments, schema));
-  }
 
   /** integer 字段的十进制数字字符串被改写为 JSON integer；非数字字符串保持原样。 */
   @Test
@@ -82,7 +55,7 @@ class InputNormalizerTest {
     assertEquals(arguments, InputNormalizer.normalize(arguments, schema));
   }
 
-  /** 递归归一化数组与嵌套对象中的 filePath 别名和整数字符串。 */
+  /** 递归归一化数组与嵌套对象中的整数字符串。 */
   @Test
   void normalizesRecursivelyIntoArraysAndNestedObjects() throws Exception {
     InputSchema schema =
@@ -102,16 +75,14 @@ class InputNormalizerTest {
             Set.of(),
             false);
     String arguments =
-        "{\"items\":[{\"filePath\":\"a.txt\",\"limit\":\"10\"},{\"path\":\"b.txt\",\"limit\":5}]}";
+        "{\"items\":[{\"path\":\"a.txt\",\"limit\":\"10\"},{\"path\":\"b.txt\",\"limit\":5}]}";
     String normalized = InputNormalizer.normalize(arguments, schema);
-    // 字段改写可能改变 JSON 字段顺序，按解析后的节点做语义等值断言。
     JsonNode items = OBJECT_MAPPER.readTree(normalized).get("items");
     assertEquals(2, items.size());
     assertEquals("a.txt", items.get(0).get("path").asText());
     assertEquals(10, items.get(0).get("limit").asInt());
     assertEquals("b.txt", items.get(1).get("path").asText());
     assertEquals(5, items.get(1).get("limit").asInt());
-    assertFalse(items.get(0).has("filePath"));
   }
 
   /** 整数溢出或超 double 范围的文本不改写，仍由校验器拒绝；这是归一化不吞掉非法输入的关键。 */
@@ -137,20 +108,44 @@ class InputNormalizerTest {
                 InputNormalizer.normalize(tooLarge, numberSchema), numberSchema));
   }
 
-  /** 归一化后参数仍必须通过 schema 校验；两者都存在的 filePath 归一化不改写、校验必然失败。 */
+  /** 验证原始入参字符串不可变，归一化不会对原输入产生任何破坏性副作用。 */
   @Test
-  void normalizedArgumentsStillPassSchemaValidation() {
+  void preservesInputImmutability() {
     InputSchema schema =
-        new InputSchema(null, Map.of("path", new StringSchema(null)), Set.of(), false);
-    InputValidator.validate(
-        InputNormalizer.normalize("{\"filePath\":\"README.md\"}", schema), schema);
+        new InputSchema(null, Map.of("offset", new IntegerSchema(null)), Set.of(), false);
+    String raw = "{\"offset\":\"12\"}";
+    String normalized = InputNormalizer.normalize(raw, schema);
+    assertEquals("{\"offset\":12}", normalized);
+    assertEquals("{\"offset\":\"12\"}", raw);
+  }
 
-    // path 与 filePath 同时存在时归一化不改写，校验器以 additionalProperties 拒绝。
-    String both = "{\"filePath\":\"a.txt\",\"path\":\"b.txt\"}";
-    assertEquals(both, InputNormalizer.normalize(both, schema));
+  /** 归一化后的数字参数仍必须通过严格 schema 校验；未声明字段与非法非数字文本由校验器拒绝。 */
+  @Test
+  void normalizedArgumentsStillPassStrictSchemaValidation() {
+    InputSchema schema =
+        new InputSchema(
+            null,
+            Map.of(
+                "path", new StringSchema(null),
+                "offset", new IntegerSchema(null)),
+            Set.of("path"),
+            false);
+    String valid = "{\"path\":\"README.md\",\"offset\":\"12\"}";
+    String normalizedValid = InputNormalizer.normalize(valid, schema);
+    InputValidator.validate(normalizedValid, schema);
+
+    // 未声明的附加字段不会被归一化移除，归一化后校验器以 additionalProperties 严格拒绝
+    String extra = "{\"path\":\"README.md\",\"offset\":\"12\",\"extra\":true}";
     assertThrows(
         IllegalArgumentException.class,
-        () -> InputValidator.validate(InputNormalizer.normalize(both, schema), schema));
+        () -> InputValidator.validate(InputNormalizer.normalize(extra, schema), schema));
+
+    // 非数字字符串不改写，校验器以类型不匹配严格拒绝
+    String invalidNumeric = "{\"path\":\"README.md\",\"offset\":\"not-a-number\"}";
+    assertEquals(invalidNumeric, InputNormalizer.normalize(invalidNumeric, schema));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> InputValidator.validate(InputNormalizer.normalize(invalidNumeric, schema), schema));
   }
 
   /** 空白参数归一为 {}；顶层非 object 仍被拒绝。 */

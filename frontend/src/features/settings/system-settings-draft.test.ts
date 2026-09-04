@@ -87,14 +87,14 @@ describe('system settings draft codec', () => {
     expect(update.integrations.comfyui.baseUrl).toBe('https://comfy.example.com')
   })
 
-  it('serializes MiniMax H3 integration without obsolete prompt environment field and preserves current fields', () => {
-    // MiniMax H3 契约已移除 prompt environment 字段，后端 DTO 启用了严格 @JsonAnySetter 拒绝未知属性。
+  it('serializes MiniMax H3 integration with strict declared fields and rejects unknown properties', () => {
+    // MiniMax H3 契约只声明并支持合法属性，服务端与客户端均执行严格字段收敛。
     // 本用例验证：
-    // 1. draft 初始化不会创建已废弃字段，且叶子路径列表与属性枚举均严格等于 8 个合法字段；
-    // 2. getDraftValue / setDraftValue 按路径访问废弃字段时 fail-closed；
-    // 3. update 序列化产物完全不包含已废弃属性（严格 key 集合比对），且现有合法字段原样保留并完成正确的类型转换；
-    // 4. 即便输入 DTO 包含残留的未知属性，draft 与 update 组装也不会将其透传。
-    const obsoleteField = ['prompt', 'Environment', 'Name'].join('')
+    // 1. draft 初始化仅包含已声明合法字段，叶子路径列表与属性枚举严格对应；
+    // 2. getDraftValue / setDraftValue 按未知路径访问时 fail-closed；
+    // 3. update 序列化产物不包含未声明属性，现有合法字段完成正确的类型转换；
+    // 4. 即便输入 DTO 包含未知属性，draft 与 update 组装也不会透传。
+    const unknownField = 'unknownField'
     const expectedKeys = [
       'comfyBaseUrl',
       'comfyConnectTimeoutMillis',
@@ -110,14 +110,14 @@ describe('system settings draft codec', () => {
     const draft = settingsSectionsToDraft(dto)
 
     expect(Object.keys(draft.integrations.minimaxH3).sort()).toEqual(expectedKeys)
-    expect(Object.hasOwn(draft.integrations.minimaxH3, obsoleteField)).toBe(false)
-    expect(() => getDraftValue(draft, `integrations.minimaxH3.${obsoleteField}`)).toThrow(
+    expect(Object.hasOwn(draft.integrations.minimaxH3, unknownField)).toBe(false)
+    expect(() => getDraftValue(draft, `integrations.minimaxH3.${unknownField}`)).toThrow(
       /unknown system settings draft path/,
     )
-    expect(() => setDraftValue(draft, `integrations.minimaxH3.${obsoleteField}`, 'custom')).toThrow(
+    expect(() => setDraftValue(draft, `integrations.minimaxH3.${unknownField}`, 'custom')).toThrow(
       /unknown system settings draft path/,
     )
-    expect(draftLeafPaths(draft)).not.toContain(`integrations.minimaxH3.${obsoleteField}`)
+    expect(draftLeafPaths(draft)).not.toContain(`integrations.minimaxH3.${unknownField}`)
 
     // 修改若干字段以验证合法字段的赋值与序列化转换
     draft.integrations.minimaxH3.enabled = true
@@ -131,7 +131,7 @@ describe('system settings draft codec', () => {
 
     const update = assembleSettingsUpdate(draft, '0')
     expect(Object.keys(update.integrations.minimaxH3).sort()).toEqual(expectedKeys)
-    expect(Object.hasOwn(update.integrations.minimaxH3, obsoleteField)).toBe(false)
+    expect(Object.hasOwn(update.integrations.minimaxH3, unknownField)).toBe(false)
     expect(update.integrations.minimaxH3).toEqual({
       enabled: true,
       promptAgentName: 'custom-agent',
@@ -145,11 +145,11 @@ describe('system settings draft codec', () => {
 
     // 输入 DTO 携带残留未知属性时，draft 与 update 依然不会泄露该未知属性
     const dirtyDto = makeSettingsDto()
-    ;(dirtyDto.integrations.minimaxH3 as Record<string, unknown>)[obsoleteField] = 'dirty-env'
+    ;(dirtyDto.integrations.minimaxH3 as Record<string, unknown>)[unknownField] = 'dirty-value'
     const cleanDraft = settingsSectionsToDraft(dirtyDto)
-    expect(Object.hasOwn(cleanDraft.integrations.minimaxH3, obsoleteField)).toBe(false)
+    expect(Object.hasOwn(cleanDraft.integrations.minimaxH3, unknownField)).toBe(false)
     const cleanUpdate = assembleSettingsUpdate(cleanDraft, '0')
-    expect(Object.hasOwn(cleanUpdate.integrations.minimaxH3, obsoleteField)).toBe(false)
+    expect(Object.hasOwn(cleanUpdate.integrations.minimaxH3, unknownField)).toBe(false)
     expect(Object.keys(cleanUpdate.integrations.minimaxH3).sort()).toEqual(expectedKeys)
   })
 

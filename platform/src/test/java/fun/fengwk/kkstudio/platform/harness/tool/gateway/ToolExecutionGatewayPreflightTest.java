@@ -261,7 +261,7 @@ class ToolExecutionGatewayPreflightTest {
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("PERMISSION_DENIED", deny.error().kind());
 
-    ToolSettings environmentRelativeAlias =
+    ToolSettings rootRelativeRule =
         new ToolSettings(
             Map.of(
                 "*",
@@ -269,9 +269,9 @@ class ToolExecutionGatewayPreflightTest {
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("repo/sub/**", PermissionAction.DENY))),
             false);
-    ToolGateway.PreflightResult aliasResult =
-        environmentPreflight(binding, "{\"path\":\"src/Main.java\"}", environmentRelativeAlias);
-    assertInstanceOf(ToolGateway.Ask.class, aliasResult);
+    ToolGateway.PreflightResult rootRelativeResult =
+        environmentPreflight(binding, "{\"path\":\"src/Main.java\"}", rootRelativeRule);
+    assertInstanceOf(ToolGateway.Ask.class, rootRelativeResult);
   }
 
   @Test

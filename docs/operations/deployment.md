@@ -41,7 +41,7 @@ flowchart LR
   DaemonImage --> Reliability
   DaemonImage --> Distributed
   Reliability --> App["app :8080"]
-  Reliability --> Daemon["daemon -> ws://app:8080/api/ai/environment/daemon/v2"]
+  Reliability --> Daemon["daemon -> ws://app:8080/api/ai/environment/daemon/v1"]
   App --> PG["PostgreSQL"]
   Test --> S3["MinIO S3-compatible"]
 ```
@@ -324,13 +324,13 @@ project name 是 `kk-studio-reliability`：
 loopback API。Daemon 不发布宿主端口，只经：
 
 ```text
-ws://app:8080/api/ai/environment/daemon/v2
+ws://app:8080/api/ai/environment/daemon/v1
 ```
 
 Daemon command 当前固定：
 
 ```text
---gateway-uri ws://app:8080/api/ai/environment/daemon/v2
+--gateway-uri ws://app:8080/api/ai/environment/daemon/v1
 --registration-token ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-reliability}
 --note "Isolated Docker reliability environment."
 --environment-root /workspace
@@ -412,7 +412,7 @@ handle 和 presigned URL contract，不把 bucket/key 暴露给 Frontend。
 ### 10.3 Environment daemon
 
 Environment Daemon 是独立 JVM 进程，连接 App 的
-`/api/ai/environment/daemon/v2` WebSocket gateway。App 负责：
+`/api/ai/environment/daemon/v1` WebSocket gateway。App 负责：
 
 - Daemon handshake、Environment binding、Tool/Skill capability projection；
 - inbound/outbound frame size、queue capacity、send timeout；

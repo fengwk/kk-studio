@@ -329,7 +329,7 @@ version source。建立上游时先注册 consumer 再读取 cursor；fan-out �
 端点由 `EnvironmentDaemonWebSocketConfiguration`注册为：
 
 ```text
-/api/ai/environment/daemon/v2
+/api/ai/environment/daemon/v1
 ```
 
 `EnvironmentDaemonWebSocketHandler`只做 transport adapter：
@@ -337,7 +337,7 @@ version source。建立上游时先注册 consumer 再读取 cursor；fan-out �
 1. 在 Spring WebSocket 和 native JSR-356 session 两侧设置 `max-message-bytes`；
 2. 创建 `SpringWebSocketConnection`和每连接 `DaemonOutboundSender`；
 3. 把 open/receive/close 委托给 Platform `EnvironmentDaemonEndpoint`；
-4. Gateway 只接受 protocol v6 HELLO 及严格的 `capabilityCatalogVersion`，并负责校验通用 capability INVOKE payload；
+4. Gateway 只接受 protocol v1 HELLO 及严格的 `capabilityCatalogVersion`，并负责校验通用 capability INVOKE payload；
 5. Gateway 先解绑 registry、active invocation 和 pending request，再关闭 sender。
 
 `DaemonOutboundSender`使用 `ConcurrentWebSocketSessionDecorator`和每连接一个 virtual-thread sender。入队是非阻塞的，

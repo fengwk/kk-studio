@@ -1,20 +1,16 @@
 package fun.fengwk.kkstudio.platform.settings;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.cfg.CoercionAction;
 import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.stereotype.Component;
 
@@ -32,7 +28,6 @@ import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsStorageMediaDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -71,7 +66,6 @@ public class SystemSettingsCodec {
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             // 显式 null 的 required primitive 必须拒绝，而不是回退到 0/false。
             .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
-            .enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS)
             .withCoercionConfig(
                 LogicalType.Integer,
                 config ->
@@ -101,19 +95,6 @@ public class SystemSettingsCodec {
         JsonMapper.builder().enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY).build();
     this.canonicalMapper.enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
     this.canonicalMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
-    // PermissionAction 的 wire 值是小写 allow/ask/deny（与 ToolSettingsCodec 一致），而非枚举名。
-    SimpleModule permissionModule = new SimpleModule();
-    permissionModule.addSerializer(
-        PermissionAction.class,
-        new JsonSerializer<PermissionAction>() {
-          @Override
-          public void serialize(
-              PermissionAction value, JsonGenerator generator, SerializerProvider provider)
-              throws IOException {
-            generator.writeString(value.value());
-          }
-        });
-    this.canonicalMapper.registerModule(permissionModule);
   }
 
   /** 严格解码持久化的 canonical JSON 为领域聚合。 */

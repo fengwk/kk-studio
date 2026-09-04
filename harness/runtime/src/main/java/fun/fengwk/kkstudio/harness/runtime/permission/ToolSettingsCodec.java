@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Tool settings canonical codec，兼容 PiBase string/object 简写。 */
+/** Tool settings 规范 JSON 编解码器，解析并校验严格的 permission 规则与 defaultYolo。 */
 public final class ToolSettingsCodec {
   private final ObjectMapper objectMapper;
 
@@ -63,13 +63,8 @@ public final class ToolSettingsCodec {
     if (permissionNode == null || permissionNode.isNull()) {
       return result;
     }
-    if (permissionNode.isTextual()) {
-      result.put(PermissionKeyValidator.GLOBAL_KEY, decodeRules(permissionNode));
-      return result;
-    }
     if (!permissionNode.isObject()) {
-      throw new IllegalArgumentException(
-          "permission must be allow, ask or deny, or a JSON object keyed by AgentToolId");
+      throw new IllegalArgumentException("permission must be a JSON object");
     }
     for (Map.Entry<String, JsonNode> field : permissionNode.properties()) {
       String key = field.getKey();
@@ -80,38 +75,24 @@ public final class ToolSettingsCodec {
   }
 
   private List<PermissionRule> decodeRules(JsonNode node) {
-    if (node.isTextual()) {
-      return List.of(new PermissionRule("*", PermissionAction.fromValue(node.asText())));
+    if (!node.isArray()) {
+      throw new IllegalArgumentException("permission rules must be an array");
     }
-    if (node.isArray()) {
-      List<PermissionRule> rules = new ArrayList<>();
-      for (JsonNode rule : node) {
-        if (!rule.isObject()
-            || !rule.path("pattern").isTextual()
-            || !rule.path("action").isTextual()) {
-          throw new IllegalArgumentException(
-              "permission rule must contain string pattern and action");
-        }
-        rules.add(
-            new PermissionRule(
-                rule.path("pattern").asText(),
-                PermissionAction.fromValue(rule.path("action").asText())));
+    List<PermissionRule> rules = new ArrayList<>();
+    for (JsonNode rule : node) {
+      if (!rule.isObject()
+          || rule.size() != 2
+          || !rule.path("pattern").isTextual()
+          || !rule.path("action").isTextual()) {
+        throw new IllegalArgumentException(
+            "permission rule must be an object with exact string keys 'pattern' and 'action'");
       }
-      return List.copyOf(rules);
+      rules.add(
+          new PermissionRule(
+              rule.path("pattern").asText(),
+              PermissionAction.fromValue(rule.path("action").asText())));
     }
-    if (node.isObject()) {
-      List<PermissionRule> rules = new ArrayList<>();
-      for (Map.Entry<String, JsonNode> field : node.properties()) {
-        if (!field.getValue().isTextual()) {
-          throw new IllegalArgumentException("permission shorthand action must be a string");
-        }
-        rules.add(
-            new PermissionRule(
-                field.getKey(), PermissionAction.fromValue(field.getValue().asText())));
-      }
-      return List.copyOf(rules);
-    }
-    throw new IllegalArgumentException("permission tool rules must be string, object or array");
+    return List.copyOf(rules);
   }
 
   private ObjectNode encodePermission(Map<String, List<PermissionRule>> permission) {

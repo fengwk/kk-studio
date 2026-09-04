@@ -5,7 +5,7 @@ import {
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
 
-const STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v2:'
+const STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v1:'
 
 export type ComposerDraftChangeSource = 'edit' | 'history'
 
@@ -15,7 +15,7 @@ export function composerDraftStorageKey(scope: string): string {
 
 /**
  * 浏览器可靠持久化 text + durable resource；attachment 依赖页面内上传注册表与 File，
- * 因此 attachment-bearing 草稿只在当前页面会话有效，并清理旧持久值。
+ * 因此 attachment-bearing 草稿只在当前页面会话有效，并清理本地已持久化草稿。
  */
 export function storeComposerDraft(
   scope: string,
@@ -34,7 +34,7 @@ export function storeComposerDraft(
     storage.setItem(
       composerDraftStorageKey(scope),
       JSON.stringify({
-        version: 2,
+        version: 1,
         parts: parts.map((part) => {
           if (part.type === 'text') {
             return { type: 'text', text: part.text }
@@ -49,7 +49,7 @@ export function storeComposerDraft(
       }),
     )
   } catch {
-    // quota/set 失败时移除旧值，避免刷新后恢复成过期草稿。
+    // quota/set 失败时清理存储键，避免刷新后恢复出损坏或陈旧草稿。
     try {
       storage.removeItem(composerDraftStorageKey(scope))
     } catch {
@@ -113,7 +113,7 @@ export function restoreComposerDraft(
 
 function parseStoredDraft(raw: string): ComposerPart[] {
   const parsed: unknown = JSON.parse(raw)
-  if (!isRecord(parsed) || parsed.version !== 2 || !Array.isArray(parsed.parts)) {
+  if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.parts)) {
     throw new Error('invalid composer draft')
   }
   if (!hasExactKeys(parsed, ['version', 'parts'])) {

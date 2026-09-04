@@ -8,7 +8,7 @@ registerCase({
   level: 'L1',
   title: 'Canvas UUID/version/command patch/snapshot HTTP 契约',
   docs:
-    '免费 L1：create/list/get/commands 的 canonical UUID id 与十进制字符串 long version，expectedVersion CAS 409，同 idempotencyKey 精确回放空 patch 与不同内容 409，标准 snapshot 收敛且旧 changes 端点不存在，Group 重命名与成员子集解绑，删除后 404',
+    '免费 L1：create/list/get/commands 的 canonical UUID id 与十进制字符串 long version，expectedVersion CAS 409，同 idempotencyKey 精确回放空 patch 与不同内容 409，标准 snapshot 收敛，Group 重命名与成员子集解绑，删除后 404',
   async run(ctx) {
     const { json: createJson } = await ctx.call('POST', '/api/canvases', {
       title: 'e2e-version-contract',
@@ -219,12 +219,6 @@ registerCase({
     const listed = list.find((item) => item.id === canvas.id)
     assertDecimalVersion(listed?.version, 'listed canvas.version')
     assert(listed?.version === '4', JSON.stringify(listed))
-
-    // 跨窗口/version/reconnect 恢复只允许标准 Snapshot；旧 changes 兼容端点必须不存在。
-    await expectHttpError(
-      () => ctx.call('GET', `/api/canvases/${canvas.id}/changes?afterVersion=0`),
-      { status: 404 },
-    )
 
     await ctx.call('DELETE', `/api/canvases/${canvas.id}`)
     await expectHttpError(() => ctx.call('GET', `/api/canvases/${canvas.id}`), { status: 404 })

@@ -56,12 +56,12 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * PostgreSQL-backed Canvas v1 command service。
+ * PostgreSQL 上的 Canvas 写服务，负责图命令、版本推进和关联资源生命周期。
  *
- * <p>事务内先锁定 document 行串行化全部命令，再按 {@code (canvasId, idempotencyKey)} 幂等：相同 idempotencyKey + request
- * hash 精确回放（返回当前版本的确定性空 patch），相同 idempotencyKey 不同 hash 冲突；{@code expectedVersion} 在应用后 CAS 校验。
- * CREATE_RESOURCE_NODE 在同一事务内消费 READY 全局上传（行锁 → retain blob → 删上传行 → 释放上传引用）， 资源 blob 引用只经
- * StorageBlobManager 转移；删除节点/画布同步释放全部 owned blob。
+ * <p>修改或删除现有画布前先锁定 document 行，因此同一画布的写事务串行执行。命令批次在该锁内完成幂等键校验、版本校验、图变更、资源所有权变更和版本 CAS。
+ *
+ * <p>相同幂等键和命令哈希返回当前版本的空 Patch；相同键对应不同哈希时拒绝请求。消费上传时，Blob retain、上传所有权释放和 CanvasResource
+ * 写入位于同一事务。预览只在事务提交后触发，删除则按外键依赖顺序由应用层显式编排。
  */
 @Slf4j
 @Service
@@ -115,6 +115,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     return canvasStore.addDocument(UUID.randomUUID(), canonicalTitle);
   }
 
+  /** 在 document 行锁内应用命令批次，并将画布版本推进一次。 */
   @Override
   @Transactional
   public CanvasPatch applyCommands(
@@ -131,7 +132,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     }
 
     String requestHash = requestHash(commandBatch);
-    // 行锁先于一切：并发命令与精确回放都在 document 行锁上串行化。
+    // 同一画布的写入和幂等重放都在 document 行锁上串行化。
     CanvasDocument document =
         canvasStore
             .lockDocument(canvasId)
@@ -141,7 +142,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
       if (!requestHash.equals(existing.requestHash())) {
         throw conflict(CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT);
       }
-      // 精确回放：命令早已应用；返回当前版本的确定性空 patch（客户端按 version <= 本地版本忽略或按 base 对齐）。
+      // 相同键与哈希表示该批次已提交；返回当前版本的空 Patch，不重复副作用。
       long currentVersion = document.version();
       return new CanvasPatch(currentVersion, currentVersion, List.of(), List.of(), List.of());
     }
@@ -158,6 +159,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
       throw new IllegalArgumentException("duplicate Canvas graph value", error);
     }
 
+    // 行锁是主并发边界，CAS 仍作为版本不变量的最终校验。
     long newVersion = Math.addExact(expectedVersion, 1L);
     if (!canvasStore.advanceDocumentVersion(canvasId, expectedVersion, newVersion)) {
       throw conflict(CanvasConflictException.Reason.VERSION_CONFLICT);
@@ -170,6 +172,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     return accumulator.toPatch(expectedVersion, newVersion);
   }
 
+  /** 在 document 行锁内按外键依赖顺序删除画布及其关联状态。 */
   @Override
   @Transactional
   public void deleteCanvas(UUID canvasId) {
@@ -177,8 +180,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     canvasStore
         .lockDocument(canvasId)
         .orElseThrow(() -> new IllegalArgumentException("Canvas not found: " + canvasId));
-    // canvas_document 行锁（Owner FOR UPDATE）保护：先删 graph 内容，再经共享会话深删除移除全部归属 Session
-    // （relation 行先于 document 行删除，FK RESTRICT 顺序由应用显式驱动），最后 CAS 删除 document 行。
+    // RESTRICT 外键要求从资源和叶子实体开始，最后删除 document 根记录。
     resourceLifecycle.releaseCanvasPins(canvasId);
     resourceLifecycle.deleteCanvasResources(canvasId);
     runRepository.deleteByCanvasId(canvasId);
@@ -509,6 +511,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     accumulator.upsertGroup(group);
   }
 
+  /** 锁定并消费就绪上传；Blob retain 与上传所有权释放属于当前事务。 */
   private CanvasResource consumeUpload(
       UUID canvasId, UUID nodeId, int resourceIndex, UUID uploadId, String nodeName) {
     StorageUploadService uploadService = uploadServices.getIfAvailable();
@@ -519,7 +522,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     UUID blobId = upload.blobId();
     StorageBlobManager blobManager = requireBlobManager();
     blobManager.retain(blobId);
-    // delete 在当前事务内只标记 cleanup request 并 release upload owner；对象清理由提交后的 Maintenance 完成。
+    // 删除上传记录会释放 upload owner；对象清理由维护任务处理。
     uploadService.delete(uploadId);
     String filename = upload.filename();
     return new CanvasResource(
@@ -533,6 +536,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
         Instant.now());
   }
 
+  /** 提交成功后生成预览，使慢 I/O 不占用画布写事务；失败只记录日志。 */
   private void registerPreviewAfterCommit(CanvasResource resource) {
     if (resource.blobId() == null) {
       return;
@@ -716,7 +720,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     }
   }
 
-  /** 命令批的 patch 累积：按实体 id 去重，同 id 后写覆盖先写，最终顺序为首次出现顺序。 */
+  /** 批次内同一实体后写覆盖前写，同时保留实体首次出现的输出顺序。 */
   private static final class PatchAccumulator {
 
     private final Map<UUID, CanvasGroupPatch> groups = new LinkedHashMap<>();

@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import org.junit.jupiter.api.Test;
 
@@ -16,7 +15,7 @@ class PlatformPackageArchitectureTest {
 
   @Test
   void platformUsesOnlyExplicitDomainRoots() throws IOException {
-    // 精确的包根能暴露任何恢复出的遗留包或未审视的跨域桶。
+    // 精确的包根保证平台子域严格对齐当前设计。
     Path platformRoot =
         repositoryRoot().resolve("platform/src/main/java/fun/fengwk/kkstudio/platform");
     assertEquals(
@@ -33,13 +32,11 @@ class PlatformPackageArchitectureTest {
             "settings",
             "storage"),
         directDirectoryNames(platformRoot));
-    assertFalse(Files.exists(platformRoot.resolve("ai")));
-    assertFalse(Files.exists(platformRoot.resolve("studio")));
   }
 
   @Test
   void sharedContractsUseOnlyExplicitDomainRoots() throws IOException {
-    // 共享根保持精确，可防止通用 share.model 包回归。
+    // 共享根保持精确，各子域模型保持隔离。
     assertEquals(
         Set.of("ai", "canvas", "comfyui", "storage", "systemsettings"),
         directDirectoryNames(

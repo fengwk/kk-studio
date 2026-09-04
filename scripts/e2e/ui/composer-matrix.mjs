@@ -29,7 +29,7 @@ import {
 } from '../lib/harness.mjs'
 
 const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
-const COMPOSER_DRAFT_STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v2:'
+const COMPOSER_DRAFT_STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v1:'
 const TINY_IMAGE = readFileSync(
   new URL('../../../platform/src/main/resources/fun/fengwk/kkstudio/platform/canvas/function/fake/tiny.png', import.meta.url),
 )
@@ -1756,7 +1756,7 @@ async function expectStorage(page, key, expected) {
       )
       return
     }
-    // draft v2 envelope 严格校验：exact keys version/parts、version=2、恰一个 text part。
+    // draft v1 envelope 严格校验：exact keys version/parts、version=1、恰一个 text part。
     await page.waitForFunction(
       ({ storageKey, text }) => {
         const raw = localStorage.getItem(storageKey)
@@ -1772,7 +1772,7 @@ async function expectStorage(page, key, expected) {
           || typeof parsed !== 'object'
           || Array.isArray(parsed)
           || JSON.stringify(Object.keys(parsed).sort()) !== '["parts","version"]'
-          || parsed.version !== 2
+          || parsed.version !== 1
           || !Array.isArray(parsed.parts)
           || parsed.parts.length !== 1
         ) {

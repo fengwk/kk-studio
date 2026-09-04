@@ -112,7 +112,7 @@ class CanvasFunctionConfigCodecTest {
   void validatesParametersAgainstDescriptor() {
     assertInvalid(
         """
-        {"prompt":{"segments":[{"type":"TEXT","text":"x"}]},"parameters":{"legacy":1}}
+        {"prompt":{"segments":[{"type":"TEXT","text":"x"}]},"parameters":{"unexpected":1}}
         """);
     assertInvalid(
         """

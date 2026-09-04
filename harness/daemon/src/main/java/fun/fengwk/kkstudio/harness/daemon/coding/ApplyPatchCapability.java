@@ -34,7 +34,17 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.locks.ReentrantLock;
 
-/** 在 invocation workspace 内解析并原子提交一组文本文件 patch。 */
+/**
+ * 在 invocation workspace 内解析并执行多文件文本 Patch。
+ *
+ * <p>协议支持可选 workdir 以及 Add、Update、Delete；路径必须是规范相对路径。现有目标通过真实路径校验，新目标通过最近的已存在真实祖先校验，任何路径都不能越过
+ * workspace。
+ *
+ * <p>执行分为只读预检和提交。预检完成 UTF-8、hunk
+ * 唯一匹配及路径冲突校验；提交阶段按稳定顺序获取进程内文件锁，并在写入前复核预检快照。文件写入先落同目录临时文件，文件系统支持时使用原子移动，否则退化为普通移动。
+ *
+ * <p>文件系统不提供多文件事务。中途失败时本类会逆序补偿已执行变更，并只在当前内容仍是本次产物时还原，因此多文件回滚是尽力而为语义。
+ */
 public final class ApplyPatchCapability extends AbstractCodingCapability {
 
   private static final String BEGIN_PATCH = "*** Begin Patch";
@@ -76,6 +86,7 @@ public final class ApplyPatchCapability extends AbstractCodingCapability {
     return success(request.call().id(), successSummary(plans));
   }
 
+  /** 只读生成全部变更计划；任一文件或路径冲突失败时不进入提交阶段。 */
   private List<MutationPlan> preflight(
       List<PatchFile> files, Path workdir, Path invocationWorkspace, Execution execution)
       throws Exception {
@@ -144,6 +155,7 @@ public final class ApplyPatchCapability extends AbstractCodingCapability {
     return canonical;
   }
 
+  /** 解析目标路径，并将现有文件限制在 invocation workspace 的真实路径边界内。 */
   private Path resolveTarget(
       String rawPath, Operation operation, Path workdir, Path invocationWorkspace) {
     EnvironmentWorkspacePath.requireCanonicalRelativePath(rawPath);
@@ -170,6 +182,7 @@ public final class ApplyPatchCapability extends AbstractCodingCapability {
     return canonical;
   }
 
+  /** 从最近的已存在真实祖先推导新增目标，避免经由符号链接越过 workspace。 */
   private Path resolveMissingTarget(Path candidate, Path invocationWorkspace, String rawPath) {
     if (Files.exists(candidate, LinkOption.NOFOLLOW_LINKS)) {
       throw new IllegalArgumentException("Add File requires a path that does not exist");
@@ -238,6 +251,7 @@ public final class ApplyPatchCapability extends AbstractCodingCapability {
     return errors;
   }
 
+  /** 在进程内文件锁保护下复核并提交；失败或取消时逆序补偿已执行变更。 */
   private void commit(List<MutationPlan> plans, Path invocationWorkspace, Execution execution)
       throws Exception {
     Path[] paths = plans.stream().map(MutationPlan::target).toArray(Path[]::new);
@@ -369,6 +383,7 @@ public final class ApplyPatchCapability extends AbstractCodingCapability {
     }
   }
 
+  /** 先写同目录临时文件并复制 POSIX 权限；优先原子移动，不支持时退化为普通移动。 */
   private static void writeFile(
       Path target, byte[] bytes, boolean replaceExisting, Set<PosixFilePermission> permissions)
       throws IOException {
@@ -423,6 +438,7 @@ public final class ApplyPatchCapability extends AbstractCodingCapability {
     }
   }
 
+  /** 逆序补偿已执行变更；内容已被再次修改时保留现场，不覆盖并发写入。 */
   private void rollback(
       List<AppliedMutation> applied, List<Path> createdDirectories, Path invocationWorkspace) {
     for (int index = applied.size() - 1; index >= 0; index--) {
@@ -666,6 +682,7 @@ public final class ApplyPatchCapability extends AbstractCodingCapability {
     return lines.isEmpty() ? "" : String.join("\n", lines) + "\n";
   }
 
+  /** 按顺序应用 hunk，并保留原文件的行结束符和末尾换行约定。 */
   private static String applyUpdate(String path, String source, List<Hunk> hunks) {
     LineDocument document = parseLines(source);
     List<LineRecord> records = document.lines();
@@ -737,6 +754,7 @@ public final class ApplyPatchCapability extends AbstractCodingCapability {
     return serializeLines(records);
   }
 
+  /** hunk 上下文必须在目标区间内唯一匹配。 */
   private static int findUnique(
       String path,
       String description,

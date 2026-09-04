@@ -73,7 +73,7 @@ class StudioHarnessCommandBatchControllerTest {
 
   @Test
   void acceptsNewSessionEntryAndThreadTargetsAndMapsCurrentSnapshotResponse() throws Exception {
-    // 三种 target 都必须经过同一 owner-aware service，而不是旧 thread 便利 API。
+    // 三种 target 都经过同一 owner-aware service。
     for (String target : List.of(newSessionTarget(), entryTarget(), threadTarget())) {
       mockMvc
           .perform(
@@ -222,8 +222,8 @@ class StudioHarnessCommandBatchControllerTest {
   }
 
   @Test
-  void rejectsLegacyEnvironmentFieldInSetEnvironmentCommand() throws Exception {
-    // 意图：验证 SET_ENVIRONMENT 命令携带旧 environment 字段被严格拒绝且 detail 包含该字段，不调用底层服务。
+  void rejectsUnknownFieldInSetEnvironmentCommand() throws Exception {
+    // 意图：验证 SET_ENVIRONMENT 命令携带未定义字段被严格拒绝且 detail 包含该字段，不调用底层服务。
     String payload =
         batchWithCommands(
             threadTarget(),
@@ -231,7 +231,7 @@ class StudioHarnessCommandBatchControllerTest {
             [{
               "type":"SET_ENVIRONMENT",
               "idempotencyKey":"%s",
-              "environment":{"name":"Not-A-Name","workspacePath":"."}
+              "unexpectedField":{"workspacePath":"."}
             }]
             """
                 .formatted(IDEMPOTENCY_KEY));
@@ -245,7 +245,8 @@ class StudioHarnessCommandBatchControllerTest {
         .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
         .andExpect(jsonPath("$.errors.type").value("about:blank"))
         .andExpect(jsonPath("$.errors.title").value("Bad Request"))
-        .andExpect(jsonPath("$.errors.detail").value("unknown HTTP command field: environment"));
+        .andExpect(
+            jsonPath("$.errors.detail").value("unknown HTTP command field: unexpectedField"));
 
     verify(acceptanceService, never())
         .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));

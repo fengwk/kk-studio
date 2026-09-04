@@ -12,15 +12,11 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * 输入参数 JSON 的静默归一化：在 schema 校验前把兼容别名与数字字符串改写为正式字段。
+ * 输入参数 JSON 的静默归一化：在 schema 校验前将数字字符串容错改写为目标数值类型。
  *
- * <p>{@code filePath} 别名规则：仅当 schema 声明了 {@code path}、JSON 含 {@code filePath} 且不含 {@code path} 时改写为
- * {@code path} 并删除原字段；两者同时存在时不改写，仍由校验器以 additionalProperties 拒绝。归一化是 schema 驱动的，别名不会出现在 schema 或
- * prompt 中。
- *
- * <p>{@link IntegerSchema} 字段接受匹配 {@code -?\d+} 的十进制数字字符串并改写为 JSON integer； {@link NumberSchema}
- * 字段接受十进制数字字符串（含小数与指数）并改写为 JSON number。非数字文本、 超出 long / double
- * 可表示范围的值不改写，仍由校验器拒绝。boolean/string/enum 字段不转换。
+ * <p>{@link IntegerSchema} 字段接受匹配 {@code -?\d+} 的十进制数字字符串并改写为 JSON integer；{@link NumberSchema}
+ * 字段接受十进制数字字符串（含小数与指数）并改写为 JSON number。非数字文本、超出 long / double
+ * 可表示范围的值不改写，仍由校验器严格拒绝。boolean/string/enum 字段不转换。
  *
  * <p>递归遍历对象与数组元素；归一化输出为紧凑 JSON 文本。
  */
@@ -42,13 +38,6 @@ public final class InputNormalizer {
   }
 
   private static void normalizeObject(ObjectNode node, Map<String, SchemaElement> properties) {
-    if (properties.containsKey("path")
-        && !properties.containsKey("filePath")
-        && node.has("filePath")
-        && !node.has("path")) {
-      node.set("path", node.get("filePath"));
-      node.remove("filePath");
-    }
     for (Map.Entry<String, SchemaElement> entry : properties.entrySet()) {
       JsonNode value = node.get(entry.getKey());
       if (value != null) {

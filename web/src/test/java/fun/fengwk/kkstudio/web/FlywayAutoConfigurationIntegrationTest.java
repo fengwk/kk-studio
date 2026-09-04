@@ -100,17 +100,6 @@ class FlywayAutoConfigurationIntegrationTest {
             ownerSessionForeignKeys.getLong(1),
             "owner-to-Session relations must retain real owner and Harness Session FKs");
       }
-      try (ResultSet legacyThreadRelations =
-          st.executeQuery(
-              "select count(*) from information_schema.tables"
-                  + " where table_schema = 'public'"
-                  + " and table_name in ('chat_thread', 'canvas_thread')")) {
-        assertTrue(legacyThreadRelations.next());
-        assertEquals(
-            0L,
-            legacyThreadRelations.getLong(1),
-            "clean-slate V1 must not retain legacy owner-to-Thread relation tables");
-      }
     }
   }
 }

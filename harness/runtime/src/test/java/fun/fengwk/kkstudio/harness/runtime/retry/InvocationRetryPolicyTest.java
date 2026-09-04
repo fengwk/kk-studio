@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
-import java.util.Locale;
 
 /** 自动重试次数与退避计算的 Invocation 级值对象契约。 */
 class InvocationRetryPolicyTest {
@@ -87,24 +86,19 @@ class InvocationRetryPolicyTest {
                 .delayBeforeRetry(0));
   }
 
-  /** 持久化 strategy 解析大小写无关，且与进程 locale 独立。 */
+  /** 持久化 strategy 只接受 canonical 枚举值。 */
   @Test
-  void parsesBackoffStrategyDeterministically() {
-    Locale previous = Locale.getDefault();
-    try {
-      Locale.setDefault(Locale.forLanguageTag("tr-TR"));
-      assertEquals(
-          InvocationRetryBackoffStrategy.FIXED,
-          InvocationRetryBackoffStrategy.fromValue(" fixed "));
-      assertEquals(
-          InvocationRetryBackoffStrategy.EXPONENTIAL,
-          InvocationRetryBackoffStrategy.fromValue("Exponential"));
-    } finally {
-      Locale.setDefault(previous);
-    }
+  void parsesCanonicalBackoffStrategy() {
+    assertEquals(
+        InvocationRetryBackoffStrategy.FIXED, InvocationRetryBackoffStrategy.fromValue("FIXED"));
+    assertEquals(
+        InvocationRetryBackoffStrategy.EXPONENTIAL,
+        InvocationRetryBackoffStrategy.fromValue("EXPONENTIAL"));
     assertThrows(
-        IllegalArgumentException.class, () -> InvocationRetryBackoffStrategy.fromValue(" "));
+        IllegalArgumentException.class, () -> InvocationRetryBackoffStrategy.fromValue("fixed"));
     assertThrows(
-        IllegalArgumentException.class, () -> InvocationRetryBackoffStrategy.fromValue("linear"));
+        IllegalArgumentException.class, () -> InvocationRetryBackoffStrategy.fromValue(" FIXED "));
+    assertThrows(
+        IllegalArgumentException.class, () -> InvocationRetryBackoffStrategy.fromValue(null));
   }
 }

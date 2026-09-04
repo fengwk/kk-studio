@@ -247,8 +247,6 @@ describe('PaneTarget durable-local FSM', () => {
     for (const rejectedCommand of [
       { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', environment: 'local' },
       { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', environment: { name: 'local', workspacePath: '.' } },
-      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', environmentId: 'env-1' },
-      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', environmentName: 'local' },
       { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', extraField: 'invalid' },
     ]) {
       setRequest({ ...validRequest, commands: [rejectedCommand] })
@@ -372,11 +370,11 @@ describe('PaneTarget durable-local FSM', () => {
       },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
-    // 验证持久化 validator 严格 exact shape 校验：fail closed 拒绝携带旧 environment 字段的数据，不向后兼容读取旧 localStorage
+    // 持久化 validator 对 branchDraft 与 rootSettings 执行 exact-shape 校验。
     setPending({
       branchDraft: {
         ...valid.branchDraft,
-        environment: { name: 'local', workspacePath: '.' },
+        unexpected: true,
       },
       request: validRequest,
     })
@@ -390,7 +388,7 @@ describe('PaneTarget durable-local FSM', () => {
           ...validRequest.target,
           rootSettings: {
             ...validRequest.target.rootSettings,
-            environment: { name: 'local', workspacePath: '.' },
+            unexpected: true,
           },
         },
       },
@@ -400,7 +398,7 @@ describe('PaneTarget durable-local FSM', () => {
     setPending({
       branchDraft: {
         ...valid.branchDraft,
-        environment: { name: 'local', workspacePath: '.' },
+        unexpected: true,
       },
       request: {
         ...validRequest,
@@ -408,7 +406,7 @@ describe('PaneTarget durable-local FSM', () => {
           ...validRequest.target,
           rootSettings: {
             ...validRequest.target.rootSettings,
-            environment: { name: 'local', workspacePath: '.' },
+            unexpected: true,
           },
         },
       },

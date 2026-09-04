@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandler {
 
-  public static final String PATH = "/api/ai/environment/daemon/v2";
+  public static final String PATH = "/api/ai/environment/daemon/v1";
 
   private final EnvironmentDaemonEndpoint endpoint;
   private final int maxMessageBytes;

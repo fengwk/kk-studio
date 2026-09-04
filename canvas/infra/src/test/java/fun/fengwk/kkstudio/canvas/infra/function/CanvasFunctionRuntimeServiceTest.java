@@ -32,7 +32,7 @@ class CanvasFunctionRuntimeServiceTest {
   private static final UUID REQUEST = UUID.randomUUID();
   private static final Instant NOW = Instant.parse("2026-02-03T04:05:06.123Z");
 
-  /** start 不再向内存 dispatcher 投递，直接返回事务提交的 READY DTO。 */
+  /** start 提交 READY 状态并直接返回事务结果。 */
   @Test
   void startReturnsTheDurableReadyRun() {
     Fixture fixture = new Fixture();

@@ -192,7 +192,7 @@ class ThreadVersionHubTest {
   @Test
   void lastReleaseConcurrentWithSubscribeKeepsNewSubscriberLive() throws Exception {
     // 确定性交错：新订阅者已完成注册（compute 内 add 原子完成）但卡在 cursor 读取时，最后释放并发执行；
-    // 修复后 remove-if-empty 在 computeIfPresent 内原子完成，存活订阅者必然留在 map 的集合中并继续收到事件。
+    // remove-if-empty 在 computeIfPresent 内原子完成，存活订阅者始终留在 map 中并继续收到事件。
     DataSource dataSource = mock(DataSource.class);
     Connection connection = mock(Connection.class);
     PreparedStatement statement = mock(PreparedStatement.class);

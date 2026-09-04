@@ -8,7 +8,6 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -286,7 +285,6 @@ class StudioCanvasControllerTest {
         "\"idempotencyKey\":\"%s\",\"commands\":[{\"type\":\"DELETE_NODE\",\"nodeId\":\"%s\"}]"
             .formatted(COMMAND, NODE_1);
 
-    // 公共契约是 string；JSON number 经 Jackson coercion 兼容接受（同一严格校验）。
     mockMvc
         .perform(
             post("/api/canvases/" + CANVAS + "/commands")
@@ -298,7 +296,7 @@ class StudioCanvasControllerTest {
             post("/api/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":3," + commands + "}"))
-        .andExpect(status().isOk());
+        .andExpect(status().isBadRequest());
 
     for (String invalid :
         new String[] {
@@ -316,7 +314,7 @@ class StudioCanvasControllerTest {
           .andExpect(status().isBadRequest());
     }
 
-    verify(commandService, times(2)).applyCommands(eq(CANVAS), eq(3L), eq(COMMAND), anyList());
+    verify(commandService).applyCommands(eq(CANVAS), eq(3L), eq(COMMAND), anyList());
   }
 
   @Test
@@ -374,7 +372,7 @@ class StudioCanvasControllerTest {
                 .content(
                     """
                     {"expectedVersion":3,"idempotencyKey":"%s",
-                     "commands":[{"type":"OLD_COMMAND"}]}
+                     "commands":[{"type":"UNKNOWN_COMMAND"}]}
                     """
                         .formatted(COMMAND)))
         .andExpect(status().isBadRequest());
@@ -385,18 +383,10 @@ class StudioCanvasControllerTest {
                 .content(
                     """
                     {"expectedVersion":3,"idempotencyKey":"%s",
-                     "commands":[{"type":"DELETE_NODE","nodeId":"%s","legacy":true}]}
+                     "commands":[{"type":"DELETE_NODE","nodeId":"%s","unexpected":true}]}
                     """
                         .formatted(COMMAND, NODE_1)))
         .andExpect(status().isBadRequest());
-  }
-
-  @Test
-  void changesEndpointIsNotExposed() throws Exception {
-    // Canvas 跨窗口恢复只允许读取标准 Snapshot；旧 changes 路由必须彻底消失，避免兼容路径回流。
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/changes?afterVersion=0"))
-        .andExpect(status().isNotFound());
   }
 
   @Test

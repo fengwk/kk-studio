@@ -1013,9 +1013,9 @@ describe('AgentPane orchestration', () => {
 
   it('keeps the stored draft unchanged while navigating recalled history', async () => {
     // 历史导航只更新当前受控内容；刷新恢复的持久草稿仍是用户原始编辑。
-    const draftKey = `kkstudio.ai.composer-draft.v2:thread:${THREAD_ID}`
+    const draftKey = `kkstudio.ai.composer-draft.v1:thread:${THREAD_ID}`
     const stored = JSON.stringify({
-      version: 2,
+      version: 1,
       parts: [{ type: 'text', text: 'original draft' }],
     })
     localStorage.setItem(draftKey, stored)

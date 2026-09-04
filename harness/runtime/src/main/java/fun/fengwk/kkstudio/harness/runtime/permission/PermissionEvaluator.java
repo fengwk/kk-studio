@@ -12,8 +12,8 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * PiBase 等价的 ordered Tool permission evaluator。path target 只解析为 effective-workdir 相对 POSIX 路径，交给
- * JGit gitignore 语义匹配；Bash/普通 command 候选仍使用简单 wildcard。这里只生成策略候选，不承担 T09 path/symlink 安全。
+ * 基于有序规则的 Tool permission evaluator。path target 只解析为 effective-workdir 相对 POSIX 路径，交给 JGit
+ * gitignore 语义匹配；Bash/普通 command 候选仍使用简单 wildcard。这里只生成策略候选，不承担 T09 path/symlink 安全。
  */
 public final class PermissionEvaluator {
   private static final int ARGUMENT_PREVIEW_LENGTH = 120;

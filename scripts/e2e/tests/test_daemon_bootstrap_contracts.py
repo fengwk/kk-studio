@@ -19,7 +19,7 @@ APP_TEST_YML = REPOSITORY_ROOT / "web/src/test/resources/application.yml"
 
 
 class TestDaemonBootstrapContracts(unittest.TestCase):
-    """Ensure daemon bootstrap, registration tokens, and canonical fixtures adhere to Phase 15 contracts."""
+    """Ensure daemon bootstrap, registration tokens, and canonical fixtures adhere to current contracts."""
 
     def test_e2e_seed_four_environment_cards_and_safety(self):
         """Seed must pre-seed exactly 4 disposable Environment Cards with fixed UUIDs and tokens."""
@@ -57,29 +57,20 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         self.assertNotIn("environmentId", default_assistant_stmt)
         self.assertNotIn("11111111-1111-1111-1111-111111111111", default_assistant_stmt)
 
-    def test_three_startup_paths_use_registration_token_only(self):
+    def test_three_startup_paths_use_registration_token(self):
         """lib.sh, reliability compose, and distributed compose must only use registration token."""
         lib_content = E2E_LIB_SH.read_text(encoding="utf-8")
         self.assertIn("--registration-token", lib_content)
         self.assertIn("e2e-token-host-tool", lib_content)
-        self.assertNotIn("--environment-name", lib_content)
-        self.assertNotIn("--gateway-token", lib_content)
-        self.assertNotIn("--daemon-id", lib_content)
 
         rel_content = RELIABILITY_COMPOSE.read_text(encoding="utf-8")
         self.assertIn("--registration-token", rel_content)
         self.assertIn("e2e-token-reliability", rel_content)
-        self.assertNotIn("--environment-name", rel_content)
-        self.assertNotIn("--gateway-token", rel_content)
-        self.assertNotIn("--daemon-id", rel_content)
 
         dist_content = DISTRIBUTED_COMPOSE.read_text(encoding="utf-8")
         self.assertIn("--registration-token", dist_content)
         self.assertIn("e2e-token-dist-a", dist_content)
         self.assertIn("e2e-token-dist-b", dist_content)
-        self.assertNotIn("--environment-name", dist_content)
-        self.assertNotIn("--gateway-token", dist_content)
-        self.assertNotIn("--daemon-id", dist_content)
 
     def test_distributed_a_b_tokens_are_distinct(self):
         """Distributed A and B must never share a registration token."""
@@ -91,43 +82,6 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         token_a = token_a_match.group(1)
         token_b = token_b_match.group(1)
         self.assertNotEqual(token_a, token_b)
-
-    def test_legacy_cli_and_global_token_zero_residual(self):
-        """No legacy daemon-token configuration or CLI arguments in production / deployment."""
-        app_e2e = APP_E2E_YML.read_text(encoding="utf-8")
-        self.assertNotIn("daemon-token", app_e2e)
-        self.assertNotIn("environment-gateway", app_e2e)
-
-        app_test = APP_TEST_YML.read_text(encoding="utf-8")
-        self.assertNotIn("daemon-token", app_test)
-
-        forbidden_pattern = re.compile(
-            r"--environment-name|--gateway-token|--daemon-id|environment-gateway.*daemon-token"
-        )
-        scan_paths = [
-            REPOSITORY_ROOT / "deploy",
-            REPOSITORY_ROOT / "scripts",
-            REPOSITORY_ROOT / "docs",
-            REPOSITORY_ROOT / "web/src/main/resources",
-            REPOSITORY_ROOT / "harness/daemon/src/main/java",
-        ]
-        violations = []
-        for base in scan_paths:
-            if base.is_file():
-                files = [base]
-            else:
-                files = list(base.rglob("*"))
-            for file_path in files:
-                if (
-                    file_path.is_file()
-                    and not file_path.name.endswith(".pyc")
-                    and "__pycache__" not in file_path.parts
-                    and "tests" not in file_path.parts
-                ):
-                    text = file_path.read_text(encoding="utf-8", errors="ignore")
-                    if forbidden_pattern.search(text):
-                        violations.append(str(file_path.relative_to(REPOSITORY_ROOT)))
-        self.assertEqual(violations, [])
 
     def test_ui_smoke_uses_workspace_only_ui(self):
         """UI smoke must not require Environment option picker and must clean up temporary agent in finally."""
@@ -147,8 +101,6 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         """HarnessRuntimePostgresqlLifecycleIntegrationTest must use canonical workspacePath."""
         content = LIFECYCLE_TEST_JAVA.read_text(encoding="utf-8")
         self.assertIn('"workspacePath": null', content)
-        self.assertNotIn('"environment": null', content)
-        self.assertNotIn('"environment":', content)
 
 
 if __name__ == "__main__":

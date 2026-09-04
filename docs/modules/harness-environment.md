@@ -6,7 +6,7 @@
 
 - 确立规范的环境唯一标识（`EnvironmentId`）与已冻结的工作区绑定模型（`EnvironmentBinding`）；
 - 定义独立于上层模型工具编排的标准原子能力目录（Capability catalog）、执行 SPI 及传输确定性契约；
-- 提供 Environment Daemon WebSocket 协议 v6 的封包结构（`DaemonEnvelope`）、控制与执行消息类型、能力通告规范（READY capabilities）、调用与流式结果编解码器以及安全目录模型。
+- 提供 Environment Daemon WebSocket 协议 v1 的封包结构（`DaemonEnvelope`）、控制与执行消息类型、能力通告规范（READY capabilities）、调用与流式结果编解码器以及安全目录模型。
 
 该模块仅依赖 [`harness-common`](harness-common.md) 的基础值对象（`InputSchema`、`ResultContent`、`ResourceRef`）与 Jackson，独立于具体的模型工具编排、执行运行时、外部存储、网络基础设施及 Daemon 实现。
 
@@ -17,7 +17,7 @@
 - 将分支持久化配置（BranchSettings）、Platform 寻址路由与 Daemon 物理传输收敛到统一的 `EnvironmentId` 标识体系。
 - 确立与模型层解耦的原子能力标准（Capability catalog），通过稳定的能力标识、输入模式（schema）与版本约束规范环境执行标准。
 - 确立传输层（Transport）调用语义，保证发送确定性、有序流式事件及单次终态（terminal-once）约束。
-- 统一使用 Daemon protocol v6 通用协议封包与严格编解码契约。
+- 统一使用 Daemon protocol v1 通用协议封包与严格编解码契约。
 - 统一跨平台工作区与目录浏览使用的规范相对路径规则。
 
 ### 协作边界
@@ -25,7 +25,7 @@
 - 连接管理与寻址租约：活跃连接注册表、心跳超时判定、数据库路由租约（lease）及跨节点路由由 Platform 统一管理；本模块提供无状态的协议值对象。
 - 真实环境执行：本地文件系统操作、进程启动、LSP 服务及技能加载的具体实现由 Daemon 进程承载；本模块仅定义抽象执行接口与调用参数约束。
 - 工具编排与权限准入：面向模型的 Tool 包装、参数准入（admission）与权限决策由 Runtime 与 Contributor API 承载；本模块聚焦原子能力描述。
-- MCP 外部工具：平台在每次调用时通过 HTTP 访问外部 MCP 服务，采用独立于 Environment Daemon protocol v6 的接入路径。
+- MCP 外部工具：平台在每次调用时通过 HTTP 访问外部 MCP 服务，采用独立于 Environment Daemon protocol v1 的接入路径。
 - 状态管理：Daemon 以进程内 journal 管理执行日志，Platform 管理连接与路由状态，Runtime 管理持久化调用快照；本模块提供这些边界共享的值契约。
 
 ## 依赖边界
@@ -37,7 +37,7 @@ harness-common + Jackson
 harness-environment
   ├─ EnvironmentId / Binding / WorkspacePath
   ├─ Capability catalog + execution/transport SPI
-  └─ Daemon protocol v6 values + codecs
+  └─ Daemon protocol v1 values + codecs
 ```
 
 生产依赖单向受限于 `harness-common` 与 Jackson；Agent Runtime、Tool 编排层、持久化存储以及 Daemon 具体实现均向本模块单向依赖。详细依赖声明见 [`pom.xml`](../../harness/environment/pom.xml)，依赖方向由 [`EnvironmentModuleArchitectureTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentModuleArchitectureTest.java) 自动化守卫。
@@ -48,7 +48,7 @@ harness-environment
 | --- | --- |
 | `fun.fengwk.kkstudio.harness.environment` | 环境身份标识与绑定模型。定义跨 Runtime、Platform Gateway 与 Daemon 共享的规范 UUID 路由身份（`EnvironmentId`）、已冻结的环境与工作区相对路径绑定（`EnvironmentBinding`）以及跨平台相对路径语法规则（`EnvironmentWorkspacePath`）。本包聚焦纯内存值对象与格式校验，物理文件与网络 I/O 交由各端具体实现承载。 |
 | `fun.fengwk.kkstudio.harness.environment.capability` | 跨环境共享的原子能力契约与执行 SPI。定义版本固定的 12 项原子能力描述符（catalog version 1）、底层异步执行接口（`EnvironmentCapability`）以及传输层窄端口（`EnvironmentCapabilityTransport`），严格约束发送异常确定性以及流式事件序列（`PARTIAL* -> exactly one terminal`）。底层能力由 Daemon 注册执行，模型工具映射由上层 Contributor 承接。 |
-| `fun.fengwk.kkstudio.harness.environment.daemon` | Platform Gateway 与 Environment Daemon 之间的 WebSocket JSON 通信协议（v6）。包含协议封包（`DaemonEnvelope`）、握手能力载荷（READY）、通用调用与流式结果编解码器，以及目录浏览（`EnvironmentDirectoryListing`）与资源引用模型。本包聚焦报文的序列化与严格校验，连接代际、路由租约与执行日志分别由网关和 Daemon 状态机管理。 |
+| `fun.fengwk.kkstudio.harness.environment.daemon` | Platform Gateway 与 Environment Daemon 之间的 WebSocket JSON 通信协议（v1）。包含协议封包（`DaemonEnvelope`）、握手能力载荷（READY）、通用调用与流式结果编解码器，以及目录浏览（`EnvironmentDirectoryListing`）与资源引用模型。本包聚焦报文的序列化与严格校验，连接代际、路由租约与执行日志分别由网关和 Daemon 状态机管理。 |
 
 ## 核心模型 / API
 
@@ -125,9 +125,9 @@ PARTIAL* -> exactly one terminal
 
 远端报告的 `FAILED` 与 `CANCELLED` 分别转换为强类型异常 `EnvironmentCapabilityFailedException` 与 `EnvironmentCapabilityCancelledException`。终态产生后，任何延迟到达的事件均直接丢弃；取消指令直接透传给底层句柄，严格保持事件流的先后顺序。
 
-### Daemon protocol v6
+### Daemon protocol v1
 
-[`DaemonProtocol.VERSION`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java) 固定为 `6`。系统支持的消息集合由如下枚举定义：
+[`DaemonProtocol.VERSION`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java) 固定为 `1`。系统支持的消息集合由如下枚举定义：
 
 ```text
 HELLO / WELCOME / READY / HEARTBEAT
@@ -147,9 +147,9 @@ invocationId? / sequence / payload
 握手与主执行时序：
 
 ```text
-Daemon -> HELLO(protocolVersion=6, registrationToken, catalog version)
+Daemon -> HELLO(protocolVersion=1, registrationToken, catalog version)
 Gateway -> WELCOME(environmentId)
-Daemon -> READY(capabilities version=6)
+Daemon -> READY(capabilities version=1)
 Daemon -> HEARTBEAT*
 
 Gateway -> INVOKE
@@ -168,7 +168,7 @@ Daemon -> CANCELLED | 已冻结 terminal replay
 [`DaemonCapabilitiesCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java) 编解码 READY 阶段的能力载荷：
 
 ```text
-version=6
+version=1
 environment: operatingSystem / timeZone / note / rootPath
 skills: name / description
 ```
@@ -196,7 +196,7 @@ timeoutMillis
 - 每个逻辑 Environment 由一个 `EnvironmentId` 标识，该标识贯穿路由寻址、工作区绑定与协议封包。
 - `EnvironmentBinding` 在写入 Invocation 时原子绑定环境标识与工作区相对路径，确保执行上下文完整确定。
 - 原子能力目录与上层模型工具目录保持独立解耦；能力标识或版本不匹配直接判定为确定性的协议错误。
-- 协议严格限定在 v6 消息集合内；收到任何未定义的消息类型直接判定为协议违规并终止处理。
+- 协议严格限定在 v1 消息集合内；收到任何未定义的消息类型直接判定为协议违规并终止处理。
 - 遇到 `SendUncertainException` 异常时，表明远端执行状态未知且可能已产生副作用，调用方必须停止自动重试，转入既定恢复流程。
 - 协议编解码器专注于数据包格式与字段值的严格校验；连接代际管理与执行日志重放由 Daemon 承载，路由租约由 Platform 维持，持久化状态恢复由 Runtime 统一协调。
 
@@ -214,7 +214,7 @@ timeoutMillis
 - [`EnvironmentModuleArchitectureTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentModuleArchitectureTest.java)：验证模块依赖方向与隔离边界。
 - [`EnvironmentIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentIdTest.java)、[`EnvironmentWorkspacePathTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentWorkspacePathTest.java)：验证身份标识生成与路径语法校验规则。
 - [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)、[`EnvironmentCapabilityTransportTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransportTest.java)：验证能力目录注册完整性、异常确定性分类与事件有序性。
-- [`DaemonEnvelopeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonCapabilityInvokeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodecTest.java)、[`DaemonCapabilityResultCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodecTest.java)：验证 protocol v6 封包与载荷编解码的严格校验策略。
+- [`DaemonEnvelopeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonCapabilityInvokeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodecTest.java)、[`DaemonCapabilityResultCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodecTest.java)：验证 protocol v1 封包与载荷编解码的严格校验策略。
 
 ---
 

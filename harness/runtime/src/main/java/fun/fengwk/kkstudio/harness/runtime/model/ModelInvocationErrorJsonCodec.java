@@ -17,7 +17,7 @@ import java.util.Set;
 /**
  * {@link ModelInvocationError} 的严格、确定性 JSON codec。与 runtime 其他严格 codec 保持一致：显式构建与读取 {@link
  * JsonNode} 树，要求精确字段集合，并以 {@link IllegalArgumentException} 拒绝未知、缺失或类型错误的字段。不使用 Jackson default
- * typing、polymorphic annotation、反射 POJO 绑定或兼容别名。
+ * typing、polymorphic annotation 或反射 POJO 绑定。
  */
 public final class ModelInvocationErrorJsonCodec {
 

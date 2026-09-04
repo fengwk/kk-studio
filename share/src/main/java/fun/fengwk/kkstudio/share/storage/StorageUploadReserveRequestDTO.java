@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.storage;
 
+import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.Data;
 
 /**
@@ -21,6 +22,19 @@ public class StorageUploadReserveRequestDTO {
 
   /** 必填声明的字节大小：非负。 */
   private Long sizeBytes;
+
+  @JsonSetter("sizeBytes")
+  public void setSizeBytes(Object value) {
+    if (value == null) {
+      this.sizeBytes = null;
+    } else if (value instanceof Integer integer) {
+      this.sizeBytes = integer.longValue();
+    } else if (value instanceof Long longValue) {
+      this.sizeBytes = longValue;
+    } else {
+      throw new IllegalArgumentException("sizeBytes must be a JSON integer");
+    }
+  }
 
   /** 必填声明的 SHA-256：64 位十六进制摘要（大小写均可，服务端统一小写）。 */
   private String sha256;

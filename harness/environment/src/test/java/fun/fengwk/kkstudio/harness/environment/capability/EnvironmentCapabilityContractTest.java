@@ -80,16 +80,16 @@ class EnvironmentCapabilityContractTest {
                 new EnvironmentCapabilityId("fs.read"), "1", SCHEMA, Duration.ofSeconds(-1)));
   }
 
-  /** filePath 别名经过现有归一化器改为 schema 声明的 path，且原调用保持不变。 */
+  /** 数字字符串经过归一化器改为 JSON integer，且原调用保持不变。 */
   @Test
   void normalizesCapabilityCallArguments() {
     EnvironmentCapabilityCall original =
-        new EnvironmentCapabilityCall("call-1", "{\"filePath\":\"README.md\"}");
+        new EnvironmentCapabilityCall("call-1", "{\"offset\":\"10\",\"path\":\"README.md\"}");
 
     EnvironmentCapabilityCall normalized = original.validateFor(DESCRIPTOR);
 
-    assertEquals("{\"filePath\":\"README.md\"}", original.argumentsJson());
-    assertEquals("{\"path\":\"README.md\"}", normalized.argumentsJson());
+    assertEquals("{\"offset\":\"10\",\"path\":\"README.md\"}", original.argumentsJson());
+    assertEquals("{\"offset\":10,\"path\":\"README.md\"}", normalized.argumentsJson());
     assertEquals("call-1", normalized.id());
     assertNotSame(original, normalized);
   }
@@ -98,10 +98,10 @@ class EnvironmentCapabilityContractTest {
   @Test
   void normalizesAndValidatesNumericArguments() {
     EnvironmentCapabilityCall normalized =
-        new EnvironmentCapabilityCall("call-1", "{\"path\":\"README.md\",\"offset\":\"10\"}")
+        new EnvironmentCapabilityCall("call-1", "{\"offset\":\"10\",\"path\":\"README.md\"}")
             .validateFor(DESCRIPTOR);
 
-    assertEquals("{\"path\":\"README.md\",\"offset\":10}", normalized.argumentsJson());
+    assertEquals("{\"offset\":10,\"path\":\"README.md\"}", normalized.argumentsJson());
   }
 
   /** 调用 id 必须非空，参数必须是 JSON object，且 schema 错误不能被归一化吞掉。 */
@@ -118,7 +118,7 @@ class EnvironmentCapabilityContractTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new EnvironmentCapabilityCall("call-1", "{\"path\":\"a\",\"extra\":true}")
+            new EnvironmentCapabilityCall("call-1", "{\"extra\":true,\"path\":\"a\"}")
                 .validateFor(DESCRIPTOR));
   }
 
@@ -128,11 +128,11 @@ class EnvironmentCapabilityContractTest {
     EnvironmentCapabilityExecutionRequest request =
         new EnvironmentCapabilityExecutionRequest(
             DESCRIPTOR,
-            new EnvironmentCapabilityCall("call-1", "{\"filePath\":\"README.md\"}"),
+            new EnvironmentCapabilityCall("call-1", "{\"offset\":\"20\",\"path\":\"README.md\"}"),
             Duration.ZERO,
             Path.of("/workspace"));
 
-    assertEquals("{\"path\":\"README.md\"}", request.call().argumentsJson());
+    assertEquals("{\"offset\":20,\"path\":\"README.md\"}", request.call().argumentsJson());
     assertEquals(Duration.ZERO, request.timeout());
     assertEquals(Duration.ofSeconds(10), request.effectiveTimeout());
     assertEquals(Path.of("/workspace"), request.workdir());

@@ -71,8 +71,8 @@ import java.util.concurrent.TimeoutException;
 /**
  * Environment daemon 的连接/协议 transport 与能力/技能适配器。
  *
- * <p>使用当前 Daemon wire 协议（VERSION=6）：HELLO 消息 scope 为 null，payload 携带 {@code registrationToken}；
- * Gateway 通过 registrationToken 查询数据库验证并获取对应的 Environment，通过 PostgreSQL 路由租约原子抢占连接： 已有活跃路由返回
+ * <p>使用当前 Daemon wire 协议（当前 v1）：HELLO 消息 scope 为 null，payload 携带 {@code registrationToken}； Gateway
+ * 通过 registrationToken 查询数据库验证并获取对应的 Environment，通过 PostgreSQL 路由租约原子抢占连接： 已有活跃路由返回
  * RETRY_LATER；成功抢占返回 WELCOME 消息下发分配的 {@link EnvironmentId}。
  *
  * <p>READY、HEARTBEAT 与断开连接均以 {@code (environment_id, owner_node_id, lease_token)} 围栏更新；数据库不可用时

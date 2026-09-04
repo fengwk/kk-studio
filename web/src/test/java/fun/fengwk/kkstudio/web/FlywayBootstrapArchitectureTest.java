@@ -17,22 +17,12 @@ import java.util.stream.Stream;
 /** 守护生产与集成测试共用的唯一 Flyway 引导路径。 */
 class FlywayBootstrapArchitectureTest {
 
-  private static final String LEGACY_SCHEMA_MODULE = "data" + "base";
-  private static final String LEGACY_SCHEMA_ARTIFACT = "kk-studio-" + LEGACY_SCHEMA_MODULE;
-  private static final List<String> LEGACY_RESOURCES =
-      List.of(
-          "platform/src/main/resources/schema-postgresql.sql",
-          "platform/src/main/resources/data-dev-postgresql.sql",
-          "platform/src/main/resources/data-e2e-postgresql.sql");
   private static final List<String> FLYWAY_RESOURCES =
       List.of(
           "schema/src/main/resources/db/migration/V1__schema.sql",
           "schema/src/main/resources/db/seed/dev/R__dev_seed.sql",
           "schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql",
           "schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql");
-  private static final String OLD_HARNESS_SCHEMA =
-      "harness/infra/src/main/resources/fun/fengwk/kkstudio/harness/infra/"
-          + "postgresql/harness-runtime-schema.sql";
   private static final List<String> BOOTSTRAP_CONFIGS =
       List.of(
           "web/src/main/resources/application-dev.yml",
@@ -49,35 +39,22 @@ class FlywayBootstrapArchitectureTest {
   void onlyFlywayMigrationResourcesExist() throws IOException {
     Path root = repositoryRoot();
     assertTrue(Files.isDirectory(root.resolve("schema")), "schema module must exist");
-    assertFalse(
-        Files.exists(root.resolve(LEGACY_SCHEMA_MODULE)), "legacy schema module must be absent");
-    for (String resource : LEGACY_RESOURCES) {
-      assertFalse(
-          Files.exists(root.resolve(resource)), "legacy resource must be absent: " + resource);
-    }
     for (String resource : FLYWAY_RESOURCES) {
       assertTrue(
           Files.isRegularFile(root.resolve(resource)), "Flyway resource must exist: " + resource);
     }
-    assertFalse(
-        Files.exists(root.resolve(OLD_HARNESS_SCHEMA)),
-        "the old infra schema mirror must be gone: " + OLD_HARNESS_SCHEMA);
 
-    Path dbDir = root.resolve("schema/src/main/resources/db");
-    try (Stream<Path> stream = Files.walk(dbDir)) {
-      List<String> actualDbSqlFiles =
-          stream
-              .filter(Files::isRegularFile)
-              .filter(path -> path.getFileName().toString().endsWith(".sql"))
-              .map(root::relativize)
-              .map(Path::toString)
-              .sorted()
-              .toList();
-      assertEquals(
-          FLYWAY_RESOURCES.stream().sorted().toList(),
-          actualDbSqlFiles,
-          "db inventory must strictly contain only V1 baseline and the three repeatable seeds");
-    }
+    List<String> actualRepositorySqlFiles =
+        repositoryFiles(root).stream()
+            .map(root::relativize)
+            .map(path -> path.toString().replace('\\', '/'))
+            .filter(path -> path.endsWith(".sql"))
+            .sorted()
+            .toList();
+    assertEquals(
+        FLYWAY_RESOURCES.stream().sorted().toList(),
+        actualRepositorySqlFiles,
+        "repository sql inventory must strictly equal the four Flyway migration and seed resources");
   }
 
   @Test
@@ -87,7 +64,7 @@ class FlywayBootstrapArchitectureTest {
     List<String> allVersionedMigrations =
         files.stream()
             .map(root::relativize)
-            .map(Path::toString)
+            .map(path -> path.toString().replace('\\', '/'))
             .filter(
                 path -> {
                   String filename = Path.of(path).getFileName().toString();
@@ -99,11 +76,7 @@ class FlywayBootstrapArchitectureTest {
         List.of("schema/src/main/resources/db/migration/V1__schema.sql"),
         allVersionedMigrations,
         "V1 baseline must be the single versioned migration across the whole repository; no other"
-            + " versioned migrations (V2+, V1_1, legacy V2/V3 seeds, etc.) are allowed");
-    assertFalse(
-        files.stream()
-            .anyMatch(path -> path.getFileName().toString().equals("harness-runtime-schema.sql")),
-        "no file in the repository may keep the old schema mirror");
+            + " versioned migrations (V2+, V1_1, etc.) are allowed");
   }
 
   @Test
@@ -122,7 +95,6 @@ class FlywayBootstrapArchitectureTest {
     Path root = repositoryRoot();
     String rootPom = Files.readString(root.resolve("pom.xml"), StandardCharsets.UTF_8);
     assertTrue(rootPom.contains("<module>schema</module>"));
-    assertFalse(rootPom.contains("<module>" + LEGACY_SCHEMA_MODULE + "</module>"));
     assertTrue(rootPom.contains("<artifactId>kk-studio-schema</artifactId>"));
 
     String webPom = Files.readString(root.resolve("web/pom.xml"), StandardCharsets.UTF_8);
@@ -158,16 +130,6 @@ class FlywayBootstrapArchitectureTest {
         harnessInfraPom.contains(
             "<artifactId>kk-studio-schema</artifactId>\n            <scope>test</scope>"),
         "harness infra must depend on the schema module for infrastructure tests");
-
-    for (Path pom :
-        repositoryFiles(root).stream()
-            .filter(path -> path.getFileName().toString().equals("pom.xml"))
-            .toList()) {
-      assertFalse(
-          Files.readString(pom, StandardCharsets.UTF_8)
-              .contains("<artifactId>" + LEGACY_SCHEMA_ARTIFACT + "</artifactId>"),
-          "old schema artifact must be absent: " + root.relativize(pom));
-    }
   }
 
   /** 一次性物化整个仓库的常规文件（跳过生成/依赖目录），Stream 在方法内关闭。 */

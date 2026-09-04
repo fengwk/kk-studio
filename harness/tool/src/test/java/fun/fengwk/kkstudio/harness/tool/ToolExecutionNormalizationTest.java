@@ -15,7 +15,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 
-/** ToolCall 在 schema 校验前静默归一化参数的契约测试。 */
+/** ToolCall 在 schema 校验前静默数字归一化参数的契约测试。 */
 class ToolExecutionNormalizationTest {
 
   private static final ToolDescriptor DESCRIPTOR =
@@ -34,33 +34,24 @@ class ToolExecutionNormalizationTest {
           ToolSideEffect.READ_ONLY,
           Duration.ofSeconds(10));
 
-  /** filePath 且无 path 时，validateFor 返回归一化后的 ToolCall，argumentsJson 只含 path。 */
-  @Test
-  void validateForMapsFilePathToPath() {
-    ToolCall call =
-        new ToolCall("call-1", "read", "{\"filePath\":\"README.md\"}").validateFor(DESCRIPTOR);
-
-    assertEquals("{\"path\":\"README.md\"}", call.argumentsJson());
-  }
-
   /** integer 字段的十进制数字字符串被写成 JSON integer，归一化后的 argumentsJson 不含数字字符串。 */
   @Test
   void validateForConvertsIntegerTextToInteger() {
     ToolCall call =
-        new ToolCall("call-1", "read", "{\"path\":\"a.txt\",\"offset\":\"10\"}")
+        new ToolCall("call-1", "read", "{\"offset\":\"10\",\"path\":\"a.txt\"}")
             .validateFor(DESCRIPTOR);
 
-    assertEquals("{\"path\":\"a.txt\",\"offset\":10}", call.argumentsJson());
+    assertEquals("{\"offset\":10,\"path\":\"a.txt\"}", call.argumentsJson());
   }
 
-  /** validateFor 返回归一化后的新 ToolCall，原调用保持原始 JSON。 */
+  /** validateFor 返回归一化后的新 ToolCall，原调用保持原始 JSON 与不可变性。 */
   @Test
   void validateForReturnsNormalizedCall() {
-    ToolCall original = new ToolCall("call-1", "read", "{\"filePath\":\"a.txt\"}");
+    ToolCall original = new ToolCall("call-1", "read", "{\"offset\":\"10\",\"path\":\"a.txt\"}");
     ToolCall normalized = original.validateFor(DESCRIPTOR);
 
-    assertEquals("{\"filePath\":\"a.txt\"}", original.argumentsJson());
-    assertEquals("{\"path\":\"a.txt\"}", normalized.argumentsJson());
+    assertEquals("{\"offset\":\"10\",\"path\":\"a.txt\"}", original.argumentsJson());
+    assertEquals("{\"offset\":10,\"path\":\"a.txt\"}", normalized.argumentsJson());
     assertEquals(original.id(), normalized.id());
     assertEquals(original.toolName(), normalized.toolName());
     assertNotSame(original, normalized);
@@ -73,13 +64,13 @@ class ToolExecutionNormalizationTest {
     assertSame(original, original.validateFor(DESCRIPTOR));
   }
 
-  /** path 与 filePath 同时存在时校验仍因 additionalProperties 失败，归一化不掩盖冲突。 */
+  /** 未知附加字段即使伴随有效参数，校验仍因 additionalProperties 严格失败。 */
   @Test
-  void validateForRejectsFilePathAlongsidePath() {
+  void validateForRejectsAdditionalProperties() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new ToolCall("call-1", "read", "{\"filePath\":\"a.txt\",\"path\":\"b.txt\"}")
+            new ToolCall("call-1", "read", "{\"extra\":true,\"path\":\"a.txt\"}")
                 .validateFor(DESCRIPTOR));
   }
 
@@ -89,7 +80,7 @@ class ToolExecutionNormalizationTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new ToolCall("call-1", "read", "{\"path\":\"a.txt\",\"offset\":\"ten\"}")
+            new ToolCall("call-1", "read", "{\"offset\":\"ten\",\"path\":\"a.txt\"}")
                 .validateFor(DESCRIPTOR));
   }
 }

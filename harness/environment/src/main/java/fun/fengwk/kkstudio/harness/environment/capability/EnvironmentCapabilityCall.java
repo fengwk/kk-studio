@@ -19,7 +19,7 @@ public record EnvironmentCapabilityCall(String id, String argumentsJson) {
   }
 
   /**
-   * 静默归一化参数（如 {@code filePath}→{@code path}、整数字符串→integer），再用 schema 校验。
+   * 静默归一化参数（数字字符串→integer/number），再用 schema 严格校验。
    *
    * @return 持有归一化后参数的新 {@code EnvironmentCapabilityCall}。
    */

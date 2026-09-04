@@ -26,10 +26,10 @@ import java.util.TreeSet;
 import java.util.UUID;
 
 /**
- * 断言最终的 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 infra 的七张表（业务表 不得使用 harness_ 前缀），被禁止的遗留
- * harness 表不存在，且结构化载荷使用 jsonb（绝不使用 bytea）。
+ * 断言 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 infra 的七张表（业务表不得使用 harness_ 前缀），且结构化载荷使用
+ * jsonb。
  *
- * <p>public schema 的相等性校验是严格的：{@code public} 中 {@code BASE TABLE} 的集合必须与期望列表完全一致，因此任何残留或桩表都会立即被发现。
+ * <p>public schema 的相等性校验是严格的：{@code public} 中 {@code BASE TABLE} 的集合必须与期望列表完全一致。
  */
 class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
@@ -79,20 +79,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_tool_invocation",
           "harness_work");
 
-  private static final Set<String> FORBIDDEN_LEGACY_TABLES =
-      Set.of(
-          "harness_thread_input",
-          "harness_interaction",
-          "harness_model_usage",
-          "harness_execution_activation",
-          "harness_execution_target",
-          "harness_artifact",
-          "harness_retry_policy",
-          "harness_realtime_stream_policy",
-          "harness_environment_queue",
-          "harness_thread_goal",
-          "agent_thread_goal");
-
   /** Canvas 与 Chat/Comfy 一样完全 UUID：所有持久化实体 id 由应用侧生成，schema 不提供任何序列。 */
   private static final Set<String> CANVAS_UUID_ID_TABLES =
       Set.of("canvas_document", "canvas_group", "canvas_node", "canvas_resource");
@@ -126,22 +112,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         new TreeSet<>(HARNESS_TABLES),
         harnessTables,
         "only the infra execution tables may use the harness_ prefix");
-  }
-
-  @Test
-  void forbiddenLegacyHarnessTablesAreAbsent() throws SQLException {
-    for (String table : FORBIDDEN_LEGACY_TABLES) {
-      try (Connection conn = newConnection();
-          PreparedStatement ps =
-              conn.prepareStatement(
-                  "select 1 from information_schema.tables"
-                      + " where table_schema = 'public' and table_name = ?")) {
-        ps.setString(1, table);
-        try (ResultSet rs = ps.executeQuery()) {
-          assertFalse(rs.next(), () -> "legacy harness table must be removed: " + table);
-        }
-      }
-    }
   }
 
   @Test
@@ -385,50 +355,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "error",
         "created_at",
         "updated_at");
-  }
-
-  @Test
-  void harnessThreadNoLongerExposesLegacyExecutionColumns() throws SQLException {
-    for (String legacy :
-        new String[] {
-          "environment_name",
-          "input_sequence",
-          "runnable",
-          "execution_epoch",
-          "processor_token",
-          "processor_until"
-        }) {
-      try (Connection conn = newConnection();
-          PreparedStatement ps =
-              conn.prepareStatement(
-                  "select 1 from information_schema.columns"
-                      + " where table_schema = 'public' and table_name = 'harness_thread'"
-                      + " and column_name = ?")) {
-        ps.setString(1, legacy);
-        try (ResultSet rs = ps.executeQuery()) {
-          assertFalse(rs.next(), () -> "harness_thread must not expose legacy column " + legacy);
-        }
-      }
-    }
-  }
-
-  @Test
-  void harnessEntryDoesNotExposeLegacyVersionColumn() throws SQLException {
-    Set<String> columns = new TreeSet<>();
-    try (Connection conn = newConnection();
-        PreparedStatement ps =
-            conn.prepareStatement(
-                "select column_name from information_schema.columns"
-                    + " where table_schema = 'public' and table_name = 'harness_entry'")) {
-      try (ResultSet rs = ps.executeQuery()) {
-        while (rs.next()) {
-          columns.add(rs.getString(1));
-        }
-      }
-    }
-    assertTrue(
-        !columns.contains("version"),
-        () -> "harness_entry must not declare a legacy version column; found=" + columns);
   }
 
   @Test
@@ -922,7 +848,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "trg_canvas_document_version_notify",
             "trg_canvas_function_work_notify"),
         triggers,
-        "no legacy trigger (version bump, activation notify, child version) may remain");
+        "public triggers must equal the exact set of user triggers");
 
     String systemSettingsDefinition =
         singleString(

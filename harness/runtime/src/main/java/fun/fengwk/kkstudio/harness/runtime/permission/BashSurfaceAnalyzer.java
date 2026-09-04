@@ -8,8 +8,12 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 不调用 shell 的 Bash 顶层静态 surface analyzer。动态执行面返回 unsupported，由 PermissionEvaluator 采用“完整命令显式
- * deny，否则 ask”。
+ * 为权限匹配提取 Bash 顶层执行面，不启动 Shell。
+ *
+ * <p>分析器只识别确定的静态命令段，并处理引号、转义、顶层控制运算符和 heredoc 边界。命令替换、进程替换、复合语法、动态命令名、Shell 包装器及未闭合结构会返回 {@code
+ * unsupported}，由权限层按完整原命令执行保守判定。
+ *
+ * <p>这不是完整 Bash 解析器，也不声称模拟运行时展开；它的输出仅用于构造权限规则候选。
  */
 public final class BashSurfaceAnalyzer {
   private static final Pattern ASSIGNMENT = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*(?:\\+)?=");
@@ -36,6 +40,7 @@ public final class BashSurfaceAnalyzer {
           "until",
           "while");
 
+  /** 切分顶层命令段，并标记无法静态确定执行面的语法。 */
   public Analysis analyze(String command) {
     String input = normalize(command);
     List<String> segments = new ArrayList<>();
@@ -196,6 +201,7 @@ public final class BashSurfaceAnalyzer {
     return Analysis.supported(segments);
   }
 
+  /** 为静态命令段生成权限匹配候选，包括去除赋值前缀后的可执行文件名。 */
   public List<String> buildCandidates(String segment) {
     String trimmed = segment.trim();
     if (trimmed.isEmpty()) {
@@ -341,6 +347,7 @@ public final class BashSurfaceAnalyzer {
     }
   }
 
+  /** 消费 heredoc 正文；允许展开的正文中出现命令替换时拒绝静态分析。 */
   private ConsumeResult consumePendingHeredocs(
       String input, int newlineIndex, List<String> segments, List<PendingHeredoc> pendingHeredocs) {
     int currentNewlineIndex = newlineIndex;
@@ -450,6 +457,7 @@ public final class BashSurfaceAnalyzer {
     return new ParsedDelimiter(value.toString(), allowExpansion);
   }
 
+  /** 返回阻止当前命令段参与静态权限匹配的原因；可分析时返回 {@code null}。 */
   private String unsupportedSurfaceReason(String segment) {
     List<String> tokens = tokenize(segment);
     int index = firstCommandIndex(tokens);
@@ -654,6 +662,7 @@ public final class BashSurfaceAnalyzer {
     return current.length() == 0 || Character.isWhitespace(current.charAt(current.length() - 1));
   }
 
+  /** 识别顶层控制运算符，同时排除 {@code &>}、{@code >&}、{@code >|} 等重定向。 */
   private static int topLevelOperatorLength(String input, int index) {
     char ch = input.charAt(index);
     Character next = index + 1 < input.length() ? input.charAt(index + 1) : null;

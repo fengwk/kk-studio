@@ -66,7 +66,7 @@ class DaemonEnvelopeCodecTest {
             + "\"sequence\":0,\"payload\":{},\"unexpected\":true}");
   }
 
-  /** READY 等 connection 消息必须携带 canonical UUID scope；缺失、非法文本与旧 environmentName 字段都拒绝。 */
+  /** READY 等 connection 消息必须携带 canonical UUID scope。 */
   @Test
   void rejectsMissingOrNonCanonicalEnvironmentId() {
     assertProtocolError(current("\"messageType\":\"READY\",\"sequence\":0,\"payload\":{}}"));
@@ -79,10 +79,6 @@ class DaemonEnvelopeCodecTest {
     assertProtocolError(
         current("\"messageType\":\"READY\",\"environmentId\":7,")
             + "\"sequence\":0,\"payload\":{}}");
-    // environmentName 不是任何受支持 envelope 的字段（旧协议残留）。
-    assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
-            + "\"environmentName\":\"env\",\"sequence\":0,\"payload\":{}}");
   }
 
   /** HELLO envelope 不得声明 scope；HELLO 上的 environmentId 字段在边界拒绝。 */

@@ -193,7 +193,7 @@ registerCase({
     )
     assert(!after.some((provider) => provider.name === created.name), 'Provider still listed')
 
-    // 硬删除后同名可重建：version 从 0 重新开始，且读取到新 body 的数据（旧 v2 baseUrl 不残留）。
+    // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体属性。
     const recreated = envelopeData(
       (
         await ctx.call('POST', '/api/ai/catalog/providers', {
@@ -269,7 +269,7 @@ registerCase({
     await deleteModel(ctx, updated)
     assert(!(await findModel(ctx, provider.name, name)), 'Model still listed')
 
-    // 硬删除后同名可重建：version 从 0 重新开始，且读取到新 body 的数据（旧 updated 配置不残留）。
+    // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体配置。
     const recreated = envelopeData(
       (
         await ctx.call('POST', '/api/ai/catalog/models', {
@@ -288,7 +288,7 @@ registerCase({
     assert(recreated.description === 'recreated', JSON.stringify(recreated))
     assert(
       recreated.config.defaultVariant === 'default',
-      `recreated Model must not carry old config: ${JSON.stringify(recreated)}`,
+      `recreated Model must reflect current body config: ${JSON.stringify(recreated)}`,
     )
     assert(await findModel(ctx, provider.name, name), 'recreated Model not listed')
     await deleteModel(ctx, recreated)
@@ -343,7 +343,7 @@ registerCase({
     )
     assert(!agents.some((candidate) => candidate.name === name), 'Agent still listed')
 
-    // 硬删除后同名可重建：version 从 0 重新开始，且读取到新 body 的数据（旧 updated prompt 不残留）。
+    // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体 prompt。
     const recreated = envelopeData(
       (
         await ctx.call('POST', '/api/ai/catalog/agents', {

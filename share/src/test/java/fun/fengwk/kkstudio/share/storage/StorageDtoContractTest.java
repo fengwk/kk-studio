@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.share.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import org.junit.jupiter.api.Test;
@@ -31,11 +33,21 @@ class StorageDtoContractTest {
     }
   }
 
-  /** 请求侧 sizeBytes 保持 Long：JSON number 与 string 都由 backend Jackson coercion 解析，不改领域。 */
+  /** 请求侧 sizeBytes 保持 Long，setter 只接收 Jackson 对 JSON integer 使用的整数类型。 */
   @Test
   void reserveRequestSizeBytesStaysLong() throws Exception {
     Field sizeBytes = StorageUploadReserveRequestDTO.class.getDeclaredField("sizeBytes");
     assertEquals(Long.class, sizeBytes.getType());
+
+    StorageUploadReserveRequestDTO request = new StorageUploadReserveRequestDTO();
+    request.setSizeBytes(7);
+    assertEquals(7L, request.getSizeBytes());
+    request.setSizeBytes(8L);
+    assertEquals(8L, request.getSizeBytes());
+    request.setSizeBytes(null);
+    assertNull(request.getSizeBytes());
+    assertThrows(IllegalArgumentException.class, () -> request.setSizeBytes("9"));
+    assertThrows(IllegalArgumentException.class, () -> request.setSizeBytes(9.5D));
   }
 
   private static Field field(String ownerAndField) throws NoSuchFieldException {

@@ -104,7 +104,7 @@ export function groupFlowId(groupId: string): string {
 
 /**
  * 从 flow id 解码 group UUID。UUID 不含 ':'，前缀切片是安全的；
- * 非 canonical UUID 后缀（包括旧十进制 id）一律拒绝。
+ * 非 canonical UUID 后缀一律拒绝。
  */
 export function groupIdFromFlowId(flowId: string): UUIDString | null {
   const groupId = flowId.startsWith('group:') ? flowId.slice('group:'.length) : ''

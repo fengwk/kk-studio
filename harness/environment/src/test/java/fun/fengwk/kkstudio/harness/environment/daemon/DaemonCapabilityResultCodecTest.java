@@ -435,15 +435,15 @@ class DaemonCapabilityResultCodecTest {
                     + "\"contentBase64\":\"YQ==\"}]}}"));
   }
 
-  /** 旧结果字段 toolCallId 不属于 Capability wire，必须被严格拒绝。 */
+  /** Capability result 必须拒绝未知字段。 */
   @Test
-  void rejectsLegacyToolCallIdField() {
+  void rejectsUnknownResultField() {
     DaemonProtocolException error =
         assertThrows(
             DaemonProtocolException.class,
             () ->
                 codec.decodeResult(
-                    "{\"result\":{\"toolCallId\":\"c\",\"error\":false,\"details\":{},"
+                    "{\"result\":{\"unexpected\":\"c\",\"error\":false,\"details\":{},"
                         + "\"contents\":[]}}"));
     assertTrue(error.getMessage().contains("unknown field"));
   }

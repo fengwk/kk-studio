@@ -69,7 +69,7 @@ describe('CanvasPage integration', () => {
   })
 
   it('redirects non-canonical deep links back to the library', async () => {
-    renderPage(['/canvas/legacy-id'])
+    renderPage(['/canvas/invalid-id'])
 
     expect(await screen.findByText('Research board')).toBeInTheDocument()
     expect(getCanvas).not.toHaveBeenCalled()

@@ -130,13 +130,13 @@ class CompactionFileSectionsTest {
   }
 
   @Test
-  void cumulativeFromBranchStartIncludesOlderFileOpsBeforePreviousCompaction() {
-    // 先前已完成一次压缩（其 firstKept 指向第一个 turn），新压缩扫描仍从分支起点累计：旧文件操作不丢失。
+  void cumulativeFromBranchStartIncludesEarlierFileOpsBeforePreviousCompaction() {
+    // 已完成一次压缩后，下一次压缩仍从分支起点累计文件操作。
     PathBuilder path = new PathBuilder();
     path.root();
     long ts1 = path.turnStart();
     path.user("u");
-    path.assistant("read", "legacy.txt");
+    path.assistant("read", "before.txt");
     path.toolResults();
     long te1 = path.turnEnd(ts1);
     path.compactionComplete(id(te1)); // 第一次 FULL 压缩
@@ -148,7 +148,7 @@ class CompactionFileSectionsTest {
     path.turnStart(); // 当前压缩 turn
 
     assertEquals(
-        "<read-files>\nlegacy.txt\nnew.txt\n</read-files>",
+        "<read-files>\nbefore.txt\nnew.txt\n</read-files>",
         CompactionFileSections.sections(path.path(), id(te2)));
   }
 

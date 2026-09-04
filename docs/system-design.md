@@ -42,7 +42,7 @@ flowchart LR
     HarnessBuiltin[Harness Builtin]
     PG[(PostgreSQL<br/>durable truth)]
     S3[(S3<br/>blob bytes)]
-    Env["/api/ai/environment/daemon/v2<br/>Environment Daemon"]
+    Env["/api/ai/environment/daemon/v1<br/>Environment Daemon"]
     Trusted[Trusted contributor JARs]
 
     Browser --> Frontend
@@ -175,7 +175,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `canvas/infra` | Canvas PostgreSQL/MyBatis、Snapshot query、Function durable runtime | 依赖 `canvas-core`，不反向依赖 Platform/Harness/Web |
 | `harness/common` | Prompt template/loader、JSON 边界工具、ResourceRef、统一 ResultContent 与 InputSchema 体系 | 依赖 JDK/Jackson，无其它 Harness 依赖 |
 | `harness/tool` | Tool identity、descriptor、call/result 与 Tool JSON codecs（Result 组合 ResultContent） | 依赖 `harness-common` 与 Jackson |
-| `harness/environment` | Environment binding、Capability SPI/catalog 与 Daemon v6 wire（CapabilityResult 组合 ResultContent） | 依赖 `harness-common` 与 Jackson，绝不依赖 `harness-tool` |
+| `harness/environment` | Environment binding、Capability SPI/catalog 与 Daemon v1 wire（CapabilityResult 组合 ResultContent） | 依赖 `harness-common` 与 Jackson，绝不依赖 `harness-tool` |
 | `harness/runtime` | Session/Entry/Thread/Command/Invocation/Work 状态机与 processors | 依赖 `harness-common`、`harness-tool`、`harness-environment`、Jackson、SLF4J、JGit |
 | `harness/contributor-api` | trusted Contributor 的 Catalog、BranchView、统一 Tool、effect 与 projector API | 生产依赖 `harness-tool`、`harness-environment`，不进生产 Common/Runtime |
 | `harness/builtin` | 第一方内置 17 工具、goal.state 与 context projector | 依赖 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment`、Jackson |
@@ -427,7 +427,7 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
 - [harness-common 模块](modules/harness-common.md)：Prompt、JSON、ResourceRef、ResultContent 与 InputSchema 基础契约。
 - [harness-contributor-api 模块](modules/harness-contributor-api.md)：trusted Java Contributor SPI 与 catalog。
 - [harness-daemon 模块](modules/harness-daemon.md)：Environment Daemon 与 Daemon wire。
-- [harness-environment 模块](modules/harness-environment.md)：Environment binding、Capability 与 Daemon v6 wire。
+- [harness-environment 模块](modules/harness-environment.md)：Environment binding、Capability 与 Daemon v1 wire。
 - [harness-infra 模块](modules/harness-infra.md)：Harness Store、Work、通知与 ResourceStore。
 - [harness-runtime 模块](modules/harness-runtime.md)：Agent Runtime 状态机与 processors。
 - [harness-tool 模块](modules/harness-tool.md)：Tool identity、descriptor、call/result 与 Tool JSON codecs。

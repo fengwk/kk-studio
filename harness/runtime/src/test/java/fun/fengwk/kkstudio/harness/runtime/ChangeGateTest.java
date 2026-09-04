@@ -42,7 +42,7 @@ class ChangeGateTest {
                     Thread.currentThread().interrupt();
                   }
                 });
-    // 修复前 deadline 溢出为负会立即返回 false；饱和加法后必须等到 signal 才返回 true。
+    // deadline 使用饱和加法，超大 timeout 仍等待 signal 而不是立即超时。
     assertTrue(gate.awaitChange(since, Long.MAX_VALUE), "overflow must not cause immediate false");
     signaller.join();
   }

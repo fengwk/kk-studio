@@ -40,7 +40,7 @@ export function preferNewerChat(
   return current
 }
 
-/** 合并服务器列表响应，同时避免旧 Chat 版本使 cache 回退。 */
+/** 合并服务器列表响应，同时避免较低 Chat 版本使 cache 回退。 */
 export function mergeChatList(
   current: ChatDTO[] | undefined,
   incoming: ChatDTO[],

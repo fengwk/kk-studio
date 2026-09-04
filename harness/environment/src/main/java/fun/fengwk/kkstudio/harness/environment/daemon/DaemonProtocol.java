@@ -4,7 +4,7 @@ package fun.fengwk.kkstudio.harness.environment.daemon;
 public final class DaemonProtocol {
 
   /** 当前 Environment Daemon wire 协议版本。 */
-  public static final int VERSION = 6;
+  public static final int VERSION = 1;
 
   /**
    * ERROR payload 的可选 {@code code}：目标 Environment 当前已有活跃连接租约，daemon 应按配置退避重连 （同 registration token

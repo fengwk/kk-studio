@@ -41,16 +41,49 @@ class PermissionContractsTest {
             "not-json",
             "{\"defaultYolo\":1}",
             "{\"permission\":\"invalid\"}",
+            "{\"permission\":\"allow\"}",
+            "{\"permission\":\"ask\"}",
+            "{\"permission\":\"deny\"}",
             "{\"permission\":[]}",
             "{\"permission\":{\"base.bash\":1}}",
+            "{\"permission\":{\"base.bash\":\"allow\"}}",
+            "{\"permission\":{\"base.bash\":{\"*\":\"allow\"}}}",
             "{\"permission\":{\"base.bash\":{\"*\":1}}}",
             "{\"permission\":{\"base.bash\":[{}]}}",
+            "{\"permission\":{\"base.bash\":[{\"pattern\":\"*\"}]}}",
+            "{\"permission\":{\"base.bash\":[{\"action\":\"allow\"}]}}",
+            "{\"permission\":{\"base.bash\":[{\"pattern\":123,\"action\":\"allow\"}]}}",
+            "{\"permission\":{\"base.bash\":[{\"pattern\":\"*\",\"action\":true}]}}",
+            "{\"permission\":{\"base.bash\":[\"allow\"]}}",
+            "{\"permission\":{\"base.bash\":[{\"pattern\":\"*\",\"action\":\"allow\",\"extra\":1}]}}",
+            "{\"permission\":{\"base.bash\":[{\"pattern\":\"*\",\"action\":\"ALLOW\"}]}}",
             "{\"permission\":{\"base.bash\":[{\"pattern\":\"*\",\"action\":\"invalid\"}]}}",
             "{\"permission\":{\"Base.bash\":[]}}",
             "{\"permission\":{\" base.bash\":[]}}",
             "{\"permission\":{\"base.bash \":[]}}")) {
       assertThrows(IllegalArgumentException.class, () -> codec.canonicalize(invalid), invalid);
     }
+
+    IllegalArgumentException nonCanonicalShortcut =
+        assertThrows(
+            IllegalArgumentException.class, () -> codec.canonicalize("{\"permission\":\"allow\"}"));
+    assertEquals("permission must be a JSON object", nonCanonicalShortcut.getMessage());
+
+    IllegalArgumentException perToolShortcut =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> codec.canonicalize("{\"permission\":{\"base.bash\":\"allow\"}}"));
+    assertEquals("permission rules must be an array", perToolShortcut.getMessage());
+
+    IllegalArgumentException extraField =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                codec.canonicalize(
+                    "{\"permission\":{\"base.bash\":[{\"pattern\":\"*\",\"action\":\"allow\",\"extra\":1}]}}"));
+    assertEquals(
+        "permission rule must be an object with exact string keys 'pattern' and 'action'",
+        extraField.getMessage());
 
     IllegalArgumentException invalidKey =
         assertThrows(
@@ -127,7 +160,12 @@ class PermissionContractsTest {
             WRITE, "{\"path\":\"x\",\"workdir\":\"@\"}", Path.of("."), ToolSettings.DEFAULT);
     assertThrows(IllegalArgumentException.class, () -> evaluator.evaluate(invalidWorkdir));
     assertEquals("<invalid-workdir>", evaluator.preview(invalidWorkdir).workdir());
+    assertEquals(PermissionAction.ALLOW, PermissionAction.fromValue("allow"));
+    assertEquals(PermissionAction.ASK, PermissionAction.fromValue("ask"));
+    assertEquals(PermissionAction.DENY, PermissionAction.fromValue("deny"));
     assertThrows(IllegalArgumentException.class, () -> PermissionAction.fromValue("invalid"));
+    assertThrows(IllegalArgumentException.class, () -> PermissionAction.fromValue("ALLOW"));
+    assertThrows(IllegalArgumentException.class, () -> PermissionAction.fromValue(" allow "));
     assertThrows(IllegalArgumentException.class, () -> PermissionAction.fromValue(null));
     assertThrows(
         IllegalArgumentException.class, () -> new PermissionRule(" ", PermissionAction.ALLOW));

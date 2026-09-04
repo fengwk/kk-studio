@@ -13,6 +13,16 @@ export function assert(cond, message) {
   if (!cond) throw new Error(message || 'assertion failed')
 }
 
+export function assertExactFields(value, expectedFields, label = 'object') {
+  assert(value && typeof value === 'object' && !Array.isArray(value), `${label} must be an object`)
+  const actual = Object.keys(value).sort()
+  const expected = [...expectedFields].sort()
+  assert(
+    actual.length === expected.length && actual.every((field, index) => field === expected[index]),
+    `${label} fields must be ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+  )
+}
+
 /** canonical 非负十进制字符串（Java long wire）：'0' 或非零开头，拒绝前导零/负数/空白/数字。 */
 export function assertDecimalVersion(value, label = 'version') {
   assert(

@@ -354,11 +354,8 @@ class ApplicationEventHubTest {
 
   @Test
   void subscribeConcurrentWithLastReleaseNeverRebuildsUpstreamOnDetachedState() throws Exception {
-    // 确定性复现 Review 竞态：subscribe 已取得旧 state、最后 release 删除 map 后 subscribe 才继续。
-    // release 在状态锁内先 retire + identity 移除 map entry、再关闭旧上游（用 latch 卡住关闭）；subscribe
-    // 任务在 release 卡住期间已开始执行（start-pin 保证其状态查找先于 release 的 map 删除）。修复前 release
-    // 在 closeQuietly 之后才 remove，此时 subscribe 会拿到旧 state，在 detached state 上重建上游——该订阅
-    // close 后其上游句柄永远不会被释放（orphan）；修复后 subscribe 只能取得全新 state，上游可正常释放。
+    // 最后一个 release 在状态锁内先 retire 并按 identity 移除 map entry，再关闭上游。
+    // 并发 subscribe 只能取得全新 state，不能在 detached state 上重建无法回收的上游。
     CountDownLatch releaseClosingStarted = new CountDownLatch(1);
     CountDownLatch releaseClosingDone = new CountDownLatch(1);
     CountDownLatch subscribeTaskStarted = new CountDownLatch(1);
@@ -411,7 +408,7 @@ class ApplicationEventHubTest {
       verify(threadVersionSource, times(2)).subscribe(any(), any()); // 同一资源只建立两组上游
       verify(firstVersionHandle.get()).close(); // 最后释放关闭了第一组上游
       second.close();
-      verify(secondVersionHandle.get()).close(); // 修复前 second 建立在 detached state 上，上游永远关不掉
+      verify(secondVersionHandle.get()).close(); // 第二组上游随其订阅关闭。
     } finally {
       executor.shutdownNow();
     }

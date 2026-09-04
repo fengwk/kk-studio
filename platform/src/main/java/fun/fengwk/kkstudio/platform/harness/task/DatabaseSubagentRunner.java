@@ -63,7 +63,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
-/** 以普通 durable Harness Thread 运行隔离子 Agent 的平台实现。 */
+/**
+ * 使用独立持久化 Harness Thread 执行 {@code task} 子任务。
+ *
+ * <p>入口会校验父调用冻结的子 Agent 白名单和递归深度，并通过 {@link SubagentRunRegistry} 预占会话。恢复已有会话时还会校验父/根归属和静止态，避免同一
+ * Thread 被并发追加命令。
+ *
+ * <p>等待循环由子 Thread 版本事件和后代状态事件唤醒，同时发送状态心跳、执行空闲超时和最大轮次提醒。父任务取消时对子 Thread 发出尽力停止；停止失败不改变父任务已经进入的取消路径。
+ */
 public class DatabaseSubagentRunner implements SubagentRunner {
 
   private static final int MAX_TURNS_REMINDER_INTERVAL = 5;
@@ -123,6 +130,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
       this.listener = listener;
     }
 
+    /** 校验父上下文，预占并启动或恢复子会话，然后观察到终态。 */
     private void run() {
       try {
         HarnessRuntime runtime = requireRuntime();
@@ -217,11 +225,12 @@ public class DatabaseSubagentRunner implements SubagentRunner {
         try {
           cancelChildOnce(requireRuntime(), threadId, taskRequest.invocationId());
         } catch (RuntimeException ignored) {
-          // 父 Tool stop 已是 durable 事实；子 Thread 的 best-effort cascade 失败不能反转它。
+          // 子会话停止是尽力而为；失败不改变父工具的取消路径。
         }
       }
     }
 
+    /** 每个父任务至多启动一次对子会话的尽力停止。 */
     private void cancelChildOnce(HarnessRuntime runtime, UUID threadId, UUID taskInvocationId) {
       if (!cancelChildStarted.compareAndSet(false, true)) {
         return;
@@ -229,7 +238,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
       try {
         cancelChild(runtime, threadId, taskInvocationId);
       } catch (RuntimeException ignored) {
-        // best-effort：stop 序列失败不反转取消/超时终态。
+        // 停止失败由父任务自己的终态收敛吸收。
       }
     }
 
@@ -253,7 +262,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
             RunState.ERROR,
             "Subagent execution capacity is exhausted; retry later.");
       } catch (RuntimeException ignored) {
-        // listener 异常隔离。
+        // 执行器已拒绝任务，此处不能再让监听器异常逃出调用线程。
       }
     }
 
@@ -269,7 +278,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
           }
         }
       } catch (RuntimeException ignored) {
-        // fallback
+        // 拒绝路径仍需稳定的 call ID。
       }
       return taskRequest.invocationId().toString();
     }
@@ -284,6 +293,11 @@ public class DatabaseSubagentRunner implements SubagentRunner {
           listener, callId, subagentType, snapshot, sourceHeadEntryId, descendants);
     }
 
+    /**
+     * 等待子会话或后代状态变化，并按心跳发布状态。
+     *
+     * <p>无活跃工具时执行空闲超时；达到 {@code maxTurns} 后周期性注入收敛提醒。
+     */
     private RunResult awaitResult(
         HarnessRuntime runtime,
         String callId,
@@ -465,6 +479,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
     }
   }
 
+  /** 恢复属于当前父链且没有模型、工具或排队命令的静止子会话。 */
   private ThreadSnapshot resumeChild(HarnessRuntime runtime, ParentContext parent, UUID threadId) {
     ThreadSnapshot snapshot;
     try {
@@ -780,7 +795,7 @@ public class DatabaseSubagentRunner implements SubagentRunner {
         runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().version()));
         return;
       } catch (HarnessRuntimeConflictException stale) {
-        // version 前进时重读后重试。
+        // 使用新版本重读后重试停止。
       } catch (HarnessRuntimeNotFoundException notFound) {
         return;
       }

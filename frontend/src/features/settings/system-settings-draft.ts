@@ -319,7 +319,7 @@ export function assembleSettingsUpdate(
     permissionEntries.set(tool, rules)
   }
   // Object.fromEntries 使用 CreateDataProperty 创建键；`__proto__` 是普通 own property，不会触发
-  // Object.prototype 的 legacy setter。
+  // Object.prototype 上的 __proto__ 特殊 setter。
   const permission = Object.fromEntries(permissionEntries)
 
   return {

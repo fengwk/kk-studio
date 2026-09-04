@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.environmentModelRequest;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.hostModelRequest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,9 +14,11 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
-/** 紧凑 ModelRequestSpec 的严格 wire：不含 history messages / environment / yolo / contextWindow。 */
+/** 紧凑 ModelRequestSpec 的严格 wire 与 round-trip 契约。 */
 class ModelRequestSpecJsonCodecTest {
 
   private final ModelRequestSpecJsonCodec codec = new ModelRequestSpecJsonCodec();
@@ -72,22 +73,21 @@ class ModelRequestSpecJsonCodecTest {
   }
 
   @Test
-  void encodedSpecDoesNotContainHistoryOrYoloOrContextWindow() {
+  void encodedSpecContainsExactlyTheFrozenInvocationFields() {
     ObjectNode encoded = codec.encodeNode(environmentModelRequest());
-    assertFalse(encoded.has("environment"));
-    assertFalse(encoded.has("providerRequest"));
-    assertFalse(encoded.has("yoloEnabled"));
-    assertFalse(encoded.has("contextWindow"));
-    assertFalse(encoded.has("messages"));
-    assertFalse(encoded.has("compaction"));
-  }
-
-  @Test
-  void rejectsCompactionMetadataField() {
-    // Compaction metadata belongs exclusively to TURN_START; spec JSON 中出现该字段即拒绝。
-    ObjectNode withCompaction = encodedNode();
-    withCompaction.putNull("compaction");
-    assertInvalid(withCompaction);
+    Set<String> fieldNames = new HashSet<>();
+    encoded.fieldNames().forEachRemaining(fieldNames::add);
+    assertEquals(
+        Set.of(
+            "providerType",
+            "model",
+            "variant",
+            "preambleMessages",
+            "toolBindings",
+            "skillBindings",
+            "subagentBindings",
+            "cacheControl"),
+        fieldNames);
   }
 
   @Test

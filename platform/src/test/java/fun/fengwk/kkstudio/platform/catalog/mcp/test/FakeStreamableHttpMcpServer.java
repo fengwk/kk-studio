@@ -72,7 +72,7 @@ public final class FakeStreamableHttpMcpServer implements AutoCloseable {
             JsonNode id = request.get("id");
 
             if ("server/discover".equals(method)) {
-              // 模拟不支持现代扩展，触发 LangChain4j 降级到 legacy initialize
+              // 模拟 server/discover 不可用，覆盖 LangChain4j 的 initialize 探测路径。
               ObjectNode err = MAPPER.createObjectNode();
               err.put("jsonrpc", "2.0");
               if (id != null) {

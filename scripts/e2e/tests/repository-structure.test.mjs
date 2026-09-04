@@ -48,16 +48,8 @@ function createRepositoryMirror() {
   return mirrorRoot
 }
 
-test('repository structure guard verifies absence of top-level harness/prompt and presence of shared prompt', () => {
-  // Test intent: top-level harness/prompt module must not return while the legitimate
-  // harness/common/.../prompt package remains intact as shared prompt-template code.
-  const obsoleteHarnessPrompt = path.join(REPOSITORY_ROOT, 'harness/prompt')
-  assert.equal(
-    existsSync(obsoleteHarnessPrompt),
-    false,
-    'top-level harness/prompt must not exist in repository',
-  )
-
+test('repository structure guard verifies presence of shared prompt package', () => {
+  // Test intent: ensure the legitimate harness/common/.../prompt package remains intact as shared prompt-template code.
   const legitimatePromptPkg = path.join(
     REPOSITORY_ROOT,
     'harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt',
@@ -80,8 +72,7 @@ test('repository structure guard verifies absence of top-level harness/prompt an
 })
 
 test('repository structure guard verifies root and harness POM module lists', () => {
-  // Test intent: ensure declared POM module declarations exactly match expected topology
-  // and do not declare obsolete modules like harness/prompt.
+  // Test intent: ensure declared POM module declarations exactly match expected topology.
   const rootPom = readFileSync(path.join(REPOSITORY_ROOT, 'pom.xml'), 'utf8')
   const rootModules = [...rootPom.matchAll(/<module>\s*([^<\s]+)\s*<\/module>/gu)].map((m) => m[1])
   assert.deepEqual(rootModules, ['share', 'schema', 'canvas', 'harness', 'platform', 'web'])
@@ -98,18 +89,15 @@ test('repository structure guard verifies root and harness POM module lists', ()
     'infra',
     'daemon',
   ])
-  assert.equal(harnessModules.includes('prompt'), false)
 })
 
-test('docs check fails when obsolete harness/prompt directory is reintroduced', () => {
+test('docs check fails when unexpected harness module directory is introduced', () => {
   // Test intent: ensure normal validation via scripts/docs/check.mjs immediately fails
-  // if an obsolete harness/prompt directory is ever recreated, without mutating the repository.
+  // if an unexpected harness module directory is introduced, without mutating the repository.
   const mirrorRoot = createRepositoryMirror()
-  const fakePromptDir = path.join(mirrorRoot, 'harness/prompt')
-  const realPromptDir = path.join(REPOSITORY_ROOT, 'harness/prompt')
-  assert.equal(existsSync(realPromptDir), false)
+  const unexpectedModuleDir = path.join(mirrorRoot, 'harness/unexpected-module')
   try {
-    mkdirSync(fakePromptDir, { recursive: true })
+    mkdirSync(unexpectedModuleDir, { recursive: true })
     assert.throws(
       () => {
         execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
@@ -120,10 +108,9 @@ test('docs check fails when obsolete harness/prompt directory is reintroduced', 
       },
       (error) => {
         const stderr = error.stderr || ''
-        return stderr.includes('obsolete top-level harness/prompt module directory must not exist')
+        return stderr.includes('harness directories mismatch')
       },
     )
-    assert.equal(existsSync(realPromptDir), false, 'real repository must not have harness/prompt')
   } finally {
     rmSync(mirrorRoot, { recursive: true, force: true })
   }
@@ -154,7 +141,7 @@ test('docs check fails when harness module docs path is reintroduced', () => {
   try {
     const mirrorRuntimeDocsDir = path.join(mirrorRoot, 'harness/runtime/docs')
     mkdirSync(mirrorRuntimeDocsDir, { recursive: true })
-    writeFileSync(path.join(mirrorRuntimeDocsDir, 'README.md'), '# Obsolete local doc\n')
+    writeFileSync(path.join(mirrorRuntimeDocsDir, 'README.md'), '# Fixture local doc\n')
 
     assert.throws(
       () => {
