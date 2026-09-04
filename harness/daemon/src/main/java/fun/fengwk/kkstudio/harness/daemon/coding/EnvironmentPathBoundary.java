@@ -7,11 +7,14 @@ import java.nio.file.Path;
 import java.util.Objects;
 
 /**
- * 为每个面向文件系统的 capability 强制执行 Daemon environment root 边界。
+ * 为每个面向文件系统的 Capability 强制执行 Daemon Environment root 边界。
  *
- * <p>只持有 canonical environment root；每次 invocation 的默认 workdir（workspace 目录）由 Daemon 写入 {@code
- * EnvironmentCapabilityExecutionRequest.workdir}，各 capability 以此为缺省基准：未提供 {@code workdir} 时使用
- * invocation workspace，相对值以 invocation workspace 为基准，absolute 值允许但必须 canonical 在 root 内。
+ * <p>只持有 canonical Environment root；每次 Invocation 的默认 workdir（workspace 目录）由 Daemon 写入 {@code
+ * EnvironmentCapabilityExecutionRequest.workdir}，各 Capability 以此为缺省基准：未提供 {@code workdir} 时使用
+ * invocation workspace，相对值以 invocation workspace 为基准，absolute 值允许但必须 real path 在 root 内。
+ *
+ * <p>路径边界提供纵深防御：对存在性路径使用 {@link Path#toRealPath} 校验真实物理位置，对搜索路径逐级禁止符号链接，
+ * 对写路径回溯至已存在的真实祖先。本类提供操作前的安全校验但不能消除文件系统 TOCTOU；具体写能力仍须在提交前复核路径， 并按各自协议使用临时文件替换或失败回滚。
  *
  * <p>Platform permission 负责授权命令；它绝不会放宽本地的路径与 symlink 边界。
  */
@@ -63,7 +66,7 @@ public final class EnvironmentPathBoundary {
     return canonicalExisting(candidate, "path");
   }
 
-  /** 解析写目标：其已存在的祖先路径不得穿越到 environment root 之外。 */
+  /** 解析写目标：自底向上回溯已存在祖先并校验真实路径，拒绝当前文件系统快照中越出 Environment root 的目标。 */
   public Path writable(String rawPath, Path workdir) {
     Path candidate = resolve(rawPath, requireWorkdir(workdir), "path");
     Path existing = candidate;
