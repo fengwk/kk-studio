@@ -41,6 +41,12 @@ trusted contributor implementation
 
 生产依赖见 [`pom.xml`](../../harness/contributor-api/pom.xml)。[`ContributorApiModuleArchitectureTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/ContributorApiModuleArchitectureTest.java) 扫描主源码并守卫该边界。
 
+## 包架构
+
+| 包名 | 职责 | 明确边界 |
+| --- | --- | --- |
+| `fun.fengwk.kkstudio.harness.contributor.api` | 受信任 Contributor 的启动期发现与不可变目录冻结机制（`HarnessContributor`、`HarnessRegistrar`、`HarnessCatalog`）、统一异步 `Tool` SPI、限定 ownership 的分支自定义状态访问（`BranchView`、`StateDeclaration`、`ToolOutcome`）与纯上下文投影器（`ContextProjector`） | 不暴露 Runtime Store、gateway、transaction、lock、Spring、JDBC 或底层存储句柄；不负责运行时动态安装、卸载或 classloader 隔离 |
+
 ## 核心模型 / API
 
 ### Contributor 与 descriptor

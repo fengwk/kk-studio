@@ -218,6 +218,10 @@ public final class HarnessCatalog {
       }
     }
 
+    /**
+     * 冻结不可变 Catalog：校验 Tool 的自定义状态访问必须命中所属 Contributor 已注册的 Custom Entry Type， 计算 requires
+     * 传递依赖偏序闭包，并将各扩展点按 requires 偏序、priority 降序与 ContributionId 字典序排序冻结。
+     */
     HarnessCatalog freeze(List<ContributorRegistration> orderedContributors) {
       List<ContributorDescriptor> descriptors =
           orderedContributors.stream().map(ContributorRegistration::descriptor).toList();
