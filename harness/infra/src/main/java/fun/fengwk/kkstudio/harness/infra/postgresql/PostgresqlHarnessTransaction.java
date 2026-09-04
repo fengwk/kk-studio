@@ -47,8 +47,79 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
+/**
+ * 七表 {@link HarnessStore.Transaction} typed primitives 的 PostgreSQL 实现。
+ *
+ * <p>本类仅实现底层持久化原语的精确映射，绝不包含 Thread 下一步决策、重试策略、权限判定或 Tool 聚合等用例逻辑。
+ *
+ * <p><b>Transaction 线程约束：</b> 事务句柄严格由创建它的单线程独占（{@link #owner}），禁止跨线程传递或并发调用；每次操作前均通过 {@link
+ * #checkOpen()} 校验 调用线程身份与活跃状态，已关闭或跨线程调用直接抛出 {@link IllegalStateException}。
+ *
+ * <p><b>首个数据库故障 poisoning 防护：</b> 事务内任何底层 JDBC 操作捕获的 {@link
+ * org.springframework.dao.DataAccessException} 或数据完整性违规均通过 {@link #remember(RuntimeException)} 记录到
+ * {@link #databaseFailure} 字段中，并原样抛出。若外层代码未中断执行， 在事务提交前 {@link #rethrowDatabaseFailure()}
+ * 将强制重新抛出该首个故障，彻底阻断脏状态提交。
+ *
+ * <p><b>严格锁序防御（Lock Ranking &amp; Ordering）：</b> 所有跨实体并发加锁严格遵守单向递增的层级排序：
+ *
+ * <pre>{@code
+ * SESSION -> THREAD -> COMMAND -> MODEL -> TOOL -> WORK
+ * }</pre>
+ *
+ * 在同级实体内部，亦严格按稳定全序加锁：
+ *
+ * <ul>
+ *   <li>Thread 必须按 {@link UuidOrder#COMPARATOR} 升序；
+ *   <li>Command 必须按 sequence 严格递增升序；
+ *   <li>Tool 必须按 {@code (assistantEntryId, callIndex, id)} 严格递增升序；
+ *   <li>Work 必须按 {@code (targetType.ordinal(), targetId)} 严格递增升序。
+ * </ul>
+ *
+ * 任何违背层级阶梯或同级排序的加锁尝试，均在执行 SQL 之前由防御断言拦截并抛出 {@link IllegalStateException}，从根源杜绝死锁。
+ *
+ * <p><b>事务内 EntryPath 局部缓存（Transaction-local Cache）与 Invalidation：</b> 维护事务局部的 {@link
+ * #entryPathCache}（{@code Map<UUID, EntryPath>}），在单事务内优化 Entry 路径读取与构建开销：
+ *
+ * <ul>
+ *   <li>首次读取未命中缓存时，执行单次不可变回溯递归 CTE（{@link #LOAD_ENTRY_PATH}）并存入正向缓存；
+ *   <li>连续调用 {@link #insertEntry(Entry)} 时，从已缓存的 parent path 直接在内存中派生追加新路径并写入缓存，实现子节点后续读取 0 次 CTE；
+ *   <li>窄查询（{@link #loadContributorCustomEntriesOnPath}）在 cache miss 时执行独立窄 CTE，绝不将不完整投影写回完整路径缓存；
+ *   <li>执行 {@link #deleteEntries} 或 {@link #deleteSession} 时，按 session 整体驱逐相关缓存，避免脏读；
+ *   <li>事务 {@link #close()} 时立即清空全部缓存。
+ * </ul>
+ *
+ * <p><b>Environment route 路由围栏与 Work claim：</b> 调度器通过 {@link #claimNextWork} 开启独立 short transaction
+ * 选取待处理任务：
+ *
+ * <ul>
+ *   <li>{@code harness_work.required_environment_id} 仅用于 TOOL Work；为空时无亲和性要求；
+ *   <li>非空时，只有在 {@code environment_connection} 中存在匹配的 {@code environment_id}、所有者为当前 Dispatcher 的
+ *       {@code nodeInstanceId}、连接状态为 {@code READY} 且租约有效的记录时，当前节点才可 claim；
+ *   <li>路由不确定或底层查询失败时严格 fail closed；
+ *   <li>层次区分：Environment route 路由围栏与 PostgreSQL 底层 {@code FOR UPDATE SKIP LOCKED} 行级跳锁以及应用层 {@code
+ *       lease_token} / {@code lease_until} 所有权围栏分属不同层次，互不替代；避免把 {@code SKIP LOCKED} 误称为分布式锁。
+ *   <li>{@link #requestWork} 对已冻结的 affinity 实施严格冲突拒绝，已存在的 Work 不允许被修改为冲突的不同非空 affinity。
+ * </ul>
+ *
+ * <p><b>Final Work Fence：</b> Processor 的持久化变更先于 Work 终态变更。{@link #completeWork} 与 {@link
+ * #rescheduleWork} 在执行终态更新前， 先由 {@link #lockWork} 获取 Work 行级排他锁并校验 {@code lease_token} 与 {@code
+ * claimedWakeVersion}。若租约丢失则抛出异常 导致整个事务回滚；若执行期间有新 wake 到达使版本递增，则清除租约保留行，防止并发工作被静默覆盖。
+ */
 final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
+  /**
+   * Work claim-only 短事务候选选取与租约写入 SQL。
+   *
+   * <p>Candidate CTE 执行条件过滤与环境路由围栏判定：
+   *
+   * <ul>
+   *   <li>目标类型匹配、已到期（{@code available_at <= statement_timestamp()}）且无未过期租约；
+   *   <li>Environment route 亲和性：当 {@code required_environment_id} 为空时无亲和性；非空时通过 EXISTS 关联 {@code
+   *       environment_connection}，要求连接所有者为当前传入的 {@code nodeInstanceId}、状态为 {@code READY} 且租约有效；
+   *   <li>使用 {@code FOR UPDATE SKIP LOCKED} 悲观跳过正被其他事务锁定或并发处理的行，选出单条候选；
+   *   <li>外层 UPDATE 原子写入新的 {@code lease_token} 与 {@code lease_until} 并返回完整 Work 行。
+   * </ul>
+   */
   private static final String CLAIM_NEXT_WORK =
       """
       with candidate as (
@@ -80,6 +151,19 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       returning work.*
       """;
 
+  /**
+   * Work 登记与唤醒 upsert SQL。
+   *
+   * <p>插入新工作或更新既有工作：
+   *
+   * <ul>
+   *   <li>若目标不存在则插入初始行（初始 wake_version = 1，lease 为空）；
+   *   <li>若已存在则更新 {@code available_at = least(current, requested)} 且递增 {@code wake_version}；
+   *   <li>保留既有 {@code lease_token} 与 {@code lease_until} 不变；
+   *   <li>冲突拒绝：WHERE 子句要求传入的 {@code required_environment_id} 必须与既有值一致或传入为 null； 若传入了与已冻结 affinity
+   *       冲突的值，则更新 0 行并导致上层抛错拒绝。
+   * </ul>
+   */
   private static final String REQUEST_WORK =
       """
       insert into harness_work (
@@ -93,6 +177,16 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       returning *
       """;
 
+  /**
+   * 单次不可变 EntryPath 递归读取 CTE。
+   *
+   * <p>以指定 head 为起点向上回溯直至根节点：
+   *
+   * <ul>
+   *   <li>通过 {@code CYCLE id SET is_cycle USING path} 阻断环路破坏并标明环路哨兵；
+   *   <li>按 {@code depth desc} 输出自 ROOT 到 head 的单调递增有序 Entry 序列。
+   * </ul>
+   */
   private static final String LOAD_ENTRY_PATH =
       """
       with recursive entry_path as (
@@ -110,6 +204,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       order by depth desc
       """;
 
+  /**
+   * 窄查询递归 CTE：仅提取路径上的 ROOT、head、环路哨兵及指定 contributorId 的 CUSTOM Entry。
+   *
+   * <p>用于局部 Contributor 状态提取，避免完整路径全量回溯开销，其结果绝不回填完整路径缓存。
+   */
   private static final String LOAD_CONTRIBUTOR_CUSTOM_ENTRIES_ON_PATH =
       """
       with recursive custom_entry_path as (
@@ -152,16 +251,37 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       Comparator.comparingInt((WorkTarget target) -> target.type().ordinal())
           .thenComparing(WorkTarget::id, UuidOrder.COMPARATOR);
 
+  /** 底层 Spring JdbcTemplate，绑定当前事务的数据库连接。 */
   private final JdbcTemplate jdbc;
+
+  /** 外部注入的 UUID 生成器。 */
   private final Supplier<UUID> idGenerator;
+
+  /** 当前事务已成功获取锁的实体资源标识集合，用于支持加锁幂等并防范重入。 */
   private final Set<LockKey> locked = new HashSet<>();
+
+  /** 记录各 assistantEntryId 下当前已锁定的最高 tool callIndex，防范乱序持锁。 */
   private final Map<UUID, Integer> highestToolCallIndexByAssistant = new HashMap<>();
+
+  /** 事务内 EntryPath 正向局部缓存，避免重复递归 CTE 查询。 */
   private final Map<UUID, EntryPath> entryPathCache = new HashMap<>();
+
+  /** 创建本事务 handle 的宿主线程，用于严格守护单线程约束。 */
   private final Thread owner = Thread.currentThread();
+
+  /** 记录事务生命周期内发生的首个数据库异常（poisoning），用于在完成前强制重抛。 */
   private RuntimeException databaseFailure;
+
+  /** 当前事务已达到的最高锁阶梯等级，确保层级单调递增。 */
   private LockRank highestLockRank;
+
+  /** 当前事务已锁定的最高 Thread UUID，确保同级按 UUID 升序加锁。 */
   private UUID highestThreadId;
+
+  /** 当前事务已锁定的最高 WorkTarget，确保同级按 (type, id) 升序加锁。 */
   private WorkTarget highestWorkTarget;
+
+  /** 事务 handle 关闭状态标识。 */
   private boolean closed;
 
   PostgresqlHarnessTransaction(JdbcTemplate jdbc, Supplier<UUID> idGenerator) {
@@ -169,11 +289,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
   }
 
+  /** 关闭事务 handle 并清空事务内 EntryPath 局部缓存。 */
   void close() {
     closed = true;
     entryPathCache.clear();
   }
 
+  /** 若底层操作曾触发数据库异常，在此强制重新抛出该首个故障（poisoning），彻底阻断被破坏的事务继续提交。 */
   void rethrowDatabaseFailure() {
     if (databaseFailure != null) {
       throw databaseFailure;
@@ -233,6 +355,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return session;
   }
 
+  /**
+   * 插入新的 Entry 节点并同步更新事务内 EntryPath 局部缓存。
+   *
+   * <p>若为非 ROOT Entry，从父节点已缓存的路径直接内存追加派生子节点的 {@link EntryPath} 并写入 {@link
+   * #entryPathCache}，使同事务内后续子节点构建达到 0 次递归 CTE 开销。
+   */
   @Override
   public void insertEntry(Entry entry) {
     checkOpen();
@@ -281,6 +409,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return queryOne("select * from harness_entry where id = ?", PostgresqlHarnessRows.ENTRY, id);
   }
 
+  /**
+   * 查找指定 Session 的 ROOT Entry。
+   *
+   * <p>优先复用当前事务局部缓存 {@link #entryPathCache} 中已有的同 Session 路径根节点；未命中时通过 {@code
+   * uk_harness_entry_single_root} 索引点查，并将单节点根路径写回缓存。
+   */
   @Override
   public Optional<Entry> findRootEntry(UUID sessionId) {
     checkOpen();
@@ -303,6 +437,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return found;
   }
 
+  /**
+   * 读取指定 head 的完整不可变 EntryPath。
+   *
+   * <p>优先从 {@link #entryPathCache} 读取；未命中时执行单次递归回溯 CTE（{@link #LOAD_ENTRY_PATH}）并存入缓存。
+   */
   @Override
   public EntryPath loadEntryPath(UUID headEntryId) {
     checkOpen();
@@ -326,6 +465,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return path;
   }
 
+  /**
+   * 加载指定 head 路径上属于特定 Contributor 的自定义 Entry。
+   *
+   * <p>若完整路径在 {@link #entryPathCache} 中已命中，直接在内存中过滤返回；cold cache 则执行窄查询 CTE（{@link
+   * #LOAD_CONTRIBUTOR_CUSTOM_ENTRIES_ON_PATH}），部分投影结果绝不写入完整路径缓存。
+   */
   @Override
   public List<Entry> loadContributorCustomEntriesOnPath(UUID headEntryId, String contributorId) {
     checkOpen();
@@ -1008,6 +1153,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         target.id());
   }
 
+  /**
+   * 按锁阶梯获取单个 Work 的排他行级锁（{@code FOR UPDATE}）。
+   *
+   * <p>必须遵守 {@code (targetType.ordinal(), targetId)} 升序排序。
+   */
   @Override
   public Optional<Work> lockWork(WorkTarget target) {
     checkOpen();
@@ -1028,6 +1178,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return work;
   }
 
+  /**
+   * Work 所有权围栏校验：获取行级排他锁并校验 {@code lease_token} 匹配且 {@code lease_until > now}。
+   *
+   * <p>若租约已过期或被其他 Dispatcher 接管，返回 empty，调用方绝不能推进该 Work 状态。
+   */
   @Override
   public Optional<Work> lockClaimedWork(ClaimedWork claim, Instant now) {
     checkOpen();
@@ -1054,6 +1209,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return work;
   }
 
+  /** 删除指定 Work。要求必须已持有其属主实体的行级锁。 */
   @Override
   public boolean deleteWork(WorkTarget target) {
     checkOpen();
@@ -1179,6 +1335,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return copied.size();
   }
 
+  /** 删除指定 Session 下的全部 Entry 节点（叶子优先逐层删除），并同步驱逐事务内缓存。 */
   @Override
   public int deleteEntries(UUID sessionId) {
     checkOpen();
@@ -1207,6 +1364,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
+  /** 删除指定 Session 并从事务局部缓存中驱逐该 Session 的全部 EntryPath。 */
   @Override
   public boolean deleteSession(UUID sessionId) {
     checkOpen();
@@ -1266,6 +1424,20 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     requestWork(target, requestedAt, null);
   }
 
+  /**
+   * 登记或唤醒指定 Work。
+   *
+   * <p>必须在已锁定属主 Thread 的事务内调用。执行 upsert 原语：
+   *
+   * <ul>
+   *   <li>若 Work 不存在则新建，初始 wake_version 为 1；
+   *   <li>若已存在则更新 {@code available_at = least(current, requested)} 且递增 {@code wake_version}；
+   *   <li>{@code requiredEnvironmentId} 仅允许用于 TOOL Work；
+   *   <li><b>已冻结 Affinity 冲突拒绝：</b>upsert WHERE 子句要求传入的 {@code requiredEnvironmentId} 与既有值一致或传入为
+   *       null； 若已存在的 Work 绑定的环境与新传入的值冲突，更新 0 行并抛出 {@link IllegalArgumentException} 明确拒绝，防止环境亲和性漂移；
+   *   <li>提交前发送 {@code pg_notify} availability hint。
+   * </ul>
+   */
   @Override
   public void requestWork(
       WorkTarget target, Instant requestedAt, EnvironmentId requiredEnvironmentId) {
@@ -1301,6 +1473,20 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return claimNextWork(targetType, now, leaseToken, leaseUntil, null);
   }
 
+  /**
+   * Work claim-only 短事务：以 {@code FOR UPDATE SKIP LOCKED} 和 Environment route 路由围栏选取单条候选并签发租约。
+   *
+   * <p><b>Environment route 路由围栏：</b>
+   *
+   * <ul>
+   *   <li>{@code required_environment_id} 为空时无亲和性要求，任何活跃 Dispatcher 均可获取；
+   *   <li>非空时，要求在 {@code environment_connection} 中存在匹配的 {@code environment_id}、所有者为传入的 {@code
+   *       nodeInstanceId}、状态为 {@code READY} 且租约未过期的记录；
+   *   <li>路由不确定（如断联、未就绪、租约过期、归属其他节点）或底层故障时 fail closed（不返回候选）；
+   *   <li>层次区分：本路由围栏与底层数据库行级并发控制 {@code FOR UPDATE SKIP LOCKED} 及应用层 {@code lease_token} / {@code
+   *       lease_until} 所有权围栏分属不同层次，互不替代。
+   * </ul>
+   */
   @Override
   public Optional<ClaimedWork> claimNextWork(
       WorkTargetType targetType,
@@ -1341,6 +1527,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             work.requiredEnvironmentId()));
   }
 
+  /** 在持有 Work 锁前提下为已 claim 的 Work 续期租约。 */
   @Override
   public void renewWork(ClaimedWork claim, Instant now, Instant newLeaseUntil) {
     checkOpen();
@@ -1353,6 +1540,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     updateWork(renewed);
   }
 
+  /**
+   * Final Work Fence：完成工作并校验 wakeVersion。
+   *
+   * <p>若 claimed wakeVersion 仍为最新，则直接删除该 Work 行；若处理期间有新 wake 请求导致版本递增，则清除租约保留该行
+   * 并发送唤醒通知待后续调度；若租约丢失则抛错回滚事务。
+   */
   @Override
   public Optional<Work> completeWork(ClaimedWork claim, Instant now) {
     checkOpen();
@@ -1375,6 +1568,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return next;
   }
 
+  /** 重排 Work 调度时间：清除租约并设置新的 requestedAt，保留当前 wakeVersion。 */
   @Override
   public void rescheduleWork(ClaimedWork claim, Instant now, Instant requestedAt) {
     checkOpen();
@@ -1892,6 +2086,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return queryOne(sql, mapper, arguments);
   }
 
+  /** 记录事务内发生的首个数据库异常（poisoning），以防止脏状态下的继续执行或掩盖初始错误。 */
   private <T extends RuntimeException> T remember(T failure) {
     if (databaseFailure == null) {
       databaseFailure = failure;
@@ -1904,6 +2099,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return new IllegalArgumentException("PostgreSQL integrity constraint violation", error);
   }
 
+  /** 严格校验单线程约束与事务活跃状态：只有创建该 handle 的线程才可调用，且已关闭后拒绝执行。 */
   private void checkOpen() {
     if (Thread.currentThread() != owner) {
       throw new IllegalStateException("transaction handle may only be used by its owner thread");
@@ -1913,6 +2109,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
+  /** 锁阶梯单向递增防御：禁止在已获取高阶锁之后回退获取低阶锁。 */
   private void requireCanLockRank(LockRank rank) {
     if (highestLockRank != null && rank.ordinal() < highestLockRank.ordinal()) {
       throw new IllegalStateException(
@@ -1920,6 +2117,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
+  /** 同阶梯加锁排序防御：多个 Thread 必须严格按 UUID 升序加锁。 */
   private void requireCanLockThread(UUID threadId) {
     LockKey key = LockKey.thread(threadId);
     if (locked.contains(key)) {
@@ -1957,6 +2155,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
+  /** 同阶梯加锁排序防御：同一 assistantEntryId 下的多个 ToolInvocation 必须按 callIndex 严格递增加锁。 */
   private void requireCanLockTools(List<ToolInvocation> invocations) {
     Map<UUID, Integer> callIndexes = new HashMap<>(highestToolCallIndexByAssistant);
     for (ToolInvocation invocation : invocations) {
@@ -1984,6 +2183,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
+  /** 同阶梯加锁排序防御：多个 Work 目标必须严格按 (targetType.ordinal(), targetId) 升序加锁。 */
   private void requireCanLockWork(WorkTarget target) {
     LockKey key = LockKey.work(target);
     if (locked.contains(key)) {
@@ -1999,6 +2199,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
+  /** 验证当前事务是否允许执行 claimNextWork：必须先达到 WORK 锁阶梯，且在此之前不能持有任何其他 Work 锁。 */
   private void requireCanClaimWork() {
     requireCanLockRank(LockRank.WORK);
     if (highestWorkTarget != null) {
