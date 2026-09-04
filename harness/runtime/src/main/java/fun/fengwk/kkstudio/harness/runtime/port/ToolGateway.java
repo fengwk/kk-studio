@@ -13,12 +13,12 @@ import java.util.UUID;
  * Tool 执行 admission 端口：preflight 权限判定与 execution 提交。
  *
  * <p>{@link #preflight} 是同步、无副作用、事务外的判定；异常表示本次判定没有产生执行副作用，Processor 可安全 reschedule。它只接收 frozen
- * {@link ToolInvocationRequest}，不感知 Thread YOLO——YOLO 短路由 Processor 在锁内读取 Thread 后自行决定，本端口 绝不查询
- * HarnessStore。{@link #start} 返回前不得同步调用任何 listener 回调；回调 duplicate / stale 由 Runtime fence，Gateway
+ * {@link ToolInvocationRequest}，不感知 Thread YOLO——YOLO 短路由 Processor 在锁内读取 Thread 后自行决定，本端口绝不查询
+ * HarnessStore。{@link #start} 返回前不得同步调用任何 Listener 回调；回调的重复与陈旧触发由 Runtime 实施所有权围栏与陈旧回调围栏拦截，Gateway
  * 不保证 exactly-once。Tool 的 retry 决策（{@link RetryLater} 后何时重试）由 Processor 决定，不放 Gateway。
  *
- * <p>两阶段激活：{@link #start} 返回 {@link Started} 时不得打开任何回调 gate（同步回调只能缓冲），{@link Handle#activate} 由
- * Processor 在 attach handle + durable markRunning 之后、打开自身 listener 门之前调用，此时 Gateway 才允许打开回调 gate /
+ * <p>两阶段激活：{@link #start} 返回 {@link Started} 时不得打开任何回调门控（同步回调只能缓冲），{@link Handle#activate} 由
+ * Processor 在 attach handle + 持久化 markRunning 之后、打开自身 Listener 回调门控之前调用，此时 Gateway 才允许打开回调门控 /
  * 启动外部执行；activate 抛异常表示激活失败，Processor 恰好收敛一次 UNKNOWN。
  */
 public interface ToolGateway {
@@ -83,7 +83,7 @@ public interface ToolGateway {
           ToolGateway.Rejected,
           ToolGateway.Indeterminate {}
 
-  /** 调用已接受并开始；{@code handle} 提供 best effort 取消。 */
+  /** 准入成功并已准备 {@code handle}；外部执行须等待 {@link Handle#activate()}，尚未开始。 */
   record Started(Handle handle) implements StartResult {
     public Started {
       handle = Objects.requireNonNull(handle, "handle");
@@ -113,17 +113,17 @@ public interface ToolGateway {
 
   /**
    * 一次 execution 的本地取消控制；best effort 且幂等，不保证远程停止。两阶段激活契约：Gateway 在 {@link #start} 返回 {@link
-   * Started} 时不得打开任何回调 gate，{@link #activate} 由 Processor 在 attach handle + durable markRunning
-   * 之后调用， 此时 Gateway 才允许打开回调 gate / 启动外部执行。
+   * Started} 时不得打开任何回调门控，{@link #activate} 由 Processor 在 attach handle + 持久化 markRunning 之后调用，此时
+   * Gateway 才允许打开回调门控 / 启动外部执行。
    */
   interface Handle {
     void cancel();
 
-    /** 打开 Gateway 回调 gate；只在 {@link Started} 返回后由 Processor 调用；抛异常即激活失败（收敛一次 UNKNOWN）。 */
+    /** 打开 Gateway 回调门控；只在 {@link Started} 返回后由 Processor 调用；抛异常即激活失败（收敛一次 UNKNOWN）。 */
     void activate();
   }
 
-  /** partial 与 terminal 回调；duplicate / stale 由 Runtime fence。 */
+  /** partial 与 terminal 回调；重复与陈旧的 Listener 回调由 Runtime 实施所有权围栏与陈旧回调围栏拦截。 */
   interface Listener {
 
     /** 交付一个非 terminal partial ToolResult（不得包含 binary / resource content）。 */

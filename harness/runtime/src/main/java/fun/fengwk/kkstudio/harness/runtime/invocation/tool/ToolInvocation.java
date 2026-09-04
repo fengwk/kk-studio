@@ -10,14 +10,14 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 一次 Tool invocation 的 durable 当前状态。
+ * 一次 Tool Invocation 的持久化当前状态。
  *
- * <p>直接持有冻结的 {@code call} 与可空 {@code binding}，不保留任何 durable request 包装。{@code attempt}
+ * <p>直接持有冻结的 {@code call} 与可空 {@code binding}，不保留冗余的持久化 request 包装。{@code attempt}
  * 统计执行端实际接受的执行次数；BUSY/OVERLOADED 或执行前的本地拒绝不会增加它。result 与 error 在任何状态上都互斥；非 terminal 状态永远不携带
  * terminal 事实。Terminal Tool 行始终表示 outcome 尚未进入 ToolResult Entry：batch apply 后行被物理删除。
  *
- * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受执行尚未被 durable
- * 确认。纯转换会把回拨的调用方 wall-clock 抬升到当前 {@code updatedAt}；Store 仍必须在每次 {@code update*} 写入前调用 {@link
+ * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受执行尚未被持久化状态 确认。纯转换会把回拨的调用方
+ * wall-clock 抬升到当前 {@code updatedAt}；Store 仍必须在每次 {@code update*} 写入前调用 {@link
  * #validateTransition}，严格拒绝直接构造的时间回退。
  */
 public record ToolInvocation(

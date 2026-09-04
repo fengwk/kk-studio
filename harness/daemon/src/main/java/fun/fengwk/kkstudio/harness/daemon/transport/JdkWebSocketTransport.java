@@ -111,6 +111,7 @@ public final class JdkWebSocketTransport implements DaemonTransport {
       if (rejected.get()) {
         return CompletableFuture.completedFuture(null);
       }
+      // 防御过大帧累积攻击：超过字符上限立即确定性拒绝并关闭。
       if (text.length() + data.length() > maxInboundTextChars) {
         reject(webSocket, "inbound text message exceeds the maximum size");
         return CompletableFuture.failedFuture(
@@ -128,6 +129,7 @@ public final class JdkWebSocketTransport implements DaemonTransport {
 
     @Override
     public CompletionStage<?> onBinary(WebSocket webSocket, ByteBuffer data, boolean last) {
+      // 协议 v6 仅允许 UTF-8 文本帧，二进制帧视为协议违规直接拒绝。
       reject(webSocket, "binary frames are not supported");
       return CompletableFuture.failedFuture(
           new IllegalStateException("binary frames are not supported"));
@@ -144,7 +146,7 @@ public final class JdkWebSocketTransport implements DaemonTransport {
       notifyDisconnected(error);
     }
 
-    /** 确定性拒绝：恰好一次 close，不再消费后续帧，并立即通知运行时断开。 */
+    /** 确定性拒绝：通过 CAS 保证恰好发送一次 close code 1008，不再消费后续帧，并立即通知运行时断开。 */
     private void reject(WebSocket webSocket, String reason) {
       if (rejected.compareAndSet(false, true)) {
         webSocket.sendClose(POLICY_VIOLATION, reason);
@@ -152,6 +154,7 @@ public final class JdkWebSocketTransport implements DaemonTransport {
       }
     }
 
+    /** 确保向 DaemonTransportListener 投递的断开事件恰好发生一次。 */
     private void notifyDisconnected(Throwable cause) {
       if (disconnected.compareAndSet(false, true)) {
         listener.onDisconnected(cause);

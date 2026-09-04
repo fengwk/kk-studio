@@ -4,9 +4,9 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Environment 的 durable 路由身份：一个 UUID 值对象。
+ * Environment 的持久化路由身份：一个 UUID 值对象。
  *
- * <p>{@code EnvironmentId} 是 stable environment 资源、daemon envelope scope、BranchSettings workspace
+ * <p>{@code EnvironmentId} 是 stable Environment 资源、Daemon envelope scope、BranchSettings workspace
  * 路由与 harness work 亲和性共用的唯一身份；display 名称只是元数据，绝不参与路由。canonical 表示是 {@link UUID#toString()}
  * 的小写形式，解析时拒绝任何非 canonical 文本。
  */

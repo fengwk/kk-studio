@@ -14,7 +14,13 @@ import java.time.format.DateTimeParseException;
 import java.util.Objects;
 import java.util.Set;
 
-/** Goal CUSTOM snapshot 的严格、确定性 JSON codec。 */
+/**
+ * Goal CUSTOM snapshot 的严格、确定性 JSON 编解码器。
+ *
+ * <p>要求 payload 的 {@code schemaVersion = 1}，{@code dataJson} 精确包含且仅包含 6 个合法字段 （{@code
+ * objective}、{@code tokenBudget}、{@code status}、{@code reason}、{@code createdAt}、{@code
+ * updatedAt}）。 对未知字段、缺失字段、重复字段、尾随 token、非法状态枚举值或时间戳语法错误均执行严格 fail-closed 拦截。
+ */
 final class GoalStateCodec {
 
   static final int SCHEMA_VERSION = 1;

@@ -2,10 +2,10 @@
 
 ## 定位
 
-`harness-builtin` 是系统第一方内置能力模块，提供唯一的 `BuiltinHarnessContributor`（ID 为 `builtin`）。它将系统内置的 17 个统一 Tool、`goal.state` 自定义 Entry ownership 与 Goal 上下文投影器注册到 `HarnessCatalog`。
+`harness-builtin` 是系统第一方内置能力模块，提供唯一的 `BuiltinHarnessContributor`（ID 为 `builtin`）。它将系统内置的 15 个统一 Tool、`goal.state` 自定义 Entry ownership 与 Goal 上下文投影器注册到 `HarnessCatalog`。
 
-17 个内置工具包括：
-- 12 个模型可见、声明 `environmentRequired=true` 的 Environment capability Tool；
+15 个内置工具包括：
+- 10 个模型可见、声明 `environmentRequired=true` 的 Environment capability Tool；
 - 2 个内部 Tool：`load_skill` 与 `task`；
 - 3 个模型可见、通过 `AppendCustomEntry` effect 维护 branch Goal 的 Tool。
 
@@ -15,7 +15,7 @@
 
 ### Goals
 
-- 通过单一 `BuiltinHarnessContributor` 和统一 Tool SPI 注册全部 17 个工具。
+- 通过单一 `BuiltinHarnessContributor` 和统一 Tool SPI 注册全部 15 个工具。
 - 将 Goal 表达为 branch-scoped `builtin/goal.state` 全量快照，不建独立数据库表，通过 `AppendCustomEntry` 由 Core 原子追加。
 - 提供 `goal.context` 投影器，仅将当前 branch 活跃的 Goal 投影到下一次 Model planning 的 SYSTEM 上下文中。
 - 将内部 `load_skill` 与 `task` 作为普通 `INTERNAL` Tool 注册，为 Skill 加载与 Subagent 任务执行提供标准化契约。
@@ -41,11 +41,21 @@ POM 见 [`pom.xml`](../../harness/builtin/pom.xml)，包级职责见 [`package-i
 
 Harness durable schema 的唯一入口是 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)；其中只有 Harness 七张协议表，没有 Goal 专用表。
 
+## 包架构
+
+| 包名 | 职责 | 明确边界 |
+| --- | --- | --- |
+| `fun.fengwk.kkstudio.harness.builtin` | 系统第一方内置能力根包，提供唯一的 `BuiltinHarnessContributor`、`BuiltinToolIds` 全局常量与完成态句柄 | 集中注册 15 个统一内置工具、Goal custom type 与投影器；不实现底层环境 transport 或 durable 调度 |
+| `fun.fengwk.kkstudio.harness.builtin.environment` | 内置 Environment capability 工具实现（`EnvironmentCapabilityTool`）与 prompt 模板加载 | 委托执行期 `BoundEnvironment` 执行环境能力；不实现 Daemon wire 协议或进程管理 |
+| `fun.fengwk.kkstudio.harness.builtin.goal` | 内置 Goal 状态管理工具（`create_goal`、`get_goal`、`update_goal`）、纯上下文投影器（`GoalContextProjector`）、快照模型（`GoalState`）与严格确定性 JSON 编解码器（`GoalStateCodec`） | 依托 `harness_entry` CUSTOM payload 存储，不建立独立数据库表；通过 `AppendCustomEntry` 由 Core 原子追加 |
+| `fun.fengwk.kkstudio.harness.builtin.skill` | 内部 Skill 加载工具（`LoadSkillTool`）及正文加载契约 | 仅供当前 Thread Agent 选中的 Skill 按需加载，不暴露本地文件系统绝对路径 |
+| `fun.fengwk.kkstudio.harness.builtin.subagent` | 内部 Subagent 委派工具适配器（`TaskTool`）、任务请求契约（`SubagentTaskRequest`）、执行端口（`SubagentRunner`）与动态配置接入 | 负责参数校验与委派转发，委托 `SubagentRunner` 执行；不在此处实现多轮调度引擎或持久化状态机 |
+
 ## 核心模型 / API
 
 ### BuiltinHarnessContributor 注册清单
 
-[`BuiltinHarnessContributor`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor.java) 接收 `loadSkillTool` 与 `taskTool`（由 Platform 装配提供），其 descriptor 为 `ContributorId("builtin")`、version `"1"`、无 requires。它共注册 17 个 Tool、1 个 Custom Entry Type 和 1 个 Context Projector：
+[`BuiltinHarnessContributor`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor.java) 接收 `loadSkillTool` 与 `taskTool`（由 Platform 装配提供），其 descriptor 为 `ContributorId("builtin")`、version `"1"`、无 requires。它共注册 15 个 Tool、1 个 Custom Entry Type 和 1 个 Context Projector：
 
 | localName | AgentToolId | model name | requirements | visibility | priority | 说明 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -111,7 +121,7 @@ updatedAt:   Instant
 ### Skill 与 Subagent 工具
 
 - [`LoadSkillTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillTool.java)：内部 Tool，依据 `ThreadSelectedSkillLookup` 与 `SkillBodyLoader` 按需加载 Skill 正文内容。
-- [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java)：内部 Tool，通过外部 `SubagentRunner` 创建/恢复子 Session 与 Thread，在有界并发限制下执行子任务并返回汇总报告。
+- [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java)：内部 Tool，通过外部 `SubagentRunner` 创建/恢复 Subagent Session 与 Thread，在有界并发限制下执行子任务并返回汇总报告。
 
 ## 执行 / 状态 trace
 
@@ -164,7 +174,7 @@ sequenceDiagram
 
 ### 关键测试守卫
 
-- [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java)：完整 17 工具清单、Tool descriptor/version/schema、ownership 与 Catalog 注册测试。
+- [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java)：完整 15 工具清单、Tool descriptor/version/schema、ownership 与 Catalog 注册测试。
 - [`BuiltinModuleArchitectureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinModuleArchitectureTest.java)：Builtin 只依赖 common/contributor-api/tool/environment/Jackson，不依赖 runtime/infra/daemon/platform/web。
 - [`BuiltinToolIdsTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinToolIdsTest.java)：全局 `base.*` 稳定标识校验。
 - [`GoalFeatureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalFeatureTest.java)：branch latest snapshot、fork/sibling 隔离、replacement 时间戳、active projector 静默。

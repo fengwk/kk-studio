@@ -177,6 +177,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
             .isEmpty());
   }
 
+  /** 测试意图：验证 claimNextWork 成功获取带环境亲和性的 TOOL Work 时，返回的 ClaimedWork 正确包含该 requiredEnvironmentId。 */
   @Test
   @Override
   void claimNextWorkReturnsClaimedWorkWithEnvironmentAffinity() {
@@ -207,6 +208,16 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     assertEquals(env, claimed.requiredEnvironmentId());
   }
 
+  /**
+   * 测试意图：验证 PostgreSQL 下 claimNextWork 对 Environment route 路由围栏的严格守卫：
+   *
+   * <ul>
+   *   <li>无 affinity 约束的 Work 允许任何节点 claim；
+   *   <li>有 affinity 约束的 Work 只有持有匹配 environmentId、状态为 READY 且 lease 未过期的 ownerNode 节点可 claim；
+   *   <li>连接租约已过期或连接处于非 READY（如 CONNECTING）状态时，严格 fail closed，任何节点均无法 claim；
+   *   <li>非目标环境连接持有者节点无法越权 claim。
+   * </ul>
+   */
   @Test
   void claimNextWorkEnforcesPostgresqlRouteAffinity() {
     HarnessStore store = createStore();

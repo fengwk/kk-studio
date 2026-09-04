@@ -4,10 +4,10 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 子 Agent Session ROOT 上冻结的委派归属。
+ * Subagent Session ROOT 上冻结的委派归属。
  *
- * <p>{@code taskInvocationId} 把子 Session 关联到父 Thread 的 durable task ToolInvocation；{@code
- * rootThreadId} 在整棵委派树中保持不变，{@code depth} 以普通根 Thread 为 1，因此子 Session 从 2 开始。
+ * <p>{@code taskInvocationId} 把 Subagent Session 关联到父 Thread 的持久化 task ToolInvocation；{@code
+ * rootThreadId} 在整棵委派树中保持不变，{@code depth} 以普通根 Thread 为 1，因此 Subagent Session 从 2 开始。
  */
 public record SubagentContext(
     UUID parentThreadId, UUID rootThreadId, UUID taskInvocationId, int depth) {

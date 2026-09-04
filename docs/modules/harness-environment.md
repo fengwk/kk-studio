@@ -35,14 +35,22 @@ harness-common + Jackson
        ▼
 harness-environment
   ├─ EnvironmentId / Binding / WorkspacePath
-  ├─ capability catalog + execution/transport SPI
-  └─ daemon protocol v6 values + codecs
+  ├─ Capability catalog + execution/transport SPI
+  └─ Daemon protocol v6 values + codecs
 
 禁止：harness-tool / harness-runtime / harness-infra / harness-daemon implementation
       contributor-api / platform / web / Spring / JDBC
 ```
 
 生产依赖见 [`pom.xml`](../../harness/environment/pom.xml)。[`EnvironmentModuleArchitectureTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentModuleArchitectureTest.java) 守卫依赖方向。
+
+## 包架构
+
+| 包路径 | 职责与边界 |
+| --- | --- |
+| `fun.fengwk.kkstudio.harness.environment` | Environment identity 与 binding 模型。定义跨 Runtime、Platform Gateway 与 Daemon 共享的 canonical 持久化 UUID 路由身份（`EnvironmentId`）、已冻结的 Environment 与 workspace 相对路径绑定（`EnvironmentBinding`）及纯跨平台相对路径语法校验（`EnvironmentWorkspacePath`）。不包含本地文件系统/网络 I/O、执行逻辑与具体 transport。 |
+| `fun.fengwk.kkstudio.harness.environment.capability` | 跨 Environment 共享的 Capability 契约、原子能力目录与执行/transport SPI。定义独立于模型 Tool 命名与展示的 12 项原子 Capability 描述符（catalog version 1）、执行 handle/listener 与调用方 transport 窄端口（包含 busy/unavailable/uncertain 发送确定性与 `PARTIAL* -> exactly one terminal` 顺序契约）。不直接执行具体能力，不依赖模型或通信框架。 |
+| `fun.fengwk.kkstudio.harness.environment.daemon` | Platform Gateway 与 Environment Daemon 共享的 WebSocket JSON wire 协议 v6 值对象与严格编解码器。包含封包 envelope（带 canonical `EnvironmentId` scope、sequence、messageType）、握手 READY payload、通用的 INVOKE / PARTIAL / COMPLETED 编解码器以及安全相对目录列表（`EnvironmentDirectoryListing`）与 Resource 引用模型。只负责 wire 严格校验与序列化，不维护连接状态、generation、lease 或 journal。 |
 
 ## 核心模型 / API
 
@@ -73,7 +81,7 @@ environmentId + workspacePath
 capabilityId / capabilityVersion / inputSchema / timeout
 ```
 
-[`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 当前 catalog version 为 `1`，按稳定顺序冻结 12 个 capability：
+[`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 当前 catalog version 为 `1`，按稳定顺序冻结 12 个 Capability：
 
 ```text
 fs.read
@@ -187,8 +195,8 @@ timeoutMillis
 
 ## 不变量、failure / recovery
 
-- `EnvironmentId` 是 route、binding 与 wire 的唯一逻辑身份；不能用连接 ID、daemon ID 或节点 ID替代。
-- `EnvironmentBinding` 一经写入 invocation 就同时冻结 id 与 workspace；不存在半空 binding。
+- `EnvironmentId` 是 route、binding 与 wire 的唯一逻辑身份；不能用连接 ID、Daemon ID 或节点 ID 替代。
+- `EnvironmentBinding` 一经写入 Invocation 就同时冻结 id 与 workspace；不存在半空 binding。
 - Capability catalog 与 model Tool catalog 分离；Capability ID/version mismatch 是确定性协议失败。
 - Protocol v6 只允许当前通用消息集合；历史专用 Skill/Directory 消息必须按 unknown type 拒绝。
 - `SendUncertain` 代表副作用结果未知，调用方不得自动重放。

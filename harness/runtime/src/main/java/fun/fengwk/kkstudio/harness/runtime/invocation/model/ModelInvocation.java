@@ -11,14 +11,14 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 一次 Model invocation 的 durable 当前状态。
+ * 一次 Model Invocation 的持久化当前状态。
  *
  * <p>{@code attempt} 统计已确认的 Provider 调用启动次数；BUSY/OVERLOADED 或启动前的明确拒绝不会增加它。 {@code resultEntryId}
  * 将执行结果链接到 Session 历史，且仅（在某些情况下）出现于 terminal 状态。 {@code streamCheckpoint} 是当前 attempt 的安全
  * partial，永远不是第二个 result。{@code failedAttempts} 是 append-only 的瞬态失败 attempt 审计，不属于对话语义。
  *
- * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受调用尚未被 durable
- * 确认。纯转换会把回拨的调用方 wall-clock 抬升到当前 {@code updatedAt}；Store 仍必须在每次 {@code update*} 写入前调用 {@link
+ * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受调用尚未被持久化状态 确认。纯转换会把回拨的调用方
+ * wall-clock 抬升到当前 {@code updatedAt}；Store 仍必须在每次 {@code update*} 写入前调用 {@link
  * #validateTransition}，严格拒绝直接构造的时间回退。
  */
 public record ModelInvocation(

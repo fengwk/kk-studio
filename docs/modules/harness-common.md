@@ -46,6 +46,16 @@ harness-common
 
 生产依赖见 [`pom.xml`](../../harness/common/pom.xml)。[`CommonModuleArchitectureTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 守卫主源码 import 与 POM 依赖。
 
+## 包架构
+
+| 包名 | 职责 | 明确边界 |
+| --- | --- | --- |
+| `fun.fengwk.kkstudio.harness.common.prompt` | 提供严格 classpath prompt 模板解析、缓存与精确变量渲染原语 | 仅支持 `${name}` 占位符且变量全匹配；不负责动态表达式计算或业务编排 |
+| `fun.fengwk.kkstudio.harness.common.json` | 提供严格重复键与尾随拦截的 JSON 校验器，以及流式有界 UTF-8 编码器 | 纯底层边界校验工具；不维护领域特定数据模型，超限立即中止且不物化内容 |
+| `fun.fengwk.kkstudio.harness.common.resource` | 定义不可变规范 Resource URI 引用 `ResourceRef` 与严格 URI / 载荷校验器 | 限定五类 scheme 与严格字节上限；不负责资源物理下载、传输或外部化存储 |
+| `fun.fengwk.kkstudio.harness.common.result` | 定义 sealed `ResultContent` 内容单元层次（Text、Json、Binary、Resource） | 纯不可变值模型；不包含执行态生命周期、权限控制或持久化调度逻辑 |
+| `fun.fengwk.kkstudio.harness.common.schema` | 定义输入参数 Schema 结构、参数校验器、静默归一化器与确定性 JSON 编解码器 | 严格字典序确定性编解码；不负责工具执行路由或 Provider 参数转换 |
+
 ## 核心模型 / API
 
 ### Prompt 模板与 Loader

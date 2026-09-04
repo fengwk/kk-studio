@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import java.util.Objects;
 
-/** 一次 Model invocation 可委派的子 Agent 名称与展示描述快照。 */
+/** 一次 Model Invocation 可委派的 Subagent 名称与展示描述快照。 */
 public record SubagentBinding(String name, String description) {
 
   public SubagentBinding {

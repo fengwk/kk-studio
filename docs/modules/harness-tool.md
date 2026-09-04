@@ -40,6 +40,13 @@ harness-common + Jackson
 
 生产依赖见 [`pom.xml`](../../harness/tool/pom.xml)。[`ToolModuleArchitectureTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolModuleArchitectureTest.java) 扫描主源码 import，守卫该依赖方向。
 
+## 包架构
+
+| 包名 | 职责 | 明确边界 |
+| --- | --- | --- |
+| `fun.fengwk.kkstudio.harness.tool` | 提供 route-neutral 的 Tool 身份（`AgentToolId`）、模型可见描述（`ToolDescriptor`）、顶层定义（`AgentToolDefinition`）、调用（`ToolCall`）与结果（`ToolResult`）纯值契约 | 纯值模型；不定义执行 SPI、listener、权限或持久化调度状态机，不读取系统配置 |
+| `fun.fengwk.kkstudio.harness.tool.codec` | 提供 Tool 定义、ToolDescriptor 与 ToolResult 的严格、确定性 JSON 编解码器 | 拒绝未知字段与语法错误，排序保证确定性；不维护历史 backend 属性或外部排序 |
+
 ## 核心模型 / API
 
 ### 稳定身份与模型定义
