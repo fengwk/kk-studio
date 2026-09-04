@@ -33,12 +33,12 @@ import java.util.function.Function;
  * {@link IllegalStateException} 拒绝。实现必须拒绝重入（回调内再次调用同一 Store 的 {@link
  * #transaction}）。并发由实现决定：生产实现允许并发事务，测试参考实现使用全局 monitor 串行化。
  *
- * <p>多实体锁顺序（所有多行事务必须遵守，防止死锁）：若涉及 Session 锁，先锁 Session（{@link #lockSessionForKeyShare} 或 {@link
- * #lockSessionForUpdate}），再按 {@link UuidOrder} 升序锁 Thread，再锁其 Commands，再锁其 ModelInvocation，再按
- * callIndex 升序锁同 Assistant Entry 的 ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work 时，同层 Work 必须按
- * (type, id) 升序（例如先 THREAD Work 再 MODEL Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；dispatcher
- * claim、heartbeat/lease 等单 Work 调度事务是唯一例外，它们不得创建新的业务 wake。实现必须在实际获取新锁前以 {@link
- * IllegalStateException} 拒绝逆序；重复访问本事务已持有的锁合法。
+ * <p>多实体锁顺序（所有多行事务必须遵守，用于收敛已知锁逆序与数据库死锁路径）：若涉及 Session 锁，先锁 Session（{@link #lockSessionForKeyShare}
+ * 或 {@link #lockSessionForUpdate}），再按 {@link UuidOrder} 升序锁 Thread，再锁其 Commands，再锁其
+ * ModelInvocation，再按 callIndex 升序锁同 Assistant Entry 的 ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work
+ * 时，同层 Work 必须按 (type, id) 升序（例如先 THREAD Work 再 MODEL Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning
+ * Thread；dispatcher claim、heartbeat/lease 等单 Work 调度事务是唯一例外，它们不得创建新的业务 wake。实现必须在实际获取新锁前以 {@link
+ * IllegalStateException} 拒绝已知逆序；重复访问本事务已持有的锁合法。
  *
  * <p>读取约定：所有 find/lock 返回 {@link Optional}；所有 list 返回不可变列表；list 入参被防御性拷贝且拒绝 null 元素。唯一键 / 引用完整性违反抛
  * {@link IllegalArgumentException}；未锁定即更新抛 {@link IllegalStateException}。

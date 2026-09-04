@@ -47,7 +47,7 @@ POM 和依赖架构守卫见 [`pom.xml`](../../harness/daemon/pom.xml) 与 [`Dae
 
 | 包路径 | 职责与边界 |
 | --- | --- |
-| `fun.fengwk.kkstudio.harness.daemon` | Environment Daemon 进程入口与核心运行时编排。包含 CLI 配置解析（`DaemonConfig`）、Capability 注册表冻结（`DaemonCapabilityRegistry`）、双 executor 资源管理（单线程调度器 + virtual-thread 执行器）、连接重连与握手（HELLO/WELCOME/READY）、统一请求规约（`InvocationRequestNormalizer`）及目录安全浏览。只依赖本地环境与 `harness-environment` 契约，不反向依赖 Model、Agent 或 Runtime。 |
+| `fun.fengwk.kkstudio.harness.daemon` | Environment Daemon 进程入口与核心运行时编排。包含 CLI 配置解析（`DaemonConfig`）、Capability 注册表冻结（`DaemonCapabilityRegistry`）、双 executor 资源管理（单线程调度器 + virtual-thread 执行器）、连接重连与握手（HELLO/WELCOME/READY）、统一请求规约（`InvocationRequestNormalizer`）及目录安全浏览。通过 `harness-environment` 契约与 Gateway 交互，不反向依赖 Model、Agent、Tool 或 Runtime。 |
 | `fun.fengwk.kkstudio.harness.daemon.coding` | 固定在 Environment root 内执行的具体 coding capabilities 实现（文件读写编辑补丁、进程执行、NIO 搜索与 LSP 桥接）及路径/资源存储边界。由 `EnvironmentPathBoundary` 强制执行真实路径校验与 symlink 穿越防护；大/二进制结果通过不可变 content-addressed `ResourceStore` 落地；`apply-patch` 提供严密预检与回滚；所有执行均在 invocation workspace 隔离。 |
 | `fun.fengwk.kkstudio.harness.daemon.journal` | Daemon 进程内 Invocation 执行事实存储与去重日志。维护 Invocation 的生命周期状态（RUNNING、COMPLETED、FAILED、CANCELLED），通过原子去重保证同一 `invocationId` 仅 start 一次，并记录 terminal 消息；在断线重连时支撑重复 INVOKE 的 STARTED 与 terminal 确定性重放（replay），实现 terminal-once 契约；独立于网络连接生命周期，连接断开绝不清空 journal。 |
 | `fun.fengwk.kkstudio.harness.daemon.skill` | 本地 Skill 发现、元数据解析与按需加载能力（`skill.load`）。在 Daemon 启动期通过 CLI `--skill-dir` 或默认 `~/.agents/skills` 扫描合法 `SKILL.md`，READY 仅上报 name 与 description，正文在 `INVOKE(skill.load)` 时剥离 front matter 后按需返回；禁止接收服务端下发任意本地路径。 |

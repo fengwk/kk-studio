@@ -3,10 +3,10 @@
  * fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork}，实施所有权围栏并驱动单次 target execution 的持久化生命周期。
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor} 输入必须是 MODEL target 的
- * claim，只依赖单一 {@link fun.fengwk.kkstudio.harness.runtime.store.HarnessStore}、{@link
+ * claim，核心持久化与执行端口为单一 {@link fun.fengwk.kkstudio.harness.runtime.store.HarnessStore}、{@link
  * fun.fengwk.kkstudio.harness.runtime.port.ModelGateway} 与 {@link
  * fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink}；{@link
- * fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor} 输入必须是 TOOL target 的 claim，只依赖 {@link
+ * fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor} 输入必须是 TOOL target 的 claim，以 {@link
  * fun.fengwk.kkstudio.harness.runtime.port.ToolGateway} 替代 Model Gateway，其余协议一致。所有持久化状态变更都在短事务内通过
  * store 锁序（Thread -&gt; ModelInvocation -&gt; ToolInvocation -&gt; Work，同层 Work 按 (type, id) 升序）与
  * lease/token 校验完成；本地 Listener 回调在持久化 RUNNING 落地前由回调门控缓冲，任何 Listener 回调都不能早于 RUNNING 落地；两阶段激活确保
@@ -21,7 +21,7 @@
  * bounce 回 READY + reschedule，绝不启动 Gateway，也不留下新 execution。
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor} 输入必须是 THREAD target 的
- * claim，只依赖单一 {@link fun.fengwk.kkstudio.harness.runtime.store.HarnessStore} 与 {@link
+ * claim，核心状态与解析端口为单一 {@link fun.fengwk.kkstudio.harness.runtime.store.HarnessStore} 与 {@link
  * fun.fengwk.kkstudio.harness.runtime.port.TurnResolver}，是每个 claim 恰执行一个持久化 action 的 single-action
  * reducer（terminal Model apply -&gt; Tool sibling batch -&gt; blocker -&gt; continuation -&gt;
  * input -&gt; idle），下一 action 一律由同事务 {@code requestWork} 驱动，绝不内部循环。Turn 启动采用 speculative plan + 事务外

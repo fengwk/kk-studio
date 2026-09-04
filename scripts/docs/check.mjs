@@ -497,34 +497,43 @@ function walkJavaSourceDirectories(directory) {
   })
 }
 
+function harnessProductionPackages(moduleName) {
+  const srcMainJava = path.join(repositoryRoot, 'harness', moduleName, 'src/main/java')
+  if (!existsSync(srcMainJava)) {
+    return []
+  }
+  const dirs = [srcMainJava, ...walkJavaSourceDirectories(srcMainJava)]
+  return dirs.flatMap((dir) => {
+    let entries = []
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return []
+    }
+    const hasProductionJava = entries.some((entry) => {
+      return (
+        entry.isFile() &&
+        entry.name.endsWith('.java') &&
+        entry.name !== 'package-info.java' &&
+        entry.name !== 'module-info.java'
+      )
+    })
+    if (!hasProductionJava) {
+      return []
+    }
+    const relativePackagePath = path.relative(srcMainJava, dir).split(path.sep).join('/')
+    return [
+      {
+        dir,
+        name: relativePackagePath.split('/').join('.'),
+      },
+    ]
+  })
+}
+
 function checkHarnessPackageInfo() {
   for (const moduleName of harnessProductionModules) {
-    const srcMainJava = path.join(repositoryRoot, 'harness', moduleName, 'src/main/java')
-    if (!existsSync(srcMainJava)) {
-      continue
-    }
-    const dirs = [srcMainJava, ...walkJavaSourceDirectories(srcMainJava)]
-    for (const dir of dirs) {
-      let entries = []
-      try {
-        entries = readdirSync(dir, { withFileTypes: true })
-      } catch {
-        continue
-      }
-      const productionJavaFiles = entries.filter((entry) => {
-        return (
-          entry.isFile() &&
-          entry.name.endsWith('.java') &&
-          entry.name !== 'package-info.java' &&
-          entry.name !== 'module-info.java'
-        )
-      })
-      if (productionJavaFiles.length === 0) {
-        continue
-      }
-
-      const relativePackagePath = path.relative(srcMainJava, dir).split(path.sep).join('/')
-      const expectedPackageName = relativePackagePath.split('/').join('.')
+    for (const { dir, name: expectedPackageName } of harnessProductionPackages(moduleName)) {
       const packageInfoPath = path.join(dir, 'package-info.java')
       const relativePackageInfoPath = relativeFromRoot(packageInfoPath)
 
@@ -556,6 +565,39 @@ function checkHarnessPackageInfo() {
       const javadocText = javadocMatch[1].replace(/^\s*\* ?/gm, '').trim()
       if (javadocText.length === 0) {
         addError(`empty package Javadoc in ${relativePackageInfoPath}`)
+      }
+    }
+  }
+}
+
+function levelTwoSection(source, title) {
+  const lines = source.split(/\r?\n/u)
+  const start = lines.findIndex((line) => line.trim() === `## ${title}`)
+  if (start < 0) {
+    return null
+  }
+  const next = lines.findIndex((line, index) => index > start && /^##\s+\S/u.test(line))
+  return lines.slice(start + 1, next < 0 ? lines.length : next).join('\n')
+}
+
+function checkHarnessPackageArchitectureDocs() {
+  for (const moduleName of harnessProductionModules) {
+    const docPath = `docs/modules/harness-${moduleName}.md`
+    const section = levelTwoSection(read(docPath), '包架构')
+    if (section === null) {
+      addError(`${docPath}: missing '## 包架构' section`)
+      continue
+    }
+    if (!/^\|\s*(?:包名|包路径)\s*\|/mu.test(section)) {
+      addError(`${docPath}: package architecture section must contain a package table`)
+    }
+    for (const { name: packageName } of harnessProductionPackages(moduleName)) {
+      const displayNames = [
+        packageName,
+        packageName.replace('fun.fengwk.kkstudio.harness.', ''),
+      ]
+      if (!displayNames.some((displayName) => section.includes(`| \`${displayName}\` |`))) {
+        addError(`${docPath}: package architecture table missing '${packageName}'`)
       }
     }
   }
@@ -602,6 +644,7 @@ checkForbiddenReferencesAndTerms()
 checkRepositoryStructure()
 checkNoHarnessModuleDocs()
 checkHarnessPackageInfo()
+checkHarnessPackageArchitectureDocs()
 checkEnvironmentRouteDocs()
 
 if (errors.length > 0) {
