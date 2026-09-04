@@ -117,6 +117,7 @@ final class ManualCompactionControl {
     return store.transaction(tx -> commitManual(tx, command, manualPlan.plan(), result));
   }
 
+  /** 在首个事务中锁定 Thread、校验版本与可用性，并冻结供事务外解析的手动压缩规划。 */
   private ManualPlan planManual(HarnessStore.Transaction tx, CompactThreadCommand command) {
     ThreadState thread =
         tx.lockThread(command.threadId())
@@ -146,6 +147,7 @@ final class ManualCompactionControl {
     return new ManualPlan(plan);
   }
 
+  /** 沿当前分支回溯带上下文预算的已关闭 Turn，并依次检查所有权、模型与 token 阈值。 */
   private ManualDecision manualDecision(
       HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
     ThreadContext context = contextLoader.load(tx, thread, path);
@@ -196,6 +198,7 @@ final class ManualCompactionControl {
             : ManualCompactionAvailability.DisabledReason.NO_RESOLVED_CONTEXT);
   }
 
+  /** 在第二事务中重验版本、head 与命令快照，再原子提交压缩 Turn 及其 Model Work 或失败终态。 */
   private CompactThreadResult commitManual(
       HarnessStore.Transaction tx,
       CompactThreadCommand command,

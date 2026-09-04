@@ -4,8 +4,13 @@ package fun.fengwk.kkstudio.platform.canvas.function.h3;
 public record H3ComfyHistory(Status status, H3OutputDescriptor output, String error) {
 
   public enum Status {
+    /** Comfy 任务正在排队或执行中。 */
     PENDING,
+
+    /** Comfy 任务执行成功并产出结果。 */
     SUCCESS,
+
+    /** Comfy 任务执行遇到错误。 */
     ERROR
   }
 

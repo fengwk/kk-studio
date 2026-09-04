@@ -432,6 +432,7 @@ public class CanvasFunctionRunTransactions {
     return List.copyOf(refs);
   }
 
+  /** 在已持有文档行锁的事务内执行版本 CAS，失败视为持久化不变量破坏。 */
   private void bumpVersion(CanvasDocument document) {
     long baseVersion = document.version();
     long newVersion = baseVersion + 1L;
@@ -445,6 +446,7 @@ public class CanvasFunctionRunTransactions {
     return stateCodec.decode(run.stateJson(), model);
   }
 
+  /** 以冻结执行状态构造终态记录，并清空可调度时间与租约字段。 */
   private CanvasFunctionRun terminal(
       CanvasFunctionRun current,
       CanvasFunctionRunStatus status,

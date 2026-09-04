@@ -264,6 +264,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     return finalized;
   }
 
+  /** 在上传行锁保护的事务内消解或创建去重 Blob，并与当前上传记录安全绑定。 */
   private UUID resolveBlobAndBindUpload(StorageUpload upload, StorageMediaFacts facts) {
     // 先在绑定事务内锁定上传行：同一上传的并发 complete 在行锁上串行，保证 retain/insert 只发生在
     // 最终成功绑定的一方，杜绝对已有 ACTIVE blob 的重复计数。

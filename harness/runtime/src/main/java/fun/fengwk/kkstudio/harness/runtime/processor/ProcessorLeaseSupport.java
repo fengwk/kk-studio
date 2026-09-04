@@ -11,10 +11,7 @@ final class ProcessorLeaseSupport {
 
   private ProcessorLeaseSupport() {}
 
-  /**
-   * 只要当前 leaseUntil 早于 {@code now + leaseDuration} 就 renew 到 {@code now + leaseDuration} （相等 / 更晚不
-   * renew——renew 要求严格延展，等值会违反）。调用方必须已通过 {@code lockClaimedWork} 锁住 Work 行。
-   */
+  /** 在调用方已锁定 Work 行时，仅当现有租约早于 {@code now + leaseDuration} 才将其严格延展到该时点。 */
   static void ensureLeaseMargin(
       HarnessStore.Transaction tx,
       ClaimedWork claim,

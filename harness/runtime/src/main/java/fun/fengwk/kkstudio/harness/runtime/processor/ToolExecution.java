@@ -697,10 +697,19 @@ final class ToolExecution implements ToolGateway.Listener {
   }
 
   private enum PendingKind {
+    /** 暂存待处理的工具局部输出结果。 */
     PARTIAL,
+
+    /** 暂存待处理的工具成功完成信号。 */
     SUCCEEDED,
+
+    /** 暂存待处理的工具执行失败错误。 */
     FAILED,
+
+    /** 暂存待处理的工具取消信号。 */
     CANCELLED,
+
+    /** 暂存待处理的结果不确定错误。 */
     UNKNOWN
   }
 
@@ -720,16 +729,29 @@ final class ToolExecution implements ToolGateway.Listener {
     }
   }
 
+  /** 一次回调信号落地后的本地应用结果。 */
   private enum Applied {
+    /** 局部输出已成功落盘或发布进度。 */
     PROGRESSED,
+
+    /** 触发瞬态重试，对应 Work 已完成延迟重排。 */
     RETRY,
+
+    /** 终态已持久化落盘，本地执行结束。 */
     TERMINAL,
+
+    /** Claim 所有权已丢失或调用已被废弃，当前信号未被应用。 */
     LOST
   }
 
   private enum TerminalKind {
+    /** 收敛为明确的失败终态。 */
     FAILED,
+
+    /** 收敛为取消终态。 */
     CANCELLED,
+
+    /** 收敛为结果不确定的终态。 */
     UNKNOWN
   }
 }

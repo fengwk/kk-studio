@@ -418,3 +418,545 @@ test('docs check fails when environment route critical facts are removed or corr
     rmSync(mirrorRoot, { recursive: true, force: true })
   }
 })
+
+const CORE_STATE_ENUMS = [
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ProcessResult.java',
+    enumName: 'ProcessResult',
+    constants: ['STARTED', 'TERMINATED', 'RESCHEDULED', 'LOST_OWNERSHIP'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessResult.java',
+    enumName: 'ThreadProcessResult',
+    constants: ['COMPLETED', 'RESCHEDULED', 'LOST_OWNERSHIP'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/work/WorkTargetType.java',
+    enumName: 'WorkTargetType',
+    constants: ['THREAD', 'MODEL', 'TOOL'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeConflictException.java',
+    enumName: 'Reason',
+    constants: [
+      'STALE_VERSION',
+      'STALE_COMMAND_CURSOR',
+      'IDEMPOTENCY_KEY_REUSED',
+      'PARTIAL_COMMAND_REPLAY',
+      'COMMAND_REPLAY_ORDER_MISMATCH',
+      'THREAD_ID_REUSED',
+      'TERMINAL_APPLY_PENDING',
+      'STOP_REQUEST_ID_REUSED',
+      'APPROVAL_NOT_APPLICABLE',
+      'APPROVAL_DECISION_MISMATCH',
+      'MANUAL_COMPACTION_UNAVAILABLE',
+    ],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadRuntimeStatus.java',
+    enumName: 'ThreadRuntimeStatus',
+    constants: [
+      'IDLE',
+      'CONTINUATION_DUE',
+      'MODEL_READY',
+      'MODEL_DISPATCHING',
+      'MODEL_RUNNING',
+      'APPLYING',
+      'TOOL_WAITING_APPROVAL',
+      'TOOL_RUNNING',
+      'TOOL_DISPATCHING',
+      'TOOL_READY',
+    ],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocationStatus.java',
+    enumName: 'ModelInvocationStatus',
+    constants: ['READY', 'DISPATCHING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocationStatus.java',
+    enumName: 'ToolInvocationStatus',
+    constants: [
+      'WAITING_APPROVAL',
+      'READY',
+      'DISPATCHING',
+      'RUNNING',
+      'SUCCEEDED',
+      'FAILED',
+      'CANCELLED',
+      'UNKNOWN',
+    ],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolApprovalDecision.java',
+    enumName: 'ToolApprovalDecision',
+    constants: ['ALLOWED', 'DENIED'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/command/ThreadCommandState.java',
+    enumName: 'ThreadCommandState',
+    constants: ['QUEUED', 'APPLIED', 'CANCELLED'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/TurnEndOutcome.java',
+    enumName: 'TurnEndOutcome',
+    constants: ['COMPLETED', 'FAILED', 'STOPPED', 'CANCELLED'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/TurnEndReason.java',
+    enumName: 'TurnEndReason',
+    constants: [
+      'USER_STOP',
+      'HISTORY_CUT',
+      'CANCELLED',
+      'TURN_FAILED',
+      'OUTPUT_TRUNCATED',
+      'CONTENT_FILTERED',
+    ],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/TurnStartReason.java',
+    enumName: 'TurnStartReason',
+    constants: ['INPUT', 'CONTINUATION', 'COMPACTION'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/ToolResultStatus.java',
+    enumName: 'ToolResultStatus',
+    constants: ['SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/ToolResultReason.java',
+    enumName: 'ToolResultReason',
+    constants: ['HISTORY_CUT'],
+  },
+  {
+    path: 'harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStatus.java',
+    enumName: 'GoalStatus',
+    constants: ['ACTIVE', 'COMPLETE', 'BLOCKED'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPhase.java',
+    enumName: 'CompactionPhase',
+    constants: ['FULL', 'HISTORY', 'TURN_PREFIX'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionTrigger.java',
+    enumName: 'CompactionTrigger',
+    constants: ['THRESHOLD', 'OVERFLOW', 'MANUAL'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/GenerationStopReason.java',
+    enumName: 'GenerationStopReason',
+    constants: ['COMPLETE', 'LENGTH', 'FILTERED'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderErrorKind.java',
+    enumName: 'ProviderErrorKind',
+    constants: [
+      'TRANSIENT',
+      'OVERFLOW',
+      'AUTHENTICATION',
+      'BILLING',
+      'INVALID_REQUEST',
+      'INVALID_RESPONSE',
+      'CANCELLED',
+    ],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionAvailability.java',
+    enumName: 'DisabledReason',
+    constants: [
+      'THREAD_BUSY',
+      'OWNERSHIP_BARRIER',
+      'NO_RESOLVED_CONTEXT',
+      'MODEL_CHANGED',
+      'BELOW_MINIMUM',
+      'NOTHING_TO_COMPACT',
+    ],
+  },
+  {
+    path: 'harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeState.java',
+    enumName: 'DaemonRuntimeState',
+    constants: ['STOPPED', 'CONNECTING', 'READY', 'DISCONNECTED', 'FAILED'],
+  },
+  {
+    path: 'harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/journal/DaemonInvocationState.java',
+    enumName: 'DaemonInvocationState',
+    constants: ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
+    enumName: 'PendingKind',
+    constants: ['EVENT', 'SUCCEEDED', 'FAILED', 'UNKNOWN'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
+    enumName: 'Applied',
+    constants: ['PROGRESSED', 'RETRY', 'TERMINAL', 'LOST'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
+    enumName: 'TerminalKind',
+    constants: ['FAILED', 'CANCELLED', 'UNKNOWN'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolExecution.java',
+    enumName: 'PendingKind',
+    constants: ['PARTIAL', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolExecution.java',
+    enumName: 'Applied',
+    constants: ['PROGRESSED', 'RETRY', 'TERMINAL', 'LOST'],
+  },
+  {
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolExecution.java',
+    enumName: 'TerminalKind',
+    constants: ['FAILED', 'CANCELLED', 'UNKNOWN'],
+  },
+  {
+    path: 'canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionRunStatus.java',
+    enumName: 'CanvasFunctionRunStatus',
+    constants: ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'],
+  },
+  {
+    path: 'canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasConflictException.java',
+    enumName: 'Reason',
+    constants: ['VERSION_CONFLICT', 'IDEMPOTENCY_CONFLICT'],
+  },
+  {
+    path: 'canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionRunException.java',
+    enumName: 'Reason',
+    constants: ['NOT_FOUND', 'CONFLICT'],
+  },
+  {
+    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/environment/query/EnvironmentQueryStatus.java',
+    enumName: 'EnvironmentQueryStatus',
+    constants: ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED'],
+  },
+  {
+    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/environment/registry/LiveEnvironmentStatus.java',
+    enumName: 'LiveEnvironmentStatus',
+    constants: ['CONNECTING', 'READY'],
+  },
+  {
+    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/storage/service/model/StorageBlobState.java',
+    enumName: 'StorageBlobState',
+    constants: ['ACTIVE', 'DELETING'],
+  },
+  {
+    path: 'share/src/main/java/fun/fengwk/kkstudio/share/storage/StorageUploadState.java',
+    enumName: 'StorageUploadState',
+    constants: ['PENDING', 'READY'],
+  },
+  {
+    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/h3/H3ComfyHistory.java',
+    enumName: 'Status',
+    constants: ['PENDING', 'SUCCESS', 'ERROR'],
+  },
+  {
+    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/OpenCliHubClient.java',
+    enumName: 'ExecutionStatus',
+    constants: ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'TIMED_OUT', 'CANCELLED'],
+  },
+  {
+    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task/DatabaseSubagentRunner.java',
+    enumName: 'RunState',
+    constants: ['COMPLETED', 'ERROR', 'CANCELLED'],
+  },
+  {
+    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java',
+    enumName: 'SignalKind',
+    constants: ['PARTIAL', 'COMPLETE', 'ERROR'],
+  },
+  {
+    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/environment/gateway/EnvironmentDaemonGateway.java',
+    enumName: 'SendOutcome',
+    constants: ['SENT', 'NOT_SENT', 'UNCERTAIN'],
+  },
+]
+
+function extractEnumConstantSection(source, enumName) {
+  const enumRegex = new RegExp(`\\benum\\s+${enumName}\\b[^{]*\\{`, 'u')
+  const match = enumRegex.exec(source)
+  if (!match) {
+    throw new Error(`Cannot find enum ${enumName}`)
+  }
+  const startIndex = match.index + match[0].length
+
+  let depth = 1
+  let parenDepth = 0
+  let inLineComment = false
+  let inBlockComment = false
+  let inString = false
+  let inChar = false
+
+  let endIndex = -1
+  for (let i = startIndex; i < source.length; i++) {
+    const ch = source[i]
+    const next = source[i + 1]
+
+    if (inLineComment) {
+      if (ch === '\n') {
+        inLineComment = false
+      }
+      continue
+    }
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') {
+        inBlockComment = false
+        i++
+      }
+      continue
+    }
+    if (inString) {
+      if (ch === '\\') {
+        i++
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (inChar) {
+      if (ch === '\\') {
+        i++
+      } else if (ch === "'") {
+        inChar = false
+      }
+      continue
+    }
+
+    if (ch === '/' && next === '/') {
+      inLineComment = true
+      i++
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      inBlockComment = true
+      i++
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+    if (ch === "'") {
+      inChar = true
+      continue
+    }
+
+    if (ch === '(') {
+      parenDepth++
+      continue
+    }
+    if (ch === ')') {
+      parenDepth--
+      continue
+    }
+    if (ch === '{') {
+      depth++
+      continue
+    }
+    if (ch === '}') {
+      depth--
+      if (depth === 0) {
+        endIndex = i
+        break
+      }
+      continue
+    }
+    if (ch === ';' && depth === 1 && parenDepth === 0) {
+      endIndex = i
+      break
+    }
+  }
+
+  if (endIndex === -1) {
+    throw new Error(`Unterminated enum body for ${enumName}`)
+  }
+
+  return source.slice(startIndex, endIndex)
+}
+
+function parseEnumConstantEntries(constantSection) {
+  const constants = []
+  let parenDepth = 0
+  let braceDepth = 0
+  let inLineComment = false
+  let inBlockComment = false
+  let inString = false
+  let inChar = false
+
+  let lastDelimiterEnd = 0
+
+  for (let i = 0; i < constantSection.length; i++) {
+    const ch = constantSection[i]
+    const next = constantSection[i + 1]
+
+    if (inLineComment) {
+      if (ch === '\n') {
+        inLineComment = false
+      }
+      continue
+    }
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') {
+        inBlockComment = false
+        i++
+      }
+      continue
+    }
+    if (inString) {
+      if (ch === '\\') {
+        i++
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (inChar) {
+      if (ch === '\\') {
+        i++
+      } else if (ch === "'") {
+        inChar = false
+      }
+      continue
+    }
+
+    if (ch === '/' && next === '/') {
+      inLineComment = true
+      i++
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      inBlockComment = true
+      i++
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+    if (ch === "'") {
+      inChar = true
+      continue
+    }
+
+    if (ch === '(') {
+      parenDepth++
+      continue
+    }
+    if (ch === ')') {
+      parenDepth--
+      continue
+    }
+    if (ch === '{') {
+      braceDepth++
+      continue
+    }
+    if (ch === '}') {
+      braceDepth--
+      continue
+    }
+
+    if (parenDepth === 0 && braceDepth === 0) {
+      if (ch === ',') {
+        lastDelimiterEnd = i + 1
+        continue
+      }
+
+      if (/[A-Za-z_]/u.test(ch)) {
+        const idStart = i
+        while (i < constantSection.length && /[A-Za-z0-9_]/u.test(constantSection[i])) {
+          i++
+        }
+        const identifier = constantSection.slice(idStart, i)
+        i--
+
+        if (/^[A-Z][A-Z0-9_]*$/u.test(identifier)) {
+          const prefix = constantSection.slice(lastDelimiterEnd, idStart)
+          const trimmed = prefix.trim()
+          const hasSingleJavadoc =
+            trimmed.startsWith('/**') &&
+            trimmed.endsWith('*/') &&
+            !trimmed.slice(3, -2).includes('*/')
+          const javadocText = hasSingleJavadoc
+            ? trimmed
+                .slice(3, -2)
+                .replace(/^\s*\*\s?/gmu, '')
+                .trim()
+            : ''
+
+          constants.push({
+            name: identifier,
+            hasImmediateNonEmptyJavadoc: javadocText.length > 0,
+          })
+        }
+      }
+    }
+  }
+
+  return constants
+}
+
+function assertManagedCoreStateEnums(repositoryRoot) {
+  for (const entry of CORE_STATE_ENUMS) {
+    const fullPath = path.join(repositoryRoot, entry.path)
+    assert.equal(existsSync(fullPath), true, `file must exist: ${entry.path}`)
+
+    const source = readFileSync(fullPath, 'utf8')
+    const constantSection = extractEnumConstantSection(source, entry.enumName)
+    const parsedEntries = parseEnumConstantEntries(constantSection)
+
+    const actualConstants = parsedEntries.map((p) => p.name)
+    assert.deepEqual(
+      actualConstants,
+      entry.constants,
+      `enum ${entry.enumName} in ${entry.path} constants mismatch`,
+    )
+
+    for (const parsed of parsedEntries) {
+      assert.equal(
+        parsed.hasImmediateNonEmptyJavadoc,
+        true,
+        `enum ${entry.enumName}.${parsed.name} in ${entry.path} must have immediate non-empty Javadoc`,
+      )
+    }
+  }
+}
+
+test('repository structure guard verifies managed core state enums have exact constants and immediate non-empty Javadoc', () => {
+  // Test intent: ensure all managed core state enums declare exactly the specified constants and document every constant.
+  assertManagedCoreStateEnums(REPOSITORY_ROOT)
+})
+
+test('repository structure guard rejects missing or empty core state enum constant Javadoc in isolation', () => {
+  // Test intent: prove the enum documentation guard fails closed without mutating the repository.
+  const mirrorRoot = createRepositoryMirror()
+  const relativePath =
+    'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ProcessResult.java'
+  const mirrorPath = path.join(mirrorRoot, relativePath)
+  const source = readFileSync(mirrorPath, 'utf8')
+  const startedJavadoc =
+    /(\n[ \t]*)\/\*\*(?:(?!\*\/)[\s\S])*\*\/(\s*STARTED,)/u
+
+  try {
+    const missing = source.replace(startedJavadoc, '$1$2')
+    assert.notEqual(missing, source, 'STARTED Javadoc fixture must be removable')
+    writeFileSync(mirrorPath, missing)
+    assert.throws(
+      () => assertManagedCoreStateEnums(mirrorRoot),
+      /enum ProcessResult\.STARTED .* must have immediate non-empty Javadoc/u,
+    )
+
+    const empty = source.replace(startedJavadoc, '$1/** */$2')
+    assert.notEqual(empty, source, 'STARTED Javadoc fixture must be replaceable with an empty block')
+    writeFileSync(mirrorPath, empty)
+    assert.throws(
+      () => assertManagedCoreStateEnums(mirrorRoot),
+      /enum ProcessResult\.STARTED .* must have immediate non-empty Javadoc/u,
+    )
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+})

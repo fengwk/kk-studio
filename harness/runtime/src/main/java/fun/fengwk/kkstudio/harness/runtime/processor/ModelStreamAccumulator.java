@@ -168,6 +168,7 @@ final class ModelStreamAccumulator {
           gap.index(), gap.id(), gap.name(), gap.argumentsJson());
     }
 
+    /** 接受首次值或当前值的前缀扩展，忽略重复及已接收前缀，并拒绝相互冲突的片段。 */
     private static void appendIdentity(StringBuilder target, String value) {
       if (value == null || value.isBlank()) {
         return;

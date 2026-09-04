@@ -15,7 +15,10 @@ public class CanvasConflictException extends RuntimeException {
   }
 
   public enum Reason {
+    /** 文档乐观锁版本号不匹配引发的冲突。 */
     VERSION_CONFLICT,
+
+    /** 同一命令幂等键已绑定不一致的请求。 */
     IDEMPOTENCY_CONFLICT
   }
 }

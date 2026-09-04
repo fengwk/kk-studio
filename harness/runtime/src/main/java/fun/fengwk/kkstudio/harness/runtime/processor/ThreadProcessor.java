@@ -1051,16 +1051,8 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 第二事务 CAS 提交。要求当前 Thread head == planned source head、cutoff 内 queued Command 与 planned
-   * 快照逐字段相等（允许 sequence &gt; cutoff 的新命令，不 CAS version / nextCommandSequence），claim token 活跃；最终
-   * Thread 更新使用第二事务锁到的当前 YOLO（speculative plan 创建时的旧值绝不写回）并保留其最新 nextCommandSequence， version 精确
-   * +1。锁序为 Thread -&gt; Commands -&gt; Model -&gt; Work：全部低序 mutation 先完成，claimed THREAD Work 的
-   * final fence 最后执行（失败抛 {@link ClaimLostSignal} 整事务回滚）。任何 head / 快照 / claim 损失一律抛 {@link
-   * ClaimLostSignal} 回滚（零 durable mutation），由 {@link #process} 映射为 LOST_OWNERSHIP。
-   *
-   * <p>resolved：同层 Work 按 (type, id) 升序（先 THREAD wake 再 MODEL Work）只请求 MODEL Work——绝不因 deferred
-   * messages 制造无意义 THREAD claim（terminal apply 会按 queued 快照重建 wake）——然后 complete。rejected：追加
-   * error+TURN_END 后，只在 deferred user demand 或 fallback/hard-overflow obligation 存在时请求 THREAD。
+   * 在第二事务中基于重新锁定的 Thread 重验 head、命令快照与 Claim，按 Thread -> Commands -> Model -> Work 锁序原子提交；最终 Claim
+   * 围栏失败会回滚全部变更。
    */
   private void commit(ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
     store.transaction(

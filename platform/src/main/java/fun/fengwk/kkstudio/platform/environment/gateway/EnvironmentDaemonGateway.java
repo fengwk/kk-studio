@@ -231,6 +231,7 @@ public class EnvironmentDaemonGateway
     return startCapability(binding, request, listener);
   }
 
+  /** 在数据库 READY 路由租约有效且环境无其他活动调用时登记调用，再向目标 Daemon 发送 INVOKE。 */
   private ActiveCapability startCapability(
       EnvironmentBinding binding,
       EnvironmentCapabilityExecutionRequest request,
@@ -629,6 +630,7 @@ public class EnvironmentDaemonGateway
             request.timeout()));
   }
 
+  /** 校验入站信封协议版本与连接合法性，并按消息类型分派处理。 */
   private void handleInbound(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     if (envelope.protocolVersion() != DaemonProtocol.VERSION) {
@@ -658,6 +660,7 @@ public class EnvironmentDaemonGateway
     }
   }
 
+  /** 处理 Daemon 首帧 HELLO 握手，校验协议与注册凭据并完成欢迎回包。 */
   private void handleHello(ConnectionState state, DaemonEnvelope envelope) {
     if (state.helloReceived) {
       throw new DaemonProtocolException("HELLO may only be sent once per connection");
@@ -736,6 +739,7 @@ public class EnvironmentDaemonGateway
     }
   }
 
+  /** 处理 Daemon 发送的 READY 声明，向注册表登记或续约环境并开启就绪状态。 */
   private void handleReady(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     requireHello(state);
@@ -876,6 +880,7 @@ public class EnvironmentDaemonGateway
     }
   }
 
+  /** 原子终结并移除与入站连接和 invocationId 匹配的活动调用，已知迟到终态则消费 tombstone 后忽略。 */
   private ActiveCapability takeTerminalTarget(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
     UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
@@ -896,6 +901,7 @@ public class EnvironmentDaemonGateway
         "daemon terminal callback does not own invocationId: " + envelope.invocationId());
   }
 
+  /** 将未终结调用从活动表移入 tombstone，并至多向原连接发送一次 CANCEL。 */
   private void expireCapability(ActiveCapability active) {
     boolean sendCancel;
     synchronized (active) {
@@ -1009,6 +1015,7 @@ public class EnvironmentDaemonGateway
     }
   }
 
+  /** 幂等清理 Daemon 连接、数据库租约与活动调用，并将未完成调用通知为结果不确定。 */
   private void closeConnectionState(ConnectionState state) {
     ActiveCapability lostCapability = null;
     EnvironmentId environmentId;
@@ -1170,8 +1177,13 @@ public class EnvironmentDaemonGateway
   }
 
   private enum SendOutcome {
+    /** 消息已成功发送至传输连接。 */
     SENT,
+
+    /** 消息确定尚未向网络发送。 */
     NOT_SENT,
+
+    /** 消息已尝试写入网络但送达状态不可确认。 */
     UNCERTAIN
   }
 
