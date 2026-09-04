@@ -116,6 +116,25 @@ test('docs check fails when unexpected harness module directory is introduced', 
   }
 })
 
+test('docs check ignores hidden Harness IDE metadata', () => {
+  // Test intent: local dot-prefixed IDE metadata must not weaken the exact visible module inventory.
+  const mirrorRoot = createRepositoryMirror()
+  try {
+    const settingsDir = path.join(mirrorRoot, 'harness/.settings')
+    mkdirSync(settingsDir, { recursive: true })
+    writeFileSync(path.join(settingsDir, 'org.eclipse.m2e.core.prefs'), 'activeProfiles=\n')
+
+    const output = execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
+      cwd: mirrorRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    assert.equal(output.includes('PASS docs'), true, `expected PASS docs, got:\n${output}`)
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+})
+
 test('docs check passes against an isolated physical mirror', () => {
   // Test intent: the repository itself must satisfy every documentation and structure gate.
   const mirrorRoot = createRepositoryMirror()
