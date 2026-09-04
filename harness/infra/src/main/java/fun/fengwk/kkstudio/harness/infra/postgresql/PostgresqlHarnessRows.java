@@ -37,6 +37,11 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * 七表 durable protocol 对应的 Spring JDBC {@link RowMapper} 与 JSON Codec 映射集。
+ *
+ * <p>集中管理 Java 领域实体与 PostgreSQL 关系行、JSONB 字段以及时间戳（毫秒精度截断）的双向编解码与映射。
+ */
 final class PostgresqlHarnessRows {
 
   static final HistoryEntryPayloadJsonCodec ENTRY_PAYLOADS = new HistoryEntryPayloadJsonCodec();
