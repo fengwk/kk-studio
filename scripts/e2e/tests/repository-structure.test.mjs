@@ -351,15 +351,13 @@ test('docs check fails when environment route critical facts are removed or corr
     )
 
     // 2. Missing TOOL Work only constraint in harness-runtime.md
-    writeFileSync(
-      mirrorRuntimeDoc,
-      validRuntimeDoc
-        .replace(
-          /仅允许 target 为 `TOOL` 的 Work 携带非空环境 ID/g,
-          '允许任意 target 的 Work 携带非空环境 ID',
-        )
-        .replace(/仅允许 TOOL Work 非空/g, '允许任意 Work 非空'),
+    const runtimeWithoutToolAffinity = validRuntimeDoc.replace(/\bTOOL\b/g, 'OTHER')
+    assert.notEqual(
+      runtimeWithoutToolAffinity,
+      validRuntimeDoc,
+      'runtime TOOL work affinity contract must exist in fixture',
     )
+    writeFileSync(mirrorRuntimeDoc, runtimeWithoutToolAffinity)
     assert.throws(
       () => {
         execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {

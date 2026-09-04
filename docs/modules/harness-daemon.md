@@ -2,26 +2,26 @@
 
 ## 定位
 
-Environment Daemon 是独立进程，负责固定 Environment root 内的 coding capabilities、Skill discovery、目录浏览和 Daemon WebSocket protocol v6。它依赖 `harness-common` 的共享值契约与 `harness-environment` 的 Capability SPI/wire contract，不依赖 Tool、Runtime、Infra、Platform、Spring、数据库或 Model/Agent。
+Environment Daemon 是独立运行的宿主进程，负责在受限的环境根目录（Environment root）内提供代码能力执行、本地技能发现与按需加载、目录安全浏览以及 Daemon WebSocket 协议 v6 通信。它引入 `harness-common` 的基础值对象与 `harness-environment` 的能力 SPI 及通信协议编解码器，与上层的 Model、Tool、Runtime 状态机及业务数据库保持解耦。
 
-[`DaemonMain`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonMain.java) 是进程入口；[`DaemonRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java) 管理连接、journal、capability 执行、重连、超时和 shutdown。Daemon 的 Invocation journal 是进程内 execution fact；WebSocket 连接仅传递消息，不作为执行事实源。
+[`DaemonMain`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonMain.java) 是进程入口；[`DaemonRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java) 统筹网络连接、执行日志（journal）、能力异步调度、重连退避、超时判定以及进程生命周期。Daemon 进程内以 Invocation journal 维护执行状态的权威事实；WebSocket 连接作为纯消息传输管道，连接的中断与重建不会破坏正在进行的执行状态，支持重连后幂等重放。
 
-## Goals / Non-goals
+## 职责
 
-### Goals
+### 核心职责
 
-- 以 `EnvironmentId` 绑定唯一逻辑 route，并在每个 envelope 校验 scope。
-- 在连接断开/重连时用 Invocation journal 去重 `INVOKE` 并重放 STARTED/terminal。
-- 在统一 Environment root 内安全执行 coding capabilities，提供 Skill 的本地能力通告和按需加载。
-- 以 scheduler + virtual-thread task executor 管理 heartbeat、reconnect、timeout 和阻塞执行。
-- 对路径、symlink、wire size、Resource、sequence、cancel 和 shutdown 采用 fail-closed 边界。
+- 以统一的 `EnvironmentId` 建立网关路由绑定，并在每个协议封包上严格校验作用域。
+- 基于进程内 Invocation 日志保障调用的幂等性，在网络重连时准确去重 `INVOKE` 请求并幂等重放 STARTED 与终态（terminal）结果。
+- 在受限的环境根目录内安全执行编码与文件能力，并基于本地目录发现与按需提供 Skill 正文。
+- 通过双线程池分工承载运行任务：单线程调度器负责心跳、重连与超时，虚拟线程池负责阻塞执行。
+- 对文件路径、符号链接、报文大小、资源体积、调用时序及安全关闭等边界执行 fail-closed 校验。
 
-### Non-goals
+### 协作边界
 
-- 不持久化 Agent/Session/Invocation/Work，不实现 Runtime 的模型调用处理器或权限决策。
-- 不接受 Gateway 下发的 Skill 目录、Environment root 或任意本地路径配置。
-- 不在 READY capabilities 中暴露 headers、environment values、command、URL 或本地绝对路径。
-- 不把 WebSocket 连接当作持久化 Invocation 事实源；连接丢失不清空 journal。
+- 会话生命周期与决策事实：Session、Turn、Entry 树与长期状态持久化归属 Runtime 模块；权限准入策略由 Platform 与 Runtime 判定，Daemon 聚焦于已授权指令的本地能力执行与路径边界校验。
+- 本地路径与技能配置事实：环境根目录与技能目录完全由本地启动参数（CLI）确定，远程请求仅能在已建立的本地约束内寻址。
+- READY 元数据：能力通告包含操作系统、时区、可信备注、canonical Environment root 展示路径，以及技能名称和描述；凭证、请求头、环境变量、命令与连接 URL 保留在本地。
+- 执行状态持久性：执行事实独立保存在进程内存日志中；连接断开仅触发传输层重连，执行生命周期不受网络连接波动影响。
 
 ## 依赖边界
 
@@ -38,26 +38,25 @@ DaemonMain
 
 Daemon -> harness-common
 Daemon -> harness-environment -> harness-common
-Daemon -/-> harness-tool / harness-runtime / harness-infra / platform / web
 ```
 
-POM 和依赖架构守卫见 [`pom.xml`](../../harness/daemon/pom.xml) 与 [`DaemonModuleArchitectureTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonModuleArchitectureTest.java)。executor 只在 `DaemonRuntime` 创建，架构测试会检查这一生命周期边界。
+Daemon 的生产依赖止于 `harness-common` 与 `harness-environment`；`harness-tool`、`harness-runtime`、`harness-infra`、`platform` 和 `web` 位于调用侧。调度器与虚拟线程池由 `DaemonRuntime` 统一创建并管理生命周期。详细依赖与结构约束见 [`pom.xml`](../../harness/daemon/pom.xml)，并由 [`DaemonModuleArchitectureTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonModuleArchitectureTest.java) 自动化守卫。
 
 ## 包架构
 
 | 包路径 | 职责与边界 |
 | --- | --- |
-| `fun.fengwk.kkstudio.harness.daemon` | Environment Daemon 进程入口与核心运行时编排。包含 CLI 配置解析（`DaemonConfig`）、Capability 注册表冻结（`DaemonCapabilityRegistry`）、双 executor 资源管理（单线程调度器 + virtual-thread 执行器）、连接重连与握手（HELLO/WELCOME/READY）、统一请求规约（`InvocationRequestNormalizer`）及目录安全浏览。通过 `harness-environment` 契约与 Gateway 交互，不反向依赖 Model、Agent、Tool 或 Runtime。 |
-| `fun.fengwk.kkstudio.harness.daemon.coding` | 固定在 Environment root 内执行的具体 coding capabilities 实现（文件读写编辑补丁、进程执行、NIO 搜索与 LSP 桥接）及路径/资源存储边界。由 `EnvironmentPathBoundary` 强制执行真实路径校验与 symlink 穿越防护；大/二进制结果通过不可变 content-addressed `ResourceStore` 落地；`apply-patch` 提供严密预检与回滚；所有执行均在 invocation workspace 隔离。 |
-| `fun.fengwk.kkstudio.harness.daemon.journal` | Daemon 进程内 Invocation 执行事实存储与去重日志。维护 Invocation 的生命周期状态（RUNNING、COMPLETED、FAILED、CANCELLED），通过原子去重保证同一 `invocationId` 仅 start 一次，并记录 terminal 消息；在断线重连时支撑重复 INVOKE 的 STARTED 与 terminal 确定性重放（replay），实现 terminal-once 契约；独立于网络连接生命周期，连接断开绝不清空 journal。 |
-| `fun.fengwk.kkstudio.harness.daemon.skill` | 本地 Skill 发现、元数据解析与按需加载能力（`skill.load`）。在 Daemon 启动期通过 CLI `--skill-dir` 或默认 `~/.agents/skills` 扫描合法 `SKILL.md`，READY 仅上报 name 与 description，正文在 `INVOKE(skill.load)` 时剥离 front matter 后按需返回；禁止接收服务端下发任意本地路径。 |
-| `fun.fengwk.kkstudio.harness.daemon.transport` | Daemon 侧底层传输抽象与基于 JDK `HttpClient` WebSocket 的生产实现。定义 transport 连接、发送、关闭与事件监听接口（`DaemonTransportListener`）；维护文本帧接收、累积限制（默认 16 MiB 上限保护）及二进制/溢出违规时的 RFC 6455 close code 1008 policy 关闭；连接仅作为消息管道，不作为执行状态的事实源。 |
+| `fun.fengwk.kkstudio.harness.daemon` | Environment Daemon 进程启动入口与核心运行时编排。负责解析启动配置（`DaemonConfig`）、冻结能力注册表（`DaemonCapabilityRegistry`）、托管双线程池资源、驱动 WebSocket 握手与重连状态机、归一化调用请求（`InvocationRequestNormalizer`）以及目录安全浏览。通过通用协议契约与 Platform 通信，聚焦进程内执行管理。 |
+| `fun.fengwk.kkstudio.harness.daemon.coding` | 受限环境根目录（Environment root）内的具体编码能力实现（文件读写、补丁应用、命令执行、原生文本检索与 LSP 桥接）。`EnvironmentPathBoundary` 统一校验真实物理路径并防范符号链接越界；大文本与二进制结果写入本地内容寻址存储（`ResourceStore`）；`apply-patch` 采用两阶段预检与尽力回滚，每次调用以对应的 Invocation workspace 为路径基准。 |
+| `fun.fengwk.kkstudio.harness.daemon.journal` | 进程内调用执行事实与去重日志。跟踪 Invocation 的运行态与终态（RUNNING、COMPLETED、FAILED、CANCELLED），通过原子操作确保单次执行并记录终态结果；在网络重连时支持针对重复 `INVOKE` 幂等重放 STARTED 与终态消息，确保单次终态（terminal-once）契约。执行日志在整个进程生命周期中持续生效，网络断开时维持执行状态。 |
+| `fun.fengwk.kkstudio.harness.daemon.skill` | 本地技能发现与加载机制。在启动时扫描本地配置目录中的 `SKILL.md` 文件，解析并保存元数据与正文；握手阶段通告技能名称和描述，执行 `skill.load` 时返回已加载的正文。技能目录由本地 CLI 配置确定。 |
+| `fun.fengwk.kkstudio.harness.daemon.transport` | 底层网络传输抽象与基于 JDK `HttpClient` WebSocket 的生产实现。提供连接管理、报文收发及传输监听机制；强制执行文本帧检查与单消息累积上限（默认 16 MiB），遇到二进制帧或报文超限时按照 RFC 6455 发送 close code 1008 并关闭连接。 |
 
 ## 核心模型 / API
 
 ### DaemonMain、config 与固定 capability registry
 
-`DaemonMain` 的启动装配为：
+`DaemonMain` 的启动装配流程如下：
 
 ```text
 CLI -> DaemonConfig
@@ -68,7 +67,7 @@ CLI -> DaemonConfig
    -> runtime.start / awaitTermination
 ```
 
-[`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java) 读取：
+[`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java) 解析命令行选项：
 
 ```text
 --gateway-uri (ws / wss)
@@ -82,34 +81,34 @@ CLI -> DaemonConfig
 --skill-dir (repeatable)
 ```
 
-默认 heartbeat 15s、reconnect initial 1s、reconnect max 30s、default capability timeout 5min；environment root 默认启动用户 HOME 的 canonical existing directory；未显式指定 skill dir 时只在 `~/.agents/skills` 存在时纳入。`note` 只接受可信操作者配置或按 OS 生成的稳定默认文本，最多 512 字符单行。
+配置默认值：心跳间隔（heartbeat）15 秒、初始重连退避（reconnect initial）1 秒、最大重连退避（reconnect max）30 秒、能力调用超时 5 分钟；环境根目录（environment root）默认为当前启动用户 HOME 目录对应的真实绝对路径；未显式指定技能目录时，仅在 `~/.agents/skills` 存在时自动纳入。`note` 支持操作者显式指定或按操作系统生成稳定的默认文本，限制为单行且不超过 512 字符。
 
-[`DaemonCapabilityRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonCapabilityRegistry.java) 在 runtime 构造完成时 freeze，freeze 后不能注册新 capability。生产 coding catalog 由 [`CodingCapabilities`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilities.java) 固定注册 10 项能力：
+[`DaemonCapabilityRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonCapabilityRegistry.java) 在运行时构造完成时冻结，确保运行期能力集合不可变。生产编码能力集合由 [`CodingCapabilities`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilities.java) 固定注册 11 项能力：
 
 ```text
 fs.read, fs.write, fs.apply-edit, fs.apply-patch,
-process.exec, fs.search, fs.find,
+process.exec, fs.search, fs.find, fs.list-directory,
 lsp.goto-definition, lsp.workspace-symbols, lsp.java-decompile
 ```
 
-此外目录浏览 `fs.list-directory` 与技能加载 `skill.load` 分别由 [`ListDirectoryCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ListDirectoryCapability.java) 与 [`SkillLoadCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillLoadCapability.java) 注册，完整覆盖 `EnvironmentCapabilityCatalog` 的 12 项原子能力，并在 runtime 构造完成时 freeze。
+[`SkillLoadCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillLoadCapability.java) 再注册 `skill.load`，完整覆盖 `EnvironmentCapabilityCatalog` 定义的 12 项原子能力，并在运行时装配就绪后统一冻结。
 
 ### 双 executor lifecycle
 
-`DaemonRuntime` 只拥有两个执行资源：
+`DaemonRuntime` 统一管理两个专用执行资源：
 
 | 资源 | 所有者 | 用途 |
 | --- | --- | --- |
-| `ScheduledThreadPoolExecutor(1)` | `DaemonRuntime` | heartbeat、reconnect、capability timeout |
-| `Executors.newThreadPerTaskExecutor(Thread.ofVirtual())` | `DaemonRuntime` | Coding/目录浏览阻塞调用 |
+| `ScheduledThreadPoolExecutor(1)` | `DaemonRuntime` | 心跳定时、重连调度、能力调用超时控制 |
+| `Executors.newThreadPerTaskExecutor(Thread.ofVirtual())` | `DaemonRuntime` | 编码能力与目录浏览的阻塞任务执行 |
 
-创建顺序是 scheduler → taskExecutor → transport/capability registration → runtime；任一步失败都会释放已创建 transport 和 executor。`start()` schedule heartbeat 和 immediate reconnect；重复 start 无副作用。`close`/terminal failure 先停止 transport 接入，再给 running invocation 发 CANCELLED，最后 `shutdownNow` 两个 executor，并在 5s termination deadline 内等待；单个清理失败不阻断其它资源。
+初始化顺序为调度器 → 虚拟线程执行器 → 传输层与能力注册表 → 运行时实例；装配过程中任一步失败都会尝试释放已创建的资源。调用 `start()` 后，运行时启动心跳定时任务并立即尝试连接，重复调用保持幂等。关闭或致命失败时，运行时先停止传输接入，再取消运行中的 Invocation 并将 CANCELLED 终态写入 journal，最后对两个线程池执行 `shutdownNow`；每个线程池最多等待 5 秒，各清理步骤互不阻断。
 
 ### WebSocket protocol
 
-生产 transport 是 [`JdkWebSocketTransport`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/JdkWebSocketTransport.java)，使用 JDK `HttpClient` WebSocket。只接受文本帧；fragment 累积超过默认 16 MiB 字符或出现 binary frame 时发送一次 RFC 6455 close code `1008`，后续帧全部拒绝。
+生产网络传输使用 [`JdkWebSocketTransport`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/JdkWebSocketTransport.java)，基于 JDK `HttpClient` WebSocket 构建。传输通道仅接收文本帧；当分片累积长度超过配置上限（默认 16 MiB 字符）或收到二进制帧时，确定性发送一次 RFC 6455 close code `1008` 策略违规关闭帧，并中断连接。
 
-握手与连接状态：
+握手与连接状态跃迁：
 
 ```text
 DISCONNECTED -> CONNECTING
@@ -119,34 +118,29 @@ DISCONNECTED -> CONNECTING
   -> READY + HEARTBEAT
 ```
 
-每个 envelope 都带 protocol version、message type、canonical scope (`EnvironmentId`)、sequence、payload；outbound sequence 由 runtime 递增。单个 connection generation 的 inbound sequence 必须从基线开始严格相邻递增；相同 sequence + 完全相同 envelope 是静默 duplicate，冲突复用、回退或跳号均拒绝；重连后 generation 重新建立基线。
+每个封包均包含协议版本、消息类型、规范环境作用域（`EnvironmentId`）、消息序号及载荷；出站序号由运行时严格递增。在单一连接代际（connection generation）内，入站序号必须从基线开始连续递增；序号与内容完全一致的重复封包会被静默去重，序号冲突、回退或跳号则作为协议错误回复 ERROR，报文不会进入执行流程。连接重连后，新代际重新确立序号基线。
 
-Inbound：
+入站消息控制：
 
 ```text
 INVOKE / CANCEL           -> invocationId required
 WELCOME / ACK / ERROR     -> handshake/control
 ```
 
-scope 不匹配、未知 protocol/type、缺失/未知 payload 字段、duplicate/trailing 或非 object payload 都在 wire 边界拒绝。`REGISTRATION_FAILED` 等致命错误使 runtime 进入 FAILED、停止重连并让进程非零退出；其它 ERROR 不改变 invocation journal。
+封包的作用域（`EnvironmentId`）必须与当前已绑定的环境标识完全一致。协议版本、消息类型、载荷或作用域校验失败时，运行时回复 ERROR，并保留现有 Invocation journal。网关返回 `REGISTRATION_REJECTED` 时，运行时跃迁至 FAILED、停止重连并以非零状态码退出；`RETRY_LATER` 触发断线与退避重连；未携带 code 的 ERROR 仅作为控制消息接收。
 
 ### Coding Capabilities 与路径/资源边界
 
-所有 filesystem coding capabilities 通过 [`EnvironmentPathBoundary`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPathBoundary.java)：
+所有文件系统编码能力均通过 [`EnvironmentPathBoundary`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPathBoundary.java) 实施严格边界约束：
 
-- 默认 workdir 来自每个 `EnvironmentCapabilityExecutionRequest.workdir`，由 INVOKE 的 `workspacePath` canonicalize 后写入；
-- 相对 path 以 invocation workspace 为基准，absolute path 也必须 real path 位于 Environment root；
-- `existing` 对已存在目标做 `toRealPath` root check；
-- `existingWithoutSymlinks` 拒绝 root→target 的任意 symlink segment；
-- `writable` 先校验已存在祖先的 canonical path，再允许新 leaf；
-- Platform permission 负责授权，不能放宽 Daemon 的 root/symlink 边界。
+- 调用默认工作目录来自 `EnvironmentCapabilityExecutionRequest.workdir`，由请求中的 `workspacePath` 规范化为真实物理路径后写入；
+- 相对路径以调用工作区为基准，绝对路径必须经过真实路径（real path）解析后确认完全包含在环境根目录之内；
+- 针对已存在路径，调用 `existing` 进行 `toRealPath` 根包含校验；
+- 针对安全读取，调用 `existingWithoutSymlinks` 校验从根目录到目标文件的全部路径段，一旦包含符号链接即判定越界；
+- 针对写入操作，调用 `writable` 先校验已存在祖先目录的真实路径，再允许创建新的叶子文件；
+- 平台的权限判定负责业务层访问授权；无论上层授权结果如何，Daemon 均强制执行环境根目录（root）与符号链接越界防护，底线安全边界不可被跳过。
 
-`read`、`write`、`edit`、`apply_patch` 共享编码/preview/文件 mutation 边界；`apply_patch`
-在一次 invocation 内先完成全部 patch 解析、路径和上下文预检，再用临时文件提交并对已提交
-文件做尽力回滚。Add 的父目录逐级使用 NOFOLLOW 检查，并在写目标前重新 canonicalize 到 invocation
-workspace；POSIX 可用时 replacement 与 Delete rollback 保留原文件权限。`grep`、`find` 使用 Java NIO/JGit ignore 规则，不启动外部搜索命令；LSP
-capabilities 通过可选 `kkstudio.daemon.lsp-bridge`，`lsp_java_decompile` 对可解析 class 目标可用
-`javap` fallback。配置见 [`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java)：
+`read`、`write`、`edit` 与 `apply_patch` 共享统一的文件编码、预览截断与文件修改边界；`apply_patch` 在单次调用内先完成全部补丁的语法解析、目标路径验证与上下文预检，确认无误后通过临时文件提交修改，若后续步骤失败则对已修改文件执行尽力回滚。新增文件的父目录逐级采用 NOFOLLOW 模式检查，并在写入目标前重新解析校验到调用工作区；在 POSIX 环境下，文件替换与删除回滚均保留原有文件权限。`grep` 与 `find` 使用 Java NIO 原生遍历与 JGit 规则解析 `.gitignore`，直接在 JVM 内完成检索；LSP 能力通过可选的本地进程桥接（`kkstudio.daemon.lsp-bridge`）承载，当缺少相关工具链时返回明确的不可用提示，其中 `lsp_java_decompile` 对可解析的 class 目标支持回退到 `javap`。参数配置见 [`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java)：
 
 ```text
 previewMaxLines = 2000
@@ -161,13 +155,13 @@ system properties:
   kkstudio.daemon.javap
 ```
 
-Resource store 默认为 Environment root 下 `.kkstudio/resources` 的 content-addressed local store；大/二进制结果转为 resource content。结果由 `DaemonCapabilityResultCodec` 编码：PARTIAL 只允许 text/json，COMPLETED 资源预检后才允许 store read/write；默认资源聚合 8 MiB、最终 payload 16 MiB、contents 64 项。该 codec 直接编码和解码 `EnvironmentCapabilityResult`，不参与 capability 执行 SPI。
+资源存储默认采用环境根目录下 `.kkstudio/resources` 的本地内容寻址存储（`LocalFileResourceStore`）；大文本与二进制输出统一转换为不可变 Resource 引用。输出结果由 `DaemonCapabilityResultCodec` 编解码：流式 `PARTIAL` 仅允许文本与 JSON 数据，终态 `COMPLETED` 在通过资源预检后方允许执行读写存储；默认资源聚合上限 8 MiB、最终载荷上限 16 MiB、内容条目上限 64 项。`DaemonCapabilityResultCodec` 专注于流式与终态结果（`EnvironmentCapabilityResult`）的网络报文编解码，底层执行 SPI 则由 `EnvironmentCapability` 独立承载。
 
 ### Skills 与目录浏览
 
-[`DaemonSkillRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistry.java) 只从 CLI skill dirs 或默认 `~/.agents/skills` 发现 root/直接子目录 `SKILL.md`。同名、元数据非法、目录不存在或读取失败在启动期拒绝；READY 只返回 name/description，`skill.load` 返回去除 front matter 的 body。
+[`DaemonSkillRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistry.java) 从命令行显式指定的技能目录或默认的 `~/.agents/skills` 目录发现其根目录及直接子目录下的 `SKILL.md`。扫描阶段遇到同名冲突、元数据非法、目录不存在或读取失败时，启动直接失败；READY 阶段向网关通告技能名称与描述，执行 `skill.load` 时返回启动期已加载并剥离 YAML front matter 的正文。
 
-目录浏览通过 generic capability `fs.list-directory` 执行；单层列表最多 1000 项，稳定按名称排序，wire path 只使用 Environment root 下 canonical 相对路径，不回显 Daemon 绝对路径。实现见 [`EnvironmentDirectoryBrowser`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/EnvironmentDirectoryBrowser.java) 和 [`ListDirectoryCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ListDirectoryCapability.java)。
+目录浏览通过通用原子能力 `fs.list-directory` 执行；单层列表最多包含 1000 个条目，按条目名称确定性升序排序。传输报文使用环境根目录下的规范相对路径呈现，向远端屏蔽宿主机的真实物理路径。具体实现见 [`EnvironmentDirectoryBrowser`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/EnvironmentDirectoryBrowser.java) 与 [`ListDirectoryCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ListDirectoryCapability.java)。
 
 ## 执行 / 状态 trace
 
@@ -194,30 +188,29 @@ sequenceDiagram
   end
 ```
 
-INVOKE 的 `capabilityId`、`capabilityVersion`、`workspacePath`、`arguments` 和 `timeoutMillis` 先由 capability codec 严格校验。[`InvocationRequestNormalizer`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/InvocationRequestNormalizer.java) 再通过共享 `EnvironmentWorkspacePath` 校验 workspace，并执行 `resolve + normalize + toRealPath + startsWith(root) + isDirectory`；它同时按 request → capability descriptor → daemon default 解析 timeout。失败、未知 capability 或 version mismatch 都是 deterministic FAILED，绝不发送 STARTED。timeout 由 scheduler 计时，terminal claim 后调用 capability handle cancel；`CANCEL` 对 RUNNING invocation 发送 CANCELLED 并取消 handle，对 terminal invocation 重放 terminal。
+入站 `INVOKE` 报文的 `capabilityId`、`capabilityVersion`、`workspacePath`、`arguments` 与 `timeoutMillis` 首先由编解码器进行格式与结构校验。随后，[`InvocationRequestNormalizer`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/InvocationRequestNormalizer.java) 借助共享的 `EnvironmentWorkspacePath` 校验工作区相对路径，并依次执行物理路径解析（`resolve + normalize + toRealPath + startsWith(root) + isDirectory`）；同时按照“请求指定值 → 能力描述符声明值 → Daemon 默认值”的优先级解析本次调用的超时时间。遇到参数非法、未知能力或版本不匹配时，确定性判定为 FAILED 并返回错误，不发送 STARTED 确认。超时判定由单线程调度器负责计时，触发时抢占终态标记并调用底层句柄的 cancel 方法；收到 `CANCEL` 控制消息时，若调用处于 RUNNING 状态则向网关回复 CANCELLED 终态并取消执行句柄，若已处于终态则重放既有终态报文。
 
-Daemon disconnect 后保留 journal 和 running execution 的进程内事实，连接 generation 进入重连；Gateway 重新发送相同 invocationId 时，RUNNING 重放 `STARTED(replayed=true)`，terminal 重放相同 terminal payload。Capability Listener 回调中的 callId 不等于 invocationId、result 编码超限、Resource store 失败或 partial 包含 resource/binary 时确定性 FAILED。
+网络连接断开时，Daemon 保留日志记录与后台执行任务，连接代际进入重连流程。网关在重连后若重新发送相同 `invocationId` 的请求，处于 RUNNING 状态的调用将重放 `STARTED(replayed=true)`，处于终态的调用则直接重放终态报文。若能力监听器回调中的调用标识不符、报文编码超出体积上限、资源持久化失败或流式事件包含非法的二进制/资源载荷，均确定性作为 FAILED 终态处理。
 
 ## 不变量、failure / recovery
 
-- `EnvironmentId` 是唯一 wire scope。
-- Capability registry 在 runtime 构造期 freeze；READY 后不变更本地 catalog 或 Skill metadata。
-- connection generation 内 inbound sequence 只能相邻递增或等值完全 duplicate；重连重新基线。
-- Invocation journal `start` 原子去重，`complete` 只允许 RUNNING → terminal，terminal callback fire-once。
-- STARTED 只在 workspace、capability ID/version、capability request 和 runtime state 均通过后发送；invalid request 不产生 STARTED。
-- timeout/cancel/shutdown 使用 `RunningInvocation` 的 terminal AtomicBoolean，完成、失败、取消和 timeout 只选择一个 terminal。
-- 断线不把 WebSocket 当事实源；journal 负责 duplicate replay，Capability 本地 execution 结束后仍按 terminal-once 处理。
-- Resource/binary 结果在预检、size、sha、Base64、UTF-8 payload 约束任一失败时 fail closed，不产生成功 terminal。
-- 目录浏览、Skill body 与 capabilities 都不泄漏未授权本地路径、秘密或连接配置。
+- `EnvironmentId` 是当前 Daemon 连接的通信作用域；作用域不匹配按协议错误处理。
+- 能力注册表与技能元数据在运行时构造完成后冻结，握手后在整个进程生命周期中保持不可变。
+- 单连接代际内入站序号严格保持相邻递增或等值重复；网络重连后开启新代际并重新确立基线。
+- 调用日志 `start` 操作执行原子去重，状态跃迁严格遵循 RUNNING 到终态的单向流动，保证终态回调触发一次。
+- 工作区路径、能力版本及请求参数全部验证通过后方可发出 STARTED 确认；任何前置校验失败均直接以 FAILED 终态返回。
+- 超时控制、主动取消与停机清理依托执行上下文中的原子标记（AtomicBoolean）进行协调，在正常完成、失败、取消与超时之间只接受一个终态。
+- 执行日志独立保存运行事实，脱离连接生命周期约束；网络断开后后台任务正常推进，重连到达的重复请求由日志负责幂等重放，并维持单次终态语义。
+- 资源与二进制结果在预检、体积、校验和或 Base64/UTF-8 编码约束校验中一旦发生违规，立即执行 fail-closed 中止，并以确定性 FAILED 终态结束。
+- 目录条目与能力调用使用规范相对路径；READY 明确披露 canonical Environment root 的只读展示路径，凭证、请求头、环境变量、命令和连接 URL 保留在本地。
 
 ## 配置 / 扩展
 
-- Environment Capability 通过 `harness-environment` 的 `EnvironmentCapability` SPI 和 `DaemonCapabilityRegistry`
-  注册，并与固定 Environment Capability catalog descriptor/version 对齐。
-- Coding capabilities 的 executor、scheduler、ResourceStore 由 `DaemonRuntime` 注入；不得建立 static executor 或绕过 runtime 直接启动 virtual thread。
-- Skill 只能通过 CLI 本地目录加入，state 在 `start()` 后冻结。
-- 测试可注入内存 `DaemonTransport`、journal、executor 和 ResourceStore；生产使用 JDK WebSocket、InMemory journal 和 runtime-owned executors。
-- Gateway 可通过 INVOKE 的 `timeoutMillis` 覆盖 descriptor/default timeout，但 `0` 表示不覆盖，最终 deadline 始终有效。
+- 环境能力通过 `harness-environment` 的 `EnvironmentCapability` SPI 与 `DaemonCapabilityRegistry` 进行装配，并与标准原子能力目录的描述符和版本严格对齐。
+- 虚拟线程执行器、定时调度器与本地资源存储由 `DaemonRuntime` 集中管理与生命周期注入，保证进程退出时资源完全回收。
+- 技能目录由本地启动参数确定，元数据与正文随启动期发现结果一起冻结。
+- 测试环境支持注入内存传输通道（`DaemonTransport`）、内存执行日志、专用执行器与资源存储；生产环境使用基于 JDK WebSocket 的网络传输、内存执行日志与运行时托管的线程池。
+- 网关可通过 `INVOKE` 报文中的 `timeoutMillis` 覆盖能力默认超时，当值为 `0` 时沿用默认配置，调用截止时间始终生效。
 
 ## 测试与源码入口
 
@@ -232,14 +225,13 @@ Daemon disconnect 后保留 journal 和 running execution 的进程内事实，�
 
 ### 关键测试守卫
 
-- [`DaemonModuleArchitectureTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonModuleArchitectureTest.java)：依赖边界、executor ownership。
-- [`DaemonConfigTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfigTest.java)、[`DaemonRuntimeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)、[`InvocationRequestNormalizerTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/InvocationRequestNormalizerTest.java)：CLI/default、握手、reconnect、journal replay、workspace/timeout normalization、timeout/cancel/shutdown。
-- [`CodingCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesTest.java)、[`CodingCapabilitiesEdgeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesEdgeTest.java)、[`ApplyPatchCapabilityTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ApplyPatchCapabilityTest.java)、[`LocalFileResourceStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/LocalFileResourceStoreTest.java)：coding capability、路径/symlink、Resource 和 output boundary。
-- [`JdkWebSocketTransportTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/transport/JdkWebSocketTransportTest.java)：文本帧、binary、16 MiB 上限和 policy close。
-- [`DaemonSkillRegistryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistryTest.java)：Skill 发现、配置 strictness、独立失败和 close。
-- [`EnvironmentDirectoryBrowserTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/EnvironmentDirectoryBrowserTest.java)：root boundary、symlink、stable listing、entry count 和安全 wire path。
+- [`DaemonModuleArchitectureTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonModuleArchitectureTest.java)：验证模块依赖方向与线程池所有权边界。
+- [`DaemonConfigTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfigTest.java)、[`DaemonRuntimeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)、[`InvocationRequestNormalizerTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/InvocationRequestNormalizerTest.java)：验证配置解析、握手重连、日志重放、路径归一化及超时取消生命周期。
+- [`CodingCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesTest.java)、[`CodingCapabilitiesEdgeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesEdgeTest.java)、[`ApplyPatchCapabilityTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ApplyPatchCapabilityTest.java)、[`LocalFileResourceStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/LocalFileResourceStoreTest.java)：验证编码能力执行、路径与符号链接防护、补丁原子提交与回滚以及资源存储边界。
+- [`JdkWebSocketTransportTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/transport/JdkWebSocketTransportTest.java)：验证文本帧传输、二进制拦截、16 MiB 报文上限与策略违规关闭行为。
+- [`DaemonSkillRegistryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistryTest.java)：验证技能扫描发现、格式校验与按需正文提取。
+- [`EnvironmentDirectoryBrowserTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/EnvironmentDirectoryBrowserTest.java)：验证根目录边界隔离、符号链接防护、稳定排序、条目数量上限与规范相对路径格式。
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Environment](harness-environment.md)、[Harness Tool](harness-tool.md)、
-[Harness Infra](harness-infra.md)、[Platform](platform.md)、[部署与运行](../operations/deployment.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Environment](harness-environment.md)、[Harness Tool](harness-tool.md)、[Harness Infra](harness-infra.md)、[Platform](platform.md)、[部署与运行](../operations/deployment.md)。
