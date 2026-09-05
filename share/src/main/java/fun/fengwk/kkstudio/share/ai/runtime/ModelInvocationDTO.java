@@ -9,7 +9,7 @@ import java.time.Instant;
  * ModelInvocation 查询投影（model_invocation 表）；实体 id 均为 canonical UUID string。
  *
  * <p>{@code streamCheckpointJson} / {@code resultJson} / {@code errorJson} 为 canonical runtime
- * codec JSON，仅对应阶段非 null；{@code resultEntryId} 只属于当前 open Tool phase：
+ * codec JSON；{@code resultEntryId} 只属于当前 open Tool phase：
  *
  * <ul>
  *   <li>{@code null}：model outcome 尚未被 Thread apply；
@@ -43,8 +43,8 @@ public class ModelInvocationDTO {
   private Integer attempt;
 
   /**
-   * 当前尝试的安全流式部分：canonical JSON（StreamCheckpointJsonCodec）；仅 RUNNING 阶段可能非
-   * null（{@code @JsonInclude(ALWAYS)}）。
+   * 当前尝试的 durable 安全流式部分：canonical JSON（StreamCheckpointJsonCodec）；RUNNING 时可持续推进，终态挂接 Entry
+   * 前也可保留，且推进不要求 Thread version 变化（{@code @JsonInclude(ALWAYS)}）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String streamCheckpointJson;

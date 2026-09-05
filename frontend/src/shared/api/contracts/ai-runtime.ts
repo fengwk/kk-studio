@@ -166,8 +166,8 @@ export interface HarnessToolApprovalDTO {
 
 /**
  * ModelInvocation 查询投影；id 均为 canonical UUID string。
- * streamCheckpointJson / resultJson / errorJson 是规范的运行时 codec JSON，仅在其对应阶段
- * 非 null；resultEntryId 是应用 TURN_END 后的结果 Entry。
+ * streamCheckpointJson / resultJson / errorJson 是规范的运行时 codec JSON；
+ * streamCheckpointJson 可在 Thread version 不变时推进，resultEntryId 是已应用的结果 Entry。
  */
 export interface ModelInvocationDTO {
   id: string

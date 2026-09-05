@@ -151,9 +151,10 @@ kk-studio 根 POM 直接配置并提供 JaCoCo `0.8.11`：
 - `test` phase 执行 `report`；
 - 各模块报告位于对应 `target/site/jacoco/`。
 
-`harness/tool`、`harness/runtime`、`platform` 与 `web` 在自己的 module POM 中增加了
-绑定到 `verify` 的 JaCoCo `check` execution，只按 `CLASS` include 检查本次关键类，
-要求 `LINE COVEREDRATIO >= 0.90`：
+`harness/common`、`harness/tool`、`harness/environment`、`harness/runtime`、
+`harness/contributor-api`、`harness/builtin`、`platform` 与 `web` 在自己的 module
+POM 中增加了绑定到 `verify` 的 JaCoCo `check` execution，只按 `CLASS` include
+检查当前关键类，要求 `LINE COVEREDRATIO >= 0.90`：
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am verify
@@ -165,7 +166,11 @@ find . -path '*/target/site/jacoco/index.html' -print
 - `fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog`
 - `fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor`
 - `fun.fengwk.kkstudio.harness.builtin.goal.GoalStateCodec`
-- `fun.fengwk.kkstudio.harness.runtime.processor.ResolvedRequestValidator`
+- `fun.fengwk.kkstudio.harness.runtime.ManualCompactionControl`
+- `fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner`
+- `fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory`
+- `fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator`
+- `fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe`
 - `fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec`
 - `fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding`
 - `fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec`

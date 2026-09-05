@@ -6,7 +6,9 @@ import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -1177,13 +1179,14 @@ final class ThreadProcessorTestSupport {
         });
   }
 
-  /** 每次测试一个 Fixture：InMemory store + fake resolver + 可变时钟 + ThreadProcessor。 */
+  /** 每次测试一个 Fixture：InMemory store + fake resolver + 可变时钟 + ThreadProcessor + HarnessRuntime。 */
   static final class Fixture implements AutoCloseable {
     final MutableClock clock = new MutableClock(NOW);
     final InMemoryHarnessStore store = new InMemoryHarnessStore();
     final FakeTurnResolver resolver = new FakeTurnResolver();
     final ScheduledExecutorService scheduler;
     final ThreadProcessor processor;
+    final HarnessRuntime runtime;
     ClaimedWork claim;
 
     Fixture() {
@@ -1201,12 +1204,14 @@ final class ThreadProcessorTestSupport {
 
     private Fixture(HarnessStore processorStore, CompactionConfig compactionConfig) {
       this.scheduler = newScheduler();
+      HarnessStore targetStore = processorStore == null ? store : processorStore;
+      CompactionConfigProvider configProvider = () -> compactionConfig;
+      this.runtime = new HarnessRuntime(targetStore, clock, resolver, configProvider);
       this.processor =
           new ThreadProcessor(
-              processorStore == null ? store : processorStore,
+              targetStore,
               resolver,
-              new ThreadProcessorConfig(
-                  LEASE_CONFIG, RESOLVE_FAILURE_DELAY, () -> compactionConfig),
+              new ThreadProcessorConfig(LEASE_CONFIG, RESOLVE_FAILURE_DELAY, configProvider),
               clock,
               scheduler);
     }

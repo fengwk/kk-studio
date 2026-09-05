@@ -26,9 +26,9 @@
  * reducer（terminal Model apply -&gt; Tool sibling batch -&gt; blocker -&gt; continuation -&gt;
  * input -&gt; idle），下一 action 一律由同事务 {@code requestWork} 驱动，绝不内部循环。Turn 启动采用 speculative plan + 事务外
  * resolve + 第二事务 CAS 提交，不存在可恢复的持久化 TURN_START-without-Invocation 中间态；Resolved 请求在提交前由 {@link
- * fun.fengwk.kkstudio.harness.runtime.processor.ResolvedRequestValidator} 按 candidate branch
- * 事实（route / model / variant / tools / compaction）做机械一致性校验，任何不一致都是 Resolver 契约错误，抛错且零持久化变更，绝不转
- * typed rejection。终端 Model/Tool 应用只由 ThreadProcessor 写 Entry/head。Result / Config 类型见 {@link
+ * fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator} 按 candidate branch 事实（route
+ * / model / variant / tools / compaction）做机械一致性校验，任何不一致都是 Resolver 契约错误，抛错且零持久化变更，绝不转 typed
+ * rejection。终端 Model/Tool 应用只由 ThreadProcessor 写 Entry/head。Result / Config 类型见 {@link
  * fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult} 与 {@link
  * fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig}。
  */

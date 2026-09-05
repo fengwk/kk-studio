@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -56,7 +57,12 @@ class PostgresqlAcceptCommandsRootQueryTest {
         PostgresqlEntryPathCteCounter.countingDataSource(
             PostgresqlHarnessStoreFixture.dataSource(), cteCounter);
     store = PostgresqlHarnessStoreFixture.create(countingDs);
-    runtime = new HarnessRuntime(store, Clock.fixed(T0, ZoneOffset.UTC));
+    runtime =
+        new HarnessRuntime(
+            store,
+            Clock.fixed(T0, ZoneOffset.UTC),
+            (threadId, path, prep) -> null,
+            () -> CompactionConfig.DEFAULT);
   }
 
   /** 测试意图：具有非 ROOT head 的 Thread 接受全新 batch 或 exact ordered replay 时只查询 ROOT，不回溯完整 EntryPath。 */

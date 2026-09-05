@@ -12,9 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
+import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -25,6 +28,7 @@ import java.lang.reflect.Modifier;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -50,7 +54,9 @@ class StopRecordsTest {
   @BeforeEach
   void setUp() {
     store = new InMemoryHarnessStore();
-    runtime = new HarnessRuntime(store, Clock.fixed(Instant.ofEpochMilli(3_000), ZoneOffset.UTC));
+    runtime =
+        HarnessRuntimeTestSupport.runtime(
+            store, Clock.fixed(Instant.ofEpochMilli(3_000), ZoneOffset.UTC));
   }
 
   @Test
@@ -121,24 +127,63 @@ class StopRecordsTest {
   }
 
   @Test
-  void constructorsExposeControlOnlyAndFullProcessorWiring() throws Exception {
+  void constructorsRequireCompleteControlDependenciesAndExposeOptionalExecutionWiring()
+      throws Exception {
+    // HarnessRuntime 的 public wiring surface 必须精确保持为 control-only 与 execution-wired 两种。
+    assertEquals(
+        2L,
+        Arrays.stream(HarnessRuntime.class.getDeclaredConstructors())
+            .filter(constructor -> Modifier.isPublic(constructor.getModifiers()))
+            .count());
     assertTrue(
         Modifier.isPublic(
             HarnessRuntime.class
-                .getDeclaredConstructor(HarnessStore.class, Clock.class)
+                .getDeclaredConstructor(
+                    HarnessStore.class,
+                    Clock.class,
+                    TurnResolver.class,
+                    CompactionConfigProvider.class)
                 .getModifiers()));
     assertTrue(
         Modifier.isPublic(
             HarnessRuntime.class
                 .getDeclaredConstructor(
-                    HarnessStore.class, Clock.class, ModelProcessor.class, ToolProcessor.class)
+                    HarnessStore.class,
+                    Clock.class,
+                    TurnResolver.class,
+                    CompactionConfigProvider.class,
+                    ToolResultHistoryMaterializer.class,
+                    ModelProcessor.class,
+                    ToolProcessor.class)
                 .getModifiers()));
+    assertThrows(
+        NoSuchMethodException.class,
+        () -> HarnessRuntime.class.getDeclaredConstructor(HarnessStore.class, Clock.class));
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessRuntime(
                 store,
                 Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
+                null,
+                HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new HarnessRuntime(
+                store,
+                Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
+                HarnessRuntimeTestSupport.UNUSED_RESOLVER,
+                null));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new HarnessRuntime(
+                store,
+                Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
+                HarnessRuntimeTestSupport.UNUSED_RESOLVER,
+                HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER,
+                null,
                 (ModelProcessor) null,
                 (ToolProcessor) null));
     assertThrows(
@@ -147,6 +192,9 @@ class StopRecordsTest {
             new HarnessRuntime(
                 store,
                 Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
+                HarnessRuntimeTestSupport.UNUSED_RESOLVER,
+                HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER,
+                null,
                 (Consumer<UUID>) null,
                 ignored -> {}));
   }

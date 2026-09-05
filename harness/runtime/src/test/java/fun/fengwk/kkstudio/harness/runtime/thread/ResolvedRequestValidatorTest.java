@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.processor;
+package fun.fengwk.kkstudio.harness.runtime.thread;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -67,13 +67,13 @@ class ResolvedRequestValidatorTest {
 
   @Test
   void rejectsNullValidationInputsBeforeReadingCandidateFacts() {
-    // 参数缺失必须在读取 plan/resolved 字段前失败，保持边界契约清晰。
+    // 参数缺失必须在读取 path/resolved 字段前失败，保持边界契约清晰。
     assertThrows(
         NullPointerException.class,
-        () -> ResolvedRequestValidator.validate(null, resolved(normalSpec(SETTINGS))));
+        () -> ResolvedRequestValidator.validate(null, null, resolved(normalSpec(SETTINGS))));
     assertThrows(
         NullPointerException.class,
-        () -> ResolvedRequestValidator.validate(normalPlan(SETTINGS), null));
+        () -> ResolvedRequestValidator.validate(normalPath(SETTINGS), null, null));
   }
 
   @Test
@@ -88,7 +88,7 @@ class ResolvedRequestValidatorTest {
 
     // 正常 turn 允许匹配 candidate environment 的 tool/skill binding。
     assertDoesNotThrow(
-        () -> ResolvedRequestValidator.validate(normalPlan(SETTINGS), resolved(spec)));
+        () -> ResolvedRequestValidator.validate(normalPath(SETTINGS), null, resolved(spec)));
   }
 
   @Test
@@ -96,13 +96,11 @@ class ResolvedRequestValidatorTest {
     CompactionPreparation preparation = preparation();
     EntryPath path = compactionPath(SETTINGS, preparation.frozenStart());
 
-    // normal plan 不得借 candidate path 末尾的 COMPACTION TURN_START 携带压缩元数据。
+    // normal 校验不得借 candidate path 末尾的 COMPACTION TURN_START 携带压缩元数据。
     IllegalStateException error =
         assertThrows(
             IllegalStateException.class,
-            () ->
-                ResolvedRequestValidator.validate(
-                    normalPlan(path), resolved(normalSpec(SETTINGS))));
+            () -> ResolvedRequestValidator.validate(path, null, resolved(normalSpec(SETTINGS))));
     assertEquals("a normal turn must not carry compaction TURN_START metadata", error.getMessage());
   }
 
@@ -124,7 +122,8 @@ class ResolvedRequestValidatorTest {
             IllegalStateException.class,
             () ->
                 ResolvedRequestValidator.validate(
-                    compactionPlan(compactionPath(SETTINGS, mismatchedStart), preparation),
+                    compactionPath(SETTINGS, mismatchedStart),
+                    preparation,
                     resolved(compactionSpec(preparation))));
     assertEquals(
         "a compaction candidate TURN_START must carry the exact frozen preparation metadata",
@@ -199,7 +198,8 @@ class ResolvedRequestValidatorTest {
     assertDoesNotThrow(
         () ->
             ResolvedRequestValidator.validate(
-                compactionPlan(compactionPath(SETTINGS, preparation.frozenStart()), preparation),
+                compactionPath(SETTINGS, preparation.frozenStart()),
+                preparation,
                 resolved(compactionSpec(preparation))));
   }
 
@@ -222,7 +222,8 @@ class ResolvedRequestValidatorTest {
             IllegalStateException.class,
             () ->
                 ResolvedRequestValidator.validate(
-                    normalPlan(SETTINGS),
+                    normalPath(SETTINGS),
+                    null,
                     resolved(
                         normalSpec(
                             SETTINGS,
@@ -243,7 +244,8 @@ class ResolvedRequestValidatorTest {
             IllegalStateException.class,
             () ->
                 ResolvedRequestValidator.validate(
-                    normalPlan(settings),
+                    normalPath(settings),
+                    null,
                     resolved(
                         normalSpec(
                             settings,
@@ -271,8 +273,8 @@ class ResolvedRequestValidatorTest {
             IllegalStateException.class,
             () ->
                 ResolvedRequestValidator.validate(
-                    compactionPlan(
-                        compactionPath(SETTINGS, preparation.frozenStart()), preparation),
+                    compactionPath(SETTINGS, preparation.frozenStart()),
+                    preparation,
                     resolved(
                         normalSpec(
                             preparation.executionModel(),
@@ -288,42 +290,6 @@ class ResolvedRequestValidatorTest {
 
   private static TurnResolver.Resolved resolved(ModelRequestSpec spec) {
     return new TurnResolver.Resolved(spec, 100_000, 16_384);
-  }
-
-  private static TurnPlan normalPlan(BranchSettings settings) {
-    return normalPlan(normalPath(settings));
-  }
-
-  private static TurnPlan normalPlan(EntryPath path) {
-    return new TurnPlan(
-        THREAD_ID,
-        SESSION_ID,
-        ROOT_ENTRY_ID,
-        0L,
-        List.of(),
-        List.of(),
-        path.entries(),
-        path,
-        TURN_START_ENTRY_ID,
-        path.head().id(),
-        TurnStartReason.INPUT,
-        null);
-  }
-
-  private static TurnPlan compactionPlan(EntryPath path, CompactionPreparation preparation) {
-    return new TurnPlan(
-        THREAD_ID,
-        SESSION_ID,
-        ROOT_ENTRY_ID,
-        0L,
-        List.of(),
-        List.of(),
-        path.entries(),
-        path,
-        TURN_START_ENTRY_ID,
-        path.head().id(),
-        TurnStartReason.COMPACTION,
-        preparation);
   }
 
   private static EntryPath normalPath(BranchSettings settings) {

@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -40,6 +42,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
+import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -89,6 +93,10 @@ import java.util.function.Function;
  */
 final class HarnessRuntimeTestSupport {
 
+  static final TurnResolver UNUSED_RESOLVER = (threadId, candidatePath, preparation) -> null;
+  static final CompactionConfigProvider DEFAULT_COMPACTION_PROVIDER =
+      () -> CompactionConfig.DEFAULT;
+
   static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
   static final Instant T0 = Instant.ofEpochMilli(1_000);
   static final Instant T1 = Instant.ofEpochMilli(2_000);
@@ -107,6 +115,53 @@ final class HarnessRuntimeTestSupport {
       EnvironmentBindings.binding("22222222-2222-2222-2222-222222222222");
 
   private HarnessRuntimeTestSupport() {}
+
+  /** 创建仅带默认/未使用依赖的测试 Runtime 控制面。 */
+  static HarnessRuntime runtime(HarnessStore store, Clock clock) {
+    return new HarnessRuntime(store, clock, UNUSED_RESOLVER, DEFAULT_COMPACTION_PROVIDER);
+  }
+
+  /** 创建带指定 resolver 与 compaction provider 的测试 Runtime。 */
+  static HarnessRuntime runtime(
+      HarnessStore store,
+      Clock clock,
+      TurnResolver resolver,
+      CompactionConfigProvider compactionConfigProvider) {
+    return new HarnessRuntime(store, clock, resolver, compactionConfigProvider);
+  }
+
+  /** 创建带 local execution canceller 的测试 Runtime。 */
+  static HarnessRuntime runtime(
+      HarnessStore store,
+      Clock clock,
+      Consumer<UUID> modelCanceller,
+      Consumer<UUID> toolCanceller) {
+    return new HarnessRuntime(
+        store,
+        clock,
+        UNUSED_RESOLVER,
+        DEFAULT_COMPACTION_PROVIDER,
+        null,
+        modelCanceller,
+        toolCanceller);
+  }
+
+  /** 创建带 materializer 与 local execution canceller 的测试 Runtime。 */
+  static HarnessRuntime runtime(
+      HarnessStore store,
+      Clock clock,
+      ToolResultHistoryMaterializer materializer,
+      Consumer<UUID> modelCanceller,
+      Consumer<UUID> toolCanceller) {
+    return new HarnessRuntime(
+        store,
+        clock,
+        UNUSED_RESOLVER,
+        DEFAULT_COMPACTION_PROVIDER,
+        materializer,
+        modelCanceller,
+        toolCanceller);
+  }
 
   /** 固定 UTC 的测试时钟，可推进 instant 用于 replay/竞态测试。 */
   static final class TestClock extends Clock {

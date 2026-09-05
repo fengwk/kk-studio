@@ -36,4 +36,17 @@ public final class HarnessStoreTime {
     }
     return value;
   }
+
+  /** 将候选时间抬升到一组 durable 时间下界中的最大值；所有参数都必须非 null。 */
+  public static Instant notBefore(Instant candidate, Instant... floors) {
+    Instant effective = Objects.requireNonNull(candidate, "candidate");
+    Objects.requireNonNull(floors, "floors");
+    for (Instant floor : floors) {
+      Instant requiredFloor = Objects.requireNonNull(floor, "floor");
+      if (requiredFloor.isAfter(effective)) {
+        effective = requiredFloor;
+      }
+    }
+    return effective;
+  }
 }

@@ -36,7 +36,9 @@ React/Vite/TypeScript 工程；开发时由 Vite 提供页面，发布时由 Mav
 - REST Snapshot 是浏览器事实源；Application Event WebSocket 只触发 invalidate、
   version 对账或提供短暂的 streaming overlay。
 - Thread 和 Canvas version 只能前进。旧 Snapshot、旧 Patch 和旧 version event
-  不得覆盖较新的本地状态；gap、resync、重连和非法事件统一回到完整 Snapshot。
+  不得覆盖较新的本地状态；Thread Snapshot 的 Invocation checkpoint 可在 version
+  相等时推进，因此同 version 的权威回读仍需参与 overlay 对账。gap、resync、重连和
+  非法事件统一回到完整 Snapshot。
 - 每个 mutation controller 冻结 request、target identity、cursor 和 generation。
   不确定的网络结果保留 exact replay，明确的 conflict 交给 ConflictPresenter，
   不自动重放具有业务语义的命令。
@@ -335,7 +337,8 @@ sequenceDiagram
 - `useHarnessThreadRealtime` 先加载 snapshot，再按 thread resource 订阅
   `/api/events/v1`。`subscribed`、`version`、`resync`、`error` 都会触发
   snapshot 对账；`heartbeat` 只做连接保活。
-- Thread `version` 是 durable 提示；`realtime` 没有 cursor，是可丢失的
+- Thread `version` 是结构/控制状态的 durable 提示，不是 Snapshot ETag；Model
+  checkpoint 可在同一 version 内推进。`realtime` 没有 cursor，是可丢失的
   `MODEL_DELTA`/`TOOL_PARTIAL`。MODEL delta 只接受
   `TEXT_DELTA`、`THINKING_DELTA`、`TOOL_CALL_DELTA`，按连续 sequence 追加；
   tool partial 按 `thread:invocation:attempt` 做有界精确去重。
@@ -343,8 +346,8 @@ sequenceDiagram
   fence，迟到 delta/partial 丢弃。持久化终态优先于任何较新的 transient
   overlay。
 - MODEL sequence 出现 gap 时启动单飞 recovery：重新拉 snapshot，退避
-  `200ms` 到 `2000ms`，最多 `8` 次；恢复由 durable checkpoint 决定，不能
-  通过填补事件猜测内容。
+  `200ms` 到 `2000ms`，最多 `8` 次；即使 Thread version 未变化也读取并合并
+  durable checkpoint，不能通过填补事件猜测内容。
 - `thread-events.ts` 把每个 durable Entry 投影为恰好一条记录，把 active
   model/tool invocation 和 attempt failure 作为锚定其 Entry 后的 synthetic
   record。状态为 `pending`、`running`、`completed`、`failed`、`stopped` 五态；

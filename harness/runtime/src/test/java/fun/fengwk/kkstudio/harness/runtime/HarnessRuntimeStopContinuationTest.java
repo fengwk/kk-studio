@@ -53,7 +53,7 @@ class HarnessRuntimeStopContinuationTest {
   @BeforeEach
   void setUp() {
     store = new InMemoryHarnessStore();
-    runtime = new HarnessRuntime(store, Clock.fixed(T5, ZoneOffset.UTC));
+    runtime = HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T5, ZoneOffset.UTC));
   }
 
   @Test

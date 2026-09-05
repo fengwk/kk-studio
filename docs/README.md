@@ -25,7 +25,7 @@
 | canvas-core | [modules/canvas-core.md](modules/canvas-core.md) | Canvas 领域模型、typed command 与 ports |
 | canvas-infra | [modules/canvas-infra.md](modules/canvas-infra.md) | Canvas PostgreSQL 适配与 Function runtime |
 | frontend | [modules/frontend.md](modules/frontend.md) | React 宿主、feature 边界与浏览器恢复 |
-| harness-builtin | [modules/harness-builtin.md](modules/harness-builtin.md) | 第一方内置 17 工具与 Goal 契约 |
+| harness-builtin | [modules/harness-builtin.md](modules/harness-builtin.md) | 第一方内置 15 工具与 Goal 契约 |
 | harness-common | [modules/harness-common.md](modules/harness-common.md) | Prompt、JSON、ResourceRef、ResultContent 与 InputSchema 基础契约 |
 | harness-contributor-api | [modules/harness-contributor-api.md](modules/harness-contributor-api.md) | Trusted Java Contributor SPI 与 catalog |
 | harness-daemon | [modules/harness-daemon.md](modules/harness-daemon.md) | Environment Daemon 与本地工具执行 |

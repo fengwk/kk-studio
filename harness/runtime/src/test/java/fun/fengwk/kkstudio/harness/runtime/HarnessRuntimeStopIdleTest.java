@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T3;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedQueuedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadWork;
@@ -41,7 +42,7 @@ class HarnessRuntimeStopIdleTest {
   @BeforeEach
   void setUp() {
     store = new InMemoryHarnessStore();
-    runtime = new HarnessRuntime(store, Clock.fixed(T3, ZoneOffset.UTC));
+    runtime = runtime(store, Clock.fixed(T3, ZoneOffset.UTC));
   }
 
   @Test
@@ -127,7 +128,7 @@ class HarnessRuntimeStopIdleTest {
     seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("a"), TestIds.id(1));
     seedThreadWork(store, baseline.threadId());
     HarnessRuntime failingRuntime =
-        new HarnessRuntime(storeFailingDeleteWork(store), Clock.fixed(T3, ZoneOffset.UTC));
+        runtime(storeFailingDeleteWork(store), Clock.fixed(T3, ZoneOffset.UTC));
     assertThrows(
         IllegalStateException.class,
         () -> failingRuntime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0)));

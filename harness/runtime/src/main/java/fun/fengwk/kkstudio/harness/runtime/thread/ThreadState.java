@@ -17,8 +17,10 @@ import java.util.regex.Pattern;
  * DTO 暴露；{@code headEntryId} 必须属于 {@code sessionId} 的 Session，该约束由 Store 在 insert/update 时按
  * harness_entry 的 session 归属强制。
  *
- * <p>所有状态变更都通过下方纯转换方法执行；转换会把回拨的调用方 wall-clock 抬升到当前 {@code updatedAt}，任何对外可见的变更都会把 {@code version}
- * 严格 +1。Store 仍必须在每次 {@code updateThread} 写入前调用 {@link #validateTransition}，严格拒绝直接构造的时间回退。
+ * <p>所有 Thread 行变更都通过下方纯转换方法执行；转换会把回拨的调用方 wall-clock 抬升到当前 {@code updatedAt}，并把 {@code version} 严格
+ * +1。该版本是 Thread 结构与控制状态的 CAS / invalidation cursor，不是完整快照的内容版本：ModelInvocation 的高频流式 checkpoint
+ * 可在同一 Thread version 内推进。Store 仍必须在每次 {@code updateThread} 写入前调用 {@link
+ * #validateTransition}，严格拒绝直接构造的时间回退。
  */
 public record ThreadState(
     UUID id,
@@ -58,7 +60,7 @@ public record ThreadState(
   /**
    * 校验 {@code next} 是存储行 {@code stored} 的合法迁移：identity（id / sessionId / creationRequestHash /
    * createdAt）不可变， {@code headEntryId} / {@code nextCommandSequence} / {@code version} / {@code
-   * updatedAt} 不允许回退，任何对外可见的 变更都会把 {@code version} 严格 +1。exact replay 一律被接受。
+   * updatedAt} 不允许回退，任何 Thread 行变更都会把 {@code version} 严格 +1。exact replay 一律被接受。
    */
   public static void validateTransition(ThreadState stored, ThreadState next) {
     Objects.requireNonNull(stored, "stored");

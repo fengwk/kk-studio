@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
@@ -53,17 +52,15 @@ class StudioHarnessThreadControllerTest {
   }
 
   private HarnessRuntime runtime;
-  private ThreadProcessor threadProcessor;
   private SystemPromptPreviewService systemPromptPreviewService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     runtime = mock(HarnessRuntime.class);
-    threadProcessor = mock(ThreadProcessor.class);
     systemPromptPreviewService = mock(SystemPromptPreviewService.class);
     StudioHarnessThreadController controller =
-        new StudioHarnessThreadController(runtime, threadProcessor, systemPromptPreviewService);
+        new StudioHarnessThreadController(runtime, systemPromptPreviewService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -73,9 +70,9 @@ class StudioHarnessThreadControllerTest {
   }
 
   @Test
-  void snapshotProjectsManualCompactionAvailabilityFromThreadProcessor() throws Exception {
+  void snapshotProjectsManualCompactionAvailabilityFromHarnessRuntime() throws Exception {
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
-    when(threadProcessor.manualCompactionAvailability(id(1)))
+    when(runtime.manualCompactionAvailability(id(1)))
         .thenReturn(
             ManualCompactionAvailability.disabled(
                 ManualCompactionAvailability.DisabledReason.BELOW_MINIMUM));
@@ -90,8 +87,8 @@ class StudioHarnessThreadControllerTest {
   }
 
   @Test
-  void compactCallsInjectedThreadProcessorWithVersionFenceAndMapsCommitResult() throws Exception {
-    when(threadProcessor.compactThread(any(CompactThreadCommand.class)))
+  void compactCallsInjectedHarnessRuntimeWithVersionFenceAndMapsCommitResult() throws Exception {
+    when(runtime.compactThread(any(CompactThreadCommand.class)))
         .thenReturn(new CompactThreadResult(HarnessRuntimeTestFixtures.thread(id(1)), id(2), null));
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
 
@@ -107,14 +104,14 @@ class StudioHarnessThreadControllerTest {
 
     ArgumentCaptor<CompactThreadCommand> captor =
         ArgumentCaptor.forClass(CompactThreadCommand.class);
-    verify(threadProcessor).compactThread(captor.capture());
+    verify(runtime).compactThread(captor.capture());
     assertEquals(id(1), captor.getValue().threadId());
     assertEquals(3L, captor.getValue().expectedVersion());
   }
 
   @Test
   void compactConflictPreservesManualUnavailableReason() throws Exception {
-    when(threadProcessor.compactThread(any(CompactThreadCommand.class)))
+    when(runtime.compactThread(any(CompactThreadCommand.class)))
         .thenThrow(
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.MANUAL_COMPACTION_UNAVAILABLE,
@@ -137,7 +134,7 @@ class StudioHarnessThreadControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":3}"))
         .andExpect(status().isBadRequest());
-    verify(threadProcessor, never()).compactThread(any(CompactThreadCommand.class));
+    verify(runtime, never()).compactThread(any(CompactThreadCommand.class));
   }
 
   @Test

@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
@@ -1980,15 +1981,25 @@ class ModelProcessorTest {
   @Test
   void everySafeDeltaPersistsCheckpointBeforeRealtimePublication() {
     Fixture fixture = fixture(NO_RETRY, requestWithTool());
+    HarnessRuntime runtime =
+        new HarnessRuntime(
+            fixture.store,
+            fixture.clock,
+            (threadId, path, preparation) -> null,
+            () -> CompactionConfig.DEFAULT);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
     ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    long runningVersion = thread(fixture.store, fixture.baseline.threadId()).version();
+    assertNull(runtime.getThreadSnapshot(fixture.baseline.threadId()).model().streamCheckpoint());
 
     listener.onEvent(new ProviderStreamEvent.TextDelta("a"));
-    assertEquals(1, model(fixture.store, fixture.invocationId).streamCheckpoint().sequence());
-    assertEquals("a", model(fixture.store, fixture.invocationId).streamCheckpoint().text());
+    var snapshotAfterFirstDelta = runtime.getThreadSnapshot(fixture.baseline.threadId());
+    assertEquals(runningVersion, snapshotAfterFirstDelta.thread().version());
+    assertEquals(1, snapshotAfterFirstDelta.model().streamCheckpoint().sequence());
+    assertEquals("a", snapshotAfterFirstDelta.model().streamCheckpoint().text());
 
     listener.onEvent(new ProviderStreamEvent.TextDelta("b"));
     assertEquals(2, model(fixture.store, fixture.invocationId).streamCheckpoint().sequence());
