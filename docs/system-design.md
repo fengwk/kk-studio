@@ -14,7 +14,7 @@ IP/DNS 依赖，调度、租约、路由、查询信箱与通知均经 PostgreSQ
 | Snapshot | REST Snapshot 是 Thread 和 Canvas 的权威读取面；通知和 WebSocket 只负责低延迟唤醒或可丢失 overlay。 |
 | Work | Harness 与 Canvas 都把可调度事实放在 PostgreSQL，并以 claim、lease、token 和 poll 处理丢通知、断线和进程退出。 |
 | Node coordination | App 节点之间无网络边；PostgreSQL 是唯一协调介质。数据库不可达时 claim、lease、route 与 mailbox 判定全部 fail closed。 |
-| Version | Harness Thread version 与 Canvas document version 是独立单调坐标；HTTP mapper 使用 canonical UUID 和 decimal cursor。 |
+| Version | Harness Thread version 与 Canvas document version 是独立单调坐标；Thread version 只跟踪结构/控制状态，不是 Snapshot ETag，Invocation checkpoint 可在同一 version 内推进；HTTP mapper 使用 canonical UUID 和 decimal cursor。 |
 | Composition root | 每个 App 节点都由 `web` 作为唯一生产 Spring Boot root；`platform`、Core、Runtime 和 Contributor API 不创建第二个 root。 |
 | Byte boundary | Blob metadata 与引用在 PostgreSQL；对象字节在受控 Blob Storage；浏览器只取得短期签名 URL。 |
 
@@ -178,7 +178,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `harness/environment` | Environment binding、Capability SPI/catalog 与 Daemon v1 wire（CapabilityResult 组合 ResultContent） | 依赖 `harness-common` 与 Jackson，绝不依赖 `harness-tool` |
 | `harness/runtime` | Session/Entry/Thread/Command/Invocation/Work 状态机与 processors | 依赖 `harness-common`、`harness-tool`、`harness-environment`、Jackson、SLF4J、JGit |
 | `harness/contributor-api` | trusted Contributor 的 Catalog、BranchView、统一 Tool、effect 与 projector API | 生产依赖 `harness-tool`、`harness-environment`，不进生产 Common/Runtime |
-| `harness/builtin` | 第一方内置 17 工具、goal.state 与 context projector | 依赖 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment`、Jackson |
+| `harness/builtin` | 第一方内置 15 工具、goal.state 与 context projector | 依赖 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment`、Jackson |
 | `harness/infra` | PostgreSQL HarnessStore、Work dispatcher、realtime、Resource store | 依赖 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Spring JDBC、PostgreSQL |
 | `harness/daemon` | 独立 Environment 进程适配器 | 依赖 `harness-common`、`harness-environment`、Jackson、JGit、LangChain4j adapters，绝不依赖 `harness-tool` |
 | `platform` | Catalog、MCP、Storage、Chat/Canvas application service、Resolver、Model/Tool/Environment Gateway | 适配 Share、Core/Runtime ports，不成为组合根 |
@@ -260,6 +260,11 @@ YOLO 和 creation request hash（初始创建请求指纹）；Model/Tool 的完
 而由 Invocation 及其 Work 承担执行事实。`task` 是内部 Tool，通过同一
 `HarnessRuntime.acceptCommands(NEW_SESSION, ...)` 创建子 Session、ROOT、Thread、
 Commands 与 Work，不增加表或调度协议。
+
+Thread version 是 Thread 行结构与控制状态的 CAS / invalidation cursor，不是完整
+Snapshot 的 ETag。Model 流式 delta 会先持久化到 Invocation checkpoint，再尽力发布
+realtime；为避免高频更新 Thread 行，checkpoint 可在相同 Thread version 下推进。
+因此恢复与 gap 对账必须重新读取完整 Snapshot，不能仅凭 version 相等跳过响应内容。
 
 ### Canvas：Command 与 Function
 
@@ -377,7 +382,9 @@ Thread version 与 Canvas version 事件带 cursor；Thread 的 Model delta、To
 partial 是无 cursor 的 live overlay。事件丢失、payload 畸形、通知超出
 PostgreSQL payload 上限、重连、订阅 gap 或 buffer overflow 都折叠为
 `resync`，客户端重新读取完整 Snapshot。terminal durable result 不依赖 terminal
-notification。
+notification。Thread checkpoint 更新不单独推进 Thread version；首次订阅、重连、
+resync 与 realtime sequence gap 仍会回读 Snapshot，以同 version 下的新 checkpoint
+恢复安全前缀。
 
 ### Settings 恢复
 
@@ -423,7 +430,7 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
 - [canvas-core 模块](modules/canvas-core.md)：JDK-only Canvas 领域与 ports。
 - [canvas-infra 模块](modules/canvas-infra.md)：PostgreSQL/MyBatis 与 Function durable runtime。
 - [frontend 模块](modules/frontend.md)：React 宿主、feature 边界与浏览器恢复。
-- [harness-builtin 模块](modules/harness-builtin.md)：第一方内置 17 工具与 Goal 契约。
+- [harness-builtin 模块](modules/harness-builtin.md)：第一方内置 15 工具与 Goal 契约。
 - [harness-common 模块](modules/harness-common.md)：Prompt、JSON、ResourceRef、ResultContent 与 InputSchema 基础契约。
 - [harness-contributor-api 模块](modules/harness-contributor-api.md)：trusted Java Contributor SPI 与 catalog。
 - [harness-daemon 模块](modules/harness-daemon.md)：Environment Daemon 与 Daemon wire。

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T6;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedContinuationChain;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModel;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
@@ -60,7 +61,7 @@ class HarnessRuntimeStopEffectiveTimeTest {
         });
 
     StopResult result =
-        new HarnessRuntime(store, Clock.fixed(T0, ZoneOffset.UTC))
+        runtime(store, Clock.fixed(T0, ZoneOffset.UTC))
             .stop(new StopCommand(baseline.threadId(), TestIds.id(2), 0));
 
     assertEquals(T6, result.thread().updatedAt());
@@ -89,7 +90,7 @@ class HarnessRuntimeStopEffectiveTimeTest {
         });
 
     StopResult result =
-        new HarnessRuntime(store, Clock.fixed(T0, ZoneOffset.UTC))
+        runtime(store, Clock.fixed(T0, ZoneOffset.UTC))
             .stop(new StopCommand(baseline.threadId(), TestIds.id(2), 1));
 
     assertEquals(T6, result.thread().updatedAt());
@@ -118,7 +119,7 @@ class HarnessRuntimeStopEffectiveTimeTest {
         store.transaction(tx -> tx.findEntry(before.headEntryId()).orElseThrow()).createdAt();
 
     StopResult result =
-        new HarnessRuntime(store, Clock.fixed(T0, ZoneOffset.UTC))
+        runtime(store, Clock.fixed(T0, ZoneOffset.UTC))
             .stop(new StopCommand(baseline.threadId(), TestIds.id(2), 1));
 
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(result.thread().headEntryId()));

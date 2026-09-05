@@ -237,11 +237,19 @@ public class HarnessRuntimeConfiguration {
   public HarnessRuntime harnessRuntime(
       HarnessStore store,
       Clock clock,
+      TurnResolver turnResolver,
+      CompactionConfigProvider compactionConfigProvider,
       ModelProcessor modelProcessor,
       ToolProcessor toolProcessor,
       ObjectProvider<ToolResultHistoryMaterializer> materializerProvider) {
     return new HarnessRuntime(
-        store, clock, materializerProvider.getIfAvailable(), modelProcessor, toolProcessor);
+        store,
+        clock,
+        turnResolver,
+        compactionConfigProvider,
+        materializerProvider.getIfAvailable(),
+        modelProcessor,
+        toolProcessor);
   }
 
   @Bean

@@ -37,7 +37,7 @@ class HarnessRuntimeStopClockTest {
     seedModelWork(store, baseline.modelId());
     TestClock clock = new TestClock(T0);
     HarnessRuntime runtime =
-        new HarnessRuntime(storeAdvancingClockOnWorkLock(store, clock, T3), clock);
+        HarnessRuntimeTestSupport.runtime(storeAdvancingClockOnWorkLock(store, clock, T3), clock);
 
     runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
 

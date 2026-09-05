@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSystemPromptPreviewDTO;
@@ -50,16 +49,12 @@ import java.util.function.Supplier;
 @RequestMapping("/api/ai/runtime/threads")
 public class StudioHarnessThreadController {
   private final HarnessRuntime runtime;
-  private final ThreadProcessor threadProcessor;
   private final SystemPromptPreviewService systemPromptPreviewService;
 
   /** 创建 Thread API Controller。 */
   public StudioHarnessThreadController(
-      HarnessRuntime runtime,
-      ThreadProcessor threadProcessor,
-      SystemPromptPreviewService systemPromptPreviewService) {
+      HarnessRuntime runtime, SystemPromptPreviewService systemPromptPreviewService) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
-    this.threadProcessor = Objects.requireNonNull(threadProcessor, "threadProcessor");
     this.systemPromptPreviewService =
         Objects.requireNonNull(systemPromptPreviewService, "systemPromptPreviewService");
   }
@@ -72,8 +67,7 @@ public class StudioHarnessThreadController {
             () -> {
               UUID id = HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId");
               ThreadSnapshot snapshot = runtime.getThreadSnapshot(id);
-              ManualCompactionAvailability availability =
-                  threadProcessor.manualCompactionAvailability(id);
+              ManualCompactionAvailability availability = runtime.manualCompactionAvailability(id);
               return HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, availability);
             }));
   }
@@ -91,7 +85,7 @@ public class StudioHarnessThreadController {
             }));
   }
 
-  /** 直接调用 ThreadProcessor 执行受 expectedVersion 守护的手动压缩。 */
+  /** 直接调用 HarnessRuntime 执行受 expectedVersion 守护的手动压缩。 */
   @PostMapping("/{threadId}/compact")
   public Result<HarnessThreadCompactResultDTO> compact(
       @PathVariable String threadId, @RequestBody HarnessThreadCompactDTO request) {
@@ -99,7 +93,7 @@ public class StudioHarnessThreadController {
         withRuntimeTranslation(
             () -> {
               CompactThreadResult result =
-                  threadProcessor.compactThread(
+                  runtime.compactThread(
                       HarnessRuntimeRequestMapper.toCompactThreadCommand(threadId, request));
               return HarnessRuntimeResponseMapper.toCompactResultDto(
                   result, runtime.getThreadSnapshot(result.thread().id()));

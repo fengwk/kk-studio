@@ -17,11 +17,14 @@ import java.util.stream.Stream;
  * web 模块的轻量架构守护。
  *
  * <p>生产源码不得引用 Harness Tool execution/Daemon 包或选定的 Core 基础设施实现；DTO mapping 只放行列出的 canonical Tool
- * 类型。web 模块是 Harness 组合根：它按设计将 Runtime 契约与 infra 传输适配器声明为直接依赖，且 {@code web/pom.xml} 必须保留该声明。
+ * 类型；web.controller 包不得引用 Harness runtime processor。web 模块是 Harness 组合根：它按设计将 Runtime 契约与 infra
+ * 传输适配器声明为直接依赖，且 {@code web/pom.xml} 必须保留该声明。
  */
 class WebModuleArchitectureTest {
 
   private static final String HARNESS_RUNTIME_PREFIX = "fun.fengwk.kkstudio.harness.runtime.";
+  private static final String HARNESS_RUNTIME_PROCESSOR_PREFIX =
+      "fun.fengwk.kkstudio.harness.runtime.processor.";
   private static final String HARNESS_INFRA_PREFIX = "fun.fengwk.kkstudio.harness.infra.";
   private static final String HARNESS_CONTRIBUTOR_API_PREFIX =
       "fun.fengwk.kkstudio.harness.contributor.api.";
@@ -117,6 +120,45 @@ class WebModuleArchitectureTest {
         List.of("org.springframework", "org.flywaydb", "HttpClient", "WebClient")) {
       assertFalse(source.contains(forbidden), "trusted JAR loader must not reference " + forbidden);
     }
+  }
+
+  @Test
+  void webControllersDoNotDependOnHarnessRuntimeProcessors() throws IOException {
+    Path main = locateWebMainJava();
+    Path controllerDir = main.resolve("fun/fengwk/kkstudio/web/controller");
+    assertTrue(
+        Files.isDirectory(controllerDir), "web controller directory must exist: " + controllerDir);
+    List<String> violations = new ArrayList<>();
+    try (Stream<Path> stream = Files.walk(controllerDir)) {
+      stream
+          .filter(path -> path.toString().endsWith(".java"))
+          .filter(path -> !isGeneratedOrTarget(path))
+          .forEach(
+              path -> {
+                try {
+                  String source = Files.readString(path, StandardCharsets.UTF_8);
+                  for (String line : source.split("\\R")) {
+                    String trimmed = line.trim();
+                    if (trimmed.startsWith("import ")) {
+                      String imported = normalizeImport(trimmed);
+                      if (imported.startsWith(HARNESS_RUNTIME_PROCESSOR_PREFIX)) {
+                        violations.add(relative(main, path) + ": " + trimmed);
+                      }
+                    } else if (trimmed.contains(HARNESS_RUNTIME_PROCESSOR_PREFIX)) {
+                      violations.add(
+                          relative(main, path) + ": forbidden processor reference " + trimmed);
+                    }
+                  }
+                } catch (IOException error) {
+                  throw new IllegalStateException(error);
+                }
+              });
+    }
+    assertTrue(
+        violations.isEmpty(),
+        () ->
+            "web controller boundary violations (controllers must not depend on harness runtime processor):\n"
+                + String.join("\n", violations));
   }
 
   private static List<String> scanViolations(Path main) throws IOException {

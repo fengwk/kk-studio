@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
@@ -13,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
+import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -35,17 +37,18 @@ import java.util.function.Consumer;
 /**
  * Root Harness command/control/query 平面：durable Agent Runtime 的同步公共入口。
  *
- * <p>每个方法严格执行一次 {@link HarnessStore} transaction，使用规范锁序 Session -&gt; Thread -&gt; Commands -&gt;
- * ModelInvocation -&gt; ToolInvocation siblings -&gt; Work，从而保证命令接受、Stop 与 snapshot 永不观察到混合的
- * durable 状态。所有业务拒绝均为类型化 {@link HarnessRuntimeConflictException} / {@link
+ * <p>同步控制操作通过短事务与规范锁序 Session -&gt; Thread -&gt; Commands -&gt; ModelInvocation -&gt;
+ * ToolInvocation siblings -&gt; Work 保证 durable 状态一致；需要外部解析的手动压缩采用短事务 plan、事务外 resolve、第二短事务 CAS
+ * commit。所有业务拒绝均为类型化 {@link HarnessRuntimeConflictException} / {@link
  * HarnessRuntimeNotFoundException}；被破坏 的持久化不变量（所有权错误、sibling 混合挂接、callIndex 不连续）仍为 {@link
  * IllegalStateException}。对已存在 Thread 的 mutation 在相关 durable 锁之后读取时间戳，因此 lock-wait 不会让过期的 pre-lock
  * instant 让 {@code updatedAt} 回退； Stop 与未决 Approval 还会把 mutation 时间钳制到最新的已锁定 durable
  * fact，以容忍本地时钟回滚与跨节点时钟偏差，而 Work request 始终使用未抬升的本地调度时钟。
  *
  * <p>本类实现 {@link #acceptCommands}（NEW_SESSION / ENTRY / THREAD 单原语）、{@link #stop}、{@link
- * #decideToolApproval}、{@link #setThreadYolo}、{@link #getThreadSnapshot}、{@link
- * #listThreadsBySession} 与 {@link #getSessionEntries}。
+ * #decideToolApproval}、{@link #setThreadYolo}、{@link #manualCompactionAvailability}、{@link
+ * #compactThread}、{@link #getThreadSnapshot}、{@link #listThreadsBySession} 与 {@link
+ * #getSessionEntries}。
  */
 @Slf4j
 public final class HarnessRuntime {
@@ -56,63 +59,47 @@ public final class HarnessRuntime {
   private final Clock clock;
   private final AcceptCommandsControl acceptCommandsControl;
   private final StopControl stopControl;
+  private final ManualCompactionControl manualCompactionControl;
   private final Consumer<UUID> modelExecutionCanceller;
   private final Consumer<UUID> toolExecutionCanceller;
 
-  /** 创建完整 Runtime facade，包含 durable Stop commit 之后的 process-local execution 取消能力。 */
+  /** 创建仅含 control 面的 Runtime，不承载本地 Model/Tool execution。 */
   public HarnessRuntime(
-      HarnessStore store, Clock clock, ModelProcessor modelProcessor, ToolProcessor toolProcessor) {
-    this(
-        store,
-        clock,
-        null,
-        modelExecutionCanceller(modelProcessor),
-        toolExecutionCanceller(toolProcessor));
-  }
-
-  /**
-   * 创建仅含 control 面的 Runtime，不承载本地 Model/Tool execution。
-   *
-   * <p>Stop 通过 durable terminal state 与 Work fencing 仍然保持正确；缺失的仅是可选的同进程 best-effort 取消。
-   */
-  public HarnessRuntime(HarnessStore store, Clock clock) {
-    this(store, clock, null, NO_OP_CANCELLER, NO_OP_CANCELLER);
+      HarnessStore store,
+      Clock clock,
+      TurnResolver resolver,
+      CompactionConfigProvider compactionConfigProvider) {
+    this(store, clock, resolver, compactionConfigProvider, null, NO_OP_CANCELLER, NO_OP_CANCELLER);
   }
 
   /**
    * 创建完整 Runtime facade，并注入 Tool outcome 的 durable history 物化端口（可为 null：ToolResult 含 Resource 引用时
-   * fail-closed）。
+   * fail-closed）以及非空的本地 Model/Tool processors。
    */
   public HarnessRuntime(
       HarnessStore store,
       Clock clock,
+      TurnResolver resolver,
+      CompactionConfigProvider compactionConfigProvider,
       ToolResultHistoryMaterializer toolResultHistoryMaterializer,
       ModelProcessor modelProcessor,
       ToolProcessor toolProcessor) {
     this(
         store,
         clock,
+        resolver,
+        compactionConfigProvider,
         toolResultHistoryMaterializer,
         modelExecutionCanceller(modelProcessor),
         toolExecutionCanceller(toolProcessor));
-  }
-
-  /**
-   * 创建完整 Runtime facade，并注入 process-local 的 Model / Tool execution 取消器（无物化端口，Resource 引用
-   * fail-closed）。
-   */
-  public HarnessRuntime(
-      HarnessStore store,
-      Clock clock,
-      Consumer<UUID> modelExecutionCanceller,
-      Consumer<UUID> toolExecutionCanceller) {
-    this(store, clock, null, modelExecutionCanceller, toolExecutionCanceller);
   }
 
   /** 由具体 Processor wiring 与 local execution adapter 共用的内部构造方法。 */
   HarnessRuntime(
       HarnessStore store,
       Clock clock,
+      TurnResolver resolver,
+      CompactionConfigProvider compactionConfigProvider,
       ToolResultHistoryMaterializer toolResultHistoryMaterializer,
       Consumer<UUID> modelExecutionCanceller,
       Consumer<UUID> toolExecutionCanceller) {
@@ -120,6 +107,12 @@ public final class HarnessRuntime {
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.acceptCommandsControl = new AcceptCommandsControl(store, this.clock);
     this.stopControl = new StopControl(store, this.clock, toolResultHistoryMaterializer);
+    this.manualCompactionControl =
+        new ManualCompactionControl(
+            this.store,
+            this.clock,
+            Objects.requireNonNull(resolver, "resolver"),
+            Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider"));
     this.modelExecutionCanceller =
         Objects.requireNonNull(modelExecutionCanceller, "modelExecutionCanceller");
     this.toolExecutionCanceller =
@@ -203,6 +196,19 @@ public final class HarnessRuntime {
         });
   }
 
+  /** 返回 Thread 当前的手动压缩可用性；结果是瞬时 projection，提交仍由 expectedVersion 做最终 CAS。 */
+  public ManualCompactionAvailability manualCompactionAvailability(UUID threadId) {
+    return manualCompactionControl.manualCompactionAvailability(threadId);
+  }
+
+  /**
+   * 手动压缩控制：短事务 plan，事务外 resolve，再以 expected version/source head/command snapshot 原子提交 COMPACTION
+   * Turn 与 MODEL Work。resolve 前崩溃零持久化；提交成功后不依赖进程内 intent。
+   */
+  public CompactThreadResult compactThread(CompactThreadCommand command) {
+    return manualCompactionControl.compactThread(command);
+  }
+
   /**
    * 原子停止当前 live Turn、取消已入队 Commands，或重放一次先前 thread-owned Stop。
    *
@@ -269,7 +275,8 @@ public final class HarnessRuntime {
    *
    * <p>返回 ThreadState、当前 root-to-head {@link EntryPath}、不可变的已入队 Commands，以及仅与分类器匹配的 ModelInvocation
    * / Tool siblings / 尚未物化的失败 attempts：IDLE_OR_HISTORICAL 与 CONTINUATION_DUE 不暴露 Invocation，Model
-   * context 暴露 Model 与失败 attempts，Tool context 暴露 Model 与全部 siblings。不持久化也不返回任何派生 状态。
+   * context 暴露 Model 与失败 attempts，Tool context 暴露 Model 与全部 siblings。ModelInvocation checkpoint 可能在
+   * Thread version 不变时推进；本方法仍返回事务内最新 checkpoint，调用方不得把 version 当作完整快照 ETag。不持久化也不返回任何派生状态。
    */
   public ThreadSnapshot getThreadSnapshot(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
@@ -444,12 +451,15 @@ public final class HarnessRuntime {
           "tool invocation " + tool.id() + " changed its approval state before being decided");
     }
     Instant workNow = clock.instant();
-    Instant mutationNow = max(workNow, thread.updatedAt());
-    mutationNow = max(mutationNow, locked.path().head().createdAt());
-    mutationNow = max(mutationNow, active.model().updatedAt());
-    mutationNow = max(mutationNow, approval.requestedAt());
+    Instant mutationNow =
+        HarnessStoreTime.notBefore(
+            workNow,
+            thread.updatedAt(),
+            locked.path().head().createdAt(),
+            active.model().updatedAt(),
+            approval.requestedAt());
     for (ToolInvocation sibling : active.siblings()) {
-      mutationNow = max(mutationNow, sibling.updatedAt());
+      mutationNow = HarnessStoreTime.notBefore(mutationNow, sibling.updatedAt());
     }
     ToolInvocation updated =
         tool.decideApproval(
@@ -471,10 +481,6 @@ public final class HarnessRuntime {
       tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), workNow);
     }
     return updated;
-  }
-
-  private static Instant max(Instant left, Instant right) {
-    return right.isAfter(left) ? right : left;
   }
 
   private static Consumer<UUID> modelExecutionCanceller(ModelProcessor processor) {

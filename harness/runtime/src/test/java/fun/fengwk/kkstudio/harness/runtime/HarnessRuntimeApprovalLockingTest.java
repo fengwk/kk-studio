@@ -45,7 +45,7 @@ class HarnessRuntimeApprovalLockingTest {
   void setUp() {
     store = new InMemoryHarnessStore();
     clock = new TestClock(T5);
-    runtime = new HarnessRuntime(store, clock);
+    runtime = HarnessRuntimeTestSupport.runtime(store, clock);
   }
 
   private ToolApprovalCommand allow(UUID threadId, UUID toolId) {
@@ -90,7 +90,7 @@ class HarnessRuntimeApprovalLockingTest {
             T5);
     List<String> locks = new ArrayList<>();
     HarnessRuntime lockedRuntime =
-        new HarnessRuntime(
+        HarnessRuntimeTestSupport.runtime(
             recordingProbeStore(
                 store, locks, Map.of("findToolInvocation", args -> Optional.of(staleProbe))),
             clock);
@@ -133,7 +133,7 @@ class HarnessRuntimeApprovalLockingTest {
             T5);
     List<String> locks = new ArrayList<>();
     HarnessRuntime lockedRuntime =
-        new HarnessRuntime(
+        HarnessRuntimeTestSupport.runtime(
             recordingProbeStore(
                 store, locks, Map.of("findToolInvocation", args -> Optional.of(cancelledProbe))),
             clock);
@@ -185,7 +185,7 @@ class HarnessRuntimeApprovalLockingTest {
         assertThrows(
             HarnessRuntimeConflictException.class,
             () ->
-                new HarnessRuntime(
+                HarnessRuntimeTestSupport.runtime(
                         recordingProbeStore(
                             store,
                             new ArrayList<>(),
@@ -227,7 +227,7 @@ class HarnessRuntimeApprovalLockingTest {
         assertThrows(
             HarnessRuntimeConflictException.class,
             () ->
-                new HarnessRuntime(
+                HarnessRuntimeTestSupport.runtime(
                         recordingProbeStore(
                             store,
                             new ArrayList<>(),
@@ -252,7 +252,7 @@ class HarnessRuntimeApprovalLockingTest {
         assertThrows(
             IllegalStateException.class,
             () ->
-                new HarnessRuntime(
+                HarnessRuntimeTestSupport.runtime(
                         recordingProbeStore(
                             store,
                             new ArrayList<>(),
@@ -265,7 +265,7 @@ class HarnessRuntimeApprovalLockingTest {
         assertThrows(
             IllegalStateException.class,
             () ->
-                new HarnessRuntime(
+                HarnessRuntimeTestSupport.runtime(
                         recordingProbeStore(
                             store,
                             new ArrayList<>(),
@@ -293,7 +293,7 @@ class HarnessRuntimeApprovalLockingTest {
         assertThrows(
             IllegalStateException.class,
             () ->
-                new HarnessRuntime(
+                HarnessRuntimeTestSupport.runtime(
                         recordingProbeStore(
                             store,
                             new ArrayList<>(),
@@ -321,7 +321,7 @@ class HarnessRuntimeApprovalLockingTest {
         assertThrows(
             IllegalStateException.class,
             () ->
-                new HarnessRuntime(
+                HarnessRuntimeTestSupport.runtime(
                         recordingProbeStore(
                             store,
                             new ArrayList<>(),
@@ -359,7 +359,7 @@ class HarnessRuntimeApprovalLockingTest {
         assertThrows(
             HarnessRuntimeConflictException.class,
             () ->
-                new HarnessRuntime(
+                HarnessRuntimeTestSupport.runtime(
                         recordingProbeStore(
                             store,
                             new ArrayList<>(),
@@ -378,7 +378,7 @@ class HarnessRuntimeApprovalLockingTest {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
     HarnessRuntime lockedRuntime =
-        new HarnessRuntime(storeAdvancingClockOnThreadLock(store, clock, T6), clock);
+        HarnessRuntimeTestSupport.runtime(storeAdvancingClockOnThreadLock(store, clock, T6), clock);
     ToolInvocation decided =
         lockedRuntime.decideToolApproval(allow(baseline.threadId(), baseline.toolId()));
     assertEquals(T6, decided.approval().decidedAt());

@@ -333,25 +333,19 @@ final class StopControl {
       EntryPath path,
       List<ThreadCommand> queued,
       ThreadContext context) {
-    Instant now = Objects.requireNonNull(clockNow, "clockNow");
-    now = max(now, thread.updatedAt());
-    now = max(now, path.head().createdAt());
+    Instant now = HarnessStoreTime.notBefore(clockNow, thread.updatedAt(), path.head().createdAt());
     for (ThreadCommand command : queued) {
-      now = max(now, command.createdAt());
+      now = HarnessStoreTime.notBefore(now, command.createdAt());
     }
     if (context instanceof ThreadContext.ModelActive active) {
-      now = max(now, active.model().updatedAt());
+      now = HarnessStoreTime.notBefore(now, active.model().updatedAt());
     } else if (context instanceof ThreadContext.ToolActive active) {
-      now = max(now, active.model().updatedAt());
+      now = HarnessStoreTime.notBefore(now, active.model().updatedAt());
       for (ToolInvocation sibling : active.siblings()) {
-        now = max(now, sibling.updatedAt());
+        now = HarnessStoreTime.notBefore(now, sibling.updatedAt());
       }
     }
     return now;
-  }
-
-  private static Instant max(Instant left, Instant right) {
-    return right.isAfter(left) ? right : left;
   }
 
   private static int workTypeRank(WorkTargetType type) {

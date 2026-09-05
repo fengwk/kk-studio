@@ -50,7 +50,7 @@ class HarnessRuntimeStopLocalCancellationTest {
     List<UUID> modelCalls = new ArrayList<>();
     List<UUID> toolCalls = new ArrayList<>();
     HarnessRuntime runtime =
-        new HarnessRuntime(
+        HarnessRuntimeTestSupport.runtime(
             store,
             Clock.fixed(T5, ZoneOffset.UTC),
             invocationId -> {
@@ -90,7 +90,7 @@ class HarnessRuntimeStopLocalCancellationTest {
     List<UUID> modelCalls = new ArrayList<>();
     List<UUID> toolCalls = new ArrayList<>();
     HarnessRuntime runtime =
-        new HarnessRuntime(
+        HarnessRuntimeTestSupport.runtime(
             store,
             Clock.fixed(T5, ZoneOffset.UTC),
             modelCalls::add,
@@ -140,7 +140,7 @@ class HarnessRuntimeStopLocalCancellationTest {
     HarnessRuntimeTestSupport.MultiToolBaseline baseline = seedToolBaseline(store, 2);
     List<UUID> calls = new ArrayList<>();
     HarnessRuntime runtime =
-        new HarnessRuntime(
+        HarnessRuntimeTestSupport.runtime(
             store,
             Clock.fixed(T5, ZoneOffset.UTC),
             ignored -> {},
@@ -177,7 +177,8 @@ class HarnessRuntimeStopLocalCancellationTest {
     HarnessRuntimeTestSupport.ModelBaseline active = seedModel(store, ModelInvocationStatus.READY);
     List<UUID> calls = new ArrayList<>();
     HarnessRuntime runtime =
-        new HarnessRuntime(store, Clock.fixed(T5, ZoneOffset.UTC), calls::add, ignored -> {});
+        HarnessRuntimeTestSupport.runtime(
+            store, Clock.fixed(T5, ZoneOffset.UTC), calls::add, ignored -> {});
     runtime.stop(new StopCommand(active.threadId(), TestIds.id(1), 0));
     runtime.stop(new StopCommand(active.threadId(), TestIds.id(1), 0));
     assertEquals(List.of(active.modelId()), calls);

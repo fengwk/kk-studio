@@ -25,7 +25,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -54,9 +53,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -364,9 +361,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     processing.start();
     assertTrue(resolverEntered.await(5, TimeUnit.SECONDS));
     // 并发直接控制面：与 plan 无关的独立短事务，成功（seedCommand 已把 version 推进到 1，CAS 精确匹配）。
-    HarnessRuntime runtime = new HarnessRuntime(fixture.store, Clock.fixed(NOW, ZoneOffset.UTC));
     ThreadState yoloUpdate =
-        runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), 1, true));
+        fixture.runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), 1, true));
     assertTrue(yoloUpdate.yoloEnabled());
     assertEquals(2L, yoloUpdate.version());
     releaseResolver.countDown();

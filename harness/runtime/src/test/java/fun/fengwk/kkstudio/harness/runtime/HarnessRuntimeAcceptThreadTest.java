@@ -51,7 +51,7 @@ class HarnessRuntimeAcceptThreadTest {
   @BeforeEach
   void setUp() {
     store = new InMemoryHarnessStore();
-    runtime = new HarnessRuntime(store, Clock.fixed(T0, ZoneOffset.UTC));
+    runtime = HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T0, ZoneOffset.UTC));
   }
 
   private static AcceptCommandsCommand thread(

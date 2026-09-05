@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModelWork;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
@@ -53,7 +54,7 @@ class HarnessRuntimeStopWorkOrderTest {
     }
     List<StoreCall> calls = new ArrayList<>();
     HarnessRuntime runtime =
-        new HarnessRuntime(recordingStore(delegate, calls), Clock.fixed(T5, ZoneOffset.UTC));
+        runtime(recordingStore(delegate, calls), Clock.fixed(T5, ZoneOffset.UTC));
 
     runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
 
@@ -105,7 +106,7 @@ class HarnessRuntimeStopWorkOrderTest {
       seedToolWork(delegate, id);
     }
     HarnessRuntime runtime =
-        new HarnessRuntime(storeFailingSecondDelete(delegate), Clock.fixed(T5, ZoneOffset.UTC));
+        runtime(storeFailingSecondDelete(delegate), Clock.fixed(T5, ZoneOffset.UTC));
 
     assertThrows(
         IllegalStateException.class,

@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T6;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.beginDispatchTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModel;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModelWork;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadWork;
@@ -37,7 +38,7 @@ class HarnessRuntimeStopCallbackFenceTest {
         store.transaction(
             tx -> tx.claimNextWork(WorkTargetType.MODEL, T3, "model-lease", T6).orElseThrow());
 
-    new HarnessRuntime(store, Clock.fixed(T5, ZoneOffset.UTC))
+    runtime(store, Clock.fixed(T5, ZoneOffset.UTC))
         .stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
 
     assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim, T5)).isEmpty());
@@ -57,7 +58,7 @@ class HarnessRuntimeStopCallbackFenceTest {
         store.transaction(
             tx -> tx.claimNextWork(WorkTargetType.TOOL, T3, "tool-lease", T6).orElseThrow());
 
-    new HarnessRuntime(store, Clock.fixed(T5, ZoneOffset.UTC))
+    runtime(store, Clock.fixed(T5, ZoneOffset.UTC))
         .stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
 
     assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim, T5)).isEmpty());

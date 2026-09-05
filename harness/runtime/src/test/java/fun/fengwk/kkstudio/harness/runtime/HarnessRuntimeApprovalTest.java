@@ -47,7 +47,7 @@ class HarnessRuntimeApprovalTest {
   void setUp() {
     store = new InMemoryHarnessStore();
     clock = new TestClock(T5);
-    runtime = new HarnessRuntime(store, clock);
+    runtime = HarnessRuntimeTestSupport.runtime(store, clock);
   }
 
   private ToolApprovalCommand allow(UUID threadId, UUID toolId) {

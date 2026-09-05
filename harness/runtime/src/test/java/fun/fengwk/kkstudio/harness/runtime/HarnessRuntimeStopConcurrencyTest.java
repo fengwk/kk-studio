@@ -161,7 +161,7 @@ class HarnessRuntimeStopConcurrencyTest {
   }
 
   private static HarnessRuntime runtime(InMemoryHarnessStore store) {
-    return new HarnessRuntime(store, Clock.fixed(T5, ZoneOffset.UTC));
+    return HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T5, ZoneOffset.UTC));
   }
 
   private static ToolApprovalCommand allow(HarnessRuntimeTestSupport.ToolBaseline baseline) {

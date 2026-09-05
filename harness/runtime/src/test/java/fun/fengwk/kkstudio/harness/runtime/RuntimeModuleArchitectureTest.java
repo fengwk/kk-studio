@@ -1,11 +1,16 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.eclipse.jgit.ignore.FastIgnoreRule;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
+
 import java.io.IOException;
+import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -126,6 +131,29 @@ class RuntimeModuleArchitectureTest {
     List<String> violations = scanViolations(main);
     assertTrue(
         violations.isEmpty(), () -> "architecture violations:\n" + String.join("\n", violations));
+  }
+
+  @Test
+  void manualCompactionControlDoesNotDependOnProcessorInternals() throws IOException {
+    Path main = locateRuntimeMainJava();
+    Path manualControl =
+        main.resolve("fun/fengwk/kkstudio/harness/runtime/ManualCompactionControl.java");
+    assertTrue(Files.isRegularFile(manualControl), "manual compaction control must exist");
+    String source = Files.readString(manualControl, StandardCharsets.UTF_8);
+    assertFalse(
+        source.contains("fun.fengwk.kkstudio.harness.runtime.processor."),
+        "manual compaction control must not depend on processor internals");
+
+    List<String> publicOperations =
+        Stream.of(ThreadProcessor.class.getDeclaredMethods())
+            .filter(method -> Modifier.isPublic(method.getModifiers()))
+            .map(method -> method.getName())
+            .sorted()
+            .toList();
+    assertEquals(
+        List.of("process"),
+        publicOperations,
+        "ThreadProcessor public operations must be limited to claimed THREAD work reduction");
   }
 
   private static List<String> scanViolations(Path main) throws IOException {

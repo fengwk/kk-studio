@@ -48,7 +48,7 @@ class HarnessRuntimeSnapshotTest {
   @BeforeEach
   void setUp() {
     store = new InMemoryHarnessStore();
-    runtime = new HarnessRuntime(store, Clock.fixed(T5, ZoneOffset.UTC));
+    runtime = HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T5, ZoneOffset.UTC));
   }
 
   @Test
@@ -233,7 +233,8 @@ class HarnessRuntimeSnapshotTest {
     InMemoryHarnessStore delegate = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.ModelBaseline baseline = seedRunningModel(delegate);
     HarnessRuntime sabotagedRuntime =
-        new HarnessRuntime(sabotagedStoreLockingNoModel(delegate), Clock.fixed(T5, ZoneOffset.UTC));
+        HarnessRuntimeTestSupport.runtime(
+            sabotagedStoreLockingNoModel(delegate), Clock.fixed(T5, ZoneOffset.UTC));
     IllegalStateException error =
         assertThrows(
             IllegalStateException.class,

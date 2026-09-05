@@ -81,7 +81,11 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/processor/ResolvedRequestValidator</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/ManualCompactionControl</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/compaction/AutomaticCompactionPlanner</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/compaction/CompactionHistory</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/thread/ResolvedRequestValidator</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextProbe</include>
                                         <include>fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestSpec</include>
                                         <include>fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding</include>
                                         <include>fun/fengwk/kkstudio/harness/runtime/invocation/codec/ToolBindingJsonCodec</include>

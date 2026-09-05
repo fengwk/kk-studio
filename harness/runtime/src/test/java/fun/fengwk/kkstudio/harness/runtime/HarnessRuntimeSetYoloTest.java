@@ -34,7 +34,7 @@ class HarnessRuntimeSetYoloTest {
   void setUp() {
     store = new InMemoryHarnessStore();
     clock = new TestClock(T0);
-    runtime = new HarnessRuntime(store, clock);
+    runtime = HarnessRuntimeTestSupport.runtime(store, clock);
   }
 
   /** 同值请求在任何 version CAS 之前按原样返回当前 Thread：过期 expectedVersion 不冲突，时间/version 零触碰。 */
