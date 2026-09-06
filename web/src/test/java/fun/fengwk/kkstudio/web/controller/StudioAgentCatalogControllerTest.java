@@ -223,21 +223,24 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     ObjectNode modelUpdateBody = objectMapper.valueToTree(modelUpdate);
     modelUpdateBody.put("providerName", "renamed-" + providerName);
     modelUpdateBody.put("name", "renamed-" + modelName);
+    // 测试意图：验证 PUT /api/ai/catalog/models/{providerName}/{modelName} 禁止重命名，拒绝请求体携带非可变字段，返回 400
+    // BadRequest。
     mockMvc
         .perform(
-            put("/api/ai/catalog/models")
-                .param("providerName", providerName)
-                .param("modelName", modelName)
+            put("/api/ai/catalog/models/{providerName}/{modelName}", providerName, modelName)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(modelUpdateBody.toString()))
         .andExpect(status().isBadRequest());
+    // 测试意图：验证 PUT /api/ai/catalog/models/{providerName}/{modelName} 使用 body 中的 expectedVersion CAS
+    // 更新可变属性，返回 200 OK。
     JsonNode updatedModel =
         data(
             mockMvc
                 .perform(
-                    put("/api/ai/catalog/models")
-                        .param("providerName", providerName)
-                        .param("modelName", modelName)
+                    put(
+                            "/api/ai/catalog/models/{providerName}/{modelName}",
+                            providerName,
+                            modelName)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(modelUpdate)))
                 .andExpect(status().isOk())
@@ -252,12 +255,12 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertEquals(providerName, updatedModel.path("providerName").asText());
     assertEquals(modelName, updatedModel.path("name").asText());
 
+    // 测试意图：验证 PUT /api/ai/catalog/models/{providerName}/{modelName} 在 expectedVersion 过期时触发 CAS
+    // 版本冲突，返回 409 Conflict。
     modelUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
-            put("/api/ai/catalog/models")
-                .param("providerName", providerName)
-                .param("modelName", modelName)
+            put("/api/ai/catalog/models/{providerName}/{modelName}", providerName, modelName)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(modelUpdate)))
         .andExpect(status().isConflict())
@@ -318,11 +321,11 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
         .andExpect(jsonPath("$.errors.resource").value("agent_provider"));
+    // 测试意图：验证 DELETE /api/ai/catalog/models/{providerName}/{modelName}?expectedVersion=... 在被 Agent
+    // 引用时拒绝删除，返回 409 Conflict。
     mockMvc
         .perform(
-            delete("/api/ai/catalog/models")
-                .param("providerName", providerName)
-                .param("modelName", modelName)
+            delete("/api/ai/catalog/models/{providerName}/{modelName}", providerName, modelName)
                 .param("expectedVersion", "1"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
@@ -331,13 +334,29 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(delete("/api/ai/catalog/agents/{name}", agentName).param("expectedVersion", "1"))
         .andExpect(status().isNoContent());
+    // 测试意图：验证 DELETE /api/ai/catalog/models/{providerName}/{modelName}?expectedVersion=... 解除引用后成功
+    // CAS 硬删除，返回 204 NoContent。
+    mockMvc
+        .perform(
+            delete("/api/ai/catalog/models/{providerName}/{modelName}", providerName, modelName)
+                .param("expectedVersion", "1"))
+        .andExpect(status().isNoContent());
+    // 测试意图：验证无旧 alias，集合路径 /api/ai/catalog/models 不接受 PUT 与 DELETE 请求，返回 405。
+    mockMvc
+        .perform(
+            put("/api/ai/catalog/models")
+                .param("providerName", providerName)
+                .param("modelName", modelName)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(modelUpdate)))
+        .andExpect(status().isMethodNotAllowed());
     mockMvc
         .perform(
             delete("/api/ai/catalog/models")
                 .param("providerName", providerName)
                 .param("modelName", modelName)
                 .param("expectedVersion", "1"))
-        .andExpect(status().isNoContent());
+        .andExpect(status().isMethodNotAllowed());
     mockMvc
         .perform(
             delete("/api/ai/catalog/providers/{name}", providerName).param("expectedVersion", "1"))

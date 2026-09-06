@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.Data;
 
 /**
- * {@code /api/ai/chat/{id}} 的更新请求体。
+ * {@code /api/ai/chats/{chatId}} 的更新请求体。
  *
  * <p>部分更新：省略的字段保留当前值。提供 {@code title} 时必填；提供的 {@code agentName} 必须是非空白且已存在的 Agent definition
  * 名。{@link #expectedVersion} 每次更新必填。

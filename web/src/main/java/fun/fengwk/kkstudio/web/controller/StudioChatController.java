@@ -31,7 +31,7 @@ import java.util.function.Supplier;
 
 /** Chat 集合 CRUD 与 Chat owner 的 Harness Session 摘要查询。 */
 @AllArgsConstructor
-@RequestMapping("/api/ai/chat")
+@RequestMapping("/api/ai/chats")
 @RestController
 public class StudioChatController {
 
@@ -49,27 +49,29 @@ public class StudioChatController {
     return Results.created(chatService.createChat(body));
   }
 
-  @GetMapping("/{id}")
-  public Result<ChatDTO> getChat(@PathVariable("id") String id) {
-    return Results.ok(chatService.getChat(id));
+  @GetMapping("/{chatId}")
+  public Result<ChatDTO> getChat(@PathVariable("chatId") String chatId) {
+    return Results.ok(chatService.getChat(chatId));
   }
 
-  @PutMapping("/{id}")
+  @PutMapping("/{chatId}")
   public Result<ChatDTO> updateChat(
-      @PathVariable("id") String id, @RequestBody ChatUpdateDTO updateDTO) {
-    return Results.ok(chatService.updateChat(id, updateDTO));
+      @PathVariable("chatId") String chatId, @RequestBody ChatUpdateDTO updateDTO) {
+    return Results.ok(chatService.updateChat(chatId, updateDTO));
   }
 
-  @DeleteMapping("/{id}")
+  @DeleteMapping("/{chatId}")
   public Result<Void> deleteChat(
-      @PathVariable("id") String id, @RequestParam("expectedVersion") String expectedVersion) {
-    chatService.deleteChat(id, expectedVersion);
+      @PathVariable("chatId") String chatId,
+      @RequestParam("expectedVersion") String expectedVersion) {
+    chatService.deleteChat(chatId, expectedVersion);
     return Results.noContent();
   }
 
   /** 返回该 Chat 关联的 Session 摘要（按归属时间从新到旧）。 */
   @GetMapping("/{chatId}/sessions")
-  public Result<List<HarnessSessionSummaryDTO>> listChatSessions(@PathVariable String chatId) {
+  public Result<List<HarnessSessionSummaryDTO>> listChatSessions(
+      @PathVariable("chatId") String chatId) {
     UUID id = ChatIds.parseUuid(chatId, "chatId");
     return Results.ok(withRuntimeTranslation(() -> harnessQueryService.listChatSessions(id)));
   }

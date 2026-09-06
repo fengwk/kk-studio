@@ -42,13 +42,13 @@ public class StudioAgentDefinitionController {
 
   @PutMapping("/{name}")
   public Result<AgentDefinitionDTO> updateAgent(
-      @PathVariable String name, @RequestBody AgentDefinitionUpdateDTO updateDTO) {
+      @PathVariable("name") String name, @RequestBody AgentDefinitionUpdateDTO updateDTO) {
     return Results.ok(agentDefinitionService.updateAgent(name, updateDTO));
   }
 
   @DeleteMapping("/{name}")
   public Result<Void> deleteAgent(
-      @PathVariable String name, @RequestParam("expectedVersion") String expectedVersion) {
+      @PathVariable("name") String name, @RequestParam("expectedVersion") String expectedVersion) {
     agentDefinitionService.deleteAgent(name, expectedVersion);
     return Results.noContent();
   }

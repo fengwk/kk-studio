@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
+import fun.fengwk.kkstudio.share.ai.mcp.McpServerRefreshDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -114,12 +115,19 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.version").value("1"));
 
     // 5. POST /api/ai/mcp-servers/{id}/refresh (刷新)
+    // 测试意图：验证 refresh POST 改为最小 JSON body {expectedVersion} 进行 CAS 刷新，返回 200 OK 与自增 version。
+    McpServerRefreshDTO refresh = new McpServerRefreshDTO();
+    refresh.setExpectedVersion("1");
     mockMvc
-        .perform(post("/api/ai/mcp-servers/{id}/refresh", id).param("expectedVersion", "1"))
+        .perform(
+            post("/api/ai/mcp-servers/{id}/refresh", id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(refresh)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.version").value("2"));
 
     // 6. DELETE /api/ai/mcp-servers/{id} (删除)
+    // 测试意图：验证 delete 仍使用 query 参数 expectedVersion 进行 CAS 删除，返回 204 NoContent。
     mockMvc
         .perform(delete("/api/ai/mcp-servers/{id}", id).param("expectedVersion", "2"))
         .andExpect(status().isNoContent());
@@ -149,6 +157,7 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
 
     String id = data(createResult).get("id").asText();
 
+    // 测试意图：验证 PUT /api/ai/mcp-servers/{id} 在 body expectedVersion 版本过期时返回 409 Conflict。
     McpServerUpdateDTO badVersionUpdate = new McpServerUpdateDTO();
     badVersionUpdate.setTimeoutMillis(10000L);
     badVersionUpdate.setExpectedVersion("999");
@@ -158,6 +167,18 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
             put("/api/ai/mcp-servers/{id}", id)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(badVersionUpdate)))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("version_conflict"));
+
+    // 测试意图：验证 POST /api/ai/mcp-servers/{id}/refresh 在 body expectedVersion 版本过期时返回 409 Conflict。
+    McpServerRefreshDTO badVersionRefresh = new McpServerRefreshDTO();
+    badVersionRefresh.setExpectedVersion("999");
+
+    mockMvc
+        .perform(
+            post("/api/ai/mcp-servers/{id}/refresh", id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(badVersionRefresh)))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("version_conflict"));
   }
