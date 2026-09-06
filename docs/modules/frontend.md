@@ -208,11 +208,11 @@ errors；`409` 由 `isConflictError` 识别，只有 `errors.reason` 精确匹�
 | Service | 路由范围 | 规则 |
 | --- | --- | --- |
 | [agent-service.ts](../../frontend/src/shared/api/agent-service.ts) | `/ai/catalog/providers|models|agents|tools` | Provider/Model/Agent CRUD，删除使用 `expectedVersion` CAS |
-| [chat-service.ts](../../frontend/src/shared/api/chat-service.ts) | `/ai/chats` | Chat list/create/get/delete |
-| [agent-pane-service.ts](../../frontend/src/shared/api/agent-pane-service.ts) | `/harness` command batches、sessions、threads、entries、snapshot、compact | Agent Pane 的 owner-aware runtime API |
+| [chat-service.ts](../../frontend/src/shared/api/chat-service.ts) | `/ai/chats` | Chat list/create/get/update/delete 与 owner Session 查询 |
+| [mcp-server-service.ts](../../frontend/src/shared/api/mcp-server-service.ts) | `/ai/mcp-servers` | MCP Server CRUD、refresh 与 `expectedVersion` CAS |
 | [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/harness/environments`、directories | Environment READY 查询和单层 workspace directory |
-| [harness-service.ts](../../frontend/src/shared/api/harness-service.ts) | `/harness/threads` yolo、stop、approval、system prompt | Thread 运行控制 |
-| [studio-service.ts](../../frontend/src/shared/api/studio-service.ts) | `/canvases` | 自有 `canvasRequest`、strict envelope、AbortSignal、ApiError |
+| [harness-service.ts](../../frontend/src/shared/api/harness-service.ts) | `/harness/command-batches|sessions|threads` | Harness command、Session 查询、Thread 快照与运行控制 |
+| [studio-service.ts](../../frontend/src/shared/api/studio-service.ts) | `/canvases` | Canvas CRUD/命令/资源/Function Run 与 owner Session 查询；自有 `canvasRequest`、strict envelope、AbortSignal、ApiError |
 | [storage-service.ts](../../frontend/src/shared/api/storage-service.ts) | `/storage/uploads`、blob presigned URL | upload handle 生命周期和浏览器安全 header |
 | [comfyui-service.ts](../../frontend/src/shared/api/comfyui-service.ts) | workflow/run、blobId upload | path segment、header 和 upload 安全过滤 |
 | [system-settings-service.ts](../../frontend/src/shared/api/system-settings-service.ts) | `/settings`、`/settings/schema` | 聚合 GET/PUT、`expectedVersion` CAS |
@@ -484,7 +484,7 @@ headers；upload handle 只能按 upload id 删除。Blob original/preview URL �
 - run status 的 polling 集合为 `pending`、`in_progress`、`running`，terminal
   集合为 `succeeded`、`success`、`complete`、`completed`、`failed`、
   `error`、`cancelled`、`canceled`、`interrupted`；
-- file input 先走 S3 presigned upload，再提交 workflow run；download payload
+- file input 先走 Storage reserve/直传/complete，再以 `blobId + filename` 提交 workflow run；download payload
   只投影 `downloadUrl` 和 filename/name。
 
 Workflow editor/delete 是 ExtensionHost dialog contribution；页面只负责

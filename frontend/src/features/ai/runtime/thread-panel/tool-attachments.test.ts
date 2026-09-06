@@ -70,13 +70,13 @@ describe('tool-attachments', () => {
       size: 12,
       sha256: 'a'.repeat(64),
       downloadHref:
-        `/api/ai/runtime/resources/${'a'.repeat(64)}`
+        `/api/harness/resources/${'a'.repeat(64)}`
         + '?mediaType=application%2Fjson&size=12&name=result.json',
     }
     expect(toToolAttachmentSrc(fileAttachment)).toBeNull()
     expect(isPreviewableAttachment(fileAttachment)).toBe(false)
     expect(getToolAttachmentHref(fileAttachment)).toBe(
-      `/api/ai/runtime/resources/${'a'.repeat(64)}?mediaType=application%2Fjson&size=12&name=result.json`,
+      `/api/harness/resources/${'a'.repeat(64)}?mediaType=application%2Fjson&size=12&name=result.json`,
     )
     expect(formatToolAttachmentFallback(fileAttachment)).toBe('[file] result.json')
 
@@ -88,13 +88,13 @@ describe('tool-attachments', () => {
       size: 4,
       sha256: 'b'.repeat(64),
       downloadHref:
-        `/api/ai/runtime/resources/${'b'.repeat(64)}`
+        `/api/harness/resources/${'b'.repeat(64)}`
         + '?mediaType=application%2Foctet-stream&size=4&name=blob.bin',
     }
     expect(toToolAttachmentSrc(s3Attachment)).toBeNull()
     expect(isPreviewableAttachment(s3Attachment)).toBe(false)
     expect(getToolAttachmentHref(s3Attachment)).toBe(
-      `/api/ai/runtime/resources/${'b'.repeat(64)}?mediaType=application%2Foctet-stream&size=4&name=blob.bin`,
+      `/api/harness/resources/${'b'.repeat(64)}?mediaType=application%2Foctet-stream&size=4&name=blob.bin`,
     )
     expect(formatToolAttachmentFallback(s3Attachment)).toBe('[file] blob.bin')
   })

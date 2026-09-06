@@ -327,7 +327,7 @@ describe('thread realtime state', () => {
         data: 'file:///tmp/a.png',
         mime: 'image/png',
         name: 'a.png',
-        downloadHref: expect.stringContaining('/ai/runtime/resources/'),
+        downloadHref: expect.stringContaining('/harness/resources/'),
       }),
     ])
 

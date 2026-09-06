@@ -115,7 +115,7 @@ function managedResourceHref(
   if (name.trim()) {
     query.set('name', name)
   }
-  return `${apiBaseUrl}/ai/runtime/resources/${sha256}?${query}`
+  return `${apiBaseUrl}/harness/resources/${sha256}?${query}`
 }
 
 export function resourceAttachmentType(mediaType: string): ToolAttachmentType {
