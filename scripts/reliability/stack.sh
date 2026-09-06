@@ -100,7 +100,7 @@ wait_app() {
 }
 
 environment_is_ready() {
-  curl -fsS "$APP_URL/api/ai/environments" 2>/dev/null \
+  curl -fsS "$APP_URL/api/harness/environments" 2>/dev/null \
     | python3 -c '
 import json
 import sys
@@ -113,7 +113,7 @@ raise SystemExit(0 if match and match.get("status") == "READY" and match.get("re
 }
 
 print_environment_status() {
-  curl -fsS "$APP_URL/api/ai/environments" \
+  curl -fsS "$APP_URL/api/harness/environments" \
     | python3 -c '
 import json
 import sys

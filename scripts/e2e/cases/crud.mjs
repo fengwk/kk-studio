@@ -65,7 +65,7 @@ registerCase({
   id: 'crud.model.invalid_update_config',
   level: 'L1',
   title: 'Model 非法更新不破坏原配置',
-  docs: 'name identity 通过 query 指定；PUT 非法 defaultVariant => 400，随后 GET 原配置不变',
+  docs: 'name identity 通过 path 指定；PUT 非法 defaultVariant => 400，随后 GET 原配置不变',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const provider = envelopeData(
@@ -467,11 +467,11 @@ registerCase({
   id: 'crud.chat.invalid_agent_name',
   level: 'L1',
   title: 'Chat 不存在 Agent name 拒绝',
-  docs: 'POST /api/ai/chat 请求体中的 agentName 必须引用现有 Agent，否则返回 400 validation',
+  docs: 'POST /api/ai/chats 请求体中的 agentName 必须引用现有 Agent，否则返回 400 validation',
   async run(ctx) {
     await expectHttpError(
       () =>
-        ctx.call('POST', '/api/ai/chat', {
+        ctx.call('POST', '/api/ai/chats', {
           title: 'bad-agent',
           agentName: `missing-${cid().slice(0, 8)}`,
           yoloEnabled: false,
@@ -527,7 +527,7 @@ registerCase({
       )
       const updated = envelopeData(
         (
-          await ctx.call('PUT', `/api/ai/chat/${chat.id}`, {
+          await ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
             yoloEnabled: true,
             expectedVersion: chat.version,
           })
@@ -551,7 +551,7 @@ registerCase({
       // 缺 rootSettings 的 NEW_SESSION => 400（mapper requireNonNull）。
       await expectHttpError(
         () =>
-          ctx.call('POST', '/api/ai/runtime/command-batches', {
+          ctx.call('POST', '/api/harness/command-batches', {
             owner: chatOwner(chat.id),
             target: { type: 'NEW_SESSION', sessionId: cid(), threadId: cid(), yoloEnabled: false },
             commands: [userMessageCommand('missing root settings', cid())],
@@ -568,13 +568,13 @@ registerCase({
   id: 'crud.model.delete_unknown_rejected',
   level: 'L1',
   title: '删除不存在 Model 被拒绝',
-  docs: 'DELETE 使用 providerName/modelName query；未知复合 identity => 404',
+  docs: 'DELETE 使用 providerName/modelName path；未知复合 identity => 404',
   async run(ctx) {
     await expectHttpError(
       () =>
         ctx.call(
           'DELETE',
-          '/api/ai/catalog/models?providerName=missing-provider&modelName=missing-model&expectedVersion=0',
+          '/api/ai/catalog/models/missing-provider/missing-model?expectedVersion=0',
         ),
       { status: 404, messageIncludes: /not found|unknown|model/i },
     )
@@ -590,7 +590,7 @@ registerCase({
     const agent = await firstAgent(ctx)
     const chat = envelopeData(
       (
-        await ctx.call('POST', '/api/ai/chat', {
+        await ctx.call('POST', '/api/ai/chats', {
           title: 'e2e-chat',
           agentName: agent.name,
           yoloEnabled: false,
@@ -599,7 +599,7 @@ registerCase({
     )
     const updated = envelopeData(
       (
-        await ctx.call('PUT', `/api/ai/chat/${chat.id}`, {
+        await ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
           title: 'e2e-chat-upd',
           expectedVersion: chat.version,
         })
@@ -608,14 +608,14 @@ registerCase({
     assert(updated.title === 'e2e-chat-upd' && updated.agentName === agent.name, JSON.stringify(updated))
     await expectHttpError(
       () =>
-        ctx.call('PUT', `/api/ai/chat/${chat.id}`, {
+        ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
           title: '   ',
           expectedVersion: updated.version,
         }),
       { status: 400, messageIncludes: /title.*blank/i },
     )
     await deleteChat(ctx, updated)
-    await expectHttpError(() => ctx.call('GET', `/api/ai/chat/${chat.id}`), { status: 404 })
+    await expectHttpError(() => ctx.call('GET', `/api/ai/chats/${chat.id}`), { status: 404 })
   },
 })
 
@@ -623,7 +623,7 @@ registerCase({
   id: 'crud.chat.session_ownership_list',
   level: 'L1',
   title: 'Chat Session 摘要与 Session Thread 列表',
-  docs: 'NEW_SESSION 原子创建即建立 Chat owner 归属；GET /api/ai/chat/{chatId}/sessions 返回 Session 摘要（新到旧，firstMessagePreview 精确等于首条 USER 文本、threadCount=1）；同批 NEW_SESSION 幂等重放 replayed=true 且不新增 Session/Thread relation；GET /api/ai/runtime/sessions/{sessionId}/threads 返回 Thread 摘要；未知 Chat sessions => 404',
+  docs: 'NEW_SESSION 原子创建即建立 Chat owner 归属；GET /api/ai/chats/{chatId}/sessions 返回 Session 摘要（新到旧，firstMessagePreview 精确等于首条 USER 文本、threadCount=1）；同批 NEW_SESSION 幂等重放 replayed=true 且不新增 Session/Thread relation；GET /api/harness/sessions/{sessionId}/threads 返回 Thread 摘要；未知 Chat sessions => 404',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -724,7 +724,7 @@ registerCase({
       // canonical 但未知的 Chat sessions => 404。
       const unknownChatId = '00000000-0000-0000-0000-000000000999'
       await expectHttpError(
-        () => ctx.call('GET', `/api/ai/chat/${unknownChatId}/sessions`),
+        () => ctx.call('GET', `/api/ai/chats/${unknownChatId}/sessions`),
         { status: 404, messageIncludes: /unknown|not found/i },
       )
     } finally {
@@ -799,13 +799,13 @@ function modelRef(model) {
 }
 
 function modelPath(providerName, name) {
-  return `/api/ai/catalog/models?providerName=${encodeURIComponent(providerName)}&modelName=${encodeURIComponent(name)}`
+  return `/api/ai/catalog/models/${encodeURIComponent(providerName)}/${encodeURIComponent(name)}`
 }
 
 async function deleteModel(ctx, model) {
   await ctx.call(
     'DELETE',
-    `${modelPath(model.providerName, model.name)}&expectedVersion=${encodeURIComponent(model.version)}`,
+    `${modelPath(model.providerName, model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
   )
 }
 
@@ -819,6 +819,6 @@ async function deleteProvider(ctx, provider) {
 async function deleteChat(ctx, chat) {
   await ctx.call(
     'DELETE',
-    `/api/ai/chat/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+    `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
   )
 }

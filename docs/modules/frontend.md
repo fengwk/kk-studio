@@ -208,13 +208,13 @@ errors；`409` 由 `isConflictError` 识别，只有 `errors.reason` 精确匹�
 | Service | 路由范围 | 规则 |
 | --- | --- | --- |
 | [agent-service.ts](../../frontend/src/shared/api/agent-service.ts) | `/ai/catalog/providers|models|agents|tools` | Provider/Model/Agent CRUD，删除使用 `expectedVersion` CAS |
-| [chat-service.ts](../../frontend/src/shared/api/chat-service.ts) | `/ai/chat` | Chat list/create/get/delete |
-| [agent-pane-service.ts](../../frontend/src/shared/api/agent-pane-service.ts) | command batches、sessions、threads、entries、snapshot、compact | Agent Pane 的 owner-aware runtime API |
-| [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/ai/environment`、directories | Environment READY 查询和单层 workspace directory |
-| [harness-service.ts](../../frontend/src/shared/api/harness-service.ts) | yolo、stop、approval、system prompt | Thread 运行控制 |
+| [chat-service.ts](../../frontend/src/shared/api/chat-service.ts) | `/ai/chats` | Chat list/create/get/delete |
+| [agent-pane-service.ts](../../frontend/src/shared/api/agent-pane-service.ts) | `/harness` command batches、sessions、threads、entries、snapshot、compact | Agent Pane 的 owner-aware runtime API |
+| [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/harness/environments`、directories | Environment READY 查询和单层 workspace directory |
+| [harness-service.ts](../../frontend/src/shared/api/harness-service.ts) | `/harness/threads` yolo、stop、approval、system prompt | Thread 运行控制 |
 | [studio-service.ts](../../frontend/src/shared/api/studio-service.ts) | `/canvases` | 自有 `canvasRequest`、strict envelope、AbortSignal、ApiError |
 | [storage-service.ts](../../frontend/src/shared/api/storage-service.ts) | `/storage/uploads`、blob presigned URL | upload handle 生命周期和浏览器安全 header |
-| [comfyui-service.ts](../../frontend/src/shared/api/comfyui-service.ts) | workflow/run、S3 presigned upload | path segment、header 和 upload 安全过滤 |
+| [comfyui-service.ts](../../frontend/src/shared/api/comfyui-service.ts) | workflow/run、blobId upload | path segment、header 和 upload 安全过滤 |
 | [system-settings-service.ts](../../frontend/src/shared/api/system-settings-service.ts) | `/settings`、`/settings/schema` | 聚合 GET/PUT、`expectedVersion` CAS |
 
 `src/shared` 的 ESLint 规则禁止 import `@/features`；Service、contract 和
@@ -279,7 +279,7 @@ sequenceDiagram
   participant C as Composer
   participant P as Pane controller
   participant S as Snapshot query
-  participant A as /api/ai/runtime/command-batches
+  participant A as /api/harness/command-batches
   participant T as Thread mailbox
 
   C->>P: ordered TEXT/ATTACHMENT/RESOURCE parts

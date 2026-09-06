@@ -359,14 +359,14 @@ Platform storage adapter。Canvas adapter 不直接拼 S3 key，也不直接管�
 ### ComfyUI
 
 `ComfyuiWorkflowApiService`管理 `comfyui_workflow_api`卡片；`ComfyuiWorkflowApiBindingsParser`严格验证 workflow JSON、
-parameter/file binding、node/input 存在性、value type 和 S3 object key。只有 enabled workflow 才能进入运行服务。
+parameter/file binding、node/input 存在性、value type 和 blobId。只有 enabled workflow 才能进入运行服务。
 
 `ComfyuiRuntimeService`是无状态 runtime：
 
-1. 按 `apiName`读取 enabled binding 并复制 Workflow；
+1. 按 `workflowId`读取 enabled binding 并复制 Workflow；
 2. 校验 parameters/files，按 JsonPath selector 和 value type 写入参数；
-3. 对 file binding 从 S3 受 `integrations.comfyui.maxInputFileBytes`限制地读取，再上传到 ComfyUI；
-4. submit 后返回 `runId == prompt/job id`；
+3. 对 file binding 从全局 Storage 按 blobId 受 `integrations.comfyui.maxInputFileBytes`限制地读取，再上传到 ComfyUI；
+4. submit 后以 202 返回 `runId == prompt/job id`；
 5. get/cancel/download 直接查询 ComfyUI job；输出文件按 node/media/index 精确解析，运行状态不落本地表。
 
 ComfyUI client 是否装配由启动时的 `SystemSettings.integrations.comfyui.enabled`决定。base URL、timeout、

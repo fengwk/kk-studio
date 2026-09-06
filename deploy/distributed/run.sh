@@ -106,7 +106,7 @@ wait_http() {
 environment_status() {
   local app_url=$1
   local env_name=$2
-  curl -fsS "$app_url/api/ai/environments" 2>/dev/null | python3 -c '
+  curl -fsS "$app_url/api/harness/environments" 2>/dev/null | python3 -c '
 import json
 import sys
 

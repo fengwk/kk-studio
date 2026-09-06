@@ -42,7 +42,7 @@ flowchart LR
     HarnessBuiltin[Harness Builtin]
     PG[(PostgreSQL<br/>durable truth)]
     S3[(S3<br/>blob bytes)]
-    Env["/api/ai/environment/daemon/v1<br/>Environment Daemon"]
+    Env["/api/harness/environment-daemon/v1<br/>Environment Daemon"]
     Trusted[Trusted contributor JARs]
 
     Browser --> Frontend
@@ -239,7 +239,7 @@ Common、Builtin 模块。
 ### Harness：Command 到 Agent Loop
 
 ```text
-POST /api/ai/runtime/command-batches
+POST /api/harness/command-batches
   -> Web 严格解析 owner / target / UUID / decimal cursor
   -> HarnessCommandAcceptanceOrchestrator
        owner KEY SHARE + owner/session relation + attachment materialize
@@ -275,7 +275,7 @@ POST /api/canvases/{canvasId}/commands
   -> CanvasStore / command dedup
   -> Canvas Patch + canvas_document.version
 
-POST .../nodes/{nodeId}/runs
+POST .../nodes/{nodeId}/function-run
   -> CanvasFunctionRunTransactions.start
   -> freeze config / reference facts / target resource IDs
   -> canvas_function_run READY + pins + version

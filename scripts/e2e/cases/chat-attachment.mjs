@@ -188,7 +188,7 @@ registerCase({
       { status: 400 },
     )
     await expectHttpError(
-      () => ctx.call('GET', `/api/ai/runtime/threads/${rejectedThreadId}/snapshot`),
+      () => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`),
       { status: 404 },
     )
 
@@ -480,7 +480,7 @@ registerCase({
         if (!chat?.id) return
         await ctx.call(
           'DELETE',
-          `/api/ai/chat/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+          `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
         )
       })
       await cleanup('agent', cleanupErrors, async () => {
@@ -494,7 +494,7 @@ registerCase({
         if (!model?.providerName || !model?.name) return
         await ctx.call(
           'DELETE',
-          `/api/ai/catalog/models?providerName=${encodeURIComponent(model.providerName)}&modelName=${encodeURIComponent(model.name)}&expectedVersion=${encodeURIComponent(model.version)}`,
+          `/api/ai/catalog/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
         )
       })
       await cleanup('provider', cleanupErrors, async () => {

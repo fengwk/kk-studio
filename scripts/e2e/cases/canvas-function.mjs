@@ -58,7 +58,7 @@ registerCase({
 
     const { json: startJson } = await ctx.call(
       'POST',
-      `/api/canvases/${canvas.id}/nodes/${node.id}/runs`,
+      `/api/canvases/${canvas.id}/nodes/${node.id}/function-run`,
       { requestId: cid() },
     )
     let run = envelopeData(startJson)
@@ -70,7 +70,7 @@ registerCase({
       await sleep(250)
       const { json } = await ctx.call(
         'GET',
-        `/api/canvases/${canvas.id}/nodes/${node.id}/run`,
+        `/api/canvases/${canvas.id}/nodes/${node.id}/function-run`,
       )
       run = envelopeData(json)
     }

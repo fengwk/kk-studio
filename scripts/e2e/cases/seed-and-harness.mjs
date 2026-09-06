@@ -193,7 +193,7 @@ registerCase({
   id: 'thread.new_session_submission_atomic',
   level: 'L1',
   title: 'NEW_SESSION 原子创建返回完整 accepted 快照',
-  docs: 'POST /api/ai/runtime/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、version >= 1；accepted command 的 sequence=1；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
+  docs: 'POST /api/harness/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、version >= 1；accepted command 的 sequence=1；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -829,7 +829,7 @@ registerCase({
   id: 'thread.session_entry_tree',
   level: 'L1',
   title: '完整 Session Entry Tree 保留非当前历史分支',
-  docs: 'GET /api/ai/runtime/sessions/{sessionId}/entries 返回 Session 全部 immutable Entries；ENTRY 创建新 Thread 形成分叉后，snapshot 仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系；listSessionThreads 反映两条 Thread',
+  docs: 'GET /api/harness/sessions/{sessionId}/entries 返回 Session 全部 immutable Entries；ENTRY 创建新 Thread 形成分叉后，snapshot 仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系；listSessionThreads 反映两条 Thread',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1042,7 +1042,7 @@ registerCase({
     )
     // rejectedThreadId 未创建：snapshot 404。
     await expectHttpError(
-      () => ctx.call('GET', `/api/ai/runtime/threads/${rejectedThreadId}/snapshot`),
+      () => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`),
       { status: 404 },
     )
   },
@@ -1348,7 +1348,7 @@ registerCase({
   id: 'thread.yolo_direct_update',
   level: 'L1',
   title: 'Thread YOLO 直接控制面（version CAS 与同值 no-op）',
-  docs: 'PUT /api/ai/runtime/threads/{id}/yolo {expectedVersion,yoloEnabled} => 200 权威 Thread；同值请求在任何 CAS 之前 no-op 成功（过期 version 不冲突、version 零触碰）；值变化时 version 精确 +1，过期 version => 409 STALE_VERSION；不创建 Command/Entry/Work',
+  docs: 'PUT /api/harness/threads/{id}/yolo {expectedVersion,yoloEnabled} => 200 权威 Thread；同值请求在任何 CAS 之前 no-op 成功（过期 version 不冲突、version 零触碰）；值变化时 version 精确 +1，过期 version => 409 STALE_VERSION；不创建 Command/Entry/Work',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1431,11 +1431,11 @@ registerCase({
   id: 'thread_snapshot.unknown_thread_404',
   level: 'L1',
   title: '未知 Thread snapshot 404',
-  docs: 'GET /api/ai/runtime/threads/{canonical unknown UUID}/snapshot => 404 unknown thread',
+  docs: 'GET /api/harness/threads/{canonical unknown UUID} => 404 unknown thread',
   async run(ctx) {
     const unknownThreadId = '00000000-0000-0000-0000-000000000999'
     await expectHttpError(
-      () => ctx.call('GET', `/api/ai/runtime/threads/${unknownThreadId}/snapshot`),
+      () => ctx.call('GET', `/api/harness/threads/${unknownThreadId}`),
       { status: 404, messageIncludes: new RegExp(`thread ${unknownThreadId} does not exist`) },
     )
   },

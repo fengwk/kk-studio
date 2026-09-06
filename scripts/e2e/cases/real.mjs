@@ -239,7 +239,7 @@ registerCase({
         try {
           await ctx.call(
             'DELETE',
-            `/api/ai/chat/${chat.id}?expectedVersion=${encodeURIComponent(chat.version)}`,
+            `/api/ai/chats/${chat.id}?expectedVersion=${encodeURIComponent(chat.version)}`,
           )
         } catch {
           // 保留主断言失败。
@@ -600,11 +600,11 @@ registerCase({
   level: 'L4',
   title: 'Environment Root 单层目录浏览 API',
   requires: ['tools'],
-  docs: 'GET /api/ai/environments/{id}/directories（control-plane 只读）：缺省 path="." 浏览 root——canonical 相对 wire path、displayPath 等于请求 path 的最后一段（root 为 "."，只作展示、绝不暴露 daemon 本地绝对路径）、root 的 parentPath="."、truncated 布尔、gitBranch 可空、entries 只含直属子目录（{name,path}：name 是目录名且等于 path 最后一段，path 是请求目录的直接子路径）；显式 path="." 与缺省一致；".." 段 400 INVALID_PATH、不存在目录 404 NOT_FOUND、非法环境 ID 400',
+  docs: 'GET /api/harness/environments/{id}/directories（control-plane 只读）：缺省 path="." 浏览 root——canonical 相对 wire path、displayPath 等于请求 path 的最后一段（root 为 "."，只作展示、绝不暴露 daemon 本地绝对路径）、root 的 parentPath="."、truncated 布尔、gitBranch 可空、entries 只含直属子目录（{name,path}：name 是目录名且等于 path 最后一段，path 是请求目录的直接子路径）；显式 path="." 与缺省一致；".." 段 400 INVALID_PATH、不存在目录 404 NOT_FOUND、非法环境 ID 400',
   async run(ctx) {
     const envId = ctx.vars.daemonEnvironment?.id
     assert(envId, 'daemonEnvironment must have canonical UUID id')
-    const base = `/api/ai/environments/${encodeURIComponent(envId)}/directories`
+    const base = `/api/harness/environments/${encodeURIComponent(envId)}/directories`
     const { json } = await ctx.call('GET', base)
     const dir = envelopeData(json)
     assert(dir?.path === '.', JSON.stringify(json))
@@ -653,7 +653,7 @@ registerCase({
     assert(String(missing.body).includes('NOT_FOUND'), missing.body)
     // 非法环境 ID（非 UUID）=> 400，不进入 daemon。
     await expectHttpError(
-      () => ctx.call('GET', '/api/ai/environments/Not-Canonical/directories'),
+      () => ctx.call('GET', '/api/harness/environments/Not-Canonical/directories'),
       { status: 400 },
     )
   },
@@ -939,8 +939,8 @@ registerCase({
       }
       const managed = resources[0]
       const { json: signedJson } = await ctx.call(
-        'GET',
-        `/api/storage/blobs/${managed.blobId}/presigned-original`,
+        'POST',
+        `/api/storage/blobs/${managed.blobId}/download-url`,
       )
       const signed = envelopeData(signedJson)
       assert(signed.method === 'GET', JSON.stringify(signed))
@@ -982,7 +982,7 @@ registerCase({
         try {
           await ctx.call(
             'DELETE',
-            `/api/ai/chat/${chat.id}?expectedVersion=${encodeURIComponent(chat.version)}`,
+            `/api/ai/chats/${chat.id}?expectedVersion=${encodeURIComponent(chat.version)}`,
           )
         } catch {
           // Preserve the primary assertion failure.

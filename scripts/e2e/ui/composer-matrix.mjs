@@ -1500,10 +1500,8 @@ async function cleanupFixture(state) {
     if (!state.model) return
     await deleteCatalogResource(
       state.apiCtx,
-      '/api/ai/catalog/models'
-        + `?providerName=${encodeURIComponent(state.model.providerName)}`
-        + `&modelName=${encodeURIComponent(state.model.name)}`
-        + `&expectedVersion=${encodeURIComponent(state.model.version)}`,
+      `/api/ai/catalog/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}`
+        + `?expectedVersion=${encodeURIComponent(state.model.version)}`,
     )
   })
   await cleanupStep(errors, 'provider', async () => {
@@ -1531,7 +1529,7 @@ async function deleteChat(apiCtx, chat) {
   if (!chat?.id) return
   const currentResponse = await apiCtx.call(
     'GET',
-    `/api/ai/chat/${encodeURIComponent(chat.id)}`,
+    `/api/ai/chats/${encodeURIComponent(chat.id)}`,
   )
   if (currentResponse.status === 404) return
   assert(
@@ -1541,7 +1539,7 @@ async function deleteChat(apiCtx, chat) {
   const current = envelopeData(currentResponse.json)
   const response = await apiCtx.call(
     'DELETE',
-    `/api/ai/chat/${encodeURIComponent(chat.id)}`
+    `/api/ai/chats/${encodeURIComponent(chat.id)}`
       + `?expectedVersion=${encodeURIComponent(current.version)}`,
   )
   assert(
