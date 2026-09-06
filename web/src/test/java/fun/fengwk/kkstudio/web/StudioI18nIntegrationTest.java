@@ -76,7 +76,7 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
       throws Exception {
     mockMvc
         .perform(
-            get("/api/ai/runtime/sessions/{sessionId}/threads", "not-a-number")
+            get("/api/harness/sessions/{sessionId}/threads", "not-a-number")
                 .header(HttpHeaders.ACCEPT_LANGUAGE, language))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))

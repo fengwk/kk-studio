@@ -84,7 +84,7 @@ class StudioEnvironmentDirectoryControllerTest {
         .thenReturn(
             CompletableFuture.completedFuture(new EnvironmentDirectoryListResult.Loaded(dto)));
 
-    performAsync(get("/api/ai/environments/" + ENV_ID + "/directories").param("path", "src"))
+    performAsync(get("/api/harness/environments/" + ENV_ID + "/directories").param("path", "src"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.path").value("src"))
         .andExpect(jsonPath("$.data.displayPath").value("src"))
@@ -115,7 +115,7 @@ class StudioEnvironmentDirectoryControllerTest {
             SystemSettings.StorageMedia.DEFAULT,
             SystemSettings.Advanced.DEFAULT));
 
-    performAsync(get("/api/ai/environments/" + ENV_ID + "/directories").param("path", "src"))
+    performAsync(get("/api/harness/environments/" + ENV_ID + "/directories").param("path", "src"))
         .andExpect(status().isOk());
 
     verify(directoryLister).listDirectory(ENV_ID, "src", Duration.ofMillis(2_000));
@@ -128,7 +128,7 @@ class StudioEnvironmentDirectoryControllerTest {
             CompletableFuture.completedFuture(
                 new EnvironmentDirectoryListResult.Loaded(emptyListing("."))));
 
-    performAsync(get("/api/ai/environments/" + ENV_ID + "/directories"))
+    performAsync(get("/api/harness/environments/" + ENV_ID + "/directories"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.path").value("."));
 
@@ -190,20 +190,20 @@ class StudioEnvironmentDirectoryControllerTest {
   void mapsExceptionalCompletionAfterAsyncDispatch() throws Exception {
     when(directoryLister.listDirectory(any(), any(), any()))
         .thenReturn(CompletableFuture.failedFuture(new TimeoutException("daemon timed out")));
-    performAsync(get("/api/ai/environments/" + ENV_ID + "/directories").param("path", "src"))
+    performAsync(get("/api/harness/environments/" + ENV_ID + "/directories").param("path", "src"))
         .andExpect(status().isGatewayTimeout())
         .andExpect(jsonPath("$.errorCode.code").value("TIMEOUT"));
 
     when(directoryLister.listDirectory(any(), any(), any()))
         .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("transport failed")));
-    performAsync(get("/api/ai/environments/" + ENV_ID + "/directories").param("path", "src"))
+    performAsync(get("/api/harness/environments/" + ENV_ID + "/directories").param("path", "src"))
         .andExpect(status().isBadGateway())
         .andExpect(jsonPath("$.errorCode.code").value("IO_ERROR"));
   }
 
   @Test
   void invalidEnvironmentIdMapsToBadRequestWithoutCallingLister() throws Exception {
-    performAsync(get("/api/ai/environments/Not-Canonical-UUID/directories"))
+    performAsync(get("/api/harness/environments/Not-Canonical-UUID/directories"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.errorCode.code").value("INVALID_ENVIRONMENT_ID"));
     verify(directoryLister, never()).listDirectory(any(), any(), any());
@@ -216,7 +216,7 @@ class StudioEnvironmentDirectoryControllerTest {
             CompletableFuture.completedFuture(
                 new EnvironmentDirectoryListResult.Failed(code, message)));
     return performAsync(
-        get("/api/ai/environments/" + ENV_ID + "/directories").param("path", "src"));
+        get("/api/harness/environments/" + ENV_ID + "/directories").param("path", "src"));
   }
 
   private ResultActions performAsync(MockHttpServletRequestBuilder requestBuilder)

@@ -26,7 +26,7 @@ import java.util.Objects;
  * <p>HTTP mapper 只产生产品用户 batch；owner 授权、附件物化和 Runtime 接受由共享应用服务在同一事务内完成。
  */
 @RestController
-@RequestMapping("/api/ai/runtime/command-batches")
+@RequestMapping("/api/harness/command-batches")
 public class StudioHarnessCommandBatchController {
 
   private final HarnessCommandAcceptanceOrchestrator acceptanceService;

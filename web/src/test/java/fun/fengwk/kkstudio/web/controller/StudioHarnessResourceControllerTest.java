@@ -39,7 +39,7 @@ class StudioHarnessResourceControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            get("/api/ai/runtime/resources/{sha256}", SHA)
+            get("/api/harness/resources/{sha256}", SHA)
                 .param("mediaType", "text/plain")
                 .param("size", "3")
                 .param("name", "result.txt"))

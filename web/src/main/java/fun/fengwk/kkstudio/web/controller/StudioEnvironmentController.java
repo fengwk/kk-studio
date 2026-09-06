@@ -17,13 +17,14 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 
 import java.util.List;
 
 /** 稳定 Environment Card 管理 REST API。 */
 @AllArgsConstructor
-@RequestMapping("/api/ai/environments")
+@RequestMapping("/api/harness/environments")
 @RestController
 public class StudioEnvironmentController {
 
@@ -34,34 +35,36 @@ public class StudioEnvironmentController {
     return Results.ok(environmentService.list());
   }
 
-  @GetMapping("/{id}")
-  public Result<EnvironmentCardDTO> getEnvironment(@PathVariable String id) {
-    return Results.ok(environmentService.get(EnvironmentId.parse(id)));
+  @GetMapping("/{environmentId}")
+  public Result<EnvironmentCardDTO> getEnvironment(@PathVariable String environmentId) {
+    return Results.ok(environmentService.get(EnvironmentId.parse(environmentId)));
   }
 
   @PostMapping
   public Result<EnvironmentCardDTO> createEnvironment(@RequestBody EnvironmentCreateDTO request) {
-    return Results.ok(environmentService.create(request));
+    return Results.created(environmentService.create(request));
   }
 
-  @PutMapping("/{id}")
+  @PutMapping("/{environmentId}")
   public Result<EnvironmentCardDTO> updateEnvironment(
-      @PathVariable String id,
-      @RequestParam String expectedVersion,
-      @RequestBody EnvironmentUpdateDTO request) {
-    return Results.ok(environmentService.update(EnvironmentId.parse(id), request, expectedVersion));
+      @PathVariable String environmentId, @RequestBody EnvironmentUpdateDTO request) {
+    String expectedVersion = request != null ? request.getExpectedVersion() : null;
+    return Results.ok(
+        environmentService.update(EnvironmentId.parse(environmentId), request, expectedVersion));
   }
 
-  @PostMapping("/{id}/registration-token")
+  @PostMapping("/{environmentId}/registration-token")
   public Result<EnvironmentCardDTO> rotateToken(
-      @PathVariable String id, @RequestParam String expectedVersion) {
-    return Results.ok(environmentService.rotateToken(EnvironmentId.parse(id), expectedVersion));
+      @PathVariable String environmentId, @RequestBody EnvironmentRotateTokenDTO request) {
+    String expectedVersion = request != null ? request.getExpectedVersion() : null;
+    return Results.ok(
+        environmentService.rotateToken(EnvironmentId.parse(environmentId), expectedVersion));
   }
 
-  @DeleteMapping("/{id}")
+  @DeleteMapping("/{environmentId}")
   public Result<Void> deleteEnvironment(
-      @PathVariable String id, @RequestParam String expectedVersion) {
-    environmentService.delete(EnvironmentId.parse(id), expectedVersion);
-    return Results.ok();
+      @PathVariable String environmentId, @RequestParam String expectedVersion) {
+    environmentService.delete(EnvironmentId.parse(environmentId), expectedVersion);
+    return Results.noContent();
   }
 }

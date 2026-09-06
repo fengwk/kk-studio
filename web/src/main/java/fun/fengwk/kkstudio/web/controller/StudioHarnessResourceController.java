@@ -23,7 +23,7 @@ import java.util.Objects;
  * URI。响应统一作为 attachment 下载并禁止 MIME sniff，避免不可信 Tool 输出在应用同源下执行。
  */
 @RestController
-@RequestMapping("/api/ai/runtime/resources")
+@RequestMapping("/api/harness/resources")
 public class StudioHarnessResourceController {
 
   private static final String IMMUTABLE_PRIVATE_CACHE = "private, max-age=31536000, immutable";

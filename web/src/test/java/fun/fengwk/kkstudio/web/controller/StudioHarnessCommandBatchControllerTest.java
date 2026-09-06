@@ -77,7 +77,7 @@ class StudioHarnessCommandBatchControllerTest {
     for (String target : List.of(newSessionTarget(), entryTarget(), threadTarget())) {
       mockMvc
           .perform(
-              post("/api/ai/runtime/command-batches")
+              post("/api/harness/command-batches")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(batch(target)))
           .andExpect(status().isAccepted())
@@ -127,14 +127,14 @@ class StudioHarnessCommandBatchControllerTest {
                 .formatted(SESSION_ID, THREAD_ID, rootSettings(), ENTRY_ID));
     mockMvc
         .perform(
-            post("/api/ai/runtime/command-batches")
+            post("/api/harness/command-batches")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(forbidden))
         .andExpect(status().isBadRequest());
 
     mockMvc
         .perform(
-            post("/api/ai/runtime/command-batches")
+            post("/api/harness/command-batches")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     batch(
@@ -163,7 +163,7 @@ class StudioHarnessCommandBatchControllerTest {
 
     mockMvc
         .perform(
-            post("/api/ai/runtime/command-batches")
+            post("/api/harness/command-batches")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(custom))
         .andExpect(status().isBadRequest());
@@ -195,7 +195,7 @@ class StudioHarnessCommandBatchControllerTest {
             """);
     mockMvc
         .perform(
-            post("/api/ai/runtime/command-batches")
+            post("/api/harness/command-batches")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(wrongOrder))
         .andExpect(status().isBadRequest());
@@ -213,7 +213,7 @@ class StudioHarnessCommandBatchControllerTest {
 
     mockMvc
         .perform(
-            post("/api/ai/runtime/command-batches")
+            post("/api/harness/command-batches")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(batch(threadTarget())))
         .andExpect(status().isConflict())
@@ -238,7 +238,7 @@ class StudioHarnessCommandBatchControllerTest {
 
     mockMvc
         .perform(
-            post("/api/ai/runtime/command-batches")
+            post("/api/harness/command-batches")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(payload))
         .andExpect(status().isBadRequest())
@@ -257,7 +257,7 @@ class StudioHarnessCommandBatchControllerTest {
     // 意图：验证畸形 JSON 请求体安全回退通用 detail 且不泄露 parser 细节，不调用底层服务。
     mockMvc
         .perform(
-            post("/api/ai/runtime/command-batches")
+            post("/api/harness/command-batches")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{ invalid json"))
         .andExpect(status().isBadRequest())

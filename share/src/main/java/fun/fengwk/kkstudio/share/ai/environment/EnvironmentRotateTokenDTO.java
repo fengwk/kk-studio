@@ -3,12 +3,9 @@ package fun.fengwk.kkstudio.share.ai.environment;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
-/** 更新 Environment 请求 DTO。 */
+/** 轮换 Environment registrationToken 请求 DTO。 */
 @Data
-public class EnvironmentUpdateDTO {
-
-  /** 必填新环境名称（<= 64 字符，无空白或斜杠）。 */
-  private String name;
+public class EnvironmentRotateTokenDTO {
 
   /** 期望的乐观锁版本。 */
   private String expectedVersion;

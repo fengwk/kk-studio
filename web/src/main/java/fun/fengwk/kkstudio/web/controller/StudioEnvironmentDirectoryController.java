@@ -48,12 +48,12 @@ public class StudioEnvironmentDirectoryController {
    * 浏览 Environment Root 下单层目录；{@code path} 缺省为 {@code '.'}（root），wire 使用 {@code '/'} 分隔的 canonical
    * 相对路径。
    */
-  @GetMapping("/api/ai/environments/{id}/directories")
+  @GetMapping("/api/harness/environments/{environmentId}/directories")
   public CompletionStage<ResponseEntity<Result<?>>> listDirectories(
-      @PathVariable String id, @RequestParam(defaultValue = ".") String path) {
-    EnvironmentId environmentId;
+      @PathVariable String environmentId, @RequestParam(defaultValue = ".") String path) {
+    EnvironmentId parsedEnvironmentId;
     try {
-      environmentId = EnvironmentId.parse(id);
+      parsedEnvironmentId = EnvironmentId.parse(environmentId);
     } catch (IllegalArgumentException error) {
       return CompletableFuture.completedFuture(
           errorResponse(HttpStatus.BAD_REQUEST, "INVALID_ENVIRONMENT_ID", error.getMessage()));
@@ -62,7 +62,7 @@ public class StudioEnvironmentDirectoryController {
     try {
       future =
           directoryLister.listDirectory(
-              environmentId,
+              parsedEnvironmentId,
               path,
               Duration.ofMillis(snapshot.get().environment().directoryListTimeoutMillis()));
     } catch (RuntimeException error) {

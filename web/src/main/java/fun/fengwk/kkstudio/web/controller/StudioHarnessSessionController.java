@@ -25,7 +25,7 @@ import java.util.function.Supplier;
 
 /** Runtime Session 的只读 Thread 摘要与完整 Entry tree 查询。 */
 @RestController
-@RequestMapping("/api/ai/runtime/sessions")
+@RequestMapping("/api/harness/sessions")
 public class StudioHarnessSessionController {
 
   private final HarnessOwnerQueryService harnessQueryService;
