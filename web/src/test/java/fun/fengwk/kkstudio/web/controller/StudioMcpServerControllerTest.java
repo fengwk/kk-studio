@@ -206,6 +206,36 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
     assertFalse(responseBody.contains("user:secret@example.com"));
   }
 
+  /** 测试意图：验证 POST /api/ai/mcp-servers/{id}/refresh 携带未知额外字段时 fail-closed 拒绝并返回 400 BadRequest。 */
+  @Test
+  public void rejectsUnknownFieldsOnRefreshWithBadRequest() throws Exception {
+    fakeServer.addTool("echo", "Echo text", "{}");
+
+    String name = "rej_mcp_" + System.currentTimeMillis();
+    McpServerCreateDTO create = new McpServerCreateDTO();
+    create.setName(name);
+    create.setUrl(fakeServer.endpointUrl());
+    create.setTimeoutMillis(5000L);
+
+    MvcResult createResult =
+        mockMvc
+            .perform(
+                post("/api/ai/mcp-servers")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(create)))
+            .andExpect(status().isCreated())
+            .andReturn();
+
+    String id = data(createResult).get("id").asText();
+
+    mockMvc
+        .perform(
+            post("/api/ai/mcp-servers/{id}/refresh", id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"0\",\"extraField\":\"forbidden\"}"))
+        .andExpect(status().isBadRequest());
+  }
+
   private JsonNode data(MvcResult result) throws Exception {
     return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
   }
