@@ -14,6 +14,7 @@ import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.S3PresignService;
+import fun.fengwk.kkstudio.platform.storage.S3PresignedUrl;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
@@ -32,7 +33,6 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageMediaFacts;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
-import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
@@ -157,7 +157,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
 
     StoragePresignedUrlDTO presignedPut = null;
     if (outcome.blobId == null) {
-      S3PresignedResponseDTO signed =
+      S3PresignedUrl signed =
           s3PresignService.presignChecksummedCreateOnlyUpload(
               StorageObjectKeys.uploadOriginal(uploadId),
               mediaType,

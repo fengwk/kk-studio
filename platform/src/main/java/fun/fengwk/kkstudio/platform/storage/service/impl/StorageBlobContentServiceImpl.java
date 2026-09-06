@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.storage.service.impl;
 
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -24,7 +23,6 @@ import java.util.UUID;
  *
  * @author fengwk
  */
-@Slf4j
 public class StorageBlobContentServiceImpl implements StorageBlobContentService {
 
   private final StorageBlobManager blobManager;

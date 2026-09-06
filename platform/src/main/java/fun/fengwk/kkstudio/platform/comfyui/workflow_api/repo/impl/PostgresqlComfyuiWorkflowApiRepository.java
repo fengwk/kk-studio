@@ -46,11 +46,6 @@ public class PostgresqlComfyuiWorkflowApiRepository implements ComfyuiWorkflowAp
   }
 
   @Override
-  public ComfyuiWorkflowApi getEnabledByApiName(String apiName) {
-    return convert(comfyuiWorkflowApiMapper.getByApiNameAndEnabled(apiName, true));
-  }
-
-  @Override
   public boolean create(ComfyuiWorkflowApi row) {
     return comfyuiWorkflowApiMapper.insert(convert(row)) == 1;
   }
