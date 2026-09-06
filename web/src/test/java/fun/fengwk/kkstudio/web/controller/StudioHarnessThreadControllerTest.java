@@ -40,7 +40,7 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 import java.util.List;
 import java.util.UUID;
 
-/** Harness Thread 控制/查询 API：snapshot availability、compact、yolo、stop 与 approval。 */
+/** Harness Thread 控制/查询 API：snapshot availability、compact、yolo、stop、approval 与 system-prompt。 */
 class StudioHarnessThreadControllerTest {
 
   private static UUID id(long value) {
@@ -69,6 +69,7 @@ class StudioHarnessThreadControllerTest {
             .build();
   }
 
+  /** 意图：验证 GET /api/harness/threads/{threadId} 折叠快照查询路径并投影 manualCompaction 状态。 */
   @Test
   void snapshotProjectsManualCompactionAvailabilityFromHarnessRuntime() throws Exception {
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
@@ -78,7 +79,7 @@ class StudioHarnessThreadControllerTest {
                 ManualCompactionAvailability.DisabledReason.BELOW_MINIMUM));
 
     mockMvc
-        .perform(get("/api/ai/runtime/threads/" + idText(1) + "/snapshot"))
+        .perform(get("/api/harness/threads/" + idText(1)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.version").value("3"))
         .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
@@ -86,6 +87,9 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.manualCompaction.disabledReason").value("BELOW_MINIMUM"));
   }
 
+  /**
+   * 意图：验证 POST /api/harness/threads/{threadId}/compact 调用受 version 保护的手动压缩并返回 HTTP 202 Accepted。
+   */
   @Test
   void compactCallsInjectedHarnessRuntimeWithVersionFenceAndMapsCommitResult() throws Exception {
     when(runtime.compactThread(any(CompactThreadCommand.class)))
@@ -94,10 +98,10 @@ class StudioHarnessThreadControllerTest {
 
     mockMvc
         .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/compact")
+            post("/api/harness/threads/" + idText(1) + "/compact")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"3\"}"))
-        .andExpect(status().isOk())
+        .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
         .andExpect(jsonPath("$.data.turnStartEntryId").value(idText(2)))
         .andExpect(jsonPath("$.data.modelInvocationId").value(nullValue()));
@@ -109,6 +113,7 @@ class StudioHarnessThreadControllerTest {
     assertEquals(3L, captor.getValue().expectedVersion());
   }
 
+  /** 意图：验证手动压缩冲突时正确映射 MANUAL_COMPACTION_UNAVAILABLE 错误。 */
   @Test
   void compactConflictPreservesManualUnavailableReason() throws Exception {
     when(runtime.compactThread(any(CompactThreadCommand.class)))
@@ -119,24 +124,26 @@ class StudioHarnessThreadControllerTest {
 
     mockMvc
         .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/compact")
+            post("/api/harness/threads/" + idText(1) + "/compact")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"3\"}"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.errors.reason").value("MANUAL_COMPACTION_UNAVAILABLE"));
   }
 
+  /** 意图：验证手动压缩拒绝非字符串 version。 */
   @Test
   void compactRejectsNonStringVersionAtTheHttpBoundary() throws Exception {
     mockMvc
         .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/compact")
+            post("/api/harness/threads/" + idText(1) + "/compact")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":3}"))
         .andExpect(status().isBadRequest());
     verify(runtime, never()).compactThread(any(CompactThreadCommand.class));
   }
 
+  /** 意图：验证 PUT /api/harness/threads/{threadId}/yolo 执行 CAS 更新并返回权威当前 Thread。 */
   @Test
   void yoloCarriesVersionCasAndReturnsCurrentThread() throws Exception {
     when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
@@ -145,7 +152,7 @@ class StudioHarnessThreadControllerTest {
 
     mockMvc
         .perform(
-            put("/api/ai/runtime/threads/" + idText(1) + "/yolo")
+            put("/api/harness/threads/" + idText(1) + "/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
         .andExpect(status().isOk())
@@ -158,6 +165,7 @@ class StudioHarnessThreadControllerTest {
     assertEquals(3L, captor.getValue().expectedVersion());
   }
 
+  /** 意图：验证 POST stop 与 PUT tool approval 路径与方法映射正常工作。 */
   @Test
   void stopAndApprovalRoutesRemainAvailable() throws Exception {
     when(runtime.stop(any()))
@@ -173,7 +181,7 @@ class StudioHarnessThreadControllerTest {
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
     mockMvc
         .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/stop")
+            post("/api/harness/threads/" + idText(1) + "/stop")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedVersion\":\"3\"}"))
         .andExpect(status().isOk())
@@ -190,7 +198,7 @@ class StudioHarnessThreadControllerTest {
         .thenReturn(HarnessRuntimeTestFixtures.waitingApprovalTool());
     mockMvc
         .perform(
-            post("/api/ai/runtime/threads/"
+            put("/api/harness/threads/"
                     + idText(1)
                     + "/tool-invocations/"
                     + idText(100)
@@ -206,5 +214,18 @@ class StudioHarnessThreadControllerTest {
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
     verify(runtime).decideToolApproval(captor.capture());
     assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
+  }
+
+  /** 意图：验证 GET /api/harness/threads/{threadId}/system-prompt 查询系统提示词预览。 */
+  @Test
+  void getSystemPromptReturnsPreviewDto() throws Exception {
+    when(systemPromptPreviewService.preview(id(1))).thenReturn("You are a helpful assistant.");
+
+    mockMvc
+        .perform(get("/api/harness/threads/" + idText(1) + "/system-prompt"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.text").value("You are a helpful assistant."));
+
+    verify(systemPromptPreviewService).preview(id(1));
   }
 }

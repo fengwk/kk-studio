@@ -10,6 +10,9 @@ public class EnvironmentUpdateDTO {
   /** 必填新环境名称（<= 64 字符，无空白或斜杠）。 */
   private String name;
 
+  /** 期望的乐观锁版本。 */
+  private String expectedVersion;
+
   @JsonAnySetter
   public void rejectUnknownField(String fieldName, Object value) {
     throw new IllegalArgumentException("unknown environment field: " + fieldName);

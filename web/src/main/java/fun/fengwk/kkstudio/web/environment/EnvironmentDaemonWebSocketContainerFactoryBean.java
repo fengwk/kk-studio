@@ -6,7 +6,7 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 
 /**
  * {@link ServletServerContainerFactoryBean} 面向 Daemon 端点（WebSocket 路径
- * `/api/ai/environment/daemon/v1`）的宽容变体。检测 JSR-356 {@link ServerContainer} 属性是否真的存在于 {@link
+ * `/api/harness/environment-daemon/v1`）的宽容变体。检测 JSR-356 {@link ServerContainer} 属性是否真的存在于 {@link
  * ServletContext} 中，仅在其存在时才委托给 Spring 标准配置路径；否则该 bean 变为 no-op，使非容器 Spring 上下文（MockMvc、{@code
  * WebEnvironment.MOCK}） 无需内嵌 servlet container 即可启动。
  */

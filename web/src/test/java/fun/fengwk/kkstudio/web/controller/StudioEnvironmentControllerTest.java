@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -15,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -50,6 +52,7 @@ class StudioEnvironmentControllerTest {
             .build();
   }
 
+  /** 意图：验证 GET /api/harness/environments 列表查询返回 200 与卡片列表。 */
   @Test
   void listEnvironmentsReturnsOk() throws Exception {
     EnvironmentCardDTO card = new EnvironmentCardDTO();
@@ -59,13 +62,13 @@ class StudioEnvironmentControllerTest {
     when(environmentService.list()).thenReturn(List.of(card));
 
     mockMvc
-        .perform(get("/api/ai/environments"))
+        .perform(get("/api/harness/environments"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].id").value(ENV_ID.toString()))
         .andExpect(jsonPath("$.data[0].name").value("dev"));
   }
 
-  /** 验证查询已存在的 Environment 返回 200 与对应的卡片信息。 */
+  /** 意图：验证 GET /api/harness/environments/{environmentId} 查询已存在的环境返回 200 与对应的卡片信息。 */
   @Test
   void getEnvironmentReturnsOk() throws Exception {
     EnvironmentCardDTO card = new EnvironmentCardDTO();
@@ -74,14 +77,14 @@ class StudioEnvironmentControllerTest {
     when(environmentService.get(eq(EnvironmentId.of(ENV_ID)))).thenReturn(card);
 
     mockMvc
-        .perform(get("/api/ai/environments/" + ENV_ID))
+        .perform(get("/api/harness/environments/" + ENV_ID))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
         .andExpect(jsonPath("$.data.name").value("dev"));
   }
 
   /**
-   * 验证当服务层抛出 AiResourceNotFoundException 时，由统一 StudioDomainErrorAdvice 映射为 HTTP 404 与
+   * 意图：验证当服务层抛出 AiResourceNotFoundException 时，由统一 StudioDomainErrorAdvice 映射为 HTTP 404 与
    * RESOURCE_NOT_FOUND (code="resource_not_found") 错误信封，而不是泄露为 500。
    */
   @Test
@@ -91,7 +94,7 @@ class StudioEnvironmentControllerTest {
             new AiResourceNotFoundException("environment", "environment not found: " + ENV_ID));
 
     mockMvc
-        .perform(get("/api/ai/environments/" + ENV_ID))
+        .perform(get("/api/harness/environments/" + ENV_ID))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.status").value(404))
         .andExpect(jsonPath("$.code").value("resource_not_found"))
@@ -99,8 +102,9 @@ class StudioEnvironmentControllerTest {
         .andExpect(jsonPath("$.errors.detail").value("environment not found: " + ENV_ID));
   }
 
+  /** 意图：验证 POST /api/harness/environments 创建环境成功返回 HTTP 201 Created。 */
   @Test
-  void createEnvironmentReturnsOk() throws Exception {
+  void createEnvironmentReturnsCreated() throws Exception {
     EnvironmentCardDTO card = new EnvironmentCardDTO();
     card.setId(ENV_ID.toString());
     card.setName("new-env");
@@ -109,14 +113,18 @@ class StudioEnvironmentControllerTest {
 
     mockMvc
         .perform(
-            post("/api/ai/environments")
+            post("/api/harness/environments")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"new-env\"}"))
-        .andExpect(status().isOk())
+        .andExpect(status().isCreated())
         .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
         .andExpect(jsonPath("$.data.registrationToken").value("secret-token"));
   }
 
+  /**
+   * 意图：验证 PUT /api/harness/environments/{environmentId} 的 expectedVersion 必须从 body 读取并执行 CAS 更新，返回
+   * 200。
+   */
   @Test
   void updateEnvironmentReturnsOk() throws Exception {
     EnvironmentCardDTO card = new EnvironmentCardDTO();
@@ -128,14 +136,23 @@ class StudioEnvironmentControllerTest {
 
     mockMvc
         .perform(
-            put("/api/ai/environments/" + ENV_ID)
-                .param("expectedVersion", "0")
+            put("/api/harness/environments/" + ENV_ID)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"updated-env\"}"))
+                .content("{\"name\":\"updated-env\",\"expectedVersion\":\"0\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.name").value("updated-env"));
+
+    ArgumentCaptor<EnvironmentUpdateDTO> dtoCaptor =
+        ArgumentCaptor.forClass(EnvironmentUpdateDTO.class);
+    verify(environmentService).update(eq(EnvironmentId.of(ENV_ID)), dtoCaptor.capture(), eq("0"));
+    assertEquals("updated-env", dtoCaptor.getValue().getName());
+    assertEquals("0", dtoCaptor.getValue().getExpectedVersion());
   }
 
+  /**
+   * 意图：验证 POST /api/harness/environments/{environmentId}/registration-token 从请求体读取
+   * {expectedVersion} 并轮换 token，返回 200。
+   */
   @Test
   void rotateTokenReturnsOk() throws Exception {
     EnvironmentCardDTO card = new EnvironmentCardDTO();
@@ -145,17 +162,24 @@ class StudioEnvironmentControllerTest {
 
     mockMvc
         .perform(
-            post("/api/ai/environments/" + ENV_ID + "/registration-token")
-                .param("expectedVersion", "0"))
+            post("/api/harness/environments/" + ENV_ID + "/registration-token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"0\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.registrationToken").value("new-secret-token"));
+
+    verify(environmentService).rotateToken(EnvironmentId.of(ENV_ID), "0");
   }
 
+  /**
+   * 意图：验证 DELETE /api/harness/environments/{environmentId} 依然通过 query param 传递 expectedVersion，并返回
+   * HTTP 204 No Content。
+   */
   @Test
-  void deleteEnvironmentReturnsOk() throws Exception {
+  void deleteEnvironmentReturnsNoContent() throws Exception {
     mockMvc
-        .perform(delete("/api/ai/environments/" + ENV_ID).param("expectedVersion", "0"))
-        .andExpect(status().isOk());
+        .perform(delete("/api/harness/environments/" + ENV_ID).param("expectedVersion", "0"))
+        .andExpect(status().isNoContent());
 
     verify(environmentService).delete(EnvironmentId.of(ENV_ID), "0");
   }

@@ -59,7 +59,7 @@ class StudioHarnessSessionControllerTest {
     when(harnessQueryService.listThreadSummaries(SESSION_ID)).thenReturn(List.of(thread));
 
     mockMvc
-        .perform(get("/api/ai/runtime/sessions/" + SESSION_ID + "/threads"))
+        .perform(get("/api/harness/sessions/" + SESSION_ID + "/threads"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].threadId").value(thread.getThreadId()))
         .andExpect(jsonPath("$.data[0].status").value("IDLE"))
@@ -81,7 +81,7 @@ class StudioHarnessSessionControllerTest {
     when(harnessQueryService.listSessionEntries(SESSION_ID)).thenReturn(List.of(root));
 
     mockMvc
-        .perform(get("/api/ai/runtime/sessions/" + SESSION_ID + "/entries"))
+        .perform(get("/api/harness/sessions/" + SESSION_ID + "/entries"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].entryId").value(root.id().toString()))
         .andExpect(jsonPath("$.data[0].sessionId").value(SESSION_ID.toString()))
@@ -96,7 +96,7 @@ class StudioHarnessSessionControllerTest {
         .thenThrow(new HarnessRuntimeNotFoundException("session is missing"));
 
     mockMvc
-        .perform(get("/api/ai/runtime/sessions/" + SESSION_ID + "/threads"))
+        .perform(get("/api/harness/sessions/" + SESSION_ID + "/threads"))
         .andExpect(status().isNotFound());
   }
 }

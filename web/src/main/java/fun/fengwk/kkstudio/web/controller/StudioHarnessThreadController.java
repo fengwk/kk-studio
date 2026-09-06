@@ -46,7 +46,7 @@ import java.util.function.Supplier;
  * {@literal ->} 400。
  */
 @RestController
-@RequestMapping("/api/ai/runtime/threads")
+@RequestMapping("/api/harness/threads")
 public class StudioHarnessThreadController {
   private final HarnessRuntime runtime;
   private final SystemPromptPreviewService systemPromptPreviewService;
@@ -60,7 +60,7 @@ public class StudioHarnessThreadController {
   }
 
   /** 查询一个一致性的 Thread 快照（单事务）。 */
-  @GetMapping("/{threadId}/snapshot")
+  @GetMapping("/{threadId}")
   public Result<HarnessThreadSnapshotDTO> getSnapshot(@PathVariable String threadId) {
     return Results.ok(
         withRuntimeTranslation(
@@ -85,11 +85,11 @@ public class StudioHarnessThreadController {
             }));
   }
 
-  /** 直接调用 HarnessRuntime 执行受 expectedVersion 守护的手动压缩。 */
+  /** 直接调用 HarnessRuntime 执行受 expectedVersion 守护的手动压缩；返回 202 Accepted。 */
   @PostMapping("/{threadId}/compact")
   public Result<HarnessThreadCompactResultDTO> compact(
       @PathVariable String threadId, @RequestBody HarnessThreadCompactDTO request) {
-    return Results.ok(
+    return Results.accepted(
         withRuntimeTranslation(
             () -> {
               CompactThreadResult result =
@@ -133,7 +133,7 @@ public class StudioHarnessThreadController {
   }
 
   /** 决定一次 Tool approval（decisionId 幂等；冲突 decision 409）。 */
-  @PostMapping("/{threadId}/tool-invocations/{toolInvocationId}/approval")
+  @PutMapping("/{threadId}/tool-invocations/{toolInvocationId}/approval")
   public Result<ToolInvocationDTO> decideApproval(
       @PathVariable String threadId,
       @PathVariable String toolInvocationId,

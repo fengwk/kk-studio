@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentGatewayProper
 import java.util.Objects;
 
 /**
- * Daemon 端点（WebSocket 路径 `/api/ai/environment/daemon/v1`）Environment gateway 的 WebSocket 传输注册。
+ * Daemon 端点（WebSocket 路径 `/api/harness/environment-daemon/v1`）Environment gateway 的 WebSocket 传输注册。
  *
  * <p>当 Daemon 宣告 skills 时，{@code READY} 帧可能超过 Tomcat 默认的 8 KiB 文本缓冲区。存在真实 servlet container 时，宽容的
  * {@link ServletServerContainerFactoryBean} 把 JSR-356 {@link

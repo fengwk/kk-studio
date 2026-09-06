@@ -137,7 +137,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
             .formatted(chatId, sessionId, threadId, idempotencyKey);
     HttpResponse<String> threadResponse =
         http.send(
-            HttpRequest.newBuilder(uri("/api/ai/runtime/command-batches"))
+            HttpRequest.newBuilder(uri("/api/harness/command-batches"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(createBody))
