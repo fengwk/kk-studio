@@ -39,7 +39,7 @@ export function createAgentService(client: HttpClient = apiClient) {
       data: AgentModelUpdateDTO,
     ): Promise<AgentModelDTO> =>
       client.put(
-        `/ai/catalog/models?providerName=${encodeURIComponent(providerName)}&modelName=${encodeURIComponent(modelName)}`,
+        `/ai/catalog/models/${encodeURIComponent(providerName)}/${encodeURIComponent(modelName)}`,
         data,
       ),
 
@@ -48,9 +48,12 @@ export function createAgentService(client: HttpClient = apiClient) {
       modelName: string,
       expectedVersion: string,
     ): Promise<void> =>
-      client.delete('/ai/catalog/models', {
-        params: { providerName, modelName, expectedVersion },
-      }),
+      client.delete(
+        `/ai/catalog/models/${encodeURIComponent(providerName)}/${encodeURIComponent(modelName)}`,
+        {
+          params: { expectedVersion },
+        },
+      ),
 
     listAgents: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
       client.get('/ai/catalog/agents', { params: { pageNumber, pageSize } }),

@@ -14,7 +14,6 @@ import {
 import type { CanvasLocalState } from '@/features/canvas/types'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { CanvasSnapshotDTO } from '@/shared/api/contracts/studio'
-import { agentPaneService } from '@/shared/api/agent-pane-service'
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
@@ -49,19 +48,13 @@ vi.mock('@/shared/api/environment-service', () => ({
     listDirectories: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/agent-pane-service', () => ({
-  agentPaneService: {
+vi.mock('@/shared/api/harness-service', () => ({
+  harnessService: {
     acceptCommandBatch: vi.fn(),
-    listChatSessions: vi.fn(),
-    listCanvasSessions: vi.fn(),
     listSessionThreads: vi.fn(),
     listSessionEntries: vi.fn(),
     getThreadSnapshot: vi.fn(),
     compactThread: vi.fn(),
-  },
-}))
-vi.mock('@/shared/api/harness-service', () => ({
-  harnessService: {
     getSystemPromptPreview: vi.fn(),
     setThreadYolo: vi.fn(),
     stopThread: vi.fn(),
@@ -196,9 +189,9 @@ beforeEach(() => {
     results: [model],
   })
   vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
-  vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshotOf())
-  vi.mocked(agentPaneService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
-  vi.mocked(agentPaneService.listSessionEntries).mockResolvedValue([])
+  vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf())
+  vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
+  vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
   vi.mocked(harnessService.getSystemPromptPreview).mockResolvedValue({ text: '' })
   vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
     Promise.resolve(threadFixture({ threadId, yoloEnabled: data.yoloEnabled, version: '1' })),
@@ -259,8 +252,8 @@ describe('Canvas shared AgentPane', () => {
     await user.type(composer, 'start canvas thread')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    const [request] = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]!
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
     expect(request.target.type).toBe('NEW_SESSION')
     expect(request.target).not.toHaveProperty('kind')
     expect(request.commands).toHaveLength(1)
@@ -278,14 +271,14 @@ describe('Canvas shared AgentPane', () => {
       `kk-studio.agent-pane-target.CANVAS:${CANVAS_ID}:canvas-agent`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(threadFixture(), {
         manualCompaction: { available: false, disabledReason: 'busy' },
       }),
     )
     renderHarness(<CanvasAgentThread />, { threadOpen: true })
     const composer = await screen.findByLabelText('给 AI 发送消息')
-    await waitFor(() => expect(agentPaneService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
 
     await user.click(composer)
     await user.keyboard('/')
@@ -295,8 +288,8 @@ describe('Canvas shared AgentPane', () => {
     await user.type(composer, 'continue')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    const [request] = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]!
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
     expect(request.target).toMatchObject({
       type: 'THREAD',
       threadId: THREAD_ID,

@@ -26,7 +26,6 @@ import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websock
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
-import { agentPaneService } from '@/shared/api/agent-pane-service'
 import type {
   HarnessBranchSettingsDTO,
   HarnessModelSelectionDTO,
@@ -49,15 +48,11 @@ vi.mock('@/shared/api/agent-service', () => ({
     listProviders: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/agent-pane-service', () => ({
-  agentPaneService: {
+vi.mock('@/shared/api/harness-service', () => ({
+  harnessService: {
     getThreadSnapshot: vi.fn(),
     acceptCommandBatch: vi.fn(),
     compactThread: vi.fn(),
-  },
-}))
-vi.mock('@/shared/api/harness-service', () => ({
-  harnessService: {
     getSystemPromptPreview: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
@@ -212,8 +207,8 @@ describe('useAgentThreadController', () => {
         },
       ],
     })
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshotOf(threadFixture()))
-    vi.mocked(agentPaneService.acceptCommandBatch).mockResolvedValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(threadFixture()))
+    vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(
       [] as HarnessThreadCommandDTO[],
     )
     vi.mocked(harnessService.stopThread).mockResolvedValue({
@@ -252,7 +247,7 @@ describe('useAgentThreadController', () => {
     const currentThread = threadFixture({
       branchSettings: branchSettings({ agentName: 'assistant' }),
     })
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
 
     const base = branchDraftFromThread(currentThread)
     const draft: BranchDraft = {
@@ -278,8 +273,8 @@ describe('useAgentThreadController', () => {
       await result.current.submitMessage()
     })
 
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    const [batchArg] = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]!
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    const [batchArg] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
     expect(batchArg.target.expectedHeadEntryId).toBe('h1')
     expect(batchArg.target.expectedNextCommandSequence).toBe('1')
     const types = batchArg.commands.map((command) => command.type)
@@ -297,13 +292,13 @@ describe('useAgentThreadController', () => {
   })
 
   it('reports a 409 from send as threadStateChanged and invalidates the snapshot', async () => {
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
       new ApiError('expected version mismatch', 409),
     )
     const currentThread = threadFixture()
     const base = branchDraftFromThread(currentThread)
     const draft = base
-    const snapshotCallsBefore = vi.mocked(agentPaneService.getThreadSnapshot).mock.calls.length
+    const snapshotCallsBefore = vi.mocked(harnessService.getThreadSnapshot).mock.calls.length
 
     const { result } = renderHook(
       () =>
@@ -329,7 +324,7 @@ describe('useAgentThreadController', () => {
     expect(result.current.conflict?.detail).toContain('expected version mismatch')
     // 失效 snapshot 查询，以重新拉取当前 version。
     await waitFor(() =>
-      expect(agentPaneService.getThreadSnapshot.mock.calls.length).toBeGreaterThan(
+      expect(harnessService.getThreadSnapshot.mock.calls.length).toBeGreaterThan(
         snapshotCallsBefore,
       ),
     )
@@ -346,7 +341,7 @@ describe('useAgentThreadController', () => {
       status: 'MODEL_STREAMING',
       processing: true,
     })
-    vi.mocked(agentPaneService.getThreadSnapshot)
+    vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(currentThread))
       .mockResolvedValue(
         snapshotOf(advancedThread, {
@@ -370,7 +365,7 @@ describe('useAgentThreadController', () => {
           ],
         }),
       )
-    vi.mocked(agentPaneService.acceptCommandBatch)
+    vi.mocked(harnessService.acceptCommandBatch)
       .mockRejectedValueOnce(
         new ApiError(
           'The request conflicts with the current resource state.',
@@ -400,7 +395,7 @@ describe('useAgentThreadController', () => {
       await result.current.submitMessage()
     })
 
-    const calls = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls
+    const calls = vi.mocked(harnessService.acceptCommandBatch).mock.calls
     expect(calls).toHaveLength(2)
     expect(calls[0]?.[0]).toMatchObject({
       target: {
@@ -428,7 +423,7 @@ describe('useAgentThreadController', () => {
       nextCommandSequence: '2',
       version: '2',
     })
-    vi.mocked(agentPaneService.getThreadSnapshot)
+    vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(currentThread))
       .mockResolvedValue(
         snapshotOf(switchedThread, {
@@ -444,7 +439,7 @@ describe('useAgentThreadController', () => {
           ],
         }),
       )
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
       new ApiError('stale', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
     )
     const base = branchDraftFromThread(currentThread)
@@ -467,7 +462,7 @@ describe('useAgentThreadController', () => {
       await result.current.submitMessage()
     })
 
-    expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1)
+    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
     expect(result.current.conflict?.reason).toBe('STALE_COMMAND_CURSOR')
     expect(partsToText(result.current.draft)).toBe('do not move across branches')
   })
@@ -542,7 +537,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('restores the local-id draft, not the resolved payload, after a send failure with attachments', async () => {
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
       new ApiError('network down', 0),
     )
     const currentThread = threadFixture()
@@ -575,7 +570,7 @@ describe('useAgentThreadController', () => {
       expect.objectContaining({ type: 'attachment', uploadId: 'local-1', filename: 'a.png' }) as Record<string, string>,
     ])
     // batch 中序列化的是有序 contents（含 ATTACHMENT uploadId）。
-    const batch = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]?.[0]
+    const batch = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
     const message = batch?.commands[batch.commands.length - 1] as {
       contents?: Array<Record<string, unknown>>
     }
@@ -589,7 +584,7 @@ describe('useAgentThreadController', () => {
     const currentThread = threadFixture()
     const base = branchDraftFromThread(currentThread)
     const draft = base
-    vi.mocked(agentPaneService.acceptCommandBatch)
+    vi.mocked(harnessService.acceptCommandBatch)
       .mockRejectedValueOnce(new Error('queue full'))
       .mockResolvedValueOnce([] as HarnessThreadCommandDTO[])
 
@@ -610,16 +605,16 @@ describe('useAgentThreadController', () => {
     await act(async () => {
       await result.current.submitMessage()
     })
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    const firstBatch = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]?.[0]
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    const firstBatch = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
     expect(firstBatch).toBeDefined()
     expect(partsToText(result.current.draft)).toBe('retry me')
 
     await act(async () => {
       await result.current.submitMessage()
     })
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(2))
-    const secondBatch = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[1]?.[0]
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2))
+    const secondBatch = vi.mocked(harnessService.acceptCommandBatch).mock.calls[1]?.[0]
     // 身份匹配：完全复用上一次提交的 batch 对象（逐字节相同）。
     expect(secondBatch).toBe(firstBatch)
   })
@@ -641,7 +636,7 @@ describe('useAgentThreadController', () => {
         draft: draftB,
         parts,
       })
-    vi.mocked(agentPaneService.acceptCommandBatch)
+    vi.mocked(harnessService.acceptCommandBatch)
       .mockRejectedValueOnce(new Error('queue full'))
       .mockImplementationOnce(async () => {
         projectionApplied = true
@@ -665,15 +660,15 @@ describe('useAgentThreadController', () => {
     await act(async () => {
       await result.current.submitMessage()
     })
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    const firstBatch = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]?.[0]
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    const firstBatch = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
     expect(firstBatch?.commands).toHaveLength(2) // SET_AGENT + USER_MESSAGE
 
     await act(async () => {
       await result.current.submitMessage()
     })
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(2))
-    const secondBatch = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[1]?.[0]
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2))
+    const secondBatch = vi.mocked(harnessService.acceptCommandBatch).mock.calls[1]?.[0]
     // 精确回放：必须复用同一个 batch 对象（SET_AGENT + USER_MESSAGE），不能退化为只含消息的 batch。
     expect(secondBatch).toBe(firstBatch)
     expect(secondBatch?.commands).toHaveLength(2)
@@ -683,7 +678,7 @@ describe('useAgentThreadController', () => {
     const currentThread = threadFixture()
     const base = branchDraftFromThread(currentThread)
     const draft = base
-    vi.mocked(agentPaneService.acceptCommandBatch)
+    vi.mocked(harnessService.acceptCommandBatch)
       .mockRejectedValueOnce(new Error('queue full'))
       .mockResolvedValue([] as HarnessThreadCommandDTO[])
 
@@ -704,7 +699,7 @@ describe('useAgentThreadController', () => {
     await act(async () => {
       await result.current.submitMessage()
     })
-    const firstId = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]?.[0]
+    const firstId = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
       .commands[0]?.idempotencyKey
 
     // 将 composer 编辑成不同内容时，会重置回放身份。
@@ -712,14 +707,14 @@ describe('useAgentThreadController', () => {
     await act(async () => {
       await result.current.submitMessage()
     })
-    const secondId = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[1]?.[0]
+    const secondId = vi.mocked(harnessService.acceptCommandBatch).mock.calls[1]?.[0]
       .commands[0]?.idempotencyKey
     expect(secondId).toBeTruthy()
     expect(secondId).not.toBe(firstId)
   })
 
   it('surfaces non-conflict send failures with the draft restored', async () => {
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(new Error('queue full'))
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(new Error('queue full'))
     const currentThread = threadFixture()
     const base = branchDraftFromThread(currentThread)
     const draft = base
@@ -767,7 +762,7 @@ describe('useAgentThreadController', () => {
     await act(async () => {
       await result.current.submitMessage()
     })
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
     expect(partsToText(result.current.draft)).toBe('')
   })
 
@@ -922,7 +917,7 @@ describe('useAgentThreadController', () => {
     const turn2 = threadFixture({ headEntryId: 'e-turn1-end', version: '2' })
     // 挂载时的拉取读取的是 Turn 1；由失败 Stop 触发的失效拉取会读取
     // 已前进的 Turn 2 snapshot（说明那次含糊的 Stop 实际上已经在服务端落地）。
-    vi.mocked(agentPaneService.getThreadSnapshot)
+    vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(turn1))
       .mockResolvedValue(snapshotOf(turn2))
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
@@ -1052,7 +1047,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.stopThread).mockRejectedValue(new Error('response lost'))
     const turn1 = threadFixture()
     const turn2 = threadFixture({ headEntryId: 'e-turn1-end', version: '2' })
-    vi.mocked(agentPaneService.getThreadSnapshot)
+    vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(turn1))
       .mockResolvedValue(snapshotOf(turn2))
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
@@ -1262,12 +1257,12 @@ describe('useAgentThreadController', () => {
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
-    const initialCalls = vi.mocked(agentPaneService.getThreadSnapshot).mock.calls.length
+    const initialCalls = vi.mocked(harnessService.getThreadSnapshot).mock.calls.length
     await act(async () => {
       await result.current.stopThread()
     })
     await waitFor(() =>
-      expect(agentPaneService.getThreadSnapshot.mock.calls.length).toBeGreaterThan(initialCalls),
+      expect(harnessService.getThreadSnapshot.mock.calls.length).toBeGreaterThan(initialCalls),
     )
   })
 
@@ -1297,7 +1292,7 @@ describe('useAgentThreadController', () => {
         agentName: 'assistant',
       }),
     })
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
 
     const { result } = renderHook(() => useAgentThreadController(currentThread.threadId), {
       wrapper,
@@ -1326,7 +1321,7 @@ describe('useAgentThreadController', () => {
       payloadJson: JSON.stringify(payload),
       createTime: null,
     })
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(currentThread, {
         entries: [
           entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
@@ -1370,11 +1365,11 @@ describe('useAgentThreadController', () => {
       nextCommandSequence: '3',
       headEntryId: 'h1',
     })
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
       new ApiError('conflict', 409, 'CONFLICT'),
     )
-    vi.mocked(agentPaneService.acceptCommandBatch).mockResolvedValueOnce([])
+    vi.mocked(harnessService.acceptCommandBatch).mockResolvedValueOnce([])
     const base = branchDraftFromThread(currentThread)
 
     const { result } = renderHook(
@@ -1396,7 +1391,7 @@ describe('useAgentThreadController', () => {
       await result.current.submitMessage()
     })
 
-    const calls = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls
+    const calls = vi.mocked(harnessService.acceptCommandBatch).mock.calls
     expect(calls).toHaveLength(2)
     const first = calls[0]?.[0] as {
       target: {
@@ -1423,7 +1418,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('mints a new decision id when the user switches ALLOW -> DENY for the same invocation', async () => {
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshotOf(threadFixture()))
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(threadFixture()))
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
@@ -1458,7 +1453,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('falls back to the generic requestFailed message for a non-Error, non-string send rejection', async () => {
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(null)
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(null)
     const currentThread = threadFixture()
     const base = branchDraftFromThread(currentThread)
     const { result } = renderHook(
@@ -1495,7 +1490,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('no-ops stop and compact before the thread snapshot has loaded', async () => {
-    vi.mocked(agentPaneService.getThreadSnapshot).mockReturnValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockReturnValue(
       new Promise<HarnessThreadSnapshotDTO>(() => undefined),
     )
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
@@ -1506,13 +1501,13 @@ describe('useAgentThreadController', () => {
     await act(async () => {
       await result.current.compactThread()
     })
-    expect(agentPaneService.compactThread).not.toHaveBeenCalled()
+    expect(harnessService.compactThread).not.toHaveBeenCalled()
     expect(result.current.actionError).toBeNull()
   })
 
   it('reports threadNotLoaded without a batch builder and silently no-ops a null plan', async () => {
     const currentThread = threadFixture()
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
     // 缺省 buildBatch（null）：submit 给出 threadNotLoaded 并阻止发送。
     const { result } = renderHook(() => useAgentThreadController(currentThread.threadId), {
       wrapper,
@@ -1523,7 +1518,7 @@ describe('useAgentThreadController', () => {
       await result.current.submitMessage()
     })
     expect(result.current.actionError).toContain('Thread')
-    expect(agentPaneService.acceptCommandBatch).not.toHaveBeenCalled()
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
 
     // buildBatch 返回 null（不可构建的 payload）：静默 no-op，draft 原样保留。
     const { result: nullPlan } = renderHook(
@@ -1544,11 +1539,11 @@ describe('useAgentThreadController', () => {
     })
     expect(nullPlan.current.actionError).toBeNull()
     expect(partsToText(nullPlan.current.draft)).toBe('keep me')
-    expect(agentPaneService.acceptCommandBatch).not.toHaveBeenCalled()
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
   })
 
   it('never overwrites a newer composer draft when an earlier send fails', async () => {
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(new Error('queue full'))
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(new Error('queue full'))
     const currentThread = threadFixture()
     const base = branchDraftFromThread(currentThread)
     const { result } = renderHook(
@@ -1577,7 +1572,7 @@ describe('useAgentThreadController', () => {
 
   it('only clears the exact replay when the completing request is still the latest one', async () => {
     const releases: Array<() => void> = []
-    vi.mocked(agentPaneService.acceptCommandBatch).mockImplementation(
+    vi.mocked(harnessService.acceptCommandBatch).mockImplementation(
       () =>
         new Promise<HarnessThreadCommandDTO[]>((resolve) => {
           releases.push(() => resolve([] as HarnessThreadCommandDTO[]))
@@ -1606,9 +1601,9 @@ describe('useAgentThreadController', () => {
     await act(async () => {
       void result.current.submitMessage()
     })
-    expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(2)
-    const firstPlan = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]?.[0]
-    const secondPlan = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[1]?.[0]
+    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2)
+    const firstPlan = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
+    const secondPlan = vi.mocked(harnessService.acceptCommandBatch).mock.calls[1]?.[0]
     expect(secondPlan?.commands[0]?.idempotencyKey).not.toBe(
       firstPlan?.commands[0]?.idempotencyKey,
     )
@@ -1629,7 +1624,7 @@ describe('useAgentThreadController', () => {
 
   it('skips localStorage persistence for non-edit draft change sources', async () => {
     const currentThread = threadFixture()
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
     const { result } = renderHook(() => useAgentThreadController(currentThread.threadId), {
       wrapper,
     })
@@ -1689,10 +1684,10 @@ describe('useAgentThreadController', () => {
   })
 
   it('runs manual compaction with the snapshot version and clears conflict on success', async () => {
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(threadFixture(), { manualCompaction: { available: true, disabledReason: null } }),
     )
-    vi.mocked(agentPaneService.compactThread).mockResolvedValue({
+    vi.mocked(harnessService.compactThread).mockResolvedValue({
       thread: threadFixture({ version: '1' }),
       turnStartEntryId: 't1',
       modelInvocationId: null,
@@ -1708,7 +1703,7 @@ describe('useAgentThreadController', () => {
     await act(async () => {
       await result.current.compactThread()
     })
-    expect(agentPaneService.compactThread).toHaveBeenCalledWith(THREAD_ID, {
+    expect(harnessService.compactThread).toHaveBeenCalledWith(THREAD_ID, {
       expectedVersion: '0',
     })
     expect(invalidateSpy).toHaveBeenCalledWith(
@@ -1719,7 +1714,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('reports compaction unavailability and surfaces 409/non-conflict failures distinctly', async () => {
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(threadFixture(), { manualCompaction: { available: true, disabledReason: null } }),
     )
     const client = new QueryClient({
@@ -1727,7 +1722,7 @@ describe('useAgentThreadController', () => {
     })
     const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
     // 409：conflict 展示 + 目标 snapshot 失效；draft/错误通道不受影响。
-    vi.mocked(agentPaneService.compactThread).mockRejectedValueOnce(
+    vi.mocked(harnessService.compactThread).mockRejectedValueOnce(
       new ApiError('stale compact version', 409, 'CONFLICT', { reason: 'STALE_VERSION' }),
     )
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
@@ -1745,7 +1740,7 @@ describe('useAgentThreadController', () => {
     act(() => result.current.dismissConflict())
     expect(result.current.conflict).toBeNull()
     // 非 conflict 失败：actionError 通道。
-    vi.mocked(agentPaneService.compactThread).mockRejectedValueOnce(new Error('compact boom'))
+    vi.mocked(harnessService.compactThread).mockRejectedValueOnce(new Error('compact boom'))
     await act(async () => {
       await result.current.compactThread()
     })
@@ -1759,16 +1754,16 @@ describe('useAgentThreadController', () => {
     await act(async () => {
       await result.current.compactThread()
     })
-    expect(agentPaneService.compactThread).not.toHaveBeenCalled()
+    expect(harnessService.compactThread).not.toHaveBeenCalled()
     // 无 advisory sidecar：使用 fallback 的 disabledReason。
     expect(result.current.actionError).toContain('Thread snapshot is not loaded')
   })
 
   it('routes runCommand to stop/compact and reports unknown commands', async () => {
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(threadFixture(), { manualCompaction: { available: true, disabledReason: null } }),
     )
-    vi.mocked(agentPaneService.compactThread).mockResolvedValue({
+    vi.mocked(harnessService.compactThread).mockResolvedValue({
       thread: threadFixture(),
       turnStartEntryId: 't1',
       modelInvocationId: null,
@@ -1778,7 +1773,7 @@ describe('useAgentThreadController', () => {
     act(() => result.current.runCommand({ id: 'stop', label: 'stop', description: 'stop' }))
     await waitFor(() => expect(harnessService.stopThread).toHaveBeenCalledTimes(1))
     act(() => result.current.runCommand({ id: 'compact', label: 'compact', description: 'compact' }))
-    await waitFor(() => expect(agentPaneService.compactThread).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(harnessService.compactThread).toHaveBeenCalledTimes(1))
     // 未接管的命令 id 必须给出明确错误，而不是静默。
     act(() => result.current.runCommand({ id: 'agent', label: 'agent', description: 'agent' }))
     expect(result.current.actionError).toContain('agent')
@@ -1792,7 +1787,7 @@ describe('useAgentThreadController', () => {
           releaseStop = resolve
         }),
     )
-    vi.mocked(agentPaneService.getThreadSnapshot).mockImplementation((threadId) =>
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
       Promise.resolve(snapshotOf(threadFixture({ threadId }))),
     )
     const client = new QueryClient({
@@ -1839,7 +1834,7 @@ describe('useAgentThreadController', () => {
           rejectStop = reject
         }),
     )
-    vi.mocked(agentPaneService.getThreadSnapshot).mockImplementation((threadId) =>
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
       Promise.resolve(snapshotOf(threadFixture({ threadId }))),
     )
     const { result, rerender } = renderHook(
@@ -1869,7 +1864,7 @@ describe('useAgentThreadController', () => {
           rejectStop = reject
         }),
     )
-    vi.mocked(agentPaneService.getThreadSnapshot).mockImplementation((threadId) =>
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
       Promise.resolve(snapshotOf(threadFixture({ threadId }))),
     )
     const { result, rerender } = renderHook(

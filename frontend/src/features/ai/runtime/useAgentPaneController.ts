@@ -26,7 +26,9 @@ import {
   restoreComposerDraft,
   storeComposerDraft,
 } from '@/features/ai/composer/composer-draft'
-import { agentPaneService } from '@/shared/api/agent-pane-service'
+import { harnessService } from '@/shared/api/harness-service'
+import { chatService } from '@/shared/api/chat-service'
+import { listCanvasSessions } from '@/shared/api/studio-service'
 import {
   presentConflict,
   type ConflictPresentation,
@@ -261,18 +263,18 @@ export function useAgentPaneController({
   const sessionsQuery = useQuery({
     queryKey: ['agent-pane', 'sessions', owner.type, owner.id],
     queryFn: () => owner.type === 'CHAT'
-      ? agentPaneService.listChatSessions(owner.id)
-      : agentPaneService.listCanvasSessions(owner.id),
+      ? chatService.listChatSessions(owner.id)
+      : listCanvasSessions(owner.id),
     enabled: interaction === 'thread-sessions',
   })
   const threadsQuery = useQuery({
     queryKey: ['agent-pane', 'threads', threadNavigationSessionId],
-    queryFn: () => agentPaneService.listSessionThreads(threadNavigationSessionId!),
+    queryFn: () => harnessService.listSessionThreads(threadNavigationSessionId!),
     enabled: interaction === 'thread-threads' && threadNavigationSessionId != null,
   })
   const treeEntriesQuery = useQuery({
     queryKey: ['agent-pane', 'entries', threadNavigationSessionId ?? currentSessionId],
-    queryFn: () => agentPaneService.listSessionEntries(threadNavigationSessionId ?? currentSessionId!),
+    queryFn: () => harnessService.listSessionEntries(threadNavigationSessionId ?? currentSessionId!),
     enabled:
       (interaction === 'tree' || isEntryTarget(target))
       && (threadNavigationSessionId ?? currentSessionId) != null,
@@ -383,7 +385,7 @@ export function useAgentPaneController({
 
   async function submitFrozenAcceptance(pending: PendingAcceptance): Promise<void> {
     try {
-      const response = await agentPaneService.acceptCommandBatch(pending.request)
+      const response = await harnessService.acceptCommandBatch(pending.request)
       const stillActive = acceptanceCompletionApplies(
         targetRef.current,
         pending,

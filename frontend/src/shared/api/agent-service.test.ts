@@ -40,6 +40,10 @@ describe('agentService', () => {
     expect(client.get).toHaveBeenNthCalledWith(3, '/ai/catalog/agents', { params: { pageNumber: 1, pageSize: 50 } })
   })
 
+  /**
+   * 测试意图：验证 Provider、Model 和 Agent 的增删改端点，
+   * 特别验证 Model 的 PUT/DELETE 端点规范化为 /ai/catalog/models/{providerName}/{modelName}。
+   */
   it('maps provider, model and agent mutations to name-based CRUD endpoints', async () => {
     const client = createClient()
     const service = createAgentService(client)
@@ -121,8 +125,8 @@ describe('agentService', () => {
     expect(client.put).toHaveBeenNthCalledWith(1, '/ai/catalog/providers/minimax', updateProviderBody)
     expect(client.delete).toHaveBeenNthCalledWith(1, '/ai/catalog/providers/minimax', { params: { expectedVersion: '8' } })
     expect(client.post).toHaveBeenNthCalledWith(2, '/ai/catalog/models', modelBody)
-    expect(client.put).toHaveBeenNthCalledWith(2, '/ai/catalog/models?providerName=minimax&modelName=MiniMax-M2.7', updateModelBody)
-    expect(client.delete).toHaveBeenNthCalledWith(2, '/ai/catalog/models', { params: { providerName: 'minimax', modelName: 'MiniMax-M2.7', expectedVersion: '10' } })
+    expect(client.put).toHaveBeenNthCalledWith(2, '/ai/catalog/models/minimax/MiniMax-M2.7', updateModelBody)
+    expect(client.delete).toHaveBeenNthCalledWith(2, '/ai/catalog/models/minimax/MiniMax-M2.7', { params: { expectedVersion: '10' } })
     expect(client.post).toHaveBeenNthCalledWith(3, '/ai/catalog/agents', agentBody)
     expect(client.put).toHaveBeenNthCalledWith(3, '/ai/catalog/agents/default-assistant', updateAgentBody)
     expect(client.delete).toHaveBeenNthCalledWith(3, '/ai/catalog/agents/default-assistant', { params: { expectedVersion: '11' } })

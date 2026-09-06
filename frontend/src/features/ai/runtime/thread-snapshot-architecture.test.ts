@@ -7,10 +7,11 @@ function source(relativePath: string) {
 }
 
 describe('Thread snapshot architecture', () => {
+  // 验证当前 Thread 状态保持 snapshot 仅拉取，Entry Tree 按需读取，所有 Harness 运行时调用收敛于 harness-service。
   it('keeps current Thread state snapshot-only and loads the full Entry Tree on demand', () => {
     const queries = source('features/ai/runtime/useAgentThreadQueries.ts')
     const paneController = source('features/ai/runtime/useAgentPaneController.ts')
-    const service = source('shared/api/agent-pane-service.ts')
+    const service = source('shared/api/harness-service.ts')
     const keys = source('shared/lib/query-keys.ts')
 
     expect(queries).toContain('queryKeys.threads.snapshot(threadId)')

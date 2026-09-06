@@ -4,7 +4,6 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePage } from '@/features/ai/chat/ChatWorkspacePage'
-import { agentPaneService } from '@/shared/api/agent-pane-service'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
@@ -44,19 +43,13 @@ vi.mock('@/shared/api/environment-service', () => ({
     listEnvironments: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/agent-pane-service', () => ({
-  agentPaneService: {
+vi.mock('@/shared/api/harness-service', () => ({
+  harnessService: {
     acceptCommandBatch: vi.fn(),
-    listChatSessions: vi.fn(),
-    listCanvasSessions: vi.fn(),
     listSessionThreads: vi.fn(),
     listSessionEntries: vi.fn(),
     getThreadSnapshot: vi.fn(),
     compactThread: vi.fn(),
-  },
-}))
-vi.mock('@/shared/api/harness-service', () => ({
-  harnessService: {
     getSystemPromptPreview: vi.fn(),
     setThreadYolo: vi.fn(),
     stopThread: vi.fn(),
@@ -176,9 +169,9 @@ beforeEach(() => {
     results: [model],
   })
   vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
-  vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshot())
-  vi.mocked(agentPaneService.listSessionEntries).mockResolvedValue([])
-  vi.mocked(agentPaneService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
+  vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot())
+  vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
+  vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.getSystemPromptPreview).mockResolvedValue({ text: '' })
 })
 
@@ -201,7 +194,7 @@ describe('ChatWorkspacePage', () => {
     )
     renderWorkspace()
     await waitFor(() =>
-      expect(agentPaneService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID),
+      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID),
     )
     const layout = localStorage.getItem(`kk-studio.chat-pane.${CHAT_ID}`)
     expect(layout).not.toContain('threadId')
@@ -215,8 +208,8 @@ describe('ChatWorkspacePage', () => {
     await user.type(composer, 'start a Chat thread')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    const [request] = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]!
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
     expect(request.owner).toEqual({ type: 'CHAT', id: CHAT_ID })
     expect(request.target.type).toBe('NEW_SESSION')
     expect(request.commands).toHaveLength(1)
@@ -236,12 +229,12 @@ describe('ChatWorkspacePage', () => {
     )
     renderWorkspace()
     const composer = await screen.findByLabelText('给 AI 发送消息')
-    await waitFor(() => expect(agentPaneService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
     await user.type(composer, 'continue')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    const [request] = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]!
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
     expect(request.target).toMatchObject({
       type: 'THREAD',
       threadId: THREAD_ID,
