@@ -999,14 +999,20 @@ export async function runComposerMatrix(ui) {
             dialogueScroll.scrollTop > 0 && dialogueScroll.distanceFromBottom > 210,
             `transcript scroll did not leave the stick-to-bottom threshold: ${JSON.stringify(dialogueScroll)}`,
           )
-          const dialogueScrollTop = dialogueScroll.scrollTop
 
-          // 诊断：切走前 transcript 的实时 scrollTop（switchMode 捕获的就是这个值）。
+          // 切走前只校验仍处于回看状态；字体/内容布局可能触发浏览器 scroll anchoring，
+          // switchMode 会捕获点击瞬间的真实 scrollTop，不应要求早先写入的像素值完全不变。
           await page.waitForTimeout(300)
-          const beforeSwitchScrollTop = await scrollTopOf('.thread-dialogue')
+          const beforeSwitchMetrics = await page.locator('.thread-dialogue').evaluate((element) => ({
+            scrollTop: element.scrollTop,
+            distanceFromBottom: Math.max(
+              0,
+              element.scrollHeight - element.clientHeight - element.scrollTop,
+            ),
+          }))
           assert(
-            Math.abs(beforeSwitchScrollTop - dialogueScrollTop) <= 2,
-            `transcript scrolled between capture and switch: ${beforeSwitchScrollTop} != ${dialogueScrollTop}`,
+            beforeSwitchMetrics.scrollTop > 0 && beforeSwitchMetrics.distanceFromBottom > 210,
+            `transcript returned to bottom before switch: ${JSON.stringify(beforeSwitchMetrics)}`,
           )
 
           // 再进 debug：恢复上次的 scrollTop（不是贴底）。

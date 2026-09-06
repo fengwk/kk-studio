@@ -40,20 +40,29 @@ public class StudioAgentModelController {
     return Results.created(agentModelService.createModel(createDTO));
   }
 
-  @PutMapping("/{providerName}/{modelName}")
+  @PutMapping("/{providerName}/{modelNameHead}/{*modelNameTail}")
   public Result<AgentModelDTO> updateModel(
       @PathVariable("providerName") String providerName,
-      @PathVariable("modelName") String modelName,
+      @PathVariable("modelNameHead") String modelNameHead,
+      @PathVariable("modelNameTail") String modelNameTail,
       @RequestBody AgentModelUpdateDTO updateDTO) {
-    return Results.ok(agentModelService.updateModel(providerName, modelName, updateDTO));
+    return Results.ok(
+        agentModelService.updateModel(
+            providerName, combineModelName(modelNameHead, modelNameTail), updateDTO));
   }
 
-  @DeleteMapping("/{providerName}/{modelName}")
+  @DeleteMapping("/{providerName}/{modelNameHead}/{*modelNameTail}")
   public Result<Void> deleteModel(
       @PathVariable("providerName") String providerName,
-      @PathVariable("modelName") String modelName,
+      @PathVariable("modelNameHead") String modelNameHead,
+      @PathVariable("modelNameTail") String modelNameTail,
       @RequestParam("expectedVersion") String expectedVersion) {
-    agentModelService.deleteModel(providerName, modelName, expectedVersion);
+    agentModelService.deleteModel(
+        providerName, combineModelName(modelNameHead, modelNameTail), expectedVersion);
     return Results.noContent();
+  }
+
+  private static String combineModelName(String modelNameHead, String modelNameTail) {
+    return modelNameHead + modelNameTail;
   }
 }

@@ -155,7 +155,7 @@ Profile locations 是：
 | --- | --- | --- |
 | Health | `GET /healthz` | 进程存活探针，不读取业务外部资源 |
 | Agent Provider | `/api/ai/catalog/providers` | page、create、update、expectedVersion delete |
-| Agent Model | `/api/ai/catalog/models`、`/{providerName}/{modelName}` | page、create；路径参数复合 `(providerName, modelName)` update/delete |
+| Agent Model | `/api/ai/catalog/models`、`/{providerName}/{modelName...}` | page、create；路径参数复合 `(providerName, modelName)` update/delete，`modelName` 为可含 `/` 的尾部路径 |
 | Agent Definition | `/api/ai/catalog/agents` | page、create、update、expectedVersion delete |
 | Tool catalog | `GET /api/ai/catalog/tools` | Platform/Environment 可选工具目录投影 |
 | MCP Server | `/api/ai/mcp-servers`、`/{id}`、`/{id}/refresh` | CRUD、refresh 工具发现（expectedVersion 在 JSON body） |

@@ -373,7 +373,7 @@ describe('ToolMessageBlock', () => {
               size: 2,
               sha256: 'a'.repeat(64),
               downloadHref:
-                `/api/ai/runtime/resources/${'a'.repeat(64)}`
+                `/api/harness/resources/${'a'.repeat(64)}`
                 + '?mediaType=application%2Fjson&size=2&name=result.json',
             },
             { type: 'audio', name: '', mime: 'audio/mpeg', data: '' },
@@ -390,7 +390,7 @@ describe('ToolMessageBlock', () => {
     expect(screen.getByText('file:///tmp/result.json')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '[result.json]' })).toHaveAttribute(
       'href',
-      expect.stringContaining('/api/ai/runtime/resources/'),
+      expect.stringContaining('/api/harness/resources/'),
     )
     expect(screen.getByText('[audio] audio/mpeg')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /\[audio/ })).not.toBeInTheDocument()

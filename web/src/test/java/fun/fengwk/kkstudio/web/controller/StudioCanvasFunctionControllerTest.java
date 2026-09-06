@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standal
 
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -65,6 +66,7 @@ class StudioCanvasFunctionControllerTest {
         standaloneSetup(
                 new StudioCanvasFunctionController(
                     catalog, runtimeService, new WebDtoMapper(blobManagers)))
+            .setControllerAdvice(new ResultResponseBodyAdvice())
             .setMessageConverters(new MappingJackson2HttpMessageConverter(mapper))
             .build();
   }

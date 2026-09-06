@@ -65,7 +65,7 @@ describe('toResourceAttachment', () => {
         size: 12,
         sha256: 'a'.repeat(64),
         downloadHref:
-          `/api/ai/runtime/resources/${'a'.repeat(64)}`
+          `/api/harness/resources/${'a'.repeat(64)}`
           + '?mediaType=application%2Fjson&size=12&name=result.json',
       },
     ])
@@ -115,7 +115,7 @@ describe('toResourceAttachment', () => {
         sha256: 'c'.repeat(64),
       })[0]?.downloadHref,
     ).toBe(
-      `/api/ai/runtime/resources/${'c'.repeat(64)}`
+      `/api/harness/resources/${'c'.repeat(64)}`
       + '?mediaType=application%2Foctet-stream&size=3',
     )
   })

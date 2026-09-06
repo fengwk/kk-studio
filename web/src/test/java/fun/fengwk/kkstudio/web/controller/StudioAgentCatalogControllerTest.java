@@ -48,7 +48,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
   public void shouldUseNameBasedIdentitiesAndEnforceCatalogGuards() throws Exception {
     String suffix = Long.toString(System.nanoTime());
     String providerName = "provider-" + suffix;
-    String modelName = "model-" + suffix;
+    String modelName = "vendor/model-" + suffix;
     String agentName = "agent-" + suffix;
 
     AgentProviderCreateDTO provider = new AgentProviderCreateDTO();
@@ -227,7 +227,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     // BadRequest。
     mockMvc
         .perform(
-            put("/api/ai/catalog/models/{providerName}/{modelName}", providerName, modelName)
+            put(modelPath(providerName, modelName))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(modelUpdateBody.toString()))
         .andExpect(status().isBadRequest());
@@ -237,10 +237,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         data(
             mockMvc
                 .perform(
-                    put(
-                            "/api/ai/catalog/models/{providerName}/{modelName}",
-                            providerName,
-                            modelName)
+                    put(modelPath(providerName, modelName))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(modelUpdate)))
                 .andExpect(status().isOk())
@@ -260,7 +257,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     modelUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
-            put("/api/ai/catalog/models/{providerName}/{modelName}", providerName, modelName)
+            put(modelPath(providerName, modelName))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(modelUpdate)))
         .andExpect(status().isConflict())
@@ -324,9 +321,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     // 测试意图：验证 DELETE /api/ai/catalog/models/{providerName}/{modelName}?expectedVersion=... 在被 Agent
     // 引用时拒绝删除，返回 409 Conflict。
     mockMvc
-        .perform(
-            delete("/api/ai/catalog/models/{providerName}/{modelName}", providerName, modelName)
-                .param("expectedVersion", "1"))
+        .perform(delete(modelPath(providerName, modelName)).param("expectedVersion", "1"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
         .andExpect(jsonPath("$.errors.resource").value("agent_model"));
@@ -337,9 +332,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     // 测试意图：验证 DELETE /api/ai/catalog/models/{providerName}/{modelName}?expectedVersion=... 解除引用后成功
     // CAS 硬删除，返回 204 NoContent。
     mockMvc
-        .perform(
-            delete("/api/ai/catalog/models/{providerName}/{modelName}", providerName, modelName)
-                .param("expectedVersion", "1"))
+        .perform(delete(modelPath(providerName, modelName)).param("expectedVersion", "1"))
         .andExpect(status().isNoContent());
     // 测试意图：验证无旧 alias，集合路径 /api/ai/catalog/models 不接受 PUT 与 DELETE 请求，返回 405。
     mockMvc
@@ -445,6 +438,10 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
       }
     }
     throw new AssertionError("missing page result: " + name);
+  }
+
+  private static String modelPath(String providerName, String modelName) {
+    return "/api/ai/catalog/models/" + providerName + "/" + modelName;
   }
 
   private static void configureExecutableModel(AgentModelCreateDTO model) {

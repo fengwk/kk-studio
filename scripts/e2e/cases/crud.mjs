@@ -799,7 +799,8 @@ function modelRef(model) {
 }
 
 function modelPath(providerName, name) {
-  return `/api/ai/catalog/models/${encodeURIComponent(providerName)}/${encodeURIComponent(name)}`
+  const encodedName = name.split('/').map(encodeURIComponent).join('/')
+  return `/api/ai/catalog/models/${encodeURIComponent(providerName)}/${encodedName}`
 }
 
 async function deleteModel(ctx, model) {

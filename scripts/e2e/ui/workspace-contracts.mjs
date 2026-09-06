@@ -8,6 +8,7 @@ import {
   createChat,
   getThreadSnapshot,
   createNewSession,
+  listEnvironments,
   setAgentCommand,
   setEnvironmentCommand,
   setModelCommand,
@@ -692,14 +693,12 @@ async function waitForQueuedSettingsBatch(apiCtx, threadId, marker, timeoutMs = 
 async function createCompletedUsageFixture(apiCtx, stamp) {
   const suffix = cid().slice(0, 8)
   const mock = new CompletingOpenAiMock()
+  const workspacePath = 'projects/very-long-directory-name/packages/runtime/thread-panel'
   const state = {
     apiCtx,
     agent: null,
     chat: null,
-    environment: {
-      name: `offline-${suffix}`,
-      workspacePath: 'projects/very-long-directory-name/packages/runtime/thread-panel',
-    },
+    environment: null,
     mock,
     model: null,
     provider: null,
@@ -708,6 +707,18 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
   }
   try {
     await mock.start()
+    const environmentResponse = await apiCtx.call('POST', '/api/harness/environments', {
+      name: `offline-${suffix}`,
+    })
+    assert(
+      environmentResponse.status === 201,
+      `create usage environment: ${JSON.stringify(environmentResponse)}`,
+    )
+    state.environment = {
+      ...envelopeData(environmentResponse.json),
+      workspacePath,
+    }
+
     const providerResponse = await apiCtx.call('POST', '/api/ai/catalog/providers', {
       name: `e2e-ui-usage-provider-${suffix}`,
       description: 'Local completion provider for free Footer usage tests.',
@@ -746,6 +757,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       systemPrompt: 'Return the deterministic local response.',
       model: `${state.model.providerName}/${state.model.name}`,
       variant: 'default',
+      environmentId: state.environment.id,
       config: { toolIds: [], skills: [], subagents: [] },
     })
     assert(agentResponse.status === 201, `create usage agent: ${JSON.stringify(agentResponse)}`)
@@ -786,7 +798,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
         expectedNextCommandSequence: completed.nextCommandSequence,
       }),
       commands: [
-        setEnvironmentCommand(state.environment.workspacePath, cid()),
+        setEnvironmentCommand(workspacePath, cid()),
         userMessageCommand(`footer environment ${stamp}`, cid()),
       ],
     })
@@ -1108,6 +1120,14 @@ async function cleanupCompletedUsageFixture(state) {
       await state.apiCtx.call(
         'DELETE',
         `/api/ai/catalog/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
+      )
+    }
+  })
+  await cleanup('environment', errors, async () => {
+    if (state.environment?.id) {
+      await state.apiCtx.call(
+        'DELETE',
+        `/api/harness/environments/${encodeURIComponent(state.environment.id)}?expectedVersion=${encodeURIComponent(state.environment.version)}`,
       )
     }
   })

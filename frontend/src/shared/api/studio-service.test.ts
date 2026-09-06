@@ -81,7 +81,7 @@ describe('studio service transport adapter', () => {
   /**
    * 测试意图：验证 studio-service 导出的所有 Canvas 请求均能正常通过 fetch 传输，
    * 包含画布生命周期、节点命令批应用、资源获取、模型列表、Function Run 生命周期，
-   * 以及从 agent-pane-service 移入的 Canvas owner session 列表查询。
+   * 以及 Canvas owner session 列表查询。
    */
   it('exercises every exported canvas request through fetch', async () => {
     fetchMock

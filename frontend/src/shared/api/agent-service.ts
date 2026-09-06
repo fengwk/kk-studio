@@ -13,6 +13,10 @@ import type {
 } from '@/shared/api/contracts/ai-catalog'
 import type { PageResult } from '@/shared/api/contracts/base'
 
+function encodePathTail(value: string): string {
+  return value.split('/').map(encodeURIComponent).join('/')
+}
+
 export function createAgentService(client: HttpClient = apiClient) {
   return {
     listProviders: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentProviderDTO>> =>
@@ -39,7 +43,7 @@ export function createAgentService(client: HttpClient = apiClient) {
       data: AgentModelUpdateDTO,
     ): Promise<AgentModelDTO> =>
       client.put(
-        `/ai/catalog/models/${encodeURIComponent(providerName)}/${encodeURIComponent(modelName)}`,
+        `/ai/catalog/models/${encodeURIComponent(providerName)}/${encodePathTail(modelName)}`,
         data,
       ),
 
@@ -49,7 +53,7 @@ export function createAgentService(client: HttpClient = apiClient) {
       expectedVersion: string,
     ): Promise<void> =>
       client.delete(
-        `/ai/catalog/models/${encodeURIComponent(providerName)}/${encodeURIComponent(modelName)}`,
+        `/ai/catalog/models/${encodeURIComponent(providerName)}/${encodePathTail(modelName)}`,
         {
           params: { expectedVersion },
         },
