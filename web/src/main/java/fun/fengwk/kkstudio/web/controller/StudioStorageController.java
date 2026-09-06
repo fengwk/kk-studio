@@ -4,7 +4,6 @@ import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
-import org.springframework.util.Assert;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,6 +17,7 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
+import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.util.UUID;
 
@@ -47,7 +47,7 @@ public class StudioStorageController {
   /** 预约上传：ACTIVE 内容命中返回 READY，否则返回 PENDING 与浏览器直传预签名 PUT。 */
   @PostMapping("/uploads")
   public Result<StorageUploadDTO> reserve(@RequestBody StorageUploadReserveRequestDTO request) {
-    return Results.ok(requireUploadService().reserve(request));
+    return Results.created(requireUploadService().reserve(request));
   }
 
   /** 完成上传：校验直传对象的大小与 SHA-256 后绑定 blob，返回 READY。 */
@@ -65,15 +65,13 @@ public class StudioStorageController {
 
   /** 为 ACTIVE blob 的原始内容签发 GET 预签名 URL。 */
   @PostMapping("/blobs/{blobId}/download-url")
-  public Result<StoragePresignedUrlDTO> presignBlobOriginal(
-      @PathVariable("blobId") String blobIdText) {
+  public Result<StoragePresignedUrlDTO> downloadUrl(@PathVariable("blobId") String blobIdText) {
     return Results.ok(requireBlobManager().presignOriginalUrl(parseUuid(blobIdText, "blobId")));
   }
 
   /** 为 ACTIVE blob 的 webp 预览签发 GET 预签名 URL。 */
   @PostMapping("/blobs/{blobId}/preview-url")
-  public Result<StoragePresignedUrlDTO> presignBlobPreview(
-      @PathVariable("blobId") String blobIdText) {
+  public Result<StoragePresignedUrlDTO> previewUrl(@PathVariable("blobId") String blobIdText) {
     return Results.ok(requireBlobManager().presignPreviewUrl(parseUuid(blobIdText, "blobId")));
   }
 
@@ -96,12 +94,6 @@ public class StudioStorageController {
   }
 
   private static UUID parseUuid(String text, String name) {
-    try {
-      UUID id = UUID.fromString(text);
-      Assert.notNull(id, name + " must not be null");
-      return id;
-    } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException(name + " must be a valid UUID", e);
-    }
+    return WebDtoMapper.parseUuid(text, name);
   }
 }

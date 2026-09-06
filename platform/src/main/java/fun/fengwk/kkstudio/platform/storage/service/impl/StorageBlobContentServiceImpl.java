@@ -52,6 +52,8 @@ public class StorageBlobContentServiceImpl implements StorageBlobContentService 
     }
 
     // 2. 事务外执行大小校验与 S3 下载；无论成功或失败，finally 短事务 release 释放引用
+    StorageBlobContent content = null;
+    Throwable readError = null;
     try {
       if (maxSizeBytes >= 0 && blob.getSizeBytes() > maxSizeBytes) {
         throw new IllegalArgumentException(
@@ -62,22 +64,35 @@ public class StorageBlobContentServiceImpl implements StorageBlobContentService 
                 + " bytes");
       }
       String objectKey = StorageObjectKeys.blobOriginal(blobId);
-      S3ObjectContent content = s3StorageService.download(objectKey, maxSizeBytes);
-      return new StorageBlobContent(
-          blobId, content.getBytes(), blob.getMediaType(), blob.getSizeBytes());
+      S3ObjectContent s3Content = s3StorageService.download(objectKey, maxSizeBytes);
+      content =
+          new StorageBlobContent(
+              blobId, s3Content.getBytes(), blob.getMediaType(), blob.getSizeBytes());
+    } catch (Throwable error) {
+      readError = error;
+      throw error;
     } finally {
-      // 3. 短事务 release
+      // 3. 短事务 release：不重试非幂等 release；检查 release 返回值，失败时作为不变式破坏抛出
       try {
         TransactionTemplate releaseTemplate = newTransactionTemplate();
         releaseTemplate.execute(
             status -> {
-              blobManager.release(blobId);
+              boolean released = blobManager.release(blobId);
+              if (!released) {
+                throw new IllegalStateException("blob release returned false for " + blobId);
+              }
               return null;
             });
-      } catch (RuntimeException error) {
-        log.warn("failed to release blob {} in finally block", blobId, error);
+      } catch (RuntimeException | Error releaseError) {
+        if (readError != null) {
+          readError.addSuppressed(releaseError);
+        } else {
+          throw releaseError;
+        }
       }
     }
+
+    return content;
   }
 
   private TransactionTemplate newTransactionTemplate() {

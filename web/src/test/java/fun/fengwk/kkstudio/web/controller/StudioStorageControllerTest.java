@@ -88,7 +88,7 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(
                         reserveBody("photo.png", "image/png", content.length, sha256Hex(content))))
-            .andExpect(status().isOk())
+            .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.id").isString())
             .andExpect(jsonPath("$.data.state").value("PENDING"))
             .andExpect(jsonPath("$.data.blobId").value(nullValue()))
@@ -219,7 +219,7 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
                 .content(
                     reserveBody(
                         "b.bin", "application/octet-stream", content.length, sha256Hex(content))))
-        .andExpect(status().isOk())
+        .andExpect(status().isCreated())
         .andExpect(jsonPath("$.data.state").value("READY"))
         .andExpect(jsonPath("$.data.blobId").isString())
         .andExpect(jsonPath("$.data.presignedPut").value(nullValue()));
@@ -358,7 +358,7 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
                 post("/api/storage/uploads")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(reserveBody(filename, mediaType, size, sha256)))
-            .andExpect(status().isOk())
+            .andExpect(status().isCreated())
             .andReturn();
     return readJsonString(result.getResponse().getContentAsString(), "$.data.id");
   }

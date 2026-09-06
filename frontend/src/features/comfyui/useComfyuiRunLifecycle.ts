@@ -24,8 +24,7 @@ async function defaultHashFile(file: File): Promise<string> {
 }
 
 export interface UseComfyuiRunLifecycleOptions {
-  workflowId?: string
-  apiName?: string
+  workflowId: string
   defaultSelector: string | null
   storageService?: StorageService
   hashFile?: (file: File) => Promise<string>
@@ -34,13 +33,11 @@ export interface UseComfyuiRunLifecycleOptions {
 
 export function useComfyuiRunLifecycle({
   workflowId,
-  apiName,
   defaultSelector,
   storageService = defaultStorageService,
   hashFile = defaultHashFile,
   comfyuiService = defaultComfyuiService,
 }: UseComfyuiRunLifecycleOptions) {
-  const targetWorkflowId = workflowId ?? apiName ?? ''
   const [selector, setSelector] = useState(defaultSelector ?? '')
   const [run, setRun] = useState<ComfyuiWorkflowRunDTO | null>(null)
   const [job, setJob] = useState<ComfyuiWorkflowJobDTO | null>(null)
@@ -129,39 +126,39 @@ export function useComfyuiRunLifecycle({
 
     const uploadedHandles: string[] = []
     try {
-      const uploadedFiles = await Promise.all(
-        Object.entries(files)
-          .filter((entry): entry is [string, File] => Boolean(entry[1]))
-          .map(async ([name, file]) => {
-            const sha256 = await hashFile(file)
-            const reservation = await storageService.reserveUpload({
-              filename: file.name,
-              mediaType: file.type || 'application/octet-stream',
-              sizeBytes: file.size,
-              sha256,
-            })
-            uploadedHandles.push(reservation.id)
-            if (reservation.state === 'PENDING') {
-              await storageService.uploadFile(reservation.presignedPut, file)
-            }
-            const completed = await storageService.completeUpload(reservation.id)
-            if (!completed.blobId) {
-              throw new Error('Upload completion did not return a valid blobId')
-            }
-            return [
-              name,
-              {
-                blobId: completed.blobId,
-                filename: file.name,
-              } satisfies ComfyuiWorkflowRunFileDTO,
-            ] as const
-          }),
+      const fileEntries = Object.entries(files).filter(
+        (entry): entry is [string, File] => Boolean(entry[1]),
       )
+      const uploadedFiles: Array<readonly [string, ComfyuiWorkflowRunFileDTO]> = []
+      for (const [name, file] of fileEntries) {
+        const sha256 = await hashFile(file)
+        const reservation = await storageService.reserveUpload({
+          filename: file.name,
+          mediaType: file.type || 'application/octet-stream',
+          sizeBytes: file.size,
+          sha256,
+        })
+        uploadedHandles.push(reservation.id)
+        if (reservation.state === 'PENDING') {
+          await storageService.uploadFile(reservation.presignedPut, file)
+        }
+        const completed = await storageService.completeUpload(reservation.id)
+        if (!completed.blobId) {
+          throw new Error('Upload completion did not return a valid blobId')
+        }
+        uploadedFiles.push([
+          name,
+          {
+            blobId: completed.blobId,
+            filename: file.name,
+          } satisfies ComfyuiWorkflowRunFileDTO,
+        ])
+      }
       if (!mountedRef.current || generation !== generationRef.current) {
         return
       }
       const fileReferences: Record<string, ComfyuiWorkflowRunFileDTO> = Object.fromEntries(uploadedFiles)
-      const nextRun = await comfyuiService.runWorkflow(targetWorkflowId, { parameters, files: fileReferences })
+      const nextRun = await comfyuiService.runWorkflow(workflowId, { parameters, files: fileReferences })
       if (!mountedRef.current || generation !== generationRef.current) {
         return
       }

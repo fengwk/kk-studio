@@ -125,7 +125,7 @@ describe('ComfyuiPage', () => {
     renderPage()
     // 面板渲染工作流卡片。
     expect(await screen.findByRole('button', { name: '运行 Image Upscale' })).toBeInTheDocument()
-    expect(screen.getByText('POST /api/comfyui/workflows/image-upscale/runs')).toBeInTheDocument()
+    expect(screen.getByText('POST /api/comfyui/workflows/workflow-1/runs')).toBeInTheDocument()
     // 打开运行 modal 前不渲染。
     expect(screen.queryByText('JSONPath 选择器')).not.toBeInTheDocument()
     // 点击运行卡片 -> ComfyuiRunModalHost 渲染 modal。

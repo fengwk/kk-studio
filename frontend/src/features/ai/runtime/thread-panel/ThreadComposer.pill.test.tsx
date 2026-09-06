@@ -62,14 +62,14 @@ function fakeStorage(overrides: {
     }
   })
   const deleteUpload = vi.fn(async () => undefined)
-  const getBlobOriginalUrl = vi.fn(async () => ({ url: 'https://s3.test/orig', expiresAt: null }))
+  const getBlobDownloadUrl = vi.fn(async () => ({ url: 'https://s3.test/orig', expiresAt: null }))
   const getBlobPreviewUrl = vi.fn(async () => ({ url: 'https://s3.test/prev', expiresAt: null }))
   const uploadFile = vi.fn(async () => undefined)
   const service = {
     reserveUpload,
     completeUpload,
     deleteUpload,
-    getBlobOriginalUrl,
+    getBlobDownloadUrl,
     getBlobPreviewUrl,
     uploadFile,
   } as unknown as StorageService

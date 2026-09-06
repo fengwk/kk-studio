@@ -2,9 +2,9 @@ import { createContext } from 'react'
 
 /** durable RESOURCE 的渲染期解析结果（各自可为 null，表示该端点解析失败）。 */
 export interface ResourceBlobUrls {
-  /** presigned-original：下载/原图。 */
+  /** download-url：下载/原图。 */
   original: string | null
-  /** presigned-preview：image/video 内联预览。 */
+  /** preview-url：image/video 内联预览。 */
   preview: string | null
   /** storage_blob 的权威媒体类型；不从文件名或 URL 猜测。 */
   mediaType: string | null

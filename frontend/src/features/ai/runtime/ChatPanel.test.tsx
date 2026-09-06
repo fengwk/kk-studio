@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatPanel } from '@/features/ai/runtime/ChatPanel'
 
 const storageMocks = vi.hoisted(() => ({
-  getBlobOriginalUrl: vi.fn(),
+  getBlobDownloadUrl: vi.fn(),
   getBlobPreviewUrl: vi.fn(),
 }))
 
@@ -168,7 +168,7 @@ describe('ChatPanel', () => {
   })
 
   it('treats a missing authoritative original response as an unavailable resource', async () => {
-    storageMocks.getBlobOriginalUrl.mockRejectedValue(new Error('missing'))
+    storageMocks.getBlobDownloadUrl.mockRejectedValue(new Error('missing'))
     storageMocks.getBlobPreviewUrl.mockResolvedValue({
       url: 'https://s3.test/preview',
       expiresAt: '2026-08-12T00:00:00Z',
@@ -222,7 +222,7 @@ describe('ChatPanel', () => {
   })
 
   it('renders the authoritative original inline when preview resolution fails', async () => {
-    storageMocks.getBlobOriginalUrl.mockResolvedValue({
+    storageMocks.getBlobDownloadUrl.mockResolvedValue({
       url: 'https://s3.test/original',
       expiresAt: '2026-08-12T00:00:00Z',
       mediaType: 'image/png',

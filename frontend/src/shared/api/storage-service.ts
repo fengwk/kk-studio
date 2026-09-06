@@ -62,8 +62,6 @@ export function createStorageService(client: HttpClient = apiClient) {
       client.delete(`/storage/uploads/${encodeURIComponent(uploadId)}`),
     /** 下载 URL 端点（原件）：sizeBytes 是 Java long 的 decimal string|null，严格归一化为 number|null。 */
     getBlobDownloadUrl,
-    /** 兼容历史命名的原件下载别名。 */
-    getBlobOriginalUrl: getBlobDownloadUrl,
     getBlobPreviewUrl: async (blobId: string): Promise<StoragePresignedUrlDTO> => {
       const raw = await client.post<unknown>(
         `/storage/blobs/${encodeURIComponent(blobId)}/preview-url`,

@@ -32,7 +32,6 @@ export function ComfyuiRunModal({ workflow, onClose }: { workflow: ComfyuiWorkfl
   const [files, setFiles] = useState<Record<string, File | undefined>>({})
   const lifecycle = useComfyuiRunLifecycle({
     workflowId: workflow.id,
-    apiName: workflow.apiName,
     defaultSelector: workflow.defaultSelector,
   })
 

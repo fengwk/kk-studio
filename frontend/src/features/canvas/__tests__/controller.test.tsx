@@ -88,7 +88,7 @@ vi.mock('@/shared/api/storage-service', () => ({
     uploadFile: vi.fn(),
     completeUpload: vi.fn(),
     deleteUpload: vi.fn(),
-    getBlobOriginalUrl: vi.fn(),
+    getBlobDownloadUrl: vi.fn(),
     getBlobPreviewUrl: vi.fn(),
   },
 }))

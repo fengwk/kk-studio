@@ -35,7 +35,7 @@ export function ComfyuiWorkflowCard({
         </span>
       </div>
       <div className="meta-block">
-        <MetaRow label={t('comfyui.card.metaApi')} value={`POST /api/comfyui/workflows/${workflow.apiName}/runs`} />
+        <MetaRow label={t('comfyui.card.metaApi')} value={`POST /api/comfyui/workflows/${workflow.id}/runs`} />
         <MetaRow
           label={t('comfyui.card.metaBindings')}
           value={bindingSummary.error ? t('comfyui.card.bindingError') : String(bindingSummary.count)}

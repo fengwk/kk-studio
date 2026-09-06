@@ -9,7 +9,7 @@ import java.util.UUID;
 /**
  * 暴露给 runtime 提交路径使用的只读查询入口。
  *
- * <p>该类只做持久配置的获取与解析，不会执行 workflow 或访问网络。runtime 可在每次提交时通过 apiName 获取最新启用的配置 + 校验过的绑定模型。
+ * <p>该类只做持久配置的获取与解析，不会执行 workflow 或访问网络。runtime 可在每次提交时通过 workflowId 获取最新启用的配置 + 校验过的绑定模型。
  *
  * @author fengwk
  */
