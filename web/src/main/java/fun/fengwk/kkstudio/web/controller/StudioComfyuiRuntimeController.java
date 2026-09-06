@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunRequestDTO;
 
 import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 
 /**
  * ComfyUI 无状态任务 API。
@@ -49,12 +50,13 @@ public class StudioComfyuiRuntimeController {
 
   private final ComfyuiRuntimeService comfyuiRuntimeService;
 
-  @PostMapping("/workflows/{apiName}/runs")
+  @PostMapping("/workflows/{workflowId}/runs")
   public Result<ComfyuiWorkflowRunDTO> run(
-      @PathVariable("apiName") String apiName,
+      @PathVariable("workflowId") String workflowIdText,
       @RequestBody(required = false) ComfyuiWorkflowRunRequestDTO request) {
+    UUID workflowId = parseUuid(workflowIdText, "workflowId");
     try {
-      return Results.created(comfyuiRuntimeService.run(apiName, request));
+      return Results.accepted(comfyuiRuntimeService.run(workflowId, request));
     } catch (IllegalArgumentException error) {
       throw translateNotFound(error);
     }
@@ -123,5 +125,13 @@ public class StudioComfyuiRuntimeController {
       return new ResponseStatusException(HttpStatus.NOT_FOUND, message, error);
     }
     return error;
+  }
+
+  private static UUID parseUuid(String text, String name) {
+    try {
+      return UUID.fromString(text);
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, name + " must be a valid UUID", e);
+    }
   }
 }

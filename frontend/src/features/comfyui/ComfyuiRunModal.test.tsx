@@ -5,12 +5,14 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComfyuiRunModal } from '@/features/comfyui/ComfyuiRunModal'
 import { comfyuiService } from '@/shared/api/comfyui-service'
+import { storageService } from '@/shared/api/storage-service'
 import { setLocale } from '@/shared/i18n'
 import type {
   ComfyuiWorkflowApiDTO,
   ComfyuiWorkflowJobDTO,
   ComfyuiWorkflowRunDTO,
 } from '@/shared/api/contracts/comfyui'
+import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
 
 vi.mock('@/shared/api/comfyui-service', () => ({
   comfyuiService: {
@@ -21,15 +23,23 @@ vi.mock('@/shared/api/comfyui-service', () => ({
     runWorkflow: vi.fn(),
     getRun: vi.fn(),
     cancelRun: vi.fn(),
-    uploadFile: vi.fn(),
-    createPresignedUpload: vi.fn(),
-    createPresignedDownload: vi.fn(),
   },
 }))
 
+vi.mock('@/shared/api/storage-service', () => ({
+  storageService: {
+    reserveUpload: vi.fn(),
+    uploadFile: vi.fn(),
+    completeUpload: vi.fn(),
+    deleteUpload: vi.fn(),
+  },
+}))
+
+const defaultWorkflowId = '37d4fa8b-00cf-4dbd-a44e-53934d6a7567'
+
 function makeWorkflow(overrides: Partial<ComfyuiWorkflowApiDTO> = {}): ComfyuiWorkflowApiDTO {
   return {
-    id: 'workflow-1',
+    id: defaultWorkflowId,
     apiName: 'image-upscale',
     name: 'Image Upscale',
     description: null,
@@ -113,14 +123,26 @@ async function flushPromises() {
 describe('ComfyuiRunModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(storageService.reserveUpload).mockResolvedValue({
+      id: 'up-1',
+      state: 'PENDING',
+      blobId: null,
+      presignedPut: { method: 'PUT', url: 'https://s3.test/up-1', headers: {} },
+      expiresAt: '2026-08-12T00:00:00Z',
+    } satisfies StorageUploadDTO)
+    vi.mocked(storageService.uploadFile).mockResolvedValue()
+    vi.mocked(storageService.completeUpload).mockResolvedValue({
+      id: 'up-1',
+      state: 'READY',
+      blobId: 'blob-1',
+      presignedPut: null,
+      expiresAt: '2026-08-12T00:00:00Z',
+    } satisfies StorageUploadDTO)
+    vi.mocked(storageService.deleteUpload).mockResolvedValue()
+
     vi.mocked(comfyuiService.runWorkflow).mockReset().mockResolvedValue(makeRun())
     vi.mocked(comfyuiService.getRun).mockReset().mockResolvedValue(makeJob('completed'))
     vi.mocked(comfyuiService.cancelRun).mockReset().mockResolvedValue({ runId: 'run-1', cancelled: true })
-    vi.mocked(comfyuiService.uploadFile).mockReset().mockResolvedValue({
-      key: 'comfyui-inputs/image-upscale/abc/input.png',
-      filename: 'input.png',
-      contentType: 'image/png',
-    })
   })
 
   afterEach(() => {
@@ -131,10 +153,12 @@ describe('ComfyuiRunModal', () => {
     renderModal({ workflow: makeWorkflow({ inputBindingsJson: '{broken' }) })
     expect(screen.getByText(/输入绑定配置错误/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '运行工作流' })).toBeDisabled()
-    expect(screen.getByText('POST /api/comfyui/workflows/image-upscale/runs')).toBeInTheDocument()
+    expect(
+      screen.getByText('POST /api/comfyui/workflows/37d4fa8b-00cf-4dbd-a44e-53934d6a7567/runs'),
+    ).toBeInTheDocument()
   })
 
-  it('uploads files via the service and submits run with only S3 key references', async () => {
+  it('uploads files via Storage service, releases handles in finally, and submits run with { blobId, filename }', async () => {
     const user = userEvent.setup()
     renderModal()
 
@@ -145,13 +169,12 @@ describe('ComfyuiRunModal', () => {
     await user.click(screen.getByRole('button', { name: '运行工作流' }))
 
     // 必需的 steps 取自默认值，prompt 也取自默认值。
-    expect(comfyuiService.uploadFile).toHaveBeenCalledTimes(1)
-    const [apiNameArg, fileArg] = vi.mocked(comfyuiService.uploadFile).mock.calls[0]
-    expect(apiNameArg).toBe('image-upscale')
-    expect(fileArg).toBeInstanceOf(File)
+    await waitFor(() => expect(storageService.reserveUpload).toHaveBeenCalledTimes(1))
+    expect(storageService.uploadFile).toHaveBeenCalledTimes(1)
+    expect(storageService.completeUpload).toHaveBeenCalledWith('up-1')
 
     await waitFor(() => expect(comfyuiService.runWorkflow).toHaveBeenCalledTimes(1))
-    expect(comfyuiService.runWorkflow).toHaveBeenCalledWith('image-upscale', {
+    expect(comfyuiService.runWorkflow).toHaveBeenCalledWith(defaultWorkflowId, {
       parameters: {
         prompt: 'hello',
         steps: 4,
@@ -160,13 +183,13 @@ describe('ComfyuiRunModal', () => {
       },
       files: {
         image: {
-          key: 'comfyui-inputs/image-upscale/abc/input.png',
+          blobId: 'blob-1',
           filename: 'input.png',
-          contentType: 'image/png',
         },
       },
     })
-    expect(vi.mocked(comfyuiService.uploadFile).mock.invocationCallOrder[0]).toBeLessThan(
+    await waitFor(() => expect(storageService.deleteUpload).toHaveBeenCalledWith('up-1'))
+    expect(vi.mocked(storageService.uploadFile).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(comfyuiService.runWorkflow).mock.invocationCallOrder[0],
     )
   })
@@ -179,7 +202,7 @@ describe('ComfyuiRunModal', () => {
       ]),
     })
     vi.mocked(comfyuiService.runWorkflow).mockClear()
-    vi.mocked(comfyuiService.uploadFile).mockClear()
+    vi.mocked(storageService.reserveUpload).mockClear()
     renderModal({ workflow })
     // 提交必须在任何上传或运行发生前做客户端拦截。
     expect(screen.queryByRole('button', { name: '运行工作流' })).toBeInTheDocument()
@@ -187,7 +210,7 @@ describe('ComfyuiRunModal', () => {
     fireEvent.submit(screen.getByRole('button', { name: '运行工作流' }).closest('form')!)
     await flushPromises()
     expect(comfyuiService.runWorkflow).not.toHaveBeenCalled()
-    expect(comfyuiService.uploadFile).not.toHaveBeenCalled()
+    expect(storageService.reserveUpload).not.toHaveBeenCalled()
   })
 
   it('completes submit and job updates under React StrictMode', async () => {
@@ -256,14 +279,14 @@ describe('ComfyuiRunModal', () => {
   }, 10000)
 
   it('surfaces a direct upload failure without submitting the run', async () => {
-    vi.mocked(comfyuiService.uploadFile).mockRejectedValue(new Error('S3 upload rejected'))
+    vi.mocked(storageService.reserveUpload).mockRejectedValue(new Error('Storage upload rejected'))
     const user = userEvent.setup()
     renderModal()
     fireEvent.change(screen.getByLabelText('image *'), {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
     await user.click(screen.getByRole('button', { name: '运行工作流' }))
-    expect(await screen.findByText('S3 upload rejected')).toBeInTheDocument()
+    expect(await screen.findByText('Storage upload rejected')).toBeInTheDocument()
     expect(comfyuiService.runWorkflow).not.toHaveBeenCalled()
   })
 
@@ -361,8 +384,8 @@ describe('ComfyuiRunModal', () => {
     // 没有必需的文件 binding - submit 必须以空 parameters 和空 files 成功。
     fireEvent.submit(screen.getByRole('button', { name: '运行工作流' }).closest('form')!)
     return flushPromises().then(() => {
-      expect(comfyuiService.uploadFile).not.toHaveBeenCalled()
-      expect(comfyuiService.runWorkflow).toHaveBeenCalledWith('image-upscale', {
+      expect(storageService.reserveUpload).not.toHaveBeenCalled()
+      expect(comfyuiService.runWorkflow).toHaveBeenCalledWith(defaultWorkflowId, {
         parameters: {},
         files: {},
       })

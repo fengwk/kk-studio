@@ -6,7 +6,6 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.Assert;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -65,14 +64,14 @@ public class StudioStorageController {
   }
 
   /** 为 ACTIVE blob 的原始内容签发 GET 预签名 URL。 */
-  @GetMapping("/blobs/{blobId}/presigned-original")
+  @PostMapping("/blobs/{blobId}/download-url")
   public Result<StoragePresignedUrlDTO> presignBlobOriginal(
       @PathVariable("blobId") String blobIdText) {
     return Results.ok(requireBlobManager().presignOriginalUrl(parseUuid(blobIdText, "blobId")));
   }
 
   /** 为 ACTIVE blob 的 webp 预览签发 GET 预签名 URL。 */
-  @GetMapping("/blobs/{blobId}/presigned-preview")
+  @PostMapping("/blobs/{blobId}/preview-url")
   public Result<StoragePresignedUrlDTO> presignBlobPreview(
       @PathVariable("blobId") String blobIdText) {
     return Results.ok(requireBlobManager().presignPreviewUrl(parseUuid(blobIdText, "blobId")));

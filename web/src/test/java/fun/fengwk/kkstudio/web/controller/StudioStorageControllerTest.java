@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -137,7 +136,7 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
 
     MvcResult original =
         mockMvc
-            .perform(get("/api/storage/blobs/" + blobId + "/presigned-original"))
+            .perform(post("/api/storage/blobs/" + blobId + "/download-url"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.method").value("GET"))
             .andExpect(
@@ -152,7 +151,7 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
 
     MvcResult preview =
         mockMvc
-            .perform(get("/api/storage/blobs/" + blobId + "/presigned-preview"))
+            .perform(post("/api/storage/blobs/" + blobId + "/preview-url"))
             .andExpect(status().isOk())
             .andExpect(
                 jsonPath("$.data.url").value(containsString("blobs/" + blobId + "/preview.webp")))
@@ -195,7 +194,7 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("STORAGE_NOT_FOUND"));
     mockMvc
-        .perform(get("/api/storage/blobs/" + blobId + "/presigned-original"))
+        .perform(post("/api/storage/blobs/" + blobId + "/download-url"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("STORAGE_NOT_FOUND"));
   }
@@ -315,7 +314,10 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
         .andExpect(jsonPath("$.code").value("STORAGE_NOT_FOUND"));
 
     mockMvc
-        .perform(get("/api/storage/blobs/" + UUID.randomUUID() + "/presigned-original"))
+        .perform(post("/api/storage/blobs/" + UUID.randomUUID() + "/download-url"))
+        .andExpect(status().isNotFound());
+    mockMvc
+        .perform(post("/api/storage/blobs/" + UUID.randomUUID() + "/preview-url"))
         .andExpect(status().isNotFound());
   }
 

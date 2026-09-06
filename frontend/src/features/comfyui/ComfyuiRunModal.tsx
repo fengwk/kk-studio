@@ -31,6 +31,7 @@ export function ComfyuiRunModal({ workflow, onClose }: { workflow: ComfyuiWorkfl
   const [values, setValues] = useState<Record<string, string>>(() => initialBindingValues(bindingResult.bindings))
   const [files, setFiles] = useState<Record<string, File | undefined>>({})
   const lifecycle = useComfyuiRunLifecycle({
+    workflowId: workflow.id,
     apiName: workflow.apiName,
     defaultSelector: workflow.defaultSelector,
   })
@@ -67,7 +68,7 @@ export function ComfyuiRunModal({ workflow, onClose }: { workflow: ComfyuiWorkfl
       >
         <ModalHeader title={t('comfyui.run.title', { name: workflow.name })} onClose={onClose} />
         <div className="modal-body comfyui-modal-scroll">
-          <div className="comfyui-run-endpoint">POST /api/comfyui/workflows/{workflow.apiName}/runs</div>
+          <div className="comfyui-run-endpoint">POST /api/comfyui/workflows/{workflow.id}/runs</div>
           {bindingResult.error && (
             <StateBlock title={t('comfyui.run.bindingError', { error: bindingResult.error })} tone="danger" />
           )}

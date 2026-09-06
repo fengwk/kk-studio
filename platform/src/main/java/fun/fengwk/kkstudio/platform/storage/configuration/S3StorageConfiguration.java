@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.platform.storage.persistence.SessionBlobRefRepository
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobIngestService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
@@ -36,6 +37,7 @@ import fun.fengwk.kkstudio.platform.storage.service.impl.HeadOnlyStorageMediaPro
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlSessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageBlobIngestService;
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.impl.StorageBlobContentServiceImpl;
 import fun.fengwk.kkstudio.platform.storage.service.impl.StorageUploadServiceImpl;
 
 import java.net.URI;
@@ -153,6 +155,23 @@ public class S3StorageConfiguration {
         Objects.requireNonNull(s3StorageService.getIfAvailable(), "s3StorageService"),
         Objects.requireNonNull(s3PresignService.getIfAvailable(), "s3PresignService"),
         maintenanceWakeup);
+  }
+
+  /** 最小的 Blob 内容读取边界：短事务 retain 权威元数据，事务外 S3 下载，finally 短事务 release。 */
+  @Bean
+  @ConditionalOnMissingBean(StorageBlobContentService.class)
+  public StorageBlobContentService storageBlobContentService(
+      ObjectProvider<StorageBlobManager> storageBlobManager,
+      ObjectProvider<S3StorageService> s3StorageService,
+      PlatformTransactionManager transactionManager,
+      SystemSettingsSnapshot snapshot) {
+    if (!s3Enabled(snapshot)) {
+      return null;
+    }
+    return new StorageBlobContentServiceImpl(
+        Objects.requireNonNull(storageBlobManager.getIfAvailable(), "storageBlobManager"),
+        Objects.requireNonNull(s3StorageService.getIfAvailable(), "s3StorageService"),
+        transactionManager);
   }
 
   /** 上传契约服务：reserve/complete/delete 与 cleanup-lease 过期回收。 */

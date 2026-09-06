@@ -1,20 +1,5 @@
 import type { BackendDateTime } from '@/shared/api/contracts/base'
 
-export interface S3PresignedRequestDTO {
-  key: string
-  contentType?: string
-  expiresInSeconds?: number
-}
-
-export interface S3PresignedResponseDTO {
-  bucket: string
-  key: string
-  method: string
-  url: string
-  headers: Record<string, string>
-  expiresAt: BackendDateTime
-}
-
 /**
  * 共享存储上传的媒体类别。媒体类型（mediaType）负责精确分类；mediaKind 是
  * 客户端与存储层之间的粗粒度路由/限制键。
@@ -70,8 +55,8 @@ export type StorageUploadDTO =
     }
 
 /**
- * 渲染期 blob URL：`GET /api/storage/blobs/{blobId}/presigned-original`
- * 与 `GET /api/storage/blobs/{blobId}/presigned-preview`。只在资源实际渲染
+ * 渲染期 blob URL：`POST /api/storage/blobs/{blobId}/download-url`
+ * 与 `POST /api/storage/blobs/{blobId}/preview-url`。只在资源实际渲染
  * （预览/下载）时才调用，避免为未展示的资源提前换取 URL。
  */
 export interface StoragePresignedUrlDTO {

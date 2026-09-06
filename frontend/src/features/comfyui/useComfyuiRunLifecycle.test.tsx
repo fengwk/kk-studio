@@ -1,20 +1,32 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { comfyuiService } from '@/shared/api/comfyui-service'
+import { storageService } from '@/shared/api/storage-service'
 import { useComfyuiRunLifecycle } from '@/features/comfyui/useComfyuiRunLifecycle'
 import type {
   ComfyuiWorkflowJobDTO,
   ComfyuiWorkflowRunDTO,
 } from '@/shared/api/contracts/comfyui'
+import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
 
 vi.mock('@/shared/api/comfyui-service', () => ({
   comfyuiService: {
     runWorkflow: vi.fn(),
     getRun: vi.fn(),
     cancelRun: vi.fn(),
-    uploadFile: vi.fn(),
   },
 }))
+
+vi.mock('@/shared/api/storage-service', () => ({
+  storageService: {
+    reserveUpload: vi.fn(),
+    uploadFile: vi.fn(),
+    completeUpload: vi.fn(),
+    deleteUpload: vi.fn(),
+  },
+}))
+
+const testWorkflowId = '37d4fa8b-00cf-4dbd-a44e-53934d6a7567'
 
 function makeRun(overrides: Partial<ComfyuiWorkflowRunDTO> = {}): ComfyuiWorkflowRunDTO {
   return {
@@ -32,7 +44,7 @@ function makeJob(status: string): ComfyuiWorkflowJobDTO {
     priority: 0,
     createTime: 1,
     updateTime: 2,
-    workflowId: 'workflow-1',
+    workflowId: testWorkflowId,
     executionStartTime: 1,
     executionEndTime: status === 'completed' ? 2 : null,
     outputsCount: 0,
@@ -45,21 +57,39 @@ function makeJob(status: string): ComfyuiWorkflowJobDTO {
 }
 
 describe('useComfyuiRunLifecycle', () => {
+  const fakeHash = vi.fn(async () => 'mock-sha256-hex')
+
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(comfyuiService.uploadFile).mockResolvedValue({
-      key: 'comfyui-inputs/image-upscale/input.png',
-      filename: 'input.png',
-      contentType: 'image/png',
-    })
+    vi.mocked(storageService.reserveUpload).mockResolvedValue({
+      id: 'up-1',
+      state: 'PENDING',
+      blobId: null,
+      presignedPut: { method: 'PUT', url: 'https://s3.test/up-1', headers: {} },
+      expiresAt: '2026-08-12T00:00:00Z',
+    } satisfies StorageUploadDTO)
+    vi.mocked(storageService.uploadFile).mockResolvedValue()
+    vi.mocked(storageService.completeUpload).mockResolvedValue({
+      id: 'up-1',
+      state: 'READY',
+      blobId: 'blob-1',
+      presignedPut: null,
+      expiresAt: '2026-08-12T00:00:00Z',
+    } satisfies StorageUploadDTO)
+    vi.mocked(storageService.deleteUpload).mockResolvedValue()
+
     vi.mocked(comfyuiService.runWorkflow).mockResolvedValue(makeRun())
     vi.mocked(comfyuiService.getRun).mockResolvedValue(makeJob('completed'))
     vi.mocked(comfyuiService.cancelRun).mockResolvedValue({ runId: 'run-1', cancelled: true })
   })
 
-  it('uploads files, submits the run, and loads its initial job with the resolved selector', async () => {
+  it('uploads files via Storage, submits run with canonical UUID and { blobId, filename }, and releases handles in finally', async () => {
     const { result } = renderHook(() =>
-      useComfyuiRunLifecycle({ apiName: 'image-upscale', defaultSelector: null }),
+      useComfyuiRunLifecycle({
+        workflowId: testWorkflowId,
+        defaultSelector: null,
+        hashFile: fakeHash,
+      }),
     )
 
     await act(async () => {
@@ -69,17 +99,25 @@ describe('useComfyuiRunLifecycle', () => {
       })
     })
 
-    expect(comfyuiService.uploadFile).toHaveBeenCalledWith('image-upscale', expect.any(File))
-    expect(comfyuiService.runWorkflow).toHaveBeenCalledWith('image-upscale', {
+    expect(storageService.reserveUpload).toHaveBeenCalledWith({
+      filename: 'input.png',
+      mediaType: 'image/png',
+      sizeBytes: 6,
+      sha256: 'mock-sha256-hex',
+    })
+    expect(storageService.uploadFile).toHaveBeenCalledTimes(1)
+    expect(storageService.completeUpload).toHaveBeenCalledWith('up-1')
+    expect(comfyuiService.runWorkflow).toHaveBeenCalledWith(testWorkflowId, {
       parameters: { prompt: 'hello' },
       files: {
         image: {
-          key: 'comfyui-inputs/image-upscale/input.png',
+          blobId: 'blob-1',
           filename: 'input.png',
-          contentType: 'image/png',
         },
       },
     })
+    // 始终在 finally 释放 upload handle
+    expect(storageService.deleteUpload).toHaveBeenCalledWith('up-1')
     expect(comfyuiService.getRun).toHaveBeenCalledWith('run-1', '$.outputs')
     expect(result.current).toMatchObject({
       selector: '$.outputs',
@@ -89,11 +127,33 @@ describe('useComfyuiRunLifecycle', () => {
     })
   })
 
+  it('always releases upload handles in finally even when runWorkflow throws', async () => {
+    vi.mocked(comfyuiService.runWorkflow).mockRejectedValueOnce(new Error('workflow rejected'))
+    const { result } = renderHook(() =>
+      useComfyuiRunLifecycle({
+        workflowId: testWorkflowId,
+        defaultSelector: '$.outputs',
+        hashFile: fakeHash,
+      }),
+    )
+
+    await act(async () => {
+      await result.current.submit({
+        parameters: {},
+        files: { image: new File(['pixels'], 'input.png', { type: 'image/png' }) },
+      })
+    })
+
+    expect(storageService.reserveUpload).toHaveBeenCalledTimes(1)
+    expect(storageService.deleteUpload).toHaveBeenCalledWith('up-1')
+    expect(result.current).toMatchObject({ error: 'workflow rejected', operationPending: false, run: null })
+  })
+
   it('reloads the current job when cancellation is no longer accepted by the server', async () => {
     vi.mocked(comfyuiService.getRun).mockResolvedValue(makeJob('running'))
     vi.mocked(comfyuiService.cancelRun).mockResolvedValue({ runId: 'run-1', cancelled: false })
     const { result } = renderHook(() =>
-      useComfyuiRunLifecycle({ apiName: 'image-upscale', defaultSelector: '$.outputs' }),
+      useComfyuiRunLifecycle({ workflowId: testWorkflowId, defaultSelector: '$.outputs', hashFile: fakeHash }),
     )
 
     await act(async () => {
@@ -111,9 +171,9 @@ describe('useComfyuiRunLifecycle', () => {
   })
 
   it('exposes upload and refresh failures without leaving an operation pending', async () => {
-    vi.mocked(comfyuiService.uploadFile).mockRejectedValueOnce(new Error('upload rejected'))
+    vi.mocked(storageService.reserveUpload).mockRejectedValueOnce(new Error('upload rejected'))
     const { result } = renderHook(() =>
-      useComfyuiRunLifecycle({ apiName: 'image-upscale', defaultSelector: '$.outputs' }),
+      useComfyuiRunLifecycle({ workflowId: testWorkflowId, defaultSelector: '$.outputs', hashFile: fakeHash }),
     )
 
     await act(async () => {
@@ -140,7 +200,7 @@ describe('useComfyuiRunLifecycle', () => {
     vi.mocked(comfyuiService.getRun).mockResolvedValue(makeJob('running'))
     vi.mocked(comfyuiService.cancelRun).mockRejectedValue(new Error('cancel rejected'))
     const { result } = renderHook(() =>
-      useComfyuiRunLifecycle({ apiName: 'image-upscale', defaultSelector: '$.outputs' }),
+      useComfyuiRunLifecycle({ workflowId: testWorkflowId, defaultSelector: '$.outputs', hashFile: fakeHash }),
     )
 
     await act(async () => {
@@ -159,7 +219,7 @@ describe('useComfyuiRunLifecycle', () => {
 
   it('ignores refresh and cancel without an active run', async () => {
     const { result } = renderHook(() =>
-      useComfyuiRunLifecycle({ apiName: 'image-upscale', defaultSelector: '$.outputs' }),
+      useComfyuiRunLifecycle({ workflowId: testWorkflowId, defaultSelector: '$.outputs', hashFile: fakeHash }),
     )
 
     // 无 run 时 refresh/cancel 都是 no-op，不触碰服务也不进入 pending 状态。
@@ -183,7 +243,7 @@ describe('useComfyuiRunLifecycle', () => {
         }),
     )
     const { result } = renderHook(() =>
-      useComfyuiRunLifecycle({ apiName: 'image-upscale', defaultSelector: '$.outputs' }),
+      useComfyuiRunLifecycle({ workflowId: testWorkflowId, defaultSelector: '$.outputs', hashFile: fakeHash }),
     )
 
     await act(async () => {
