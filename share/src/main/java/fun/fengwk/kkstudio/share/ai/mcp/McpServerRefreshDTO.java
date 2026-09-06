@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.mcp;
 
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
 /**
@@ -12,4 +13,9 @@ public class McpServerRefreshDTO {
 
   /** 必填非负十进制字符串；必须与当前 Server 版本一致。 */
   private String expectedVersion;
+
+  @JsonAnySetter
+  public void rejectUnknownField(String name, Object value) {
+    throw new IllegalArgumentException("unknown mcp server refresh field: " + name);
+  }
 }
