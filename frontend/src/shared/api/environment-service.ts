@@ -18,13 +18,9 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
 
     updateEnvironment: (
       id: string,
-      expectedVersion: string,
       data: EnvironmentUpdateDTO,
     ): Promise<EnvironmentCardDTO> =>
-      client.put(`/harness/environments/${encodeURIComponent(id)}`, {
-        ...data,
-        expectedVersion,
-      }),
+      client.put(`/harness/environments/${encodeURIComponent(id)}`, data),
 
     rotateToken: (id: string, expectedVersion: string): Promise<EnvironmentCardDTO> =>
       client.post(`/harness/environments/${encodeURIComponent(id)}/registration-token`, {

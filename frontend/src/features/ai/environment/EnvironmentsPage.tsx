@@ -152,7 +152,7 @@ export function EnvironmentsPage() {
       id: string
       expectedVersion: string
       name: string
-    }) => environmentService.updateEnvironment(id, expectedVersion, { name }),
+    }) => environmentService.updateEnvironment(id, { name, expectedVersion }),
     onSuccess: () => {
       setEditModal(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })

@@ -85,5 +85,5 @@ export interface EnvironmentCreateDTO {
 
 export interface EnvironmentUpdateDTO {
   name: string
-  expectedVersion?: string
+  expectedVersion: string
 }

@@ -130,7 +130,7 @@ export function cancelCanvasFunctionRun(
 }
 
 export function listCanvasSessions(
-  canvasId: UUIDString | string,
+  canvasId: string,
   options?: CanvasRequestOptions,
 ): Promise<RuntimeSessionSummaryDTO[]> {
   return canvasRequest(`/canvases/${encodeURIComponent(canvasId)}/sessions`, {
@@ -204,18 +204,4 @@ function isResultEnvelope<T>(value: unknown): value is ResultEnvelope<T> {
     && typeof candidate.message === 'string'
     && 'data' in candidate
   )
-}
-
-export const studioService = {
-  listCanvases,
-  createCanvas,
-  getCanvas,
-  postCanvasCommands,
-  listCanvasFunctionModels,
-  getCanvasResourceOriginalUrl,
-  getCanvasResourcePreviewUrl,
-  startCanvasFunctionRun,
-  getCanvasFunctionRun,
-  cancelCanvasFunctionRun,
-  listCanvasSessions,
 }
