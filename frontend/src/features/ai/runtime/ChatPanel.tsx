@@ -96,7 +96,7 @@ export function ChatPanel({
   // 面板保持 API 无关：RESOURCE blob URL 由本适配层在渲染期解析。
   const resolveBlobUrls = useCallback(async (blobId: string): Promise<ResourceBlobUrls | null> => {
     const [original, preview] = await Promise.all([
-      storageService.getBlobOriginalUrl(blobId).catch(() => null),
+      storageService.getBlobDownloadUrl(blobId).catch(() => null),
       storageService.getBlobPreviewUrl(blobId).catch(() => null),
     ])
     if (

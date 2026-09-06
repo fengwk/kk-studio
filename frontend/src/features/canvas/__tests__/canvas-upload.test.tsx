@@ -68,7 +68,7 @@ function createHarness(options?: Partial<CanvasUploadPipelineOptions>) {
     uploadFile: vi.fn().mockResolvedValue(undefined),
     completeUpload: vi.fn().mockResolvedValue(readyReservation()),
     deleteUpload: vi.fn(),
-    getBlobOriginalUrl: vi.fn(),
+    getBlobDownloadUrl: vi.fn(),
     getBlobPreviewUrl: vi.fn(),
   }
   const nextTransform = vi.fn(() => ({ x: 100, y: 100, width: 320, height: 246 }))

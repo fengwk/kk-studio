@@ -66,6 +66,7 @@ class StorageBlobContentServiceImplTest {
     blobManager = mock(StorageBlobManager.class);
     s3StorageService = mock(S3StorageService.class);
     transactionManager = new TestTransactionManager();
+    when(blobManager.release(any())).thenReturn(true);
     contentService =
         new StorageBlobContentServiceImpl(blobManager, s3StorageService, transactionManager);
   }
@@ -199,9 +200,9 @@ class StorageBlobContentServiceImplTest {
     verify(s3StorageService, never()).download(any(), anyLong());
   }
 
-  /** 测试意图：当 finally release 发生异常时，警告日志记录而不覆盖正常的返回或已发生的原始异常。 */
+  /** 测试意图：当读取成功但 release 抛出异常时，必须抛出 release 异常以避免隐藏引用计数泄漏。 */
   @Test
-  void shouldLogWarningAndNotMaskSuccessWhenReleaseFails() {
+  void shouldThrowReleaseErrorWhenReadSucceedsButReleaseThrows() {
     UUID blobId = UUID.randomUUID();
     byte[] payload = new byte[] {9, 8, 7};
     StorageBlob blob = new StorageBlob();
@@ -212,12 +213,56 @@ class StorageBlobContentServiceImplTest {
     when(blobManager.retain(blobId)).thenReturn(blob);
     when(s3StorageService.download(StorageObjectKeys.blobOriginal(blobId), -1L))
         .thenReturn(new S3ObjectContent(payload, "image/png"));
-    doThrow(new RuntimeException("database connection drop")).when(blobManager).release(blobId);
+    doThrow(new RuntimeException("release db error")).when(blobManager).release(blobId);
 
-    StorageBlobContent result = contentService.readBlobContent(blobId, -1L);
-    assertNotNull(result);
-    assertEquals(blobId, result.getBlobId());
-    assertArrayEquals(payload, result.getBytes());
+    RuntimeException exception =
+        assertThrows(RuntimeException.class, () -> contentService.readBlobContent(blobId, -1L));
+    assertEquals("release db error", exception.getMessage());
+    verify(blobManager).release(blobId);
+  }
+
+  /** 测试意图：当读取和 release 同时失败时，保留原读取异常，并将 release 异常作为 suppressed 附加。 */
+  @Test
+  void shouldAddSuppressedWhenBothReadAndReleaseFail() {
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setSizeBytes(100L);
+    blob.setMediaType("image/png");
+
+    when(blobManager.retain(blobId)).thenReturn(blob);
+    when(s3StorageService.download(StorageObjectKeys.blobOriginal(blobId), -1L))
+        .thenThrow(new IllegalStateException("S3 download error"));
+    doThrow(new RuntimeException("release db error")).when(blobManager).release(blobId);
+
+    IllegalStateException exception =
+        assertThrows(
+            IllegalStateException.class, () -> contentService.readBlobContent(blobId, -1L));
+    assertEquals("S3 download error", exception.getMessage());
+    assertEquals(1, exception.getSuppressed().length);
+    assertEquals("release db error", exception.getSuppressed()[0].getMessage());
+    verify(blobManager).release(blobId);
+  }
+
+  /** 测试意图：当 blobManager.release 返回 false 时，必须视为 invariant failure 抛出 IllegalStateException。 */
+  @Test
+  void shouldThrowInvariantFailureWhenReleaseReturnsFalse() {
+    UUID blobId = UUID.randomUUID();
+    byte[] payload = new byte[] {1, 2};
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setSizeBytes(payload.length);
+    blob.setMediaType("image/png");
+
+    when(blobManager.retain(blobId)).thenReturn(blob);
+    when(s3StorageService.download(StorageObjectKeys.blobOriginal(blobId), -1L))
+        .thenReturn(new S3ObjectContent(payload, "image/png"));
+    when(blobManager.release(blobId)).thenReturn(false);
+
+    IllegalStateException exception =
+        assertThrows(
+            IllegalStateException.class, () -> contentService.readBlobContent(blobId, -1L));
+    assertTrue(exception.getMessage().contains("blob release returned false for " + blobId));
     verify(blobManager).release(blobId);
   }
 

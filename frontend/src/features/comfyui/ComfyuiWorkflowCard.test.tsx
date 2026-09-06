@@ -45,7 +45,7 @@ describe('ComfyuiWorkflowCard', () => {
 
     expect(screen.getByRole('heading', { name: 'Image Upscale' })).toBeInTheDocument()
     expect(screen.getByText('Upscale reference image')).toBeInTheDocument()
-    expect(screen.getByText('POST /api/comfyui/workflows/image-upscale/runs')).toBeInTheDocument()
+    expect(screen.getByText('POST /api/comfyui/workflows/workflow-1/runs')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
     expect(screen.getByText('已启用')).toHaveClass('enabled')
     expect(screen.getByText('$.outputs')).toBeInTheDocument()

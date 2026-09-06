@@ -262,4 +262,43 @@ describe('useComfyuiRunLifecycle', () => {
     expect(result.current.run).toMatchObject({ runId: 'run-1', status: 'cancelled' })
     expect(result.current.operationPending).toBe(false)
   })
+
+  it('sequentially uploads files and ensures all reserved handles are deleted without submitting run on partial failure', async () => {
+    vi.mocked(storageService.reserveUpload)
+      .mockResolvedValueOnce({
+        id: 'up-first',
+        state: 'READY',
+        blobId: 'blob-first',
+        presignedPut: null,
+        expiresAt: '2026-08-12T00:00:00Z',
+      } satisfies StorageUploadDTO)
+      .mockRejectedValueOnce(new Error('second file reserve failed'))
+
+    const { result } = renderHook(() =>
+      useComfyuiRunLifecycle({
+        workflowId: testWorkflowId,
+        defaultSelector: '$.outputs',
+        hashFile: fakeHash,
+      }),
+    )
+
+    await act(async () => {
+      await result.current.submit({
+        parameters: { prompt: 'hello' },
+        files: {
+          first: new File(['first'], 'first.png', { type: 'image/png' }),
+          second: new File(['second'], 'second.png', { type: 'image/png' }),
+        },
+      })
+    })
+
+    expect(storageService.reserveUpload).toHaveBeenCalledTimes(2)
+    expect(storageService.deleteUpload).toHaveBeenCalledWith('up-first')
+    expect(comfyuiService.runWorkflow).not.toHaveBeenCalled()
+    expect(result.current).toMatchObject({
+      error: 'second file reserve failed',
+      operationPending: false,
+      run: null,
+    })
+  })
 })

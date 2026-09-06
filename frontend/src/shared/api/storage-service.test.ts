@@ -105,7 +105,7 @@ describe('storage-service', () => {
       sizeBytes: '64',
     })
 
-    await expect(service.getBlobOriginalUrl('blob-1')).resolves.toMatchObject({
+    await expect(service.getBlobDownloadUrl('blob-1')).resolves.toMatchObject({
       url: 'https://s3.test/orig',
       sizeBytes: 64,
     })
@@ -124,7 +124,7 @@ describe('storage-service', () => {
     post.mockResolvedValueOnce({ url: 'https://s3.test/a', expiresAt: '2026-08-12T00:00:00Z' })
       .mockResolvedValueOnce({ url: 'https://s3.test/b', expiresAt: '2026-08-12T00:00:00Z', sizeBytes: 9 })
 
-    await expect(service.getBlobOriginalUrl('blob-1')).resolves.toMatchObject({ sizeBytes: null })
+    await expect(service.getBlobDownloadUrl('blob-1')).resolves.toMatchObject({ sizeBytes: null })
     await expect(service.getBlobPreviewUrl('blob-1')).resolves.toMatchObject({ sizeBytes: 9 })
   })
 
@@ -134,13 +134,13 @@ describe('storage-service', () => {
     const invalid = ['9007199254740993', '-1', '01', 'abc', 1.5, Number.NaN]
     for (const sizeBytes of invalid) {
       post.mockResolvedValueOnce({ url: 'https://s3.test/x', expiresAt: '2026-08-12T00:00:00Z', sizeBytes })
-      await expect(service.getBlobOriginalUrl('blob-1')).rejects.toMatchObject({
+      await expect(service.getBlobDownloadUrl('blob-1')).rejects.toMatchObject({
         name: 'ApiError',
         message: expect.stringContaining('sizeBytes'),
       })
     }
     post.mockResolvedValueOnce({ expiresAt: '2026-08-12T00:00:00Z' })
-    await expect(service.getBlobOriginalUrl('blob-1')).rejects.toMatchObject({
+    await expect(service.getBlobDownloadUrl('blob-1')).rejects.toMatchObject({
       name: 'ApiError',
       message: expect.stringContaining('url'),
     })

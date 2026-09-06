@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowCancelDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowJobDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunRequestDTO;
+import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
@@ -116,7 +117,7 @@ public class StudioComfyuiRuntimeController {
   }
 
   /**
-   * 把"运行期提交路径上 apiName 找不到已启用卡片"的 {@link IllegalArgumentException} 翻译为 404，其它 {@link
+   * 把"运行期提交路径上 workflowId 找不到已启用卡片"的 {@link IllegalArgumentException} 翻译为 404，其它 {@link
    * IllegalArgumentException}（参数 / 选择器 / binding 校验）保持 400。
    */
   private static RuntimeException translateNotFound(IllegalArgumentException error) {
@@ -129,9 +130,9 @@ public class StudioComfyuiRuntimeController {
 
   private static UUID parseUuid(String text, String name) {
     try {
-      return UUID.fromString(text);
+      return WebDtoMapper.parseUuid(text, name);
     } catch (IllegalArgumentException e) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, name + " must be a valid UUID", e);
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
     }
   }
 }

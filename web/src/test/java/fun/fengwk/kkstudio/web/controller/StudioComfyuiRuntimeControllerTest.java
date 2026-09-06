@@ -100,6 +100,16 @@ public class StudioComfyuiRuntimeControllerTest extends WebPostgresTestSupport {
   }
 
   @Test
+  public void shouldReturn400WhenWorkflowIdNotCanonicalUuid() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/comfyui/workflows/550E8400-E29B-41D4-A716-446655440000/runs")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new ComfyuiWorkflowRunRequestDTO())))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
   public void shouldReturn200AndJobOnGet() throws Exception {
     when(comfyuiRuntimeService.getJob(eq("run-1"), any()))
         .thenReturn(ComfyuiWorkflowJobDTO.builder().runId("run-1").status("completed").build());
