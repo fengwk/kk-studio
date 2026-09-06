@@ -172,7 +172,7 @@ describe('EnvironmentsPage', () => {
     await user.type(input, 'renamed')
     await user.click(screen.getByRole('button', { name: '确认' }))
 
-    expect(environmentService.updateEnvironment).toHaveBeenCalledWith('env-1', '1', { name: 'renamed' })
+    expect(environmentService.updateEnvironment).toHaveBeenCalledWith('env-1', { name: 'renamed', expectedVersion: '1' })
   })
 
   it('rotates registration token and displays the new token', async () => {

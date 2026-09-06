@@ -60,7 +60,7 @@ describe('environmentService', () => {
       delete: vi.fn(async () => ({})),
     }
     const service = createEnvironmentService(client)
-    await service.updateEnvironment('env-1', '1', { name: 'dev-renamed' })
+    await service.updateEnvironment('env-1', { name: 'dev-renamed', expectedVersion: '1' })
     expect(client.put).toHaveBeenCalledWith(
       '/harness/environments/env-1',
       { name: 'dev-renamed', expectedVersion: '1' },
