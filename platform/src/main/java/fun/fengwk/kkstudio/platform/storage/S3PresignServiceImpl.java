@@ -14,7 +14,6 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
-import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 
 import java.time.Duration;
 import java.util.Base64;
@@ -51,21 +50,7 @@ public class S3PresignServiceImpl implements S3PresignService {
   }
 
   @Override
-  public S3PresignedResponseDTO presignUpload(
-      String key, String contentType, Long expiresInSeconds) {
-    PutObjectRequest putRequest = newPutObjectRequest(key, contentType).build();
-    return presignUpload(putRequest, expiresInSeconds);
-  }
-
-  @Override
-  public S3PresignedResponseDTO presignCreateOnlyUpload(
-      String key, String contentType, Long expiresInSeconds) {
-    PutObjectRequest putRequest = newPutObjectRequest(key, contentType).ifNoneMatch("*").build();
-    return presignUpload(putRequest, expiresInSeconds);
-  }
-
-  @Override
-  public S3PresignedResponseDTO presignChecksummedCreateOnlyUpload(
+  public S3PresignedUrl presignChecksummedCreateOnlyUpload(
       String key, String contentType, String checksumSha256Base64, Long expiresInSeconds) {
     validateChecksumSha256Base64(checksumSha256Base64);
     PutObjectRequest putRequest =
@@ -73,7 +58,29 @@ public class S3PresignServiceImpl implements S3PresignService {
             .ifNoneMatch("*")
             .checksumSHA256(checksumSha256Base64)
             .build();
-    return presignUpload(putRequest, expiresInSeconds);
+    Duration duration = resolveExpires(expiresInSeconds);
+    PutObjectPresignRequest presignRequest =
+        PutObjectPresignRequest.builder()
+            .signatureDuration(duration)
+            .putObjectRequest(putRequest)
+            .build();
+    PresignedPutObjectRequest presigned = s3Presigner.presignPutObject(presignRequest);
+    return toPresignedUrl(presigned, "PUT");
+  }
+
+  @Override
+  public S3PresignedUrl presignDownload(String key, Long expiresInSeconds) {
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    Duration duration = resolveExpires(expiresInSeconds);
+    GetObjectRequest getRequest =
+        GetObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build();
+    GetObjectPresignRequest presignRequest =
+        GetObjectPresignRequest.builder()
+            .signatureDuration(duration)
+            .getObjectRequest(getRequest)
+            .build();
+    PresignedGetObjectRequest presigned = s3Presigner.presignGetObject(presignRequest);
+    return toPresignedUrl(presigned, "GET");
   }
 
   private PutObjectRequest.Builder newPutObjectRequest(String key, String contentType) {
@@ -85,33 +92,6 @@ public class S3PresignServiceImpl implements S3PresignService {
       putBuilder.contentType(normalizedContentType);
     }
     return putBuilder;
-  }
-
-  private S3PresignedResponseDTO presignUpload(
-      PutObjectRequest putObjectRequest, Long expiresInSeconds) {
-    Duration duration = resolveExpires(expiresInSeconds);
-    PutObjectPresignRequest presignRequest =
-        PutObjectPresignRequest.builder()
-            .signatureDuration(duration)
-            .putObjectRequest(putObjectRequest)
-            .build();
-    PresignedPutObjectRequest presigned = s3Presigner.presignPutObject(presignRequest);
-    return toResponse(presigned, "PUT", putObjectRequest.key());
-  }
-
-  @Override
-  public S3PresignedResponseDTO presignDownload(String key, Long expiresInSeconds) {
-    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
-    Duration duration = resolveExpires(expiresInSeconds);
-    GetObjectRequest getRequest =
-        GetObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build();
-    GetObjectPresignRequest presignRequest =
-        GetObjectPresignRequest.builder()
-            .signatureDuration(duration)
-            .getObjectRequest(getRequest)
-            .build();
-    PresignedGetObjectRequest presigned = s3Presigner.presignGetObject(presignRequest);
-    return toResponse(presigned, "GET", normalizedKey);
   }
 
   private String normalizeContentType(String contentType) {
@@ -156,8 +136,7 @@ public class S3PresignServiceImpl implements S3PresignService {
     return Duration.ofSeconds(requested);
   }
 
-  private S3PresignedResponseDTO toResponse(
-      PresignedRequest presigned, String method, String normalizedKey) {
+  private S3PresignedUrl toPresignedUrl(PresignedRequest presigned, String method) {
     Map<String, List<String>> signedHeaders = presigned.signedHeaders();
     // 对不暴露独立 signedHeaders map 的 SDK 实现，回退到已签名的 HTTP 请求头。
     if (signedHeaders == null || signedHeaders.isEmpty()) {
@@ -175,9 +154,7 @@ public class S3PresignServiceImpl implements S3PresignService {
         }
       }
     }
-    return S3PresignedResponseDTO.builder()
-        .bucket(properties.getBucket())
-        .key(normalizedKey)
+    return S3PresignedUrl.builder()
         .method(method)
         .url(presigned.url().toString())
         .headers(flatHeaders)

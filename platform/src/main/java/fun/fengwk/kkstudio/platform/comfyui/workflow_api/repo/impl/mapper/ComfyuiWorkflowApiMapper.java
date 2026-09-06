@@ -96,26 +96,6 @@ public interface ComfyuiWorkflowApiMapper extends BaseMapper {
   @ResultMap("comfyuiWorkflowApiResultMap")
   ComfyuiWorkflowApiDO getByApiName(@Param("apiName") String apiName);
 
-  @Select(
-      """
-        select
-            id,
-            api_name,
-            name,
-            description,
-            workflow,
-            input_bindings,
-            default_selector,
-            enabled,
-            created_at as create_time,
-            updated_at as update_time
-        from comfyui_workflow_api
-        where api_name = #{apiName} and enabled = #{enabled}
-        """)
-  @ResultMap("comfyuiWorkflowApiResultMap")
-  ComfyuiWorkflowApiDO getByApiNameAndEnabled(
-      @Param("apiName") String apiName, @Param("enabled") boolean enabled);
-
   @Insert(
       """
         insert into comfyui_workflow_api (

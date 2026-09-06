@@ -126,11 +126,6 @@ public class ComfyuiWorkflowApiLookupServiceTest {
     }
 
     @Override
-    public ComfyuiWorkflowApi getEnabledByApiName(String apiName) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
     public Page<ComfyuiWorkflowApi> page(PageQuery q) {
       throw new UnsupportedOperationException();
     }

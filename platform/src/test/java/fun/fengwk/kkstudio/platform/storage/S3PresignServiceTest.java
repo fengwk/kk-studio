@@ -16,7 +16,6 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
-import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 
 import java.net.URI;
 import java.time.Instant;
@@ -24,68 +23,39 @@ import java.util.Base64;
 import java.util.Map;
 
 /**
- * {@link S3PresignService} 单元测试.
+ * {@link S3PresignService} 端到端单元测试。
  *
- * <p>使用 AWS SDK 提供的真实 {@code S3Presigner}（path-style + SigV4）在本地完成签名，不与对象存储产生任何 IO，从而精准覆盖 key
- * 规范化、签名时长校验与响应字段语义。
+ * <p>使用 AWS SDK 真实 {@code S3Presigner}（path-style + SigV4）在本地完成签名，不与对象存储产生任何 IO。
  *
  * @author fengwk
  */
 public class S3PresignServiceTest {
 
-  private static final String ENDPOINT = "https://minio.example.local:9000";
-  private static final String PUBLIC_ENDPOINT = "https://cdn.example.com";
   private static final String BUCKET = "test-bucket";
+  private static final String ENDPOINT = "http://minio.example.local:9000";
+  private static final String PUBLIC_ENDPOINT = "https://cdn.example.com";
   private static final String REGION = "us-east-1";
+  private static final String DEFAULT_CHECKSUM = Base64.getEncoder().encodeToString(new byte[32]);
 
-  /**
-   * PUT 预签名：URL 落在 public endpoint、method=PUT、bucket 与 key 与请求一致，且当指定 contentType 时该头会被签名进入响应
-   * headers（浏览器必须原样回传）。
-   */
+  /** 浏览器直传 PUT：签名必须同时携带 If-None-Match: * 与 x-amz-checksum-sha256，且校验和出现在 signed headers。 */
   @Test
-  public void testPresignUploadUsesPublicEndpointAndIncludesContentTypeHeader() {
+  public void testPresignChecksummedCreateOnlyUploadIncludesChecksumAndIfNoneMatch() {
+    String checksum = Base64.getEncoder().encodeToString(new byte[32]);
     try (TestContext context = newTestContext()) {
-      S3PresignedResponseDTO resp =
-          context.service.presignUpload("uploads/demo.bin", "application/octet-stream", 120L);
-      assertEquals(BUCKET, resp.getBucket());
-      assertEquals("uploads/demo.bin", resp.getKey());
+      S3PresignedUrl resp =
+          context.service.presignChecksummedCreateOnlyUpload(
+              "uploads/demo.bin", "application/octet-stream", checksum, 120L);
+
       assertEquals("PUT", resp.getMethod());
-      assertNotNull(resp.getUrl());
-      assertNotNull(resp.getExpiresAt());
-      URI uri = URI.create(resp.getUrl());
-      assertEquals("cdn.example.com", uri.getHost());
-      assertEquals("/" + BUCKET + "/uploads/demo.bin", uri.getRawPath());
-      assertTrue(
-          resp.getUrl().contains("X-Amz-Signature="),
-          "expected signed URL to carry X-Amz-Signature, got: " + resp.getUrl());
-      assertTrue(
-          resp.getUrl().contains("X-Amz-SignedHeaders="),
-          "expected signed URL to declare signed headers, got: " + resp.getUrl());
-      assertTrue(
-          resp.getUrl().toLowerCase().contains("content-type"),
-          "expected Content-Type to be among signed headers, got: " + resp.getUrl());
-      assertNotNull(resp.getHeaders(), "signed headers must not be null");
-      assertEquals("application/octet-stream", getHeader(resp, "content-type"));
-      assertFalse(
-          hasHeader(resp, "if-none-match"), "ordinary PUT must preserve overwrite semantics");
-      assertFalse(resp.getUrl().toLowerCase().contains("if-none-match"));
-      assertFalse(hasHeader(resp, "host"), "browser response headers must not include Host");
-    }
-  }
-
-  /** Create-only PUT 必须签名并返回 If-None-Match，确保已存在对象无法被覆盖。 */
-  @Test
-  public void testPresignCreateOnlyUploadIncludesIfNoneMatchHeader() {
-    try (TestContext context = newTestContext()) {
-      S3PresignedResponseDTO resp =
-          context.service.presignCreateOnlyUpload(
-              "uploads/immutable.bin", "application/octet-stream", 120L);
-
       assertEquals("*", getHeader(resp, "if-none-match"));
+      assertEquals(checksum, getHeader(resp, "x-amz-checksum-sha256"));
+      assertEquals("application/octet-stream", getHeader(resp, "content-type"));
+      assertTrue(
+          resp.getUrl().toLowerCase().contains("x-amz-checksum-sha256"),
+          "checksum header must be signed into the URL, got: " + resp.getUrl());
       assertTrue(
           resp.getUrl().toLowerCase().contains("if-none-match"),
-          "expected If-None-Match to be among signed headers, got: " + resp.getUrl());
-      assertEquals("application/octet-stream", getHeader(resp, "content-type"));
+          "If-None-Match must be signed into the URL, got: " + resp.getUrl());
       assertFalse(hasHeader(resp, "host"));
     }
   }
@@ -94,10 +64,7 @@ public class S3PresignServiceTest {
   @Test
   public void testPresignDownloadUsesPublicEndpoint() {
     try (TestContext context = newTestContext()) {
-      S3PresignedResponseDTO resp =
-          context.service.presignDownload("exports/2026/07/report.pdf", 300L);
-      assertEquals(BUCKET, resp.getBucket());
-      assertEquals("exports/2026/07/report.pdf", resp.getKey());
+      S3PresignedUrl resp = context.service.presignDownload("exports/2026/07/report.pdf", 300L);
       assertEquals("GET", resp.getMethod());
       URI uri = URI.create(resp.getUrl());
       assertEquals("cdn.example.com", uri.getHost());
@@ -106,13 +73,15 @@ public class S3PresignServiceTest {
     }
   }
 
-  /** contentType 空白时视为未提供，因此响应不要求浏览器显式设置任何请求头。 */
+  /** contentType 空白时视为未提供，因此响应不要求浏览器显式设置该请求头。 */
   @Test
   public void testBlankContentTypeIsOmitted() {
     try (TestContext context = newTestContext()) {
-      S3PresignedResponseDTO resp = context.service.presignUpload("uploads/demo.bin", "  ", 120L);
+      S3PresignedUrl resp =
+          context.service.presignChecksummedCreateOnlyUpload(
+              "uploads/demo.bin", "  ", DEFAULT_CHECKSUM, 120L);
 
-      assertTrue(resp.getHeaders().isEmpty());
+      assertNull(getHeader(resp, "content-type"));
       assertFalse(resp.getUrl().toLowerCase().contains("content-type"));
     }
   }
@@ -121,8 +90,9 @@ public class S3PresignServiceTest {
   @Test
   public void testContentTypeIsNormalized() {
     try (TestContext context = newTestContext()) {
-      S3PresignedResponseDTO resp =
-          context.service.presignUpload("uploads/demo.png", "  image/png  ", 120L);
+      S3PresignedUrl resp =
+          context.service.presignChecksummedCreateOnlyUpload(
+              "uploads/demo.png", "  image/png  ", DEFAULT_CHECKSUM, 120L);
 
       assertEquals("image/png", getHeader(resp, "content-type"));
       assertFalse(hasHeader(resp, "host"));
@@ -135,17 +105,22 @@ public class S3PresignServiceTest {
     try (TestContext context = newTestContext()) {
       assertThrows(
           IllegalArgumentException.class,
-          () -> context.service.presignUpload("uploads/a.bin", "not-a-media-type", 120L));
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload(
+                  "uploads/a.bin", "not-a-media-type", DEFAULT_CHECKSUM, 120L));
       assertThrows(
           IllegalArgumentException.class,
           () ->
-              context.service.presignUpload(
+              context.service.presignChecksummedCreateOnlyUpload(
                   "uploads/a.bin",
                   "a".repeat(S3PresignServiceImpl.MAX_CONTENT_TYPE_LENGTH + 1),
+                  DEFAULT_CHECKSUM,
                   120L));
       assertThrows(
           IllegalArgumentException.class,
-          () -> context.service.presignUpload("uploads/a.bin", "image/png\n", 120L));
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload(
+                  "uploads/a.bin", "image/png\n", DEFAULT_CHECKSUM, 120L));
     }
   }
 
@@ -154,7 +129,7 @@ public class S3PresignServiceTest {
   public void testPresignFallsBackToEndpointWhenPublicEndpointBlank() {
     S3StorageProperties props = newS3Properties(PUBLIC_ENDPOINT, /*publicEndpointBlank*/ true);
     try (TestContext ctx = new TestContext(props, SystemSettings.StorageMedia.DEFAULT)) {
-      S3PresignedResponseDTO resp = ctx.service.presignDownload("docs/readme.md", null);
+      S3PresignedUrl resp = ctx.service.presignDownload("docs/readme.md", null);
       URI uri = URI.create(resp.getUrl());
       assertEquals("minio.example.local", uri.getHost());
       assertEquals(9000, uri.getPort());
@@ -166,7 +141,7 @@ public class S3PresignServiceTest {
   public void testDefaultExpiresWhenNotProvided() {
     try (TestContext context = newTestContext()) {
       long before = System.currentTimeMillis();
-      S3PresignedResponseDTO resp = context.service.presignDownload("docs/readme.md", null);
+      S3PresignedUrl resp = context.service.presignDownload("docs/readme.md", null);
       long delta = Instant.parse(resp.getExpiresAt()).toEpochMilli() - before;
       long defaultExpiresMillis =
           SystemSettings.StorageMedia.DEFAULT.s3PresignDefaultExpiresSeconds() * 1000L;
@@ -183,7 +158,9 @@ public class S3PresignServiceTest {
     try (TestContext context = newTestContext()) {
       assertThrows(
           IllegalArgumentException.class,
-          () -> context.service.presignUpload("uploads/a.bin", "text/plain", -1L));
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload(
+                  "uploads/a.bin", "text/plain", DEFAULT_CHECKSUM, -1L));
     }
   }
 
@@ -215,22 +192,39 @@ public class S3PresignServiceTest {
   public void testPresignRejectsInvalidKeys() {
     try (TestContext context = newTestContext()) {
       assertThrows(
-          IllegalArgumentException.class, () -> context.service.presignUpload(null, null, null));
-      assertThrows(
-          IllegalArgumentException.class, () -> context.service.presignUpload("", null, null));
-      assertThrows(
-          IllegalArgumentException.class, () -> context.service.presignUpload("   ", null, null));
-      assertThrows(
-          IllegalArgumentException.class, () -> context.service.presignUpload("/", null, null));
+          IllegalArgumentException.class,
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload(
+                  null, null, DEFAULT_CHECKSUM, null));
       assertThrows(
           IllegalArgumentException.class,
-          () -> context.service.presignUpload("dir/./file", null, null));
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload("", null, DEFAULT_CHECKSUM, null));
       assertThrows(
           IllegalArgumentException.class,
-          () -> context.service.presignUpload("dir/../escape", null, null));
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload(
+                  "   ", null, DEFAULT_CHECKSUM, null));
       assertThrows(
           IllegalArgumentException.class,
-          () -> context.service.presignUpload("dir/\nfile", null, null));
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload(
+                  "/", null, DEFAULT_CHECKSUM, null));
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload(
+                  "dir/./file", null, DEFAULT_CHECKSUM, null));
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload(
+                  "dir/../escape", null, DEFAULT_CHECKSUM, null));
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload(
+                  "dir/\nfile", null, DEFAULT_CHECKSUM, null));
       String tooLong = "a".repeat(S3ObjectKeyNormalizer.MAX_KEY_LENGTH_BYTES + 1);
       assertThrows(
           IllegalArgumentException.class, () -> context.service.presignDownload(tooLong, null));
@@ -242,47 +236,20 @@ public class S3PresignServiceTest {
   public void testPresignAcceptsKeyAtMaxLength() {
     try (TestContext context = newTestContext()) {
       String key = "b".repeat(S3ObjectKeyNormalizer.MAX_KEY_LENGTH_BYTES);
-      S3PresignedResponseDTO resp = context.service.presignDownload(key, null);
-      assertEquals(key, resp.getKey());
+      S3PresignedUrl resp = context.service.presignDownload(key, null);
       assertNotNull(resp.getUrl());
     }
   }
 
-  /** 校验失败的 key 永不泄露到响应：异常路径上不返回 DTO。 */
+  /** 校验失败的 key 永不泄露到响应：异常路径上不返回对象。 */
   @Test
   public void testPresignFailureDoesNotLeakResponse() {
     try (TestContext context = newTestContext()) {
-      S3PresignedResponseDTO resp = context.service.presignDownload("ok.bin", null);
+      S3PresignedUrl resp = context.service.presignDownload("ok.bin", null);
       assertNotNull(resp);
       assertThrows(IllegalArgumentException.class, () -> context.service.presignDownload("", null));
-      // res 在失败之前已构建，并保持有效；关键断言保持稳定
-      assertEquals("ok.bin", resp.getKey());
       assertNull(resp.getHeaders().get("Content-Type"), "GET presign should not sign Content-Type");
       assertFalse(resp.getUrl().isEmpty());
-    }
-  }
-
-  /** 浏览器直传 PUT：签名必须同时携带 If-None-Match: * 与 x-amz-checksum-sha256，且校验和出现在 signed headers。 */
-  @Test
-  public void testPresignChecksummedCreateOnlyUploadIncludesChecksumAndIfNoneMatch() {
-    String checksum = Base64.getEncoder().encodeToString(new byte[32]);
-    try (TestContext context = newTestContext()) {
-      S3PresignedResponseDTO resp =
-          context.service.presignChecksummedCreateOnlyUpload(
-              "uploads/demo.bin", "application/octet-stream", checksum, 120L);
-
-      assertEquals("PUT", resp.getMethod());
-      assertEquals("uploads/demo.bin", resp.getKey());
-      assertEquals("*", getHeader(resp, "if-none-match"));
-      assertEquals(checksum, getHeader(resp, "x-amz-checksum-sha256"));
-      assertEquals("application/octet-stream", getHeader(resp, "content-type"));
-      assertTrue(
-          resp.getUrl().toLowerCase().contains("x-amz-checksum-sha256"),
-          "checksum header must be signed into the URL, got: " + resp.getUrl());
-      assertTrue(
-          resp.getUrl().toLowerCase().contains("if-none-match"),
-          "If-None-Match must be signed into the URL, got: " + resp.getUrl());
-      assertFalse(hasHeader(resp, "host"));
     }
   }
 
@@ -311,11 +278,11 @@ public class S3PresignServiceTest {
     }
   }
 
-  private static boolean hasHeader(S3PresignedResponseDTO response, String name) {
+  private static boolean hasHeader(S3PresignedUrl response, String name) {
     return response.getHeaders().keySet().stream().anyMatch(name::equalsIgnoreCase);
   }
 
-  private static String getHeader(S3PresignedResponseDTO response, String name) {
+  private static String getHeader(S3PresignedUrl response, String name) {
     return response.getHeaders().entrySet().stream()
         .filter(entry -> name.equalsIgnoreCase(entry.getKey()))
         .map(Map.Entry::getValue)

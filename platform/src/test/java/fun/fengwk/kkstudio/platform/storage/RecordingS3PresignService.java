@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.platform.storage;
 
-import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
-
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -26,7 +24,7 @@ public class RecordingS3PresignService implements S3PresignService {
   }
 
   @Override
-  public synchronized S3PresignedResponseDTO presignChecksummedCreateOnlyUpload(
+  public synchronized S3PresignedUrl presignChecksummedCreateOnlyUpload(
       String key, String contentType, String checksumSha256Base64, Long expiresInSeconds) {
     records.add(
         new PresignRecord(
@@ -35,21 +33,7 @@ public class RecordingS3PresignService implements S3PresignService {
   }
 
   @Override
-  public synchronized S3PresignedResponseDTO presignUpload(
-      String key, String contentType, Long expiresInSeconds) {
-    records.add(new PresignRecord("upload", key, contentType, null, expiresInSeconds));
-    return response("PUT", key, headers(contentType, null, null));
-  }
-
-  @Override
-  public synchronized S3PresignedResponseDTO presignCreateOnlyUpload(
-      String key, String contentType, Long expiresInSeconds) {
-    records.add(new PresignRecord("createOnly", key, contentType, null, expiresInSeconds));
-    return response("PUT", key, headers(contentType, "*", null));
-  }
-
-  @Override
-  public synchronized S3PresignedResponseDTO presignDownload(String key, Long expiresInSeconds) {
+  public synchronized S3PresignedUrl presignDownload(String key, Long expiresInSeconds) {
     records.add(new PresignRecord("download", key, null, null, expiresInSeconds));
     return response("GET", key, Map.of());
   }
@@ -69,11 +53,8 @@ public class RecordingS3PresignService implements S3PresignService {
     return headers;
   }
 
-  private static S3PresignedResponseDTO response(
-      String method, String key, Map<String, String> headers) {
-    return S3PresignedResponseDTO.builder()
-        .bucket("test-bucket")
-        .key(key)
+  private static S3PresignedUrl response(String method, String key, Map<String, String> headers) {
+    return S3PresignedUrl.builder()
         .method(method)
         .url("https://cdn.example.com/test-bucket/" + key + "?X-Amz-Signature=fake")
         .headers(headers)
@@ -81,7 +62,7 @@ public class RecordingS3PresignService implements S3PresignService {
         .build();
   }
 
-  /** 一次预签名调用记录（kind 取值 upload/createOnly/checksummedCreateOnly/download）。 */
+  /** 一次预签名调用记录（kind 取值 checksummedCreateOnly/download）。 */
   public record PresignRecord(
       String kind,
       String key,
