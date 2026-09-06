@@ -35,7 +35,7 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
     MvcResult created =
         mockMvc
             .perform(
-                post("/api/ai/chat")
+                post("/api/ai/chats")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"title\":\"i18n-test\",\"agentName\":\"default-assistant\"}"))
             .andExpect(status().isCreated())
@@ -54,7 +54,7 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
 
   private void assertDomainMessage(String language, String expectedMessage) throws Exception {
     MockHttpServletRequestBuilder request =
-        get("/api/ai/chat/00000000-0000-0000-0000-000000000999");
+        get("/api/ai/chats/00000000-0000-0000-0000-000000000999");
     if (language != null) {
       request.header(HttpHeaders.ACCEPT_LANGUAGE, language);
     }

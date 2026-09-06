@@ -69,6 +69,7 @@ class StudioCanvasFunctionControllerTest {
             .build();
   }
 
+  /** 测试意图：验证 GET /api/canvas-function-models 返回模型元数据且不泄露后端实现细节。 */
   @Test
   void listsCapabilitiesWithoutProviderInternals() throws Exception {
     mockMvc
@@ -81,6 +82,10 @@ class StudioCanvasFunctionControllerTest {
         .andExpect(jsonPath("$.data[0].workflow").doesNotExist());
   }
 
+  /**
+   * 测试意图：验证 Canvas Function 统一使用 function-run 路径，POST 启动返回 202 Accepted，GET 查询与 POST 取消返回 200
+   * OK，且字段脱敏。
+   */
   @Test
   void startGetCancelExposeOnlyPublicRunFields() throws Exception {
     CanvasFunctionRun run = run(CanvasFunctionRunStatus.READY, "QUEUED");
@@ -91,21 +96,21 @@ class StudioCanvasFunctionControllerTest {
 
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/runs")
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"request-1\"}"))
-        .andExpect(status().isOk())
+        .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.code").value("ACCEPTED"))
         .andExpect(jsonPath("$.data.status").value("READY"))
         .andExpect(jsonPath("$.data.stage").value("QUEUED"))
         .andExpect(jsonPath("$.data.stateJson").doesNotExist());
     mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/run"))
+        .perform(get("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.requestId").value(REQUEST.toString()));
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/run/cancel")
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/cancel")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"request-1\"}"))
         .andExpect(status().isOk())
@@ -114,28 +119,33 @@ class StudioCanvasFunctionControllerTest {
     verify(runtimeService).cancel(CANVAS, NODE, "request-1");
   }
 
+  /**
+   * 测试意图：验证 POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run 严格校验 UUID 格式与非重复请求体，返回 400
+   * BadRequest。
+   */
   @Test
   void rejectsUnknownDuplicateAndNonCanonicalIds() throws Exception {
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/runs")
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"r\",\"extra\":true}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/runs")
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"r\",\"requestId\":\"r\"}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            post("/api/canvases/not-a-uuid/nodes/" + NODE + "/runs")
+            post("/api/canvases/not-a-uuid/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"r\"}"))
         .andExpect(status().isBadRequest());
   }
 
+  /** 测试意图：验证业务异常精准映射为 404 NotFound 与 409 Conflict 状态码。 */
   @Test
   void mapsNotFoundAndConflictPrecisely() throws Exception {
     when(runtimeService.get(any(), any()))
@@ -146,14 +156,34 @@ class StudioCanvasFunctionControllerTest {
             new CanvasFunctionRunException(CanvasFunctionRunException.Reason.CONFLICT, "running"));
 
     mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/run"))
+        .perform(get("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run"))
         .andExpect(status().isNotFound());
+    mockMvc
+        .perform(
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"requestId\":\"r\"}"))
+        .andExpect(status().isConflict());
+  }
+
+  /** 测试意图：验证无旧 alias，历史旧路径 /runs、/run、/run/cancel 均返回 404 NotFound。 */
+  @Test
+  void oldPathAliasesAreNotPresent() throws Exception {
     mockMvc
         .perform(
             post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/runs")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"r\"}"))
-        .andExpect(status().isConflict());
+        .andExpect(status().isNotFound());
+    mockMvc
+        .perform(get("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/run"))
+        .andExpect(status().isNotFound());
+    mockMvc
+        .perform(
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/run/cancel")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"requestId\":\"r\"}"))
+        .andExpect(status().isNotFound());
   }
 
   private static CanvasFunctionRun run(CanvasFunctionRunStatus status, String stage) {

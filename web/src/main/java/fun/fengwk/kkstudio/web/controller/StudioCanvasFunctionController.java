@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -50,7 +51,8 @@ public class StudioCanvasFunctionController {
             .toList());
   }
 
-  @PostMapping("/canvases/{canvasId}/nodes/{nodeId}/runs")
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  @PostMapping("/canvases/{canvasId}/nodes/{nodeId}/function-run")
   public Result<CanvasFunctionRunDTO> start(
       @PathVariable("canvasId") String canvasIdText,
       @PathVariable("nodeId") String nodeIdText,
@@ -70,7 +72,7 @@ public class StudioCanvasFunctionController {
     }
   }
 
-  @GetMapping("/canvases/{canvasId}/nodes/{nodeId}/run")
+  @GetMapping("/canvases/{canvasId}/nodes/{nodeId}/function-run")
   public Result<CanvasFunctionRunDTO> get(
       @PathVariable("canvasId") String canvasIdText, @PathVariable("nodeId") String nodeIdText) {
     try {
@@ -84,7 +86,7 @@ public class StudioCanvasFunctionController {
     }
   }
 
-  @PostMapping("/canvases/{canvasId}/nodes/{nodeId}/run/cancel")
+  @PostMapping("/canvases/{canvasId}/nodes/{nodeId}/function-run/cancel")
   public Result<CanvasFunctionRunDTO> cancel(
       @PathVariable("canvasId") String canvasIdText,
       @PathVariable("nodeId") String nodeIdText,

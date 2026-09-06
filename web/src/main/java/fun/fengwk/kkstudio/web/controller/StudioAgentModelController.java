@@ -7,6 +7,7 @@ import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -39,18 +40,18 @@ public class StudioAgentModelController {
     return Results.created(agentModelService.createModel(createDTO));
   }
 
-  @PutMapping
+  @PutMapping("/{providerName}/{modelName}")
   public Result<AgentModelDTO> updateModel(
-      @RequestParam("providerName") String providerName,
-      @RequestParam("modelName") String modelName,
+      @PathVariable("providerName") String providerName,
+      @PathVariable("modelName") String modelName,
       @RequestBody AgentModelUpdateDTO updateDTO) {
     return Results.ok(agentModelService.updateModel(providerName, modelName, updateDTO));
   }
 
-  @DeleteMapping
+  @DeleteMapping("/{providerName}/{modelName}")
   public Result<Void> deleteModel(
-      @RequestParam("providerName") String providerName,
-      @RequestParam("modelName") String modelName,
+      @PathVariable("providerName") String providerName,
+      @PathVariable("modelName") String modelName,
       @RequestParam("expectedVersion") String expectedVersion) {
     agentModelService.deleteModel(providerName, modelName, expectedVersion);
     return Results.noContent();

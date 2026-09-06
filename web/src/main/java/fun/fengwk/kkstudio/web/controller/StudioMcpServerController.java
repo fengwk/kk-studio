@@ -18,13 +18,14 @@ import org.springframework.web.bind.annotation.RestController;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
+import fun.fengwk.kkstudio.share.ai.mcp.McpServerRefreshDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
 
 /**
  * Platform MCP server CRUD API。
  *
- * <p>所有路径 / DTO 边界上的 id 都是 canonical UUID string（应用侧生成），由服务层内部严格解析。响应绝不包含 bearer token；refresh 与
- * delete 的 expectedVersion 走 query 参数。
+ * <p>所有路径 / DTO 边界上的 id 都是 canonical UUID string（应用侧生成），由服务层内部严格解析。响应绝不包含 bearer token；refresh 的
+ * expectedVersion 走请求体 JSON，delete 的 expectedVersion 走 query 参数。
  */
 @AllArgsConstructor
 @RequestMapping("/api/ai/mcp-servers")
@@ -58,7 +59,8 @@ public class StudioMcpServerController {
 
   @PostMapping("/{id}/refresh")
   public Result<McpServerDTO> refreshServer(
-      @PathVariable("id") String id, @RequestParam("expectedVersion") String expectedVersion) {
+      @PathVariable("id") String id, @RequestBody McpServerRefreshDTO refreshDTO) {
+    String expectedVersion = refreshDTO == null ? null : refreshDTO.getExpectedVersion();
     return Results.ok(mcpServerService.refreshServer(id, expectedVersion));
   }
 
