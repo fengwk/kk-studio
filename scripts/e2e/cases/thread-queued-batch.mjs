@@ -314,7 +314,7 @@ registerCase({
         if (chat?.id) {
           await ctx.call(
             'DELETE',
-            `/api/ai/chat/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(
+            `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(
               chat.version,
             )}`,
           )
@@ -334,9 +334,9 @@ registerCase({
         if (model?.providerName && model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/models?providerName=${encodeURIComponent(
+            `/api/ai/catalog/models/${encodeURIComponent(
               model.providerName,
-            )}&modelName=${encodeURIComponent(model.name)}&expectedVersion=${encodeURIComponent(
+            )}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(
               model.version,
             )}`,
           )

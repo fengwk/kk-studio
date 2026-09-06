@@ -10,17 +10,17 @@ import {
  * Harness Runtime 单轨契约 helper（owner-aware command-batches + Session/Thread 查询）。
  *
  * 端点事实源（web 模块）：
- * - POST /api/ai/runtime/command-batches          唯一产品用户命令写入口（202 accepted）
- * - GET  /api/ai/chat/{chatId}/sessions           Chat owner 的 Session 摘要（新到旧）
- * - GET  /api/ai/canvases/{canvasId}/sessions     Canvas owner 的 Session 摘要（新到旧）
- * - GET  /api/ai/runtime/sessions/{sessionId}/threads   Session 下 Thread 摘要
- * - GET  /api/ai/runtime/sessions/{sessionId}/entries   完整不可变 Entry Tree
- * - GET  /api/ai/runtime/threads/{id}/snapshot    一致快照（单事务）
- * - PUT  /api/ai/runtime/threads/{id}/yolo        {expectedVersion,yoloEnabled}（version CAS）
- * - POST /api/ai/runtime/threads/{id}/stop        {stopRequestId,expectedVersion}（同 id 幂等 replay）
- * - POST /api/ai/runtime/threads/{id}/tool-invocations/{toolInvocationId}/approval
- * - WS   /api/events/v1                           应用级 Thread/Canvas 事件订阅
- * - GET  /api/ai/environments                    只读 Environment 注册表（Card UUID id = canonical 路由身份）
+ * - POST /api/harness/command-batches          唯一产品用户命令写入口（202 accepted）
+ * - GET  /api/ai/chats/{chatId}/sessions       Chat owner 的 Session 摘要（新到旧）
+ * - GET  /api/canvases/{canvasId}/sessions     Canvas owner 的 Session 摘要（新到旧）
+ * - GET  /api/harness/sessions/{sessionId}/threads   Session 下 Thread 摘要
+ * - GET  /api/harness/sessions/{sessionId}/entries   完整不可变 Entry Tree
+ * - GET  /api/harness/threads/{id}             一致快照（单事务）
+ * - PUT  /api/harness/threads/{id}/yolo        {expectedVersion,yoloEnabled}（version CAS）
+ * - POST /api/harness/threads/{id}/stop        {stopRequestId,expectedVersion}（同 id 幂等 replay）
+ * - PUT  /api/harness/threads/{id}/tool-invocations/{toolInvocationId}/approval
+ * - WS   /api/events/v1                        应用级 Thread/Canvas 事件订阅
+ * - GET  /api/harness/environments             只读 Environment 注册表（Card UUID id = canonical 路由身份）
  *
  * 产品 HTTP 写面只接受三种 sealed target：
  * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
@@ -91,7 +91,7 @@ export async function createChat(
   ctx,
   { title, agentName, yoloEnabled = false, workspacePath = null },
 ) {
-  const { status, json } = await ctx.call('POST', '/api/ai/chat', {
+  const { status, json } = await ctx.call('POST', '/api/ai/chats', {
     title,
     agentName,
     yoloEnabled,
@@ -214,7 +214,7 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
       `invalid command: ${JSON.stringify(command)}`,
     )
   }
-  const { status, json } = await ctx.call('POST', '/api/ai/runtime/command-batches', {
+  const { status, json } = await ctx.call('POST', '/api/harness/command-batches', {
     owner,
     target,
     commands,
@@ -314,7 +314,7 @@ function assertSessionSummary(item) {
 
 /** Chat owner 的 Session 摘要数组（归属时间新到旧）。 */
 export async function listChatSessions(ctx, chatId) {
-  const { json } = await ctx.call('GET', `/api/ai/chat/${encodeURIComponent(chatId)}/sessions`)
+  const { json } = await ctx.call('GET', `/api/ai/chats/${encodeURIComponent(chatId)}/sessions`)
   const sessions = envelopeData(json)
   assert(Array.isArray(sessions), `expected Session summary array: ${JSON.stringify(json)}`)
   for (const item of sessions) assertSessionSummary(item)
@@ -334,7 +334,7 @@ export async function listCanvasSessions(ctx, canvasId) {
 export async function listSessionThreads(ctx, sessionId) {
   const { json } = await ctx.call(
     'GET',
-    `/api/ai/runtime/sessions/${encodeURIComponent(sessionId)}/threads`,
+    `/api/harness/sessions/${encodeURIComponent(sessionId)}/threads`,
   )
   const threads = envelopeData(json)
   assert(Array.isArray(threads), `expected Thread summary array: ${JSON.stringify(json)}`)
@@ -362,7 +362,7 @@ export async function listSessionThreads(ctx, sessionId) {
 export async function listSessionEntries(ctx, sessionId) {
   const { json } = await ctx.call(
     'GET',
-    `/api/ai/runtime/sessions/${encodeURIComponent(sessionId)}/entries`,
+    `/api/harness/sessions/${encodeURIComponent(sessionId)}/entries`,
   )
   const entries = envelopeData(json)
   assert(Array.isArray(entries), `expected Session Entry array: ${JSON.stringify(json)}`)
@@ -383,7 +383,7 @@ export async function listSessionEntries(ctx, sessionId) {
 export async function getThreadSnapshot(ctx, threadId) {
   const { json } = await ctx.call(
     'GET',
-    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/snapshot`,
+    `/api/harness/threads/${encodeURIComponent(threadId)}`,
   )
   const snapshot = envelopeData(json)
   assert(snapshot?.thread, `expected Thread snapshot: ${JSON.stringify(json)}`)
@@ -431,7 +431,7 @@ export async function snapshotEntries(ctx, threadId) {
 
 /** 只读 Environment 注册表；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记。 */
 export async function listEnvironments(ctx) {
-  const { json } = await ctx.call('GET', '/api/ai/environments')
+  const { json } = await ctx.call('GET', '/api/harness/environments')
   const environments = envelopeData(json)
   assert(Array.isArray(environments), `expected Environment array: ${JSON.stringify(json)}`)
   for (const environment of environments) {
@@ -482,7 +482,7 @@ export async function setThreadYolo(ctx, threadId, { expectedVersion, yoloEnable
   assert(typeof yoloEnabled === 'boolean', 'yoloEnabled must be boolean')
   const { status, json } = await ctx.call(
     'PUT',
-    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/yolo`,
+    `/api/harness/threads/${encodeURIComponent(threadId)}/yolo`,
     {
       expectedVersion: nonNegativeDecimal(expectedVersion, 'expectedVersion'),
       yoloEnabled,
@@ -499,7 +499,7 @@ export async function stopThread(ctx, threadId, { stopRequestId, expectedVersion
   assert(stopRequestId && typeof stopRequestId === 'string', 'stopRequestId required')
   const { status, json } = await ctx.call(
     'POST',
-    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/stop`,
+    `/api/harness/threads/${encodeURIComponent(threadId)}/stop`,
     {
       stopRequestId,
       expectedVersion: nonNegativeDecimal(expectedVersion, 'expectedVersion'),
@@ -579,8 +579,8 @@ export async function approveToolInvocation(
   assert(actor && typeof actor === 'string', 'actor required')
   assert(reason == null || typeof reason === 'string', 'reason must be string|null')
   const { status, json } = await ctx.call(
-    'POST',
-    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
+    'PUT',
+    `/api/harness/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
     { decision, decisionId, actor, reason },
   )
   assert(status === 200, `approval status ${status}: ${JSON.stringify(json)}`)

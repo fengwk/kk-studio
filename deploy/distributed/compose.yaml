@@ -226,7 +226,7 @@ services:
         condition: service_completed_successfully
     command:
       - --gateway-uri
-      - ws://app-a:8080/api/ai/environment/daemon/v1
+      - ws://app-a:8080/api/harness/environment-daemon/v1
       - --registration-token
       - ${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-dist-a}
       - --note
@@ -248,7 +248,7 @@ services:
         condition: service_completed_successfully
     command:
       - --gateway-uri
-      - ws://app-b:8080/api/ai/environment/daemon/v1
+      - ws://app-b:8080/api/harness/environment-daemon/v1
       - --registration-token
       - ${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-dist-b}
       - --note

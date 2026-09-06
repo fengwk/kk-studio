@@ -1099,7 +1099,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.chat?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/chat/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
+        `/api/ai/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
       )
     }
   })
@@ -1115,7 +1115,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.model?.providerName && state.model?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/models?providerName=${encodeURIComponent(state.model.providerName)}&modelName=${encodeURIComponent(state.model.name)}&expectedVersion=${encodeURIComponent(state.model.version)}`,
+        `/api/ai/catalog/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
       )
     }
   })
@@ -1143,7 +1143,7 @@ async function cleanupActiveTaskFixture(state) {
     if (state.chat?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/chat/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
+        `/api/ai/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
       )
     }
   })
@@ -1164,7 +1164,7 @@ async function cleanupActiveTaskFixture(state) {
     if (state.model?.providerName && state.model?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/models?providerName=${encodeURIComponent(state.model.providerName)}&modelName=${encodeURIComponent(state.model.name)}&expectedVersion=${encodeURIComponent(state.model.version)}`,
+        `/api/ai/catalog/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
       )
     }
   })
@@ -1192,7 +1192,7 @@ async function cleanupToolCardFixture(state) {
     if (state.chat?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/chat/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
+        `/api/ai/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
       )
     }
   })
@@ -1208,7 +1208,7 @@ async function cleanupToolCardFixture(state) {
     if (state.model?.providerName && state.model?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/models?providerName=${encodeURIComponent(state.model.providerName)}&modelName=${encodeURIComponent(state.model.name)}&expectedVersion=${encodeURIComponent(state.model.version)}`,
+        `/api/ai/catalog/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
       )
     }
   })

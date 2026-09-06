@@ -11,7 +11,7 @@ const MARKER_B = 'distributed-b-only'
 async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 30) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const res = await callNode(node, 'GET', `/api/ai/environments/${encodeURIComponent(envId)}`)
+      const res = await callNode(node, 'GET', `/api/harness/environments/${encodeURIComponent(envId)}`)
       const card = envelopeData(res.json)
       if (card?.ready === true && card?.status === 'READY') {
         return card
@@ -39,7 +39,7 @@ registerCase({
 
     try {
       // 1. 在 node A 创建临时 Environment Card
-      const createRes = await ctx.callNode('a', 'POST', '/api/ai/environments', { name: envName })
+      const createRes = await ctx.callNode('a', 'POST', '/api/harness/environments', { name: envName })
       const created = envelopeData(createRes.json)
       assert(created?.id, 'expected created environment id')
       assert(created.name === envName, `expected name ${envName}, got ${created.name}`)
@@ -52,7 +52,7 @@ registerCase({
       latestVersion = created.version
 
       // 2. 在 node B 读取并验证一致性（注意 registrationToken 不再暴露）
-      const getBRes = await ctx.callNode('b', 'GET', `/api/ai/environments/${encodeURIComponent(createdId)}`)
+      const getBRes = await ctx.callNode('b', 'GET', `/api/harness/environments/${encodeURIComponent(createdId)}`)
       const fromB = envelopeData(getBRes.json)
       assert(fromB.id === createdId, 'node B get: id mismatch')
       assert(fromB.name === envName, 'node B get: name mismatch')
@@ -64,7 +64,7 @@ registerCase({
       const updateRes = await ctx.callNode(
         'b',
         'PUT',
-        `/api/ai/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
+        `/api/harness/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
         { name: updatedName },
       )
       const updated = envelopeData(updateRes.json)
@@ -74,7 +74,7 @@ registerCase({
       latestVersion = updated.version
 
       // 4. 回 node A 验证更新内容与 CAS version
-      const getARes = await ctx.callNode('a', 'GET', `/api/ai/environments/${encodeURIComponent(createdId)}`)
+      const getARes = await ctx.callNode('a', 'GET', `/api/harness/environments/${encodeURIComponent(createdId)}`)
       const fromA = envelopeData(getARes.json)
       assert(fromA.name === updatedName, 'node A verify: name mismatch')
       assert(fromA.version === latestVersion, 'node A verify: version mismatch')
@@ -83,14 +83,14 @@ registerCase({
       await ctx.callNode(
         'b',
         'DELETE',
-        `/api/ai/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
+        `/api/harness/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
       )
       await expectHttpError(
-        () => ctx.callNode('a', 'GET', `/api/ai/environments/${encodeURIComponent(createdId)}`),
+        () => ctx.callNode('a', 'GET', `/api/harness/environments/${encodeURIComponent(createdId)}`),
         { status: 404 },
       )
       await expectHttpError(
-        () => ctx.callNode('b', 'GET', `/api/ai/environments/${encodeURIComponent(createdId)}`),
+        () => ctx.callNode('b', 'GET', `/api/harness/environments/${encodeURIComponent(createdId)}`),
         { status: 404 },
       )
 
@@ -114,13 +114,13 @@ registerCase({
       // 尽力清理临时环境卡片
       if (createdId) {
         try {
-          const probe = await ctx.callNode('a', 'GET', `/api/ai/environments/${encodeURIComponent(createdId)}`)
+          const probe = await ctx.callNode('a', 'GET', `/api/harness/environments/${encodeURIComponent(createdId)}`)
           const card = envelopeData(probe.json)
           if (card?.version) {
             await ctx.callNode(
               'a',
               'DELETE',
-              `/api/ai/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(card.version)}`,
+              `/api/harness/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(card.version)}`,
             )
           }
         } catch {
@@ -149,7 +149,7 @@ registerCase({
     assert(cardAOnA.ready && cardBOnA.ready && cardAOnB.ready && cardBOnB.ready, 'all four projections must be ready')
 
     // 2. 从 node B 查询 env A 根目录：必须强制走 mailbox，命中 MARKER_A 且不能含 MARKER_B
-    const resAFromB = await ctx.callNode('b', 'GET', `/api/ai/environments/${ENV_A_ID}/directories`)
+    const resAFromB = await ctx.callNode('b', 'GET', `/api/harness/environments/${ENV_A_ID}/directories`)
     const dirA = envelopeData(resAFromB.json)
     assert(dirA?.path === '.', `expected root path '.', got ${dirA?.path}`)
     assert(Array.isArray(dirA?.entries), 'expected entries array')
@@ -164,7 +164,7 @@ registerCase({
     )
 
     // 3. 从 node A 查询 env B 根目录：必须强制走 mailbox，命中 MARKER_B 且不能含 MARKER_A
-    const resBFromA = await ctx.callNode('a', 'GET', `/api/ai/environments/${ENV_B_ID}/directories`)
+    const resBFromA = await ctx.callNode('a', 'GET', `/api/harness/environments/${ENV_B_ID}/directories`)
     const dirB = envelopeData(resBFromA.json)
     assert(dirB?.path === '.', `expected root path '.', got ${dirB?.path}`)
     assert(Array.isArray(dirB?.entries), 'expected entries array')
@@ -199,7 +199,7 @@ registerCase({
     )
 
     // 1. 先证明 node B -> env A mailbox 成功
-    const preRes = await ctx.callNode('b', 'GET', `/api/ai/environments/${ENV_A_ID}/directories`)
+    const preRes = await ctx.callNode('b', 'GET', `/api/harness/environments/${ENV_A_ID}/directories`)
     const preDir = envelopeData(preRes.json)
     assert(
       preDir?.entries?.some((entry) => entry.name === MARKER_A),
@@ -215,7 +215,7 @@ registerCase({
           ctx.callNode(
             'a',
             'GET',
-            `/api/ai/environments/${ENV_A_ID}/directories`,
+            `/api/harness/environments/${ENV_A_ID}/directories`,
             undefined,
             10_000,
           ),
@@ -238,7 +238,7 @@ registerCase({
     let recoveredDir = null
     for (let attempt = 1; attempt <= 30; attempt++) {
       try {
-        const res = await ctx.callNode('b', 'GET', `/api/ai/environments/${ENV_A_ID}/directories`)
+        const res = await ctx.callNode('b', 'GET', `/api/harness/environments/${ENV_A_ID}/directories`)
         const dir = envelopeData(res.json)
         if (dir?.entries?.some((entry) => entry.name === MARKER_A)) {
           recoveredDir = dir

@@ -55,7 +55,7 @@ for (const row of modelConfigMatrix()) {
         // cleanup model immediately to keep list small
         await ctx.call(
           'DELETE',
-          `/api/ai/catalog/models?providerName=${encodeURIComponent(model.providerName)}&modelName=${encodeURIComponent(model.name)}&expectedVersion=${encodeURIComponent(model.version)}`,
+          `/api/ai/catalog/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
         )
       } else {
         const err = await expectHttpError(() => ctx.call('POST', '/api/ai/catalog/models', body), {
@@ -183,7 +183,7 @@ registerCase({
       const modelName = sharedModelRefForAgent.slice(separator + 1)
       await ctx.call(
         'DELETE',
-        `/api/ai/catalog/models?providerName=${encodeURIComponent(providerName)}&modelName=${encodeURIComponent(modelName)}&expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
+        `/api/ai/catalog/models/${encodeURIComponent(providerName)}/${encodeURIComponent(modelName)}?expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
       )
       sharedModelRefForAgent = null
       sharedModelVersionForAgent = null

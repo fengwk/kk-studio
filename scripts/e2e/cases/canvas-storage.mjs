@@ -19,7 +19,7 @@ registerCase({
   requires: ['canvas-storage'],
   title: 'Canvas Resource 直读预签名与全局 Blob 存储边界',
   docs:
-    '需 backend 启用 S3；验证通用 S3 端点不能签名 Canvas/blob key，全局 upload reserve->PUT->complete 后 CREATE_RESOURCE_NODE 在同一事务消费 READY 上传，Resource download/preview-url 只暴露 method/url/headers/expiresAt，TEXT 资源与未知资源明确拒绝，画布深删除后 404',
+    '需 backend 启用 S3；验证公开 /api/s3/** 已移除，全局 upload reserve->PUT->complete 后可通过 /api/storage/blobs/{blobId}/download-url|preview-url 获取预签名 URL，CREATE_RESOURCE_NODE 在同一事务消费 READY 上传，Resource download/preview-url 只暴露 method/url/headers/expiresAt，TEXT 资源与未知资源明确拒绝，画布深删除后 404',
   async run(ctx) {
     const { json: createJson } = await ctx.call('POST', '/api/canvases', {
       title: 'e2e-resource-storage',
@@ -30,32 +30,21 @@ registerCase({
     assert(canvas.version === '0', JSON.stringify(canvas))
     assert(!('threadId' in canvas), `Canvas must not expose threadId: ${JSON.stringify(canvas)}`)
 
-    // 通用 S3 预签名端点不能触碰 Canvas/blob key 命名空间。
-    const { json: comfyuiPresignJson } = await ctx.call(
-      'POST',
-      '/api/s3/presigned-uploads',
-      {
-        key: 'comfyui-inputs/e2e/upload/input.png',
-        contentType: 'image/png',
-      },
-    )
-    const comfyuiPresign = envelopeData(comfyuiPresignJson)
-    assert(comfyuiPresign.key === 'comfyui-inputs/e2e/upload/input.png', JSON.stringify(comfyuiPresign))
-    assert(comfyuiPresign.method === 'PUT', JSON.stringify(comfyuiPresign))
+    // 公开 /api/s3/** 端点已删除。
     await expectHttpError(
       () =>
         ctx.call('POST', '/api/s3/presigned-uploads', {
-          key: 'blobs/00000000-0000-0000-0000-000000000001/original',
+          key: 'comfyui-inputs/e2e/upload/input.png',
           contentType: 'image/png',
         }),
-      { status: 400 },
+      { status: 404 },
     )
     await expectHttpError(
       () =>
         ctx.call('POST', '/api/s3/presigned-downloads', {
           key: 'blobs/00000000-0000-0000-0000-000000000001/preview.webp',
         }),
-      { status: 400 },
+      { status: 404 },
     )
 
     // 全局 upload：reserve -> 浏览器直传 PUT -> complete 绑定 blob。
@@ -86,6 +75,23 @@ registerCase({
     assert(completed.state === 'READY', JSON.stringify(completed))
     assert(UUID_TEXT.test(completed.blobId), JSON.stringify(completed))
     assert(completed.presignedPut === null, JSON.stringify(completed))
+
+    // Storage blob URL：通过 POST download-url 与 preview-url 签发预签名 URL。
+    const { json: blobDownloadJson } = await ctx.call(
+      'POST',
+      `/api/storage/blobs/${completed.blobId}/download-url`,
+    )
+    const blobDownload = envelopeData(blobDownloadJson)
+    assert(blobDownload.method === 'GET', JSON.stringify(blobDownload))
+    assert(/^https?:\/\//.test(blobDownload.url), JSON.stringify(blobDownload))
+
+    const { json: blobPreviewJson } = await ctx.call(
+      'POST',
+      `/api/storage/blobs/${completed.blobId}/preview-url`,
+    )
+    const blobPreview = envelopeData(blobPreviewJson)
+    assert(blobPreview.method === 'GET', JSON.stringify(blobPreview))
+    assert(/^https?:\/\//.test(blobPreview.url), JSON.stringify(blobPreview))
 
     // CREATE_RESOURCE_NODE 在同一事务消费 READY 上传：上传行消失，资源携带 blobId 与媒体事实。
     const nodeId = cid()

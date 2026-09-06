@@ -86,7 +86,7 @@ async function apiJson(backendUrl, method, requestPath, body) {
 }
 
 async function apiDeleteByName(backendUrl, resource, name) {
-  const resourcePath = resource === 'chats' ? '/api/ai/chat' : `/api/ai/catalog/${resource}`
+  const resourcePath = resource === 'chats' ? '/api/ai/chats' : `/api/ai/catalog/${resource}`
   const listPath = resource === 'chats' ? resourcePath : `${resourcePath}?pageNumber=1&pageSize=100`
   const { json } = await apiJson(backendUrl, 'GET', listPath)
   const list = json?.data?.results || json?.data || []
@@ -880,12 +880,12 @@ async function main(argv) {
       const tempAgentName = `e2e-ui-agent-${stamp}`
 
       // 1. API 找到 args.daemonEnv Card，断言 canonical UUID
-      const envsResponse = await apiJson(args.backendUrl, 'GET', '/api/ai/environments')
+      const envsResponse = await apiJson(args.backendUrl, 'GET', '/api/harness/environments')
       const envCards = envsResponse.json?.data || []
       const card = envCards.find((candidate) => candidate.name === args.daemonEnv)
       assert(
         card != null,
-        `daemon Environment Card '${args.daemonEnv}' not found in /api/ai/environments: ${JSON.stringify(envCards)}`,
+        `daemon Environment Card '${args.daemonEnv}' not found in /api/harness/environments: ${JSON.stringify(envCards)}`,
       )
       const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
       assert(
@@ -938,7 +938,7 @@ async function main(argv) {
         // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
         await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 15_000 })
 
-        const { json } = await apiJson(args.backendUrl, 'GET', '/api/ai/chat')
+        const { json } = await apiJson(args.backendUrl, 'GET', '/api/ai/chats')
         const created = (json?.data || []).find((chat) => chat.title === title)
         assert(
           created?.workspacePath === '.',

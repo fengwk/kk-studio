@@ -69,7 +69,7 @@ services:
         condition: service_completed_successfully
     command:
       - --gateway-uri
-      - ws://app:8080/api/ai/environment/daemon/v1
+      - ws://app:8080/api/harness/environment-daemon/v1
       - --registration-token
       - ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-reliability}
       - --note

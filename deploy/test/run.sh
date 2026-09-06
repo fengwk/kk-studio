@@ -405,14 +405,14 @@ function_node = upserted_node(function_patch, function_node_id)
 request_id = new_id()
 started = json_call(
     "POST",
-    f"/api/canvases/{canvas['id']}/nodes/{function_node['id']}/runs",
+    f"/api/canvases/{canvas['id']}/nodes/{function_node['id']}/function-run",
     {"requestId": request_id},
 )
 assert started["requestId"] == request_id
 for _ in range(120):
     current = json_call(
         "GET",
-        f"/api/canvases/{canvas['id']}/nodes/{function_node['id']}/run",
+        f"/api/canvases/{canvas['id']}/nodes/{function_node['id']}/function-run",
     )
     if current["status"] not in ("READY", "RUNNING"):
         break
@@ -494,7 +494,7 @@ def create_and_run(
     request_id = new_id()
     run = json_call(
         "POST",
-        f"/api/canvases/{canvas['id']}/nodes/{node['id']}/runs",
+        f"/api/canvases/{canvas['id']}/nodes/{node['id']}/function-run",
         {"requestId": request_id},
     )
     for _ in range(160):
@@ -502,7 +502,7 @@ def create_and_run(
             break
         time.sleep(0.1)
         run = json_call(
-            "GET", f"/api/canvases/{canvas['id']}/nodes/{node['id']}/run"
+            "GET", f"/api/canvases/{canvas['id']}/nodes/{node['id']}/function-run"
         )
     assert run["status"] == "SUCCEEDED", run
     snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
@@ -537,7 +537,7 @@ assert stub["configured"] is True, stub
 
 chat = json_call(
     "POST",
-    "/api/ai/chat",
+    "/api/ai/chats",
     {"title": "offline-chat-smoke", "agentName": "default-assistant", "yoloEnabled": False},
 )
 assert chat["agentName"] == "default-assistant", chat
@@ -547,7 +547,7 @@ session_id = str(uuid.uuid4())
 thread_id = str(uuid.uuid4())
 accepted = json_call(
     "POST",
-    "/api/ai/runtime/command-batches",
+    "/api/harness/command-batches",
     build_offline_chat_batch_request(
         chat_id=chat["id"],
         session_id=session_id,
@@ -565,7 +565,7 @@ assert accepted["acceptedCommands"][0]["type"] == "USER_MESSAGE", accepted
 assert thread["threadId"] == thread_id, thread
 for _ in range(240):
     current = json_call(
-        "GET", f"/api/ai/runtime/threads/{thread_id}/snapshot"
+        "GET", f"/api/harness/threads/{thread_id}"
     )
     candidate = current["thread"]
     if (

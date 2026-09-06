@@ -41,7 +41,7 @@ flowchart LR
   DaemonImage --> Reliability
   DaemonImage --> Distributed
   Reliability --> App["app :8080"]
-  Reliability --> Daemon["daemon -> ws://app:8080/api/ai/environment/daemon/v1"]
+  Reliability --> Daemon["daemon -> ws://app:8080/api/harness/environment-daemon/v1"]
   App --> PG["PostgreSQL"]
   Test --> S3["MinIO S3-compatible"]
 ```
@@ -324,13 +324,13 @@ project name 是 `kk-studio-reliability`：
 loopback API。Daemon 不发布宿主端口，只经：
 
 ```text
-ws://app:8080/api/ai/environment/daemon/v1
+ws://app:8080/api/harness/environment-daemon/v1
 ```
 
 Daemon command 当前固定：
 
 ```text
---gateway-uri ws://app:8080/api/ai/environment/daemon/v1
+--gateway-uri ws://app:8080/api/harness/environment-daemon/v1
 --registration-token ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-reliability}
 --note "Isolated Docker reliability environment."
 --environment-root /workspace
@@ -374,7 +374,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 ```
 
 `up` 等待 PostgreSQL health、App `/actuator/health` 和公共
-`GET /api/ai/environments` 的 `status=READY`。`inspect` fail closed 检查：
+`GET /api/harness/environments` 的 `status=READY`。`inspect` fail closed 检查：
 
 - Daemon uid 不是 root；
 - mount 只有 `volume -> /workspace` 且可写；
@@ -412,11 +412,11 @@ handle 和 presigned URL contract，不把 bucket/key 暴露给 Frontend。
 ### 10.3 Environment daemon
 
 Environment Daemon 是独立 JVM 进程，连接 App 的
-`/api/ai/environment/daemon/v1` WebSocket gateway。App 负责：
+`/api/harness/environment-daemon/v1` WebSocket gateway。App 负责：
 
 - Daemon handshake、Environment binding、Tool/Skill capability projection；
 - inbound/outbound frame size、queue capacity、send timeout；
-- `/api/ai/environments` 的 public READY projection。
+- `/api/harness/environments` 的 public READY projection。
 
 Daemon 负责 workspace 内的工具执行和目录访问；reliability stack 用
 `daemon-workspace` named volume 保存 anchor/case workspace，Daemon 不通过

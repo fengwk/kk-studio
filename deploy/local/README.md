@@ -39,7 +39,7 @@ docker compose -f deploy/local/compose.yaml logs -f postgres
 | 资源 | 地址 |
 | --- | --- |
 | Web UI | <http://localhost:8080/> |
-| Harness API | <http://localhost:8080/api/ai/runtime/threads> 等 |
+| Harness API | <http://localhost:8080/api/harness/threads> 等 |
 | Health | <http://localhost:8080/actuator/health> |
 | PostgreSQL | `jdbc:postgresql://localhost:5432/kk_studio`（用户 / 密码：`kk_studio`） |
 

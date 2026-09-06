@@ -155,24 +155,24 @@ Profile locations 是：
 | --- | --- | --- |
 | Health | `GET /healthz` | 进程存活探针，不读取业务外部资源 |
 | Agent Provider | `/api/ai/catalog/providers` | page、create、update、expectedVersion delete |
-| Agent Model | `/api/ai/catalog/models` | page、create、复合 `(providerName, modelName)` update/delete |
+| Agent Model | `/api/ai/catalog/models`、`/{providerName}/{modelName}` | page、create；路径参数复合 `(providerName, modelName)` update/delete |
 | Agent Definition | `/api/ai/catalog/agents` | page、create、update、expectedVersion delete |
 | Tool catalog | `GET /api/ai/catalog/tools` | Platform/Environment 可选工具目录投影 |
-| Chat | `/api/ai/chat` | Chat CRUD、Chat Session summary |
-| Harness command | `POST /api/ai/runtime/command-batches` | Chat/Canvas 唯一用户 command write path |
-| Harness Session | `/api/ai/runtime/sessions/{sessionId}/{threads,entries}` | Thread summary 和 Session Entry tree 查询 |
-| Harness Thread | `/api/ai/runtime/threads/{threadId}` | snapshot、system-prompt、compact、yolo、stop、Tool approval |
-| Harness resource | `/api/ai/runtime/resources/{sha256}` | content-addressed managed Resource 下载 |
+| MCP Server | `/api/ai/mcp-servers`、`/{id}`、`/{id}/refresh` | CRUD、refresh 工具发现（expectedVersion 在 JSON body） |
+| Chat | `/api/ai/chats` | Chat CRUD、Chat Session summary |
+| Harness command | `POST /api/harness/command-batches` | Chat/Canvas 唯一用户 command write path（202 accepted） |
+| Harness Session | `/api/harness/sessions/{sessionId}/{threads,entries}` | Thread summary 和 Session Entry tree 查询 |
+| Harness Thread | `/api/harness/threads/{threadId}` | snapshot（GET direct）、system-prompt、compact（POST 202）、yolo、stop、Tool approval（PUT） |
+| Harness resource | `/api/harness/resources/{sha256}` | content-addressed managed Resource 下载 |
 | Canvas document | `/api/canvases` | document snapshot/list/create/delete、typed command batch |
 | Canvas resource | `/api/canvases/{canvasId}/resources/{resourceId}/{download-url,preview-url}` | Blob original/preview presign |
-| Canvas Function | `/api/canvas-function-models`、`/api/canvases/{canvasId}/nodes/{nodeId}/...` | model catalog、run、query、cancel |
-| Storage | `/api/storage` | upload reserve/complete/delete、Blob original/preview presign |
-| S3 presign | `/api/s3/presigned-{uploads,downloads}` | 仅 `comfyui-inputs/` namespace 的 PUT/GET presign |
+| Canvas Function | `/api/canvas-function-models`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel` | model catalog、run、query、cancel |
+| Storage | `/api/storage` | upload reserve/complete/delete、`POST /api/storage/blobs/{blobId}/download-url|preview-url` |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
-| Environment | `/api/ai/environments`、`/{id}`、`/{id}/registration-token` | Environment Card CRUD、rotate-token、live projection |
-| Environment directory | `GET /api/ai/environments/{id}/directories` | control-plane 单层目录 async query |
+| Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token` | Environment Card CRUD、rotate-token、live projection |
+| Environment directory | `GET /api/harness/environments/{id}/directories` | control-plane 单层目录 async query |
 | ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |
-| ComfyUI runtime | `/api/comfyui/workflows/{apiName}/runs`、`/api/comfyui/runs/{runId}` | stateless run/get/cancel/output download |
+| ComfyUI runtime | `POST /api/comfyui/workflows/{workflowId}/runs`、`/api/comfyui/runs/{runId}` | stateless 202 run、job/cancel/output download，文件输入使用 blobId |
 
 `StudioHarnessCommandBatchController`返回 `202 Accepted`只表示 durable acceptance 已提交；Provider/Tool 执行和
 Thread progression 由 Work dispatcher 异步完成。Canvas command 返回带 `baseVersion/version`的 Patch，实时收敛另走
@@ -251,7 +251,7 @@ Runtime control/query、store、processor 和 realtime bean。`PostgresqlNotific
 ### Harness REST acceptance
 
 ```text
-POST /api/ai/runtime/command-batches
+POST /api/harness/command-batches
   -> HarnessRuntimeRequestMapper
   -> HarnessCommandAcceptanceOrchestrator
        -> owner authorization
@@ -329,7 +329,7 @@ version source。建立上游时先注册 consumer 再读取 cursor；fan-out �
 端点由 `EnvironmentDaemonWebSocketConfiguration`注册为：
 
 ```text
-/api/ai/environment/daemon/v1
+/api/harness/environment-daemon/v1
 ```
 
 `EnvironmentDaemonWebSocketHandler`只做 transport adapter：
@@ -351,7 +351,7 @@ send timeout，超时/异常会关闭入队围栏、通知 Gateway 进行 uncert
 
 ### HTTP async boundary：Environment directory
 
-`GET /api/ai/environments/{id}/directories?path=.`是 control-plane read-only 查询，不经过 Tool permission、不会
+`GET /api/harness/environments/{id}/directories?path=.`是 control-plane read-only 查询，不经过 Tool permission、不会
 创建 ToolInvocation，也不把绝对路径返回给浏览器。它通过 `fs.list-directory` generic capability 执行，与 Tool/Skill
 共享该 Environment 的单一 active invocation slot；本节点不是 route owner 时经 PostgreSQL `environment_directory_query` mailbox
 转发到 owner 节点。
@@ -445,8 +445,8 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
   ingress policy 属部署边界，不由当前 Web context伪造。
 - Daemon WebSocket 的 registration_token 是 deployment secret，保存在数据库 environment.registration_token 中，不进 SystemSettings、DTO 或日志；Platform gateway
   在 HELLO 认证时基于该 token 映射对应 Environment Card，连接失败会清理 live state。
-- S3 presign Controller 只允许 ComfyUI input namespace 或 server 生成的 Blob key，响应丢弃 bucket/object key；
-  浏览器拿到的是有限 expiry 的 signed URL。
+- 系统不开放公开 S3 预签名端点；Blob 原始和预览访问统一由 Storage/Canvas 签发有限 expiry 的 presigned URL，
+  ComfyUI 文件输入直接使用 blobId。
 - `TrustedJarContributorLoader`把本地 JAR 作为 trusted code，只从显式 canonical directory 加载，不提供远程下载或热加载。
 - `StrictJacksonConfiguration`和各 domain codec 拒绝 duplicate/unknown/trailing fields；Controller 不把上游异常、credential、
   bucket 或本地 Environment root 作为公开字段。
