@@ -9,8 +9,9 @@ import {
   useAgentPaneController,
 } from '@/features/ai/runtime/useAgentPaneController'
 import { createTextPart } from '@/features/ai/composer/composer-parts'
-import { agentPaneService } from '@/shared/api/agent-pane-service'
 import { agentService } from '@/shared/api/agent-service'
+import { chatService } from '@/shared/api/chat-service'
+import { listCanvasSessions } from '@/shared/api/studio-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
@@ -48,23 +49,25 @@ vi.mock('@/shared/api/environment-service', () => ({
     listDirectories: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/harness-service', () => ({
-  harnessService: {
-    getSystemPromptPreview: vi.fn(),
-    setThreadYolo: vi.fn(),
-    stopThread: vi.fn(),
-    decideApproval: vi.fn(),
+vi.mock('@/shared/api/chat-service', () => ({
+  chatService: {
+    listChatSessions: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/agent-pane-service', () => ({
-  agentPaneService: {
+vi.mock('@/shared/api/studio-service', () => ({
+  listCanvasSessions: vi.fn(),
+}))
+vi.mock('@/shared/api/harness-service', () => ({
+  harnessService: {
     acceptCommandBatch: vi.fn(),
-    listChatSessions: vi.fn(),
-    listCanvasSessions: vi.fn(),
     listSessionThreads: vi.fn(),
     listSessionEntries: vi.fn(),
     getThreadSnapshot: vi.fn(),
     compactThread: vi.fn(),
+    getSystemPromptPreview: vi.fn(),
+    setThreadYolo: vi.fn(),
+    stopThread: vi.fn(),
+    decideApproval: vi.fn(),
   },
 }))
 
@@ -174,9 +177,9 @@ beforeEach(() => {
     totalCount: models.length,
     results: models,
   })
-  vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshot())
-  vi.mocked(agentPaneService.listSessionEntries).mockResolvedValue([])
-  vi.mocked(agentPaneService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
+  vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot())
+  vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
+  vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.getSystemPromptPreview).mockResolvedValue({ text: '' })
   vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
     Promise.resolve(threadFixture(threadId, { yoloEnabled: data.yoloEnabled, version: '1' })),
@@ -191,8 +194,8 @@ describe('AgentPane orchestration', () => {
     await user.type(composer, 'first message')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    const [request] = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]!
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
     expect(request.target.type).toBe('NEW_SESSION')
     expect(request.target).not.toHaveProperty('kind')
     expect(request.commands).toHaveLength(1)
@@ -210,15 +213,15 @@ describe('AgentPane orchestration', () => {
     await user.type(composer, 'branch message')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    const [request] = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]!
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
     expect(request.target.type).toBe('ENTRY')
     expect(request.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
   })
 
   it('retries an unknown outcome with the exact request and clears the old action error', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.acceptCommandBatch)
+    vi.mocked(harnessService.acceptCommandBatch)
       .mockRejectedValueOnce(new Error('connection lost'))
       .mockResolvedValueOnce(acceptedResponse())
     renderPane({ type: 'CHAT', id: CHAT_ID })
@@ -226,35 +229,35 @@ describe('AgentPane orchestration', () => {
     await user.type(composer, 'retry me')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     const retry = await screen.findByRole('button', { name: '重试' })
-    const firstRequest = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]?.[0]
+    const firstRequest = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
 
     await user.click(retry)
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[1]?.[0]).toBe(firstRequest)
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(harnessService.acceptCommandBatch).mock.calls[1]?.[0]).toBe(firstRequest)
     expect(screen.queryByText('connection lost')).not.toBeInTheDocument()
   })
 
   it('restores an unknown pending acceptance after remount with the same frozen request', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(new Error('timeout'))
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(new Error('timeout'))
     const firstRender = renderPane({ type: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'persist me')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     await screen.findByRole('button', { name: '重试' })
-    const firstRequest = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]?.[0]
+    const firstRequest = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
     firstRender.unmount()
 
     renderPane({ type: 'CHAT', id: CHAT_ID })
     const retry = await screen.findByRole('button', { name: '重试' })
     await user.click(retry)
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[1]?.[0]).toEqual(firstRequest)
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(harnessService.acceptCommandBatch).mock.calls[1]?.[0]).toEqual(firstRequest)
   })
 
   it('abandons an unknown outcome by restoring the frozen composer parts', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(new Error('timeout'))
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(new Error('timeout'))
     renderPane({ type: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'frozen draft')
@@ -267,7 +270,7 @@ describe('AgentPane orchestration', () => {
 
   it('restores the frozen request on a definite 409 and presents its reason', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
       new ApiError('entry changed', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
     )
     renderPane({ type: 'CHAT', id: CHAT_ID })
@@ -283,7 +286,7 @@ describe('AgentPane orchestration', () => {
   it('fences a late success after abandon without changing the target', async () => {
     const user = userEvent.setup()
     let resolve: ((value: ReturnType<typeof acceptedResponse>) => void) | null = null
-    vi.mocked(agentPaneService.acceptCommandBatch).mockImplementationOnce(
+    vi.mocked(harnessService.acceptCommandBatch).mockImplementationOnce(
       () => new Promise((complete) => {
         resolve = complete
       }),
@@ -298,13 +301,13 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(localStorage.getItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
     )).toContain('NEW_SESSION_DRAFT'))
-    expect(vi.mocked(agentPaneService.acceptCommandBatch)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(harnessService.acceptCommandBatch)).toHaveBeenCalledTimes(1)
   })
 
   it('ignores a late rejection after abandon without restoring a stale error', async () => {
     const user = userEvent.setup()
     let reject: ((error: Error) => void) | null = null
-    vi.mocked(agentPaneService.acceptCommandBatch).mockImplementationOnce(
+    vi.mocked(harnessService.acceptCommandBatch).mockImplementationOnce(
       () => new Promise((_, fail) => {
         reject = fail
       }),
@@ -320,7 +323,7 @@ describe('AgentPane orchestration', () => {
 
   it('uses the action error path for a definite non-conflict acceptance failure', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
       new ApiError('locked', 400, 'BAD_REQUEST'),
     )
     renderPane({ type: 'CHAT', id: CHAT_ID })
@@ -337,7 +340,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
       new ApiError('state changed', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
     )
     renderPane({ type: 'CHAT', id: CHAT_ID })
@@ -392,7 +395,7 @@ describe('AgentPane orchestration', () => {
 
   it('disables and enables compact from the advisory snapshot sidecar', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.compactThread).mockResolvedValueOnce({
+    vi.mocked(harnessService.compactThread).mockResolvedValueOnce({
       thread: thread({ version: '1' }),
       turnStartEntryId: 'turn-start-1',
       modelInvocationId: 'model-1',
@@ -431,7 +434,7 @@ describe('AgentPane orchestration', () => {
     )
     await user.click(screen.getByRole('option', { name: /^compact/ }))
     await waitFor(() =>
-      expect(agentPaneService.compactThread).toHaveBeenCalledWith(
+      expect(harnessService.compactThread).toHaveBeenCalledWith(
         THREAD_ID,
         { expectedVersion: '0' },
       ),
@@ -457,7 +460,7 @@ describe('AgentPane orchestration', () => {
 
   it('dismisses a non-conflict action error through the shared panel callback', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(new Error('network lost'))
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(new Error('network lost'))
     renderPane({ type: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'network error')
@@ -481,7 +484,7 @@ describe('AgentPane orchestration', () => {
       payloadJson: '{}',
       createTime: null,
     }
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(thread(), { entries: [rootEntry] }),
     )
     renderPane({ type: 'CHAT', id: CHAT_ID })
@@ -541,14 +544,14 @@ describe('AgentPane orchestration', () => {
 
   it('navigates Session -> Thread through the owner-scoped queries', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.listChatSessions).mockResolvedValue([{
+    vi.mocked(chatService.listChatSessions).mockResolvedValue([{
       sessionId: 'session-1',
       createdAt: null,
       lastActivityAt: null,
       firstMessagePreview: 'first',
       threadCount: 1,
     }])
-    vi.mocked(agentPaneService.listSessionThreads).mockResolvedValue([{
+    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
       threadId: THREAD_ID,
       createdAt: null,
       updatedAt: null,
@@ -564,7 +567,7 @@ describe('AgentPane orchestration', () => {
     await user.click(screen.getByRole('button', { name: '关闭' }))
     await user.click(await screen.findByRole('option', { name: /first/ }))
     await user.click(await screen.findByRole('option', { name: /thread preview/ }))
-    await waitFor(() => expect(agentPaneService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
     expect(localStorage.getItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
     )).toContain('BOUND_THREAD')
@@ -576,7 +579,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'ENTRY_DRAFT', sessionId: 'session-1', startEntryId: 'entry-1' }),
     )
-    vi.mocked(agentPaneService.listSessionEntries).mockResolvedValue([{
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([{
       entryId: 'entry-1',
       sessionId: 'session-1',
       parentEntryId: null,
@@ -589,7 +592,7 @@ describe('AgentPane orchestration', () => {
     await user.click(composer)
     await user.keyboard('/tree{Enter}')
     expect(await screen.findByRole('region', { name: '历史分支' })).toBeInTheDocument()
-    expect(agentPaneService.listSessionEntries).toHaveBeenCalledWith('session-1')
+    expect(harnessService.listSessionEntries).toHaveBeenCalledWith('session-1')
     await user.click(document.querySelector<HTMLButtonElement>('.history-branch-entry')!)
     await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
     expect(localStorage.getItem(
@@ -608,7 +611,7 @@ describe('AgentPane orchestration', () => {
     await user.click(composer)
     await user.keyboard('/tree{Enter}')
     expect(await screen.findByRole('region', { name: '历史分支' })).toBeInTheDocument()
-    expect(agentPaneService.listSessionEntries).toHaveBeenCalledWith('session-1')
+    expect(harnessService.listSessionEntries).toHaveBeenCalledWith('session-1')
   })
 
   it('blocks target navigation while an exact Stop replay is pending', async () => {
@@ -643,7 +646,7 @@ describe('AgentPane orchestration', () => {
 
   it('keeps a background realtime version from changing the persisted target', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(thread({ status: 'MODEL_STREAMING', processing: true })),
     )
     localStorage.setItem(
@@ -688,17 +691,17 @@ describe('AgentPane orchestration', () => {
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: preview,
     })
-    vi.mocked(agentPaneService.getThreadSnapshot).mockImplementation(async (threadId) =>
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
       snapshot(thread({ threadId, status: 'MODEL_STREAMING', processing: true })),
     )
-    vi.mocked(agentPaneService.listChatSessions).mockResolvedValue([{
+    vi.mocked(chatService.listChatSessions).mockResolvedValue([{
       sessionId: 'session-1',
       createdAt: null,
       lastActivityAt: null,
       firstMessagePreview: 'session',
       threadCount: 1,
     }])
-    vi.mocked(agentPaneService.listSessionThreads)
+    vi.mocked(harnessService.listSessionThreads)
       .mockResolvedValueOnce([summary(threadB, 'thread B')])
       .mockResolvedValueOnce([summary(threadA, 'thread A')])
     localStorage.setItem(
@@ -837,7 +840,7 @@ describe('AgentPane orchestration', () => {
 
   it('keeps pending acceptance fenced while commands and a direct composer callback race', async () => {
     let resolve: ((value: ReturnType<typeof acceptedResponse>) => void) | null = null
-    vi.mocked(agentPaneService.acceptCommandBatch).mockImplementationOnce(
+    vi.mocked(harnessService.acceptCommandBatch).mockImplementationOnce(
       () => new Promise((complete) => {
         resolve = complete
       }),
@@ -865,7 +868,7 @@ describe('AgentPane orchestration', () => {
     act(() => hook.result.current.composer.onSubmit([createTextPart('/unknown-command')]))
     act(() => hook.result.current.composer.onSubmit([]))
     act(() => hook.result.current.composer.onCommand(testCommand('yolo')))
-    expect(agentPaneService.acceptCommandBatch).not.toHaveBeenCalled()
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
   })
 
   it('uses stored composer parts when the submit callback omits an explicit payload', async () => {
@@ -873,13 +876,13 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
     act(() => hook.result.current.composer.onPartsChange([createTextPart('stored parts')]))
     act(() => hook.result.current.composer.onSubmit())
-    await waitFor(() => expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    expect(agentPaneService.acceptCommandBatch.mock.calls[0]?.[0].commands[0]?.type)
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    expect(harnessService.acceptCommandBatch.mock.calls[0]?.[0].commands[0]?.type)
       .toBe('USER_MESSAGE')
   })
 
   it('restores the browser-local draft rather than the resolved submit payload', async () => {
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
       new ApiError('rejected', 400, 'BAD_REQUEST'),
     )
     const hook = renderController()
@@ -900,17 +903,17 @@ describe('AgentPane orchestration', () => {
   })
 
   it('uses the Canvas session query when opening thread navigation', async () => {
-    vi.mocked(agentPaneService.listCanvasSessions).mockResolvedValue([])
+    vi.mocked(listCanvasSessions).mockResolvedValue([])
     const hook = renderController({ owner: { type: 'CANVAS', id: CANVAS_ID } })
     await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
     act(() => hook.result.current.composer.onCommand(testCommand('thread')))
     expect(hook.result.current.interaction).toBe('thread-sessions')
-    await waitFor(() => expect(agentPaneService.listCanvasSessions).toHaveBeenCalledWith(CANVAS_ID))
+    await waitFor(() => expect(listCanvasSessions).toHaveBeenCalledWith(CANVAS_ID))
   })
 
   it('falls back for unknown errors and selection previews without hiding the failure', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce({})
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce({})
     renderPane({ type: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'unknown error')
@@ -935,8 +938,8 @@ describe('AgentPane orchestration', () => {
 
   it('renders Session/Thread pickers with the existing ai.chat translations', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.listChatSessions).mockResolvedValue([])
-    vi.mocked(agentPaneService.listSessionThreads).mockResolvedValue([])
+    vi.mocked(chatService.listChatSessions).mockResolvedValue([])
+    vi.mocked(harnessService.listSessionThreads).mockResolvedValue([])
     const emptyPane = renderPane({ type: 'CHAT', id: CHAT_ID })
     const emptyComposer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(emptyComposer)
@@ -946,7 +949,7 @@ describe('AgentPane orchestration', () => {
     expect(screen.getByText('暂无 Session')).toBeInTheDocument()
     emptyPane.unmount()
 
-    vi.mocked(agentPaneService.listChatSessions).mockResolvedValue([{
+    vi.mocked(chatService.listChatSessions).mockResolvedValue([{
         sessionId: 'session-1',
         createdAt: null,
         lastActivityAt: null,
@@ -972,7 +975,7 @@ describe('AgentPane orchestration', () => {
   it('keeps the composer editable with queued commands while blocking target switching', async () => {
     // QUEUED USER_MESSAGE 只保留在 hasPendingOperation 栅栏中：Composer 仍可
     // 编辑并提交新 batch，/thread 切换则必须被拒绝。
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshot(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(
       thread(),
       {
         queuedCommands: [{
@@ -1005,7 +1008,7 @@ describe('AgentPane orchestration', () => {
 
     act(() => hook.result.current.composer.onSubmit([createTextPart('下一条消息')]))
     await waitFor(() =>
-      expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledWith(
+      expect(harnessService.acceptCommandBatch).toHaveBeenCalledWith(
         expect.objectContaining({ target: expect.objectContaining({ type: 'THREAD' }) }),
       ),
     )
@@ -1040,7 +1043,7 @@ describe('AgentPane orchestration', () => {
 
   it('does not retain a background subscription for a terminal previous thread', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(thread({ status: 'IDLE', processing: false })),
     )
     localStorage.setItem(

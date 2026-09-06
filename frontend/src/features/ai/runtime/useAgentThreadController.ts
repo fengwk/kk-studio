@@ -42,7 +42,6 @@ import {
 } from '@/features/ai/composer/composer-draft'
 import { isConflictError, isConflictReason } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
-import { agentPaneService } from '@/shared/api/agent-pane-service'
 import type { HarnessThreadSnapshotDTO } from '@/shared/api/contracts/ai-runtime'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate, useI18n } from '@/shared/i18n'
@@ -295,7 +294,7 @@ export function useAgentThreadController(
 
   const compactMutation = useMutation({
     mutationFn: (expectedVersion: string) =>
-      agentPaneService.compactThread(threadId, { expectedVersion }),
+      harnessService.compactThread(threadId, { expectedVersion }),
     onSuccess: async () => {
       setConflict(null)
       await queryClient.invalidateQueries({
@@ -427,7 +426,7 @@ export function useAgentThreadController(
       submittedPlan = initialPlan
       for (let retryCount = 0; ; retryCount += 1) {
         try {
-          await agentPaneService.acceptCommandBatch(submittedPlan.request)
+          await harnessService.acceptCommandBatch(submittedPlan.request)
           setConflict(null)
           return
         } catch (error) {
@@ -440,7 +439,7 @@ export function useAgentThreadController(
           let latest: HarnessThreadSnapshotDTO
           try {
             // 直接读取权威 snapshot，不能复用可能早于失败请求启动的 query refetch。
-            latest = await agentPaneService.getThreadSnapshot(threadId)
+            latest = await harnessService.getThreadSnapshot(threadId)
           } catch {
             throw error
           }

@@ -1,42 +1,77 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
 import type {
+  AgentCommandBatchRequestDTO,
+  AgentCommandBatchResponseDTO,
+  HarnessSessionEntryDTO,
   HarnessSystemPromptPreviewDTO,
   HarnessThreadDTO,
+  HarnessThreadSnapshotDTO,
   HarnessThreadStopDTO,
   HarnessThreadStopResultDTO,
   HarnessThreadYoloUpdateDTO,
   HarnessToolApprovalDTO,
+  ManualCompactionRequestDTO,
+  ManualCompactionResponseDTO,
+  RuntimeThreadSummaryDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
 
 /**
- * Harness runtime 线程控制/查询面：
- * - GET snapshot（一致的 PostgreSQL 投影）
- * - GET system-prompt（按当前 branch 最新状态现算的系统提示词预览）
- * - PUT yolo / POST stop / POST approval（yolo/stop 均基于 version CAS）
- * - 实时事件经应用级 WebSocket（/api/events/v1，见 shared/app-events）
+ * Harness runtime 客户端调用统一收敛：
+ * - POST /harness/command-batches
+ * - GET /harness/sessions/{id}/threads
+ * - GET /harness/sessions/{id}/entries
+ * - GET /harness/threads/{id}（Thread snapshot 查询）
+ * - POST /harness/threads/{id}/compact
+ * - GET /harness/threads/{id}/system-prompt
+ * - PUT /harness/threads/{id}/yolo
+ * - POST /harness/threads/{id}/stop
+ * - PUT /harness/threads/{threadId}/tool-invocations/{invocationId}/approval
  */
 export function createHarnessService(client: HttpClient = apiClient) {
   return {
+    acceptCommandBatch: (
+      data: AgentCommandBatchRequestDTO,
+    ): Promise<AgentCommandBatchResponseDTO> =>
+      client.post('/harness/command-batches', data),
+
+    listSessionThreads: (sessionId: string): Promise<RuntimeThreadSummaryDTO[]> =>
+      client.get(`/harness/sessions/${encodeURIComponent(sessionId)}/threads`),
+
+    listSessionEntries: (sessionId: string): Promise<HarnessSessionEntryDTO[]> =>
+      client.get(`/harness/sessions/${encodeURIComponent(sessionId)}/entries`),
+
+    getThreadSnapshot: (threadId: string): Promise<HarnessThreadSnapshotDTO> =>
+      client.get(`/harness/threads/${encodeURIComponent(threadId)}`),
+
+    compactThread: (
+      threadId: string,
+      data: ManualCompactionRequestDTO,
+    ): Promise<ManualCompactionResponseDTO> =>
+      client.post(`/harness/threads/${encodeURIComponent(threadId)}/compact`, data),
+
     getSystemPromptPreview: (threadId: string): Promise<HarnessSystemPromptPreviewDTO> =>
-      client.get(`/ai/runtime/threads/${encodeURIComponent(threadId)}/system-prompt`),
+      client.get(`/harness/threads/${encodeURIComponent(threadId)}/system-prompt`),
+
     setThreadYolo: (
       threadId: string,
       data: HarnessThreadYoloUpdateDTO,
     ): Promise<HarnessThreadDTO> =>
-      client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/yolo`, data),
+      client.put(`/harness/threads/${encodeURIComponent(threadId)}/yolo`, data),
+
     stopThread: (
       threadId: string,
       data: HarnessThreadStopDTO,
     ): Promise<HarnessThreadStopResultDTO> =>
-      client.post(`/ai/runtime/threads/${encodeURIComponent(threadId)}/stop`, data),
+      client.post(`/harness/threads/${encodeURIComponent(threadId)}/stop`, data),
+
     decideApproval: (
       threadId: string,
       toolInvocationId: string,
       data: HarnessToolApprovalDTO,
     ): Promise<ToolInvocationDTO> =>
-      client.post(
-        `/ai/runtime/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
+      client.put(
+        `/harness/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
         data,
       ),
   }

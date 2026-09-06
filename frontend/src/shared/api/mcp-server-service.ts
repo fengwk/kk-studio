@@ -21,9 +21,9 @@ export function createMcpServerService(client: HttpClient = apiClient) {
       client.put(`/ai/mcp-servers/${encodeURIComponent(id)}`, data),
 
     refreshServer: (id: string, expectedVersion: string): Promise<McpServerDTO> =>
-      client.post(
-        `/ai/mcp-servers/${encodeURIComponent(id)}/refresh?expectedVersion=${encodeURIComponent(expectedVersion)}`,
-      ),
+      client.post(`/ai/mcp-servers/${encodeURIComponent(id)}/refresh`, {
+        expectedVersion,
+      }),
 
     deleteServer: (id: string, expectedVersion: string): Promise<void> =>
       client.delete(

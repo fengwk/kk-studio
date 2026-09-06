@@ -13,7 +13,6 @@ import type {
 } from '@/features/ai/runtime/thread-timeline-types'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { agentService } from '@/shared/api/agent-service'
-import { agentPaneService } from '@/shared/api/agent-pane-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { ApiError } from '@/shared/api/client'
 import type {
@@ -43,14 +42,10 @@ vi.mock('@/shared/api/agent-service', () => ({
     listProviders: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/agent-pane-service', () => ({
-  agentPaneService: {
-    getThreadSnapshot: vi.fn(),
-    acceptCommandBatch: vi.fn(),
-  },
-}))
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
+    getThreadSnapshot: vi.fn(),
+    acceptCommandBatch: vi.fn(),
     getSystemPromptPreview: vi.fn(),
     setThreadYolo: vi.fn(),
     stopThread: vi.fn(),
@@ -219,10 +214,10 @@ describe('useBoundBranchPanel', () => {
       totalCount: 1,
       results: [modelEntry],
     })
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(threadFixture(THREAD_ID)),
     )
-    vi.mocked(agentPaneService.acceptCommandBatch).mockResolvedValue([] as HarnessThreadCommandDTO[])
+    vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue([] as HarnessThreadCommandDTO[])
     // 直接控制面默认回显请求值（同值 no-op 由服务端保证，这里仅回显）。
     vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
       Promise.resolve(threadFixture(threadId, { yoloEnabled: data.yoloEnabled })),
@@ -230,7 +225,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('initializes the draft from the snapshot with queued SET_* projected, and submits without a reversal diff', async () => {
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(threadFixture(THREAD_ID), {
         queuedCommands: [queuedSettingCommand('1', 'SET_AGENT', { agentName: 'coder' })],
       }),
@@ -248,8 +243,8 @@ describe('useBoundBranchPanel', () => {
 
     await send(result)
 
-    expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(1)
-    const [batch] = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]!
+    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
+    const [batch] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
     expect(batch.target.expectedHeadEntryId).toBe('e-assistant')
     expect(batch.target.expectedNextCommandSequence).toBe('1')
     // 投影后 effectiveBase === draft：最小 diff 只含 USER_MESSAGE，无 SET_AGENT reversal。
@@ -288,7 +283,7 @@ describe('useBoundBranchPanel', () => {
 
     await send(result)
 
-    const [batch] = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]!
+    const [batch] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
     // buildBranchDiffCommands 的固定顺序：ENV/AGENT/MODEL + USER_MESSAGE；yolo 走直接控制面。
     expect(batch.commands.map((command) => command.type)).toEqual([
       'SET_ENVIRONMENT',
@@ -330,7 +325,7 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.yoloError).toBeNull()
 
     await send(result)
-    const [batch] = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]!
+    const [batch] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
     // 未发送的 agent 编辑仍与消息一起提交；yolo 已对齐，绝不重复发送。
     expect(batch.commands.map((command) => command.type)).toEqual([
       'SET_AGENT',
@@ -465,7 +460,7 @@ describe('useBoundBranchPanel', () => {
     // 只有 BigInt 精确比较才能真正识别低 version 的迟到 snapshot。
     const BIG_LOW = '9007199254740992'
     const BIG_AUTH = '9007199254740993'
-    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(threadFixture(THREAD_ID, { version: BIG_LOW })),
     )
     vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
@@ -586,7 +581,7 @@ describe('useBoundBranchPanel', () => {
       }
       return Promise.resolve(threadFixture(threadId, { yoloEnabled: data.yoloEnabled }))
     })
-    vi.mocked(agentPaneService.getThreadSnapshot).mockImplementation((threadId) =>
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
       Promise.resolve(
         threadId === THREAD_ID_2
           ? snapshotOf(
@@ -629,7 +624,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('resets the pane-local draft on thread rebind and re-initializes from the new snapshot', async () => {
-    vi.mocked(agentPaneService.getThreadSnapshot).mockImplementation((threadId) =>
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
       Promise.resolve(
         threadId === THREAD_ID_2
           ? snapshotOf(
@@ -673,7 +668,7 @@ describe('useBoundBranchPanel', () => {
 
   it('fails closed during the rebind gap: old draft is not exposed and cannot be submitted until the new snapshot arrives', async () => {
     let resolveNewSnapshot: ((snapshot: HarnessThreadSnapshotDTO) => void) | null = null
-    vi.mocked(agentPaneService.getThreadSnapshot).mockImplementation((threadId) => {
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) => {
       if (threadId === THREAD_ID) {
         return Promise.resolve(snapshotOf(threadFixture(THREAD_ID)))
       }
@@ -710,7 +705,7 @@ describe('useBoundBranchPanel', () => {
     await act(async () => {
       await result.current.controller.submitMessage([createTextPart('hello world')])
     })
-    expect(agentPaneService.acceptCommandBatch).not.toHaveBeenCalled()
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
 
     // 新 snapshot 到达后，从新 Thread 重新初始化，旧编辑不泄漏。
     await act(async () => {

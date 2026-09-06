@@ -1,5 +1,6 @@
 import { ApiError, apiBaseUrl } from '@/shared/api/client'
 import type { ResultEnvelope } from '@/shared/api/contracts/base'
+import type { RuntimeSessionSummaryDTO } from '@/shared/api/contracts/ai-runtime'
 import {
   decodeCanvasDocument,
   decodeCanvasDocumentList,
@@ -98,7 +99,7 @@ export function startCanvasFunctionRun(
   request: CanvasFunctionRunRequestDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
-  return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/runs`, {
+  return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/function-run`, {
     method: 'POST',
     body: request,
     signal: options?.signal,
@@ -110,7 +111,7 @@ export function getCanvasFunctionRun(
   nodeId: UUIDString,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
-  return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/run`, {
+  return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/function-run`, {
     signal: options?.signal,
   })
 }
@@ -121,9 +122,18 @@ export function cancelCanvasFunctionRun(
   request: CanvasFunctionRunRequestDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
-  return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/run/cancel`, {
+  return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/function-run/cancel`, {
     method: 'POST',
     body: request,
+    signal: options?.signal,
+  })
+}
+
+export function listCanvasSessions(
+  canvasId: UUIDString | string,
+  options?: CanvasRequestOptions,
+): Promise<RuntimeSessionSummaryDTO[]> {
+  return canvasRequest(`/canvases/${encodeURIComponent(canvasId)}/sessions`, {
     signal: options?.signal,
   })
 }
@@ -194,4 +204,18 @@ function isResultEnvelope<T>(value: unknown): value is ResultEnvelope<T> {
     && typeof candidate.message === 'string'
     && 'data' in candidate
   )
+}
+
+export const studioService = {
+  listCanvases,
+  createCanvas,
+  getCanvas,
+  postCanvasCommands,
+  listCanvasFunctionModels,
+  getCanvasResourceOriginalUrl,
+  getCanvasResourcePreviewUrl,
+  startCanvasFunctionRun,
+  getCanvasFunctionRun,
+  cancelCanvasFunctionRun,
+  listCanvasSessions,
 }

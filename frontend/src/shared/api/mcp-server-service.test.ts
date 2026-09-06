@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { createMcpServerService } from '@/shared/api/mcp-server-service'
 
 describe('mcpServerService', () => {
+  /**
+   * 测试意图：验证 MCP server 分页查询使用 GET /ai/mcp-servers 并携带分页参数。
+   */
   it('pages servers via GET /ai/mcp-servers', async () => {
     const client = {
       get: vi.fn(async () => ({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })),
@@ -16,6 +19,9 @@ describe('mcpServerService', () => {
     })
   })
 
+  /**
+   * 测试意图：验证通过 UUID 获取单个 MCP Server 详情。
+   */
   it('gets a single server by UUID', async () => {
     const client = {
       get: vi.fn(async () => ({ id: 'srv-1', name: 'fs' })),
@@ -28,6 +34,9 @@ describe('mcpServerService', () => {
     expect(client.get).toHaveBeenCalledWith('/ai/mcp-servers/srv-1')
   })
 
+  /**
+   * 测试意图：验证创建 MCP Server 使用 POST /ai/mcp-servers。
+   */
   it('creates an MCP server', async () => {
     const client = {
       get: vi.fn(async () => ({})),
@@ -44,6 +53,9 @@ describe('mcpServerService', () => {
     })
   })
 
+  /**
+   * 测试意图：验证更新 MCP Server 使用 PUT /ai/mcp-servers/{id}。
+   */
   it('updates an MCP server with PUT /ai/mcp-servers/{id}', async () => {
     const client = {
       get: vi.fn(async () => ({})),
@@ -62,7 +74,10 @@ describe('mcpServerService', () => {
     })
   })
 
-  it('refreshes tools via POST /ai/mcp-servers/{id}/refresh?expectedVersion=', async () => {
+  /**
+   * 测试意图：验证 MCP 工具刷新契约，POST /ai/mcp-servers/{id}/refresh 且 expectedVersion 放在 POST body {expectedVersion} 中。
+   */
+  it('refreshes tools via POST /ai/mcp-servers/{id}/refresh with body {expectedVersion}', async () => {
     const client = {
       get: vi.fn(async () => ({})),
       post: vi.fn(async () => ({ id: 'srv-1', version: '2' })),
@@ -71,9 +86,15 @@ describe('mcpServerService', () => {
     }
     const service = createMcpServerService(client)
     await service.refreshServer('srv-1', '1')
-    expect(client.post).toHaveBeenCalledWith('/ai/mcp-servers/srv-1/refresh?expectedVersion=1')
+    expect(client.post).toHaveBeenCalledWith(
+      '/ai/mcp-servers/srv-1/refresh',
+      { expectedVersion: '1' },
+    )
   })
 
+  /**
+   * 测试意图：验证删除 MCP Server 使用 DELETE /ai/mcp-servers/{id}?expectedVersion=。
+   */
   it('deletes an MCP server via DELETE /ai/mcp-servers/{id}?expectedVersion=', async () => {
     const client = {
       get: vi.fn(async () => ({})),
