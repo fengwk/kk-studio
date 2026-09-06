@@ -94,11 +94,11 @@ describe('storage-service', () => {
     expect(deleteFn).toHaveBeenCalledWith('/storage/uploads/up-1')
   })
 
-  it('resolves original and preview blob URLs via GET on the blob path', async () => {
-    const { client, get } = fakeClient()
+  it('resolves original and preview blob URLs via POST on the blob path', async () => {
+    const { client, post } = fakeClient()
     const service = createStorageService(client)
     // 原件 sizeBytes 是 Java long：wire 为 decimal string，adapter 归一化为 number。
-    get.mockResolvedValue({
+    post.mockResolvedValue({
       url: 'https://s3.test/orig',
       expiresAt: '2026-08-12T00:00:00Z',
       mediaType: 'image/png',
@@ -109,19 +109,19 @@ describe('storage-service', () => {
       url: 'https://s3.test/orig',
       sizeBytes: 64,
     })
-    expect(get).toHaveBeenCalledWith('/storage/blobs/blob-1/presigned-original')
+    expect(post).toHaveBeenCalledWith('/storage/blobs/blob-1/download-url')
 
     await expect(service.getBlobPreviewUrl('blob-1')).resolves.toMatchObject({
       url: 'https://s3.test/orig',
       sizeBytes: 64,
     })
-    expect(get).toHaveBeenCalledWith('/storage/blobs/blob-1/presigned-preview')
+    expect(post).toHaveBeenCalledWith('/storage/blobs/blob-1/preview-url')
   })
 
   it('accepts missing and numeric sizeBytes and keeps null', async () => {
-    const { client, get } = fakeClient()
+    const { client, post } = fakeClient()
     const service = createStorageService(client)
-    get.mockResolvedValueOnce({ url: 'https://s3.test/a', expiresAt: '2026-08-12T00:00:00Z' })
+    post.mockResolvedValueOnce({ url: 'https://s3.test/a', expiresAt: '2026-08-12T00:00:00Z' })
       .mockResolvedValueOnce({ url: 'https://s3.test/b', expiresAt: '2026-08-12T00:00:00Z', sizeBytes: 9 })
 
     await expect(service.getBlobOriginalUrl('blob-1')).resolves.toMatchObject({ sizeBytes: null })
@@ -129,17 +129,17 @@ describe('storage-service', () => {
   })
 
   it('fails closed on unsafe or malformed sizeBytes instead of silent zero', async () => {
-    const { client, get } = fakeClient()
+    const { client, post } = fakeClient()
     const service = createStorageService(client)
     const invalid = ['9007199254740993', '-1', '01', 'abc', 1.5, Number.NaN]
     for (const sizeBytes of invalid) {
-      get.mockResolvedValueOnce({ url: 'https://s3.test/x', expiresAt: '2026-08-12T00:00:00Z', sizeBytes })
+      post.mockResolvedValueOnce({ url: 'https://s3.test/x', expiresAt: '2026-08-12T00:00:00Z', sizeBytes })
       await expect(service.getBlobOriginalUrl('blob-1')).rejects.toMatchObject({
         name: 'ApiError',
         message: expect.stringContaining('sizeBytes'),
       })
     }
-    get.mockResolvedValueOnce({ expiresAt: '2026-08-12T00:00:00Z' })
+    post.mockResolvedValueOnce({ expiresAt: '2026-08-12T00:00:00Z' })
     await expect(service.getBlobOriginalUrl('blob-1')).rejects.toMatchObject({
       name: 'ApiError',
       message: expect.stringContaining('url'),

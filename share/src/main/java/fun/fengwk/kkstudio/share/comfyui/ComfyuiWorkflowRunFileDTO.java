@@ -3,19 +3,18 @@ package fun.fengwk.kkstudio.share.comfyui;
 import lombok.Data;
 
 /**
- * ComfyUI 工作流运行的 S3 文件输入。
+ * ComfyUI 工作流运行的文件输入。
+ *
+ * <p>wire 契约仅包含 {@code blobId} 与客户端 {@code filename}，绝不接受 key 与 contentType。
  *
  * @author fengwk
  */
 @Data
 public class ComfyuiWorkflowRunFileDTO {
 
-  /** S3 对象键：服务端统一校验（非空白、无前导 {@code '/'}、无 {@code .}/{@code ..} 段、无控制字符、UTF-8 ≤1024 字节）。 */
-  private String key;
+  /** 目标 ACTIVE blob 的 canonical UUID 字符串。 */
+  private String blobId;
 
-  /** 上传到 ComfyUI 的文件名（实际上传名取此值，而非 S3 key）。 */
+  /** 上传到 ComfyUI 的基准文件名（严格 basename 校验）。 */
   private String filename;
-
-  /** 可空 media type；为空时依次回退 S3 对象 Content-Type 与默认 {@code application/octet-stream}。 */
-  private String contentType;
 }

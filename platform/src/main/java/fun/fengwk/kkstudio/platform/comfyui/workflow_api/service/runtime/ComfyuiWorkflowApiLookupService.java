@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.platform.comfyui.workflow_api.repo.ComfyuiWorkflowApi
 import fun.fengwk.kkstudio.platform.comfyui.workflow_api.service.model.ComfyuiWorkflowApi;
 
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 暴露给 runtime 提交路径使用的只读查询入口。
@@ -31,15 +32,16 @@ public class ComfyuiWorkflowApiLookupService {
   }
 
   /**
-   * 仅当配置存在且 enabled=true 时返回绑定模型；否则返回 {@link Optional#empty()}，便于 runtime 直接抛 404 / 403
-   * 而不会回落到未启用配置。
+   * 按工作流 canonical UUID 查找已启用的绑定模型。
+   *
+   * <p>仅当配置存在且 enabled=true 时返回绑定模型；否则返回 {@link Optional#empty()}。
    */
-  public Optional<ComfyuiWorkflowApiBindings> findEnabledBindings(String apiName) {
-    if (apiName == null || apiName.isBlank()) {
+  public Optional<ComfyuiWorkflowApiBindings> findEnabledBindings(UUID id) {
+    if (id == null) {
       return Optional.empty();
     }
-    ComfyuiWorkflowApi row = comfyuiWorkflowApiRepository.getEnabledByApiName(apiName);
-    if (row == null) {
+    ComfyuiWorkflowApi row = comfyuiWorkflowApiRepository.getById(id);
+    if (row == null || !Boolean.TRUE.equals(row.getEnabled())) {
       return Optional.empty();
     }
     return Optional.of(

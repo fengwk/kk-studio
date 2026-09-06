@@ -33,9 +33,6 @@ vi.mock('@/shared/api/comfyui-service', () => ({
     runWorkflow: vi.fn(),
     getRun: vi.fn(),
     cancelRun: vi.fn(),
-    uploadFile: vi.fn(),
-    createPresignedUpload: vi.fn(),
-    createPresignedDownload: vi.fn(),
   },
 }))
 

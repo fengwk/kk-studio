@@ -31,6 +31,8 @@ import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunRequestDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import java.util.UUID;
+
 /**
  * {@link StudioComfyuiRuntimeController} HTTP 契约测试。
  *
@@ -66,8 +68,9 @@ public class StudioComfyuiRuntimeControllerTest extends WebPostgresTestSupport {
   // -------- 成功路径 --------
 
   @Test
-  public void shouldReturn201AndRunIdOnSubmit() throws Exception {
-    when(comfyuiRuntimeService.run(eq("happy-api"), any()))
+  public void shouldReturn202AndRunIdOnSubmit() throws Exception {
+    UUID workflowId = UUID.randomUUID();
+    when(comfyuiRuntimeService.run(eq(workflowId), any()))
         .thenReturn(
             ComfyuiWorkflowRunDTO.builder()
                 .runId("run-abc-123")
@@ -77,13 +80,23 @@ public class StudioComfyuiRuntimeControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            post("/api/comfyui/workflows/happy-api/runs")
+            post("/api/comfyui/workflows/" + workflowId + "/runs")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(new ComfyuiWorkflowRunRequestDTO())))
-        .andExpect(status().isCreated())
+        .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.runId").value("run-abc-123"))
         .andExpect(jsonPath("$.data.status").value("pending"))
         .andExpect(jsonPath("$.data.defaultSelector").value("$.files[0]"));
+  }
+
+  @Test
+  public void shouldReturn400WhenWorkflowIdNotUuid() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/comfyui/workflows/not-a-uuid/runs")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new ComfyuiWorkflowRunRequestDTO())))
+        .andExpect(status().isBadRequest());
   }
 
   @Test
@@ -130,13 +143,14 @@ public class StudioComfyuiRuntimeControllerTest extends WebPostgresTestSupport {
 
   @Test
   public void shouldRegisterEndpointAndReturn503WhenRuntimeDisabled() throws Exception {
+    UUID workflowId = UUID.randomUUID();
     // 默认 system settings 下 ComfyUI disabled；端点必须已注册并返回 503 而非 404。
-    when(comfyuiRuntimeService.run(eq("any-api"), any()))
+    when(comfyuiRuntimeService.run(eq(workflowId), any()))
         .thenThrow(new IllegalStateException("ComfyUI runtime is disabled by system settings"));
 
     mockMvc
         .perform(
-            post("/api/comfyui/workflows/any-api/runs")
+            post("/api/comfyui/workflows/" + workflowId + "/runs")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(new ComfyuiWorkflowRunRequestDTO())))
         .andExpect(status().isServiceUnavailable());
@@ -144,15 +158,32 @@ public class StudioComfyuiRuntimeControllerTest extends WebPostgresTestSupport {
 
   @Test
   public void shouldMapEnabledWorkflowNotFoundTo404() throws Exception {
+    UUID workflowId = UUID.randomUUID();
     // 即使运行期 bean 本身可注入，启用 lookup miss 也必须返回 404 而不是 500。
-    when(comfyuiRuntimeService.run(eq("missing-api"), any()))
-        .thenThrow(new IllegalArgumentException("enabled ComfyUI workflow not found: missing-api"));
+    when(comfyuiRuntimeService.run(eq(workflowId), any()))
+        .thenThrow(
+            new IllegalArgumentException("enabled ComfyUI workflow not found: " + workflowId));
 
     mockMvc
         .perform(
-            post("/api/comfyui/workflows/missing-api/runs")
+            post("/api/comfyui/workflows/" + workflowId + "/runs")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(new ComfyuiWorkflowRunRequestDTO())))
+        .andExpect(status().isNotFound());
+  }
+
+  @Test
+  public void shouldReturn404ForRemovedS3PresignedEndpoints() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/s3/presigned-uploads").contentType(MediaType.APPLICATION_JSON).content("{}"))
+        .andExpect(status().isNotFound());
+
+    mockMvc
+        .perform(
+            post("/api/s3/presigned-downloads")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
         .andExpect(status().isNotFound());
   }
 

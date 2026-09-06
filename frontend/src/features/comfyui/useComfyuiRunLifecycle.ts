@@ -1,23 +1,46 @@
 import { useEffect, useRef, useState } from 'react'
-import { comfyuiService } from '@/shared/api/comfyui-service'
+import { comfyuiService as defaultComfyuiService } from '@/shared/api/comfyui-service'
+import { storageService as defaultStorageService, type StorageService } from '@/shared/api/storage-service'
 import { errorMessage, isComfyuiPollingStatus } from '@/features/comfyui/comfyui-utils'
 import type {
-  ComfyuiWorkflowRunFileDTO,
   ComfyuiWorkflowJobDTO,
   ComfyuiWorkflowRunDTO,
+  ComfyuiWorkflowRunFileDTO,
 } from '@/shared/api/contracts/comfyui'
 
 const pollIntervalMillis = 1500
 
 type PendingOperation = 'submit' | 'refresh' | 'cancel'
 
+async function defaultHashFile(file: File): Promise<string> {
+  if (typeof crypto !== 'undefined' && crypto.subtle?.digest) {
+    const buffer = await file.arrayBuffer()
+    const digest = await crypto.subtle.digest('SHA-256', buffer)
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+  }
+  throw new Error('SHA-256 calculation is not supported in this environment')
+}
+
+export interface UseComfyuiRunLifecycleOptions {
+  workflowId?: string
+  apiName?: string
+  defaultSelector: string | null
+  storageService?: StorageService
+  hashFile?: (file: File) => Promise<string>
+  comfyuiService?: typeof defaultComfyuiService
+}
+
 export function useComfyuiRunLifecycle({
+  workflowId,
   apiName,
   defaultSelector,
-}: {
-  apiName: string
-  defaultSelector: string | null
-}) {
+  storageService = defaultStorageService,
+  hashFile = defaultHashFile,
+  comfyuiService = defaultComfyuiService,
+}: UseComfyuiRunLifecycleOptions) {
+  const targetWorkflowId = workflowId ?? apiName ?? ''
   const [selector, setSelector] = useState(defaultSelector ?? '')
   const [run, setRun] = useState<ComfyuiWorkflowRunDTO | null>(null)
   const [job, setJob] = useState<ComfyuiWorkflowJobDTO | null>(null)
@@ -103,17 +126,42 @@ export function useComfyuiRunLifecycle({
     runIdRef.current = null
     setRun(null)
     setJob(null)
+
+    const uploadedHandles: string[] = []
     try {
       const uploadedFiles = await Promise.all(
         Object.entries(files)
           .filter((entry): entry is [string, File] => Boolean(entry[1]))
-          .map(async ([name, file]) => [name, await comfyuiService.uploadFile(apiName, file)] as const),
+          .map(async ([name, file]) => {
+            const sha256 = await hashFile(file)
+            const reservation = await storageService.reserveUpload({
+              filename: file.name,
+              mediaType: file.type || 'application/octet-stream',
+              sizeBytes: file.size,
+              sha256,
+            })
+            uploadedHandles.push(reservation.id)
+            if (reservation.state === 'PENDING') {
+              await storageService.uploadFile(reservation.presignedPut, file)
+            }
+            const completed = await storageService.completeUpload(reservation.id)
+            if (!completed.blobId) {
+              throw new Error('Upload completion did not return a valid blobId')
+            }
+            return [
+              name,
+              {
+                blobId: completed.blobId,
+                filename: file.name,
+              } satisfies ComfyuiWorkflowRunFileDTO,
+            ] as const
+          }),
       )
       if (!mountedRef.current || generation !== generationRef.current) {
         return
       }
       const fileReferences: Record<string, ComfyuiWorkflowRunFileDTO> = Object.fromEntries(uploadedFiles)
-      const nextRun = await comfyuiService.runWorkflow(apiName, { parameters, files: fileReferences })
+      const nextRun = await comfyuiService.runWorkflow(targetWorkflowId, { parameters, files: fileReferences })
       if (!mountedRef.current || generation !== generationRef.current) {
         return
       }
@@ -128,6 +176,9 @@ export function useComfyuiRunLifecycle({
         setError(errorMessage(submitError))
       }
     } finally {
+      if (uploadedHandles.length > 0) {
+        await Promise.allSettled(uploadedHandles.map((id) => storageService.deleteUpload(id)))
+      }
       if (mountedRef.current && generation === generationRef.current && operationRef.current === 'submit') {
         operationRef.current = null
         setPendingOperation(null)

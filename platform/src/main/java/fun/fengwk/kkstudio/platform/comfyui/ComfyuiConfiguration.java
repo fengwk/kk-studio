@@ -13,7 +13,7 @@ import org.springframework.context.annotation.Configuration;
 import fun.fengwk.kkstudio.platform.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiLookupService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -55,13 +55,13 @@ public class ComfyuiConfiguration {
       ComfyuiWorkflowApiLookupService workflowApiLookupService,
       SystemSettingsSnapshot snapshot,
       ObjectProvider<ComfyUIClient> comfyUIClientProvider,
-      ObjectProvider<S3StorageService> s3StorageServiceProvider,
+      ObjectProvider<StorageBlobContentService> blobContentServiceProvider,
       ObjectMapper objectMapper) {
     return new ComfyuiRuntimeService(
         workflowApiLookupService,
         snapshot,
         comfyUIClientProvider,
-        s3StorageServiceProvider,
+        blobContentServiceProvider,
         objectMapper);
   }
 }

@@ -44,9 +44,8 @@ export type ComfyuiWorkflowApiCreateDTO = ComfyuiWorkflowApiEditablePropertiesDT
 export type ComfyuiWorkflowApiUpdateDTO = ComfyuiWorkflowApiEditablePropertiesDTO
 
 export interface ComfyuiWorkflowRunFileDTO {
-  key: string
+  blobId: string
   filename: string
-  contentType: string
 }
 
 export interface ComfyuiWorkflowRunRequestDTO {

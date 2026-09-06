@@ -26,8 +26,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>通过 stub 仓储驱动，验证：
  *
  * <ul>
- *   <li>apiName 找不到 / 空白 → 返回 {@code Optional.empty()}；
- *   <li>禁用卡片即使存在也必须被屏蔽；
+ *   <li>workflowId 为空或找不到 → 返回 {@code Optional.empty()}；
+ *   <li>禁用卡片即使存在也必须被屏蔽（返回 {@code Optional.empty()}）；
  *   <li>启用卡片必须经过 binding parser，得到与原始 schema 一致的绑定模型。
  * </ul>
  *
@@ -45,49 +45,53 @@ public class ComfyuiWorkflowApiLookupServiceTest {
           + "\"kind\":\"parameter\",\"nodeId\":\"3\",\"inputName\":\"seed\",\"valueType\":\"integer\","
           + "\"defaultValue\":7}]";
 
+  /** 测试意图：workflowId 为 null 或仓储中不存在时，返回 Optional.empty()。 */
   @Test
-  public void shouldReturnEmptyForBlankOrUnknownApiName() {
+  public void shouldReturnEmptyForNullOrUnknownWorkflowId() {
     StubRepository repo = new StubRepository();
     ComfyuiWorkflowApiLookupService lookup = newLookup(repo);
 
-    assertFalse(lookup.findEnabledBindings(null).isPresent());
-    assertFalse(lookup.findEnabledBindings("  ").isPresent());
-    assertFalse(lookup.findEnabledBindings("missing").isPresent());
-    assertEquals(1, repo.enabledCalls.get());
+    assertFalse(lookup.findEnabledBindings((UUID) null).isPresent());
+    assertFalse(lookup.findEnabledBindings(UUID.randomUUID()).isPresent());
+    assertEquals(1, repo.getByIdCalls.get());
   }
 
+  /** 测试意图：即使卡片存在，只要 enabled 为 false，lookup 必须屏蔽并返回 Optional.empty()。 */
   @Test
   public void shouldHideDisabledWorkflows() {
+    UUID id = UUID.randomUUID();
     StubRepository repo =
-        new StubRepository().put("disabled-api", WORKFLOW_JSON, BINDINGS_JSON, false);
+        new StubRepository().put(id, "disabled-api", WORKFLOW_JSON, BINDINGS_JSON, false);
     ComfyuiWorkflowApiLookupService lookup = newLookup(repo);
 
-    // 禁用卡片必须被屏蔽，runtime 调用方会按 404 处理。
-    assertFalse(lookup.findEnabledBindings("disabled-api").isPresent());
-    assertEquals(1, repo.enabledCalls.get());
+    assertFalse(lookup.findEnabledBindings(id).isPresent());
+    assertEquals(1, repo.getByIdCalls.get());
   }
 
+  /** 测试意图：卡片存在且 enabled 为 true 时，返回解析好的绑定模型。 */
   @Test
   public void shouldParseEnabledWorkflowIntoBindings() {
+    UUID id = UUID.randomUUID();
     StubRepository repo =
-        new StubRepository().put("enabled-api", WORKFLOW_JSON, BINDINGS_JSON, true);
+        new StubRepository().put(id, "enabled-api", WORKFLOW_JSON, BINDINGS_JSON, true);
     ComfyuiWorkflowApiLookupService lookup = newLookup(repo);
 
-    Optional<ComfyuiWorkflowApiBindings> resolved = lookup.findEnabledBindings("enabled-api");
+    Optional<ComfyuiWorkflowApiBindings> resolved = lookup.findEnabledBindings(id);
     assertTrue(resolved.isPresent());
     ComfyuiWorkflowApiBindings b = resolved.get();
     assertEquals(1, b.bindings().size());
     assertEquals("seed", b.bindings().get(0).name());
-    assertEquals("enabled-api", repo.enabledLastApiName.get());
+    assertEquals(id, repo.lastLookupId.get());
   }
 
+  /** 测试意图：绑定 JSON 不合法时，向上抛出 IllegalArgumentException。 */
   @Test
   public void shouldPropagateBindingParseFailures() {
-    StubRepository repo = new StubRepository().put("enabled-api", "{bad}", "[]", true);
+    UUID id = UUID.randomUUID();
+    StubRepository repo = new StubRepository().put(id, "enabled-api", "{bad}", "[]", true);
     ComfyuiWorkflowApiLookupService lookup = newLookup(repo);
 
-    // 已经入库但绑定 JSON 不合规的卡片再次启用 lookup 会把校验错误抛回调用方。
-    assertThrows(IllegalArgumentException.class, () -> lookup.findEnabledBindings("enabled-api"));
+    assertThrows(IllegalArgumentException.class, () -> lookup.findEnabledBindings(id));
   }
 
   private static ComfyuiWorkflowApiLookupService newLookup(StubRepository repo) {
@@ -95,34 +99,35 @@ public class ComfyuiWorkflowApiLookupServiceTest {
         repo, new ComfyuiWorkflowApiBindingsParser(new ObjectMapper()));
   }
 
-  /** 最小可配置的仓储 stub：仅实现 lookup 关心的两个方法，其它方法不抛错即可。 */
+  /** 最小可配置的仓储 stub。 */
   private static final class StubRepository implements ComfyuiWorkflowApiRepository {
 
-    private final Map<String, ComfyuiWorkflowApi> byApiName = new LinkedHashMap<>();
-    final AtomicReference<String> enabledLastApiName = new AtomicReference<>();
-    final AtomicInteger enabledCalls = new AtomicInteger();
+    private final Map<UUID, ComfyuiWorkflowApi> byId = new LinkedHashMap<>();
+    final AtomicReference<UUID> lastLookupId = new AtomicReference<>();
+    final AtomicInteger getByIdCalls = new AtomicInteger();
 
-    StubRepository put(String apiName, String workflow, String bindings, boolean enabled) {
+    StubRepository put(UUID id, String apiName, String workflow, String bindings, boolean enabled) {
       ComfyuiWorkflowApi row = new ComfyuiWorkflowApi();
-      row.setId(new UUID(0L, System.nanoTime()));
+      row.setId(id);
       row.setApiName(apiName);
       row.setName(apiName);
       row.setWorkflowJson(workflow);
       row.setInputBindingsJson(bindings);
       row.setEnabled(enabled);
-      byApiName.put(apiName, row);
+      byId.put(id, row);
       return this;
     }
 
     @Override
+    public ComfyuiWorkflowApi getById(UUID id) {
+      getByIdCalls.incrementAndGet();
+      lastLookupId.set(id);
+      return byId.get(id);
+    }
+
+    @Override
     public ComfyuiWorkflowApi getEnabledByApiName(String apiName) {
-      enabledCalls.incrementAndGet();
-      enabledLastApiName.set(apiName);
-      ComfyuiWorkflowApi row = byApiName.get(apiName);
-      if (row == null || !Boolean.TRUE.equals(row.getEnabled())) {
-        return null;
-      }
-      return row;
+      throw new UnsupportedOperationException();
     }
 
     @Override
@@ -131,13 +136,8 @@ public class ComfyuiWorkflowApiLookupServiceTest {
     }
 
     @Override
-    public ComfyuiWorkflowApi getById(UUID id) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
     public ComfyuiWorkflowApi getByApiName(String apiName) {
-      return byApiName.get(apiName);
+      throw new UnsupportedOperationException();
     }
 
     @Override

@@ -11,7 +11,6 @@ import fun.fengwk.convention4j.comfyui.PromptSubmission;
 import fun.fengwk.convention4j.comfyui.input.UploadResult;
 import fun.fengwk.convention4j.comfyui.workflow.Workflow;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.util.MimeTypeUtils;
 import org.springframework.util.StringUtils;
 
 import fun.fengwk.kkstudio.platform.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindings;
@@ -23,9 +22,8 @@ import fun.fengwk.kkstudio.platform.comfyui.workflow_api.service.runtime.Comfyui
 import fun.fengwk.kkstudio.platform.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiSelectorValidator;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectKeyNormalizer;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowCancelDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowJobDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunDTO;
@@ -45,6 +43,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 基于已配置工作流的 ComfyUI 运行门面。
@@ -75,14 +74,14 @@ public class ComfyuiRuntimeService {
   private final ComfyuiWorkflowApiLookupService workflowApiLookupService;
   private final SystemSettings.Comfyui settings;
   private final ObjectProvider<ComfyUIClient> comfyUIClientProvider;
-  private final ObjectProvider<S3StorageService> s3StorageServiceProvider;
+  private final ObjectProvider<StorageBlobContentService> blobContentServiceProvider;
   private final ObjectMapper objectMapper;
 
   public ComfyuiRuntimeService(
       ComfyuiWorkflowApiLookupService workflowApiLookupService,
       SystemSettingsSnapshot snapshot,
       ObjectProvider<ComfyUIClient> comfyUIClientProvider,
-      ObjectProvider<S3StorageService> s3StorageServiceProvider,
+      ObjectProvider<StorageBlobContentService> blobContentServiceProvider,
       ObjectMapper objectMapper) {
     this.workflowApiLookupService =
         Objects.requireNonNull(
@@ -90,21 +89,23 @@ public class ComfyuiRuntimeService {
     this.settings = Objects.requireNonNull(snapshot, "snapshot").get().integrations().comfyui();
     this.comfyUIClientProvider =
         Objects.requireNonNull(comfyUIClientProvider, "comfyUIClientProvider must not be null");
-    this.s3StorageServiceProvider =
+    this.blobContentServiceProvider =
         Objects.requireNonNull(
-            s3StorageServiceProvider, "s3StorageServiceProvider must not be null");
+            blobContentServiceProvider, "blobContentServiceProvider must not be null");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
   }
 
-  /** 解析绑定并提交工作流；文件输入会先从 S3 中转到 ComfyUI。 */
-  public ComfyuiWorkflowRunDTO run(String apiName, ComfyuiWorkflowRunRequestDTO request) {
+  /** 解析绑定并提交工作流；文件输入先经 Storage 权威读取并中转到 ComfyUI。 */
+  public ComfyuiWorkflowRunDTO run(UUID workflowId, ComfyuiWorkflowRunRequestDTO request) {
+    Objects.requireNonNull(workflowId, "workflowId must not be null");
     ComfyUIClient client = requireClient();
     ComfyuiWorkflowApiBindings configured =
         workflowApiLookupService
-            .findEnabledBindings(apiName)
+            .findEnabledBindings(workflowId)
             .orElseThrow(
                 () ->
-                    new IllegalArgumentException("enabled ComfyUI workflow not found: " + apiName));
+                    new IllegalArgumentException(
+                        "enabled ComfyUI workflow not found: " + workflowId));
     Workflow workflow = configured.workflow().copy();
     Map<String, Object> parameters =
         request == null || request.getParameters() == null
@@ -121,17 +122,19 @@ public class ComfyuiRuntimeService {
         (binding, value) ->
             workflow.getNode(binding.nodeId()).setInput(binding.inputName(), value));
     if (!plannedFiles.isEmpty()) {
-      S3StorageService s3StorageService = requireS3StorageService();
+      StorageBlobContentService blobContentService = requireBlobContentService();
       long maxSizeBytes = maxInputFileSizeBytes();
       for (PlannedFile plannedFile : plannedFiles) {
-        S3ObjectContent objectContent = s3StorageService.download(plannedFile.key(), maxSizeBytes);
+        StorageBlobContent blobContent =
+            blobContentService.readBlobContent(plannedFile.blobId(), maxSizeBytes);
         String contentType =
-            firstNonBlank(
-                plannedFile.contentType(), objectContent.getContentType(), DEFAULT_CONTENT_TYPE);
+            StringUtils.hasText(blobContent.getMediaType())
+                ? blobContent.getMediaType().trim()
+                : DEFAULT_CONTENT_TYPE;
         UploadResult uploadResult =
             requireResult(
                 client
-                    .uploadFile(plannedFile.filename(), objectContent.getBytes(), contentType)
+                    .uploadFile(plannedFile.filename(), blobContent.getBytes(), contentType)
                     .block(blockTimeout()),
                 "ComfyUI upload returned no result");
         String uploadedPath = uploadedPath(uploadResult);
@@ -298,12 +301,22 @@ public class ComfyuiRuntimeService {
         }
         continue;
       }
-      String key = S3ObjectKeyNormalizer.normalize(file.getKey());
-      String filename = resolveFilename(file.getFilename(), key);
-      String contentType = normalizeContentType(file.getContentType());
-      plannedFiles.add(new PlannedFile(binding, key, filename, contentType));
+      UUID blobId = parseBlobId(file.getBlobId(), binding.name());
+      String filename = resolveFilename(file.getFilename());
+      plannedFiles.add(new PlannedFile(binding, blobId, filename));
     }
     return plannedFiles;
+  }
+
+  private static UUID parseBlobId(String blobIdText, String inputName) {
+    if (!StringUtils.hasText(blobIdText)) {
+      throw new IllegalArgumentException("file '" + inputName + "' blobId must not be blank");
+    }
+    try {
+      return UUID.fromString(blobIdText.trim());
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException("file '" + inputName + "' blobId must be a valid UUID", e);
+    }
   }
 
   private Object coerceParameter(Binding binding, Object rawValue) {
@@ -444,12 +457,11 @@ public class ComfyuiRuntimeService {
     return client;
   }
 
-  private S3StorageService requireS3StorageService() {
-    S3StorageService service = s3StorageServiceProvider.getIfAvailable();
+  private StorageBlobContentService requireBlobContentService() {
+    StorageBlobContentService service = blobContentServiceProvider.getIfAvailable();
     if (service == null) {
       throw new IllegalStateException(
-          "S3 storage is unavailable; enable SystemSettings storageMedia.s3Enabled for ComfyUI file"
-              + " inputs");
+          "storage blob content service is unavailable; enable SystemSettings storageMedia.s3Enabled for ComfyUI file inputs");
     }
     return service;
   }
@@ -480,12 +492,8 @@ public class ComfyuiRuntimeService {
   }
 
   /** 要求上传文件名是长度受限且不含路径分隔符或控制字符的基名。 */
-  private static String resolveFilename(String requestedFilename, String key) {
+  private static String resolveFilename(String requestedFilename) {
     String filename = trimToNull(requestedFilename);
-    if (filename == null) {
-      int slash = key.lastIndexOf('/');
-      filename = slash < 0 ? key : key.substring(slash + 1);
-    }
     if (!StringUtils.hasText(filename)
         || filename.length() > 255
         || filename.equals(".")
@@ -501,30 +509,6 @@ public class ComfyuiRuntimeService {
       }
     }
     return filename;
-  }
-
-  private static String normalizeContentType(String contentType) {
-    String normalized = trimToNull(contentType);
-    if (normalized == null) {
-      return null;
-    }
-    if (normalized.length() > 255) {
-      throw new IllegalArgumentException("contentType is too long");
-    }
-    try {
-      return MimeTypeUtils.parseMimeType(normalized).toString();
-    } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("contentType must be a valid media type", e);
-    }
-  }
-
-  private static String firstNonBlank(String... values) {
-    for (String value : values) {
-      if (StringUtils.hasText(value)) {
-        return value.trim();
-      }
-    }
-    return null;
   }
 
   private static String trimToNull(String value) {
@@ -549,7 +533,7 @@ public class ComfyuiRuntimeService {
     return result;
   }
 
-  private record PlannedFile(Binding binding, String key, String filename, String contentType) {}
+  private record PlannedFile(Binding binding, UUID blobId, String filename) {}
 
   private record OutputDescriptor(String filename, String subfolder, String type) {}
 }

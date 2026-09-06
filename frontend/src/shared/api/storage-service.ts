@@ -41,11 +41,18 @@ const FORBIDDEN_UPLOAD_HEADERS = new Set([
  * - 直传 PUT（仅 PENDING 预留；跨域签名 URL，使用 fetch）
  * - POST /storage/uploads/{id}/complete（返回同一 StorageUploadDTO，句柄不变）
  * - DELETE /storage/uploads/{id}（释放句柄；绝不按 blobId 删除）
- * - GET /storage/blobs/{blobId}/presigned-original|presigned-preview（渲染期解析）
+ * - POST /storage/blobs/{blobId}/download-url|preview-url（渲染期解析）
  *
  * 该契约绝不暴露 bucket/key，客户端也不能提交对象 key。
  */
 export function createStorageService(client: HttpClient = apiClient) {
+  const getBlobDownloadUrl = async (blobId: string): Promise<StoragePresignedUrlDTO> => {
+    const raw = await client.post<unknown>(
+      `/storage/blobs/${encodeURIComponent(blobId)}/download-url`,
+    )
+    return decodeBlobUrl(raw)
+  }
+
   return {
     reserveUpload: (request: StorageUploadReserveRequestDTO): Promise<StorageUploadDTO> =>
       client.post('/storage/uploads', request),
@@ -53,16 +60,13 @@ export function createStorageService(client: HttpClient = apiClient) {
       client.post(`/storage/uploads/${encodeURIComponent(uploadId)}/complete`),
     deleteUpload: (uploadId: string): Promise<void> =>
       client.delete(`/storage/uploads/${encodeURIComponent(uploadId)}`),
-    /** 原件响应 sizeBytes 是 Java long 的 decimal string|null，严格归一化为 number|null。 */
-    getBlobOriginalUrl: async (blobId: string): Promise<StoragePresignedUrlDTO> => {
-      const raw = await client.get<unknown>(
-        `/storage/blobs/${encodeURIComponent(blobId)}/presigned-original`,
-      )
-      return decodeBlobUrl(raw)
-    },
+    /** 下载 URL 端点（原件）：sizeBytes 是 Java long 的 decimal string|null，严格归一化为 number|null。 */
+    getBlobDownloadUrl,
+    /** 兼容历史命名的原件下载别名。 */
+    getBlobOriginalUrl: getBlobDownloadUrl,
     getBlobPreviewUrl: async (blobId: string): Promise<StoragePresignedUrlDTO> => {
-      const raw = await client.get<unknown>(
-        `/storage/blobs/${encodeURIComponent(blobId)}/presigned-preview`,
+      const raw = await client.post<unknown>(
+        `/storage/blobs/${encodeURIComponent(blobId)}/preview-url`,
       )
       return decodeBlobUrl(raw)
     },
