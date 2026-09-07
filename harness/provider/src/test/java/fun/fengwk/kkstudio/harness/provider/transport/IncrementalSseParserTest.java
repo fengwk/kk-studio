@@ -8,12 +8,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * SSE 增量解析器的单测与边界测试。
@@ -110,56 +107,6 @@ class IncrementalSseParserTest {
     assertEquals(List.of(new ServerSentEvent(null, "nospace")), events);
   }
 
-  /** 对应上游 shouldHandleIOException：验证底层输入流发生真实 I/O 故障时被安全捕获并映射为 IO 终态错误。 */
-  @Test
-  void shouldHandleIOException() {
-    InputStream failingStream =
-        new InputStream() {
-          private int readCount = 0;
-
-          @Override
-          public int read() throws IOException {
-            readCount++;
-            if (readCount >= 5) {
-              throw new IOException("Simulated pipe break");
-            }
-            return 'd';
-          }
-        };
-
-    IncrementalSseParser parser = new IncrementalSseParser(HttpSseLimits.DEFAULT, event -> {});
-    byte[] buf = new byte[16];
-    IOException thrown =
-        assertThrows(
-            IOException.class,
-            () -> {
-              int r;
-              while ((r = failingStream.read(buf)) != -1) {
-                parser.feed(buf, 0, r);
-              }
-            });
-    assertEquals("Simulated pipe break", thrown.getMessage());
-  }
-
-  /** 对应上游 parse_stops_emitting_after_the_listener_cancels：验证 listener 取消后停止分发后续事件。 */
-  @Test
-  void parse_stops_emitting_after_the_listener_cancels() {
-    List<ServerSentEvent> received = new ArrayList<>();
-    AtomicBoolean cancelled = new AtomicBoolean(false);
-    IncrementalSseParser parser =
-        new IncrementalSseParser(
-            HttpSseLimits.DEFAULT,
-            event -> {
-              if (!cancelled.get()) {
-                received.add(event);
-                cancelled.set(true);
-              }
-            });
-    feedString(parser, "data: first\n\ndata: second\n\ndata: third\n\n");
-    parser.flush();
-    assertEquals(List.of(new ServerSentEvent(null, "first")), received);
-  }
-
   /** 对应上游 parse_handles_cr_and_crlf_line_endings：验证 CRLF 和裸 CR 换行符的统一支持。 */
   @Test
   void parse_handles_cr_and_crlf_line_endings() {
@@ -193,12 +140,9 @@ class IncrementalSseParserTest {
     assertEquals(List.of(new ServerSentEvent("spaced-event", "  spaced value   ")), events);
   }
 
-  /**
-   * 对应上游 a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async： 明确证明本 API
-   * 架构为原生纯增量解析，无需任何阻塞式/非增量式 fallback，单字节喂入即可实时驱动。
-   */
+  /** 契约测试：纯增量解析器支持逐字节供给且单字节实时触发交付，无需阻塞式缓冲。 */
   @Test
-  void a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async() {
+  void incremental_parser_processes_byte_by_byte_without_blocking() {
     List<ServerSentEvent> events = new ArrayList<>();
     IncrementalSseParser parser = new IncrementalSseParser(HttpSseLimits.DEFAULT, events::add);
     // 单字节逐字节供给，证明在完全未遇到换行时无事件，一旦遇到双换行立即交付，绝无全量缓冲等待

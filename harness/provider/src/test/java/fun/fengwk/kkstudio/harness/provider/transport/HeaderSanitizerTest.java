@@ -63,15 +63,15 @@ class HeaderSanitizerTest {
 
   @Test
   void allowlistedHeaderWithSensitiveKeywordIsRedacted() {
-    // 假设白名单内的标头带有敏感词
+    // 包含敏感关键词（token）的白名单标头（x-ratelimit-reset-tokens）必须被安全覆盖为 [REDACTED]
     Map<String, List<String>> raw =
         Map.of(
             "x-request-id", List.of("req-normal"),
-            "x-ratelimit-reset", List.of("1700000000"));
+            "x-ratelimit-reset-tokens", List.of("123456789"));
 
     Map<String, List<String>> clean = HeaderSanitizer.sanitizeHeaders(raw);
     assertEquals("req-normal", clean.get("x-request-id").get(0));
-    assertEquals("1700000000", clean.get("x-ratelimit-reset").get(0));
+    assertEquals("[REDACTED]", clean.get("x-ratelimit-reset-tokens").get(0));
   }
 
   @Test

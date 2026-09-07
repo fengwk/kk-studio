@@ -12,7 +12,7 @@
 - 实现双维度有界防护（`HttpSseLimits`）：支持单行字节限制、单事件字节限制、成功流累计字节上限与错误响应体抓取上限，超限立即中止请求并关闭底层 TCP 连接。
 - 实现逐字节增量 SSE 解析器（`IncrementalSseParser`），原生支持 CRLF、LF 与孤立 CR 换行，支持跨 chunk 拼装 UTF-8 多字节字符，静默剔除前导 UTF-8 BOM，检测并严格拦截 NUL 字节与畸形 UTF-8 序列。
 - 构建 Secret-Safe 脱敏异常体系（`TransportException` 与 `HttpOpenMetadata`）：严格采用最小白名单放行协议诊断标头（丢弃所有未知标头，杜绝回显凭据泄露），在 `getMessage()`、`toString()` 以及受控的 `SafeCauseException` 异常因果链中严格抹除敏感请求头、Token、URI 参数与未经授权的响应正文，杜绝任何凭据在日志或异常转储中外泄。
-- 真实对齐 LangChain4j 1.20.0（Git 提交 `3a2f4dca6fb447e4d191624b3d588952ed9f4ce9`）shared HTTP 与 JDK 范围内的 15 个源文件、共 115 个 active 用例：51 个适用流式用例忠实移植且全绿通过（`PORTED/PASSED`），64 个超出本模块职责范围用例（同步非流式 HTTP、Multipart 构建器、Reactive Streams TCK 38 与 BlockHound 非阻塞检测）明确标记为 `OUT_OF_SCOPE` 并详述 capability mismatch，以机器可读清单 `upstream-test-manifest.json` 固化对齐口径。
+- 真实对齐 LangChain4j 1.20.0（Git 提交 `3a2f4dca6fb447e4d191624b3d588952ed9f4ce9`）shared HTTP 与 JDK 范围内的 15 个源文件、共 115 个 active 测试方法：按 invocation 展开共 141 个测试项，49 applicable invocations passed / 92 explicit OOS（含同步非流式 HTTP、Multipart 构建器、Reactive Streams TCK 38 项、BlockHound 非阻塞检测、PUBLISHER 异步流分支以及语义不兼容的静默异常吞没用例），所有 OOS 项明确标记为 `NOT_EXECUTED_OUT_OF_SCOPE` 并详述 capability mismatch，以机器可读清单 `upstream-test-manifest.json` 固化对齐口径。
 
 ### 协作边界
 

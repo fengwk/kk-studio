@@ -35,7 +35,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>支持从回调内部安全重入 {@link #cancel()} 而不死锁。
  *   <li>竞态安全的 Future 挂接：任何 future 一经挂接若已处于终态必须立即 cancel。
  *   <li>非显式 cancel 导致的 {@link InterruptedException} 按基础 transport I/O 语义分类并保留中断标志。
- *   <li>饱和截止时间与自适应 Watchdog 周期调度，彻底杜绝长周期溢出与短超时延迟。
+ *   <li>自适应单调时钟 Watchdog 周期调度，彻底杜绝短超时调度延迟。
  * </ul>
  */
 final class HttpSseStreamExecution implements ProviderStream {
@@ -62,7 +62,6 @@ final class HttpSseStreamExecution implements ProviderStream {
   private final long totalTimeoutNanos;
   private final long idleTimeoutNanos;
   private final long startNano;
-  private final long totalDeadlineNano;
   private volatile long lastActivityNano;
 
   private final Object futureLock = new Object();
@@ -87,7 +86,6 @@ final class HttpSseStreamExecution implements ProviderStream {
     this.startNano = System.nanoTime();
     this.totalTimeoutNanos = safeDurationToNanos(timeoutPolicy.modelCallTimeout());
     this.idleTimeoutNanos = safeDurationToNanos(timeoutPolicy.modelCallIdleTimeout());
-    this.totalDeadlineNano = saturatedAdd(startNano, totalTimeoutNanos);
     this.lastActivityNano = startNano;
   }
 
@@ -105,14 +103,6 @@ final class HttpSseStreamExecution implements ProviderStream {
       return Long.MAX_VALUE;
     }
     return nanosFromSeconds + nanos;
-  }
-
-  static long saturatedAdd(long a, long b) {
-    long res = a + b;
-    if (((a ^ res) & (b ^ res)) < 0) {
-      return a > 0 ? Long.MAX_VALUE : Long.MIN_VALUE;
-    }
-    return res;
   }
 
   long watchdogIntervalNanos() {
@@ -273,6 +263,12 @@ final class HttpSseStreamExecution implements ProviderStream {
     InputStream responseBodyStream = response.body();
     this.activeInputStream = responseBodyStream;
 
+    // 确认权威状态仍为 RUNNING（若在 send 期间发生超时或取消，立即关闭流并退出）
+    if (state.get() != STATE_RUNNING) {
+      closeActiveStream();
+      return;
+    }
+
     // 状态码校验：非 2xx 响应
     if (statusCode < 200 || statusCode >= 300) {
       handleNon2xxResponse(statusCode, headers, responseBodyStream, TransportErrorKind.HTTP_STATUS);
@@ -370,7 +366,7 @@ final class HttpSseStreamExecution implements ProviderStream {
     }
   }
 
-  private void triggerTimeout(String reason) {
+  void triggerTimeout(String reason) {
     if (isTerminal()) {
       return;
     }
@@ -412,22 +408,30 @@ final class HttpSseStreamExecution implements ProviderStream {
     if (in == null) {
       return new BoundedErrorResult(new byte[0], false);
     }
+    if (isTerminal()) {
+      closeInputStream(in);
+      return new BoundedErrorResult(new byte[0], false);
+    }
     int max = limits.maxErrorBodyBytes();
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     byte[] buf = new byte[1024];
-    int totalRead = 0;
+    long totalRead = 0L;
     boolean truncated = false;
+    long targetLimit = (long) max + 1L;
     try {
       int r;
-      // 读取上限为 max + 1，以便精确暴露 truncated 标志
-      while ((r = in.read(buf, 0, Math.min(buf.length, (max + 1) - totalRead))) != -1) {
+      // 读取上限为 targetLimit，采用 long 运算杜绝 max == Integer.MAX_VALUE 时的整型溢出
+      while (!isTerminal()
+          && (r = in.read(buf, 0, (int) Math.min((long) buf.length, targetLimit - totalRead)))
+              != -1) {
         lastActivityNano = System.nanoTime();
         if (isTerminal()) {
           break;
         }
         totalRead += r;
-        if (totalRead > max) {
-          int keep = r - (totalRead - max);
+        if (totalRead > (long) max) {
+          long keepLong = (long) r - (totalRead - (long) max);
+          int keep = (int) Math.max(0L, Math.min((long) r, keepLong));
           if (keep > 0) {
             out.write(buf, 0, keep);
           }
@@ -543,7 +547,7 @@ final class HttpSseStreamExecution implements ProviderStream {
     }
   }
 
-  private void closeInputStream(InputStream in) {
+  static void closeInputStream(InputStream in) {
     try {
       in.close();
     } catch (IOException ignored) {
