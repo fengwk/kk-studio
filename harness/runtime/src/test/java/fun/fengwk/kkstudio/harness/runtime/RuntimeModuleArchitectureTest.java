@@ -75,6 +75,7 @@ class RuntimeModuleArchitectureTest {
     assertManagedInternalDependency(rootPom, "kk-studio-harness-builtin");
     assertManagedInternalDependency(rootPom, "kk-studio-harness-infra");
     assertManagedInternalDependency(rootPom, "kk-studio-harness-environment");
+    assertManagedInternalDependency(rootPom, "kk-studio-harness-provider");
     assertDirectProductionDependencies(
         harnessRoot.resolve("common/pom.xml"),
         Set.of("com.fasterxml.jackson.core:jackson-databind"));
@@ -97,6 +98,9 @@ class RuntimeModuleArchitectureTest {
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
             "org.eclipse.jgit:org.eclipse.jgit",
             "org.slf4j:slf4j-api"));
+    assertDirectProductionDependencies(
+        harnessRoot.resolve("provider/pom.xml"),
+        Set.of("fun.fengwk.kk-studio:kk-studio-harness-runtime"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("contributor-api/pom.xml"),
         Set.of(
@@ -215,12 +219,13 @@ class RuntimeModuleArchitectureTest {
                 "tool",
                 "environment",
                 "runtime",
+                "provider",
                 "contributor-api",
                 "builtin",
                 "infra",
                 "daemon")),
         () ->
-            "harness modules must be exactly common/tool/environment/runtime/contributor-api/builtin/infra/daemon, got "
+            "harness modules must be exactly common/tool/environment/runtime/provider/contributor-api/builtin/infra/daemon, got "
                 + modules);
   }
 

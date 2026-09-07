@@ -31,6 +31,7 @@
 | harness-daemon | [modules/harness-daemon.md](modules/harness-daemon.md) | Environment Daemon 与本地工具执行 |
 | harness-environment | [modules/harness-environment.md](modules/harness-environment.md) | Environment binding、Capability 与 Daemon v1 wire |
 | harness-infra | [modules/harness-infra.md](modules/harness-infra.md) | Harness Store、Work、通知和 ResourceStore |
+| harness-provider | [modules/harness-provider.md](modules/harness-provider.md) | JDK 21 HttpClient + SSE 传输与增量解析基础设施 |
 | harness-runtime | [modules/harness-runtime.md](modules/harness-runtime.md) | Agent Runtime 状态机与 processors |
 | harness-tool | [modules/harness-tool.md](modules/harness-tool.md) | Tool identity、descriptor、call/result 与 Tool JSON codecs |
 | platform | [modules/platform.md](modules/platform.md) | Application service、gateway 与外部适配 |

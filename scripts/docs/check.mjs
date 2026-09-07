@@ -30,6 +30,7 @@ const moduleDocuments = [
   'harness-daemon.md',
   'harness-environment.md',
   'harness-infra.md',
+  'harness-provider.md',
   'harness-runtime.md',
   'harness-tool.md',
   'platform.md',
@@ -411,6 +412,7 @@ function checkRepositoryStructure() {
     'tool',
     'environment',
     'runtime',
+    'provider',
     'contributor-api',
     'builtin',
     'infra',
@@ -491,6 +493,7 @@ const harnessProductionModules = [
   'environment',
   'daemon',
   'runtime',
+  'provider',
   'infra',
 ]
 
