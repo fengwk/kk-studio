@@ -151,6 +151,34 @@ class ModelExecutionStreamFlushTest {
     }
   }
 
+  /** 意图：量化验证容量足够时，1/100/1000 条 delta 在同一窗口内都保持 flush 前零 UPDATE、flush 后单 UPDATE。 */
+  @Test
+  void oneHundredAndThousandDeltasWithinOneWindowFlushWithSingleUpdate() {
+    for (int eventCount : List.of(1, 100, 1000)) {
+      AtomicInteger scheduleCount = new AtomicInteger();
+      AtomicReference<Runnable> capturedTask = new AtomicReference<>();
+      ScheduledExecutorService scheduler = createControlledScheduler(scheduleCount, capturedTask);
+      StreamFlushConfig flushConfig =
+          new StreamFlushConfig(
+              Duration.ofMinutes(1), eventCount + 1, Math.max(1024, eventCount + 1));
+      Fixture fixture = createFixture(flushConfig, NO_RETRY, scheduler, Runnable::run);
+      fixture.start();
+
+      for (int i = 0; i < eventCount; i++) {
+        fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("x"));
+      }
+      assertEquals(1, scheduleCount.get());
+      assertEquals(0, fixture.store.modelInvocationUpdateCount());
+      assertTrue(fixture.sink.deltas().isEmpty());
+
+      capturedTask.get().run();
+      assertEquals(1, fixture.store.modelInvocationUpdateCount());
+      assertEquals(eventCount, fixture.sink.deltas().size());
+      assertEquals(eventCount, fixture.currentModel().streamCheckpoint().text().length());
+      fixture.processor.close();
+    }
+  }
+
   /**
    * 意图：验证单 delta 即使 Provider 暂停也必然由 timer 刷出；后续 delta 到达时不重置首事件 deadline（不 debounce）； 定时器的 DB
    * 写入与发布确实由 flushExecutor 执行而非 scheduler；stale generation 触发时判定为 no-op。
@@ -200,8 +228,10 @@ class ModelExecutionStreamFlushTest {
     Runnable timerAction = capturedTask.get();
     timerAction.run();
 
-    // 等待 flush-worker-thread 执行完毕
-    await(() -> fixture.store.modelInvocationUpdateCount() == 1, Duration.ofSeconds(2));
+    // Store 代理在真正提交前即计数；同时等待 delta 发布完成，避免提前读取线程记录。
+    await(
+        () -> fixture.store.modelInvocationUpdateCount() == 1 && fixture.sink.deltas().size() == 2,
+        Duration.ofSeconds(2));
 
     // 验证 DB 写入与发布确实在 flush-worker-thread 上执行
     assertEquals(

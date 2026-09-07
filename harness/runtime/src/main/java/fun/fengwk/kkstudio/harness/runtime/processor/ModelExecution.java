@@ -45,7 +45,7 @@ import java.util.function.Consumer;
  * markRunning，最后调用外部 {@code handle.activate()}（通知 Gateway 打开回调门控），成功后按到达顺序重放缓冲信号。 激活后通过
  * per-execution 单 drain owner 顺序处理流式增量事件、内部批次 FLUSH 与终态信号； 每 delta
  * 执行只读所有权围栏，按有界时间窗口与容量阈值聚合为批次，在独立的短事务中单次落地最新 checkpoint， commit 后在事务与 monitor 外按原 sequence
- * 逐条发布；纯工具批次仅通过 fence 并推进 sequence 水位，不更新 checkpoint； terminal / retry 信号直接吸收未刷批次，在同一次终态事务中单次更新
+ * 逐条发布；纯工具批次仅通过 fence 并推进 sequence 水位，不更新 checkpoint； terminal / retry 信号直接吸收未刷批次，在同一次状态事务中单次更新
  * ModelInvocation； lost ownership 或 Stop 竞态立即收敛关闭，绝不补写或发布未提交批次。
  */
 @Slf4j

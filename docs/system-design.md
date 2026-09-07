@@ -14,7 +14,7 @@ IP/DNS 依赖，调度、租约、路由、查询信箱与通知均经 PostgreSQ
 | Snapshot | REST Snapshot 是 Thread 和 Canvas 的权威读取面；通知和 WebSocket 只负责低延迟唤醒或可丢失 overlay。 |
 | Work | Harness 与 Canvas 都把可调度事实放在 PostgreSQL，并以 claim、lease、token 和 poll 处理丢通知、断线和进程退出。 |
 | Node coordination | App 节点之间无网络边；PostgreSQL 是唯一协调介质。数据库不可达时 claim、lease、route 与 mailbox 判定全部 fail closed。 |
-| Version | Harness Thread version 与 Canvas document version 是独立单调坐标；Thread version 只跟踪结构/控制状态，不是 Snapshot ETag，Invocation checkpoint 可在同一 version 内推进；HTTP mapper 使用 canonical UUID 和 decimal cursor。 |
+| Version | Harness Thread version 与 Canvas document version 是独立单调坐标；Thread version 只跟踪结构/控制状态，不是 Snapshot ETag，Invocation checkpoint 可按有界批次在同一 version 内推进；HTTP mapper 使用 canonical UUID 和 decimal cursor。 |
 | Composition root | 每个 App 节点都由 `web` 作为唯一生产 Spring Boot root；`platform`、Core、Runtime 和 Contributor API 不创建第二个 root。 |
 | Byte boundary | Blob metadata 与引用在 PostgreSQL；对象字节在受控 Blob Storage；浏览器只取得短期签名 URL。 |
 
@@ -218,8 +218,9 @@ Common、Builtin 模块。
 中完成以下装配：
 
 1. `HarnessRuntimeConfiguration` 注入 `UUID::randomUUID`、PostgreSQL
-   `HarnessStore`、Resource store、Model/Tool processor、dispatcher 和
-   `PostgresqlRealtimeEventSink`。
+   `HarnessStore`、Resource store、Model/Tool processor、dispatcher、
+   `PostgresqlRealtimeEventSink`，并为 Model checkpoint timer 配置独立的受管
+   虚拟线程 flush executor。
 2. Platform 提供 `BuiltinHarnessContributor` bean；`ContributorCatalogConfiguration`
    收集 Spring `HarnessContributor` 与 `TrustedJarContributorLoader`
    加载的受信任 JAR 贡献者，并在启动时冻结静态 `HarnessCatalog`。
@@ -262,9 +263,14 @@ YOLO 和 creation request hash（初始创建请求指纹）；Model/Tool 的完
 Commands 与 Work，不增加表或调度协议。
 
 Thread version 是 Thread 行结构与控制状态的 CAS / invalidation cursor，不是完整
-Snapshot 的 ETag。Model 流式 delta 会先持久化到 Invocation checkpoint，再尽力发布
-realtime；为避免高频更新 Thread 行，checkpoint 可在相同 Thread version 下推进。
-因此恢复与 gap 对账必须重新读取完整 Snapshot，不能仅凭 version 相等跳过响应内容。
+Snapshot 的 ETag。Model 流式 delta 先在单个 execution 内按默认 `200ms / 256 events /
+64KiB` 的时间与容量阈值聚合；每条 delta 保留只读 ownership fence，flush 时再次
+fence，并以一次 Invocation UPDATE 保存最新 text/thinking checkpoint。事务提交后，
+单 drain owner 才在事务和状态 monitor 外按原 sequence 逐条发布 realtime。纯工具
+批次不更新 checkpoint；terminal 在一次 UPDATE 中将未刷安全内容并入终态
+checkpoint，retry 在一次 `RUNNING -> READY` UPDATE 中将其冻结到失败审计并清空活动
+checkpoint。checkpoint 仍可在相同 Thread version 下推进，因此恢复与 gap 对账必须
+重新读取完整 Snapshot，不能仅凭 version 相等跳过响应内容。
 
 ### Canvas：Command 与 Function
 
@@ -295,7 +301,7 @@ Harness command acceptance 不推进 Canvas Graph version。
 | --- | --- | --- |
 | Storage | `storage_blob`、`storage_upload`、`session_blob_ref`、Canvas Resource 引用 | S3 stream、预签名 URL、`StorageMaintenance` |
 | Settings | `system_setting(id=1, config, version)` | `SystemSettingsSnapshot` 与 after-commit 回读 |
-| Realtime | Thread/Canvas version、Invocation checkpoint、Work 状态 | PostgreSQL `NOTIFY`、应用事件 WebSocket、Tool partial |
+| Realtime | Thread/Canvas version、聚合落盘的 Invocation checkpoint、Work 状态 | PostgreSQL `NOTIFY`、应用事件 WebSocket、Model/Tool live overlay |
 | Environment | Thread ROOT/TURN_START 的 `workspacePath` 快照、ToolInvocation 的 `{environmentId, workspacePath}`；`environment_connection` route lease；`environment_directory_query` mailbox | `EnvironmentDaemonGateway` 持有本节点连接、invocation 与心跳投影 |
 | Contributor / Tool | Entry 中的 `CUSTOM(contributorId, customType, schemaVersion, data)`；MCP server/tool 配置 | 启动期冻结 `HarnessCatalog` 元数据；`RuntimeToolCatalog` 聚合静态工具与 DB-backed MCP 工具 |
 
@@ -382,9 +388,11 @@ Thread version 与 Canvas version 事件带 cursor；Thread 的 Model delta、To
 partial 是无 cursor 的 live overlay。事件丢失、payload 畸形、通知超出
 PostgreSQL payload 上限、重连、订阅 gap 或 buffer overflow 都折叠为
 `resync`，客户端重新读取完整 Snapshot。terminal durable result 不依赖 terminal
-notification。Thread checkpoint 更新不单独推进 Thread version；首次订阅、重连、
-resync 与 realtime sequence gap 仍会回读 Snapshot，以同 version 下的新 checkpoint
-恢复安全前缀。
+notification。Thread checkpoint 的批次更新不单独推进 Thread version；首次订阅、
+重连、resync 与 realtime sequence gap 仍会回读 Snapshot，以同 version 下最近已提交
+的 checkpoint 恢复安全前缀。已记录在 `modelAttemptFailures` 中的
+invocation/attempt 拒绝迟到 `MODEL_DELTA`，避免旧 attempt 的已排队通知复活为活动
+overlay。
 
 ### Settings 恢复
 
