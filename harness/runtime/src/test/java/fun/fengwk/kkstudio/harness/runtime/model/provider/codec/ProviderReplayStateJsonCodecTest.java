@@ -88,24 +88,70 @@ class ProviderReplayStateJsonCodecTest {
   }
 
   @Test
-  void toStringDoesNotLeakPayload() {
+  void toStringDoesNotLeakPayloadHashOrAffinityDetails() {
+    String sentinelPayload = "SENTINEL_PAYLOAD_SECRET_TOKEN_42";
+    String sentinelHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    String sentinelProvider = "SENTINEL_PROVIDER_NAME_LEAK";
+    String sentinelModel = "SENTINEL_MODEL_NAME_LEAK";
+    UUID sentinelGenerationId = UUID.fromString("12345678-1234-1234-1234-1234567890ab");
+
     ObjectNode payload = NODES.objectNode();
-    payload.put("internal_token", "super_secret_payload_token_that_must_not_leak");
+    payload.put("token", sentinelPayload);
     payload.put("data", "sensitive");
+
+    ProviderReplayAffinity affinity =
+        new ProviderReplayAffinity(
+            ProviderType.OPENAI_RESPONSES, sentinelProvider, sentinelGenerationId, sentinelModel);
 
     ProviderReplayState state =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            new ProviderReplayAffinity(
-                ProviderType.OPENAI_RESPONSES, "minimax", UUID.randomUUID(), "minimax-m2"),
-            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
-            payload);
+            ProviderReplayFormat.OPENAI_RESPONSES, affinity, sentinelHash, payload);
 
     String repr = state.toString();
-    assertFalse(repr.contains("super_secret_payload_token_that_must_not_leak"));
-    assertFalse(repr.contains("sensitive"));
-    assertTrue(repr.contains("format="));
-    assertTrue(repr.contains("payloadSize="));
+    // 证明 ProviderReplayState.toString() 绝不泄漏 payload、sourcePrefixHash 以及 affinity 细节
+    assertFalse(repr.contains(sentinelPayload), "state.toString() must not leak payload");
+    assertFalse(repr.contains("sensitive"), "state.toString() must not leak payload fields");
+    assertFalse(repr.contains(sentinelHash), "state.toString() must not leak sourcePrefixHash");
+    assertFalse(repr.contains(sentinelProvider), "state.toString() must not leak providerName");
+    assertFalse(repr.contains(sentinelModel), "state.toString() must not leak modelName");
+    assertFalse(
+        repr.contains(sentinelGenerationId.toString()),
+        "state.toString() must not leak connectionGenerationId");
+    // 仅允许输出非敏感诊断字段：format 与 payload 大小
+    assertTrue(repr.contains("format=" + ProviderReplayFormat.OPENAI_RESPONSES));
+    assertTrue(repr.contains("payloadSize=2"));
+
+    // 证明 ProviderReplayAffinity.toString() 也必须完全脱敏，避免 carrier record 默认 toString 链式泄漏
+    String affinityRepr = affinity.toString();
+    assertFalse(
+        affinityRepr.contains(sentinelProvider), "affinity.toString() must not leak providerName");
+    assertFalse(
+        affinityRepr.contains(sentinelModel), "affinity.toString() must not leak modelName");
+    assertFalse(
+        affinityRepr.contains(sentinelGenerationId.toString()),
+        "affinity.toString() must not leak connectionGenerationId");
+    assertTrue(affinityRepr.contains("providerType=" + ProviderType.OPENAI_RESPONSES));
+  }
+
+  @Test
+  void rejectsTrailingTokens() {
+    String validJson = codec.encode(sampleState());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(validJson + "   {}"),
+        "trailing object must be rejected");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(validJson + " trailing"),
+        "trailing word must be rejected");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(validJson + " null"),
+        "trailing null must be rejected");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(validJson + " 123"),
+        "trailing number must be rejected");
   }
 
   @Test
