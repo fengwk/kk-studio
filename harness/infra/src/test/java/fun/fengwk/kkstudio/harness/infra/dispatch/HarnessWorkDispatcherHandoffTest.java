@@ -366,7 +366,8 @@ class HarnessWorkDispatcherHandoffTest {
             sink,
             new ModelProcessorConfig(leaseConfig, () -> noRetry, Duration.ofSeconds(5)),
             clock,
-            processorScheduler);
+            processorScheduler,
+            Runnable::run);
     ToolProcessor toolProcessor =
         new ToolProcessor(
             store,

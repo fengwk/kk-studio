@@ -100,6 +100,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -467,7 +468,7 @@ class ModelProcessorTest {
   /** checkpoint 只累积 text/thinking；tool-call fragment 只推进 sequence，绝不进入 checkpoint。 */
   @Test
   void checkpointKeepsPrefixAndExcludesToolFragments() {
-    Fixture fixture = fixture(NO_RETRY, requestWithTool());
+    Fixture fixture = fixture(NO_RETRY, requestWithTool(), StreamFlushConfig.IMMEDIATE);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -493,7 +494,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
     assertEquals(1, terminal.attempt());
     assertNotNull(terminal.streamCheckpoint());
-    assertEquals(4, terminal.streamCheckpoint().sequence());
+    assertEquals(3, terminal.streamCheckpoint().sequence());
     assertEquals("hello", terminal.streamCheckpoint().text());
     assertFalse(terminal.streamCheckpoint().text().contains("call_1"));
     List<ProviderStreamEvent> deltas = deltas(fixture.sink);
@@ -505,7 +506,7 @@ class ModelProcessorTest {
 
   @Test
   void compactionExecutionSuppressesRealtimeAndKeepsProviderTerminalForReducer() {
-    Fixture fixture = compactionFixture(NO_RETRY);
+    Fixture fixture = compactionFixture(NO_RETRY, StreamFlushConfig.IMMEDIATE);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -634,7 +635,9 @@ class ModelProcessorTest {
                 2,
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
-                Duration.ofSeconds(5)));
+                Duration.ofSeconds(5)),
+            requestSpec(),
+            StreamFlushConfig.IMMEDIATE);
     FakeHandle handle = new FakeHandle();
     fixture.gateway.queue(new ModelGateway.Started(handle));
     assertEquals(
@@ -854,7 +857,8 @@ class ModelProcessorTest {
             sink,
             new ModelProcessorConfig(LEASE_CONFIG, () -> retryPolicy, FALLBACK_DELAY),
             clock,
-            newScheduler());
+            newScheduler(),
+            Runnable::run);
     // 与生产一致的最小链：ROOT + TURN_START(INPUT) + USER，Thread head 与 invocation requestHead 指向 USER。
     UserBasis baseline = seedUserBasis(store);
     UUID invocationId = seedUserBasisInvocation(store, baseline, requestSpec(), NOW);
@@ -1233,7 +1237,7 @@ class ModelProcessorTest {
   /** 非法终态（stream 冲突 / canonical 不变量违反）：转 FAILED(INVALID_RESPONSE)（重试策略允许时先 retry）。 */
   @Test
   void conflictingFinalResponseFailsWithInvalidResponse() {
-    Fixture fixture = fixture();
+    Fixture fixture = fixture(StreamFlushConfig.IMMEDIATE);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -1363,7 +1367,7 @@ class ModelProcessorTest {
   /** 事件管线异常（tool-call identity 冲突）：转 FAILED(INVALID_RESPONSE)，已发布 delta 保持。 */
   @Test
   void conflictingToolIdentityEventFailsWithInvalidResponse() {
-    Fixture fixture = fixture(NO_RETRY, requestWithTool());
+    Fixture fixture = fixture(NO_RETRY, requestWithTool(), StreamFlushConfig.IMMEDIATE);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -1980,7 +1984,7 @@ class ModelProcessorTest {
   /** 每个 safe delta 在发布 realtime 前先持久化完整 checkpoint；tool fragment 永不 checkpoint。 */
   @Test
   void everySafeDeltaPersistsCheckpointBeforeRealtimePublication() {
-    Fixture fixture = fixture(NO_RETRY, requestWithTool());
+    Fixture fixture = fixture(NO_RETRY, requestWithTool(), StreamFlushConfig.IMMEDIATE);
     HarnessRuntime runtime =
         new HarnessRuntime(
             fixture.store,
@@ -2020,7 +2024,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
     assertNotNull(terminal.streamCheckpoint());
     assertEquals("abc", terminal.streamCheckpoint().text());
-    assertEquals(5, terminal.streamCheckpoint().sequence());
+    assertEquals(3, terminal.streamCheckpoint().sequence());
   }
 
   /** claim lease 剩余不足（首次 heartbeat 前会过期）：prepare READY 时立即 renew 出完整 margin。 */
@@ -2385,7 +2389,8 @@ class ModelProcessorTest {
             fixtureA.sink,
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixtureA.clock,
-            newScheduler());
+            newScheduler(),
+            Runnable::run);
     assertEquals(ProcessResult.TERMINATED, processorB.process(claimedB));
 
     release.countDown();
@@ -2421,7 +2426,8 @@ class ModelProcessorTest {
             fixture.sink,
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixture.clock,
-            newScheduler());
+            newScheduler(),
+            Runnable::run);
 
     assertEquals(
         ProcessResult.LOST_OWNERSHIP,
@@ -2463,7 +2469,8 @@ class ModelProcessorTest {
             fixture.sink,
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixture.clock,
-            hooked);
+            hooked,
+            Runnable::run);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle())); // 不应被消费
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(claimed));
@@ -2547,7 +2554,24 @@ class ModelProcessorTest {
         NullPointerException.class,
         () ->
             new ModelProcessor(
-                fixture.store, fixture.gateway, fixture.sink, null, fixture.clock, newScheduler()));
+                fixture.store,
+                fixture.gateway,
+                fixture.sink,
+                null,
+                fixture.clock,
+                newScheduler(),
+                Runnable::run));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ModelProcessor(
+                fixture.store,
+                fixture.gateway,
+                fixture.sink,
+                new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+                fixture.clock,
+                newScheduler(),
+                null));
   }
 
   /** ProcessorLeaseConfig：interval 必须为正且严格小于 leaseDuration。 */
@@ -2648,7 +2672,8 @@ class ModelProcessorTest {
                 () -> NO_RETRY,
                 FALLBACK_DELAY),
             Clock.systemUTC(),
-            newScheduler());
+            newScheduler(),
+            Runnable::run);
     gateway.queue(new ModelGateway.Started(handle));
     ClaimedWork claimed =
         store
@@ -2691,7 +2716,8 @@ class ModelProcessorTest {
             fixture.sink,
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixture.clock,
-            dead);
+            dead,
+            Runnable::run);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
 
     assertEquals(
@@ -2845,12 +2871,35 @@ class ModelProcessorTest {
     return fixture(retryPolicy, requestSpec());
   }
 
+  private Fixture fixture(StreamFlushConfig flushConfig) {
+    return new Fixture(NO_RETRY, requestSpec(), newScheduler(), TurnStartReason.INPUT, flushConfig);
+  }
+
   private Fixture compactionFixture(InvocationRetryPolicy retryPolicy) {
-    return new Fixture(retryPolicy, requestSpec(), newScheduler(), TurnStartReason.COMPACTION);
+    return new Fixture(
+        retryPolicy,
+        requestSpec(),
+        newScheduler(),
+        TurnStartReason.COMPACTION,
+        StreamFlushConfig.DEFAULT);
+  }
+
+  private Fixture compactionFixture(
+      InvocationRetryPolicy retryPolicy, StreamFlushConfig flushConfig) {
+    return new Fixture(
+        retryPolicy, requestSpec(), newScheduler(), TurnStartReason.COMPACTION, flushConfig);
   }
 
   private Fixture fixture(InvocationRetryPolicy retryPolicy, ModelRequestSpec requestSpec) {
     return new Fixture(retryPolicy, requestSpec, newScheduler());
+  }
+
+  private Fixture fixture(
+      InvocationRetryPolicy retryPolicy,
+      ModelRequestSpec requestSpec,
+      StreamFlushConfig flushConfig) {
+    return new Fixture(
+        retryPolicy, requestSpec, newScheduler(), TurnStartReason.INPUT, flushConfig);
   }
 
   private Fixture fixture(
@@ -2879,14 +2928,25 @@ class ModelProcessorTest {
         InvocationRetryPolicy retryPolicy,
         ModelRequestSpec requestSpec,
         ScheduledExecutorService scheduler) {
-      this(retryPolicy, requestSpec, scheduler, TurnStartReason.INPUT);
+      this(retryPolicy, requestSpec, scheduler, TurnStartReason.INPUT, StreamFlushConfig.DEFAULT);
     }
 
     Fixture(
         InvocationRetryPolicy retryPolicy,
         ModelRequestSpec requestSpec,
         ScheduledExecutorService scheduler,
-        TurnStartReason reason) {
+        TurnStartReason reason,
+        StreamFlushConfig flushConfig) {
+      this(retryPolicy, requestSpec, scheduler, reason, flushConfig, Runnable::run);
+    }
+
+    Fixture(
+        InvocationRetryPolicy retryPolicy,
+        ModelRequestSpec requestSpec,
+        ScheduledExecutorService scheduler,
+        TurnStartReason reason,
+        StreamFlushConfig flushConfig,
+        Executor flushExecutor) {
       this.scheduler = scheduler;
       this.requestSpec = requestSpec;
       this.baseline = seedBaseline(store, NOW, reason);
@@ -2896,9 +2956,11 @@ class ModelProcessorTest {
               store,
               gateway,
               sink,
-              new ModelProcessorConfig(LEASE_CONFIG, () -> retryPolicy, FALLBACK_DELAY),
+              new ModelProcessorConfig(
+                  LEASE_CONFIG, () -> retryPolicy, FALLBACK_DELAY, flushConfig),
               clock,
-              scheduler);
+              scheduler,
+              flushExecutor);
     }
   }
 
@@ -2909,7 +2971,7 @@ class ModelProcessorTest {
       UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID userEntryId, UUID threadId) {}
 
   /** Session + ROOT + TURN_START(INPUT) + USER；Thread head 指向 USER。 */
-  private static UserBasis seedUserBasis(InMemoryHarnessStore store) {
+  private static UserBasis seedUserBasis(HarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -2970,12 +3032,11 @@ class ModelProcessorTest {
         });
   }
 
-  private static Baseline seedBaseline(InMemoryHarnessStore store, Instant now) {
+  private static Baseline seedBaseline(HarnessStore store, Instant now) {
     return seedBaseline(store, now, TurnStartReason.INPUT);
   }
 
-  private static Baseline seedBaseline(
-      InMemoryHarnessStore store, Instant now, TurnStartReason reason) {
+  private static Baseline seedBaseline(HarnessStore store, Instant now, TurnStartReason reason) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -3039,7 +3100,7 @@ class ModelProcessorTest {
   }
 
   private static UUID seedInvocation(
-      InMemoryHarnessStore store, Baseline baseline, ModelRequestSpec requestSpec, Instant now) {
+      HarnessStore store, Baseline baseline, ModelRequestSpec requestSpec, Instant now) {
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -3066,19 +3127,19 @@ class ModelProcessorTest {
         });
   }
 
-  private static ClaimedWork claim(InMemoryHarnessStore store, UUID invocationId, Instant now) {
+  private static ClaimedWork claim(HarnessStore store, UUID invocationId, Instant now) {
     return claim(store, invocationId, now, "token-" + invocationId);
   }
 
   private static ClaimedWork claim(
-      InMemoryHarnessStore store, UUID invocationId, Instant now, String token) {
+      HarnessStore store, UUID invocationId, Instant now, String token) {
     return store
         .transaction(tx -> tx.claimNextWork(WorkTargetType.MODEL, now, token, now.plusSeconds(60)))
         .orElseThrow();
   }
 
   private static void transition(
-      InMemoryHarnessStore store,
+      HarnessStore store,
       UUID invocationId,
       Function<ModelInvocation, ModelInvocation> transition) {
     store.transaction(
@@ -3089,7 +3150,7 @@ class ModelProcessorTest {
         });
   }
 
-  private static ModelInvocation model(InMemoryHarnessStore store, UUID invocationId) {
+  private static ModelInvocation model(HarnessStore store, UUID invocationId) {
     return store.transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
   }
 
@@ -3100,11 +3161,11 @@ class ModelProcessorTest {
     return new ModelRequestMaterializer().materialize(path, fixture.requestSpec);
   }
 
-  private static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {
+  private static ThreadState thread(HarnessStore store, UUID threadId) {
     return store.transaction(tx -> tx.findThread(threadId)).orElseThrow();
   }
 
-  private static Work work(InMemoryHarnessStore store, WorkTarget target) {
+  private static Work work(HarnessStore store, WorkTarget target) {
     return store.transaction(tx -> tx.findWork(target)).orElse(null);
   }
 

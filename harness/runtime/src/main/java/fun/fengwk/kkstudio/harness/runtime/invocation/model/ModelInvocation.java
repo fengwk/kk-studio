@@ -77,8 +77,9 @@ public record ModelInvocation(
    * 校验 {@code next} 是已存储行 {@code stored} 的合法转换：identity 与 request 不可变，updatedAt 不允许回退， attempt 仅在
    * DISPATCHING-&gt;RUNNING / DISPATCHING-&gt;UNKNOWN（已确认启动）以及 DISPATCHING-&gt;CANCELLED（Stop
    * 窗口内调用可能已开始）这几种情形下恰好 +1；terminal 事实不可变 （仅 {@code resultEntryId} 可从 null 附加为正数）；checkpoint 仅能在
-   * RUNNING-&gt;RUNNING 时被引入 或增长；任何离开 RUNNING 或处于 terminal 内的转换，只能保留完全相同的 stored checkpoint 或清除它；
-   * terminal 结果 Entry 链接时必须同时清空已经物化的 checkpoint / failedAttempts。精确 replay 始终被接受。
+   * RUNNING-&gt;RUNNING 或 RUNNING-&gt;terminal 时被引入或增长；任何离开 RUNNING 或处于 terminal 内的转换，只能保留完全相同的
+   * stored checkpoint 或清除它； terminal 结果 Entry 链接时必须同时清空已经物化的 checkpoint / failedAttempts。精确 replay
+   * 始终被接受。
    */
   public static void validateTransition(ModelInvocation stored, ModelInvocation next) {
     Objects.requireNonNull(stored, "stored");
@@ -179,19 +180,20 @@ public record ModelInvocation(
   }
 
   /**
-   * checkpoint 仅能在 RUNNING-&gt;RUNNING 转换时被引入或增长。进入 terminal 状态或以 READY 重试时， 可以保留完全相同的 stored
-   * checkpoint 或清除它；在 terminal 内部不能再引入、增长或分叉 checkpoint。
+   * checkpoint 仅能在 RUNNING-&gt;RUNNING 或 RUNNING-&gt;terminal 转换时被引入或增长。进入 terminal 状态或以 READY 重试时，
+   * 可以保留完全相同的 stored checkpoint 或清除它；在 terminal 内部不能再引入、增长或分叉 checkpoint。
    */
   private static void requireCheckpointTransition(ModelInvocation stored, ModelInvocation next) {
     StreamCheckpoint storedCheckpoint = stored.streamCheckpoint();
     StreamCheckpoint nextCheckpoint = next.streamCheckpoint();
-    boolean runningToRunning =
+    boolean allowsGrowth =
         stored.status() == ModelInvocationStatus.RUNNING
-            && next.status() == ModelInvocationStatus.RUNNING;
+            && (next.status() == ModelInvocationStatus.RUNNING || next.status().isTerminal());
     if (storedCheckpoint == null) {
-      if (nextCheckpoint != null && !runningToRunning) {
+      if (nextCheckpoint != null && !allowsGrowth) {
         throw new IllegalArgumentException(
-            "a checkpoint may only be introduced on a RUNNING -> RUNNING transition");
+            "a checkpoint may only be introduced on a RUNNING -> RUNNING or RUNNING -> terminal"
+                + " transition");
       }
       return;
     }
@@ -204,11 +206,11 @@ public record ModelInvocation(
       }
       return;
     }
-    if (!runningToRunning) {
+    if (!allowsGrowth) {
       if (!nextCheckpoint.equals(storedCheckpoint)) {
         throw new IllegalArgumentException(
-            "a transition away from RUNNING may only keep the exact stored checkpoint or clear"
-                + " it");
+            "a transition away from RUNNING or within a terminal state may only keep the exact"
+                + " stored checkpoint or clear it");
       }
       return;
     }
@@ -354,13 +356,14 @@ public record ModelInvocation(
         ModelInvocationStatus.RUNNING, attempt, checkpoint, null, null, null, failedAttempts, now);
   }
 
-  /** RUNNING -&gt; SUCCEEDED，并附带完整的 Provider result；attempt 必须为正数。 */
-  public ModelInvocation succeed(ProviderResponse result, Instant now) {
+  /** RUNNING -&gt; SUCCEEDED，并附带完整的 Provider result 与最终 streamCheckpoint；attempt 必须为正数。 */
+  public ModelInvocation succeed(
+      ProviderResponse result, StreamCheckpoint checkpoint, Instant now) {
     Objects.requireNonNull(result, "result");
     return withState(
         ModelInvocationStatus.SUCCEEDED,
         attempt,
-        streamCheckpoint,
+        checkpoint,
         result,
         null,
         null,
@@ -368,11 +371,17 @@ public record ModelInvocation(
         now);
   }
 
+  /** RUNNING -&gt; SUCCEEDED，保留当前 streamCheckpoint；attempt 必须为正数。 */
+  public ModelInvocation succeed(ProviderResponse result, Instant now) {
+    return succeed(result, streamCheckpoint, now);
+  }
+
   /**
-   * READY / RUNNING -&gt; FAILED，并附带一个 terminal error；attempt 不变。DISPATCHING 被拒绝： 进行中的 dispatch
-   * 只能通过 {@link #rejectDispatch} 失败。
+   * READY / RUNNING -&gt; FAILED，并附带 terminal error 与可选 streamCheckpoint；attempt 不变。DISPATCHING
+   * 被拒绝： 进行中的 dispatch 只能通过 {@link #rejectDispatch} 失败。
    */
-  public ModelInvocation fail(ModelInvocationError error, Instant now) {
+  public ModelInvocation fail(
+      ModelInvocationError error, StreamCheckpoint checkpoint, Instant now) {
     Objects.requireNonNull(error, "error");
     if (status != ModelInvocationStatus.READY && status != ModelInvocationStatus.RUNNING) {
       throw new IllegalArgumentException(
@@ -382,7 +391,7 @@ public record ModelInvocation(
     return withState(
         ModelInvocationStatus.FAILED,
         attempt,
-        status == ModelInvocationStatus.RUNNING ? streamCheckpoint : null,
+        status == ModelInvocationStatus.RUNNING ? checkpoint : null,
         null,
         error,
         null,
@@ -390,18 +399,23 @@ public record ModelInvocation(
         now);
   }
 
+  public ModelInvocation fail(ModelInvocationError error, Instant now) {
+    return fail(error, streamCheckpoint, now);
+  }
+
   /**
-   * READY / DISPATCHING / RUNNING -&gt; CANCELLED，并附带一个 terminal error。READY 和 RUNNING 保持其已确认的
-   * attempt；DISPATCHING 是 Stop 窗口，调用可能已经开始，因此 attempt 恰好 +1。
+   * READY / DISPATCHING / RUNNING -&gt; CANCELLED，并附带 terminal error 与可选 streamCheckpoint。READY 和
+   * RUNNING 保持其已确认的 attempt；DISPATCHING 是 Stop 窗口，调用可能已经开始，因此 attempt 恰好 +1。
    */
-  public ModelInvocation cancel(ModelInvocationError error, Instant now) {
+  public ModelInvocation cancel(
+      ModelInvocationError error, StreamCheckpoint checkpoint, Instant now) {
     Objects.requireNonNull(error, "error");
     int nextAttempt =
         status == ModelInvocationStatus.DISPATCHING ? Math.addExact(attempt, 1) : attempt;
     return withState(
         ModelInvocationStatus.CANCELLED,
         nextAttempt,
-        status == ModelInvocationStatus.RUNNING ? streamCheckpoint : null,
+        status == ModelInvocationStatus.RUNNING ? checkpoint : null,
         null,
         error,
         null,
@@ -409,23 +423,32 @@ public record ModelInvocation(
         now);
   }
 
+  public ModelInvocation cancel(ModelInvocationError error, Instant now) {
+    return cancel(error, streamCheckpoint, now);
+  }
+
   /**
-   * DISPATCHING / RUNNING -&gt; UNKNOWN，并附带一个 terminal error：不确定的 admission 或恢复的 lease
-   * 可能已经启动了该调用，因此 DISPATCHING 时 attempt 恰好 +1，而 RUNNING 保留其已确认的 attempt。
+   * DISPATCHING / RUNNING -&gt; UNKNOWN，并附带 terminal error 与可选 streamCheckpoint：不确定的 admission 或恢复的
+   * lease 可能已经启动了该调用，因此 DISPATCHING 时 attempt 恰好 +1，而 RUNNING 保留其已确认的 attempt。
    */
-  public ModelInvocation unknown(ModelInvocationError error, Instant now) {
+  public ModelInvocation unknown(
+      ModelInvocationError error, StreamCheckpoint checkpoint, Instant now) {
     Objects.requireNonNull(error, "error");
     int nextAttempt =
         status == ModelInvocationStatus.DISPATCHING ? Math.addExact(attempt, 1) : attempt;
     return withState(
         ModelInvocationStatus.UNKNOWN,
         nextAttempt,
-        status == ModelInvocationStatus.RUNNING ? streamCheckpoint : null,
+        status == ModelInvocationStatus.RUNNING ? checkpoint : null,
         null,
         error,
         null,
         failedAttempts,
         now);
+  }
+
+  public ModelInvocation unknown(ModelInvocationError error, Instant now) {
+    return unknown(error, streamCheckpoint, now);
   }
 
   /**

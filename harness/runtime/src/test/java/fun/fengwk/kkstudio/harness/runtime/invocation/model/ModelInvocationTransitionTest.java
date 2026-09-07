@@ -274,18 +274,35 @@ class ModelInvocationTransitionTest {
   }
 
   @Test
-  void checkpointMayOnlyBeIntroducedOrGrownWhileRunning() {
-    // 直接向终态 transition 注入 checkpoint 被拒绝
+  void checkpointMayOnlyBeIntroducedOrGrownWhileRunningOrTerminalTransition() {
+    // RUNNING -> terminal 可以引入 checkpoint
     ModelInvocation runningNoCheckpoint = running(1, null);
+    ModelInvocation.validateTransition(
+        runningNoCheckpoint,
+        invocation(ModelInvocationStatus.SUCCEEDED, 1, checkpoint(1), response(), null, null));
+
+    // RUNNING -> terminal 可以单调增长同 attempt checkpoint
+    ModelInvocation runningWithCheckpoint = running(1, checkpoint(1));
+    ModelInvocation.validateTransition(
+        runningWithCheckpoint,
+        invocation(
+            ModelInvocationStatus.SUCCEEDED,
+            1,
+            new StreamCheckpoint(1, 1L, "partial+", ""),
+            response(),
+            null,
+            null));
+
+    // RUNNING -> terminal 拒绝 sequence 回退
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ModelInvocation.validateTransition(
-                runningNoCheckpoint,
+                running(1, new StreamCheckpoint(1, 2L, "partial+", "")),
                 invocation(
                     ModelInvocationStatus.SUCCEEDED, 1, checkpoint(1), response(), null, null)));
-    // 进入终态时增长 checkpoint 被拒绝
-    ModelInvocation runningWithCheckpoint = running(1, checkpoint(1));
+
+    // RUNNING -> terminal 拒绝文本前缀冲突
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -294,10 +311,33 @@ class ModelInvocationTransitionTest {
                 invocation(
                     ModelInvocationStatus.SUCCEEDED,
                     1,
-                    new StreamCheckpoint(1, 1L, "partial+", ""),
+                    new StreamCheckpoint(1, 2L, "conflict", ""),
                     response(),
                     null,
                     null)));
+
+    // RUNNING -> FAILED / CANCELLED / UNKNOWN 同样可以引入或增长 checkpoint
+    ModelInvocation.validateTransition(
+        runningNoCheckpoint, runningNoCheckpoint.fail(error(), checkpoint(1), T1));
+    ModelInvocation.validateTransition(
+        runningNoCheckpoint, runningNoCheckpoint.cancel(error(), checkpoint(1), T1));
+    ModelInvocation.validateTransition(
+        runningNoCheckpoint, runningNoCheckpoint.unknown(error(), checkpoint(1), T1));
+
+    // READY / DISPATCHING 不能产生 checkpoint
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelInvocation.validateTransition(
+                ready(0),
+                invocation(ModelInvocationStatus.FAILED, 0, checkpoint(0), null, error(), null)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelInvocation.validateTransition(
+                dispatching(0),
+                invocation(ModelInvocationStatus.FAILED, 0, checkpoint(0), null, error(), null)));
+
     // 终态不能从 null 引入 checkpoint
     assertThrows(
         IllegalArgumentException.class,

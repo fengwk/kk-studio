@@ -46,11 +46,11 @@ final class ModelStreamAccumulator {
   }
 
   /**
-   * 用最终 response 收敛累积内容：返回可持久化的 response（streamed thinking 在 final 缺失时补入）与需要补发布的尾部 gap deltas。任何
-   * prefix 冲突、final 遗漏 streamed tool call 或 identity 冲突都抛 {@link IllegalArgumentException}。
+   * 预校验最终 response 并生成候选 durable response 与尾部 gap，在执行 {@link PreparedCompletion#apply()}
+   * 之前绝不修改累积器状态。
    */
-  Completion complete(ProviderResponse response) {
-    List<ProviderStreamEvent> gaps = new ArrayList<>();
+  PreparedCompletion prepareComplete(ProviderResponse response) {
+    Objects.requireNonNull(response, "response");
     String textGap = textGap(response.text());
     String thinkingGap = thinkingGap(response.thinking());
     if (partialToolCalls.keySet().stream()
@@ -67,27 +67,59 @@ final class ModelStreamAccumulator {
               : partial.previewGap(index, complete);
       toolGaps.add(gap);
     }
+    List<ProviderStreamEvent> gaps = new ArrayList<>();
     if (textGap != null) {
-      text.append(textGap);
       gaps.add(new ProviderStreamEvent.TextDelta(textGap));
     }
     if (thinkingGap != null) {
-      thinking.append(thinkingGap);
       gaps.add(new ProviderStreamEvent.ThinkingDelta(thinkingGap));
     }
-    for (int index = 0; index < toolGaps.size(); index++) {
-      PartialToolCall partial =
-          partialToolCalls.computeIfAbsent(index, ignored -> new PartialToolCall());
-      ProviderStreamEvent.ToolCallDelta gap = partial.applyGap(toolGaps.get(index));
-      if (gap != null) {
-        gaps.add(gap);
+    for (ToolGap gap : toolGaps) {
+      ProviderStreamEvent.ToolCallDelta delta = gap.toDelta();
+      if (delta != null) {
+        gaps.add(delta);
+      }
+    }
+    String candidateThinking = response.thinking();
+    if (candidateThinking.isEmpty()) {
+      StringBuilder combined = new StringBuilder(thinking);
+      if (thinkingGap != null) {
+        combined.append(thinkingGap);
+      }
+      if (combined.length() > 0) {
+        candidateThinking = combined.toString();
       }
     }
     ProviderResponse durableResponse = response;
-    if (response.thinking().isEmpty() && thinking.length() > 0) {
-      durableResponse = withThinking(response, thinking.toString());
+    if (!candidateThinking.equals(response.thinking())) {
+      durableResponse = withThinking(response, candidateThinking);
     }
-    return new Completion(durableResponse, List.copyOf(gaps));
+    final ProviderResponse finalDurableResponse = durableResponse;
+    final List<ProviderStreamEvent> finalGaps = List.copyOf(gaps);
+    return new PreparedCompletion(
+        finalDurableResponse,
+        finalGaps,
+        () -> {
+          if (textGap != null) {
+            text.append(textGap);
+          }
+          if (thinkingGap != null) {
+            thinking.append(thinkingGap);
+          }
+          for (int index = 0; index < toolGaps.size(); index++) {
+            PartialToolCall partial =
+                partialToolCalls.computeIfAbsent(index, ignored -> new PartialToolCall());
+            partial.applyGap(toolGaps.get(index));
+          }
+        });
+  }
+
+  /**
+   * 用最终 response 收敛累积内容：返回可持久化的 response（streamed thinking 在 final 缺失时补入）与需要补发布的尾部 gap deltas。任何
+   * prefix 冲突、final 遗漏 streamed tool call 或 identity 冲突都抛 {@link IllegalArgumentException}。
+   */
+  Completion complete(ProviderResponse response) {
+    return prepareComplete(response).apply();
   }
 
   private static ProviderResponse withThinking(ProviderResponse response, String thinking) {
@@ -132,6 +164,38 @@ final class ModelStreamAccumulator {
     }
   }
 
+  /** 预处理完成的 completion 对象：携带校验后的 response 与 gaps，仅在调用 {@link #apply()} 时修改累积器状态。 */
+  static final class PreparedCompletion {
+    private final ProviderResponse response;
+    private final List<ProviderStreamEvent> gaps;
+    private final Runnable applyAction;
+    private boolean applied;
+
+    PreparedCompletion(
+        ProviderResponse response, List<ProviderStreamEvent> gaps, Runnable applyAction) {
+      this.response = Objects.requireNonNull(response, "response");
+      this.gaps = List.copyOf(gaps);
+      this.applyAction = Objects.requireNonNull(applyAction, "applyAction");
+    }
+
+    ProviderResponse response() {
+      return response;
+    }
+
+    List<ProviderStreamEvent> gaps() {
+      return gaps;
+    }
+
+    Completion apply() {
+      if (applied) {
+        throw new IllegalStateException("prepared completion already applied");
+      }
+      applied = true;
+      applyAction.run();
+      return new Completion(response, gaps);
+    }
+  }
+
   private static final class PartialToolCall {
     private final StringBuilder id = new StringBuilder();
     private final StringBuilder name = new StringBuilder();
@@ -157,15 +221,10 @@ final class ModelStreamAccumulator {
       return new ToolGap(index, complete.id(), complete.name(), complete.argumentsJson());
     }
 
-    private ProviderStreamEvent.ToolCallDelta applyGap(ToolGap gap) {
+    private void applyGap(ToolGap gap) {
       appendGap(id, gap.id());
       appendGap(name, gap.name());
       appendGap(arguments, gap.argumentsJson());
-      if (gap.id() == null && gap.name() == null && gap.argumentsJson() == null) {
-        return null;
-      }
-      return new ProviderStreamEvent.ToolCallDelta(
-          gap.index(), gap.id(), gap.name(), gap.argumentsJson());
     }
 
     /** 接受首次值或当前值的前缀扩展，忽略重复及已接收前缀，并拒绝相互冲突的片段。 */
@@ -204,5 +263,12 @@ final class ModelStreamAccumulator {
     }
   }
 
-  private record ToolGap(int index, String id, String name, String argumentsJson) {}
+  private record ToolGap(int index, String id, String name, String argumentsJson) {
+    ProviderStreamEvent.ToolCallDelta toDelta() {
+      if (id == null && name == null && argumentsJson == null) {
+        return null;
+      }
+      return new ProviderStreamEvent.ToolCallDelta(index, id, name, argumentsJson);
+    }
+  }
 }
