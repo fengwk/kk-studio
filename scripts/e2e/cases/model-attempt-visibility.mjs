@@ -30,7 +30,7 @@ registerCase({
   // 本 case 把 Provider baseUrl 指向 case 内自建的宿主 127.0.0.1 mock；App 在
   // distributed 容器内无法回连宿主 loopback，因此必须排除 host-mock capability。
   requires: ['host-mock'],
-  docs: '本地 node:http OpenAI Chat Completions SSE mock：先建立 /api/events/v1 Thread 订阅并收到 ack，首次 Provider attempt 输出确定性 partial 后断连，后续自动重试成功；轮询活跃 snapshot 的 modelAttemptFailures，断言 MODEL_ATTEMPT_FAILURE durable 顺序/精确 payload、失败 partial 不拼入 assistant，第二 turn 的 Provider messages 排除失败 partial/thinking/error',
+  docs: '本地 node:http OpenAI Chat Completions SSE mock：先建立 /api/events/v1 Thread 订阅并收到 ack，首次 Provider attempt 在 checkpoint 窗口内输出确定性 partial 后断连，未提交尾部只冻结到 modelAttemptFailures、不作为活动 MODEL_DELTA 发布；后续自动重试成功，首条 live text 来自 attempt 2。断言 MODEL_ATTEMPT_FAILURE durable 顺序/精确 payload、失败 partial 不拼入 assistant，第二 turn 的 Provider messages 排除失败 partial/thinking/error',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const initialMarker = `ATTEMPT-VISIBILITY-FIRST-${suffix}`
@@ -123,12 +123,17 @@ registerCase({
         intervalMs: 100,
       })
 
-      const { signal: firstDelta, startResult } =
+      let activeFailurePromise = null
+      const { signal: firstPublishedDelta, startResult } =
         await waitForModelTextDeltaAfterEventSubscribed(
           ctx,
           threadId,
-          () =>
-            acceptCommandBatch(ctx, {
+          () => {
+            activeFailurePromise = waitForActiveAttemptFailure(ctx, threadId, {
+              initialMarker,
+              partialText: PARTIAL_TEXT,
+            })
+            return acceptCommandBatch(ctx, {
               owner: chatOwner(chat.id),
               target: threadTarget({
                 threadId,
@@ -143,7 +148,8 @@ registerCase({
                 ),
                 userMessageCommand(initialMarker, cid()),
               ],
-            }),
+            })
+          },
           { timeoutMs: 30_000 },
         )
       assert(
@@ -153,16 +159,22 @@ registerCase({
         `initial message batch: ${JSON.stringify(startResult)}`,
       )
       assert(
-        firstDelta.text.includes(PARTIAL_TEXT),
-        `application event channel missed the failed-attempt partial: ${JSON.stringify(firstDelta)}`,
+        firstPublishedDelta.attempt === 2
+          && firstPublishedDelta.text === RECOVERED_TEXT,
+        `failed-attempt uncommitted tail must not publish before recovered attempt: ${JSON.stringify(firstPublishedDelta)}`,
       )
 
-      const activeResult = await waitForActiveAttemptFailure(ctx, threadId, {
-        initialMarker,
-        partialText: PARTIAL_TEXT,
-      })
+      assert(activeFailurePromise != null, 'active failure observation was not started')
+      const activeResult = await activeFailurePromise
       activeSnapshot = activeResult.snapshot
       const activeFailure = activeSnapshot.modelAttemptFailures[0]
+      assert(
+        firstPublishedDelta.invocationId === activeSnapshot.modelInvocation.id,
+        `recovered delta must belong to the retried invocation: ${JSON.stringify({
+          firstPublishedDelta,
+          modelInvocation: activeSnapshot.modelInvocation,
+        })}`,
+      )
       assertActiveFailure(activeSnapshot, activeFailure, {
         partialText: PARTIAL_TEXT,
         thinking: '',
