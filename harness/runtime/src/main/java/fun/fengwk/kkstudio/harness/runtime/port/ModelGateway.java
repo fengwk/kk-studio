@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
@@ -107,8 +108,15 @@ public interface ModelGateway {
     /** 交付一个非 terminal Provider delta。 */
     void onEvent(ProviderStreamEvent event);
 
+    /** 交付完整 Provider 响应与可选的 native replay 状态。 */
+    default void onSucceeded(ProviderCompletion completion) {
+      onSucceeded(completion.response());
+    }
+
     /** 交付完整 Provider 响应。 */
-    void onSucceeded(ProviderResponse response);
+    default void onSucceeded(ProviderResponse response) {
+      onSucceeded(new ProviderCompletion(response, null));
+    }
 
     /** 交付已确认失败的 terminal error。 */
     void onFailed(ModelInvocationError error);

@@ -382,7 +382,8 @@ public final class ThreadProcessor {
             succeeded
                 ? payloadMapper.assistantPayload(response, model.requestSpec().toolBindings())
                 : payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model)),
-            mutationNow));
+            mutationNow,
+            succeeded ? model.providerReplayState() : null));
     UUID head = resultEntryId;
     boolean toolPhase = false;
     List<ToolInvocation> invocations = List.of();

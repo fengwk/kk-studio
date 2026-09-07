@@ -1,10 +1,15 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import java.util.List;
 import java.util.Objects;
 
 /** 已完成语义消息到 Provider 请求消息的无损、Provider 无关表示。 */
-public record ProviderMessage(ProviderMessageRole role, List<ProviderContentBlock> contents) {
+public record ProviderMessage(
+    ProviderMessageRole role,
+    List<ProviderContentBlock> contents,
+    @JsonIgnore ProviderReplayState replayState) {
 
   public ProviderMessage {
     role = Objects.requireNonNull(role, "role");
@@ -12,7 +17,18 @@ public record ProviderMessage(ProviderMessageRole role, List<ProviderContentBloc
     if (contents.isEmpty()) {
       throw new IllegalArgumentException("contents must not be empty");
     }
+    if (replayState != null && role != ProviderMessageRole.ASSISTANT) {
+      throw new IllegalArgumentException("replayState is only allowed for ASSISTANT messages");
+    }
     validateRoleContents(role, contents);
+  }
+
+  public ProviderMessage(ProviderMessageRole role, List<ProviderContentBlock> contents) {
+    this(role, contents, null);
+  }
+
+  public boolean hasReplayState() {
+    return replayState != null;
   }
 
   private static void validateRoleContents(

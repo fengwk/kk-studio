@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -41,6 +43,7 @@ import java.time.Duration;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 基于 PostgreSQL 的 attempt-time Provider 解析证据：同一个持久 {@link ProviderRequest} 在 Provider 更新 / 删除 / 同名
@@ -78,6 +81,8 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     assertEquals("original-secret", openAi.credential, "adapter 使用创建行 credential");
     assertEquals(
         "https://original.example/v1", openAi.descriptor.endpoint(), "adapter 使用创建行 baseUrl");
+    assertNotNull(openAi.descriptor.connectionGenerationId());
+    UUID firstGen = openAi.descriptor.connectionGenerationId();
     assertEquals(
         Duration.ofSeconds(12),
         configurationCodec.readTimeoutPolicy(openAi.configJson).modelCallTimeout(),
@@ -99,6 +104,8 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     assertEquals("updated-secret", openAi.credential, "adapter 使用更新行 credential");
     assertEquals(
         "https://updated.example/v2", openAi.descriptor.endpoint(), "adapter 使用更新行 baseUrl");
+    assertNotEquals(
+        firstGen, openAi.descriptor.connectionGenerationId(), "凭据与 endpoint 更新轮换 generationId");
     assertEquals(2, openAi.openCount, "同类型更新后继续使用冻结 providerType 的 factory");
 
     // 同名更新协议类型：既有 invocation 的冻结类型必须确定性拒绝漂移。

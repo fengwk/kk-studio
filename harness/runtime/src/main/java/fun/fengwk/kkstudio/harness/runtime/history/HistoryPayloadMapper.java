@@ -10,6 +10,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderToolCallDiagnosticJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -50,6 +52,8 @@ public final class HistoryPayloadMapper {
   private static final String EMPTY_DETAILS_JSON = "{}";
 
   private final ToolInvocationErrorJsonCodec errorCodec = new ToolInvocationErrorJsonCodec();
+  private final ProviderToolCallDiagnosticJsonCodec diagnosticCodec =
+      new ProviderToolCallDiagnosticJsonCodec();
 
   /** ASSISTANT MESSAGE payload：ToolCall 的 rendererKey 来自本次 ModelInvocation 冻结的 Tool binding。 */
   public MessagePayload assistantPayload(ProviderResponse response, List<ToolBinding> bindings) {
@@ -66,6 +70,9 @@ public final class HistoryPayloadMapper {
       contents.add(
           new ToolCallMessageContent(
               call.id(), call.name(), rendererKey(call.name(), bindings), call.argumentsJson()));
+    }
+    for (ProviderToolCallDiagnostic diagnostic : response.toolCallDiagnostics()) {
+      contents.add(new JsonMessageContent(diagnosticCodec.encode(diagnostic)));
     }
     if (contents.isEmpty()) {
       contents.add(new TextMessageContent(""));

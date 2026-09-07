@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.platform.catalog.provider.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,6 +17,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
 import java.time.Duration;
+import java.util.UUID;
 
 /** Provider 变更校验与凭据补丁行为。 */
 public class AgentProviderMutationFactoryTest {
@@ -109,6 +112,85 @@ public class AgentProviderMutationFactoryTest {
     assertThrows(
         AiValidationException.class,
         () -> factory.newProvider(oversizedCredential.getName(), oversizedCredential));
+  }
+
+  @Test
+  public void shouldAssignNewConnectionGenerationIdOnCreate() {
+    AgentProviderMutationFactory factory = factory();
+    AgentProviderCreateDTO dto = provider("new-provider", "key-1");
+    AgentProvider created = factory.newProvider(dto.getName(), dto);
+    assertNotNull(created.getConnectionGenerationId());
+  }
+
+  @Test
+  public void shouldRotateConnectionGenerationIdOnCredentialOrBaseUrlOrTypeChange() {
+    AgentProviderMutationFactory factory = factory();
+    UUID originalGen = UUID.randomUUID();
+    AgentProvider provider = existingProvider("initial-secret", "{}");
+    provider.setConnectionGenerationId(originalGen);
+    provider.setBaseUrl("http://localhost:8080");
+
+    // 凭据变更触发轮换
+    AgentProviderUpdateDTO credChange = new AgentProviderUpdateDTO();
+    credChange.setProviderType("openai");
+    credChange.setBaseUrl("http://localhost:8080");
+    credChange.setCredential("new-secret");
+    factory.update(provider, credChange);
+    assertNotEquals(originalGen, provider.getConnectionGenerationId());
+
+    // baseUrl 变更触发轮换
+    UUID afterCredChange = provider.getConnectionGenerationId();
+    AgentProviderUpdateDTO urlChange = new AgentProviderUpdateDTO();
+    urlChange.setProviderType("openai");
+    urlChange.setBaseUrl("http://localhost:9090");
+    factory.update(provider, urlChange);
+    assertNotEquals(afterCredChange, provider.getConnectionGenerationId());
+
+    // providerType 变更触发轮换
+    UUID afterUrlChange = provider.getConnectionGenerationId();
+    AgentProviderUpdateDTO typeChange = new AgentProviderUpdateDTO();
+    typeChange.setProviderType("openai_response");
+    typeChange.setBaseUrl("http://localhost:9090");
+    factory.update(provider, typeChange);
+    assertNotEquals(afterUrlChange, provider.getConnectionGenerationId());
+  }
+
+  @Test
+  public void shouldNotRotateConnectionGenerationIdOnDescriptionOrTimeoutOnlyChange() {
+    AgentProviderMutationFactory factory = factory();
+    UUID originalGen = UUID.randomUUID();
+    AgentProvider provider = existingProvider("initial-secret", "{}");
+    provider.setConnectionGenerationId(originalGen);
+    provider.setBaseUrl("http://localhost:8080");
+
+    // 仅变更 description
+    AgentProviderUpdateDTO descChange = new AgentProviderUpdateDTO();
+    descChange.setProviderType("openai");
+    descChange.setBaseUrl("http://localhost:8080");
+    descChange.setDescription("new-description");
+    factory.update(provider, descChange);
+    assertEquals(originalGen, provider.getConnectionGenerationId());
+
+    // 仅变更 timeout
+    AgentProviderUpdateDTO timeoutChange = new AgentProviderUpdateDTO();
+    timeoutChange.setProviderType("openai");
+    timeoutChange.setBaseUrl("http://localhost:8080");
+    timeoutChange.setModelCallTimeoutMillis(60000L);
+    timeoutChange.setModelCallIdleTimeoutMillis(10000L);
+    factory.update(provider, timeoutChange);
+    assertEquals(originalGen, provider.getConnectionGenerationId());
+  }
+
+  @Test
+  public void shouldAssignConnectionGenerationIdIfPreviouslyNull() {
+    AgentProviderMutationFactory factory = factory();
+    AgentProvider provider = existingProvider("initial-secret", "{}");
+    provider.setConnectionGenerationId(null);
+
+    AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
+    update.setProviderType("openai");
+    factory.update(provider, update);
+    assertNotNull(provider.getConnectionGenerationId());
   }
 
   private AgentProviderCreateDTO provider(String name, String credential) {

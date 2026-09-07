@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderReplayStateJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
@@ -52,6 +53,8 @@ final class PostgresqlHarnessRows {
       new ModelAttemptFailuresJsonCodec();
   static final ProviderResponseJsonCodec MODEL_RESULTS = new ProviderResponseJsonCodec();
   static final ModelInvocationErrorJsonCodec MODEL_ERRORS = new ModelInvocationErrorJsonCodec();
+  static final ProviderReplayStateJsonCodec PROVIDER_REPLAY_STATES =
+      new ProviderReplayStateJsonCodec();
   static final ToolCallJsonCodec TOOL_CALLS = new ToolCallJsonCodec();
   static final ToolBindingJsonCodec TOOL_BINDINGS = new ToolBindingJsonCodec();
   static final ToolApprovalJsonCodec TOOL_APPROVALS = new ToolApprovalJsonCodec();
@@ -70,7 +73,9 @@ final class PostgresqlHarnessRows {
             uuid(resultSet, "session_id"),
             nullableUuid(resultSet, "parent_entry_id"),
             ENTRY_PAYLOADS.decode(type, resultSet.getString("payload")),
-            instant(resultSet, "created_at"));
+            instant(resultSet, "created_at"),
+            decodeNullable(
+                resultSet.getString("provider_replay_state"), PROVIDER_REPLAY_STATES::decode));
       };
 
   static final RowMapper<ThreadState> THREAD =
@@ -117,7 +122,9 @@ final class PostgresqlHarnessRows {
               nullableUuid(resultSet, "result_entry_id"),
               MODEL_FAILED_ATTEMPTS.decode(resultSet.getString("failed_attempts")),
               instant(resultSet, "created_at"),
-              instant(resultSet, "updated_at"));
+              instant(resultSet, "updated_at"),
+              decodeNullable(
+                  resultSet.getString("provider_replay_state"), PROVIDER_REPLAY_STATES::decode));
 
   static final RowMapper<ToolInvocation> TOOL_INVOCATION =
       (resultSet, rowNumber) ->

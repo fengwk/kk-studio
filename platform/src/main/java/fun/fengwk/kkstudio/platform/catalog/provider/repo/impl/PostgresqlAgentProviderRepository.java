@@ -70,6 +70,7 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
     result.setBaseUrl(provider.getBaseUrl());
     result.setCredential(provider.getCredential());
     result.setConfigJson(provider.getConfigJson());
+    result.setConnectionGenerationId(provider.getConnectionGenerationId());
     return result;
   }
 
@@ -84,6 +85,7 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
     result.setBaseUrl(provider.getBaseUrl());
     result.setCredential(provider.getCredential());
     result.setConfigJson(provider.getConfigJson());
+    result.setConnectionGenerationId(provider.getConnectionGenerationId());
     result.setVersion(provider.getVersion());
     result.setCreateTime(provider.getCreateTime());
     result.setUpdateTime(provider.getUpdateTime());

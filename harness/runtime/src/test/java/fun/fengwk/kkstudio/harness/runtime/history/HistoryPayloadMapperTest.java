@@ -27,6 +27,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderToolCallDiagnosticJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
@@ -97,6 +99,33 @@ class HistoryPayloadMapperTest {
     assertEquals(usage(), metadata.usage());
     assertEquals(cost(), metadata.cost());
     assertNull(payload.toolResultMetadata());
+  }
+
+  @Test
+  void assistantPayloadIncludesToolCallDiagnosticsAsJsonWarnings() {
+    ProviderToolCallDiagnostic diagnostic =
+        new ProviderToolCallDiagnostic(
+            0, "call-bad", "bash", "{\"unclosed\":", "syntax error in arguments");
+    ProviderResponse response =
+        new ProviderResponse(
+            "part 1",
+            "",
+            List.of(),
+            GenerationStopReason.COMPLETE,
+            usage(),
+            cost(),
+            "req",
+            null,
+            "{}",
+            List.of(diagnostic));
+
+    MessagePayload payload = MAPPER.assistantPayload(response, List.of());
+    assertEquals(2, payload.message().contents().size());
+    assertEquals("part 1", ((TextMessageContent) payload.message().contents().get(0)).text());
+    JsonMessageContent jsonContent = (JsonMessageContent) payload.message().contents().get(1);
+    ProviderToolCallDiagnostic decoded =
+        new ProviderToolCallDiagnosticJsonCodec().decode(jsonContent.json());
+    assertEquals(diagnostic, decoded);
   }
 
   @Test

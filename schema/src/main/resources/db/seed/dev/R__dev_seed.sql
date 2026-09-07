@@ -9,12 +9,13 @@ delete from agent_model where provider_name = 'stub';
 delete from agent_provider where name = 'stub';
 
 insert into agent_provider (
-    name, description, provider_type, base_url, credential, config,
+    name, description, provider_type, base_url, credential, config, connection_generation_id,
     created_at, updated_at, version
 ) values (
     'stub', 'Deterministic stub provider for offline dev profile.',
     'openai', 'http://stub.local:8080/v1', 'stub-key',
     '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
+    '00000000-0000-0000-0000-000000000001'::uuid,
     current_timestamp, current_timestamp, 0
 );
 

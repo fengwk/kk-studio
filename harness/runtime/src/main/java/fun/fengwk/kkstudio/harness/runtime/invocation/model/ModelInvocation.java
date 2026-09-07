@@ -1,7 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 
 import java.time.Instant;
@@ -35,7 +38,8 @@ public record ModelInvocation(
     UUID resultEntryId,
     List<ModelAttemptFailure> failedAttempts,
     Instant createdAt,
-    Instant updatedAt) {
+    Instant updatedAt,
+    @JsonIgnore ProviderReplayState providerReplayState) {
 
   public ModelInvocation {
     Objects.requireNonNull(id, "id");
@@ -65,12 +69,52 @@ public record ModelInvocation(
       throw new IllegalArgumentException("streamCheckpoint attempt must match invocation attempt");
     }
     validateStatusFields(
-        status, attempt, failedAttempts, result, error, resultEntryId, streamCheckpoint);
+        status,
+        attempt,
+        failedAttempts,
+        result,
+        error,
+        resultEntryId,
+        streamCheckpoint,
+        providerReplayState);
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
     if (updatedAt.isBefore(createdAt)) {
       throw new IllegalArgumentException("updatedAt must not precede createdAt");
     }
+  }
+
+  public ModelInvocation(
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID requestHeadEntryId,
+      ModelRequestSpec requestSpec,
+      ModelInvocationStatus status,
+      int attempt,
+      StreamCheckpoint streamCheckpoint,
+      ProviderResponse result,
+      ModelInvocationError error,
+      UUID resultEntryId,
+      List<ModelAttemptFailure> failedAttempts,
+      Instant createdAt,
+      Instant updatedAt) {
+    this(
+        id,
+        threadId,
+        turnStartEntryId,
+        requestHeadEntryId,
+        requestSpec,
+        status,
+        attempt,
+        streamCheckpoint,
+        result,
+        error,
+        resultEntryId,
+        failedAttempts,
+        createdAt,
+        updatedAt,
+        null);
   }
 
   /**
@@ -172,10 +216,21 @@ public record ModelInvocation(
     UUID storedResultEntryId = stored.resultEntryId();
     UUID nextResultEntryId = next.resultEntryId();
     if (storedResultEntryId == null) {
+      if (nextResultEntryId != null) {
+        if (next.providerReplayState() != null) {
+          throw new IllegalArgumentException(
+              "linking a terminal result entry must clear providerReplayState");
+        }
+      } else if (!Objects.equals(stored.providerReplayState(), next.providerReplayState())) {
+        throw new IllegalArgumentException("terminal providerReplayState must not change");
+      }
       return;
     }
     if (!Objects.equals(storedResultEntryId, nextResultEntryId)) {
       throw new IllegalArgumentException("terminal resultEntryId must not change");
+    }
+    if (!Objects.equals(stored.providerReplayState(), next.providerReplayState())) {
+      throw new IllegalArgumentException("terminal providerReplayState must not change");
     }
   }
 
@@ -363,9 +418,15 @@ public record ModelInvocation(
         ModelInvocationStatus.RUNNING, attempt, checkpoint, null, null, null, failedAttempts, now);
   }
 
-  /** RUNNING -&gt; SUCCEEDED，并附带完整的 Provider result 与最终 streamCheckpoint；attempt 必须为正数。 */
+  /**
+   * RUNNING -&gt; SUCCEEDED，并附带完整的 Provider result、最终 streamCheckpoint 与可选的
+   * providerReplayState；attempt 必须为正数。
+   */
   public ModelInvocation succeed(
-      ProviderResponse result, StreamCheckpoint checkpoint, Instant now) {
+      ProviderResponse result,
+      StreamCheckpoint checkpoint,
+      ProviderReplayState providerReplayState,
+      Instant now) {
     Objects.requireNonNull(result, "result");
     return withState(
         ModelInvocationStatus.SUCCEEDED,
@@ -375,12 +436,19 @@ public record ModelInvocation(
         null,
         null,
         failedAttempts,
+        providerReplayState,
         now);
+  }
+
+  /** RUNNING -&gt; SUCCEEDED，并附带完整的 Provider result 与最终 streamCheckpoint；attempt 必须为正数。 */
+  public ModelInvocation succeed(
+      ProviderResponse result, StreamCheckpoint checkpoint, Instant now) {
+    return succeed(result, checkpoint, null, now);
   }
 
   /** RUNNING -&gt; SUCCEEDED，保留当前 streamCheckpoint；attempt 必须为正数。 */
   public ModelInvocation succeed(ProviderResponse result, Instant now) {
-    return succeed(result, streamCheckpoint, now);
+    return succeed(result, streamCheckpoint, null, now);
   }
 
   /**
@@ -475,6 +543,20 @@ public record ModelInvocation(
       UUID resultEntryId,
       List<ModelAttemptFailure> failedAttempts,
       Instant now) {
+    return withState(
+        status, attempt, streamCheckpoint, result, error, resultEntryId, failedAttempts, null, now);
+  }
+
+  private ModelInvocation withState(
+      ModelInvocationStatus status,
+      int attempt,
+      StreamCheckpoint streamCheckpoint,
+      ProviderResponse result,
+      ModelInvocationError error,
+      UUID resultEntryId,
+      List<ModelAttemptFailure> failedAttempts,
+      ProviderReplayState providerReplayState,
+      Instant now) {
     ModelInvocation next =
         new ModelInvocation(
             id,
@@ -490,7 +572,8 @@ public record ModelInvocation(
             resultEntryId,
             failedAttempts,
             createdAt,
-            effectiveMutationTime(now));
+            effectiveMutationTime(now),
+            providerReplayState);
     validateTransition(this, next);
     return next;
   }
@@ -507,7 +590,14 @@ public record ModelInvocation(
       ProviderResponse result,
       ModelInvocationError error,
       UUID resultEntryId,
-      StreamCheckpoint streamCheckpoint) {
+      StreamCheckpoint streamCheckpoint,
+      ProviderReplayState providerReplayState) {
+    if (providerReplayState != null) {
+      if (status != ModelInvocationStatus.SUCCEEDED || result == null || resultEntryId != null) {
+        throw new IllegalArgumentException(
+            "providerReplayState is only allowed on SUCCEEDED invocations without resultEntryId");
+      }
+    }
     int expectedRunningFailures = Math.subtractExact(attempt, 1);
     boolean terminal = status.isTerminal();
     if (!terminal && resultEntryId != null) {

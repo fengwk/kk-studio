@@ -28,7 +28,8 @@ public record ProviderResponse(
     ModelCost cost,
     String requestId,
     String serviceTier,
-    String rawUsageJson) {
+    String rawUsageJson,
+    List<ProviderToolCallDiagnostic> toolCallDiagnostics) {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final String EMPTY_USAGE_JSON = "{}";
@@ -43,6 +44,31 @@ public record ProviderResponse(
     requestId = optionalNonBlank(requestId, "requestId");
     serviceTier = optionalNonBlank(serviceTier, "serviceTier");
     rawUsageJson = normalizeRawUsageJson(rawUsageJson);
+    toolCallDiagnostics =
+        toolCallDiagnostics == null ? List.of() : List.copyOf(toolCallDiagnostics);
+  }
+
+  public ProviderResponse(
+      String text,
+      String thinking,
+      List<ProviderToolCall> toolCalls,
+      GenerationStopReason stopReason,
+      ModelUsage usage,
+      ModelCost cost,
+      String requestId,
+      String serviceTier,
+      String rawUsageJson) {
+    this(
+        text,
+        thinking,
+        toolCalls,
+        stopReason,
+        usage,
+        cost,
+        requestId,
+        serviceTier,
+        rawUsageJson,
+        List.of());
   }
 
   private static String optionalNonBlank(String value, String name) {

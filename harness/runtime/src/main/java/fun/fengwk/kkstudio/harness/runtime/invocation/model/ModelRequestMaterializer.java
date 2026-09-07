@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -72,12 +73,15 @@ public final class ModelRequestMaterializer {
   }
 
   private ProviderRequest materializeLive(EntryPath path, ModelRequestSpec spec) {
-    List<AgentMessage> semanticMessages = new ArrayList<>(spec.preambleMessages());
-    appendHistory(path, semanticMessages);
+    List<ProviderMessageProjector.ProjectedMessage> projectedMessages = new ArrayList<>();
+    for (AgentMessage preamble : spec.preambleMessages()) {
+      projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(preamble));
+    }
+    appendHistory(path, projectedMessages);
     return new ProviderRequest(
         spec.model(),
         spec.variant(),
-        messageProjector.project(semanticMessages),
+        messageProjector.projectSources(projectedMessages),
         providerTools(spec.toolBindings()),
         spec.cacheControl());
   }
@@ -107,9 +111,11 @@ public final class ModelRequestMaterializer {
    * 继续投影。COMPACTION 控制 turn 内部、TURN 边界、MODEL_ATTEMPT_FAILURE 与 ASSISTANT_ERROR 不进入 Provider
    * messages。
    */
-  private static void appendHistory(EntryPath path, List<AgentMessage> semanticMessages) {
+  private static void appendHistory(
+      EntryPath path, List<ProviderMessageProjector.ProjectedMessage> projectedMessages) {
     List<Entry> entries = path.entries();
     int walkStart = 0;
+    int compactionResultIndex = -1;
     var latest = CompactionTurns.latestComplete(path);
     if (latest.isPresent()) {
       var complete = latest.get();
@@ -119,14 +125,17 @@ public final class ModelRequestMaterializer {
             "complete compaction references are corrupt on the current path: cutEntryId="
                 + complete.freezing().cutEntryId());
       }
-      Entry completeResult = entries.get(complete.resultIndex());
-      semanticMessages.add(
-          AgentMessage.user(CompactionPrompts.compactedContext(complete.result().summaryText())));
+      projectedMessages.add(
+          ProviderMessageProjector.ProjectedMessage.of(
+              AgentMessage.user(
+                  CompactionPrompts.compactedContext(complete.result().summaryText()))));
       walkStart = cutIndex;
+      compactionResultIndex = complete.resultIndex();
     }
     boolean inCompactionTurn = false;
     for (int i = walkStart; i < entries.size(); i++) {
-      EntryPayload payload = entries.get(i).payload();
+      Entry entry = entries.get(i);
+      EntryPayload payload = entry.payload();
       if (payload instanceof TurnStartPayload turnStart) {
         if (turnStart.reason() == TurnStartReason.COMPACTION) {
           inCompactionTurn = true;
@@ -140,12 +149,16 @@ public final class ModelRequestMaterializer {
       if (inCompactionTurn) {
         continue;
       }
+      boolean suppressReplay = (compactionResultIndex >= 0 && i <= compactionResultIndex);
+      ProviderReplayState replayState = suppressReplay ? null : entry.providerReplayState();
+
       if (payload instanceof MessagePayload message) {
-        semanticMessages.add(message.message());
+        projectedMessages.add(
+            ProviderMessageProjector.ProjectedMessage.of(message.message(), replayState));
       } else if (payload instanceof CustomMessagePayload message) {
-        semanticMessages.add(message.message());
+        projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       } else if (payload instanceof AssistantAbortedPayload message) {
-        semanticMessages.add(message.message());
+        projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       }
     }
   }

@@ -190,16 +190,16 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   private static final String LOAD_ENTRY_PATH =
       """
       with recursive entry_path as (
-          select id, session_id, parent_entry_id, entry_type, payload, created_at, 1 as depth
+          select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state, 1 as depth
           from harness_entry
           where id = ?
           union all
-          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, ep.depth + 1
+          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, e.provider_replay_state, ep.depth + 1
           from harness_entry e
           join entry_path ep on e.id = ep.parent_entry_id
           where ep.parent_entry_id is not null
       ) cycle id set is_cycle using path
-      select id, session_id, parent_entry_id, entry_type, payload, created_at
+      select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
       from entry_path
       order by depth desc
       """;
@@ -212,16 +212,16 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   private static final String LOAD_CONTRIBUTOR_CUSTOM_ENTRIES_ON_PATH =
       """
       with recursive custom_entry_path as (
-          select id, session_id, parent_entry_id, entry_type, payload, created_at, 0 as depth
+          select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state, 0 as depth
           from harness_entry
           where id = ?
           union all
-          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, cep.depth + 1
+          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, e.provider_replay_state, cep.depth + 1
           from harness_entry e
           join custom_entry_path cep on e.id = cep.parent_entry_id
           where cep.parent_entry_id is not null
       ) cycle id set is_cycle using path
-      select id, session_id, parent_entry_id, entry_type, payload, created_at, depth, is_cycle
+      select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state, depth, is_cycle
       from custom_entry_path
       where depth = 0
          or entry_type = 'ROOT'
@@ -391,16 +391,23 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     update(
         """
         insert into harness_entry (
-            id, session_id, parent_entry_id, entry_type, payload, created_at
-        ) values (?, ?, ?, ?, cast(? as jsonb), ?)
+            id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
+        ) values (?, ?, ?, ?, cast(? as jsonb), ?, cast(? as jsonb))
         """,
         entry.id(),
         entry.sessionId(),
         entry.parentEntryId(),
         entry.payload().type().name(),
         PostgresqlHarnessRows.ENTRY_PAYLOADS.encode(entry.payload()),
-        PostgresqlHarnessRows.timestamp(entry.createdAt()));
+        PostgresqlHarnessRows.timestamp(entry.createdAt()),
+        encodeEntryProviderReplayState(entry));
     entryPathCache.put(entry.id(), candidatePath);
+  }
+
+  private static String encodeEntryProviderReplayState(Entry entry) {
+    return entry.providerReplayState() == null
+        ? null
+        : PostgresqlHarnessRows.PROVIDER_REPLAY_STATES.encode(entry.providerReplayState());
   }
 
   @Override
@@ -902,10 +909,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         """
         insert into harness_model_invocation (
             id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec, status, attempt,
-            stream_checkpoint, result, error, result_entry_id, failed_attempts, created_at, updated_at
+            stream_checkpoint, result, error, result_entry_id, failed_attempts, created_at, updated_at,
+            provider_replay_state
         ) values (
             ?, ?, ?, ?, cast(? as jsonb), ?, ?, cast(? as jsonb), cast(? as jsonb),
-            cast(? as jsonb), ?, cast(? as jsonb), ?, ?
+            cast(? as jsonb), ?, cast(? as jsonb), ?, ?, cast(? as jsonb)
         )
         """,
         invocation.id(),
@@ -921,7 +929,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         invocation.resultEntryId(),
         PostgresqlHarnessRows.MODEL_FAILED_ATTEMPTS.encode(invocation.failedAttempts()),
         PostgresqlHarnessRows.timestamp(invocation.createdAt()),
-        PostgresqlHarnessRows.timestamp(invocation.updatedAt()));
+        PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
+        encodeModelProviderReplayState(invocation));
     lock(lockKey);
   }
 
@@ -953,7 +962,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 error = cast(? as jsonb),
                 result_entry_id = ?,
                 failed_attempts = cast(? as jsonb),
-                updated_at = ?
+                updated_at = ?,
+                provider_replay_state = cast(? as jsonb)
             where id = ?
             """,
             invocation.status().name(),
@@ -964,8 +974,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             invocation.resultEntryId(),
             PostgresqlHarnessRows.MODEL_FAILED_ATTEMPTS.encode(invocation.failedAttempts()),
             PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
+            encodeModelProviderReplayState(invocation),
             invocation.id());
     requireSingleUpdate(updated, "model invocation", invocation.id());
+  }
+
+  private static String encodeModelProviderReplayState(ModelInvocation invocation) {
+    return invocation.providerReplayState() == null
+        ? null
+        : PostgresqlHarnessRows.PROVIDER_REPLAY_STATES.encode(invocation.providerReplayState());
   }
 
   @Override

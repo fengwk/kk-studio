@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -42,6 +43,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
@@ -198,6 +202,105 @@ class ModelRequestMaterializerTest {
         CompactionPrompts.summaryUserPrompt(input.messages(), input.previousSummary()),
         textOf(request.messages().get(1)));
     assertTrue(request.tools().isEmpty());
+  }
+
+  @Test
+  void liveHistoryTransmitsReplayState() {
+    ProviderReplayState replayState = sampleReplayState();
+    List<Entry> entries = new ArrayList<>();
+    entries.add(entry(1, 0, new RootPayload(SETTINGS)));
+    entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(3, 2, user("user question")));
+    // 带 replayState 的 assistant entry
+    entries.add(
+        new Entry(id(4L), id(100L), id(3L), assistant("assistant answer"), T0, replayState));
+
+    ProviderRequest request =
+        MATERIALIZER.materialize(
+            new EntryPath(entries), liveSpec(List.of(AgentMessage.system("sys")), bashBinding()));
+
+    assertEquals(3, request.messages().size());
+    // index 0: sys
+    // index 1: user
+    // index 2: assistant
+    ProviderMessage assistantMsg = request.messages().get(2);
+    assertEquals(replayState, assistantMsg.replayState());
+  }
+
+  @Test
+  void compactionSuppressesOldTailReplayStateAndPreservesNewTail() {
+    ProviderReplayState oldReplayState = sampleReplayState();
+    ProviderReplayState newReplayState = sampleReplayState();
+
+    List<Entry> entries = new ArrayList<>();
+    entries.add(entry(1, 0, new RootPayload(SETTINGS)));
+    entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(3, 2, user("old user")));
+    // old tail assistant: 带有 oldReplayState，且处于 cutEntryId(4) 到 compaction result(7) 之间
+    entries.add(
+        new Entry(id(4L), id(100L), id(3L), assistant("old assistant"), T0, oldReplayState));
+    entries.add(
+        entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
+
+    CompactionStart completed =
+        new CompactionStart(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            SETTINGS.model(),
+            id(4L),
+            null,
+            null);
+    entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
+    entries.add(entry(7, 6, new CompactionPayload("summary")));
+    entries.add(
+        entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)));
+
+    // compaction 之后的新 turn
+    entries.add(entry(9, 8, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(10, 9, user("new user")));
+    // new tail assistant: 带有 newReplayState
+    entries.add(
+        new Entry(id(11L), id(100L), id(10L), assistant("new assistant"), T0, newReplayState));
+
+    ProviderRequest request =
+        MATERIALIZER.materialize(
+            new EntryPath(entries), liveSpec(List.of(AgentMessage.system("sys")), bashBinding()));
+
+    // 结构：
+    // 0: sys (null replay)
+    // 1: summary (USER wrapper, null replay)
+    // 2: old assistant (retained old tail: replay 必须被压制为 null)
+    // 3: new user (null replay)
+    // 4: new assistant (post-compaction new tail: replay 必须保留)
+    assertEquals(5, request.messages().size());
+    assertEquals("sys", textOf(request.messages().get(0)));
+    assertFalse(request.messages().get(0).hasReplayState());
+
+    assertEquals(CompactionPrompts.compactedContext("summary"), textOf(request.messages().get(1)));
+    assertFalse(request.messages().get(1).hasReplayState());
+
+    assertEquals("old assistant", textOf(request.messages().get(2)));
+    assertFalse(
+        request.messages().get(2).hasReplayState(),
+        "retained old tail assistant entry's replay state must be suppressed");
+
+    assertEquals("new user", textOf(request.messages().get(3)));
+    assertFalse(request.messages().get(3).hasReplayState());
+
+    assertEquals("new assistant", textOf(request.messages().get(4)));
+    assertTrue(
+        request.messages().get(4).hasReplayState(),
+        "post-compaction assistant entry's replay state must be preserved");
+    assertEquals(newReplayState, request.messages().get(4).replayState());
+  }
+
+  private static ProviderReplayState sampleReplayState() {
+    return new ProviderReplayState(
+        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+        new ProviderReplayAffinity(
+            ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "claude-3-5-sonnet"),
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 
   private static EntryPath conversationPath(int closedTurns) {

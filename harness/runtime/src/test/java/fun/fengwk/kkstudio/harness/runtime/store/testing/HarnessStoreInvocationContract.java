@@ -28,9 +28,11 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.withRendererKey;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -59,8 +61,12 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
@@ -96,6 +102,84 @@ public abstract class HarnessStoreInvocationContract {
   abstract HarnessStore createStore();
 
   // ---- 模型调用 ----
+
+  @Test
+  void modelInvocationAndEntryRoundtripProviderReplayState() {
+    ProviderReplayState replayState = sampleReplayState();
+
+    ModelRequestSpec requestSpec = modelRequest();
+    ProviderResponse response = assistantResponse();
+
+    // 1. 插入 READY modelInvocation 并推进到带有 replayState 的 SUCCEEDED
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  TestIds.id(101),
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+          ModelInvocation current = tx.lockModelInvocation(TestIds.id(101)).orElseThrow();
+          tx.updateModelInvocation(current.beginDispatch(T2));
+          current = tx.lockModelInvocation(TestIds.id(101)).orElseThrow();
+          tx.updateModelInvocation(current.markRunning(T2));
+          current = tx.lockModelInvocation(TestIds.id(101)).orElseThrow();
+          tx.updateModelInvocation(current.succeed(response, null, replayState, T2));
+        });
+
+    ModelInvocation foundModel =
+        store.transaction(tx -> tx.findModelInvocation(TestIds.id(101)).orElseThrow());
+    assertEquals(replayState, foundModel.providerReplayState());
+
+    // 2. 插入按照 turn 协议合法的 user entry 与带有 matching replayState 的 assistant entry
+    UUID userEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID assistantEntryId = TestIds.id(102);
+    Entry assistant =
+        new Entry(
+            assistantEntryId,
+            baseline.sessionId(),
+            userEntryId,
+            mappedAssistant(requestSpec, response),
+            T2,
+            replayState);
+
+    inTransaction(store, tx -> tx.insertEntry(assistant));
+
+    Entry foundEntry = store.transaction(tx -> tx.findEntry(assistantEntryId).orElseThrow());
+    assertEquals(replayState, foundEntry.providerReplayState());
+
+    var loadedPath = store.transaction(tx -> tx.loadEntryPath(assistantEntryId));
+    assertEquals(replayState, loadedPath.head().providerReplayState());
+
+    // 3. attachResultEntry 清空 invocation replayState
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation current = tx.lockModelInvocation(TestIds.id(101)).orElseThrow();
+          tx.updateModelInvocation(current.attachResultEntry(assistantEntryId, T3));
+        });
+
+    ModelInvocation foundAttached =
+        store.transaction(tx -> tx.findModelInvocation(TestIds.id(101)).orElseThrow());
+    assertNull(foundAttached.providerReplayState());
+    assertEquals(assistantEntryId, foundAttached.resultEntryId());
+  }
+
+  private static ProviderReplayState sampleReplayState() {
+    return new ProviderReplayState(
+        ProviderReplayFormat.OPENAI_RESPONSES,
+        new ProviderReplayAffinity(
+            ProviderType.OPENAI_RESPONSES, "openai", UUID.randomUUID(), "gpt-4o"),
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        JsonNodeFactory.instance.objectNode().put("prompt_tokens", 10));
+  }
 
   @Test
   void modelAndToolTimestampsRejectSubMillisecondPrecision() {

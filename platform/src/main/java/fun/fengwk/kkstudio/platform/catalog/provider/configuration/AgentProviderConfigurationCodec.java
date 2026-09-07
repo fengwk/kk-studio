@@ -62,6 +62,17 @@ public final class AgentProviderConfigurationCodec {
     }
   }
 
+  /** 比较两份配置在剔除超时字段后是否在结构上完全等价（用于判断是否需要轮换 connection_generation_id）。 */
+  public boolean isProtocolConfigEqual(String configJson1, String configJson2) {
+    ObjectNode node1 = readObject(configJson1).deepCopy();
+    ObjectNode node2 = readObject(configJson2).deepCopy();
+    node1.remove(MODEL_CALL_TIMEOUT_MILLIS);
+    node1.remove(MODEL_CALL_IDLE_TIMEOUT_MILLIS);
+    node2.remove(MODEL_CALL_TIMEOUT_MILLIS);
+    node2.remove(MODEL_CALL_IDLE_TIMEOUT_MILLIS);
+    return node1.equals(node2);
+  }
+
   private ObjectNode readObject(String configJson) {
     if (configJson == null || configJson.isBlank()) {
       return objectMapper.createObjectNode();

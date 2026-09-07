@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.platform.catalog.provider.configuration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -64,6 +66,20 @@ class AgentProviderConfigurationCodecTest {
             () -> failingCodec.mergeTimeoutPolicy("{}", 1_000L, 2_000L));
 
     assertEquals("cannot encode provider configuration", error.getMessage());
+  }
+
+  @Test
+  void isProtocolConfigEqualIgnoresTimeoutsAndChecksStructuralEquality() {
+    assertTrue(codec.isProtocolConfigEqual(null, "{}"));
+    assertTrue(
+        codec.isProtocolConfigEqual(
+            "{\"modelCallTimeoutMillis\":1000}", "{\"modelCallIdleTimeoutMillis\":500}"));
+    assertTrue(
+        codec.isProtocolConfigEqual(
+            "{\"custom\":\"value\",\"modelCallTimeoutMillis\":1000}",
+            "{\"custom\":\"value\",\"modelCallIdleTimeoutMillis\":2000}"));
+    assertFalse(codec.isProtocolConfigEqual("{\"custom\":\"value1\"}", "{\"custom\":\"value2\"}"));
+    assertFalse(codec.isProtocolConfigEqual("{\"extra\":1}", "{}"));
   }
 
   private static final class FailingWriteObjectMapper extends ObjectMapper {

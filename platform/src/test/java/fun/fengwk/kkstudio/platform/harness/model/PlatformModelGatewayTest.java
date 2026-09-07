@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
@@ -364,7 +365,16 @@ class PlatformModelGatewayTest {
       fixture.startAndActivate();
       fixture.provider.awaitStarted();
 
-      fixture.provider.handler.get().onComplete(null, fixture.provider.stream);
+      fixture.provider.handler.get().onComplete((ProviderResponse) null, fixture.provider.stream);
+      fixture.listener.awaitTerminal();
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, fixture.listener.failed.get().kind());
+    }
+
+    try (Fixture fixture = new Fixture()) {
+      fixture.startAndActivate();
+      fixture.provider.awaitStarted();
+
+      fixture.provider.handler.get().onComplete((ProviderCompletion) null, fixture.provider.stream);
       fixture.listener.awaitTerminal();
       assertEquals(ProviderErrorKind.INVALID_REQUEST, fixture.listener.failed.get().kind());
     }

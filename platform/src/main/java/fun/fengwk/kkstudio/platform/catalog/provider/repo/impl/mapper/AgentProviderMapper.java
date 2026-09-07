@@ -19,7 +19,7 @@ import java.util.List;
 public interface AgentProviderMapper extends BaseMapper {
 
   String COLUMNS =
-      "name, description, provider_type, base_url, credential, config, version, "
+      "name, description, provider_type, base_url, credential, config, connection_generation_id, version, "
           + "created_at as create_time, updated_at as update_time";
 
   @Select("select count(*) from agent_provider")
@@ -39,6 +39,7 @@ public interface AgentProviderMapper extends BaseMapper {
         @Result(column = "base_url", property = "baseUrl"),
         @Result(column = "credential", property = "credential"),
         @Result(column = "config", property = "configJson"),
+        @Result(column = "connection_generation_id", property = "connectionGenerationId"),
         @Result(column = "version", property = "version"),
         @Result(column = "create_time", property = "createTime"),
         @Result(column = "update_time", property = "updateTime")
@@ -57,10 +58,10 @@ public interface AgentProviderMapper extends BaseMapper {
       """
       insert into agent_provider (
           name, description, provider_type, base_url, credential, config,
-          created_at, updated_at, version
+          connection_generation_id, created_at, updated_at, version
       ) values (
           #{name}, #{description}, #{providerType}, #{baseUrl}, #{credential},
-          cast(#{configJson} as jsonb), current_timestamp, current_timestamp, 0
+          cast(#{configJson} as jsonb), #{connectionGenerationId}, current_timestamp, current_timestamp, 0
       )
       """)
   int insert(AgentProviderDO provider);
@@ -71,6 +72,7 @@ public interface AgentProviderMapper extends BaseMapper {
       set description = #{provider.description}, provider_type = #{provider.providerType},
           base_url = #{provider.baseUrl},
           credential = #{provider.credential}, config = cast(#{provider.configJson} as jsonb),
+          connection_generation_id = #{provider.connectionGenerationId},
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where name = #{provider.name} and version = #{expectedVersion}
       """)
