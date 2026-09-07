@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isFailedAttempt,
   isRealtimeModelDeltaGap,
   isRealtimeToolStreamActive,
   parseRealtimeModelDelta,
@@ -12,6 +13,7 @@ import {
   snapshotToolStream,
 } from '@/features/ai/runtime/thread-realtime-state'
 import type {
+  ModelAttemptFailureDTO,
   ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
@@ -1102,6 +1104,54 @@ describe('thread realtime state', () => {
     expect(isRealtimeToolStreamActive(overlay, invocation(1))).toBe(false)
     expect(isRealtimeToolStreamActive(null, invocation(2))).toBe(false)
     expect(isRealtimeToolStreamActive(overlay, null)).toBe(false)
+  })
+
+  it('checks if an attempt was recorded as failed for the current invocation', () => {
+    // 验证 isFailedAttempt 精确按 modelInvocationId + attempt 匹配，不误伤其他 invocation 或未失败 attempt
+    const invocation: ModelInvocationDTO = {
+      id: 'inv-1',
+      threadId: '7',
+      turnStartEntryId: 'entry-1',
+      requestHeadEntryId: 'entry-1',
+      status: 'READY',
+      attempt: 1,
+      streamCheckpointJson: null,
+      resultJson: null,
+      errorJson: null,
+      resultEntryId: null,
+      createTime: '2026-07-28T10:00:00Z',
+      updateTime: '2026-07-28T10:00:00Z',
+    }
+    const failureForCurrent: ModelAttemptFailureDTO = {
+      modelInvocationId: 'inv-1',
+      turnStartEntryId: 'entry-1',
+      requestHeadEntryId: 'entry-1',
+      attempt: 1,
+      sequence: '2',
+      text: 'partial',
+      thinking: '',
+      errorCode: 'TRANSIENT',
+      errorMessage: 'timeout',
+      failedAt: '2026-07-28T10:00:01Z',
+      retryAt: '2026-07-28T10:00:03Z',
+    }
+    const failureForOther: ModelAttemptFailureDTO = {
+      ...failureForCurrent,
+      modelInvocationId: 'inv-other',
+      attempt: 1,
+    }
+
+    // 1. 匹配当前 invocation 的失败 attempt
+    expect(isFailedAttempt(1, invocation, [failureForCurrent])).toBe(true)
+    // 2. 跨 invocation failure 不误判
+    expect(isFailedAttempt(1, invocation, [failureForOther])).toBe(false)
+    // 3. 当前 invocation 的其他 attempt（未记录失败）不被拦截
+    expect(isFailedAttempt(2, invocation, [failureForCurrent])).toBe(false)
+    // 4. invocation 为 null 或 attempt 非正整数时的安全边界
+    expect(isFailedAttempt(1, null, [failureForCurrent])).toBe(false)
+    expect(isFailedAttempt(0, invocation, [failureForCurrent])).toBe(false)
+    expect(isFailedAttempt(-1, invocation, [failureForCurrent])).toBe(false)
+    expect(isFailedAttempt(1, invocation, [])).toBe(false)
   })
 })
 

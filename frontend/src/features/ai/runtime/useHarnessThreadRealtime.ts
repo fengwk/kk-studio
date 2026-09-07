@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useApplicationEvents } from '@/shared/app-events'
 import {
+  isFailedAttempt,
   isRealtimeModelDeltaGap,
   isRealtimeToolStreamActive,
   parseRealtimeModelDelta,
@@ -15,7 +16,11 @@ import {
   type RealtimeToolStream,
 } from '@/features/ai/runtime/thread-realtime-state'
 import { queryKeys } from '@/shared/lib/query-keys'
-import type { ModelInvocationDTO, ToolInvocationDTO } from '@/shared/api/contracts/ai-runtime'
+import type {
+  ModelAttemptFailureDTO,
+  ModelInvocationDTO,
+  ToolInvocationDTO,
+} from '@/shared/api/contracts/ai-runtime'
 import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types'
 
 export interface HarnessThreadRealtimeState {
@@ -39,6 +44,7 @@ export function useHarnessThreadRealtime(
   version: string | undefined,
   modelInvocation: ModelInvocationDTO | null,
   toolInvocations: ToolInvocationDTO[],
+  modelAttemptFailures: readonly ModelAttemptFailureDTO[] = [],
 ): HarnessThreadRealtimeState {
   const queryClient = useQueryClient()
   const applicationEvents = useApplicationEvents()
@@ -54,6 +60,7 @@ export function useHarnessThreadRealtime(
   const toolStreamsRef = useRef<Map<string, RealtimeToolStream>>(new Map())
   const invocationRef = useRef<ModelInvocationDTO | null>(modelInvocation)
   const toolInvocationsRef = useRef<ToolInvocationDTO[]>(toolInvocations)
+  const modelAttemptFailuresRef = useRef<readonly ModelAttemptFailureDTO[]>(modelAttemptFailures)
   const gapRef = useRef<{
     invocationId: string
     attempt: number
@@ -68,6 +75,7 @@ export function useHarnessThreadRealtime(
     queryClient,
     modelStreamRef,
     invocationRef,
+    modelAttemptFailuresRef,
   )
 
   useEffect(() => {
@@ -82,6 +90,7 @@ export function useHarnessThreadRealtime(
   useEffect(() => {
     invocationRef.current = modelInvocation
     toolInvocationsRef.current = toolInvocations
+    modelAttemptFailuresRef.current = modelAttemptFailures
     const snapshot = snapshotModelStream(threadId, modelInvocation)
     const current = modelStreamRef.current
     let next = current
@@ -184,7 +193,7 @@ export function useHarnessThreadRealtime(
       toolStreamsRef.current = streams
       setToolStreams(streams)
     }
-  }, [modelInvocation, threadId, toolInvocations])
+  }, [modelAttemptFailures, modelInvocation, threadId, toolInvocations])
 
   useEffect(() => {
     // 只有 Thread 消失或订阅真正被禁用才清空 overlays；`subscription == null` 或
@@ -224,6 +233,11 @@ export function useHarnessThreadRealtime(
           || durable.errorJson != null
           || durable.resultEntryId != null
         ) {
+          return
+        }
+        // Durable failedAttempts fence：已记录失败的旧 attempt 迟到 MODEL_DELTA
+        // 绝不能当作当前活动流应用。
+        if (isFailedAttempt(delta.attempt, durable, modelAttemptFailuresRef.current)) {
           return
         }
         const snapshot = snapshotModelStream(threadId, durable)
@@ -473,6 +487,7 @@ function useGapRecoveryLoop(
   queryClient: QueryClient,
   modelStreamRef: { current: RealtimeModelStream | null },
   invocationRef: { current: ModelInvocationDTO | null },
+  modelAttemptFailuresRef: { current: readonly ModelAttemptFailureDTO[] },
 ): {
   requestGapRecovery: (
     recoveryThreadId: string,
@@ -511,6 +526,19 @@ function useGapRecoveryLoop(
     if (recovery == null) {
       return
     }
+    const currentInvocation = invocationRef.current
+    if (
+      currentInvocation == null
+      || currentInvocation.threadId !== recovery.threadId
+      || currentInvocation.attempt !== recovery.attempt
+      || currentInvocation.resultJson != null
+      || currentInvocation.errorJson != null
+      || currentInvocation.resultEntryId != null
+      || isFailedAttempt(recovery.attempt, currentInvocation, modelAttemptFailuresRef.current)
+    ) {
+      recoveryRef.current = null
+      return
+    }
     recoveryBusyRef.current = true
     try {
       let refetchFailed = false
@@ -542,7 +570,7 @@ function useGapRecoveryLoop(
           ) {
             terminal = true
           } else {
-            // 过期（Thread/attempt 变化）或持久化终态：停止并清理。
+            // 过期（Thread/attempt 变化）或持久化终态/失败审计：停止并清理。
             const invocation = invocationRef.current
             if (
               invocation == null
@@ -551,6 +579,7 @@ function useGapRecoveryLoop(
               || invocation.resultJson != null
               || invocation.errorJson != null
               || invocation.resultEntryId != null
+              || isFailedAttempt(recovery.attempt, invocation, modelAttemptFailuresRef.current)
             ) {
               terminal = true
             }
@@ -575,7 +604,7 @@ function useGapRecoveryLoop(
     if (recoveryRef.current != null) {
       scheduleRecoveryTickRef.current()
     }
-  }, [queryClient, modelStreamRef, invocationRef])
+  }, [queryClient, modelStreamRef, invocationRef, modelAttemptFailuresRef])
 
   const requestGapRecovery = useCallback(
     (
