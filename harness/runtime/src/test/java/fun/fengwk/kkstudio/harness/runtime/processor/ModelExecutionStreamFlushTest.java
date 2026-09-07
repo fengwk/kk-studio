@@ -1064,48 +1064,51 @@ class ModelExecutionStreamFlushTest {
   }
 
   /**
-   * 意图：验证 activation gate 打开前，普通 EVENT 的缓冲数量严格有界（达到 maxEvents 后第 max+1 个事件被拒绝并收敛为 abandoned）， 而合法
-   * terminal 信号在容量边界（pending.size() >= maxEvents）仍不被阻断，后续 activate 成功落地终态。
+   * 意图：验证 activation gate 的普通 EVENT 缓冲数量严格有界；max+1 属于本地背压失败，保留 RUNNING/claim 供 lease recovery，而
+   * terminal 在容量边界仍可落地。
    */
   @Test
   void gateBufferPendingCapacityMaxPlusOneRejectsOrdinaryEventWhileTerminalIsAccepted() {
     StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+    Fixture overflow = createFixture(flushConfig, NO_RETRY);
+    AtomicBoolean overflowHandleCancelled = new AtomicBoolean();
+    ModelGateway.Handle overflowingHandle =
+        new ModelGateway.Handle() {
+          @Override
+          public void activate() {
+            overflow.listener().onEvent(new ProviderStreamEvent.TextDelta("e1"));
+            overflow.listener().onEvent(new ProviderStreamEvent.TextDelta("e2"));
+            overflow.listener().onEvent(new ProviderStreamEvent.TextDelta("e3"));
+          }
+
+          @Override
+          public void cancel() {
+            overflowHandleCancelled.set(true);
+          }
+        };
+
+    assertEquals(ProcessResult.LOST_OWNERSHIP, overflow.start(overflowingHandle));
+    assertTrue(overflow.execution.abandoned());
+    assertTrue(overflowHandleCancelled.get());
+    assertEquals(ModelInvocationStatus.RUNNING, overflow.currentModel().status());
+    assertNull(overflow.currentModel().error());
+    assertTrue(overflow.currentModel().failedAttempts().isEmpty());
+    Work overflowWork =
+        overflow
+            .store
+            .delegate()
+            .transaction(
+                tx ->
+                    tx.findWork(new WorkTarget(WorkTargetType.MODEL, overflow.invocationId))
+                        .orElseThrow());
+    assertNotNull(overflowWork.leaseToken());
+    assertFalse(overflow.processor.hasActiveExecution());
+    assertTrue(overflow.sink.deltas().isEmpty());
+
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
-    Baseline baseline = seedBaseline(store.delegate(), NOW);
-    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
     RecordingSink sink = new RecordingSink();
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     executorsToClose.add(scheduler);
-
-    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
-
-    // 1. 验证普通事件在 max+1 时被拒绝并触发 abandon
-    ModelExecution execution1 =
-        new ModelExecution(
-            store,
-            sink,
-            claim,
-            baseline.threadId(),
-            1,
-            false,
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            scheduler,
-            Runnable::run,
-            e -> {});
-
-    // 前 2 个事件填满容量
-    execution1.onEvent(new ProviderStreamEvent.TextDelta("e1"));
-    execution1.onEvent(new ProviderStreamEvent.TextDelta("e2"));
-    assertFalse(execution1.abandoned(), "execution must not be abandoned at capacity");
-
-    // 第 3 个普通事件 (maxEvents + 1)：超出容量上限，被背压拒绝并收敛为 abandoned
-    execution1.onEvent(new ProviderStreamEvent.TextDelta("e3"));
-    assertTrue(
-        execution1.abandoned(),
-        "max+1 ordinary event must exceed pending capacity and abandon execution");
-
-    // 2. 验证 terminal 信号在容量边界 (pending 已满 maxEvents) 依然不被阻断
     Baseline baseline2 = seedBaseline(store.delegate(), NOW.plusSeconds(10));
     UUID invocationId2 =
         seedInvocation(store.delegate(), baseline2, requestSpec(), NOW.plusSeconds(10));
@@ -1994,12 +1997,17 @@ class ModelExecutionStreamFlushTest {
     }
 
     void start() {
-      gateway.queue(new ModelGateway.Started(handle));
+      assertEquals(ProcessResult.STARTED, start(handle));
+    }
+
+    ProcessResult start(ModelGateway.Handle startedHandle) {
+      gateway.queue(new ModelGateway.Started(startedHandle));
       ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
-      assertEquals(ProcessResult.STARTED, processor.process(claim));
+      ProcessResult result = processor.process(claim);
       this.execution = (ModelExecution) gateway.listener(invocationId);
       // 排除 seed 与 markRunning 的初始更新，启动后重置计数器
       store.resetUpdateCount();
+      return result;
     }
 
     ModelGateway.Listener listener() {

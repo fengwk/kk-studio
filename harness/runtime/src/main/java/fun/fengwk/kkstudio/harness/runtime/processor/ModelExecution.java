@@ -364,17 +364,19 @@ final class ModelExecution implements ModelGateway.Listener {
 
   private void checkPendingCapacityLocked(ProviderStreamEvent event) {
     if (pending.size() >= config.streamFlushConfig().maxEvents()) {
-      throw new IllegalStateException("activation pending capacity exceeded: " + pending.size());
+      throw new BatchInfrastructureException(
+          "activation pending capacity exceeded: " + pending.size());
     }
     long eventBytes = StreamFlushConfig.eventPayloadBytes(event);
     long newBytes;
     try {
       newBytes = Math.addExact(pendingPayloadBytes, eventBytes);
     } catch (ArithmeticException overflow) {
-      throw new IllegalStateException("activation pending payload bytes overflow", overflow);
+      throw new BatchInfrastructureException("activation pending payload bytes overflow", overflow);
     }
     if (!pending.isEmpty() && newBytes > config.streamFlushConfig().maxPayloadBytes()) {
-      throw new IllegalStateException("activation pending payload bytes exceeded: " + newBytes);
+      throw new BatchInfrastructureException(
+          "activation pending payload bytes exceeded: " + newBytes);
     }
     pendingPayloadBytes = newBytes;
   }
@@ -409,7 +411,7 @@ final class ModelExecution implements ModelGateway.Listener {
   private Applied handleSignalFailure(RuntimeException failure, boolean isTerminalSignal) {
     if (failure instanceof BatchInfrastructureException batchError) {
       log.warn(
-          "cannot persist model batch flush for {}: {}",
+          "model stream batching failed for {}: {}",
           invocationId,
           ProcessorExceptions.describe(batchError));
       abandon();
