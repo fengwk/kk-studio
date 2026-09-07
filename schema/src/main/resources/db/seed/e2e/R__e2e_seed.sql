@@ -17,29 +17,36 @@ delete from agent_provider where name in (
 );
 
 insert into agent_provider (
-    name, description, provider_type, base_url, credential, config,
+    name, description, provider_type, base_url, credential, config, connection_generation_id,
     created_at, updated_at, version
 ) values
     ('minimax', 'MiniMax (OpenAI Responses).', 'openai_response', null, null,
      '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
+     '00000000-0000-0000-0000-000000000001'::uuid,
      current_timestamp, current_timestamp, 0),
     ('openai', 'OpenAI (OpenAI Responses).', 'openai_response', null, null,
      '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
+     '00000000-0000-0000-0000-000000000002'::uuid,
      current_timestamp, current_timestamp, 0),
     ('xai', 'xAI / Grok (OpenAI Responses).', 'openai_response', null, null,
      '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
+     '00000000-0000-0000-0000-000000000003'::uuid,
      current_timestamp, current_timestamp, 0),
     ('deepseek', 'DeepSeek (OpenAI Chat Completions).', 'openai', null, null,
      '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
+     '00000000-0000-0000-0000-000000000004'::uuid,
      current_timestamp, current_timestamp, 0),
     ('google', 'Google Gemini.', 'google', null, null,
      '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
+     '00000000-0000-0000-0000-000000000005'::uuid,
      current_timestamp, current_timestamp, 0),
     ('anthropic', 'Anthropic.', 'anthropic', null, null,
      '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
+     '00000000-0000-0000-0000-000000000006'::uuid,
      current_timestamp, current_timestamp, 0),
     ('zai', 'ZAI (OpenAI Chat Completions).', 'openai', null, null,
      '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
+     '00000000-0000-0000-0000-000000000007'::uuid,
      current_timestamp, current_timestamp, 0);
 
 -- Effective Pi 0.82.1 model snapshot. `minimax-responses` is mapped to provider

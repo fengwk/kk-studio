@@ -5,6 +5,7 @@ import lombok.Data;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /** 全局 Agent provider 资源。 */
 @Data
@@ -30,6 +31,9 @@ public class AgentProvider {
    * config} jsonb 列，必填。
    */
   private String configJson;
+
+  /** Provider 协议/凭据连接世代标识（UUID，仅配置或凭据变更时轮换）。 */
+  private UUID connectionGenerationId;
 
   /** 乐观锁版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据。 */
   private Long version;

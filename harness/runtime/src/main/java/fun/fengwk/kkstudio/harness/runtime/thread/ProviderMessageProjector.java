@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
@@ -22,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 将语义 Context 投影为与 Provider SDK 无关的 ProviderMessage。
@@ -33,11 +35,35 @@ import java.util.List;
 public final class ProviderMessageProjector {
   private static final String ORPHAN_RESULT_TEXT = "No result provided";
 
+  public record ProjectedMessage(AgentMessage message, ProviderReplayState replayState) {
+    public ProjectedMessage {
+      Objects.requireNonNull(message, "message");
+      if (replayState != null && message.role() != AgentMessageRole.ASSISTANT) {
+        throw new IllegalArgumentException("replayState is only allowed for ASSISTANT messages");
+      }
+    }
+
+    public static ProjectedMessage of(AgentMessage message) {
+      return new ProjectedMessage(message, null);
+    }
+
+    public static ProjectedMessage of(AgentMessage message, ProviderReplayState replayState) {
+      return new ProjectedMessage(message, replayState);
+    }
+  }
+
   public List<ProviderMessage> project(List<AgentMessage> messages) {
+    Objects.requireNonNull(messages, "messages");
+    return projectSources(messages.stream().map(ProjectedMessage::of).toList());
+  }
+
+  public List<ProviderMessage> projectSources(List<ProjectedMessage> sources) {
+    Objects.requireNonNull(sources, "sources");
     List<ProviderMessage> result = new ArrayList<>();
     List<ProviderContentBlock> openToolCalls = new ArrayList<>();
 
-    for (AgentMessage message : messages) {
+    for (ProjectedMessage source : sources) {
+      AgentMessage message = source.message();
       if (message.role() != AgentMessageRole.TOOL && !openToolCalls.isEmpty()) {
         flushOrphanToolResults(result, openToolCalls);
       }
@@ -48,7 +74,8 @@ public final class ProviderMessageProjector {
             openToolCalls.add(toolCall);
           }
         }
-        result.add(new ProviderMessage(ProviderMessageRole.ASSISTANT, contents));
+        result.add(
+            new ProviderMessage(ProviderMessageRole.ASSISTANT, contents, source.replayState()));
         continue;
       }
       if (message.role() == AgentMessageRole.TOOL) {

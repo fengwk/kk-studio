@@ -8,7 +8,9 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
@@ -315,11 +317,16 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   @Override
-  public void onSucceeded(ProviderResponse response) {
+  public void onSucceeded(ProviderCompletion completion) {
     if (abandoned.get() || !terminal.compareAndSet(false, true)) {
       return;
     }
-    deliver(new Pending(PendingKind.SUCCEEDED, null, response, null));
+    deliver(new Pending(PendingKind.SUCCEEDED, null, completion, null));
+  }
+
+  @Override
+  public void onSucceeded(ProviderResponse response) {
+    onSucceeded(new ProviderCompletion(response, null));
   }
 
   @Override
@@ -457,7 +464,7 @@ final class ModelExecution implements ModelGateway.Listener {
   private Applied processSignal(Pending signal) {
     return switch (signal.kind()) {
       case EVENT -> processEvent(signal.event());
-      case SUCCEEDED -> processSucceeded(signal.response());
+      case SUCCEEDED -> processSucceeded(signal.completion());
       case FAILED -> processFailed(signal.error());
       case UNKNOWN -> processUnknown(signal.error());
     };
@@ -541,14 +548,14 @@ final class ModelExecution implements ModelGateway.Listener {
     return Applied.PROGRESSED;
   }
 
-  private Applied processSucceeded(ProviderResponse response) {
+  private Applied processSucceeded(ProviderCompletion completion) {
     List<Publish> publishes = new ArrayList<>();
     Applied applied;
     synchronized (monitor) {
       if (abandoned.get()) {
         return Applied.LOST;
       }
-      applied = finishSuccessLocked(response, publishes);
+      applied = finishSuccessLocked(completion, publishes);
     }
     if (applied == Applied.LOST) {
       return Applied.LOST;
@@ -782,8 +789,9 @@ final class ModelExecution implements ModelGateway.Listener {
     return model.status() == ModelInvocationStatus.RUNNING && model.attempt() == attempt;
   }
 
-  private Applied finishSuccessLocked(ProviderResponse response, List<Publish> publishes) {
+  private Applied finishSuccessLocked(ProviderCompletion completion, List<Publish> publishes) {
     cancelBatchTimerLocked();
+    ProviderResponse response = completion.response();
     if (response != null && response.stopReason() == GenerationStopReason.FILTERED) {
       ProviderResponse validatedResponse;
       try {
@@ -798,7 +806,7 @@ final class ModelExecution implements ModelGateway.Listener {
                 ProviderErrorKind.INVALID_RESPONSE, message(failure, "invalid provider response")),
             publishes);
       }
-      boolean committed = safeTerminal(() -> commitSuccess(validatedResponse, null));
+      boolean committed = safeTerminal(() -> commitSuccess(validatedResponse, null, null));
       if (!committed) {
         return Applied.LOST;
       }
@@ -821,9 +829,9 @@ final class ModelExecution implements ModelGateway.Listener {
               ProviderErrorKind.INVALID_RESPONSE, message(failure, "invalid provider response")),
           publishes);
     }
-    ModelStreamAccumulator.Completion completion = prepared.apply();
+    ModelStreamAccumulator.Completion accCompletion = prepared.apply();
     List<BatchItem> gapItems = new ArrayList<>();
-    for (ProviderStreamEvent gap : completion.gaps()) {
+    for (ProviderStreamEvent gap : accCompletion.gaps()) {
       long seq = nextSequence();
       boolean isSafe = isSafeDelta(gap);
       if (isSafe) {
@@ -839,7 +847,19 @@ final class ModelExecution implements ModelGateway.Listener {
       finalCheckpoint = new StreamCheckpoint(attempt, lastSafeSequence, text, thinking);
     }
     final StreamCheckpoint checkpointToCommit = finalCheckpoint;
-    boolean committed = safeTerminal(() -> commitSuccess(validatedResponse, checkpointToCommit));
+
+    ProviderReplayState replayState = null;
+    if (!compaction
+        && (validatedResponse.stopReason() == GenerationStopReason.COMPLETE
+            || validatedResponse.stopReason() == GenerationStopReason.LENGTH)
+        && validatedResponse.toolCallDiagnostics().isEmpty()) {
+      replayState = completion.replayState();
+    }
+    final ProviderReplayState replayStateToCommit = replayState;
+
+    boolean committed =
+        safeTerminal(
+            () -> commitSuccess(validatedResponse, checkpointToCommit, replayStateToCommit));
     if (!committed) {
       return Applied.LOST;
     }
@@ -993,7 +1013,10 @@ final class ModelExecution implements ModelGateway.Listener {
     return effective;
   }
 
-  private boolean commitSuccess(ProviderResponse response, StreamCheckpoint finalCheckpoint) {
+  private boolean commitSuccess(
+      ProviderResponse response,
+      StreamCheckpoint finalCheckpoint,
+      ProviderReplayState replayState) {
     Instant now = clock.instant();
     try {
       return Boolean.TRUE.equals(
@@ -1014,7 +1037,8 @@ final class ModelExecution implements ModelGateway.Listener {
                 if (tx.lockClaimedWork(claim, now).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
-                tx.updateModelInvocation(model.succeed(response, finalCheckpoint, now));
+                tx.updateModelInvocation(
+                    model.succeed(response, finalCheckpoint, replayState, now));
                 tx.updateThread(thread.touchVersion(now));
                 tx.completeWork(claim, now);
                 return true;
@@ -1234,7 +1258,7 @@ final class ModelExecution implements ModelGateway.Listener {
   private record Pending(
       PendingKind kind,
       ProviderStreamEvent event,
-      ProviderResponse response,
+      ProviderCompletion completion,
       ModelInvocationError error) {}
 
   private record Publish(ProviderStreamEvent event, long sequence) {}

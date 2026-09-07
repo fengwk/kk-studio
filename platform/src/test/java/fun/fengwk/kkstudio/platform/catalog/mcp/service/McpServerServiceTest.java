@@ -355,7 +355,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
   private void insertFakeAgentDefinitionReferencingTool(String agentToolId) {
     // 插入关联的 Provider 与 Model 满足 FK 约束
     jdbc.update(
-        "insert into agent_provider (name, provider_type, config) values ('test_p_mcp', 'openai', '{}'::jsonb) on conflict do nothing");
+        "insert into agent_provider (name, provider_type, config, connection_generation_id) values ('test_p_mcp', 'openai', '{}'::jsonb, '00000000-0000-0000-0000-000000000099'::uuid) on conflict do nothing");
     jdbc.update(
         "insert into agent_model (provider_name, name, config) "
             + "values ('test_p_mcp', 'm1', '{}'::jsonb) on conflict do nothing");

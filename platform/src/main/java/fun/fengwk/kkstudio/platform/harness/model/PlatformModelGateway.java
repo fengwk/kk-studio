@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
@@ -482,12 +483,21 @@ public final class PlatformModelGateway implements ModelGateway {
     }
 
     @Override
+    public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+      if (completion == null) {
+        enqueue(new Signal.Invalid("provider returned a null completion"));
+        return;
+      }
+      enqueue(new Signal.Complete(completion, stream));
+    }
+
+    @Override
     public void onComplete(ProviderResponse response, ProviderStream stream) {
       if (response == null) {
         enqueue(new Signal.Invalid("provider returned a null response"));
         return;
       }
-      enqueue(new Signal.Complete(response, stream));
+      onComplete(new ProviderCompletion(response, null), stream);
     }
 
     @Override
@@ -614,7 +624,7 @@ public final class PlatformModelGateway implements ModelGateway {
         return true;
       }
       // terminal 选择已经发生：listener 拒绝只记录，绝不发出第二个 terminal 回调。
-      deliverTerminal(() -> listener.onSucceeded(signal.response()));
+      deliverTerminal(() -> listener.onSucceeded(signal.completion()));
       return true;
     }
 
@@ -717,7 +727,7 @@ public final class PlatformModelGateway implements ModelGateway {
 
     record Event(ProviderStreamEvent event, ProviderStream stream) implements Signal {}
 
-    record Complete(ProviderResponse response, ProviderStream stream) implements Signal {}
+    record Complete(ProviderCompletion completion, ProviderStream stream) implements Signal {}
 
     record Error(ProviderException error, ProviderStream stream) implements Signal {}
 

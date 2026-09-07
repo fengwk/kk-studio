@@ -97,7 +97,7 @@ class ModelGatewayTest {
           public void onUnknown(ModelInvocationError error) {}
         };
     listener.onEvent(new ProviderStreamEvent.TextDelta("hello"));
-    listener.onSucceeded(null);
+    listener.onSucceeded((ProviderResponse) null);
     listener.onFailed(null);
     listener.onUnknown(null);
   }

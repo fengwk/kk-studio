@@ -9,6 +9,9 @@ import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 
+import java.util.Objects;
+import java.util.UUID;
+
 /** 规范化可变的 provider 配置，同时保证公开 DTO 不携带凭据。 */
 @Component
 final class AgentProviderMutationFactory {
@@ -31,6 +34,7 @@ final class AgentProviderMutationFactory {
   AgentProvider newProvider(String name, AgentProviderEditablePropertiesDTO properties) {
     Mutation mutation = newMutation(properties, name, null, null, true);
     AgentProvider provider = new AgentProvider();
+    provider.setConnectionGenerationId(UUID.randomUUID());
     apply(provider, mutation);
     return provider;
   }
@@ -43,6 +47,15 @@ final class AgentProviderMutationFactory {
             provider.getCredential(),
             provider.getConfigJson(),
             false);
+    boolean protocolChanged =
+        !Objects.equals(provider.getProviderType(), mutation.providerType())
+            || !Objects.equals(provider.getBaseUrl(), mutation.baseUrl())
+            || !Objects.equals(provider.getCredential(), mutation.credential())
+            || !configurationCodec.isProtocolConfigEqual(
+                provider.getConfigJson(), mutation.configJson());
+    if (provider.getConnectionGenerationId() == null || protocolChanged) {
+      provider.setConnectionGenerationId(UUID.randomUUID());
+    }
     apply(provider, mutation);
   }
 

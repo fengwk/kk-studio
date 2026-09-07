@@ -92,8 +92,10 @@ class PostgresqlHarnessSchemaTest {
     assertEquals(
         List.of(
             "harness_entry.payload",
+            "harness_entry.provider_replay_state",
             "harness_model_invocation.error",
             "harness_model_invocation.failed_attempts",
+            "harness_model_invocation.provider_replay_state",
             "harness_model_invocation.request_spec",
             "harness_model_invocation.result",
             "harness_model_invocation.stream_checkpoint",

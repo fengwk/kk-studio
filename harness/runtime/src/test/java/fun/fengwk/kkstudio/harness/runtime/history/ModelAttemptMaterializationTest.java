@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -33,6 +34,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
@@ -323,6 +327,101 @@ class ModelAttemptMaterializationTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelAttemptMaterialization.validateAttached(attached, path));
+  }
+
+  @Test
+  void acceptsExactReplayStateMatchOnAssistantEntry() {
+    ProviderReplayState state = sampleReplayState();
+    ModelInvocation stored =
+        new ModelInvocation(
+            id(10L),
+            id(20L),
+            id(2L),
+            id(3L),
+            toolPhaseRequest(),
+            ModelInvocationStatus.SUCCEEDED,
+            1,
+            null,
+            toolResponse(),
+            null,
+            null,
+            List.of(),
+            T2,
+            T6,
+            state);
+
+    Entry assistant = new Entry(id(4L), id(100L), id(3L), assistantToolPayload(), T3, state);
+    ModelInvocation attached = stored.attachResultEntry(assistant.id(), T6);
+    EntryPath path = attachedToolPath(assistant);
+
+    assertDoesNotThrow(() -> ModelAttemptMaterialization.validate(stored, attached, path));
+  }
+
+  @Test
+  void rejectsReplayStateMismatchOnAssistantEntry() {
+    ProviderReplayState state = sampleReplayState();
+    ModelInvocation storedWithReplay =
+        new ModelInvocation(
+            id(10L),
+            id(20L),
+            id(2L),
+            id(3L),
+            toolPhaseRequest(),
+            ModelInvocationStatus.SUCCEEDED,
+            1,
+            null,
+            toolResponse(),
+            null,
+            null,
+            List.of(),
+            T2,
+            T6,
+            state);
+
+    // 1. stored 有 replay 但 entry 没有
+    Entry assistantNoReplay = new Entry(id(4L), id(100L), id(3L), assistantToolPayload(), T3, null);
+    ModelInvocation attached1 = storedWithReplay.attachResultEntry(assistantNoReplay.id(), T6);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validate(
+                storedWithReplay, attached1, attachedToolPath(assistantNoReplay)));
+
+    // 2. stored 没有 replay 但 entry 有
+    ModelInvocation storedNoReplay =
+        new ModelInvocation(
+            id(10L),
+            id(20L),
+            id(2L),
+            id(3L),
+            toolPhaseRequest(),
+            ModelInvocationStatus.SUCCEEDED,
+            1,
+            null,
+            toolResponse(),
+            null,
+            null,
+            List.of(),
+            T2,
+            T6,
+            null);
+    Entry assistantWithReplay =
+        new Entry(id(4L), id(100L), id(3L), assistantToolPayload(), T3, state);
+    ModelInvocation attached2 = storedNoReplay.attachResultEntry(assistantWithReplay.id(), T6);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validate(
+                storedNoReplay, attached2, attachedToolPath(assistantWithReplay)));
+  }
+
+  private static ProviderReplayState sampleReplayState() {
+    return new ProviderReplayState(
+        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+        new ProviderReplayAffinity(
+            ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "claude-3-5-sonnet"),
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 
   @Test
@@ -921,16 +1020,16 @@ class ModelAttemptMaterializationTest {
 
   /** call-1 的 assistant head（payload 与映射一致），可指定 created_at 以满足 retry 链的 parent 时间顺序。 */
   private static Entry assistantToolMessageAt(UUID entryId, UUID parentId, Instant createdAt) {
-    return assistantToolMessageAt(
-        entryId,
-        parentId,
-        createdAt,
-        new MessagePayload(
-            new AgentMessage(
-                AgentMessageRole.ASSISTANT,
-                List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
-            new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
-            null));
+    return assistantToolMessageAt(entryId, parentId, createdAt, assistantToolPayload());
+  }
+
+  private static MessagePayload assistantToolPayload() {
+    return new MessagePayload(
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
+        new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+        null);
   }
 
   /** call-1 的 assistant head，允许自定义完整 payload（供 payload 漂移场景）。 */

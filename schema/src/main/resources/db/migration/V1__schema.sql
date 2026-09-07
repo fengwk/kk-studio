@@ -73,6 +73,7 @@ create table agent_provider (
     base_url        varchar(512),
     credential      varchar(512),
     config          jsonb         not null,
+    connection_generation_id uuid not null,
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
     version         bigint        not null default 0,
@@ -657,6 +658,7 @@ create table harness_entry (
     entry_type varchar(32) not null,
     payload jsonb not null check (jsonb_typeof(payload) = 'object'),
     created_at timestamptz(3) not null,
+    provider_replay_state jsonb,
     constraint uk_harness_entry_session_id unique (session_id, id),
     constraint fk_harness_entry_session foreign key (session_id)
         references harness_session (id),
@@ -682,6 +684,14 @@ create table harness_entry (
     ),
     constraint ck_harness_entry_parent_not_self check (
         parent_entry_id is null or parent_entry_id <> id
+    ),
+    constraint ck_harness_entry_provider_replay_state check (
+        provider_replay_state is null
+        or (
+            jsonb_typeof(provider_replay_state) = 'object'
+            and entry_type = 'MESSAGE'
+            and payload->'message'->>'role' = 'ASSISTANT'
+        )
     )
 );
 
@@ -692,6 +702,7 @@ comment on column harness_entry.parent_entry_id is '父 Entry；ROOT 为 null，
 comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END）';
 comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
 comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度）';
+comment on column harness_entry.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅 ASSISTANT MESSAGE，可空）';
 
 create unique index uk_harness_entry_single_root
     on harness_entry (session_id)
@@ -821,6 +832,7 @@ create table harness_model_invocation (
     failed_attempts jsonb not null check (jsonb_typeof(failed_attempts) = 'array'),
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
+    provider_replay_state jsonb,
     constraint fk_harness_model_invocation_thread foreign key (thread_id)
         references harness_thread (id),
     constraint fk_harness_model_invocation_turn_start foreign key (turn_start_entry_id)
@@ -844,7 +856,16 @@ create table harness_model_invocation (
     constraint ck_harness_model_invocation_terminal_facts check (
         result is null or error is null
     ),
-    constraint ck_harness_model_invocation_time_order check (updated_at >= created_at)
+    constraint ck_harness_model_invocation_time_order check (updated_at >= created_at),
+    constraint ck_harness_model_invocation_provider_replay_state check (
+        provider_replay_state is null
+        or (
+            jsonb_typeof(provider_replay_state) = 'object'
+            and status = 'SUCCEEDED'
+            and result is not null
+            and result_entry_id is null
+        )
+    )
 );
 
 comment on table harness_model_invocation is 'ModelInvocation：一次 model turn 的 durable 生命周期记录（READY/DISPATCHING/RUNNING 与四个 terminal）';
@@ -862,6 +883,7 @@ comment on column harness_model_invocation.result_entry_id is '结果 Entry（As
 comment on column harness_model_invocation.failed_attempts is '由 retry policy 驱动的 append-only TRANSIENT 失败 attempt 历史（JSON array）';
 comment on column harness_model_invocation.created_at is '创建时间（毫秒精度）';
 comment on column harness_model_invocation.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
+comment on column harness_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅未物化结果的 SUCCEEDED 状态，可空）';
 
 create unique index uk_harness_model_invocation_result
     on harness_model_invocation (result_entry_id)

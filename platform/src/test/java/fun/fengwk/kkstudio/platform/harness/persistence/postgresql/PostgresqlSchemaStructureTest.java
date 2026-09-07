@@ -124,6 +124,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "base_url",
         "credential",
         "config",
+        "connection_generation_id",
         "created_at",
         "updated_at",
         "version");
@@ -299,7 +300,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "parent_entry_id",
         "entry_type",
         "payload",
-        "created_at");
+        "created_at",
+        "provider_replay_state");
     assertColumns(
         "harness_thread",
         "id",
@@ -338,7 +340,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "result_entry_id",
         "failed_attempts",
         "created_at",
-        "updated_at");
+        "updated_at",
+        "provider_replay_state");
     assertColumns(
         "harness_tool_invocation",
         "id",
@@ -360,12 +363,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   @Test
   void usesJsonbForStructuredPayloads() throws SQLException {
     assertColumnType("jsonb", "harness_entry", "payload");
+    assertColumnType("jsonb", "harness_entry", "provider_replay_state");
     assertColumnType("jsonb", "harness_thread_command", "payload");
     assertColumnType("jsonb", "harness_model_invocation", "request_spec");
     assertColumnType("jsonb", "harness_model_invocation", "stream_checkpoint");
     assertColumnType("jsonb", "harness_model_invocation", "result");
     assertColumnType("jsonb", "harness_model_invocation", "error");
     assertColumnType("jsonb", "harness_model_invocation", "failed_attempts");
+    assertColumnType("jsonb", "harness_model_invocation", "provider_replay_state");
     assertColumnType("jsonb", "harness_tool_invocation", "call");
     assertColumnType("jsonb", "harness_tool_invocation", "binding");
     assertColumnType("jsonb", "harness_tool_invocation", "approval");
@@ -1088,8 +1093,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "insert into agent_provider (name, provider_type, config) values (?, 'openai',"
-                    + " '{}'::jsonb)")) {
+                "insert into agent_provider (name, provider_type, config, connection_generation_id) values (?, 'openai',"
+                    + " '{}'::jsonb, gen_random_uuid())")) {
       ps.setString(1, "sequence-fixture-" + System.nanoTime());
       assertEquals(1, ps.executeUpdate());
     }
@@ -1172,8 +1177,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "insert into agent_provider (name, provider_type, config) values (?,"
-                    + " 'openai', '{}'::jsonb)")) {
+                "insert into agent_provider (name, provider_type, config, connection_generation_id) values (?,"
+                    + " 'openai', '{}'::jsonb, gen_random_uuid())")) {
       ps.setString(1, name);
       assertEquals(1, ps.executeUpdate());
     }
@@ -1196,8 +1201,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "insert into agent_provider (name, provider_type, config) values (?,"
-                    + " 'openai', '{}'::jsonb)")) {
+                "insert into agent_provider (name, provider_type, config, connection_generation_id) values (?,"
+                    + " 'openai', '{}'::jsonb, gen_random_uuid())")) {
       ps.setString(1, name);
       assertEquals(1, ps.executeUpdate(), "same-name re-create must succeed after hard delete");
     }
@@ -1340,8 +1345,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "insert into agent_provider (name, provider_type, config, created_at,"
-                    + " updated_at) values (?, 'openai', '{}'::jsonb, ?, ?)")) {
+                "insert into agent_provider (name, provider_type, config, connection_generation_id, created_at,"
+                    + " updated_at) values (?, 'openai', '{}'::jsonb, gen_random_uuid(), ?, ?)")) {
       ps.setString(1, name);
       ps.setTimestamp(2, fixedTimestamp);
       ps.setTimestamp(3, fixedTimestamp);

@@ -47,6 +47,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ContextPressureFacts;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
@@ -170,7 +171,9 @@ abstract class LangChainModelProvider implements ModelProvider {
                   try {
                     flushThinkTags(handler, stream, thinkTagSplitter);
                     handler.onComplete(
-                        toResponse(request, response, thinkTagSplitter, toolCallNormalizer),
+                        new ProviderCompletion(
+                            toResponse(request, response, thinkTagSplitter, toolCallNormalizer),
+                            null),
                         stream);
                   } catch (ProviderException providerFailure) {
                     // 分类过的 Provider 失败（例如不可映射的 finish reason -> INVALID_RESPONSE）原样保留 kind。

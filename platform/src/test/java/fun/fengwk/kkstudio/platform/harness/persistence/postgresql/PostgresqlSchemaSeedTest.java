@@ -99,8 +99,8 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           try (Connection conn = newConnection();
               PreparedStatement ps =
                   conn.prepareStatement(
-                      "insert into agent_provider (name, provider_type, config) values (?,"
-                          + " 'openai', '{}'::jsonb)")) {
+                      "insert into agent_provider (name, provider_type, config, connection_generation_id) values (?,"
+                          + " 'openai', '{}'::jsonb, '00000000-0000-0000-0000-000000000088'::uuid)")) {
             ps.setString(1, "post-seed-provider");
             ps.executeUpdate();
           }

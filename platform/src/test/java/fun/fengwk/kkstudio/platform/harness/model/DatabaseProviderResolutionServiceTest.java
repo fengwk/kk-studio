@@ -99,6 +99,21 @@ class DatabaseProviderResolutionServiceTest {
   }
 
   @Test
+  void resolveRejectsProviderWithNullConnectionGenerationId() {
+    AgentProvider p = provider(ProviderType.OPENAI, ENDPOINT);
+    p.setConnectionGenerationId(null);
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(p);
+    ProviderFactory factory = openAiFactory(PromptCacheCapability.unsupported());
+    DatabaseProviderResolutionService resolution = resolution(factory);
+
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
+    assertTrue(error.getMessage().contains("connectionGenerationId must not be null"));
+  }
+
+  @Test
   void resolveRejectsFrozenProviderTypeDrift() {
     when(repository.getByName(PROVIDER_NAME))
         .thenReturn(provider(ProviderType.ANTHROPIC, ENDPOINT));
@@ -664,6 +679,7 @@ class DatabaseProviderResolutionServiceTest {
     provider.setBaseUrl(baseUrl);
     provider.setCredential("secret");
     provider.setConfigJson("{}");
+    provider.setConnectionGenerationId(UUID.randomUUID());
     return provider;
   }
 

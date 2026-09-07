@@ -29,11 +29,18 @@ public final class ModelAttemptMaterialization {
         || attached.resultEntryId() == null
         || !attached.status().isTerminal()
         || !attached.failedAttempts().isEmpty()
-        || attached.streamCheckpoint() != null) {
+        || attached.streamCheckpoint() != null
+        || attached.providerReplayState() != null) {
       throw new IllegalArgumentException(
           "attempt materialization validation requires a pending terminal attach transition");
     }
     List<Entry> materialized = failuresAfterBasis(stored, resultPath);
+    for (Entry failureEntry : materialized) {
+      if (failureEntry.providerReplayState() != null) {
+        throw new IllegalArgumentException(
+            "materialized model attempt failure must not carry provider replay state");
+      }
+    }
     if (isCompactionInvocation(stored, resultPath)) {
       if (!materialized.isEmpty()) {
         throw new IllegalArgumentException(
@@ -51,7 +58,7 @@ public final class ModelAttemptMaterialization {
     if (stored.status().isTerminal()) {
       requireTerminalResult(stored, resultPath);
     } else {
-      requireDirectStopResult(stored, attached, resultPath.head().payload());
+      requireDirectStopResult(stored, attached, resultPath.head());
     }
   }
 
@@ -99,6 +106,10 @@ public final class ModelAttemptMaterialization {
       requireSuccessfulResult(invocation, resultPath);
       return;
     }
+    if (resultPath.head().providerReplayState() != null) {
+      throw new IllegalArgumentException(
+          "materialized terminal error must not carry provider replay state");
+    }
     EntryPayload resultPayload = resultPath.head().payload();
     if (!(resultPayload instanceof AssistantErrorPayload actual)
         || !sameError(invocation, actual)
@@ -140,9 +151,14 @@ public final class ModelAttemptMaterialization {
    * metadata / summary text）都必须被拒。
    */
   private static void requireSuccessfulResult(ModelInvocation invocation, EntryPath resultPath) {
-    EntryPayload resultPayload = resultPath.head().payload();
+    Entry resultEntry = resultPath.head();
+    EntryPayload resultPayload = resultEntry.payload();
     TurnStartPayload start = requiredTurnStart(invocation, resultPath);
     if (start.compaction() != null) {
+      if (resultEntry.providerReplayState() != null) {
+        throw new IllegalArgumentException(
+            "compaction result entry must not carry provider replay state");
+      }
       EntryPayload expected =
           CompactionResultEvaluator.evaluate(
               preResultPath(resultPath), start.compaction(), invocation.result());
@@ -151,6 +167,10 @@ public final class ModelAttemptMaterialization {
             "model result must materialize the exact compaction payload");
       }
       return;
+    }
+    if (!Objects.equals(invocation.providerReplayState(), resultEntry.providerReplayState())) {
+      throw new IllegalArgumentException(
+          "materialized assistant entry must match the invocation provider replay state");
     }
     MessagePayload expected =
         new HistoryPayloadMapper()
@@ -172,11 +192,16 @@ public final class ModelAttemptMaterialization {
   }
 
   private static void requireDirectStopResult(
-      ModelInvocation stored, ModelInvocation attached, EntryPayload resultPayload) {
+      ModelInvocation stored, ModelInvocation attached, Entry resultEntry) {
     if (attached.status() != ModelInvocationStatus.CANCELLED) {
       throw new IllegalArgumentException(
           "only a direct Stop may attach a result while the stored invocation is active");
     }
+    if (resultEntry.providerReplayState() != null) {
+      throw new IllegalArgumentException(
+          "direct stop result entry must not carry provider replay state");
+    }
+    EntryPayload resultPayload = resultEntry.payload();
     StreamCheckpoint checkpoint = stored.streamCheckpoint();
     if (checkpoint == null) {
       if (!(resultPayload instanceof AssistantErrorPayload actual)

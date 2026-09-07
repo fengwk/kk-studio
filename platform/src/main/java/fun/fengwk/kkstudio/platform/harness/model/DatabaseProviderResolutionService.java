@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import java.util.EnumSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 按当前 {@code agent_provider} 行解析每次 Model attempt 的 Provider。
@@ -87,8 +88,14 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
     ModelCallTimeoutPolicy timeoutPolicy =
         providerConfigurationCodec.readTimeoutPolicy(provider.getConfigJson());
     String baseUrl = provider.getBaseUrl();
+    UUID connectionGenerationId = provider.getConnectionGenerationId();
+    if (connectionGenerationId == null) {
+      throw new IllegalStateException(
+          "provider " + providerName + " connectionGenerationId must not be null");
+    }
     // 准入期验证 endpoint 非空白：确定性失败在 resolve 阶段暴露，而不是推迟到 transport。
-    new ProviderDescriptor(providerName, providerType, baseUrl, timeoutPolicy);
+    new ProviderDescriptor(
+        providerName, providerType, baseUrl, timeoutPolicy, connectionGenerationId);
     ProviderAdapter adapter;
     try {
       adapter = factory.create(provider.getCredential(), provider.getConfigJson());
@@ -120,7 +127,12 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
         timeoutPolicy,
         effectiveTimeoutPolicy -> {
           ProviderDescriptor descriptor =
-              new ProviderDescriptor(providerName, providerType, baseUrl, effectiveTimeoutPolicy);
+              new ProviderDescriptor(
+                  providerName,
+                  providerType,
+                  baseUrl,
+                  effectiveTimeoutPolicy,
+                  connectionGenerationId);
           try {
             var modelProvider = adapter.create(descriptor);
             if (modelProvider == null) {

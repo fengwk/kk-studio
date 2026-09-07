@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -47,8 +48,11 @@ public final class ProviderResponseJsonCodec {
           "cost",
           "requestId",
           "serviceTier",
-          "rawUsageJson");
+          "rawUsageJson",
+          "toolCallDiagnostics");
   private static final Set<String> TOOL_CALL_FIELDS = orderedSet("id", "name", "argumentsJson");
+  private static final Set<String> DIAGNOSTIC_FIELDS =
+      orderedSet("callIndex", "id", "name", "partialArguments", "message");
   private static final Set<String> USAGE_FIELDS =
       orderedSet(
           "inputTokens",
@@ -108,6 +112,10 @@ public final class ProviderResponseJsonCodec {
       node.put("serviceTier", response.serviceTier());
     }
     node.put("rawUsageJson", requireJsonContainer(response.rawUsageJson(), "rawUsageJson"));
+    ArrayNode diagnostics = node.putArray("toolCallDiagnostics");
+    for (ProviderToolCallDiagnostic diagnostic : response.toolCallDiagnostics()) {
+      diagnostics.add(encodeToolCallDiagnostic(diagnostic));
+    }
     return node;
   }
 
@@ -142,6 +150,11 @@ public final class ProviderResponseJsonCodec {
     String requestId = decodeNullableText(node, "requestId");
     String serviceTier = decodeNullableText(node, "serviceTier");
     String rawUsageJson = jsonContainerText(node, "rawUsageJson");
+    ArrayNode diagnostics = array(node.get("toolCallDiagnostics"), "toolCallDiagnostics");
+    List<ProviderToolCallDiagnostic> diagnosticList = new ArrayList<>(diagnostics.size());
+    for (JsonNode item : diagnostics) {
+      diagnosticList.add(decodeToolCallDiagnostic(item));
+    }
     return new ProviderResponse(
         text,
         thinking,
@@ -151,7 +164,40 @@ public final class ProviderResponseJsonCodec {
         cost,
         requestId,
         serviceTier,
-        rawUsageJson);
+        rawUsageJson,
+        diagnosticList);
+  }
+
+  private ObjectNode encodeToolCallDiagnostic(ProviderToolCallDiagnostic diagnostic) {
+    ObjectNode node = NODES.objectNode();
+    node.put("callIndex", diagnostic.callIndex());
+    if (diagnostic.id() == null) {
+      node.putNull("id");
+    } else {
+      node.put("id", diagnostic.id());
+    }
+    if (diagnostic.name() == null) {
+      node.putNull("name");
+    } else {
+      node.put("name", diagnostic.name());
+    }
+    node.put("partialArguments", diagnostic.partialArguments());
+    node.put("message", diagnostic.message());
+    return node;
+  }
+
+  private ProviderToolCallDiagnostic decodeToolCallDiagnostic(JsonNode value) {
+    ObjectNode node = object(value, "toolCallDiagnostic");
+    requireFields(node, DIAGNOSTIC_FIELDS, "toolCallDiagnostic");
+    long callIndex = nonNegativeLong(node, "callIndex");
+    if (callIndex > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException("callIndex overflow: " + callIndex);
+    }
+    String id = decodeNullableText(node, "id");
+    String name = decodeNullableText(node, "name");
+    String partialArguments = text(node, "partialArguments");
+    String message = text(node, "message");
+    return new ProviderToolCallDiagnostic((int) callIndex, id, name, partialArguments, message);
   }
 
   private ObjectNode encodeToolCall(ProviderToolCall call) {

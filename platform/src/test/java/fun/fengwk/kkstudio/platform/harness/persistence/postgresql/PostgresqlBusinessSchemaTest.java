@@ -390,10 +390,11 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into agent_provider (name, provider_type, config)"
-                + " values (?, ?, '{}'::jsonb)")) {
+            "insert into agent_provider (name, provider_type, config, connection_generation_id)"
+                + " values (?, ?, '{}'::jsonb, ?::uuid)")) {
       ps.setString(1, name);
       ps.setString(2, providerType);
+      ps.setObject(3, UUID.randomUUID());
       assertEquals(1, ps.executeUpdate());
     }
   }

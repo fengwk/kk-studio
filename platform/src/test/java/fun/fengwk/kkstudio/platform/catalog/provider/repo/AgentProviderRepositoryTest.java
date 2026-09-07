@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -113,6 +114,7 @@ public class AgentProviderRepositoryTest extends PostgresSpringTestSupport {
     provider.setName(name);
     provider.setProviderType(ProviderType.OPENAI);
     provider.setConfigJson("{}");
+    provider.setConnectionGenerationId(UUID.randomUUID());
     return provider;
   }
 }
