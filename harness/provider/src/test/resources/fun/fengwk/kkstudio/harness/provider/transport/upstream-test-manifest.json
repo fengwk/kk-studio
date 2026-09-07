@@ -2,348 +2,708 @@
   "upstreamRepo": "https://github.com/langchain4j/langchain4j",
   "upstreamCommit": "3a2f4dca6fb447e4d191624b3d588952ed9f4ce9",
   "version": "1.20.0",
+  "inventorySources": [
+    "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+    "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+    "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+    "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientCancellationIT.java",
+    "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientCancellationIT.java",
+    "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientTimeoutIT.java",
+    "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientTimeoutIT.java",
+    "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
+    "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientStreamOverflowTest.java",
+    "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientPublisherIT.java",
+    "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientPublisherIT.java",
+    "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/AbstractHttpClientPublisherNonBlockingIT.java",
+    "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientPublisherNonBlockingIT.java",
+    "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+    "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java"
+  ],
+  "unresolvedCases": [],
   "cases": [
     {
+      "caseId": "case-001:shouldParseSimpleSingleLineEvent",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldParseSimpleSingleLineEvent",
-      "caseId": "data: Simple message",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldParseSimpleSingleLineEvent",
-      "strengthened": false,
-      "notes": "简单单行 data 事件解析（无尾随换行）"
+      "executionStatus": "PASSED",
+      "notes": "简单单行 data 事件解析（含各前导/尾随空白与换行变体）"
     },
     {
-      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
-      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
-      "caseId": "data: Simple message\\n",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
-      "localMethod": "shouldParseSimpleSingleLineEvent",
-      "strengthened": false,
-      "notes": "单换行单事件解析"
-    },
-    {
-      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
-      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
-      "caseId": "\\ndata: Simple message",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
-      "localMethod": "shouldParseSimpleSingleLineEvent",
-      "strengthened": false,
-      "notes": "前导单换行单事件解析"
-    },
-    {
-      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
-      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
-      "caseId": "\\ndata: Simple message\\n",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
-      "localMethod": "shouldParseSimpleSingleLineEvent",
-      "strengthened": false,
-      "notes": "前后各单换行单事件解析"
-    },
-    {
-      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
-      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
-      "caseId": "\\n\\ndata: Simple message",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
-      "localMethod": "shouldParseSimpleSingleLineEvent",
-      "strengthened": false,
-      "notes": "前导双换行忽略后解析单事件"
-    },
-    {
-      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
-      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
-      "caseId": "data: Simple message\\n\\n",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
-      "localMethod": "shouldParseSimpleSingleLineEvent",
-      "strengthened": false,
-      "notes": "标准双换行闭合单事件解析"
-    },
-    {
-      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
-      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
-      "caseId": "\\n\\ndata: Simple message\\n\\n",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
-      "localMethod": "shouldParseSimpleSingleLineEvent",
-      "strengthened": false,
-      "notes": "前后双换行单事件解析"
-    },
-    {
+      "caseId": "case-002:shouldParseMultiLineDataEvent",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldParseMultiLineDataEvent",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldParseMultiLineDataEvent",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "多行 data 以 \\n 拼接"
     },
     {
+      "caseId": "case-003:shouldParseEventWithAllFields",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldParseEventWithAllFields",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldParseEventWithAllFields",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "提取 event 与 data，安全忽略 id 与 retry"
     },
     {
+      "caseId": "case-004:shouldParseMultipleEvents",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldParseMultipleEvents",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldParseMultipleEvents",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "顺序分发多个事件"
     },
     {
+      "caseId": "case-005:shouldIgnoreCommentsAndEmptyLines",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldIgnoreCommentsAndEmptyLines",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldIgnoreCommentsAndEmptyLines",
-      "strengthened": false,
-      "notes": "冒号注释行安全忽略"
+      "executionStatus": "PASSED",
+      "notes": "冒号注释行与多余空行安全忽略"
     },
     {
+      "caseId": "case-006:shouldHandleStreamWithNoEvents",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldHandleStreamWithNoEvents",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldHandleStreamWithNoEvents",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "空输入不分发事件"
     },
     {
+      "caseId": "case-007:shouldPreserveAdditionalLeadingWhitespaceInData",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldPreserveAdditionalLeadingWhitespaceInData",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldPreserveAdditionalLeadingWhitespaceInData",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "仅剔除首个空格，保留额外前导空格"
     },
     {
+      "caseId": "case-008:shouldPreserveTrailingWhitespaceInData",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldPreserveTrailingWhitespaceInData",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldPreserveTrailingWhitespaceInData",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "保留尾随空白"
     },
     {
+      "caseId": "case-009:shouldNotRemoveAnyCharacterWhenDataHasNoLeadingSpace",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldNotRemoveAnyCharacterWhenDataHasNoLeadingSpace",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldNotRemoveAnyCharacterWhenDataHasNoLeadingSpace",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "无空格时保留全部字符"
     },
     {
+      "caseId": "case-010:shouldHandleIOException",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldHandleIOException",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldHandleIOException",
-      "strengthened": true,
-      "notes": "强化：底层输入流异常被包装为安全的 TransportException(IO)"
+      "executionStatus": "PASSED",
+      "notes": "真实输入流 I/O 故障驱动并验证安全终止"
     },
     {
+      "caseId": "case-011:parse_stops_emitting_after_the_listener_cancels",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "parse_stops_emitting_after_the_listener_cancels",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "parse_stops_emitting_after_the_listener_cancels",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "取消后停止后续事件分发"
     },
     {
+      "caseId": "case-012:parse_handles_cr_and_crlf_line_endings",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "parse_handles_cr_and_crlf_line_endings",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "parse_handles_cr_and_crlf_line_endings",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "同时兼容 CRLF 与孤立 CR 换行"
     },
     {
+      "caseId": "case-013:parse_trims_event_field_and_strips_one_leading_space_from_data",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "parse_trims_event_field_and_strips_one_leading_space_from_data",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "parse_trims_event_field_and_strips_one_leading_space_from_data",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "event 做全 trim，data 仅剥除单个前导空格"
     },
     {
+      "caseId": "case-014:incremental_trims_event_field_and_strips_one_leading_space_from_data",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_trims_event_field_and_strips_one_leading_space_from_data",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_trims_event_field_and_strips_one_leading_space_from_data",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "增量模式与全量模式空格处理对齐"
     },
     {
+      "caseId": "case-015:a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async",
-      "strengthened": true,
-      "notes": "强化：本仓原生全增量式解析，完全杜绝无界字符分配"
+      "executionStatus": "PASSED",
+      "notes": "实质断言：本仓原生全增量式解析，单字节推进无阻塞 fallback"
     },
     {
+      "caseId": "case-016:incremental_parses_single_event_in_one_chunk",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_parses_single_event_in_one_chunk",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_parses_single_event_in_one_chunk",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "增量单 chunk 单事件"
     },
     {
+      "caseId": "case-017:incremental_parses_event_split_across_chunks",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_parses_event_split_across_chunks",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_parses_event_split_across_chunks",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "增量跨 chunk 组装事件"
     },
     {
+      "caseId": "case-018:incremental_handles_crlf_line_endings",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_handles_crlf_line_endings",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_handles_crlf_line_endings",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "增量 CRLF 换行支持"
     },
     {
+      "caseId": "case-019:incremental_parses_multiple_events",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_parses_multiple_events",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_parses_multiple_events",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "增量多事件分发"
     },
     {
+      "caseId": "case-020:incremental_joins_multiline_data",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_joins_multiline_data",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_joins_multiline_data",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "增量多行拼接"
     },
     {
+      "caseId": "case-021:incremental_ignores_comment_id_and_retry_lines",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_ignores_comment_id_and_retry_lines",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_ignores_comment_id_and_retry_lines",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "增量忽略 comment、id 与 retry"
     },
     {
+      "caseId": "case-022:incremental_flush_emits_trailing_event_without_terminating_blank_line",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_flush_emits_trailing_event_without_terminating_blank_line",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_flush_emits_trailing_event_without_terminating_blank_line",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "增量 flush 自动交付未空行闭合事件"
     },
     {
+      "caseId": "case-023:incremental_flush_completes_a_pending_partial_line",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_flush_completes_a_pending_partial_line",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_flush_completes_a_pending_partial_line",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "增量 flush 补齐未换行的行"
     },
     {
+      "caseId": "case-024:incremental_flush_returns_empty_when_nothing_is_pending",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_flush_returns_empty_when_nothing_is_pending",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_flush_returns_empty_when_nothing_is_pending",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "增量无未决数据时不重复分发"
     },
     {
+      "caseId": "case-025:incremental_decodes_utf8_multibyte_char_split_across_chunks",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_decodes_utf8_multibyte_char_split_across_chunks",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_decodes_utf8_multibyte_char_split_across_chunks",
-      "strengthened": false,
+      "executionStatus": "PASSED",
       "notes": "增量跨 chunk 正确组装 UTF-8 多字节字符"
     },
     {
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
-      "upstreamMethod": "should_preserve_line_separators_of_error_response_body",
-      "caseId": "default",
+      "caseId": "case-026:should_return_successful_http_response",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_return_successful_http_response",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_preserve_line_separators_of_error_response_body",
-      "strengthened": true,
-      "notes": "强化：保留非 2xx 错误响应换行符，并在 errorBodyBytes 隔离，toString/message 绝不泄露"
+      "localMethod": "should_return_successful_http_response",
+      "executionStatus": "PASSED",
+      "notes": "成功 200 HTTP 响应接收并交付"
     },
     {
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
-      "upstreamMethod": "should_decode_error_response_body_as_utf8",
-      "caseId": "default",
+      "caseId": "case-027:should_return_successful_http_response",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_return_successful_http_response",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_decode_error_response_body_as_utf8",
-      "strengthened": true,
-      "notes": "强化：支持多语言 UTF-8 错误体读取并安全防御拷贝"
+      "localMethod": "should_return_successful_http_response",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端成功 200 HTTP 响应接收并交付"
     },
     {
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
-      "upstreamMethod": "should_not_fail_on_successful_response",
-      "caseId": "default",
+      "caseId": "case-028:should_deliver_response_off_the_calling_thread_executeAsync",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_deliver_response_off_the_calling_thread_executeAsync",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_not_fail_on_successful_response",
-      "strengthened": false,
-      "notes": "成功 200 text/event-stream 正确交付事件并完成"
+      "localMethod": "should_deliver_response_off_the_calling_thread_executeAsync",
+      "executionStatus": "PASSED",
+      "notes": "受管 worker 异步线程派发响应，不阻塞调用线程"
     },
     {
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientStreamOverflowTest.java",
-      "upstreamMethod": "overflowing_the_stream_buffer_aborts_the_request_and_closes_the_connection",
-      "caseId": "default",
+      "caseId": "case-029:should_deliver_response_off_the_calling_thread_executeAsync",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_deliver_response_off_the_calling_thread_executeAsync",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "overflowing_the_stream_buffer_aborts_the_request_and_closes_the_connection",
-      "strengthened": true,
-      "notes": "强化：以字节为单位进行严格限流，超出上限立即关闭 TCP socket 终止请求"
+      "localMethod": "should_deliver_response_off_the_calling_thread_executeAsync",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端受管 worker 异步派发响应"
     },
     {
+      "caseId": "case-030:should_throw_400",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_throw_400",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_throw_400",
+      "executionStatus": "PASSED",
+      "notes": "400 Bad Request 映射为 REQUEST_ERROR"
+    },
+    {
+      "caseId": "case-031:should_throw_400",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_throw_400",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_throw_400",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端 400 Bad Request 映射为 REQUEST_ERROR"
+    },
+    {
+      "caseId": "case-032:should_throw_401",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_throw_401",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_throw_401",
+      "executionStatus": "PASSED",
+      "notes": "401 Unauthorized 映射为 AUTHENTICATION_ERROR"
+    },
+    {
+      "caseId": "case-033:should_throw_401",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_throw_401",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_throw_401",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端 401 Unauthorized 映射为 AUTHENTICATION_ERROR"
+    },
+    {
+      "caseId": "case-034:should_stream_successful_response",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_stream_successful_response",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_stream_successful_response",
+      "executionStatus": "PASSED",
+      "notes": "流式多事件连续交付并正常终态"
+    },
+    {
+      "caseId": "case-035:should_stream_successful_response",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_stream_successful_response",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_stream_successful_response",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端流式多事件连续交付"
+    },
+    {
+      "caseId": "case-036:should_cancel_streaming",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_cancel_streaming",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_cancel_streaming",
+      "executionStatus": "PASSED",
+      "notes": "流式读取中显式 cancel()"
+    },
+    {
+      "caseId": "case-037:should_cancel_streaming",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_cancel_streaming",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_cancel_streaming",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端流式显式取消"
+    },
+    {
+      "caseId": "case-038:should_stream_response_with_double_newline",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_stream_response_with_double_newline",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_stream_response_with_double_newline",
+      "executionStatus": "PASSED",
+      "notes": "双换行闭合流式事件响应"
+    },
+    {
+      "caseId": "case-039:should_stream_response_with_double_newline",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_stream_response_with_double_newline",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_stream_response_with_double_newline",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端双换行流式响应"
+    },
+    {
+      "caseId": "case-040:should_deliver_error_when_streaming_400",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_deliver_error_when_streaming_400",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_deliver_error_when_streaming_400",
+      "executionStatus": "PASSED",
+      "notes": "流式请求遇到 400 派发错误"
+    },
+    {
+      "caseId": "case-041:should_deliver_error_when_streaming_400",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_deliver_error_when_streaming_400",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_deliver_error_when_streaming_400",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端流式 400 派发错误"
+    },
+    {
+      "caseId": "case-042:should_not_fail_when_listener_onOpen_throws_exception",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_not_fail_when_listener_onOpen_throws_exception",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_not_fail_when_listener_onOpen_throws_exception",
+      "executionStatus": "PASSED",
+      "notes": "onOpen 抛异常时受保护转换为 CALLBACK_FAILED 终态"
+    },
+    {
+      "caseId": "case-043:should_not_fail_when_listener_onOpen_throws_exception",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_not_fail_when_listener_onOpen_throws_exception",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_not_fail_when_listener_onOpen_throws_exception",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端 onOpen 抛异常保护"
+    },
+    {
+      "caseId": "case-044:should_not_fail_when_listener_onEvent_throws_exception",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_not_fail_when_listener_onEvent_throws_exception",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_not_fail_when_listener_onEvent_throws_exception",
+      "executionStatus": "PASSED",
+      "notes": "onEvent 抛异常时受保护转换为 CALLBACK_FAILED 终态"
+    },
+    {
+      "caseId": "case-045:should_not_fail_when_listener_onEvent_throws_exception",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_not_fail_when_listener_onEvent_throws_exception",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_not_fail_when_listener_onEvent_throws_exception",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端 onEvent 抛异常保护"
+    },
+    {
+      "caseId": "case-046:should_not_fail_when_listener_onError_throws_exception",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_not_fail_when_listener_onError_throws_exception",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_not_fail_when_listener_onError_throws_exception",
+      "executionStatus": "PASSED",
+      "notes": "终态回调抛异常被安全吞掉，不产生第二终态"
+    },
+    {
+      "caseId": "case-047:should_not_fail_when_listener_onError_throws_exception",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_not_fail_when_listener_onError_throws_exception",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_not_fail_when_listener_onError_throws_exception",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端终态回调抛异常保护"
+    },
+    {
+      "caseId": "case-048:should_deliver_error_when_streaming_connect_fails",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_deliver_error_when_streaming_connect_fails",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_deliver_error_when_streaming_connect_fails",
+      "executionStatus": "PASSED",
+      "notes": "流式连接失败派发 IO 错误"
+    },
+    {
+      "caseId": "case-049:should_deliver_error_when_streaming_connect_fails",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_deliver_error_when_streaming_connect_fails",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_deliver_error_when_streaming_connect_fails",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端流式连接失败派发 IO 错误"
+    },
+    {
+      "caseId": "case-050:should_return_successful_http_response_form_data",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_return_successful_http_response_form_data",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_return_successful_http_response_form_data",
+      "executionStatus": "PASSED",
+      "notes": "等价支持表单载荷请求体"
+    },
+    {
+      "caseId": "case-051:should_return_successful_http_response_form_data",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_return_successful_http_response_form_data",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_return_successful_http_response_form_data",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端等价支持表单请求体"
+    },
+    {
+      "caseId": "case-052:should_return_binary_response_sync",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
+      "upstreamMethod": "should_return_binary_response_sync",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_return_binary_response_sync",
+      "executionStatus": "PASSED",
+      "notes": "等价支持二进制请求体"
+    },
+    {
+      "caseId": "case-053:should_return_binary_response_sync",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_return_binary_response_sync",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_return_binary_response_sync",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端等价支持二进制请求体"
+    },
+    {
+      "caseId": "case-054:cancelling_the_future_releases_the_caller",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientCancellationIT.java",
       "upstreamMethod": "cancelling_the_future_releases_the_caller",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "cancelling_the_future_releases_the_caller",
-      "strengthened": false,
-      "notes": "取消立即返回释放调用方"
+      "executionStatus": "PASSED",
+      "notes": "取消操作立即返回释放调用方"
     },
     {
+      "caseId": "case-055:cancelling_the_future_releases_the_caller",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientCancellationIT.java",
+      "upstreamMethod": "cancelling_the_future_releases_the_caller",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "cancelling_the_future_releases_the_caller",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端取消立即释放调用方"
+    },
+    {
+      "caseId": "case-056:cancelling_the_future_aborts_the_request_and_closes_the_connection",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientCancellationIT.java",
       "upstreamMethod": "cancelling_the_future_aborts_the_request_and_closes_the_connection",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "cancelling_the_future_aborts_the_request_and_closes_the_connection",
-      "strengthened": true,
-      "notes": "强化：取消立即中止在途请求并关闭 TCP 套接字"
+      "executionStatus": "PASSED",
+      "notes": "取消操作中止网络请求并关闭 TCP 连接"
     },
     {
+      "caseId": "case-057:cancelling_the_future_aborts_the_request_and_closes_the_connection",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientCancellationIT.java",
+      "upstreamMethod": "cancelling_the_future_aborts_the_request_and_closes_the_connection",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "cancelling_the_future_aborts_the_request_and_closes_the_connection",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端取消关闭底层连接"
+    },
+    {
+      "caseId": "case-058:should_timeout_on_read_sync",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientTimeoutIT.java",
+      "upstreamMethod": "should_timeout_on_read_sync",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_timeout_on_read_sync",
+      "executionStatus": "PASSED",
+      "notes": "单调时钟总时长超时（Total Timeout）触发"
+    },
+    {
+      "caseId": "case-059:should_timeout_on_read_sync",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientTimeoutIT.java",
+      "upstreamMethod": "should_timeout_on_read_sync",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_timeout_on_read_sync",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端单调时钟总时长超时触发"
+    },
+    {
+      "caseId": "case-060:should_timeout_on_read_async",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientTimeoutIT.java",
       "upstreamMethod": "should_timeout_on_read_async",
-      "caseId": "default",
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_timeout_on_read_async",
-      "strengthened": true,
-      "notes": "强化：受管 Watchdog 基于单调时钟 System.nanoTime 精确判定闲置超时"
+      "executionStatus": "PASSED",
+      "notes": "无活动闲置超时（Idle Timeout）精确触发"
+    },
+    {
+      "caseId": "case-061:should_timeout_on_read_async",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientTimeoutIT.java",
+      "upstreamMethod": "should_timeout_on_read_async",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_timeout_on_read_async",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端无活动闲置超时触发"
+    },
+    {
+      "caseId": "case-062:should_preserve_line_separators_of_error_response_body",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
+      "upstreamMethod": "should_preserve_line_separators_of_error_response_body",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_preserve_line_separators_of_error_response_body",
+      "executionStatus": "PASSED",
+      "notes": "保留非 2xx 响应换行符"
+    },
+    {
+      "caseId": "case-063:should_decode_error_response_body_as_utf8",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
+      "upstreamMethod": "should_decode_error_response_body_as_utf8",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_decode_error_response_body_as_utf8",
+      "executionStatus": "PASSED",
+      "notes": "错误响应正文按 UTF-8 正确解码"
+    },
+    {
+      "caseId": "case-064:should_not_fail_on_successful_response",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
+      "upstreamMethod": "should_not_fail_on_successful_response",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_not_fail_on_successful_response",
+      "executionStatus": "PASSED",
+      "notes": "成功响应不触发错误"
+    },
+    {
+      "caseId": "case-065:overflowing_the_stream_buffer_aborts_the_request_and_closes_the_connection",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientStreamOverflowTest.java",
+      "upstreamMethod": "overflowing_the_stream_buffer_aborts_the_request_and_closes_the_connection",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "overflowing_the_stream_buffer_aborts_the_request_and_closes_the_connection",
+      "executionStatus": "PASSED",
+      "notes": "超出有界字节限制中止请求并关闭套接字"
+    },
+    {
+      "caseId": "case-066:publisher_is_cold_and_each_subscribe_initiates_a_new_request",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientPublisherIT.java",
+      "upstreamMethod": "publisher_is_cold_and_each_subscribe_initiates_a_new_request",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "publisher_is_cold_and_each_subscribe_initiates_a_new_request",
+      "executionStatus": "PASSED",
+      "notes": "冷流特性：每次 stream() 发起全新独立网络生命周期"
+    },
+    {
+      "caseId": "case-067:publisher_is_cold_and_each_subscribe_initiates_a_new_request",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientPublisherIT.java",
+      "upstreamMethod": "publisher_is_cold_and_each_subscribe_initiates_a_new_request",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "publisher_is_cold_and_each_subscribe_initiates_a_new_request",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端冷流特性：每次调用发起新请求"
+    },
+    {
+      "caseId": "case-068:blockHound_detects_blocking_on_a_policed_thread",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/AbstractHttpClientPublisherNonBlockingIT.java",
+      "upstreamMethod": "blockHound_detects_blocking_on_a_policed_thread",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "blockHound_detects_blocking_on_a_policed_thread",
+      "executionStatus": "PASSED",
+      "notes": "等价非阻塞隔离：回调在受管 worker 隔离线程分发"
+    },
+    {
+      "caseId": "case-069:blockHound_detects_blocking_on_a_policed_thread",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientPublisherNonBlockingIT.java",
+      "upstreamMethod": "blockHound_detects_blocking_on_a_policed_thread",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "blockHound_detects_blocking_on_a_policed_thread",
+      "executionStatus": "PASSED",
+      "notes": "JDK 客户端等价非阻塞隔离验证"
+    },
+    {
+      "caseId": "case-070:http_streaming_event_tck_serial_delivery_and_terminal_guarantees",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "http_streaming_event_tck_serial_delivery_and_terminal_guarantees",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "http_streaming_event_tck_serial_delivery_and_terminal_guarantees",
+      "executionStatus": "PASSED",
+      "notes": "Reactive TCK 串行通知、单终态与取消终止规范保证"
+    },
+    {
+      "caseId": "case-071:should_build_body_with_single_form_field",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java",
+      "upstreamMethod": "should_build_body_with_single_form_field",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "multipart_request_headers_and_body_passed_through_correctly",
+      "executionStatus": "PASSED",
+      "notes": "等价支持 multipart 报文体与 boundary 标头透传"
+    },
+    {
+      "caseId": "case-072:should_build_body_with_file",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java",
+      "upstreamMethod": "should_build_body_with_file",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "multipart_request_headers_and_body_passed_through_correctly",
+      "executionStatus": "PASSED",
+      "notes": "等价支持 multipart 文件上传载荷透传"
+    },
+    {
+      "caseId": "case-073:should_build_body_with_field_then_file",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java",
+      "upstreamMethod": "should_build_body_with_field_then_file",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "multipart_request_headers_and_body_passed_through_correctly",
+      "executionStatus": "PASSED",
+      "notes": "等价支持复合字段与文件 multipart 载荷"
+    },
+    {
+      "caseId": "case-074:should_omit_content_type_header_when_content_type_is_null",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java",
+      "upstreamMethod": "should_omit_content_type_header_when_content_type_is_null",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "multipart_request_headers_and_body_passed_through_correctly",
+      "executionStatus": "PASSED",
+      "notes": "等价支持请求头 Content-Type 策略"
+    },
+    {
+      "caseId": "case-075:should_omit_content_type_header_when_content_type_is_blank",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java",
+      "upstreamMethod": "should_omit_content_type_header_when_content_type_is_blank",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "multipart_request_headers_and_body_passed_through_correctly",
+      "executionStatus": "PASSED",
+      "notes": "等价支持空白 Content-Type 策略"
+    },
+    {
+      "caseId": "case-076:content_type_should_carry_the_boundary_used_in_the_body",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java",
+      "upstreamMethod": "content_type_should_carry_the_boundary_used_in_the_body",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "multipart_request_headers_and_body_passed_through_correctly",
+      "executionStatus": "PASSED",
+      "notes": "等价支持 Content-Type 携带 boundary 规范"
     }
   ]
 }

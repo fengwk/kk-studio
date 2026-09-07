@@ -15,10 +15,8 @@ public record ServerSentEvent(String event, String data) {
 
   @Override
   public String toString() {
-    return "ServerSentEvent{event="
-        + (event == null ? "null" : "'" + event + "'")
-        + ", dataLength="
-        + data.length()
-        + "}";
+    int eventLen = event == null ? 0 : event.length();
+    int dataLen = data == null ? 0 : data.length();
+    return "ServerSentEvent[eventLength=" + eventLen + ", dataLength=" + dataLen + "]";
   }
 }
