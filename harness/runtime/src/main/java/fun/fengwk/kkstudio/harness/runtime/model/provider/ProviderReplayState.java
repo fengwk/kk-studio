@@ -35,14 +35,6 @@ public record ProviderReplayState(
 
   @Override
   public String toString() {
-    return "ProviderReplayState[format="
-        + format
-        + ", affinity="
-        + affinity
-        + ", sourcePrefixHash="
-        + sourcePrefixHash
-        + ", payloadSize="
-        + payload.size()
-        + "]";
+    return "ProviderReplayState[format=" + format + ", payloadSize=" + payload.size() + "]";
   }
 }

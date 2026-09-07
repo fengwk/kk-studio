@@ -27,14 +27,6 @@ public record ProviderReplayAffinity(
 
   @Override
   public String toString() {
-    return "ProviderReplayAffinity[providerType="
-        + providerType
-        + ", providerName="
-        + providerName
-        + ", connectionGenerationId="
-        + connectionGenerationId
-        + ", modelName="
-        + modelName
-        + "]";
+    return "ProviderReplayAffinity[providerType=" + providerType + "]";
   }
 }

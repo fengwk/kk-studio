@@ -83,6 +83,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   private static final Set<String> CANVAS_UUID_ID_TABLES =
       Set.of("canvas_document", "canvas_group", "canvas_node", "canvas_resource");
 
+  private static final UUID EXPLICIT_CONNECTION_GENERATION_ID =
+      UUID.fromString("00000000-0000-0000-0000-000000000001");
+
   @BeforeEach
   void setup() throws SQLException {
     try (Connection conn = newConnection()) {
@@ -1064,6 +1067,25 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
+  void agentProviderConnectionGenerationIdStructureInvariants() throws SQLException {
+    // 验证 agent_provider.connection_generation_id 必须为 uuid、NOT NULL、且无任何数据库端 DEFAULT 表达式
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select data_type, is_nullable, column_default from information_schema.columns"
+                    + " where table_schema = 'public' and table_name = 'agent_provider'"
+                    + " and column_name = 'connection_generation_id'")) {
+      try (ResultSet rs = ps.executeQuery()) {
+        assertTrue(rs.next(), "agent_provider.connection_generation_id column must exist");
+        assertEquals("uuid", rs.getString("data_type"), "data_type must be uuid");
+        assertEquals(
+            "NO", rs.getString("is_nullable"), "connection_generation_id must be NOT NULL");
+        assertNull(rs.getString("column_default"), "connection_generation_id must have NO DEFAULT");
+      }
+    }
+  }
+
+  @Test
   void publicSchemaExposesNoSequences() throws SQLException {
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -1094,8 +1116,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         PreparedStatement ps =
             conn.prepareStatement(
                 "insert into agent_provider (name, provider_type, config, connection_generation_id) values (?, 'openai',"
-                    + " '{}'::jsonb, gen_random_uuid())")) {
+                    + " '{}'::jsonb, ?)")) {
       ps.setString(1, "sequence-fixture-" + System.nanoTime());
+      ps.setObject(2, EXPLICIT_CONNECTION_GENERATION_ID);
       assertEquals(1, ps.executeUpdate());
     }
     try (Connection conn = newConnection();
@@ -1178,8 +1201,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         PreparedStatement ps =
             conn.prepareStatement(
                 "insert into agent_provider (name, provider_type, config, connection_generation_id) values (?,"
-                    + " 'openai', '{}'::jsonb, gen_random_uuid())")) {
+                    + " 'openai', '{}'::jsonb, ?)")) {
       ps.setString(1, name);
+      ps.setObject(2, EXPLICIT_CONNECTION_GENERATION_ID);
       assertEquals(1, ps.executeUpdate());
     }
     try (Connection conn = newConnection();
@@ -1202,8 +1226,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         PreparedStatement ps =
             conn.prepareStatement(
                 "insert into agent_provider (name, provider_type, config, connection_generation_id) values (?,"
-                    + " 'openai', '{}'::jsonb, gen_random_uuid())")) {
+                    + " 'openai', '{}'::jsonb, ?)")) {
       ps.setString(1, name);
+      ps.setObject(2, EXPLICIT_CONNECTION_GENERATION_ID);
       assertEquals(1, ps.executeUpdate(), "same-name re-create must succeed after hard delete");
     }
   }
@@ -1346,10 +1371,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         PreparedStatement ps =
             conn.prepareStatement(
                 "insert into agent_provider (name, provider_type, config, connection_generation_id, created_at,"
-                    + " updated_at) values (?, 'openai', '{}'::jsonb, gen_random_uuid(), ?, ?)")) {
+                    + " updated_at) values (?, 'openai', '{}'::jsonb, ?, ?, ?)")) {
       ps.setString(1, name);
-      ps.setTimestamp(2, fixedTimestamp);
+      ps.setObject(2, EXPLICIT_CONNECTION_GENERATION_ID);
       ps.setTimestamp(3, fixedTimestamp);
+      ps.setTimestamp(4, fixedTimestamp);
       ps.executeUpdate();
     }
     try (Connection conn = newConnection();

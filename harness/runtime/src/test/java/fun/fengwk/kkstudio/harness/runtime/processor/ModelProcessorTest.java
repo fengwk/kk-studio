@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -51,11 +52,16 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
@@ -529,6 +535,169 @@ class ModelProcessorTest {
         "structured summary\n\n<read-files>\nstale.txt\n</read-files>", terminal.result().text());
     assertEquals(terminal.result().text(), terminal.streamCheckpoint().text());
     assertTrue(deltas(fixture.sink).isEmpty());
+  }
+
+  /**
+   * 验证 ModelExecution 完成路径：普通非 compaction 的 COMPLETE 与 LENGTH 在无 toolCallDiagnostics 时持久化
+   * replayState。
+   */
+  @Test
+  void modelExecutionPersistsReplayStateOnCompleteAndLengthWithoutDiagnostics() {
+    // 1. COMPLETE 场景
+    Fixture fixtureComplete = fixture();
+    fixtureComplete.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixtureComplete.processor.process(
+            claim(fixtureComplete.store, fixtureComplete.invocationId, NOW)));
+    ModelGateway.Listener listenerComplete =
+        fixtureComplete.gateway.listener(fixtureComplete.invocationId);
+
+    ProviderReplayState replayState1 = sampleReplayState();
+    listenerComplete.onSucceeded(
+        new ProviderCompletion(response("hello", GenerationStopReason.COMPLETE), replayState1));
+
+    ModelInvocation modelComplete = model(fixtureComplete.store, fixtureComplete.invocationId);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, modelComplete.status());
+    assertEquals(
+        replayState1,
+        modelComplete.providerReplayState(),
+        "COMPLETE without diagnostics must persist replayState");
+
+    // 2. LENGTH 场景
+    Fixture fixtureLength = fixture();
+    fixtureLength.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixtureLength.processor.process(
+            claim(fixtureLength.store, fixtureLength.invocationId, NOW)));
+    ModelGateway.Listener listenerLength =
+        fixtureLength.gateway.listener(fixtureLength.invocationId);
+
+    ProviderReplayState replayState2 = sampleReplayState();
+    listenerLength.onSucceeded(
+        new ProviderCompletion(response("partial", GenerationStopReason.LENGTH), replayState2));
+
+    ModelInvocation modelLength = model(fixtureLength.store, fixtureLength.invocationId);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, modelLength.status());
+    assertEquals(
+        replayState2,
+        modelLength.providerReplayState(),
+        "LENGTH without diagnostics must persist replayState");
+  }
+
+  /**
+   * 验证 ModelExecution 完成路径：FILTERED、compaction、含 incomplete tool diagnostics 时严格不持久化 replayState。
+   */
+  @Test
+  void modelExecutionSuppressesReplayStateOnFilteredCompactionAndIncompleteDiagnostics() {
+    // 1. FILTERED 场景
+    Fixture fixtureFiltered = fixture();
+    fixtureFiltered.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixtureFiltered.processor.process(
+            claim(fixtureFiltered.store, fixtureFiltered.invocationId, NOW)));
+    ModelGateway.Listener listenerFiltered =
+        fixtureFiltered.gateway.listener(fixtureFiltered.invocationId);
+
+    listenerFiltered.onSucceeded(
+        new ProviderCompletion(
+            response("filtered output", GenerationStopReason.FILTERED), sampleReplayState()));
+
+    ModelInvocation modelFiltered = model(fixtureFiltered.store, fixtureFiltered.invocationId);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, modelFiltered.status());
+    assertNull(modelFiltered.providerReplayState(), "FILTERED must not persist replayState");
+
+    // 2. compaction 场景
+    Fixture fixtureCompaction = compactionFixture(NO_RETRY);
+    fixtureCompaction.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixtureCompaction.processor.process(
+            claim(fixtureCompaction.store, fixtureCompaction.invocationId, NOW)));
+    ModelGateway.Listener listenerCompaction =
+        fixtureCompaction.gateway.listener(fixtureCompaction.invocationId);
+
+    listenerCompaction.onSucceeded(
+        new ProviderCompletion(
+            response("compacted summary", GenerationStopReason.COMPLETE), sampleReplayState()));
+
+    ModelInvocation modelCompaction =
+        model(fixtureCompaction.store, fixtureCompaction.invocationId);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, modelCompaction.status());
+    assertNull(
+        modelCompaction.providerReplayState(), "Compaction execution must not persist replayState");
+
+    // 3. 含 incomplete tool diagnostics 场景
+    Fixture fixtureDiag = fixture();
+    fixtureDiag.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixtureDiag.processor.process(claim(fixtureDiag.store, fixtureDiag.invocationId, NOW)));
+    ModelGateway.Listener listenerDiag = fixtureDiag.gateway.listener(fixtureDiag.invocationId);
+
+    ProviderToolCallDiagnostic diagnostic =
+        new ProviderToolCallDiagnostic(0, "call_1", "bash", "{\"param\":", "truncated json");
+    ProviderResponse responseWithDiagnostics =
+        new ProviderResponse(
+            "truncated",
+            null,
+            List.of(),
+            GenerationStopReason.COMPLETE,
+            usage(),
+            cost(),
+            "req-diag",
+            null,
+            null,
+            List.of(diagnostic));
+
+    listenerDiag.onSucceeded(new ProviderCompletion(responseWithDiagnostics, sampleReplayState()));
+
+    ModelInvocation modelDiag = model(fixtureDiag.store, fixtureDiag.invocationId);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, modelDiag.status());
+    assertNull(
+        modelDiag.providerReplayState(),
+        "Incomplete tool diagnostics must suppress replayState persistence");
+  }
+
+  /** 验证 ModelExecution 完成路径：失败与 UNKNOWN 路径绝对不会残留 replayState。 */
+  @Test
+  void modelExecutionDoesNotLeaveReplayStateOnFailureOrUnknown() {
+    // 1. FAILED 终态
+    Fixture fixtureFailed = fixture();
+    fixtureFailed.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixtureFailed.processor.process(
+            claim(fixtureFailed.store, fixtureFailed.invocationId, NOW)));
+    ModelGateway.Listener listenerFailed =
+        fixtureFailed.gateway.listener(fixtureFailed.invocationId);
+
+    listenerFailed.onFailed(
+        new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "terminal failure"));
+
+    ModelInvocation modelFailed = model(fixtureFailed.store, fixtureFailed.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, modelFailed.status());
+    assertNull(modelFailed.providerReplayState(), "Failed invocation must not retain replayState");
+
+    // 2. UNKNOWN 终态
+    Fixture fixtureUnknown = fixture();
+    fixtureUnknown.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixtureUnknown.processor.process(
+            claim(fixtureUnknown.store, fixtureUnknown.invocationId, NOW)));
+    ModelGateway.Listener listenerUnknown =
+        fixtureUnknown.gateway.listener(fixtureUnknown.invocationId);
+
+    listenerUnknown.onUnknown(
+        new ModelInvocationError(ProviderErrorKind.TRANSIENT, "indeterminate execution"));
+
+    ModelInvocation modelUnknown = model(fixtureUnknown.store, fixtureUnknown.invocationId);
+    assertEquals(ModelInvocationStatus.UNKNOWN, modelUnknown.status());
+    assertNull(
+        modelUnknown.providerReplayState(), "UNKNOWN invocation must not retain replayState");
   }
 
   /**
@@ -3310,6 +3479,15 @@ class ModelProcessorTest {
         ENV_ID == null ? null : ENV_ID.workspacePath(),
         "agent",
         new ModelSelection("provider", "model", "v1"));
+  }
+
+  private static ProviderReplayState sampleReplayState() {
+    return new ProviderReplayState(
+        ProviderReplayFormat.OPENAI_RESPONSES,
+        new ProviderReplayAffinity(
+            ProviderType.OPENAI_RESPONSES, "provider-a", UUID.randomUUID(), "model-a"),
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        JsonNodeFactory.instance.objectNode().put("token", 42));
   }
 
   static final class FakeGateway implements ModelGateway {
