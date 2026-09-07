@@ -305,4 +305,25 @@ class ModelStreamAccumulatorTest {
 
     assertEquals("hello", accumulator.text());
   }
+
+  /** 意图：验证空内容 delta 不会修改 accumulator 的 text/thinking，且终态 complete 与 gap 生成保持一致。 */
+  @Test
+  void emptyDeltasDoNotMutateAccumulatorContent() {
+    ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
+    accumulator.append(new ProviderStreamEvent.TextDelta(""));
+    accumulator.append(new ProviderStreamEvent.ThinkingDelta(""));
+    assertEquals("", accumulator.text());
+    assertEquals("", accumulator.thinking());
+
+    accumulator.append(new ProviderStreamEvent.TextDelta("hello"));
+    accumulator.append(new ProviderStreamEvent.TextDelta(""));
+    accumulator.append(new ProviderStreamEvent.ThinkingDelta(""));
+    assertEquals("hello", accumulator.text());
+    assertEquals("", accumulator.thinking());
+
+    ModelStreamAccumulator.Completion completion =
+        accumulator.complete(response("hello", "", List.of()));
+    assertEquals("hello", completion.response().text());
+    assertEquals(List.of(), completion.gaps());
+  }
 }

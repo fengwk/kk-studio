@@ -231,6 +231,13 @@ public record ModelInvocation(
       throw new IllegalArgumentException(
           "a larger checkpoint sequence must keep text and thinking as strict prefixes");
     }
+    boolean textGrew = nextCheckpoint.text().length() > storedCheckpoint.text().length();
+    boolean thinkingGrew =
+        nextCheckpoint.thinking().length() > storedCheckpoint.thinking().length();
+    if (!textGrew && !thinkingGrew) {
+      throw new IllegalArgumentException(
+          "a larger checkpoint sequence requires strict growth in text or thinking");
+    }
   }
 
   private static void requireFailedAttemptsTransition(

@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
@@ -70,6 +71,7 @@ final class ModelExecution implements ModelGateway.Listener {
   private final ReentrantLock drainLock = new ReentrantLock();
   private final ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
   private final ArrayDeque<Pending> pending = new ArrayDeque<>();
+  private long pendingPayloadBytes;
   private boolean gateOpen;
   private ModelGateway.Handle handle;
 
@@ -201,10 +203,11 @@ final class ModelExecution implements ModelGateway.Listener {
           gateOpen = true;
           buffered = List.copyOf(pending);
           pending.clear();
+          pendingPayloadBytes = 0;
         }
       }
       for (Pending signal : buffered) {
-        applied = processSignal(signal);
+        applied = applySignal(signal);
         if (applied != Applied.PROGRESSED) {
           break;
         }
@@ -251,7 +254,7 @@ final class ModelExecution implements ModelGateway.Listener {
    */
   private ProcessResult activationFailure(ModelInvocationError error) {
     List<Publish> publishes = new ArrayList<>();
-    Applied applied;
+    Applied applied = Applied.LOST;
     drainLock.lock();
     try {
       synchronized (monitor) {
@@ -260,12 +263,19 @@ final class ModelExecution implements ModelGateway.Listener {
         }
         cancelBatchTimerLocked();
         pending.clear();
+        pendingPayloadBytes = 0;
         batchItems.clear();
         batchPayloadBytes = 0;
         terminal.set(true);
         applied = finishUnknownLocked(error, publishes);
       }
       publishAll(publishes);
+    } catch (RuntimeException failure) {
+      log.warn(
+          "cannot persist activation failure terminal for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
+      applied = Applied.LOST;
     } finally {
       drainLock.unlock();
     }
@@ -341,6 +351,7 @@ final class ModelExecution implements ModelGateway.Listener {
     synchronized (monitor) {
       cancelBatchTimerLocked();
       pending.clear();
+      pendingPayloadBytes = 0;
       batchItems.clear();
       batchPayloadBytes = 0;
       cancelNow = !activationInProgress;
@@ -349,6 +360,23 @@ final class ModelExecution implements ModelGateway.Listener {
       cancelHandle();
     }
     ownerRelease.accept(this);
+  }
+
+  private void checkPendingCapacityLocked(ProviderStreamEvent event) {
+    if (pending.size() >= config.streamFlushConfig().maxEvents()) {
+      throw new IllegalStateException("activation pending capacity exceeded: " + pending.size());
+    }
+    long eventBytes = StreamFlushConfig.eventPayloadBytes(event);
+    long newBytes;
+    try {
+      newBytes = Math.addExact(pendingPayloadBytes, eventBytes);
+    } catch (ArithmeticException overflow) {
+      throw new IllegalStateException("activation pending payload bytes overflow", overflow);
+    }
+    if (!pending.isEmpty() && newBytes > config.streamFlushConfig().maxPayloadBytes()) {
+      throw new IllegalStateException("activation pending payload bytes exceeded: " + newBytes);
+    }
+    pendingPayloadBytes = newBytes;
   }
 
   private void deliver(Pending signal) {
@@ -361,10 +389,7 @@ final class ModelExecution implements ModelGateway.Listener {
       synchronized (monitor) {
         if (!gateOpen) {
           if (!isTerminalSignal) {
-            if (pending.size() >= config.streamFlushConfig().maxEvents()) {
-              throw new IllegalStateException(
-                  "activation pending capacity exceeded: " + pending.size());
-            }
+            checkPendingCapacityLocked(signal.event());
             pending.add(signal);
             return;
           } else {
@@ -373,24 +398,57 @@ final class ModelExecution implements ModelGateway.Listener {
           }
         }
       }
+      applySignal(signal);
+    } catch (RuntimeException failure) {
+      handleSignalFailure(failure, isTerminalSignal);
+    } finally {
+      drainLock.unlock();
+    }
+  }
+
+  private Applied handleSignalFailure(RuntimeException failure, boolean isTerminalSignal) {
+    if (failure instanceof BatchInfrastructureException batchError) {
+      log.warn(
+          "cannot persist model batch flush for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(batchError));
+      abandon();
+      return Applied.LOST;
+    }
+    if (isTerminalSignal) {
+      log.warn(
+          "cannot persist model terminal for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
+      abandon();
+      return Applied.LOST;
+    }
+    return deliverFailure(
+        new ModelInvocationError(
+            ProviderErrorKind.INVALID_RESPONSE, message(failure, "invalid provider callback")));
+  }
+
+  /**
+   * 统一信号处理边界：在 drainLock 保护下执行单个信号。
+   *
+   * <p>异常严格分类隔离： 1. 批次基础设施/内部不变量失败（{@link BatchInfrastructureException}）：abandon execution，保留
+   * durable 状态供 lease recovery 收敛，不得写 FAILED/retry，返回 LOST； 2.
+   * 终态信号（SUCCEEDED/FAILED/UNKNOWN）持久化失败：记录日志并 abandon，返回 LOST； 3. 非法 Provider 事件（EVENT）：收敛为
+   * INVALID_RESPONSE terminal 或 retry；若该收敛持久化亦失败则 abandon，返回对应结果。 保证任何异常绝不逃出 ModelExecution 边界。
+   */
+  private Applied applySignal(Pending signal) {
+    if (abandoned.get()) {
+      return Applied.LOST;
+    }
+    boolean isTerminalSignal = signal.kind() != PendingKind.EVENT;
+    try {
       Applied applied = processSignal(signal);
       if (applied == Applied.LOST || applied != Applied.PROGRESSED) {
         abandon();
       }
+      return applied;
     } catch (RuntimeException failure) {
-      if (isTerminalSignal) {
-        log.warn(
-            "cannot persist model terminal for {}: {}",
-            invocationId,
-            ProcessorExceptions.describe(failure));
-        abandon();
-      } else {
-        deliverFailure(
-            new ModelInvocationError(
-                ProviderErrorKind.INVALID_RESPONSE, message(failure, "invalid provider callback")));
-      }
-    } finally {
-      drainLock.unlock();
+      return handleSignalFailure(failure, isTerminalSignal);
     }
   }
 
@@ -409,7 +467,16 @@ final class ModelExecution implements ModelGateway.Listener {
    */
   private Applied processEvent(ProviderStreamEvent event) {
     Instant now = clock.instant();
-    boolean fenced = Boolean.TRUE.equals(store.transaction(tx -> checkRunningOwnership(tx, now)));
+    boolean fenced;
+    try {
+      fenced = Boolean.TRUE.equals(store.transaction(tx -> checkRunningOwnership(tx, now)));
+    } catch (RuntimeException failure) {
+      log.warn(
+          "cannot verify running ownership for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
+      throw new BatchInfrastructureException("running ownership fence failed", failure);
+    }
     if (!fenced) {
       return Applied.LOST;
     }
@@ -444,9 +511,7 @@ final class ModelExecution implements ModelGateway.Listener {
       }
       long sequence = nextSequence();
       accumulator.append(event);
-      boolean isSafe =
-          event instanceof ProviderStreamEvent.TextDelta
-              || event instanceof ProviderStreamEvent.ThinkingDelta;
+      boolean isSafe = isSafeDelta(event);
       if (isSafe) {
         lastSafeSequence = sequence;
       }
@@ -467,6 +532,9 @@ final class ModelExecution implements ModelGateway.Listener {
     publishAll(publishesCurrent);
     if (needScheduleTimer) {
       scheduleBatchTimer(timerGeneration);
+    }
+    if (abandoned.get()) {
+      return Applied.LOST;
     }
     return Applied.PROGRESSED;
   }
@@ -520,36 +588,70 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private void scheduleBatchTimer(long targetGeneration) {
+    ScheduledFuture<?> future;
     try {
-      ScheduledFuture<?> future =
+      future =
           scheduler.schedule(
-              () -> {
-                try {
-                  flushExecutor.execute(() -> deliverFlush(targetGeneration));
-                } catch (RuntimeException rejected) {
-                  log.warn(
-                      "model flush executor rejected task for {}: {}",
-                      invocationId,
-                      ProcessorExceptions.describe(rejected));
-                  abandon();
-                }
-              },
+              () -> onTimerFired(targetGeneration),
               config.streamFlushConfig().maxDelay().toMillis(),
               TimeUnit.MILLISECONDS);
-      synchronized (monitor) {
-        if (abandoned.get() || terminal.get() || targetGeneration != batchGeneration) {
-          future.cancel(false);
-        } else {
-          batchTimer = future;
-        }
-      }
     } catch (RuntimeException rejected) {
-      log.warn(
-          "model flush timer scheduling rejected for {}: {}",
-          invocationId,
-          ProcessorExceptions.describe(rejected));
-      abandon();
+      boolean shouldAbandon;
+      synchronized (monitor) {
+        shouldAbandon = claimTimerRejectionLocked(targetGeneration);
+      }
+      if (shouldAbandon) {
+        log.warn(
+            "model flush timer scheduling rejected for {}: {}",
+            invocationId,
+            ProcessorExceptions.describe(rejected));
+        abandon();
+      }
+      return;
     }
+    synchronized (monitor) {
+      if (abandoned.get() || terminal.get() || targetGeneration != batchGeneration) {
+        future.cancel(false);
+        return;
+      }
+      batchTimer = future;
+    }
+  }
+
+  private void onTimerFired(long targetGeneration) {
+    synchronized (monitor) {
+      if (abandoned.get()
+          || terminal.get()
+          || targetGeneration != batchGeneration
+          || batchItems.isEmpty()) {
+        return;
+      }
+    }
+    try {
+      flushExecutor.execute(() -> deliverFlush(targetGeneration));
+    } catch (RuntimeException rejected) {
+      boolean shouldAbandon;
+      synchronized (monitor) {
+        shouldAbandon = claimTimerRejectionLocked(targetGeneration);
+      }
+      if (shouldAbandon) {
+        log.warn(
+            "model flush executor rejected task for {}: {}",
+            invocationId,
+            ProcessorExceptions.describe(rejected));
+        abandon();
+      }
+    }
+  }
+
+  private boolean claimTimerRejectionLocked(long targetGeneration) {
+    if (abandoned.get()
+        || targetGeneration != batchGeneration
+        || batchItems.isEmpty()
+        || !terminal.compareAndSet(false, true)) {
+      return false;
+    }
+    return true;
   }
 
   private void cancelBatchTimerLocked() {
@@ -610,7 +712,7 @@ final class ModelExecution implements ModelGateway.Listener {
     }
     long firstSeq = batchItems.getFirst().sequence();
     if (firstSeq != lastCommittedSequence + 1) {
-      throw new IllegalStateException(
+      throw new BatchInfrastructureException(
           "non-contiguous sequence publication: expected "
               + (lastCommittedSequence + 1)
               + " but got "
@@ -632,23 +734,32 @@ final class ModelExecution implements ModelGateway.Listener {
     }
     final StreamCheckpoint pendingCheckpoint = checkpointToPersist;
     Instant now = clock.instant();
-    boolean committed =
-        Boolean.TRUE.equals(
-            store.transaction(
-                tx -> {
-                  ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-                  if (model == null || tx.lockClaimedWork(claim, now).isEmpty()) {
-                    return false;
-                  }
-                  if (model.status() != ModelInvocationStatus.RUNNING
-                      || model.attempt() != attempt) {
-                    return false;
-                  }
-                  if (pendingCheckpoint != null) {
-                    tx.updateModelInvocation(model.checkpoint(pendingCheckpoint, now));
-                  }
-                  return true;
-                }));
+    boolean committed;
+    try {
+      committed =
+          Boolean.TRUE.equals(
+              store.transaction(
+                  tx -> {
+                    ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
+                    if (model == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+                      return false;
+                    }
+                    if (model.status() != ModelInvocationStatus.RUNNING
+                        || model.attempt() != attempt) {
+                      return false;
+                    }
+                    if (pendingCheckpoint != null) {
+                      tx.updateModelInvocation(model.checkpoint(pendingCheckpoint, now));
+                    }
+                    return true;
+                  }));
+    } catch (RuntimeException failure) {
+      log.warn(
+          "cannot persist model batch flush for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
+      throw new BatchInfrastructureException("cannot persist model batch flush", failure);
+    }
     if (!committed) {
       return Applied.LOST;
     }
@@ -671,6 +782,28 @@ final class ModelExecution implements ModelGateway.Listener {
 
   private Applied finishSuccessLocked(ProviderResponse response, List<Publish> publishes) {
     cancelBatchTimerLocked();
+    if (response != null && response.stopReason() == GenerationStopReason.FILTERED) {
+      ProviderResponse validatedResponse;
+      try {
+        validatedResponse = ModelResponseValidator.validate(response);
+      } catch (RuntimeException failure) {
+        log.warn(
+            "invalid filtered provider response for invocation {}: {}",
+            invocationId,
+            ProcessorExceptions.describe(failure));
+        return finishFailureLocked(
+            new ModelInvocationError(
+                ProviderErrorKind.INVALID_RESPONSE, message(failure, "invalid provider response")),
+            publishes);
+      }
+      boolean committed = safeTerminal(() -> commitSuccess(validatedResponse, null));
+      if (!committed) {
+        return Applied.LOST;
+      }
+      batchItems.clear();
+      batchPayloadBytes = 0;
+      return Applied.TERMINAL;
+    }
     ModelStreamAccumulator.PreparedCompletion prepared;
     ProviderResponse validatedResponse;
     try {
@@ -690,9 +823,7 @@ final class ModelExecution implements ModelGateway.Listener {
     List<BatchItem> gapItems = new ArrayList<>();
     for (ProviderStreamEvent gap : completion.gaps()) {
       long seq = nextSequence();
-      boolean isSafe =
-          gap instanceof ProviderStreamEvent.TextDelta
-              || gap instanceof ProviderStreamEvent.ThinkingDelta;
+      boolean isSafe = isSafeDelta(gap);
       if (isSafe) {
         lastSafeSequence = seq;
       }
@@ -934,23 +1065,31 @@ final class ModelExecution implements ModelGateway.Listener {
     }
   }
 
-  private void deliverFailure(ModelInvocationError error) {
+  private Applied deliverFailure(ModelInvocationError error) {
     drainLock.lock();
     try {
       List<Publish> publishes = new ArrayList<>();
       Applied applied;
       synchronized (monitor) {
         if (abandoned.get()) {
-          return;
+          return Applied.LOST;
         }
         applied = finishFailureLocked(error, publishes);
       }
       if (applied == Applied.LOST) {
         abandon();
-        return;
+        return Applied.LOST;
       }
       publishAll(publishes);
       abandon();
+      return applied;
+    } catch (RuntimeException failure) {
+      log.warn(
+          "cannot persist model failure for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
+      abandon();
+      return Applied.LOST;
     } finally {
       drainLock.unlock();
     }
@@ -1026,6 +1165,28 @@ final class ModelExecution implements ModelGateway.Listener {
       return fallback;
     }
     return failure.getMessage();
+  }
+
+  /** 仅非空 text / thinking delta 能够更新 lastSafeSequence 并生成 durable checkpoint。 */
+  private static boolean isSafeDelta(ProviderStreamEvent event) {
+    if (event instanceof ProviderStreamEvent.TextDelta delta) {
+      return !delta.text().isEmpty();
+    }
+    if (event instanceof ProviderStreamEvent.ThinkingDelta delta) {
+      return !delta.text().isEmpty();
+    }
+    return false;
+  }
+
+  /** 内部批次持久化或内部不变量检查失败：代表基础设施异常，绝不伪装为 Provider 错误。 */
+  private static final class BatchInfrastructureException extends RuntimeException {
+    private BatchInfrastructureException(String message, Throwable cause) {
+      super(message, cause);
+    }
+
+    private BatchInfrastructureException(String message) {
+      super(message);
+    }
   }
 
   private enum PendingKind {
