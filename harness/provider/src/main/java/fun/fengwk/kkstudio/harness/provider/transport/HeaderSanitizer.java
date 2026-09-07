@@ -29,12 +29,7 @@ final class HeaderSanitizer {
           "x-ratelimit-reset-requests",
           "x-ratelimit-reset-tokens",
           "x-request-id",
-          "request-id",
-          "x-correlation-id",
-          "traceparent",
-          "x-amzn-requestid",
-          "openai-organization",
-          "openai-processing-ms");
+          "request-id");
 
   private static final Set<String> SENSITIVE_KEYWORDS =
       Set.of("token", "key", "auth", "cookie", "secret", "credential");

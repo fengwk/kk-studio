@@ -9,11 +9,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
 
 import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -21,22 +24,54 @@ import java.util.Set;
  * 校验 upstream-test-manifest.json 的机器可读性、真实上游 Inventory 覆盖与自包含性。
  *
  * <p>保证 LangChain4j 1.20.0（提交 3a2f4dca6fb447e4d191624b3d588952ed9f4ce9）在 shared HTTP 与 JDK 客户端范围内的
- * 15 个源文件、共计 115 个真实 active 测试方法（包含 Reactive Streams TCK 38 项方法及全部参数化 invocation 维度）全量可审计：
+ * 15 个源文件、共计 115 个真实 active 测试方法、按 invocation 展开共 141 个 invocation 全量可审计：
  *
  * <ul>
- *   <li>总测试数严格为 115，其中 51 项 PORTED/PASSED，64 项 OUT_OF_SCOPE。
- *   <li>所有 PORTED 项均映射到本地真实存在的测试方法，且绝对不得标注 @Disabled。
- *   <li>所有 OUT_OF_SCOPE 项均详述具体能力不匹配（capability mismatch），其 localClass/localMethod 严格为 null，绝不伪装通过。
- *   <li>拒绝任何缺失、虚构上游方法或重复 caseId。
+ *   <li>精确校验 (source, method) 全集 115 项，拒绝虚构、重复或遗漏。
+ *   <li>按 invocation 维度独立记录 disposition：49 项 PORTED/PASSED，92 项 NOT_EXECUTED_OUT_OF_SCOPE。
+ *   <li>逐方法机械校验参数键和值（包括 Parser 7 个字符串、ExecutionMode SYNC/ASYNC、StreamingMode
+ *       LISTENER/PUBLISHER、NonBlocking logging false/true、非参数化空参数）。
+ *   <li>所有 PORTED invocation 均映射到本地真实存在的测试方法，必须标注 @Test 或 @ParameterizedTest，且绝对不得标注 @Disabled。
+ *   <li>所有 OUT_OF_SCOPE invocation 均详述具体能力不匹配（capability mismatch），其 localClass/localMethod 严格为
+ *       null。
+ *   <li>所有统计指标在测试中由代码从内容动态计算断言，不单纯信任外部自报。
  * </ul>
  */
 class UpstreamTestManifestTest {
 
   private static final String REQUIRED_UPSTREAM_COMMIT = "3a2f4dca6fb447e4d191624b3d588952ed9f4ce9";
 
-  private static final int EXPECTED_TOTAL_CASES = 115;
-  private static final int EXPECTED_PORTED_CASES = 51;
-  private static final int EXPECTED_OUT_OF_SCOPE_CASES = 64;
+  private static final int EXPECTED_TOTAL_METHODS = 115;
+  private static final int EXPECTED_TOTAL_INVOCATIONS = 141;
+  private static final int EXPECTED_PORTED_INVOCATIONS = 49;
+  private static final int EXPECTED_OUT_OF_SCOPE_INVOCATIONS = 92;
+  private static final int EXPECTED_PORTED_METHODS = 43;
+  private static final int EXPECTED_PURE_OUT_OF_SCOPE_METHODS = 72;
+
+  private static final List<String> PARSER_SINGLE_LINE_INPUTS =
+      List.of(
+          "data: Simple message",
+          "data: Simple message\n",
+          "\ndata: Simple message",
+          "\ndata: Simple message\n",
+          "\n\ndata: Simple message",
+          "data: Simple message\n\n",
+          "\n\ndata: Simple message\n\n");
+
+  private static final Set<String> EXECUTION_MODE_METHODS =
+      Set.of(
+          "should_return_successful_http_response",
+          "should_throw_400",
+          "should_throw_401",
+          "should_return_successful_http_response_form_data");
+
+  private static final Set<String> STREAMING_MODE_METHODS =
+      Set.of(
+          "should_stream_successful_response",
+          "should_cancel_streaming",
+          "should_stream_response_with_double_newline",
+          "should_deliver_error_when_streaming_400",
+          "should_deliver_error_when_streaming_connect_fails");
 
   private static final Set<String> EXACT_EXPECTED_SOURCES =
       Set.of(
@@ -239,117 +274,238 @@ class UpstreamTestManifestTest {
         commit,
         "upstream commit must match required LangChain4j 1.20.0 release commit");
 
-    // 校验 inventorySources 全集
-    JsonNode inventorySources = root.get("inventorySources");
-    assertNotNull(inventorySources, "inventorySources must be present in manifest");
-    Set<String> manifestSources = new HashSet<>();
-    for (JsonNode srcNode : inventorySources) {
-      manifestSources.add(srcNode.asText());
+    // 校验自报 summary（若存在）
+    if (root.has("summary")) {
+      JsonNode summary = root.get("summary");
+      assertEquals(EXPECTED_TOTAL_METHODS, summary.get("totalMethods").asInt());
+      assertEquals(EXPECTED_TOTAL_INVOCATIONS, summary.get("totalInvocations").asInt());
+      assertEquals(EXPECTED_PORTED_INVOCATIONS, summary.get("portedInvocations").asInt());
+      assertEquals(EXPECTED_OUT_OF_SCOPE_INVOCATIONS, summary.get("outOfScopeInvocations").asInt());
+      assertEquals(EXPECTED_PORTED_METHODS, summary.get("portedMethods").asInt());
+      assertEquals(
+          EXPECTED_PURE_OUT_OF_SCOPE_METHODS, summary.get("pureOutOfScopeMethods").asInt());
     }
-    assertEquals(
-        EXACT_EXPECTED_SOURCES,
-        manifestSources,
-        "inventorySources must exactly match the 15 upstream sources");
 
-    // 校验统计字段
-    JsonNode stats = root.get("statistics");
-    assertNotNull(stats, "statistics must be present in manifest");
-    assertEquals(EXPECTED_TOTAL_CASES, stats.get("totalCases").asInt());
-    assertEquals(EXPECTED_PORTED_CASES, stats.get("portedPassedCases").asInt());
-    assertEquals(EXPECTED_OUT_OF_SCOPE_CASES, stats.get("outOfScopeCases").asInt());
-
-    JsonNode cases = root.get("cases");
-    assertTrue(cases.isArray(), "cases must be a JSON array");
-    assertEquals(EXPECTED_TOTAL_CASES, cases.size(), "cases count must exactly match 115");
+    JsonNode methods = root.get("methods");
+    assertTrue(methods.isArray(), "methods must be a JSON array");
 
     Set<String> seenCaseIds = new HashSet<>();
-    int countedPorted = 0;
-    int countedOutOfScope = 0;
+    Set<String> seenInvocationIds = new HashSet<>();
+    Set<String> seenSourceMethodPairs = new HashSet<>();
 
-    for (JsonNode item : cases) {
-      String caseId = item.get("caseId").asText();
+    int countedMethods = 0;
+    int countedInvocations = 0;
+    int countedPortedInvocations = 0;
+    int countedOutOfScopeInvocations = 0;
+    int countedPortedMethods = 0;
+    int countedPureOutOfScopeMethods = 0;
+
+    for (JsonNode methodNode : methods) {
+      countedMethods++;
+      String caseId = methodNode.get("caseId").asText();
       assertTrue(seenCaseIds.add(caseId), "caseId must be unique: " + caseId);
 
-      String upstreamSource = item.get("upstreamSource").asText();
+      String source = methodNode.get("source").asText();
       assertTrue(
-          EXACT_EXPECTED_SOURCES.contains(upstreamSource),
-          "case upstreamSource must belong to inventorySources: " + upstreamSource);
+          EXACT_EXPECTED_SOURCES.contains(source),
+          "method source must belong to exact expected 15 sources: " + source);
 
-      String upstreamMethod = item.get("upstreamMethod").asText();
-      Set<String> validMethods = SOURCE_TO_METHODS.get(upstreamSource);
-      assertNotNull(validMethods, "valid methods definition must exist for: " + upstreamSource);
+      String methodName = methodNode.get("method").asText();
+      Set<String> validMethods = SOURCE_TO_METHODS.get(source);
+      assertNotNull(validMethods, "valid methods definition must exist for: " + source);
       assertTrue(
-          validMethods.contains(upstreamMethod),
-          () ->
-              "upstreamMethod '"
-                  + upstreamMethod
-                  + "' must actually exist in source '"
-                  + upstreamSource
-                  + "'; fictitious methods are prohibited");
+          validMethods.contains(methodName),
+          () -> "upstreamMethod '" + methodName + "' must actually exist in source: " + source);
 
-      int invCount = item.get("invocationCount").asInt();
-      assertTrue(invCount >= 1, "invocationCount must be >= 1 for case: " + caseId);
-      JsonNode invDims = item.get("invocationDimensions");
-      assertNotNull(invDims, "invocationDimensions must be specified for case: " + caseId);
-      assertTrue(invDims.isArray() && invDims.size() > 0, "invocationDimensions must not be empty");
+      String pair = source + "#" + methodName;
+      assertTrue(seenSourceMethodPairs.add(pair), "source and method pair must be unique: " + pair);
 
-      String status = item.get("status").asText();
-      String executionStatus = item.get("executionStatus").asText();
+      JsonNode invocations = methodNode.get("invocations");
+      assertTrue(
+          invocations.isArray() && invocations.size() > 0, "invocations must be non-empty array");
 
-      if ("PORTED".equals(status)) {
-        countedPorted++;
-        assertEquals("PASSED", executionStatus, "PORTED case must have PASSED executionStatus");
-        assertTrue(
-            item.get("capabilityMismatch") == null || item.get("capabilityMismatch").isNull(),
-            "PORTED case must not have capabilityMismatch");
-
-        String localClass = item.get("localClass").asText();
-        String localMethod = item.get("localMethod").asText();
-        assertNotNull(localClass, "PORTED case must have non-null localClass: " + caseId);
-        assertNotNull(localMethod, "PORTED case must have non-null localMethod: " + caseId);
-
-        // 验证本地测试类与方法真实存在且未被禁用
-        Class<?> clazz = Class.forName(localClass);
-        assertNotNull(clazz, "local test class must be loadable: " + localClass);
-
-        Method method =
-            Arrays.stream(clazz.getDeclaredMethods())
-                .filter(m -> m.getName().equals(localMethod))
-                .findFirst()
-                .orElse(null);
-
-        assertNotNull(
-            method, () -> "local test method " + localMethod + " must exist in " + localClass);
-
-        assertFalse(
-            method.isAnnotationPresent(Disabled.class),
-            () -> "local test method " + localMethod + " must not be annotated with @Disabled");
-      } else if ("OUT_OF_SCOPE".equals(status)) {
-        countedOutOfScope++;
+      // 机械校验各方法的 invocation 数量及参数键值
+      if ("shouldParseSimpleSingleLineEvent".equals(methodName)) {
         assertEquals(
-            "OUT_OF_SCOPE",
-            executionStatus,
-            "OUT_OF_SCOPE case must have OUT_OF_SCOPE executionStatus");
-        JsonNode mismatchNode = item.get("capabilityMismatch");
-        assertNotNull(mismatchNode, "OUT_OF_SCOPE case must specify capabilityMismatch");
-        assertFalse(
-            mismatchNode.isNull() || mismatchNode.asText().isBlank(),
-            "OUT_OF_SCOPE case must provide non-blank capabilityMismatch explanation");
-
-        // 严格断言：OUT_OF_SCOPE 项禁止指向无关本地测试或伪装通过
-        assertTrue(
-            item.get("localClass") == null || item.get("localClass").isNull(),
-            "OUT_OF_SCOPE case must have null localClass: " + caseId);
-        assertTrue(
-            item.get("localMethod") == null || item.get("localMethod").isNull(),
-            "OUT_OF_SCOPE case must have null localMethod: " + caseId);
+            7,
+            invocations.size(),
+            "shouldParseSimpleSingleLineEvent must have exactly 7 invocations matching upstream @ValueSource");
+        List<String> actualInputs = new ArrayList<>();
+        for (JsonNode inv : invocations) {
+          assertTrue(inv.get("parameters").has("input"), "must contain parameter 'input'");
+          actualInputs.add(inv.get("parameters").get("input").asText());
+        }
+        assertEquals(
+            PARSER_SINGLE_LINE_INPUTS,
+            actualInputs,
+            "parser @ValueSource inputs must match exactly");
+      } else if (EXECUTION_MODE_METHODS.contains(methodName) && source.contains("HttpClientIT")) {
+        assertEquals(
+            2,
+            invocations.size(),
+            () ->
+                "ExecutionMode parameterized method "
+                    + pair
+                    + " must define exactly 2 invocations (SYNC, ASYNC)");
+        Set<String> modes = new HashSet<>();
+        for (JsonNode inv : invocations) {
+          assertTrue(
+              inv.get("parameters").has("executionMode"), "must contain parameter 'executionMode'");
+          modes.add(inv.get("parameters").get("executionMode").asText());
+        }
+        assertEquals(
+            Set.of("SYNC", "ASYNC"), modes, "executionMode must be exactly SYNC and ASYNC");
+      } else if (STREAMING_MODE_METHODS.contains(methodName) && source.contains("HttpClientIT")) {
+        assertEquals(
+            2,
+            invocations.size(),
+            () ->
+                "StreamingMode parameterized method "
+                    + pair
+                    + " must define exactly 2 invocations (LISTENER, PUBLISHER)");
+        Set<String> modes = new HashSet<>();
+        for (JsonNode inv : invocations) {
+          assertTrue(
+              inv.get("parameters").has("streamingMode"), "must contain parameter 'streamingMode'");
+          modes.add(inv.get("parameters").get("streamingMode").asText());
+        }
+        assertEquals(
+            Set.of("LISTENER", "PUBLISHER"),
+            modes,
+            "streamingMode must be exactly LISTENER and PUBLISHER");
+      } else if ("publisher_path_does_not_block_the_transport_threads".equals(methodName)) {
+        assertEquals(
+            2,
+            invocations.size(),
+            () ->
+                "NonBlocking method "
+                    + pair
+                    + " must define exactly 2 invocations (logging=false/true)");
+        Set<String> loggingVals = new HashSet<>();
+        for (JsonNode inv : invocations) {
+          assertTrue(inv.get("parameters").has("logging"), "must contain parameter 'logging'");
+          loggingVals.add(inv.get("parameters").get("logging").asText());
+        }
+        assertEquals(
+            Set.of("false", "true"), loggingVals, "logging must be exactly false and true");
       } else {
-        throw new AssertionError("Unknown case status: " + status);
+        assertEquals(
+            1,
+            invocations.size(),
+            () -> "Non-parameterized method " + pair + " must define exactly 1 invocation");
+        assertEquals(
+            0,
+            invocations.get(0).get("parameters").size(),
+            () -> "Non-parameterized invocation must have empty parameters: " + pair);
+      }
+
+      boolean methodHasPorted = false;
+
+      for (JsonNode inv : invocations) {
+        countedInvocations++;
+        String invocationId = inv.get("invocationId").asText();
+        assertNotNull(invocationId, "invocationId must not be null");
+        assertTrue(
+            seenInvocationIds.add(invocationId),
+            "invocationId must be globally unique: " + invocationId);
+
+        String status = inv.get("status").asText();
+        String executionStatus = inv.get("executionStatus").asText();
+
+        if ("PORTED".equals(status)) {
+          countedPortedInvocations++;
+          methodHasPorted = true;
+          assertEquals(
+              "PASSED", executionStatus, "PORTED invocation must have PASSED executionStatus");
+          assertTrue(
+              inv.get("capabilityMismatch") == null || inv.get("capabilityMismatch").isNull(),
+              "PORTED invocation must not have capabilityMismatch");
+
+          String localClass = inv.get("localClass").asText();
+          String localMethod = inv.get("localMethod").asText();
+          assertNotNull(localClass, "PORTED invocation must have non-null localClass");
+          assertNotNull(localMethod, "PORTED invocation must have non-null localMethod");
+
+          // 反射验证本地测试真实存在、具有 @Test 或 @ParameterizedTest 注解且未被 @Disabled
+          Class<?> clazz = Class.forName(localClass);
+          assertNotNull(clazz, "local test class must be loadable: " + localClass);
+          assertFalse(
+              clazz.isAnnotationPresent(Disabled.class), "local test class must not be Disabled");
+
+          Method targetMethod =
+              Arrays.stream(clazz.getDeclaredMethods())
+                  .filter(m -> m.getName().equals(localMethod))
+                  .findFirst()
+                  .orElse(null);
+
+          assertNotNull(
+              targetMethod,
+              () -> "local test method " + localMethod + " must exist in " + localClass);
+
+          boolean hasTestAnnotation =
+              targetMethod.isAnnotationPresent(Test.class)
+                  || targetMethod.isAnnotationPresent(ParameterizedTest.class);
+          assertTrue(
+              hasTestAnnotation,
+              () ->
+                  "local test method "
+                      + localMethod
+                      + " must be annotated with @Test or @ParameterizedTest");
+
+          assertFalse(
+              targetMethod.isAnnotationPresent(Disabled.class),
+              () -> "local test method " + localMethod + " must not be annotated with @Disabled");
+        } else if ("OUT_OF_SCOPE".equals(status)) {
+          countedOutOfScopeInvocations++;
+          assertEquals(
+              "NOT_EXECUTED_OUT_OF_SCOPE",
+              executionStatus,
+              "OUT_OF_SCOPE invocation must strictly have NOT_EXECUTED_OUT_OF_SCOPE executionStatus");
+
+          JsonNode mismatchNode = inv.get("capabilityMismatch");
+          assertNotNull(mismatchNode, "OUT_OF_SCOPE invocation must specify capabilityMismatch");
+          assertFalse(
+              mismatchNode.isNull() || mismatchNode.asText().isBlank(),
+              "OUT_OF_SCOPE invocation must provide non-blank capabilityMismatch explanation");
+
+          assertTrue(
+              inv.get("localClass") == null || inv.get("localClass").isNull(),
+              "OUT_OF_SCOPE invocation must have null localClass");
+          assertTrue(
+              inv.get("localMethod") == null || inv.get("localMethod").isNull(),
+              "OUT_OF_SCOPE invocation must have null localMethod");
+        } else {
+          throw new AssertionError("Unknown invocation status: " + status);
+        }
+      }
+
+      if (methodHasPorted) {
+        countedPortedMethods++;
+      } else {
+        countedPureOutOfScopeMethods++;
       }
     }
 
-    assertEquals(EXPECTED_PORTED_CASES, countedPorted, "ported cases count must be 51");
+    // 校验全量 Inventory 覆盖与全集一致性
+    int expectedTotalMethods = 0;
+    for (Set<String> mSet : SOURCE_TO_METHODS.values()) {
+      expectedTotalMethods += mSet.size();
+    }
+    assertEquals(EXPECTED_TOTAL_METHODS, expectedTotalMethods);
+    assertEquals(EXPECTED_TOTAL_METHODS, seenSourceMethodPairs.size());
+
+    // 动态计算统计指标的断言，不信任外部自报
+    assertEquals(EXPECTED_TOTAL_METHODS, countedMethods, "total methods count");
+    assertEquals(EXPECTED_TOTAL_INVOCATIONS, countedInvocations, "total invocations count");
+    assertEquals(EXPECTED_PORTED_INVOCATIONS, countedPortedInvocations, "ported invocations count");
     assertEquals(
-        EXPECTED_OUT_OF_SCOPE_CASES, countedOutOfScope, "out of scope cases count must be 64");
+        EXPECTED_OUT_OF_SCOPE_INVOCATIONS,
+        countedOutOfScopeInvocations,
+        "out of scope invocations count");
+    assertEquals(EXPECTED_PORTED_METHODS, countedPortedMethods, "ported methods count");
+    assertEquals(
+        EXPECTED_PURE_OUT_OF_SCOPE_METHODS,
+        countedPureOutOfScopeMethods,
+        "pure out of scope methods count");
   }
 }
