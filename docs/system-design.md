@@ -162,7 +162,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 根 `pom.xml` 直接聚合六个 Maven module：`share`、`schema`、`canvas`、
 `harness`、`platform`、`web`。`canvas/pom.xml` 再聚合 `canvas/core` 和
 `canvas/infra`；`harness/pom.xml` 再聚合 `common`、`tool`、`environment`、`runtime`、
-`contributor-api`、`builtin`、`infra` 和 `daemon`。下表列出的是可维护的逻辑模块/目录，
+`provider`、`contributor-api`、`builtin`、`infra` 和 `daemon`。下表列出的是可维护的逻辑模块/目录，
 不是 root reactor 的直接 children。`frontend/` 是独立的 Node/Vite 工程，
 不属于 Maven reactor。
 
@@ -177,6 +177,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `harness/tool` | Tool identity、descriptor、call/result 与 Tool JSON codecs（Result 组合 ResultContent） | 依赖 `harness-common` 与 Jackson |
 | `harness/environment` | Environment binding、Capability SPI/catalog 与 Daemon v1 wire（CapabilityResult 组合 ResultContent） | 依赖 `harness-common` 与 Jackson，绝不依赖 `harness-tool` |
 | `harness/runtime` | Session/Entry/Thread/Command/Invocation/Work 状态机与 processors | 依赖 `harness-common`、`harness-tool`、`harness-environment`、Jackson、SLF4J、JGit |
+| `harness/provider` | JDK 21 HttpClient + SSE 传输与增量解析基础设施 | 依赖 `harness-runtime`，无 Spring 依赖，安全脱敏 |
 | `harness/contributor-api` | trusted Contributor 的 Catalog、BranchView、统一 Tool、effect 与 projector API | 生产依赖 `harness-tool`、`harness-environment`，不进生产 Common/Runtime |
 | `harness/builtin` | 第一方内置 15 工具、goal.state 与 context projector | 依赖 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment`、Jackson |
 | `harness/infra` | PostgreSQL HarnessStore、Work dispatcher、realtime、Resource store | 依赖 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Spring JDBC、PostgreSQL |

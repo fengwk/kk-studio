@@ -1,0 +1,349 @@
+{
+  "upstreamRepo": "https://github.com/langchain4j/langchain4j",
+  "upstreamCommit": "3a2f4dca6fb447e4d191624b3d588952ed9f4ce9",
+  "version": "1.20.0",
+  "cases": [
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
+      "caseId": "data: Simple message",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldParseSimpleSingleLineEvent",
+      "strengthened": false,
+      "notes": "简单单行 data 事件解析（无尾随换行）"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
+      "caseId": "data: Simple message\\n",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldParseSimpleSingleLineEvent",
+      "strengthened": false,
+      "notes": "单换行单事件解析"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
+      "caseId": "\\ndata: Simple message",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldParseSimpleSingleLineEvent",
+      "strengthened": false,
+      "notes": "前导单换行单事件解析"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
+      "caseId": "\\ndata: Simple message\\n",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldParseSimpleSingleLineEvent",
+      "strengthened": false,
+      "notes": "前后各单换行单事件解析"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
+      "caseId": "\\n\\ndata: Simple message",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldParseSimpleSingleLineEvent",
+      "strengthened": false,
+      "notes": "前导双换行忽略后解析单事件"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
+      "caseId": "data: Simple message\\n\\n",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldParseSimpleSingleLineEvent",
+      "strengthened": false,
+      "notes": "标准双换行闭合单事件解析"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldParseSimpleSingleLineEvent",
+      "caseId": "\\n\\ndata: Simple message\\n\\n",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldParseSimpleSingleLineEvent",
+      "strengthened": false,
+      "notes": "前后双换行单事件解析"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldParseMultiLineDataEvent",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldParseMultiLineDataEvent",
+      "strengthened": false,
+      "notes": "多行 data 以 \\n 拼接"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldParseEventWithAllFields",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldParseEventWithAllFields",
+      "strengthened": false,
+      "notes": "提取 event 与 data，安全忽略 id 与 retry"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldParseMultipleEvents",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldParseMultipleEvents",
+      "strengthened": false,
+      "notes": "顺序分发多个事件"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldIgnoreCommentsAndEmptyLines",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldIgnoreCommentsAndEmptyLines",
+      "strengthened": false,
+      "notes": "冒号注释行安全忽略"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldHandleStreamWithNoEvents",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldHandleStreamWithNoEvents",
+      "strengthened": false,
+      "notes": "空输入不分发事件"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldPreserveAdditionalLeadingWhitespaceInData",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldPreserveAdditionalLeadingWhitespaceInData",
+      "strengthened": false,
+      "notes": "仅剔除首个空格，保留额外前导空格"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldPreserveTrailingWhitespaceInData",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldPreserveTrailingWhitespaceInData",
+      "strengthened": false,
+      "notes": "保留尾随空白"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldNotRemoveAnyCharacterWhenDataHasNoLeadingSpace",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldNotRemoveAnyCharacterWhenDataHasNoLeadingSpace",
+      "strengthened": false,
+      "notes": "无空格时保留全部字符"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "shouldHandleIOException",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "shouldHandleIOException",
+      "strengthened": true,
+      "notes": "强化：底层输入流异常被包装为安全的 TransportException(IO)"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "parse_stops_emitting_after_the_listener_cancels",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "parse_stops_emitting_after_the_listener_cancels",
+      "strengthened": false,
+      "notes": "取消后停止后续事件分发"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "parse_handles_cr_and_crlf_line_endings",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "parse_handles_cr_and_crlf_line_endings",
+      "strengthened": false,
+      "notes": "同时兼容 CRLF 与孤立 CR 换行"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "parse_trims_event_field_and_strips_one_leading_space_from_data",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "parse_trims_event_field_and_strips_one_leading_space_from_data",
+      "strengthened": false,
+      "notes": "event 做全 trim，data 仅剥除单个前导空格"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "incremental_trims_event_field_and_strips_one_leading_space_from_data",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "incremental_trims_event_field_and_strips_one_leading_space_from_data",
+      "strengthened": false,
+      "notes": "增量模式与全量模式空格处理对齐"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async",
+      "strengthened": true,
+      "notes": "强化：本仓原生全增量式解析，完全杜绝无界字符分配"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "incremental_parses_single_event_in_one_chunk",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "incremental_parses_single_event_in_one_chunk",
+      "strengthened": false,
+      "notes": "增量单 chunk 单事件"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "incremental_parses_event_split_across_chunks",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "incremental_parses_event_split_across_chunks",
+      "strengthened": false,
+      "notes": "增量跨 chunk 组装事件"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "incremental_handles_crlf_line_endings",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "incremental_handles_crlf_line_endings",
+      "strengthened": false,
+      "notes": "增量 CRLF 换行支持"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "incremental_parses_multiple_events",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "incremental_parses_multiple_events",
+      "strengthened": false,
+      "notes": "增量多事件分发"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "incremental_joins_multiline_data",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "incremental_joins_multiline_data",
+      "strengthened": false,
+      "notes": "增量多行拼接"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "incremental_ignores_comment_id_and_retry_lines",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "incremental_ignores_comment_id_and_retry_lines",
+      "strengthened": false,
+      "notes": "增量忽略 comment、id 与 retry"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "incremental_flush_emits_trailing_event_without_terminating_blank_line",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "incremental_flush_emits_trailing_event_without_terminating_blank_line",
+      "strengthened": false,
+      "notes": "增量 flush 自动交付未空行闭合事件"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "incremental_flush_completes_a_pending_partial_line",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "incremental_flush_completes_a_pending_partial_line",
+      "strengthened": false,
+      "notes": "增量 flush 补齐未换行的行"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "incremental_flush_returns_empty_when_nothing_is_pending",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "incremental_flush_returns_empty_when_nothing_is_pending",
+      "strengthened": false,
+      "notes": "增量无未决数据时不重复分发"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
+      "upstreamMethod": "incremental_decodes_utf8_multibyte_char_split_across_chunks",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
+      "localMethod": "incremental_decodes_utf8_multibyte_char_split_across_chunks",
+      "strengthened": false,
+      "notes": "增量跨 chunk 正确组装 UTF-8 多字节字符"
+    },
+    {
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
+      "upstreamMethod": "should_preserve_line_separators_of_error_response_body",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_preserve_line_separators_of_error_response_body",
+      "strengthened": true,
+      "notes": "强化：保留非 2xx 错误响应换行符，并在 errorBodyBytes 隔离，toString/message 绝不泄露"
+    },
+    {
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
+      "upstreamMethod": "should_decode_error_response_body_as_utf8",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_decode_error_response_body_as_utf8",
+      "strengthened": true,
+      "notes": "强化：支持多语言 UTF-8 错误体读取并安全防御拷贝"
+    },
+    {
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
+      "upstreamMethod": "should_not_fail_on_successful_response",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_not_fail_on_successful_response",
+      "strengthened": false,
+      "notes": "成功 200 text/event-stream 正确交付事件并完成"
+    },
+    {
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientStreamOverflowTest.java",
+      "upstreamMethod": "overflowing_the_stream_buffer_aborts_the_request_and_closes_the_connection",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "overflowing_the_stream_buffer_aborts_the_request_and_closes_the_connection",
+      "strengthened": true,
+      "notes": "强化：以字节为单位进行严格限流，超出上限立即关闭 TCP socket 终止请求"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientCancellationIT.java",
+      "upstreamMethod": "cancelling_the_future_releases_the_caller",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "cancelling_the_future_releases_the_caller",
+      "strengthened": false,
+      "notes": "取消立即返回释放调用方"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientCancellationIT.java",
+      "upstreamMethod": "cancelling_the_future_aborts_the_request_and_closes_the_connection",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "cancelling_the_future_aborts_the_request_and_closes_the_connection",
+      "strengthened": true,
+      "notes": "强化：取消立即中止在途请求并关闭 TCP 套接字"
+    },
+    {
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientTimeoutIT.java",
+      "upstreamMethod": "should_timeout_on_read_async",
+      "caseId": "default",
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_timeout_on_read_async",
+      "strengthened": true,
+      "notes": "强化：受管 Watchdog 基于单调时钟 System.nanoTime 精确判定闲置超时"
+    }
+  ]
+}
