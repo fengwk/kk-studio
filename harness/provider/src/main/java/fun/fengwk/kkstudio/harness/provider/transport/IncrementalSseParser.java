@@ -19,11 +19,12 @@ import java.util.function.Consumer;
  *   <li>行结尾兼容 CRLF ({@code \r\n})、单 LF ({@code \n}) 与孤立 CR ({@code \r})。
  *   <li>严格 UTF-8 解码与校验，仅在流开头跳过 UTF-8 BOM；遇到畸形 UTF-8 序列或 NUL ({@code \0}) 字节确定失败。
  *   <li>多行 data 以 {@code \n} 拼接；字段值若以单个空格开头则仅剥离该空格，保留其他前导与尾随空白。
- *   <li>严格按字节统计并限制单行上限、单事件上限与成功流累计上限。
- *   <li>流到达 EOF 时分发尚未以空行闭合的 pending event。
+ *   <li>严格按字节统计并限制单行上限、单事件上限与成功流累计上限（BOM 字节亦计入成功流 wire 字节数）。
+ *   <li>每个空行事件边界（无论是否有 data）必须重置 currentEvent 与 currentEventBytes；连续空行与 comment 不累积事件大小。
+ *   <li>流到达 EOF 时刷新并交付尚未以空行闭合的 pending event。
  * </ul>
  */
-class IncrementalSseParser {
+final class IncrementalSseParser {
 
   private static final byte[] UTF8_BOM = new byte[] {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
 
@@ -33,12 +34,13 @@ class IncrementalSseParser {
   private final ByteArrayOutputStream currentLineBuffer = new ByteArrayOutputStream(256);
   private int currentLineBytes;
   private int currentEventBytes;
-  private long totalSuccessBytes;
+  private long totalWireBytes;
 
   private boolean pendingCr;
   private boolean bomChecked;
   private final byte[] bomPending = new byte[3];
   private int bomPendingCount;
+  private boolean currentLineIsComment;
 
   private String currentEvent;
   private StringBuilder currentData;
@@ -50,7 +52,10 @@ class IncrementalSseParser {
 
   /** 向解析器供给一段原始字节数据。 */
   void feed(byte[] buf, int offset, int length) {
-    if (length <= 0) {
+    Objects.requireNonNull(buf, "buf must not be null");
+    Objects.checkFromIndexSize(offset, length, buf.length);
+
+    if (length == 0) {
       return;
     }
     int index = offset;
@@ -66,9 +71,10 @@ class IncrementalSseParser {
         if (bomPending[0] == UTF8_BOM[0]
             && bomPending[1] == UTF8_BOM[1]
             && bomPending[2] == UTF8_BOM[2]) {
-          // 开头包含完整 BOM，丢弃这 3 个字节
+          // 开头包含完整 BOM，丢弃这 3 个字节，但计入实际传输 wire 字节数
+          countWireBytes(3);
         } else {
-          // 不是 BOM，将暂存的字节按普通数据逐字节处理
+          // 不是 BOM，将暂存的 3 个字节逐一消费
           for (int i = 0; i < 3; i++) {
             processByte(bomPending[i]);
           }
@@ -84,28 +90,43 @@ class IncrementalSseParser {
     }
   }
 
-  /** 当底层流到达 EOF 时刷新并交付尚未闭合的尾部行和事件。 */
+  /** 当底层流到达 EOF 时刷新并交付尚未闭合的尾部行和事件，并清理所有状态。 */
   void flush() {
-    // 若流在未凑满 3 字节的 BOM 探测阶段便遇到 EOF，将暂存字节作为普通字节消费
-    if (!bomChecked && bomPendingCount > 0) {
-      bomChecked = true;
-      for (int i = 0; i < bomPendingCount; i++) {
-        processByte(bomPending[i]);
+    try {
+      // 若流在未凑满 3 字节的 BOM 探测阶段便遇到 EOF，将暂存字节作为普通字节消费
+      if (!bomChecked && bomPendingCount > 0) {
+        bomChecked = true;
+        for (int i = 0; i < bomPendingCount; i++) {
+          processByte(bomPending[i]);
+        }
       }
-    }
 
-    if (currentLineBuffer.size() > 0) {
-      finishLine();
+      if (pendingCr) {
+        pendingCr = false;
+        finishLine();
+      } else if (currentLineBuffer.size() > 0) {
+        finishLine();
+      }
+      dispatchPendingEvent();
+    } finally {
+      currentEvent = null;
+      currentData = null;
+      currentEventBytes = 0;
+      currentLineBytes = 0;
+      currentLineIsComment = false;
     }
-    dispatchPendingEvent();
   }
 
-  private void processByte(byte b) {
-    totalSuccessBytes++;
-    if (totalSuccessBytes > limits.maxSuccessBodyBytes()) {
+  private void countWireBytes(int delta) {
+    totalWireBytes += delta;
+    if (totalWireBytes > limits.maxSuccessBodyBytes()) {
       throw new TransportException(
           TransportErrorKind.INVALID_RESPONSE, "Success response body size exceeded limit");
     }
+  }
+
+  private void processByte(byte b) {
+    countWireBytes(1);
 
     if (b == 0) {
       throw new TransportException(
@@ -115,7 +136,7 @@ class IncrementalSseParser {
     if (pendingCr) {
       pendingCr = false;
       if (b == '\n') {
-        // CRLF 中的 LF，已在遇到 CR 时分发，丢弃
+        // CRLF 中的 LF，已在遇到 CR 时分发行，直接跳过
         return;
       }
       // 否则说明 CR 为独立行结尾，当前字节 b 属于新的一行，继续向下执行
@@ -132,16 +153,22 @@ class IncrementalSseParser {
       return;
     }
 
+    if (currentLineBytes == 0) {
+      currentLineIsComment = (b == ':');
+    }
+
     currentLineBytes++;
     if (currentLineBytes > limits.maxLineBytes()) {
       throw new TransportException(
           TransportErrorKind.INVALID_RESPONSE, "SSE line size exceeded limit");
     }
 
-    currentEventBytes++;
-    if (currentEventBytes > limits.maxEventBytes()) {
-      throw new TransportException(
-          TransportErrorKind.INVALID_RESPONSE, "SSE event size exceeded limit");
+    if (!currentLineIsComment) {
+      currentEventBytes++;
+      if (currentEventBytes > limits.maxEventBytes()) {
+        throw new TransportException(
+            TransportErrorKind.INVALID_RESPONSE, "SSE event size exceeded limit");
+      }
     }
 
     currentLineBuffer.write(b);
@@ -151,6 +178,7 @@ class IncrementalSseParser {
     byte[] lineBytes = currentLineBuffer.toByteArray();
     currentLineBuffer.reset();
     currentLineBytes = 0;
+    currentLineIsComment = false;
 
     String line;
     try {
@@ -201,12 +229,16 @@ class IncrementalSseParser {
   }
 
   private void dispatchPendingEvent() {
-    if (currentData != null) {
-      ServerSentEvent event = new ServerSentEvent(currentEvent, currentData.toString());
+    try {
+      if (currentData != null) {
+        ServerSentEvent event = new ServerSentEvent(currentEvent, currentData.toString());
+        eventConsumer.accept(event);
+      }
+    } finally {
+      // 无论是否有 data，空行边界都必须重置当前事件属性与字节累积
       currentEvent = null;
       currentData = null;
       currentEventBytes = 0;
-      eventConsumer.accept(event);
     }
   }
 

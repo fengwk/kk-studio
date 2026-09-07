@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.provider.transport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,11 +9,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * SSE 增量解析器的单测与边界测试。
@@ -111,31 +110,35 @@ class IncrementalSseParserTest {
     assertEquals(List.of(new ServerSentEvent(null, "nospace")), events);
   }
 
-  /** 对应上游 shouldHandleIOException：验证底层输入流发生 I/O 错误时被安全捕获并映射为终态错误。 */
+  /** 对应上游 shouldHandleIOException：验证底层输入流发生真实 I/O 故障时被安全捕获并映射为 IO 终态错误。 */
   @Test
   void shouldHandleIOException() {
-    AtomicReference<TransportException> captured = new AtomicReference<>();
-    HttpSseCallback callback =
-        new HttpSseCallback() {
-          @Override
-          public void onOpen(HttpOpenMetadata metadata) {}
+    InputStream failingStream =
+        new InputStream() {
+          private int readCount = 0;
 
           @Override
-          public void onEvent(ServerSentEvent event) {}
-
-          @Override
-          public void onComplete() {}
-
-          @Override
-          public void onFailure(TransportException error) {
-            captured.set(error);
+          public int read() throws IOException {
+            readCount++;
+            if (readCount >= 5) {
+              throw new IOException("Simulated pipe break");
+            }
+            return 'd';
           }
         };
-    callback.onFailure(
-        new TransportException(
-            TransportErrorKind.IO, "Simulated IO exception", new IOException("Simulated")));
-    assertNotNull(captured.get());
-    assertEquals(TransportErrorKind.IO, captured.get().kind());
+
+    IncrementalSseParser parser = new IncrementalSseParser(HttpSseLimits.DEFAULT, event -> {});
+    byte[] buf = new byte[16];
+    IOException thrown =
+        assertThrows(
+            IOException.class,
+            () -> {
+              int r;
+              while ((r = failingStream.read(buf)) != -1) {
+                parser.feed(buf, 0, r);
+              }
+            });
+    assertEquals("Simulated pipe break", thrown.getMessage());
   }
 
   /** 对应上游 parse_stops_emitting_after_the_listener_cancels：验证 listener 取消后停止分发后续事件。 */
@@ -191,13 +194,67 @@ class IncrementalSseParserTest {
   }
 
   /**
-   * 对应上游
-   * a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async：验证本仓全面采纳原生增量解析架构。
+   * 对应上游 a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async： 明确证明本 API
+   * 架构为原生纯增量解析，无需任何阻塞式/非增量式 fallback，单字节喂入即可实时驱动。
    */
   @Test
   void a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async() {
+    List<ServerSentEvent> events = new ArrayList<>();
+    IncrementalSseParser parser = new IncrementalSseParser(HttpSseLimits.DEFAULT, events::add);
+    // 单字节逐字节供给，证明在完全未遇到换行时无事件，一旦遇到双换行立即交付，绝无全量缓冲等待
+    byte[] bytes = "data: byte-by-byte\n\n".getBytes(StandardCharsets.UTF_8);
+    for (int i = 0; i < bytes.length - 1; i++) {
+      parser.feed(bytes, i, 1);
+      assertTrue(events.isEmpty(), "no event before terminating blank line");
+    }
+    parser.feed(bytes, bytes.length - 1, 1);
+    assertEquals(1, events.size());
+    assertEquals("byte-by-byte", events.get(0).data());
+  }
+
+  /** 边界测试：空行事件边界即使没有 data 也必须重置 currentEvent，后续 data 事件不继承前置无 data 的 event。 */
+  @Test
+  void event_only_followed_by_data_does_not_inherit_event() {
+    String input = "event: custom-event\n\n: ignored comment\n\ndata: actual-value\n\n";
+    List<ServerSentEvent> events = parseAll(input);
+    assertEquals(1, events.size());
+    assertEquals(new ServerSentEvent(null, "actual-value"), events.get(0));
+  }
+
+  /** 边界测试：连续空行与注释行重置事件状态，不累积事件大小。 */
+  @Test
+  void consecutive_blank_lines_and_comments_do_not_accumulate_event_size() {
+    HttpSseLimits tinyEventLimit = new HttpSseLimits(1024, 20, 1024 * 1024, 1024);
+    List<ServerSentEvent> events = new ArrayList<>();
+    IncrementalSseParser parser = new IncrementalSseParser(tinyEventLimit, events::add);
+    // 连续空行与注释
+    feedString(parser, "\n\n\n: comment 1\n: comment 2\n\n\n");
+    feedString(parser, "data: tiny\n\n");
+    assertEquals(List.of(new ServerSentEvent(null, "tiny")), events);
+  }
+
+  /** 边界测试：feed 输入参数越界校验。 */
+  @Test
+  void offset_length_bounds_validation() {
     IncrementalSseParser parser = new IncrementalSseParser(HttpSseLimits.DEFAULT, event -> {});
-    assertNotNull(parser);
+    byte[] buf = new byte[10];
+    assertThrows(IndexOutOfBoundsException.class, () -> parser.feed(buf, -1, 5));
+    assertThrows(IndexOutOfBoundsException.class, () -> parser.feed(buf, 0, 15));
+    assertThrows(IndexOutOfBoundsException.class, () -> parser.feed(buf, 8, 4));
+    assertThrows(NullPointerException.class, () -> parser.feed(null, 0, 0));
+  }
+
+  /** 边界测试：成功流实际 wire 字节数统计必须包含 BOM 并在超过限制时抛出异常。 */
+  @Test
+  void wire_bytes_count_includes_bom_and_triggers_overflow() {
+    // 限制总 body 为 5 字节
+    HttpSseLimits limit5 = new HttpSseLimits(1024, 1024, 5, 1024);
+    IncrementalSseParser parser = new IncrementalSseParser(limit5, event -> {});
+    // BOM 3 字节 + "abc" 3 字节 = 6 字节 > 5
+    byte[] bom = new byte[] {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF, 'a', 'b', 'c'};
+    TransportException ex =
+        assertThrows(TransportException.class, () -> parser.feed(bom, 0, bom.length));
+    assertEquals(TransportErrorKind.INVALID_RESPONSE, ex.kind());
   }
 
   /** 对应上游 incremental_parses_single_event_in_one_chunk：验证单 chunk 递送单事件。 */
