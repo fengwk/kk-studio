@@ -18,12 +18,30 @@ final class HeaderSanitizer {
 
   private static final String REDACTED = "[REDACTED]";
 
+  private static final Set<String> ALLOWLISTED_HEADERS =
+      Set.of(
+          "content-type",
+          "content-length",
+          "retry-after",
+          "x-ratelimit-limit",
+          "x-ratelimit-remaining",
+          "x-ratelimit-reset",
+          "x-ratelimit-reset-requests",
+          "x-ratelimit-reset-tokens",
+          "x-request-id",
+          "request-id",
+          "x-correlation-id",
+          "traceparent",
+          "x-amzn-requestid",
+          "openai-organization",
+          "openai-processing-ms");
+
   private static final Set<String> SENSITIVE_KEYWORDS =
       Set.of("token", "key", "auth", "cookie", "secret", "credential");
 
   private HeaderSanitizer() {}
 
-  /** 判断给定的标头名称是否为敏感标头。 */
+  /** 判断给定的标头名称是否包含敏感关键词。 */
   public static boolean isSensitiveHeader(String headerName) {
     if (headerName == null || headerName.isBlank()) {
       return false;
@@ -40,7 +58,8 @@ final class HeaderSanitizer {
   /**
    * 清洗标头集合。
    *
-   * <p>对敏感标头的值替换为 "[REDACTED]"，对值中包含 CR/LF 的进行剔除，返回按大小写不敏感排序的不可变 Map。
+   * <p>仅保留协议诊断真实需要且值可安全规范化的最小白名单标头，丢弃所有未知标头。 对命中敏感词的标头无条件覆盖其值为 "[REDACTED]"，对值中包含 CR/LF 的进行剔除，
+   * 返回按大小写不敏感排序的不可变 Map。
    */
   public static Map<String, List<String>> sanitizeHeaders(Map<String, List<String>> headers) {
     if (headers == null || headers.isEmpty()) {
@@ -52,20 +71,25 @@ final class HeaderSanitizer {
           if (name == null || name.isBlank()) {
             return;
           }
-          if (isSensitiveHeader(name)) {
-            clean.put(name, List.of(REDACTED));
+          String lower = name.toLowerCase(Locale.ROOT);
+          if (!ALLOWLISTED_HEADERS.contains(lower)) {
+            // 未在严格白名单内的未知标头直接丢弃，杜绝回显凭据或敏感调试字段泄露
+            return;
+          }
+          if (isSensitiveHeader(lower)) {
+            clean.put(lower, List.of(REDACTED));
           } else if (values != null) {
             List<String> sanitizedValues = new ArrayList<>(values.size());
             for (String val : values) {
               if (val != null) {
                 // 剔除 CR/LF，防止日志或响应拆分注入
-                String safeVal = val.replace("\r", "").replace("\n", "");
+                String safeVal = val.replace("\r", "").replace("\n", "").trim();
                 sanitizedValues.add(safeVal);
               }
             }
-            clean.put(name, Collections.unmodifiableList(sanitizedValues));
+            clean.put(lower, Collections.unmodifiableList(sanitizedValues));
           } else {
-            clean.put(name, List.of());
+            clean.put(lower, List.of());
           }
         });
     return Collections.unmodifiableMap(clean);

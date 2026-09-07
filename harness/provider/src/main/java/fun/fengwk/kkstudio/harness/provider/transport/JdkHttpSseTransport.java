@@ -77,22 +77,29 @@ public class JdkHttpSseTransport {
       throw new TransportException(
           TransportErrorKind.EXECUTOR_REJECTED, "Worker executor rejected execution", e);
     }
+    execution.attachWorkerFuture(workerFuture);
+
+    if (execution.isInlineExecutionDetected()) {
+      execution.abortAdmission();
+      throw new TransportException(
+          TransportErrorKind.EXECUTOR_REJECTED,
+          "Direct or caller-runs executor execution is rejected to prevent stream deadlock");
+    }
 
     ScheduledFuture<?> watchdogFuture;
     try {
+      long checkDelayNanos = execution.watchdogIntervalNanos();
       watchdogFuture =
-          scheduler.scheduleWithFixedDelay(execution::checkWatchdog, 25, 25, TimeUnit.MILLISECONDS);
+          scheduler.scheduleWithFixedDelay(
+              execution::checkWatchdog, checkDelayNanos, checkDelayNanos, TimeUnit.NANOSECONDS);
     } catch (RejectedExecutionException e) {
       // 调度器拒绝时，worker 仍在 start gate 阻塞，绝对未发起任何网络请求
       execution.abortAdmission();
-      if (workerFuture != null) {
-        workerFuture.cancel(true);
-      }
       throw new TransportException(
           TransportErrorKind.EXECUTOR_REJECTED, "Scheduler rejected watchdog task", e);
     }
+    execution.attachWatchdogFuture(watchdogFuture);
 
-    execution.attachFutures(workerFuture, watchdogFuture);
     execution.openStartGate();
     return execution;
   }
