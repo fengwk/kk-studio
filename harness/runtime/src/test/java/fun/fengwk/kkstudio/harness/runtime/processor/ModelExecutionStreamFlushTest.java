@@ -48,6 +48,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -529,11 +530,6 @@ class ModelExecutionStreamFlushTest {
   }
 
   /**
-   * 意图：验证 executor / scheduler rejection 与 gate buffer 边界安全收敛： 1. scheduler rejection 安全收敛
-   * abandon，且不在持有 monitor 状态下 cancel handle； 2. flushExecutor rejection 安全收敛 abandon； 3. gate 打开前
-   * EVENT 数量有界（超限背压拒绝），但 terminal 信号不能因达到 maxEvents 而被错误拒绝。
-   */
-  /**
    * 意图：验证批次定时器遭遇 scheduler 拒绝时，execution 安全收敛为 abandoned 且 handle 被取消， cancel 绝不在持 monitor 状态下触发死锁。
    */
   @Test
@@ -650,6 +646,1209 @@ class ModelExecutionStreamFlushTest {
     // activate 期间共 3 次 update：markRunning(1) + 重放满批2个事件flush(1) + terminal终态(1)
     assertEquals(
         3, store.modelInvocationUpdateCount(), "markRunning + batch flush + terminal = 3 updates");
+  }
+
+  /**
+   * 意图：验证容量触发批次 flush 遭遇 Store 持久化失败时，正确语义为 abandon 本地 execution， 绝不伪装为 Provider INVALID_RESPONSE 写
+   * FAILED/retry，未提交 delta 绝不发布，保持 durable RUNNING+claimed 供 lease recovery 收敛。
+   */
+  @Test
+  void capacityBatchFlushStoreFailureAbandonsLocalExecutionWithoutMaskingAsInvalidResponse() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+    Fixture fixture = createFixture(flushConfig, NO_RETRY);
+    fixture.start();
+
+    ModelGateway.Listener listener = fixture.listener();
+    // 第 1 个事件放入批次，未达 maxEvents (2)
+    listener.onEvent(new ProviderStreamEvent.TextDelta("e1"));
+    assertFalse(fixture.execution.abandoned(), "execution must stay active before capacity");
+    assertEquals(0, fixture.sink.deltas().size());
+
+    // 注入 Store updateModelInvocation 抛出数据库故障
+    fixture.store.updateInvocationFailure =
+        new RuntimeException("simulated db failure during flush");
+
+    // 第 2 个事件达到 maxEvents (2)，触发 flushBatchLocked 遭遇基础设施失败
+    listener.onEvent(new ProviderStreamEvent.TextDelta("e2"));
+
+    // 1. 本地 execution 必须已 abandon，handle 必须被 cancel
+    assertTrue(fixture.execution.abandoned(), "execution must be abandoned upon flush failure");
+    assertTrue(fixture.handle.isCancelled(), "handle must be cancelled upon flush failure");
+
+    // 2. durable ModelInvocation 必须保留在原有的 RUNNING 状态，attempt 仍为 1，绝不写 ModelInvocationError
+    ModelInvocation model = fixture.currentModel();
+    assertEquals(
+        ModelInvocationStatus.RUNNING,
+        model.status(),
+        "model must remain RUNNING for lease recovery");
+    assertEquals(1, model.attempt(), "attempt must not change");
+    assertNull(model.error(), "must not write ModelInvocationError for infrastructure failure");
+    assertTrue(model.failedAttempts().isEmpty(), "must not reschedule retry");
+
+    // 3. durable Work 必须保留在原有的 claimed 状态，未被 complete 或 reschedule
+    Work work =
+        fixture
+            .store
+            .delegate()
+            .transaction(
+                tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)))
+            .orElseThrow();
+    assertNotNull(work.leaseToken(), "work must remain claimed");
+    assertEquals(
+        fixture.execution.claim().leaseToken(),
+        work.leaseToken(),
+        "lease token must remain identical");
+
+    // 4. 未提交批次的 delta 绝不得发布到 RealtimeEventSink
+    assertTrue(fixture.sink.deltas().isEmpty(), "uncommitted deltas must not be published");
+  }
+
+  /**
+   * 意图：验证批次定时器触发 flush 遭遇 Store 持久化失败时，execution 安全收敛为 abandoned 且 handle 取消， 绝不写 FAILED/retry，未提交
+   * delta 绝不发布，保持 durable RUNNING+claimed 供 lease recovery 收敛。
+   */
+  @Test
+  void timerBatchFlushStoreFailureAbandonsLocalExecutionWithoutMaskingAsInvalidResponse() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMillis(100), 10, 1024 * 1024);
+    AtomicReference<Runnable> capturedTask = new AtomicReference<>();
+    ScheduledExecutorService controlledScheduler =
+        createControlledScheduler(new AtomicInteger(), capturedTask);
+
+    Fixture fixture = createFixture(flushConfig, NO_RETRY, controlledScheduler, Runnable::run);
+    fixture.start();
+
+    ModelGateway.Listener listener = fixture.listener();
+    listener.onEvent(new ProviderStreamEvent.TextDelta("e1"));
+    assertNotNull(capturedTask.get(), "timer task must be captured");
+
+    // 注入 Store updateModelInvocation 抛出数据库故障
+    fixture.store.updateInvocationFailure =
+        new RuntimeException("simulated db failure during timer flush");
+
+    // 触发定时器任务（deliverFlush）
+    capturedTask.get().run();
+
+    // 1. 本地 execution 必须已 abandon，handle 必须被 cancel
+    assertTrue(
+        fixture.execution.abandoned(), "execution must be abandoned upon timer flush failure");
+    assertTrue(fixture.handle.isCancelled(), "handle must be cancelled upon timer flush failure");
+
+    // 2. durable ModelInvocation 必须保留在 RUNNING 状态，未写错误
+    ModelInvocation model = fixture.currentModel();
+    assertEquals(ModelInvocationStatus.RUNNING, model.status(), "model must remain RUNNING");
+    assertEquals(1, model.attempt());
+    assertNull(model.error());
+    assertTrue(model.failedAttempts().isEmpty());
+
+    // 3. durable Work 必须保留在 claimed 状态
+    Work work =
+        fixture
+            .store
+            .delegate()
+            .transaction(
+                tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)))
+            .orElseThrow();
+    assertNotNull(work.leaseToken());
+    assertEquals(fixture.execution.claim().leaseToken(), work.leaseToken());
+
+    // 4. 未提交 delta 绝不发布
+    assertTrue(fixture.sink.deltas().isEmpty());
+  }
+
+  /**
+   * 意图：验证 Provider stream event 自身非法（如 tool call 标识冲突）时， 仍然正确收敛为 INVALID_RESPONSE
+   * 终态（或重试），不与基础设施失败混淆。
+   */
+  @Test
+  void invalidProviderEventConvergesToInvalidResponseTerminal() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    Fixture fixture = createFixture(flushConfig, NO_RETRY, requestWithTool());
+    fixture.start();
+
+    ModelGateway.Listener listener = fixture.listener();
+    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_1", "bash", null));
+
+    // 发送冲突的 tool call delta（同一 index 不同 call id），导致 accumulator 抛出 IllegalArgumentException
+    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_2", null, null));
+
+    // execution 必须已 abandon
+    assertTrue(fixture.execution.abandoned());
+    // 数据库状态收敛为 FAILED 且错误类别为 INVALID_RESPONSE
+    ModelInvocation model = fixture.currentModel();
+    assertEquals(ModelInvocationStatus.FAILED, model.status());
+    assertNotNull(model.error());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, model.error().kind());
+  }
+
+  /**
+   * 意图：验证空内容 delta 不得强制推进 checkpoint： 1. 周期 flush 路径：接收空 delta 后触发 flush，不生成内容相同但 sequence 更大的
+   * checkpoint（不发起无意义 UPDATE）； 2. 空 delta 仍按普通 realtime delta 分配递增 sequence 并正常发布； 3. 终态 terminal
+   * 路径：流尾部接收空 delta 后进入 succeeded，终态 checkpoint 复用已有 safe sequence，不抬高 sequence。
+   */
+  @Test
+  void emptyDeltaDoesNotAdvanceCheckpointInPeriodicOrTerminalPaths() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 1, 1024 * 1024);
+    Fixture fixture = createFixture(flushConfig, NO_RETRY);
+    fixture.start();
+
+    ModelGateway.Listener listener = fixture.listener();
+    // 1. 发送非空 text delta（maxEvents=1 触发 flush），成功保存第一个 checkpoint (seq=1)
+    listener.onEvent(new ProviderStreamEvent.TextDelta("hello"));
+    assertEquals(1, fixture.store.modelInvocationUpdateCount());
+    ModelInvocation modelAfterFirst = fixture.currentModel();
+    assertNotNull(modelAfterFirst.streamCheckpoint());
+    assertEquals(1L, modelAfterFirst.streamCheckpoint().sequence());
+    assertEquals("hello", modelAfterFirst.streamCheckpoint().text());
+
+    // 2. 发送空内容 text delta（maxEvents=1 触发 flush）
+    listener.onEvent(new ProviderStreamEvent.TextDelta(""));
+    // 验证：因为没有新增 safe 内容，不推进 checkpoint，因此没有发起额外的 updateModelInvocation！
+    assertEquals(
+        1,
+        fixture.store.modelInvocationUpdateCount(),
+        "empty delta must not trigger checkpoint update");
+    ModelInvocation modelAfterEmpty = fixture.currentModel();
+    assertEquals(
+        1L, modelAfterEmpty.streamCheckpoint().sequence(), "checkpoint sequence must remain 1");
+
+    // 3. 验证空 delta 仍然获得连续递增的 sequence 并发布
+    assertEquals(2, fixture.sink.deltas().size());
+    assertEquals(1L, fixture.sink.deltas().get(0).sequence());
+    assertEquals(
+        "hello", ((ProviderStreamEvent.TextDelta) fixture.sink.deltas().get(0).delta()).text());
+    assertEquals(2L, fixture.sink.deltas().get(1).sequence());
+    assertEquals("", ((ProviderStreamEvent.TextDelta) fixture.sink.deltas().get(1).delta()).text());
+
+    // 4. 发送终态 succeeded：response 内容与 stream 一致（"hello"）
+    listener.onSucceeded(response("hello"));
+    ModelInvocation finalModel = fixture.currentModel();
+    assertEquals(ModelInvocationStatus.SUCCEEDED, finalModel.status());
+    // 终态 checkpoint 仍然保持 sequence=1，未被空 delta 抬高为 2
+    assertNotNull(finalModel.streamCheckpoint());
+    assertEquals(
+        1L,
+        finalModel.streamCheckpoint().sequence(),
+        "final checkpoint must reuse original safe sequence");
+    assertEquals("hello", finalModel.streamCheckpoint().text());
+  }
+
+  /**
+   * 意图：验证流在接收空 delta 之后发生 failure，生成的 failure 审计与 final checkpoint 复用原有 safe sequence，不被空 delta 抬高。
+   */
+  @Test
+  void emptyDeltaDoesNotAdvanceCheckpointInFailureTerminalPath() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 1, 1024 * 1024);
+    Fixture fixture = createFixture(flushConfig, NO_RETRY);
+    fixture.start();
+
+    ModelGateway.Listener listener = fixture.listener();
+    listener.onEvent(new ProviderStreamEvent.TextDelta("hello"));
+    assertEquals(1L, fixture.currentModel().streamCheckpoint().sequence());
+
+    // 发送空 delta
+    listener.onEvent(new ProviderStreamEvent.TextDelta(""));
+
+    // 触发 FAILED
+    ModelInvocationError error =
+        new ModelInvocationError(ProviderErrorKind.TRANSIENT, "transient error");
+    listener.onFailed(error);
+
+    ModelInvocation model = fixture.currentModel();
+    assertEquals(ModelInvocationStatus.FAILED, model.status());
+    assertNotNull(model.streamCheckpoint());
+    assertEquals(
+        1L,
+        model.streamCheckpoint().sequence(),
+        "failed checkpoint sequence must not be advanced by empty delta");
+  }
+
+  /**
+   * 意图：验证在 handle.activate 同步回调中缓冲非法 Provider event 时， 异常被 ModelExecution 边界隔离，收敛为 INVALID_RESPONSE
+   * terminal，异常不逃出 activate()。
+   */
+  @Test
+  void synchronousActivateBufferedInvalidEventIsIsolatedAndConvergesToInvalidResponse() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    UUID invocationId = seedInvocation(store.delegate(), baseline, requestWithTool(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(scheduler);
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW));
+              return null;
+            });
+
+    ModelExecution[] executionHolder = new ModelExecution[1];
+    ModelGateway.Handle synchronousHandle =
+        new ModelGateway.Handle() {
+          @Override
+          public void activate() {
+            // 在 activate 内部同步投递两个冲突的 tool call 片段
+            executionHolder[0].onEvent(
+                new ProviderStreamEvent.ToolCallDelta(0, "call_1", null, null));
+            executionHolder[0].onEvent(
+                new ProviderStreamEvent.ToolCallDelta(0, "call_2", null, null));
+          }
+
+          @Override
+          public void cancel() {}
+        };
+
+    ModelExecution execution =
+        new ModelExecution(
+            store,
+            sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+    executionHolder[0] = execution;
+
+    // 执行 activate：异常不得抛出，返回 TERMINATED（NO_RETRY 下转 FAILED）
+    ProcessResult result = execution.activate(synchronousHandle);
+    assertEquals(
+        ProcessResult.TERMINATED,
+        result,
+        "illegal provider event in buffer must converge to TERMINATED");
+    ModelInvocation model =
+        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+    assertEquals(ModelInvocationStatus.FAILED, model.status());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, model.error().kind());
+  }
+
+  /**
+   * 意图：验证在 handle.activate 同步回调中缓冲普通 event，drain 期间触发 batch flush 遭遇 DB 失败时， 异常被 ModelExecution
+   * 边界隔离，返回 LOST_OWNERSHIP，保持 durable RUNNING+claimed。
+   */
+  @Test
+  void synchronousActivateBufferedEventBatchStoreFailureIsIsolatedAndReturnsLostOwnership() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 1, 1024 * 1024);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(scheduler);
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW));
+              return null;
+            });
+
+    ModelExecution[] executionHolder = new ModelExecution[1];
+    ModelGateway.Handle synchronousHandle =
+        new ModelGateway.Handle() {
+          @Override
+          public void activate() {
+            // markRunning 已成功执行；在 drain 开始前注入 batch flush 时的 store 失败
+            store.updateInvocationFailure = new RuntimeException("db error during drain flush");
+            // 同步投递事件（maxEvents=1 将在 drain 时触发 flush）
+            executionHolder[0].onEvent(new ProviderStreamEvent.TextDelta("hello"));
+          }
+
+          @Override
+          public void cancel() {}
+        };
+
+    ModelExecution execution =
+        new ModelExecution(
+            store,
+            sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+    executionHolder[0] = execution;
+
+    // 执行 activate：异常不得抛出，返回 LOST_OWNERSHIP，保留 RUNNING
+    ProcessResult result = execution.activate(synchronousHandle);
+    assertEquals(
+        ProcessResult.LOST_OWNERSHIP,
+        result,
+        "batch store failure in drain must return LOST_OWNERSHIP");
+    assertTrue(execution.abandoned());
+
+    ModelInvocation model =
+        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+    assertEquals(ModelInvocationStatus.RUNNING, model.status());
+    assertNull(model.error());
+  }
+
+  /**
+   * 意图：验证在 handle.activate 同步回调中缓冲 terminal 信号，drain 期间持久化遭遇 DB 失败时， 异常被 ModelExecution 边界隔离，返回
+   * LOST_OWNERSHIP，保持 durable RUNNING。
+   */
+  @Test
+  void synchronousActivateBufferedTerminalStoreFailureIsIsolatedAndReturnsLostOwnership() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(scheduler);
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW));
+              return null;
+            });
+
+    ModelExecution[] executionHolder = new ModelExecution[1];
+    ModelGateway.Handle synchronousHandle =
+        new ModelGateway.Handle() {
+          @Override
+          public void activate() {
+            // markRunning 已成功执行；在 drain 开始前注入 terminal commit 时的 store 失败
+            store.updateInvocationFailure = new RuntimeException("db error during terminal commit");
+            executionHolder[0].onSucceeded(response("hello"));
+          }
+
+          @Override
+          public void cancel() {}
+        };
+
+    ModelExecution execution =
+        new ModelExecution(
+            store,
+            sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+    executionHolder[0] = execution;
+
+    // 执行 activate：异常不得逃出，返回 LOST_OWNERSHIP
+    ProcessResult result = execution.activate(synchronousHandle);
+    assertEquals(ProcessResult.LOST_OWNERSHIP, result);
+    assertTrue(execution.abandoned());
+
+    ModelInvocation model =
+        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+    assertEquals(ModelInvocationStatus.RUNNING, model.status());
+  }
+
+  /**
+   * 意图：验证 activation gate 打开前，普通 EVENT 的缓冲数量严格有界（达到 maxEvents 后第 max+1 个事件被拒绝并收敛为 abandoned）， 而合法
+   * terminal 信号在容量边界（pending.size() >= maxEvents）仍不被阻断，后续 activate 成功落地终态。
+   */
+  @Test
+  void gateBufferPendingCapacityMaxPlusOneRejectsOrdinaryEventWhileTerminalIsAccepted() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(scheduler);
+
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+
+    // 1. 验证普通事件在 max+1 时被拒绝并触发 abandon
+    ModelExecution execution1 =
+        new ModelExecution(
+            store,
+            sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+
+    // 前 2 个事件填满容量
+    execution1.onEvent(new ProviderStreamEvent.TextDelta("e1"));
+    execution1.onEvent(new ProviderStreamEvent.TextDelta("e2"));
+    assertFalse(execution1.abandoned(), "execution must not be abandoned at capacity");
+
+    // 第 3 个普通事件 (maxEvents + 1)：超出容量上限，被背压拒绝并收敛为 abandoned
+    execution1.onEvent(new ProviderStreamEvent.TextDelta("e3"));
+    assertTrue(
+        execution1.abandoned(),
+        "max+1 ordinary event must exceed pending capacity and abandon execution");
+
+    // 2. 验证 terminal 信号在容量边界 (pending 已满 maxEvents) 依然不被阻断
+    Baseline baseline2 = seedBaseline(store.delegate(), NOW.plusSeconds(10));
+    UUID invocationId2 =
+        seedInvocation(store.delegate(), baseline2, requestSpec(), NOW.plusSeconds(10));
+    ClaimedWork claim2 = claim(store.delegate(), invocationId2, NOW.plusSeconds(10));
+    FakeHandle handle2 = new FakeHandle();
+    ModelExecution execution2 =
+        new ModelExecution(
+            store,
+            sink,
+            claim2,
+            baseline2.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW.plusSeconds(10), ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+
+    // 填满 maxEvents (2 个事件)
+    execution2.onEvent(new ProviderStreamEvent.TextDelta("e1"));
+    execution2.onEvent(new ProviderStreamEvent.TextDelta("e2"));
+    assertFalse(execution2.abandoned());
+
+    // 在容量边界投递 terminal 信号：绝不因 pending.size() >= maxEvents 而被拒绝！
+    execution2.onSucceeded(response("e1e2 completed"));
+    assertFalse(execution2.abandoned(), "terminal signal must not be rejected at capacity");
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline2.threadId());
+              ModelInvocation model = tx.lockModelInvocation(invocationId2).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW.plusSeconds(10)));
+              return null;
+            });
+
+    // activate 后顺利打开门控并成功将 terminal 落地落盘
+    ProcessResult result = execution2.activate(handle2);
+    assertEquals(
+        ProcessResult.TERMINATED, result, "terminal signal must be processed on activation");
+    ModelInvocation finalModel =
+        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId2)).orElseThrow();
+    assertEquals(ModelInvocationStatus.SUCCEEDED, finalModel.status());
+  }
+
+  /**
+   * 意图：验证非法同步 buffered EVENT 触发 INVALID_RESPONSE 收敛时再注入 store failure，异常被 ModelExecution 隔离，返回
+   * LOST_OWNERSHIP，durable 保持 RUNNING。
+   */
+  @Test
+  void synchronousActivateBufferedInvalidEventStoreFailureIsIsolatedAndReturnsLostOwnership() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(scheduler);
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW));
+              return null;
+            });
+
+    ModelExecution[] executionHolder = new ModelExecution[1];
+    ModelGateway.Handle synchronousHandle =
+        new ModelGateway.Handle() {
+          @Override
+          public void activate() {
+            // markRunning 成功后，注入失败终态持久化时的 store 失败
+            store.updateInvocationFailure =
+                new RuntimeException("db error during failure terminal commit");
+            // 同步投递事件，随后投递前缀冲突的非法 response，触发 INVALID_RESPONSE 收敛
+            executionHolder[0].onEvent(new ProviderStreamEvent.TextDelta("valid"));
+            executionHolder[0].onSucceeded(response("conflicts with valid"));
+          }
+
+          @Override
+          public void cancel() {}
+        };
+
+    ModelExecution execution =
+        new ModelExecution(
+            store,
+            sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+    executionHolder[0] = execution;
+
+    ProcessResult result = execution.activate(synchronousHandle);
+    assertEquals(ProcessResult.LOST_OWNERSHIP, result);
+    assertTrue(execution.abandoned());
+
+    ModelInvocation model =
+        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+    assertEquals(ModelInvocationStatus.RUNNING, model.status());
+    assertNull(model.error());
+  }
+
+  /** 意图：验证 Gateway 激活抛出异常且 UNKNOWN 终态持久化亦失败时，异常在边界被隔离并返回 LOST_OWNERSHIP，durable 保持 RUNNING。 */
+  @Test
+  void activationFailureStoreFailureIsIsolatedAndReturnsLostOwnership() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(scheduler);
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW));
+              return null;
+            });
+
+    ModelGateway.Handle failingHandle =
+        new ModelGateway.Handle() {
+          @Override
+          public void activate() {
+            // markRunning 成功后，注入持久化 UNKNOWN 失败并抛出激活异常
+            store.updateInvocationFailure = new RuntimeException("db error during UNKNOWN commit");
+            throw new RuntimeException("gateway activation failed");
+          }
+
+          @Override
+          public void cancel() {}
+        };
+
+    ModelExecution execution =
+        new ModelExecution(
+            store,
+            sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+
+    ProcessResult result = execution.activate(failingHandle);
+    assertEquals(ProcessResult.LOST_OWNERSHIP, result);
+    assertTrue(execution.abandoned());
+
+    ModelInvocation model =
+        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+    assertEquals(ModelInvocationStatus.RUNNING, model.status());
+  }
+
+  /**
+   * 意图：验证同步 activate 缓冲普通事件在 drain 期间若遭遇 scheduler 调度拒绝，事件处理返回 LOST，activate 返回 LOST_OWNERSHIP 而非
+   * STARTED。
+   */
+  @Test
+  void synchronousActivateBufferedEventSchedulerRejectionReturnsLostOwnership() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ScheduledExecutorService delegate = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(delegate);
+
+    ScheduledExecutorService rejectingScheduler =
+        (ScheduledExecutorService)
+            Proxy.newProxyInstance(
+                ScheduledExecutorService.class.getClassLoader(),
+                new Class<?>[] {ScheduledExecutorService.class},
+                (proxy, method, args) -> {
+                  if ("schedule".equals(method.getName())) {
+                    throw new RejectedExecutionException("scheduler queue full");
+                  }
+                  return method.invoke(delegate, args);
+                });
+
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW));
+              return null;
+            });
+
+    ModelExecution[] executionHolder = new ModelExecution[1];
+    ModelGateway.Handle synchronousHandle =
+        new ModelGateway.Handle() {
+          @Override
+          public void activate() {
+            executionHolder[0].onEvent(new ProviderStreamEvent.TextDelta("hello"));
+          }
+
+          @Override
+          public void cancel() {}
+        };
+
+    ModelExecution execution =
+        new ModelExecution(
+            store,
+            sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            rejectingScheduler,
+            Runnable::run,
+            e -> {});
+    executionHolder[0] = execution;
+
+    ProcessResult result = execution.activate(synchronousHandle);
+    assertEquals(
+        ProcessResult.LOST_OWNERSHIP,
+        result,
+        "scheduler rejection during drain must return LOST_OWNERSHIP rather than STARTED");
+    assertTrue(execution.abandoned());
+  }
+
+  /**
+   * 意图：验证 timer rejection CAS 竞态：terminal callback CAS claim 后阻塞在 drainLock，此时执行 rejecting timer 为
+   * stale no-op，释放 drainLock 后 terminal 顺利落地为 durable SUCCEEDED。
+   */
+  @Test
+  void timerRejectionAfterTerminalClaimIsStaleNoOpAndDoesNotBlockTerminalCommit() throws Exception {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMillis(100), 10, 1024 * 1024);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+
+    AtomicReference<Runnable> capturedTimerTask = new AtomicReference<>();
+    CountDownLatch scheduledLatch = new CountDownLatch(1);
+    ScheduledFuture<?> dummyFuture =
+        (ScheduledFuture<?>)
+            Proxy.newProxyInstance(
+                ScheduledFuture.class.getClassLoader(),
+                new Class<?>[] {ScheduledFuture.class},
+                (proxy, method, args) -> {
+                  if ("cancel".equals(method.getName())) {
+                    return Boolean.TRUE;
+                  }
+                  return null;
+                });
+
+    ScheduledExecutorService mockScheduler =
+        (ScheduledExecutorService)
+            Proxy.newProxyInstance(
+                ScheduledExecutorService.class.getClassLoader(),
+                new Class<?>[] {ScheduledExecutorService.class},
+                (proxy, method, args) -> {
+                  if ("schedule".equals(method.getName()) && args != null && args.length >= 1) {
+                    capturedTimerTask.set((Runnable) args[0]);
+                    scheduledLatch.countDown();
+                    return dummyFuture;
+                  }
+                  return null;
+                });
+
+    Executor rejectingExecutor =
+        task -> {
+          throw new RejectedExecutionException("flush executor busy");
+        };
+
+    CountDownLatch holdDrainLockLatch = new CountDownLatch(1);
+    CountDownLatch insideDrainLockLatch = new CountDownLatch(1);
+    AtomicBoolean shouldBlockTransaction = new AtomicBoolean(false);
+
+    HarnessStore controlledStore =
+        (HarnessStore)
+            Proxy.newProxyInstance(
+                HarnessStore.class.getClassLoader(),
+                new Class<?>[] {HarnessStore.class},
+                (proxy, method, args) -> {
+                  if ("transaction".equals(method.getName()) && shouldBlockTransaction.get()) {
+                    insideDrainLockLatch.countDown();
+                    try {
+                      holdDrainLockLatch.await(5, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                      Thread.currentThread().interrupt();
+                    }
+                  }
+                  return method.invoke(store, args);
+                });
+
+    FakeHandle handle = new FakeHandle();
+    ModelExecution execution =
+        new ModelExecution(
+            controlledStore,
+            sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            mockScheduler,
+            rejectingExecutor,
+            e -> {});
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW));
+              return null;
+            });
+
+    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+
+    // 1. 发送第一个事件，调度批次定时器
+    execution.onEvent(new ProviderStreamEvent.TextDelta("hello"));
+    assertTrue(scheduledLatch.await(1, TimeUnit.SECONDS));
+    assertNotNull(capturedTimerTask.get());
+
+    // 2. 启动异步线程 T1 发送第二个事件，并在其持住 drainLock 时阻断
+    shouldBlockTransaction.set(true);
+    ExecutorService asyncExecutor = Executors.newFixedThreadPool(2);
+    executorsToClose.add(asyncExecutor);
+
+    asyncExecutor.submit(() -> execution.onEvent(new ProviderStreamEvent.TextDelta(" world")));
+    assertTrue(insideDrainLockLatch.await(2, TimeUnit.SECONDS));
+
+    // 3. 在 drainLock 正被 T1 持有时，启动异步线程 T2 调用 onSucceeded：
+    //    T2 首先成功原子完成 terminal.compareAndSet(false, true)，随后阻塞在 drainLock.lock()
+    Thread[] t2Holder = new Thread[1];
+    CountDownLatch t2StartedLatch = new CountDownLatch(1);
+    asyncExecutor.submit(
+        () -> {
+          t2Holder[0] = Thread.currentThread();
+          t2StartedLatch.countDown();
+          execution.onSucceeded(response("hello world"));
+        });
+    assertTrue(t2StartedLatch.await(1, TimeUnit.SECONDS));
+    await(
+        () ->
+            t2Holder[0] != null
+                && (t2Holder[0].getState() == Thread.State.WAITING
+                    || t2Holder[0].getState() == Thread.State.BLOCKED),
+        Duration.ofSeconds(2));
+
+    // 4. 此时 terminal 已经 CAS 为 true，执行 rejecting timer：应当由于 terminal 已被 claim 判定为 stale no-op，绝不
+    // abandon！
+    capturedTimerTask.get().run();
+    assertFalse(execution.abandoned(), "timer rejection after terminal claim must be stale no-op");
+
+    // 5. 释放 T1，让 T1 退出 drainLock，T2 随后获取 drainLock 并成功落地 SUCCEEDED
+    shouldBlockTransaction.set(false);
+    holdDrainLockLatch.countDown();
+    await(
+        () ->
+            store
+                .delegate()
+                .transaction(tx -> tx.findModelInvocation(invocationId))
+                .orElseThrow()
+                .status()
+                .isTerminal(),
+        Duration.ofSeconds(2));
+
+    ModelInvocation finalModel =
+        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+    assertEquals(
+        ModelInvocationStatus.SUCCEEDED, finalModel.status(), "terminal must commit successfully");
+  }
+
+  /** 意图：验证已失效旧代际 timer 遭遇 executor rejection 时，为 stale no-op，不误伤当前批。 */
+  @Test
+  void staleGenerationTimerRejectionDoesNotAbandonCurrentExecution() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMillis(100), 2, 1024 * 1024);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+
+    AtomicReference<Runnable> capturedTimerTask = new AtomicReference<>();
+    ScheduledFuture<?> dummyFuture =
+        (ScheduledFuture<?>)
+            Proxy.newProxyInstance(
+                ScheduledFuture.class.getClassLoader(),
+                new Class<?>[] {ScheduledFuture.class},
+                (proxy, method, args) -> {
+                  if ("cancel".equals(method.getName())) {
+                    return Boolean.TRUE;
+                  }
+                  return null;
+                });
+
+    ScheduledExecutorService mockScheduler =
+        (ScheduledExecutorService)
+            Proxy.newProxyInstance(
+                ScheduledExecutorService.class.getClassLoader(),
+                new Class<?>[] {ScheduledExecutorService.class},
+                (proxy, method, args) -> {
+                  if ("schedule".equals(method.getName()) && args != null && args.length >= 1) {
+                    capturedTimerTask.set((Runnable) args[0]);
+                    return dummyFuture;
+                  }
+                  return null;
+                });
+
+    Executor rejectingExecutor =
+        task -> {
+          throw new RejectedExecutionException("executor queue full");
+        };
+
+    FakeHandle handle = new FakeHandle();
+    ModelExecution execution =
+        new ModelExecution(
+            store,
+            sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            mockScheduler,
+            rejectingExecutor,
+            e -> {});
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW));
+              return null;
+            });
+
+    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+
+    // 事件 1：调度代际 0 的 timer
+    execution.onEvent(new ProviderStreamEvent.TextDelta("e1"));
+    Runnable staleTimer = capturedTimerTask.get();
+    assertNotNull(staleTimer);
+
+    // 事件 2：达到 maxEvents=2 触发容量 flush，generation 递增，staleTimer 变为旧代际
+    execution.onEvent(new ProviderStreamEvent.TextDelta("e2"));
+
+    // 执行旧代际 timer：应当直接检查到代际失效退出，不 abandon execution
+    staleTimer.run();
+    assertFalse(execution.abandoned(), "stale timer rejection must not abandon execution");
+  }
+
+  /** 意图：验证门控前 pending 载荷字节约束：单个超阈值事件可独占，已有事件时超阈值则被拒绝并 abandon，terminal 信号在边界仍不受阻断并成功落地。 */
+  @Test
+  void gateBufferPendingPayloadBytesBoundaryAndTerminalAcceptance() {
+    // maxPayloadBytes = 10 字节
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 10);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(scheduler);
+
+    // 1. 单个超阈值事件（15 字节）可独占 pending
+    UUID id1 = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+    ClaimedWork claim1 = claim(store.delegate(), id1, NOW);
+    ModelExecution exec1 =
+        new ModelExecution(
+            store,
+            sink,
+            claim1,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+    exec1.onEvent(new ProviderStreamEvent.TextDelta("012345678901234")); // 15 字节 > 10
+    assertFalse(
+        exec1.abandoned(), "single oversized event must be allowed to monopolize pending buffer");
+
+    // 2. 已有普通事件（6 字节）时，新事件（5 字节）使总字节（11 字节 > 10）超阈值，被拒绝并收敛为 abandoned
+    Baseline baseline2 = seedBaseline(store.delegate(), NOW.plusSeconds(10));
+    UUID id2 = seedInvocation(store.delegate(), baseline2, requestSpec(), NOW.plusSeconds(10));
+    ClaimedWork claim2 = claim(store.delegate(), id2, NOW.plusSeconds(10));
+    ModelExecution exec2 =
+        new ModelExecution(
+            store,
+            sink,
+            claim2,
+            baseline2.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW.plusSeconds(10), ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+    exec2.onEvent(new ProviderStreamEvent.TextDelta("123456")); // 6 bytes <= 10
+    assertFalse(exec2.abandoned());
+    exec2.onEvent(new ProviderStreamEvent.TextDelta("12345")); // 6 + 5 = 11 > 10
+    assertTrue(
+        exec2.abandoned(), "subsequent event exceeding total payload bytes must abandon execution");
+
+    // 3. pending 处于超阈值状态时，terminal 信号依然不受阻断并成功落地
+    Baseline baseline3 = seedBaseline(store.delegate(), NOW.plusSeconds(20));
+    UUID id3 = seedInvocation(store.delegate(), baseline3, requestSpec(), NOW.plusSeconds(20));
+    ClaimedWork claim3 = claim(store.delegate(), id3, NOW.plusSeconds(20));
+    FakeHandle handle3 = new FakeHandle();
+    ModelExecution exec3 =
+        new ModelExecution(
+            store,
+            sink,
+            claim3,
+            baseline3.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW.plusSeconds(20), ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+    exec3.onEvent(new ProviderStreamEvent.TextDelta("012345678901234")); // 15 字节独占
+    exec3.onSucceeded(response("012345678901234 completed")); // terminal 信号
+    assertFalse(exec3.abandoned(), "terminal signal must not be rejected at payload boundary");
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline3.threadId());
+              ModelInvocation model = tx.lockModelInvocation(id3).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW.plusSeconds(20)));
+              return null;
+            });
+
+    ProcessResult result = exec3.activate(handle3);
+    assertEquals(ProcessResult.TERMINATED, result);
+    ModelInvocation finalModel =
+        store.delegate().transaction(tx -> tx.findModelInvocation(id3)).orElseThrow();
+    assertEquals(ModelInvocationStatus.SUCCEEDED, finalModel.status());
+  }
+
+  /** 意图：验证已提交 partial 遭遇合法 FILTERED 响应时，一次 UPDATE 落地 SUCCEEDED 并清除 checkpoint，不发布回退 delta。 */
+  @Test
+  void committedPartialWithFilteredResponseClearsCheckpointAndDoesNotPublishRegression() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 1, 1024 * 1024);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(scheduler);
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW));
+              return null;
+            });
+
+    FakeHandle handle = new FakeHandle();
+    ModelExecution execution =
+        new ModelExecution(
+            store,
+            sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+
+    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+
+    // 投递 delta 并触发 flush 提交 checkpoint
+    execution.onEvent(new ProviderStreamEvent.TextDelta("sensitive content"));
+    ModelInvocation committedModel =
+        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+    assertNotNull(committedModel.streamCheckpoint(), "checkpoint must be committed");
+    assertEquals("sensitive content", committedModel.streamCheckpoint().text());
+    assertEquals(1, sink.deltas().size());
+
+    int updatesBefore = store.modelInvocationUpdateCount.get();
+
+    // 投递合法 FILTERED 响应（内容被过滤为空，不作为前缀）
+    execution.onSucceeded(response("", GenerationStopReason.FILTERED));
+
+    // 校验：恰好单次 UPDATE 为 SUCCEEDED，checkpoint 撤回为 null
+    assertEquals(
+        updatesBefore + 1,
+        store.modelInvocationUpdateCount.get(),
+        "must update exactly once to terminal");
+    ModelInvocation finalModel =
+        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+    assertEquals(ModelInvocationStatus.SUCCEEDED, finalModel.status());
+    assertNull(finalModel.streamCheckpoint(), "checkpoint must be withdrawn/cleared on FILTERED");
+    // 校验：不得发布回退 delta
+    assertEquals(1, sink.deltas().size(), "must not publish regression delta");
+  }
+
+  /** 意图：验证未刷盘 partial 遭遇合法 FILTERED 响应时，一次 UPDATE 为 SUCCEEDED 且 checkpoint 为 null，丢弃未刷批次。 */
+  @Test
+  void unflushedPartialWithFilteredResponseClearsCheckpointAndDiscardsBatch() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(scheduler);
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW));
+              return null;
+            });
+
+    FakeHandle handle = new FakeHandle();
+    ModelExecution execution =
+        new ModelExecution(
+            store,
+            sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+
+    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+
+    // 投递 delta，未达到 maxEvents=10，停留在 batchItems 中未刷盘
+    execution.onEvent(new ProviderStreamEvent.TextDelta("unflushed sensitive"));
+    int updatesBefore = store.modelInvocationUpdateCount.get();
+
+    // 投递合法 FILTERED 响应
+    execution.onSucceeded(response("", GenerationStopReason.FILTERED));
+
+    // 校验：单次 UPDATE 为 SUCCEEDED，checkpoint 保持 null，未刷批次被丢弃未发布
+    assertEquals(
+        updatesBefore + 1,
+        store.modelInvocationUpdateCount.get(),
+        "must update exactly once to terminal");
+    ModelInvocation finalModel =
+        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+    assertEquals(ModelInvocationStatus.SUCCEEDED, finalModel.status());
+    assertNull(finalModel.streamCheckpoint(), "checkpoint must be null");
+    assertTrue(sink.deltas().isEmpty(), "unflushed deltas must be discarded, nothing published");
+  }
+
+  /** 意图：验证非法 FILTERED 响应（携带 toolCalls）按现有语义收敛为 INVALID_RESPONSE 失败。 */
+  @Test
+  void illegalFilteredResponseWithToolCallsConvergesToInvalidResponseFailure() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    Baseline baseline = seedBaseline(store.delegate(), NOW);
+    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+    RecordingSink sink = new RecordingSink();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(scheduler);
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+
+    store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
+              tx.updateModelInvocation(model.beginDispatch(NOW));
+              return null;
+            });
+
+    FakeHandle handle = new FakeHandle();
+    ModelExecution execution =
+        new ModelExecution(
+            store,
+            sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            e -> {});
+
+    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+
+    // 非法 FILTERED：携带 tool call
+    ProviderResponse illegalFiltered =
+        response(
+            "",
+            List.of(new ProviderToolCall("call-1", "tool", "{}")),
+            GenerationStopReason.FILTERED);
+    execution.onSucceeded(illegalFiltered);
+
+    ModelInvocation finalModel =
+        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+    assertEquals(ModelInvocationStatus.FAILED, finalModel.status());
+    assertNotNull(finalModel.error());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, finalModel.error().kind());
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -819,6 +2018,12 @@ class ModelExecutionStreamFlushTest {
   private static ProviderResponse response(String text, GenerationStopReason stopReason) {
     return new ProviderResponse(
         text, null, List.of(), stopReason, usage(), cost(), "req-1", null, null);
+  }
+
+  private static ProviderResponse response(
+      String text, List<ProviderToolCall> toolCalls, GenerationStopReason stopReason) {
+    return new ProviderResponse(
+        text, null, toolCalls, stopReason, usage(), cost(), "req-1", null, null);
   }
 
   private static ProviderResponse response(
@@ -1060,11 +2265,13 @@ class ModelExecutionStreamFlushTest {
     }
   }
 
-  /** 测试专用 Store 代理：拦截 updateModelInvocation 并进行精确调用计数，同时解包异常保证 delegate 原样抛出。 */
+  /** 测试专用 Store 代理：拦截 updateModelInvocation 并进行精确调用计数与失败注入，同时解包异常保证 delegate 原样抛出。 */
   static final class CountingStore implements HarnessStore {
     private final InMemoryHarnessStore delegate;
     private final AtomicInteger modelInvocationUpdateCount = new AtomicInteger();
     private final AtomicReference<String> threadRecord;
+    volatile RuntimeException updateInvocationFailure;
+    volatile RuntimeException transactionFailure;
 
     CountingStore(InMemoryHarnessStore delegate) {
       this(delegate, null);
@@ -1089,6 +2296,9 @@ class ModelExecutionStreamFlushTest {
 
     @Override
     public <T> T transaction(Function<Transaction, T> callback) {
+      if (transactionFailure != null) {
+        throw transactionFailure;
+      }
       return delegate.transaction(
           tx -> {
             Transaction proxyTx =
@@ -1102,6 +2312,9 @@ class ModelExecutionStreamFlushTest {
                               threadRecord.set(Thread.currentThread().getName());
                             }
                             modelInvocationUpdateCount.incrementAndGet();
+                            if (updateInvocationFailure != null) {
+                              throw updateInvocationFailure;
+                            }
                           }
                           try {
                             return method.invoke(tx, args);

@@ -375,6 +375,57 @@ class ModelInvocationTransitionTest {
         runningWithCheckpoint, runningWithCheckpoint.checkpoint(checkpoint(1), T1));
   }
 
+  /**
+   * 意图：验证强化后的 requireCheckpointTransition 规则： 当 checkpoint sequence 变大时，old text/thinking 必须为 new
+   * 的合法前缀且至少一项严格增长； 若内容完全相同却只抬高 sequence 则必须拒绝； 相同 sequence 的完全幂等仍被允许。
+   */
+  @Test
+  void checkpointSequenceGrowthRequiresStrictTextOrThinkingGrowth() {
+    StreamCheckpoint base = new StreamCheckpoint(1, 1L, "hello", "think");
+    ModelInvocation running = running(1, base);
+
+    // 1. 内容完全相同但 sequence 更大：拒绝
+    StreamCheckpoint sameContentLargerSeq = new StreamCheckpoint(1, 2L, "hello", "think");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelInvocation.validateTransition(
+                running, running.checkpoint(sameContentLargerSeq, T1)));
+
+    // 2. text 严格增长且为合法前缀：允许
+    StreamCheckpoint textGrown = new StreamCheckpoint(1, 2L, "hello world", "think");
+    ModelInvocation.validateTransition(running, running.checkpoint(textGrown, T1));
+
+    // 3. thinking 严格增长且为合法前缀：允许
+    StreamCheckpoint thinkingGrown = new StreamCheckpoint(1, 2L, "hello", "think more");
+    ModelInvocation.validateTransition(running, running.checkpoint(thinkingGrown, T1));
+
+    // 4. sequence 相同且完全幂等：允许
+    ModelInvocation.validateTransition(running, running.checkpoint(base, T1));
+
+    // 5. sequence 相同但内容不一致：拒绝
+    StreamCheckpoint sameSeqDifferentContent = new StreamCheckpoint(1, 1L, "hello!", "think");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelInvocation.validateTransition(
+                running, running.checkpoint(sameSeqDifferentContent, T1)));
+
+    // 6. RUNNING -> terminal 时同样校验严格增长约束
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelInvocation.validateTransition(
+                running,
+                invocation(
+                    ModelInvocationStatus.SUCCEEDED,
+                    1,
+                    sameContentLargerSeq,
+                    response(),
+                    null,
+                    null)));
+  }
+
   @Test
   void unknownAdvancesAttemptOnlyFromDispatching() {
     ModelInvocation fromDispatching = dispatching(2).unknown(error(), T1);
