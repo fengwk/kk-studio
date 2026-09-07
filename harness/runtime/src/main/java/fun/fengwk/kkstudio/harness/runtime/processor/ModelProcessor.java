@@ -30,6 +30,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BiFunction;
 
@@ -64,6 +65,7 @@ public final class ModelProcessor implements AutoCloseable {
   private final ModelProcessorConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
+  private final Executor flushExecutor;
   private final ConcurrentHashMap<UUID, ModelExecution> executions = new ConcurrentHashMap<>();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private final ModelRequestMaterializer materializer = new ModelRequestMaterializer();
@@ -75,13 +77,15 @@ public final class ModelProcessor implements AutoCloseable {
       RealtimeEventSink realtimeEventSink,
       ModelProcessorConfig config,
       Clock clock,
-      ScheduledExecutorService scheduler) {
+      ScheduledExecutorService scheduler,
+      Executor flushExecutor) {
     this.store = Objects.requireNonNull(store, "store");
     this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
     this.config = Objects.requireNonNull(config, "config");
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.flushExecutor = Objects.requireNonNull(flushExecutor, "flushExecutor");
   }
 
   /**
@@ -199,6 +203,7 @@ public final class ModelProcessor implements AutoCloseable {
             config,
             clock,
             scheduler,
+            flushExecutor,
             this::release);
     ModelExecution existing = executions.putIfAbsent(invocationId, execution);
     if (existing != null) {

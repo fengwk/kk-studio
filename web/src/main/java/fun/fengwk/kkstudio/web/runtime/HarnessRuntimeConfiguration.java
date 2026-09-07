@@ -212,14 +212,21 @@ public class HarnessRuntimeConfiguration {
   }
 
   @Bean(destroyMethod = "close")
+  public ExecutorService harnessModelFlushExecutor() {
+    return Executors.newVirtualThreadPerTaskExecutor();
+  }
+
+  @Bean(destroyMethod = "close")
   public ModelProcessor modelProcessor(
       HarnessStore store,
       ModelGateway modelGateway,
       RealtimeEventSink realtimeEventSink,
       ModelProcessorConfig config,
       Clock clock,
-      @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler) {
-    return new ModelProcessor(store, modelGateway, realtimeEventSink, config, clock, scheduler);
+      @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
+      @Qualifier("harnessModelFlushExecutor") ExecutorService flushExecutor) {
+    return new ModelProcessor(
+        store, modelGateway, realtimeEventSink, config, clock, scheduler, flushExecutor);
   }
 
   @Bean(destroyMethod = "close")

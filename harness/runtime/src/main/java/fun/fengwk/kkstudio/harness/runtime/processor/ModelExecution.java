@@ -28,8 +28,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -37,13 +41,11 @@ import java.util.function.Consumer;
  * 一次 claim 的进程内 Model execution：Gateway Listener 回调门控缓冲、所有权围栏与 lease heartbeat。
  *
  * <p>Listener 回调在持久化 RUNNING 落地前由回调门控缓冲；两阶段激活（{@link #activate}）：先安全 attach handle，再持久化
- * markRunning，最后调用外部 {@code handle.activate()}（通知 Gateway 打开回调门控），成功后按到达顺序重放缓冲信号。激活仲裁（abandon -&gt;
- * activate 竞态）：activation 开始前 abandon 获胜则 activate 绝不调用；开始后 abandon 把 cancel 推迟到 activate 返回，外部调用序
- * 恒为 ACTIVATE -&gt; CANCEL（外部 activate / cancel 绝不持有 monitor 避免死锁）。所有回调都先在校验 RUNNING + attempt 与
- * claim ownership 的短事务中落地（text/thinking 单调 checkpoint，tool-call fragment 只推 sequence 不入
- * checkpoint），commit 后才 best-effort 发布 {@link RealtimeEvent.ModelDelta}。terminal 回调一次生效， duplicate
- * / late / stale 一律 no-op；lost ownership 立即关闭回调门控、cancel handle 并停止 heartbeat，且不反写任何持久化状态。{@code
- * handle.activate()} 抛异常即激活失败：恰好一次 UNKNOWN terminal，激活前缓冲的信号全部丢弃。
+ * markRunning，最后调用外部 {@code handle.activate()}（通知 Gateway 打开回调门控），成功后按到达顺序重放缓冲信号。 激活后通过
+ * per-execution 单 drain owner 顺序处理流式增量事件、内部批次 FLUSH 与终态信号； 每 delta
+ * 执行只读所有权围栏，按有界时间窗口与容量阈值聚合为批次，在独立的短事务中单次落地最新 checkpoint， commit 后在事务与 monitor 外按原 sequence
+ * 逐条发布；纯工具批次仅通过 fence 并推进 sequence 水位，不更新 checkpoint； terminal / retry 信号直接吸收未刷批次，在同一次终态事务中单次更新
+ * ModelInvocation； lost ownership 或 Stop 竞态立即收敛关闭，绝不补写或发布未提交批次。
  */
 @Slf4j
 final class ModelExecution implements ModelGateway.Listener {
@@ -58,19 +60,30 @@ final class ModelExecution implements ModelGateway.Listener {
   private final ModelProcessorConfig config;
   private final Clock clock;
   private final WorkHeartbeat heartbeat;
+  private final ScheduledExecutorService scheduler;
+  private final Executor flushExecutor;
   private final Consumer<ModelExecution> ownerRelease;
 
   private final AtomicBoolean terminal = new AtomicBoolean();
   private final AtomicBoolean abandoned = new AtomicBoolean();
   private final Object monitor = new Object();
+  private final ReentrantLock drainLock = new ReentrantLock();
   private final ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
   private final ArrayDeque<Pending> pending = new ArrayDeque<>();
   private boolean gateOpen;
-  private long lastCommittedSequence;
   private ModelGateway.Handle handle;
 
   /** monitor 保护；activation 期间 abandon 推迟 handle cancel。 */
   private boolean activationInProgress;
+
+  private final List<BatchItem> batchItems = new ArrayList<>();
+  private long batchPayloadBytes;
+  private ScheduledFuture<?> batchTimer;
+  private long batchGeneration;
+
+  private long lastAcceptedSequence;
+  private long lastCommittedSequence;
+  private long lastSafeSequence;
 
   ModelExecution(
       HarnessStore store,
@@ -82,6 +95,7 @@ final class ModelExecution implements ModelGateway.Listener {
       ModelProcessorConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,
+      Executor flushExecutor,
       Consumer<ModelExecution> ownerRelease) {
     this.store = Objects.requireNonNull(store, "store");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
@@ -92,10 +106,12 @@ final class ModelExecution implements ModelGateway.Listener {
     this.compaction = compaction;
     this.config = Objects.requireNonNull(config, "config");
     this.clock = HarnessStoreTime.millisecondClock(clock);
+    this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.flushExecutor = Objects.requireNonNull(flushExecutor, "flushExecutor");
     this.heartbeat =
         new WorkHeartbeat(
             Objects.requireNonNull(store, "store"),
-            Objects.requireNonNull(scheduler, "scheduler"),
+            this.scheduler,
             config.leaseConfig(),
             this.clock,
             this::abandon);
@@ -173,13 +189,29 @@ final class ModelExecution implements ModelGateway.Listener {
           ProcessorExceptions.describe(activationError));
       return result;
     }
-    List<Publish> publishes = new ArrayList<>();
-    Applied applied;
-    synchronized (monitor) {
-      gateOpen = true;
-      applied = abandoned.get() ? Applied.LOST : drain(publishes);
+    Applied applied = Applied.PROGRESSED;
+    drainLock.lock();
+    try {
+      List<Pending> buffered;
+      synchronized (monitor) {
+        if (abandoned.get()) {
+          applied = Applied.LOST;
+          buffered = List.of();
+        } else {
+          gateOpen = true;
+          buffered = List.copyOf(pending);
+          pending.clear();
+        }
+      }
+      for (Pending signal : buffered) {
+        applied = processSignal(signal);
+        if (applied != Applied.PROGRESSED) {
+          break;
+        }
+      }
+    } finally {
+      drainLock.unlock();
     }
-    publishAll(publishes);
     if (applied == Applied.LOST) {
       // 兜底：gate 打开前 abandon 竞态获胜时 handle 已由 abandon 取消，这里只补 deferred cancel。
       cancelHandle();
@@ -220,22 +252,25 @@ final class ModelExecution implements ModelGateway.Listener {
   private ProcessResult activationFailure(ModelInvocationError error) {
     List<Publish> publishes = new ArrayList<>();
     Applied applied;
-    synchronized (monitor) {
-      if (abandoned.get()) {
-        return ProcessResult.LOST_OWNERSHIP;
+    drainLock.lock();
+    try {
+      synchronized (monitor) {
+        if (abandoned.get()) {
+          return ProcessResult.LOST_OWNERSHIP;
+        }
+        cancelBatchTimerLocked();
+        pending.clear();
+        batchItems.clear();
+        batchPayloadBytes = 0;
+        terminal.set(true);
+        applied = finishUnknownLocked(error, publishes);
       }
-      // 缓冲的 terminal（若存在）从未落地：丢弃并强制 UNKNOWN；terminal 标志无条件收敛，DB 层保证至多一次 terminal。
-      pending.clear();
-      terminal.set(true);
-      applied = finishUnknownLocked(error, publishes);
-    }
-    publishAll(publishes);
-    if (applied == Applied.LOST) {
-      abandon();
-      return ProcessResult.LOST_OWNERSHIP;
+      publishAll(publishes);
+    } finally {
+      drainLock.unlock();
     }
     abandon();
-    return ProcessResult.TERMINATED;
+    return applied == Applied.LOST ? ProcessResult.LOST_OWNERSHIP : ProcessResult.TERMINATED;
   }
 
   /**
@@ -263,21 +298,33 @@ final class ModelExecution implements ModelGateway.Listener {
 
   @Override
   public void onEvent(ProviderStreamEvent event) {
+    if (terminal.get() || abandoned.get()) {
+      return;
+    }
     deliver(new Pending(PendingKind.EVENT, event, null, null));
   }
 
   @Override
   public void onSucceeded(ProviderResponse response) {
+    if (abandoned.get() || !terminal.compareAndSet(false, true)) {
+      return;
+    }
     deliver(new Pending(PendingKind.SUCCEEDED, null, response, null));
   }
 
   @Override
   public void onFailed(ModelInvocationError error) {
+    if (abandoned.get() || !terminal.compareAndSet(false, true)) {
+      return;
+    }
     deliver(new Pending(PendingKind.FAILED, null, null, error));
   }
 
   @Override
   public void onUnknown(ModelInvocationError error) {
+    if (abandoned.get() || !terminal.compareAndSet(false, true)) {
+      return;
+    }
     deliver(new Pending(PendingKind.UNKNOWN, null, null, error));
   }
 
@@ -292,7 +339,10 @@ final class ModelExecution implements ModelGateway.Listener {
     heartbeat.stop();
     boolean cancelNow;
     synchronized (monitor) {
+      cancelBatchTimerLocked();
       pending.clear();
+      batchItems.clear();
+      batchPayloadBytes = 0;
       cancelNow = !activationInProgress;
     }
     if (cancelNow) {
@@ -302,32 +352,33 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private void deliver(Pending signal) {
-    if (terminal.get() || abandoned.get()) {
-      return;
-    }
-    boolean terminalSignal = signal.kind != PendingKind.EVENT;
-    if (terminalSignal && !terminal.compareAndSet(false, true)) {
-      return;
-    }
-    List<Publish> publishes = new ArrayList<>();
-    Applied applied = Applied.LOST;
-    RuntimeException failure = null;
-    synchronized (monitor) {
+    boolean isTerminalSignal = signal.kind() != PendingKind.EVENT;
+    drainLock.lock();
+    try {
       if (abandoned.get()) {
         return;
       }
-      if (!gateOpen) {
-        pending.add(signal);
-        return;
+      synchronized (monitor) {
+        if (!gateOpen) {
+          if (!isTerminalSignal) {
+            if (pending.size() >= config.streamFlushConfig().maxEvents()) {
+              throw new IllegalStateException(
+                  "activation pending capacity exceeded: " + pending.size());
+            }
+            pending.add(signal);
+            return;
+          } else {
+            pending.add(signal);
+            return;
+          }
+        }
       }
-      try {
-        applied = processLocked(signal, publishes);
-      } catch (RuntimeException error) {
-        failure = error;
+      Applied applied = processSignal(signal);
+      if (applied == Applied.LOST || applied != Applied.PROGRESSED) {
+        abandon();
       }
-    }
-    if (failure != null) {
-      if (terminalSignal) {
+    } catch (RuntimeException failure) {
+      if (isTerminalSignal) {
         log.warn(
             "cannot persist model terminal for {}: {}",
             invocationId,
@@ -338,91 +389,293 @@ final class ModelExecution implements ModelGateway.Listener {
             new ModelInvocationError(
                 ProviderErrorKind.INVALID_RESPONSE, message(failure, "invalid provider callback")));
       }
-      return;
-    }
-    if (applied == Applied.LOST) {
-      abandon();
-      return;
-    }
-    publishAll(publishes);
-    if (terminalSignal) {
-      abandon();
+    } finally {
+      drainLock.unlock();
     }
   }
 
-  /** 重放 gate 打开前缓冲的信号；terminal/retry 信号按到达顺序必须是缓冲区最后一个。 */
-  private Applied drain(List<Publish> publishes) {
-    List<Pending> buffered = List.copyOf(pending);
-    pending.clear();
-    for (Pending signal : buffered) {
-      Applied applied = processLocked(signal, publishes);
-      if (applied != Applied.PROGRESSED) {
-        return applied;
-      }
-    }
-    return Applied.PROGRESSED;
-  }
-
-  private Applied processLocked(Pending signal, List<Publish> publishes) {
-    return switch (signal.kind) {
-      case EVENT -> processEventLocked(signal.event, publishes);
-      case SUCCEEDED -> finishSuccessLocked(signal.response, publishes);
-      case FAILED -> finishFailureLocked(signal.error, publishes);
-      case UNKNOWN -> finishUnknownLocked(signal.error, publishes);
+  private Applied processSignal(Pending signal) {
+    return switch (signal.kind()) {
+      case EVENT -> processEvent(signal.event());
+      case SUCCEEDED -> processSucceeded(signal.response());
+      case FAILED -> processFailed(signal.error());
+      case UNKNOWN -> processUnknown(signal.error());
     };
   }
 
   /**
-   * 处理一个 stream delta：sequence 单调分配；每个 safe text/thinking 事件都先在校验 RUNNING + attempt 与 ownership
-   * 的短事务中落地完整 checkpoint，tool-call fragment 永不 checkpoint；commit 后 best-effort 发布 realtime delta。
+   * 处理一个 stream delta：per-delta 纯 fence 校验 RUNNING + attempt 与 lease 所有权； 容量超限时同步 flush
+   * 形成背压；text/thinking delta 更新 lastSafeSequence； 未满容量时调度单次无防抖批次定时器。整个处理与发布在单 drain owner 内顺序执行。
    */
-  private Applied processEventLocked(ProviderStreamEvent event, List<Publish> publishes) {
-    long sequence = nextSequence();
-    accumulator.append(event);
-    boolean safeContent =
-        event instanceof ProviderStreamEvent.TextDelta
-            || event instanceof ProviderStreamEvent.ThinkingDelta;
+  private Applied processEvent(ProviderStreamEvent event) {
     Instant now = clock.instant();
-    StreamCheckpoint pending = null;
-    if (safeContent) {
-      String text = accumulator.text();
-      String thinking = accumulator.thinking();
-      if (!text.isEmpty() || !thinking.isEmpty()) {
-        pending = new StreamCheckpoint(attempt, sequence, text, thinking);
-      }
-    }
-    final StreamCheckpoint pendingCheckpoint = pending;
-    boolean committed =
-        Boolean.TRUE.equals(store.transaction(tx -> persistEvent(tx, pendingCheckpoint, now)));
-    if (!committed) {
+    boolean fenced = Boolean.TRUE.equals(store.transaction(tx -> checkRunningOwnership(tx, now)));
+    if (!fenced) {
       return Applied.LOST;
     }
-    lastCommittedSequence = sequence;
-    publishes.add(new Publish(event, sequence));
+
+    long eventBytes = StreamFlushConfig.eventPayloadBytes(event);
+    StreamFlushConfig flushConfig = config.streamFlushConfig();
+
+    List<Publish> publishesBefore = new ArrayList<>();
+    Applied flushBeforeResult = Applied.PROGRESSED;
+    synchronized (monitor) {
+      if (abandoned.get()) {
+        return Applied.LOST;
+      }
+      if (!batchItems.isEmpty()
+          && (batchItems.size() + 1 > flushConfig.maxEvents()
+              || batchPayloadBytes + eventBytes > flushConfig.maxPayloadBytes())) {
+        flushBeforeResult = flushBatchLocked(publishesBefore);
+      }
+    }
+    if (flushBeforeResult == Applied.LOST) {
+      return Applied.LOST;
+    }
+    publishAll(publishesBefore);
+
+    List<Publish> publishesCurrent = new ArrayList<>();
+    Applied flushCurrentResult = Applied.PROGRESSED;
+    boolean needScheduleTimer = false;
+    long timerGeneration = 0;
+    synchronized (monitor) {
+      if (abandoned.get()) {
+        return Applied.LOST;
+      }
+      long sequence = nextSequence();
+      accumulator.append(event);
+      boolean isSafe =
+          event instanceof ProviderStreamEvent.TextDelta
+              || event instanceof ProviderStreamEvent.ThinkingDelta;
+      if (isSafe) {
+        lastSafeSequence = sequence;
+      }
+      batchItems.add(new BatchItem(event, sequence, isSafe));
+      batchPayloadBytes += eventBytes;
+
+      if (batchItems.size() >= flushConfig.maxEvents()
+          || batchPayloadBytes >= flushConfig.maxPayloadBytes()) {
+        flushCurrentResult = flushBatchLocked(publishesCurrent);
+      } else if (batchTimer == null) {
+        needScheduleTimer = true;
+        timerGeneration = batchGeneration;
+      }
+    }
+    if (flushCurrentResult == Applied.LOST) {
+      return Applied.LOST;
+    }
+    publishAll(publishesCurrent);
+    if (needScheduleTimer) {
+      scheduleBatchTimer(timerGeneration);
+    }
     return Applied.PROGRESSED;
   }
 
-  private boolean persistEvent(
-      HarnessStore.Transaction tx, StreamCheckpoint pendingCheckpoint, Instant now) {
+  private Applied processSucceeded(ProviderResponse response) {
+    List<Publish> publishes = new ArrayList<>();
+    Applied applied;
+    synchronized (monitor) {
+      if (abandoned.get()) {
+        return Applied.LOST;
+      }
+      applied = finishSuccessLocked(response, publishes);
+    }
+    if (applied == Applied.LOST) {
+      return Applied.LOST;
+    }
+    publishAll(publishes);
+    return applied;
+  }
+
+  private Applied processFailed(ModelInvocationError error) {
+    List<Publish> publishes = new ArrayList<>();
+    Applied applied;
+    synchronized (monitor) {
+      if (abandoned.get()) {
+        return Applied.LOST;
+      }
+      applied = finishFailureLocked(error, publishes);
+    }
+    if (applied == Applied.LOST) {
+      return Applied.LOST;
+    }
+    publishAll(publishes);
+    return applied;
+  }
+
+  private Applied processUnknown(ModelInvocationError error) {
+    List<Publish> publishes = new ArrayList<>();
+    Applied applied;
+    synchronized (monitor) {
+      if (abandoned.get()) {
+        return Applied.LOST;
+      }
+      applied = finishUnknownLocked(error, publishes);
+    }
+    if (applied == Applied.LOST) {
+      return Applied.LOST;
+    }
+    publishAll(publishes);
+    return applied;
+  }
+
+  private void scheduleBatchTimer(long targetGeneration) {
+    try {
+      ScheduledFuture<?> future =
+          scheduler.schedule(
+              () -> {
+                try {
+                  flushExecutor.execute(() -> deliverFlush(targetGeneration));
+                } catch (RuntimeException rejected) {
+                  log.warn(
+                      "model flush executor rejected task for {}: {}",
+                      invocationId,
+                      ProcessorExceptions.describe(rejected));
+                  abandon();
+                }
+              },
+              config.streamFlushConfig().maxDelay().toMillis(),
+              TimeUnit.MILLISECONDS);
+      synchronized (monitor) {
+        if (abandoned.get() || terminal.get() || targetGeneration != batchGeneration) {
+          future.cancel(false);
+        } else {
+          batchTimer = future;
+        }
+      }
+    } catch (RuntimeException rejected) {
+      log.warn(
+          "model flush timer scheduling rejected for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(rejected));
+      abandon();
+    }
+  }
+
+  private void cancelBatchTimerLocked() {
+    if (batchTimer != null) {
+      batchTimer.cancel(false);
+      batchTimer = null;
+    }
+    batchGeneration++;
+  }
+
+  void deliverFlush(long generation) {
+    if (abandoned.get()) {
+      return;
+    }
+    drainLock.lock();
+    try {
+      if (abandoned.get()) {
+        return;
+      }
+      List<Publish> publishes = new ArrayList<>();
+      Applied applied = Applied.LOST;
+      RuntimeException failure = null;
+      synchronized (monitor) {
+        if (abandoned.get()
+            || terminal.get()
+            || generation != batchGeneration
+            || batchItems.isEmpty()) {
+          return;
+        }
+        try {
+          applied = flushBatchLocked(publishes);
+        } catch (RuntimeException error) {
+          failure = error;
+        }
+      }
+      if (failure != null) {
+        log.warn(
+            "cannot persist model batch flush for {}: {}",
+            invocationId,
+            ProcessorExceptions.describe(failure));
+        abandon();
+        return;
+      }
+      if (applied == Applied.LOST) {
+        abandon();
+        return;
+      }
+      publishAll(publishes);
+    } finally {
+      drainLock.unlock();
+    }
+  }
+
+  private Applied flushBatchLocked(List<Publish> publishes) {
+    cancelBatchTimerLocked();
+    if (batchItems.isEmpty()) {
+      return Applied.PROGRESSED;
+    }
+    long firstSeq = batchItems.getFirst().sequence();
+    if (firstSeq != lastCommittedSequence + 1) {
+      throw new IllegalStateException(
+          "non-contiguous sequence publication: expected "
+              + (lastCommittedSequence + 1)
+              + " but got "
+              + firstSeq);
+    }
+    long batchSafeSeq = 0;
+    for (BatchItem item : batchItems) {
+      if (item.safe()) {
+        batchSafeSeq = Math.max(batchSafeSeq, item.sequence());
+      }
+    }
+    StreamCheckpoint checkpointToPersist = null;
+    if (batchSafeSeq > 0) {
+      String text = accumulator.text();
+      String thinking = accumulator.thinking();
+      if (!text.isEmpty() || !thinking.isEmpty()) {
+        checkpointToPersist = new StreamCheckpoint(attempt, batchSafeSeq, text, thinking);
+      }
+    }
+    final StreamCheckpoint pendingCheckpoint = checkpointToPersist;
+    Instant now = clock.instant();
+    boolean committed =
+        Boolean.TRUE.equals(
+            store.transaction(
+                tx -> {
+                  ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
+                  if (model == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+                    return false;
+                  }
+                  if (model.status() != ModelInvocationStatus.RUNNING
+                      || model.attempt() != attempt) {
+                    return false;
+                  }
+                  if (pendingCheckpoint != null) {
+                    tx.updateModelInvocation(model.checkpoint(pendingCheckpoint, now));
+                  }
+                  return true;
+                }));
+    if (!committed) {
+      return Applied.LOST;
+    }
+    lastCommittedSequence = batchItems.getLast().sequence();
+    for (BatchItem item : batchItems) {
+      publishes.add(new Publish(item.event(), item.sequence()));
+    }
+    batchItems.clear();
+    batchPayloadBytes = 0;
+    return Applied.PROGRESSED;
+  }
+
+  private boolean checkRunningOwnership(HarnessStore.Transaction tx, Instant now) {
     ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
     if (model == null || tx.lockClaimedWork(claim, now).isEmpty()) {
       return false;
     }
-    if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
-      return false;
-    }
-    if (pendingCheckpoint != null) {
-      tx.updateModelInvocation(model.checkpoint(pendingCheckpoint, now));
-    }
-    return true;
+    return model.status() == ModelInvocationStatus.RUNNING && model.attempt() == attempt;
   }
 
   private Applied finishSuccessLocked(ProviderResponse response, List<Publish> publishes) {
-    ModelStreamAccumulator.Completion completion;
+    cancelBatchTimerLocked();
+    ModelStreamAccumulator.PreparedCompletion prepared;
     ProviderResponse validatedResponse;
     try {
-      completion = accumulator.complete(response);
-      validatedResponse = ModelResponseValidator.validate(completion.response());
+      prepared = accumulator.prepareComplete(response);
+      validatedResponse = ModelResponseValidator.validate(prepared.response());
     } catch (RuntimeException failure) {
       log.warn(
           "invalid provider response for invocation {}: {}",
@@ -433,26 +686,55 @@ final class ModelExecution implements ModelGateway.Listener {
               ProviderErrorKind.INVALID_RESPONSE, message(failure, "invalid provider response")),
           publishes);
     }
-    long finalSequence = lastCommittedSequence;
-    for (ProviderStreamEvent ignored : completion.gaps()) {
-      finalSequence = nextSequence(finalSequence);
+    ModelStreamAccumulator.Completion completion = prepared.apply();
+    List<BatchItem> gapItems = new ArrayList<>();
+    for (ProviderStreamEvent gap : completion.gaps()) {
+      long seq = nextSequence();
+      boolean isSafe =
+          gap instanceof ProviderStreamEvent.TextDelta
+              || gap instanceof ProviderStreamEvent.ThinkingDelta;
+      if (isSafe) {
+        lastSafeSequence = seq;
+      }
+      gapItems.add(new BatchItem(gap, seq, isSafe));
     }
-    final long finalCheckpointSequence = finalSequence;
-    boolean committed =
-        safeTerminal(() -> commitSuccess(validatedResponse, finalCheckpointSequence));
+
+    String text = compaction ? validatedResponse.text() : accumulator.text();
+    String thinking = compaction ? validatedResponse.thinking() : accumulator.thinking();
+    StreamCheckpoint finalCheckpoint = null;
+    if (!text.isEmpty() || !thinking.isEmpty()) {
+      finalCheckpoint = new StreamCheckpoint(attempt, lastSafeSequence, text, thinking);
+    }
+    final StreamCheckpoint checkpointToCommit = finalCheckpoint;
+    boolean committed = safeTerminal(() -> commitSuccess(validatedResponse, checkpointToCommit));
     if (!committed) {
       return Applied.LOST;
     }
-    long sequence = lastCommittedSequence;
-    for (ProviderStreamEvent gap : completion.gaps()) {
-      sequence = nextSequence(sequence);
-      lastCommittedSequence = sequence;
-      publishes.add(new Publish(gap, sequence));
+
+    if (!batchItems.isEmpty()) {
+      long firstSeq = batchItems.getFirst().sequence();
+      if (firstSeq != lastCommittedSequence + 1) {
+        throw new IllegalStateException(
+            "non-contiguous sequence publication: expected "
+                + (lastCommittedSequence + 1)
+                + " but got "
+                + firstSeq);
+      }
     }
+    for (BatchItem item : batchItems) {
+      publishes.add(new Publish(item.event(), item.sequence()));
+    }
+    for (BatchItem item : gapItems) {
+      publishes.add(new Publish(item.event(), item.sequence()));
+    }
+    lastCommittedSequence = lastAcceptedSequence;
+    batchItems.clear();
+    batchPayloadBytes = 0;
     return Applied.TERMINAL;
   }
 
   private Applied finishFailureLocked(ModelInvocationError error, List<Publish> publishes) {
+    cancelBatchTimerLocked();
     if (isRetryable(error) && config.retryPolicyProvider().retryPolicy().allowsRetry(attempt)) {
       Duration delay = config.retryPolicyProvider().retryPolicy().delayBeforeRetry(attempt);
       boolean committed = safeTerminal(() -> commitRetry(delay, error));
@@ -462,18 +744,21 @@ final class ModelExecution implements ModelGateway.Listener {
             invocationId,
             attempt + 1,
             delay);
+        batchItems.clear();
+        batchPayloadBytes = 0;
         return Applied.RETRY;
       }
       return Applied.LOST;
     }
-    if (error.kind() == ProviderErrorKind.CANCELLED) {
-      return safeTerminal(() -> commitTerminal(TerminalKind.CANCELLED, error))
-          ? Applied.TERMINAL
-          : Applied.LOST;
+    TerminalKind kind =
+        error.kind() == ProviderErrorKind.CANCELLED ? TerminalKind.CANCELLED : TerminalKind.FAILED;
+    boolean committed = safeTerminal(() -> commitTerminal(kind, error));
+    if (committed) {
+      batchItems.clear();
+      batchPayloadBytes = 0;
+      return Applied.TERMINAL;
     }
-    return safeTerminal(() -> commitTerminal(TerminalKind.FAILED, error))
-        ? Applied.TERMINAL
-        : Applied.LOST;
+    return Applied.LOST;
   }
 
   /** TRANSIENT 与 INVALID_RESPONSE 共享 {@link InvocationRetryPolicy}：两者耗尽后都转为 FAILED terminal。 */
@@ -483,9 +768,14 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private Applied finishUnknownLocked(ModelInvocationError error, List<Publish> publishes) {
-    return safeTerminal(() -> commitTerminal(TerminalKind.UNKNOWN, error))
-        ? Applied.TERMINAL
-        : Applied.LOST;
+    cancelBatchTimerLocked();
+    boolean committed = safeTerminal(() -> commitTerminal(TerminalKind.UNKNOWN, error));
+    if (committed) {
+      batchItems.clear();
+      batchPayloadBytes = 0;
+      return Applied.TERMINAL;
+    }
+    return Applied.LOST;
   }
 
   private boolean markRunning() {
@@ -538,7 +828,7 @@ final class ModelExecution implements ModelGateway.Listener {
               ModelAttemptFailure failure =
                   new ModelAttemptFailure(
                       attempt,
-                      lastCommittedSequence,
+                      lastSafeSequence,
                       accumulator.text(),
                       accumulator.thinking(),
                       error,
@@ -570,7 +860,7 @@ final class ModelExecution implements ModelGateway.Listener {
     return effective;
   }
 
-  private boolean commitSuccess(ProviderResponse response, long finalSequence) {
+  private boolean commitSuccess(ProviderResponse response, StreamCheckpoint finalCheckpoint) {
     Instant now = clock.instant();
     try {
       return Boolean.TRUE.equals(
@@ -591,16 +881,7 @@ final class ModelExecution implements ModelGateway.Listener {
                 if (tx.lockClaimedWork(claim, now).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
-                String text = compaction ? response.text() : accumulator.text();
-                String thinking = compaction ? response.thinking() : accumulator.thinking();
-                if (!text.isEmpty() || !thinking.isEmpty()) {
-                  ModelInvocation checkpointed =
-                      model.checkpoint(
-                          new StreamCheckpoint(attempt, finalSequence, text, thinking), now);
-                  tx.updateModelInvocation(checkpointed);
-                  model = checkpointed;
-                }
-                tx.updateModelInvocation(model.succeed(response, now));
+                tx.updateModelInvocation(model.succeed(response, finalCheckpoint, now));
                 tx.updateThread(thread.touchVersion(now));
                 tx.completeWork(claim, now);
                 return true;
@@ -633,19 +914,15 @@ final class ModelExecution implements ModelGateway.Listener {
                 }
                 String text = accumulator.text();
                 String thinking = accumulator.thinking();
+                StreamCheckpoint finalCheckpoint = null;
                 if (!text.isEmpty() || !thinking.isEmpty()) {
-                  ModelInvocation checkpointed =
-                      model.checkpoint(
-                          new StreamCheckpoint(attempt, lastCommittedSequence, text, thinking),
-                          now);
-                  tx.updateModelInvocation(checkpointed);
-                  model = checkpointed;
+                  finalCheckpoint = new StreamCheckpoint(attempt, lastSafeSequence, text, thinking);
                 }
                 ModelInvocation next =
                     switch (kind) {
-                      case FAILED -> model.fail(error, now);
-                      case CANCELLED -> model.cancel(error, now);
-                      case UNKNOWN -> model.unknown(error, now);
+                      case FAILED -> model.fail(error, finalCheckpoint, now);
+                      case CANCELLED -> model.cancel(error, finalCheckpoint, now);
+                      case UNKNOWN -> model.unknown(error, finalCheckpoint, now);
                     };
                 tx.updateModelInvocation(next);
                 tx.updateThread(thread.touchVersion(now));
@@ -658,23 +935,25 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private void deliverFailure(ModelInvocationError error) {
-    if (!terminal.compareAndSet(false, true)) {
-      return;
-    }
-    List<Publish> publishes = new ArrayList<>();
-    Applied applied;
-    synchronized (monitor) {
-      if (abandoned.get()) {
+    drainLock.lock();
+    try {
+      List<Publish> publishes = new ArrayList<>();
+      Applied applied;
+      synchronized (monitor) {
+        if (abandoned.get()) {
+          return;
+        }
+        applied = finishFailureLocked(error, publishes);
+      }
+      if (applied == Applied.LOST) {
+        abandon();
         return;
       }
-      applied = finishFailureLocked(error, publishes);
-    }
-    if (applied == Applied.LOST) {
+      publishAll(publishes);
       abandon();
-      return;
+    } finally {
+      drainLock.unlock();
     }
-    publishAll(publishes);
-    abandon();
   }
 
   private boolean safeTerminal(BooleanSupplier action) {
@@ -694,7 +973,14 @@ final class ModelExecution implements ModelGateway.Listener {
       return;
     }
     for (Publish publish : publishes) {
-      appendRealtime(publish.event, publish.sequence);
+      if (publish.sequence() > lastCommittedSequence) {
+        throw new IllegalStateException(
+            "cannot publish uncommitted sequence "
+                + publish.sequence()
+                + "; committed watermark is "
+                + lastCommittedSequence);
+      }
+      appendRealtime(publish.event(), publish.sequence());
     }
   }
 
@@ -729,14 +1015,10 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private long nextSequence() {
-    return nextSequence(lastCommittedSequence);
-  }
-
-  private static long nextSequence(long current) {
-    if (current == Long.MAX_VALUE) {
+    if (lastAcceptedSequence == Long.MAX_VALUE) {
       throw new IllegalStateException("model delta sequence overflow");
     }
-    return current + 1;
+    return ++lastAcceptedSequence;
   }
 
   private static String message(Throwable failure, String fallback) {
@@ -793,6 +1075,8 @@ final class ModelExecution implements ModelGateway.Listener {
       ModelInvocationError error) {}
 
   private record Publish(ProviderStreamEvent event, long sequence) {}
+
+  private record BatchItem(ProviderStreamEvent event, long sequence, boolean safe) {}
 
   /** 内部回滚信号：callback 事务失去 Work ownership 时使当前事务完整回滚。 */
   private static final class ClaimLostSignal extends RuntimeException {

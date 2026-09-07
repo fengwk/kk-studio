@@ -221,10 +221,10 @@ public interface HarnessStore {
      * 更新 ModelInvocation current state。要求行存在且已在本事务锁定，并通过共享 transition validation（{@link
      * ModelInvocation#validateTransition}）：threadId / turnStartEntryId / requestHeadEntryId /
      * requestSpec / createdAt 不得 改变，updatedAt 不回退，attempt 只在确认 start / DISPATCHING stop 窗口时
-     * +1，terminal facts 不可变（resultEntryId 仅允许 null-&gt;non-null），checkpoint 只在 RUNNING-&gt;RUNNING
-     * 新增/增长、进入 terminal 或 retry 时保留 exact 或清空。分支校验不重复依赖 Thread 当前 head / session（relocation 后
-     * terminal exact replay 仍合法）；仅当 resultEntryId 出现时校验其类型、path 同时包含 request head 与
-     * turnStart、全局唯一。未锁定抛 {@link IllegalStateException}，身份改变、非法 transition 或行不存在抛 {@link
+     * +1，terminal facts 不可变（resultEntryId 仅允许 null-&gt;non-null），checkpoint 允许在 RUNNING-&gt;RUNNING
+     * 或 RUNNING-&gt;terminal 单调新增/增长、进入 terminal 或 retry 时保留 exact 或清空。分支校验不重复依赖 Thread 当前 head /
+     * session（relocation 后 terminal exact replay 仍合法）；仅当 resultEntryId 出现时校验其类型、path 同时包含 request
+     * head 与 turnStart、全局唯一。未锁定抛 {@link IllegalStateException}，身份改变、非法 transition 或行不存在抛 {@link
      * IllegalArgumentException}。
      */
     void updateModelInvocation(ModelInvocation invocation);

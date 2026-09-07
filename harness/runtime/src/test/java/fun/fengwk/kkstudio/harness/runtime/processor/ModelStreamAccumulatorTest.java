@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -259,5 +260,49 @@ class ModelStreamAccumulatorTest {
 
     assertEquals(
         List.of(new ProviderStreamEvent.ToolCallDelta(0, null, "bash", "{}")), completion.gaps());
+  }
+
+  /** prepareComplete 产生 gap 但后续外部校验失败时，不污染 accumulator 既有的 text/thinking partial。 */
+  @Test
+  void prepareCompleteDoesNotMutateAccumulatorWhenSubsequentValidationFails() {
+    ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
+    accumulator.append(new ProviderStreamEvent.TextDelta("hello"));
+    accumulator.append(new ProviderStreamEvent.ThinkingDelta("think"));
+
+    ProviderResponse candidateResponse = response("hello world", "think more", List.of());
+    ModelStreamAccumulator.PreparedCompletion prepared =
+        accumulator.prepareComplete(candidateResponse);
+
+    assertEquals("hello", accumulator.text());
+    assertEquals("think", accumulator.thinking());
+    assertEquals(2, prepared.gaps().size());
+
+    // 模拟外部校验失败（如 ModelResponseValidator 抛错），apply 绝未被调用
+    RuntimeException validationFailure = new IllegalArgumentException("invalid response schema");
+    assertNotNull(validationFailure);
+
+    // accumulator 状态完全未被污染
+    assertEquals("hello", accumulator.text());
+    assertEquals("think", accumulator.thinking());
+
+    // 仅在显式 apply 后状态才被推进
+    ModelStreamAccumulator.Completion completion = prepared.apply();
+    assertEquals("hello world", accumulator.text());
+    assertEquals("think more", accumulator.thinking());
+    assertEquals("hello world", completion.response().text());
+    assertThrows(IllegalStateException.class, prepared::apply);
+  }
+
+  /** prepareComplete 遭遇前缀冲突抛异常时，也不污染 accumulator 状态。 */
+  @Test
+  void prepareCompletePrefixConflictLeavesAccumulatorUntouched() {
+    ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
+    accumulator.append(new ProviderStreamEvent.TextDelta("hello"));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> accumulator.prepareComplete(response("conflict", "", List.of())));
+
+    assertEquals("hello", accumulator.text());
   }
 }

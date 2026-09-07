@@ -27,6 +27,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.withRendererKey;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -891,6 +892,154 @@ public abstract class HarnessStoreInvocationContract {
         store.transaction(tx -> tx.findModelInvocation(TestIds.id(1)).orElseThrow());
     assertEquals(ModelInvocationStatus.SUCCEEDED, committed.status());
     assertEquals(assistantEntryId, committed.resultEntryId());
+  }
+
+  @Test
+  void updateModelInvocationSupportsRunningToTerminalCheckpointTransition() {
+    ProviderResponse response = assistantResponse();
+    ModelInvocationError error = new ModelInvocationError(ProviderErrorKind.TRANSIENT, "boom");
+
+    // Case 1: RUNNING (null checkpoint) -> SUCCEEDED (new checkpoint) in a single update
+    StoreTestSupport.TurnBaseline turn1 = seedTurnBaseline(store);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(turn1.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  TestIds.id(10),
+                  turn1.threadId(),
+                  turn1.turnStartEntryId(),
+                  turn1.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+        });
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation current = tx.lockModelInvocation(TestIds.id(10)).orElseThrow();
+          tx.updateModelInvocation(current.beginDispatch(T2));
+          current = tx.lockModelInvocation(TestIds.id(10)).orElseThrow();
+          tx.updateModelInvocation(current.markRunning(T2));
+          current = tx.lockModelInvocation(TestIds.id(10)).orElseThrow();
+          StreamCheckpoint finalCheckpoint = new StreamCheckpoint(1, 10L, "hello", "");
+          tx.updateModelInvocation(current.succeed(response, finalCheckpoint, T3));
+        });
+    ModelInvocation committed10 =
+        store.transaction(tx -> tx.findModelInvocation(TestIds.id(10)).orElseThrow());
+    assertEquals(ModelInvocationStatus.SUCCEEDED, committed10.status());
+    assertNotNull(committed10.streamCheckpoint());
+    assertEquals(10L, committed10.streamCheckpoint().sequence());
+    assertEquals("hello", committed10.streamCheckpoint().text());
+
+    // Case 2: RUNNING (checkpoint 1) -> SUCCEEDED (grown checkpoint 2) in a single update
+    StoreTestSupport.TurnBaseline turn2 = seedTurnBaseline(store);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(turn2.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  TestIds.id(11),
+                  turn2.threadId(),
+                  turn2.turnStartEntryId(),
+                  turn2.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+        });
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation current = tx.lockModelInvocation(TestIds.id(11)).orElseThrow();
+          tx.updateModelInvocation(current.beginDispatch(T2));
+          current = tx.lockModelInvocation(TestIds.id(11)).orElseThrow();
+          tx.updateModelInvocation(current.markRunning(T2));
+          current = tx.lockModelInvocation(TestIds.id(11)).orElseThrow();
+          tx.updateModelInvocation(current.checkpoint(new StreamCheckpoint(1, 5L, "hel", ""), T2));
+          current = tx.lockModelInvocation(TestIds.id(11)).orElseThrow();
+          StreamCheckpoint grown = new StreamCheckpoint(1, 12L, "hello world", "");
+          tx.updateModelInvocation(current.succeed(response, grown, T3));
+        });
+    ModelInvocation committed11 =
+        store.transaction(tx -> tx.findModelInvocation(TestIds.id(11)).orElseThrow());
+    assertEquals(ModelInvocationStatus.SUCCEEDED, committed11.status());
+    assertEquals(12L, committed11.streamCheckpoint().sequence());
+    assertEquals("hello world", committed11.streamCheckpoint().text());
+
+    // Case 3: RUNNING (checkpoint 1) -> FAILED (grown checkpoint 2) in a single update
+    StoreTestSupport.TurnBaseline turn3 = seedTurnBaseline(store);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(turn3.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  TestIds.id(12),
+                  turn3.threadId(),
+                  turn3.turnStartEntryId(),
+                  turn3.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+        });
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation current = tx.lockModelInvocation(TestIds.id(12)).orElseThrow();
+          tx.updateModelInvocation(current.beginDispatch(T2));
+          current = tx.lockModelInvocation(TestIds.id(12)).orElseThrow();
+          tx.updateModelInvocation(current.markRunning(T2));
+          current = tx.lockModelInvocation(TestIds.id(12)).orElseThrow();
+          StreamCheckpoint failureCheckpoint = new StreamCheckpoint(1, 3L, "partial error", "");
+          tx.updateModelInvocation(current.fail(error, failureCheckpoint, T3));
+        });
+    ModelInvocation committed12 =
+        store.transaction(tx -> tx.findModelInvocation(TestIds.id(12)).orElseThrow());
+    assertEquals(ModelInvocationStatus.FAILED, committed12.status());
+    assertEquals(3L, committed12.streamCheckpoint().sequence());
+    assertEquals("partial error", committed12.streamCheckpoint().text());
+
+    // Case 4: Sequence regression from RUNNING to terminal update is rejected by store
+    StoreTestSupport.TurnBaseline turn4 = seedTurnBaseline(store);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(turn4.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  TestIds.id(13),
+                  turn4.threadId(),
+                  turn4.turnStartEntryId(),
+                  turn4.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+        });
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation current = tx.lockModelInvocation(TestIds.id(13)).orElseThrow();
+          tx.updateModelInvocation(current.beginDispatch(T2));
+          current = tx.lockModelInvocation(TestIds.id(13)).orElseThrow();
+          tx.updateModelInvocation(current.markRunning(T2));
+          current = tx.lockModelInvocation(TestIds.id(13)).orElseThrow();
+          tx.updateModelInvocation(
+              current.checkpoint(new StreamCheckpoint(1, 10L, "hello world", ""), T2));
+        });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  ModelInvocation current = tx.lockModelInvocation(TestIds.id(13)).orElseThrow();
+                  // current is RUNNING with sequence 10; terminal update with sequence 5 must be
+                  // rejected
+                  StreamCheckpoint regression = new StreamCheckpoint(1, 5L, "hello", "");
+                  tx.updateModelInvocation(current.succeed(response, regression, T3));
+                }));
   }
 
   @Test

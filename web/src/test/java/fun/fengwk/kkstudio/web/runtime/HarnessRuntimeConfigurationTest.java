@@ -56,6 +56,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -134,6 +135,10 @@ class HarnessRuntimeConfigurationTest {
   @Autowired
   @Qualifier("harnessDispatcherWorkerExecutor")
   private ExecutorService workerExecutor;
+
+  @Autowired
+  @Qualifier("harnessModelFlushExecutor")
+  private ExecutorService flushExecutor;
 
   @Test
   void composesTheFullRuntimeBeanGraph() {
@@ -227,5 +232,18 @@ class HarnessRuntimeConfigurationTest {
     assertTrue(latch.await(5, TimeUnit.SECONDS));
     assertEquals(first.get(), second.get());
     assertNotEquals(Thread.currentThread(), first.get(), "drain executor must not run inline");
+  }
+
+  @Test
+  void flushExecutorRunsOnVirtualThread() throws Exception {
+    AtomicBoolean isVirtual = new AtomicBoolean();
+    CountDownLatch latch = new CountDownLatch(1);
+    flushExecutor.execute(
+        () -> {
+          isVirtual.set(Thread.currentThread().isVirtual());
+          latch.countDown();
+        });
+    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    assertTrue(isVirtual.get(), "flush executor must use virtual threads");
   }
 }
