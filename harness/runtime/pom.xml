@@ -82,6 +82,8 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun/fengwk/kkstudio/harness/runtime/ManualCompactionControl</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocation</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution</include>
                                         <include>fun/fengwk/kkstudio/harness/runtime/compaction/AutomaticCompactionPlanner</include>
                                         <include>fun/fengwk/kkstudio/harness/runtime/compaction/CompactionHistory</include>
                                         <include>fun/fengwk/kkstudio/harness/runtime/thread/ResolvedRequestValidator</include>

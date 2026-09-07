@@ -343,8 +343,9 @@ sequenceDiagram
   `TEXT_DELTA`、`THINKING_DELTA`、`TOOL_CALL_DELTA`，按连续 sequence 追加；
   tool partial 按 `thread:invocation:attempt` 做有界精确去重。
 - invocation 的 `resultJson`、`errorJson` 或 `resultEntryId` 出现后建立 terminal
-  fence，迟到 delta/partial 丢弃。持久化终态优先于任何较新的 transient
-  overlay。
+  fence，迟到 delta/partial 丢弃。Snapshot 的 `modelAttemptFailures` 若已记录同一
+  `modelInvocationId + attempt`，对应迟到 `MODEL_DELTA` 也会被丢弃，并提前结束该
+  attempt 的 gap recovery。持久化终态与失败审计优先于任何较新的 transient overlay。
 - MODEL sequence 出现 gap 时启动单飞 recovery：重新拉 snapshot，退避
   `200ms` 到 `2000ms`，最多 `8` 次；即使 Thread version 未变化也读取并合并
   durable checkpoint，不能通过填补事件猜测内容。

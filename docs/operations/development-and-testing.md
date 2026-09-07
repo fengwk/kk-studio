@@ -167,6 +167,8 @@ find . -path '*/target/site/jacoco/index.html' -print
 - `fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor`
 - `fun.fengwk.kkstudio.harness.builtin.goal.GoalStateCodec`
 - `fun.fengwk.kkstudio.harness.runtime.ManualCompactionControl`
+- `fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation`
+- `fun.fengwk.kkstudio.harness.runtime.processor.ModelExecution`
 - `fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner`
 - `fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory`
 - `fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator`

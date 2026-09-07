@@ -84,7 +84,8 @@ composition 子根：
 - `LocalFileResourceStore`使用 `environment-root/.kkstudio/resources/`作为 content-addressed resource root，
   单对象上限取 `SystemSettings.Advanced.resourceMaxBytes`；
 - `PostgresqlRealtimeEventSink`和 `PostgresqlRealtimeEventSource`把 Model/Tool realtime 连接到 PostgreSQL；
-- `ThreadProcessor`、`ModelProcessor`和 `ToolProcessor`共享 lease/heartbeat 配置；
+- `ThreadProcessor`、`ModelProcessor`和 `ToolProcessor`共享 lease/heartbeat 配置；Model checkpoint timer 只复用
+  scheduler 计时，实际批次 DB flush 与通知发布由独立、受 Spring 生命周期管理的虚拟线程 executor 执行；
 - `HarnessWorkDispatcher`使用单线程 drain、bounded worker executor、poll scheduler 和 `harness_work` claim；
 - `HarnessRuntimeLifecycle`只控制 dispatcher 是否启动，Runtime control/query beans 始终由 context 持有。
 
@@ -230,7 +231,7 @@ SpringApplication.run(WebApplication)
        -> Platform gateways/resolver/storage/environment services
   -> HarnessRuntimeConfiguration
        -> PostgresqlHarnessStore + LocalFileResourceStore
-       -> Thread/Model/Tool processors
+       -> Thread/Model/Tool processors + managed Model flush executor
        -> HarnessWorkDispatcher + realtime source/sink
   -> ContributorCatalogConfiguration
        -> Spring contributors + TrustedJarContributorLoader

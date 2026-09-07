@@ -121,7 +121,7 @@ yoloEnabled / nextCommandSequence / version
 createdAt / updatedAt
 ```
 
-执行环境（Environment）、分支配置、运行状态、未完回合标识与执行周期等，均由 Entry、Invocation 与 Work 联合动态投影得出。`ThreadState.validateTransition` 守卫 Thread 行的状态单调性：实体标识不可变更，命令序列号、版本号与更新时间不可回退，任何 Thread 行变更都使 `version` 严格递增 1；相同的重放请求保持状态幂等不变。Thread version 是结构与控制状态的 CAS / invalidation cursor，不是完整 Snapshot ETag；ModelInvocation 的高频流式 checkpoint 可在相同 version 下推进，并由完整 Snapshot 提供恢复事实。
+执行环境（Environment）、分支配置、运行状态、未完回合标识与执行周期等，均由 Entry、Invocation 与 Work 联合动态投影得出。`ThreadState.validateTransition` 守卫 Thread 行的状态单调性：实体标识不可变更，命令序列号、版本号与更新时间不可回退，任何 Thread 行变更都使 `version` 严格递增 1；相同的重放请求保持状态幂等不变。Thread version 是结构与控制状态的 CAS / invalidation cursor，不是完整 Snapshot ETag；ModelInvocation 的流式 checkpoint 按有界批次在相同 version 下推进，并由完整 Snapshot 提供恢复事实。
 
 ### Thread command mailbox
 
@@ -151,6 +151,8 @@ READY -> DISPATCHING -> RUNNING
 ```
 
 外部网关返回 `Started` 且本地事务成功写入 `RUNNING` 状态后，`attempt` 计数才递增 1；网关返回 `Busy` 或直接拒绝时，调用尚未发出，`attempt` 保持不变。状态由 `RUNNING` 转为 `READY` 触发重试时，系统追加一条重试失败审计记录并重置流式检查点，下次调度将基于同一冻结参数重新发起调用。
+
+每个 `ModelExecution` 使用单 drain owner 顺序处理 delta、timer flush 与 terminal。`StreamFlushConfig` 默认按 `200ms`、`256` 个事件或 `64KiB` 增量载荷触发批次：每条 delta 保留 ownership fence，flush 时重新 fence；有新 text/thinking 时一次 UPDATE 保存累计 checkpoint，纯工具批次不更新 Invocation。提交成功后才按原 sequence 逐条发布 `MODEL_DELTA`。terminal 直接吸收未刷安全 partial，在一次 UPDATE 中提交状态与 checkpoint；retry 则在一次 `RUNNING -> READY` UPDATE 中将 partial 冻结到失败审计并清空活动 checkpoint。合法 `FILTERED` 终态清除 checkpoint 且不发布回退 delta。
 
 `ModelRequestSpec` 作为调用的不可变持久化契约：
 
@@ -199,7 +201,7 @@ listThreadsBySession
 
 `acceptCommands` 支持 `NEW_SESSION`、`ENTRY` 和 `THREAD` 三种模式。会话初始化重放、有序重放、命令批次校验与游标准入，由包私有的 [`AcceptCommandsControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AcceptCommandsControl.java) 在单个 Store 事务内协调完成，对外由 `HarnessRuntime` 统一暴露。手工压缩同样只通过根 Runtime 进入：`manualCompactionAvailability` 返回瞬时 advisory projection，`compactThread` 使用 expectedVersion、source head 与 command snapshot 做最终 CAS。
 
-`getThreadSnapshot` 在单个事务内获取目标线程锁、读取待处理命令、加载从根到当前 head 的 `EntryPath`，并通过 [`ThreadContextClassifier`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifier.java) 纯函数投影出当前最小适用状态。快照总是携带事务内最新的 Invocation checkpoint；该 checkpoint 可能在 Thread version 未变化时更新：
+`getThreadSnapshot` 在单个事务内获取目标线程锁、读取待处理命令、加载从根到当前 head 的 `EntryPath`，并通过 [`ThreadContextClassifier`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifier.java) 纯函数投影出当前最小适用状态。快照总是携带事务内最新、已批次提交的 Invocation checkpoint；该 checkpoint 可能在 Thread version 未变化时更新：
 
 ```text
 IdleOrHistorical
@@ -219,7 +221,7 @@ ToolTerminalPending
 - [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java)：执行分两阶段进行：先调用 `preflight` 获取权限预检结果（Allow、Ask、Deny），再调用 `start` 获取启动准入结果（Started、RetryLater、Rejected、Indeterminate）。YOLO 判定在 Thread 锁内完成并跳过 `preflight`，后续 `start` 流程保持一致。
 - 供应商适配契约：外部模型适配器仅使用运行时定义的通用数据传输对象（[`ProviderRequest`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderRequest.java)、[`ProviderResponse`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderResponse.java) 与 `ProviderStreamEvent`），具体供应商 SDK 类型完全隔离在外部平台层。
 - [`ToolResultHistoryMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolResultHistoryMaterializer.java)：在将工具执行结果写入 Entry 节点前，负责将工具输出中的临时资源引用外部化，并转换为 blob-backed 的持久化消息内容；运行时缺少该端口时，包含资源引用的结果按 fail-closed 语义拒绝写入历史。
-- [`RealtimeEventSink`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/RealtimeEventSink.java)：向外发布实时的有损增量事件（`MODEL_DELTA`、`TOOL_PARTIAL`）。事件通道的设计允许发生丢包，推送失败不会改变底层已持久化的终态结果。
+- [`RealtimeEventSink`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/RealtimeEventSink.java)：向外发布实时的有损增量事件（`MODEL_DELTA`、`TOOL_PARTIAL`）。Model delta 仅在对应批次完成持久化提交后，由单 drain owner 在事务与状态 monitor 外按 sequence 发布；推送失败不回滚 checkpoint 或终态，客户端通过 Snapshot/resync 恢复。
 
 ### usage、cost、cache 与 admission
 
@@ -277,8 +279,8 @@ flowchart TD
 - 认领到有效的 MODEL Work 后，从冻结的 Spec 物化中立的 ProviderRequest；
 - 将持久化状态从 `READY` 跃迁为 `DISPATCHING`，启动租约心跳，随后调用外部 Gateway；
 - 外部网关返回 `Started` 状态后，本地事务将状态更新为 `RUNNING`，随后调用 `activate` 打开回调门控；
-- 流式增量内容写入本地 attempt 检查点，并尽力通过 RealtimeSink 向外广播；
-- 终态结果或错误信息持久化写回 Invocation 实体，并在同一事务内触发 THREAD Work 调度请求；
+- 流式增量由 `ModelExecution` 有界聚合，timer 只在共享 scheduler 上计时并将实际 flush 投递到独立 executor；批次提交后再通过 RealtimeSink 顺序广播；
+- 终态结果或错误信息与未刷安全 partial 合并为一次 Invocation UPDATE，并在同一事务内触发 THREAD Work 调度请求；
 - 对于租约已过期的 `DISPATCHING` 或 `RUNNING` 任务，状态统一收敛为 `UNKNOWN`，不执行重放以防止重复调用。
 
 [`ToolProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java) 负责处理工具调用生命周期：
@@ -318,7 +320,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 - **树结构与只追加保证**：Session 与 Entry 严格保持只追加（append-only）特性；Thread 的 head 游标必须严格指向属于同会话的有效 Entry 节点；EntryPath 校验连续性与 turn 文法规则，遇到破坏结构或插件所有权的不变式损坏时，系统直接采取快速失败（fail closed）。
 - **全局规范加锁顺序**：所有跨实体的复杂事务严格遵守统一锁序：`Session -> Thread -> Commands -> ModelInvocation -> ToolInvocation siblings（按 callIndex 升序）-> Work（同层按 (type, id) 升序）`；所有权围栏检查置于事务提交的最后关卡，校验失败时整个事务回滚。统一锁序用于降低并发事务形成死锁的风险。
 - **环境亲和性路由约束**：Work 的 `requiredEnvironmentId` 仅当 Work target 为 `TOOL` 时允许非空，对 `THREAD` 与 `MODEL` 类型的 Work 必须为空；环境要求在 Work 首次创建时即完成冻结，并在调度生命周期中完整保留，若传入冲突的环境 ID 将抛出异常拒绝；实际节点分发由底层存储与 Dispatcher 依据当前节点的有效 READY 环境租约实施物理路由围栏。
-- **状态单调递增保证**：`ThreadState.version`、命令序列号、Entry 的创建时间戳、Invocation 的 attempt 次数以及 Work 的 `wakeVersion` 均单调递增，不可回退；Thread version 只在结构/控制状态变化时递增，RUNNING attempt 的 checkpoint 可在同一 version 内按序推进；checkpoint 序号只能递增或精确重放，进入重试或终态时可按状态契约清除；终态的结果、错误与副作用记录保持不可变。
+- **状态单调递增保证**：`ThreadState.version`、命令序列号、Entry 的创建时间戳、Invocation 的 attempt 次数以及 Work 的 `wakeVersion` 均单调递增，不可回退；Thread version 只在结构/控制状态变化时递增，RUNNING attempt 的 checkpoint 可在同一 version 内按序推进；更大的 checkpoint sequence 必须伴随 text 或 thinking 的严格前缀增长，相同 sequence 只允许精确重放；RUNNING 可在一次转换中引入或增长 terminal checkpoint，合法 `FILTERED` 可在终态清除它，已提交终态保持不可变。
 - **并发与竞态安全收敛**：丢失的 claim、超期租约、重复监听器回调、重复命令与重复审批统一收敛为空操作（no-op）、`LOST_OWNERSHIP` 或幂等重放；只有持有当前所有权围栏的执行体可以提交状态。
 - **外部准入分类与调度**：模型准入返回 `Busy` 或工具准入返回 `RetryLater` 时，表明外部尚未发起调用，系统安全安排重调度；返回 `Rejected` 判定为确定性失败；返回 `Indeterminate` 表明外部状态不确定，状态安全收敛为 `UNKNOWN`，严禁盲目重放以防产生未知副作用。
 - **确定性重试机制**：重试调用仅基于初始冻结的请求契约重新物化参数；标记为非幂等（`NON_IDEMPOTENT`）的工具在执行失败后不进行自动重试。
@@ -328,6 +330,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 ## 配置 / 扩展
 
 - **运行时调度策略**：`ThreadProcessorConfig` 提供租约时长、解析故障策略与压缩配置等运行时策略参数；压缩配置在每个决策点动态从提供方读取。
+- **模型流聚合策略**：`ModelProcessorConfig` 持有 `StreamFlushConfig`，默认最大等待 `200ms`、最多 `256` 个事件、最多 `64KiB` 增量载荷；composition root 提供独立受管 executor 执行 DB flush 与通知发布，heartbeat scheduler 只负责续租与 timer 唤醒。
 - **调用重试策略**：`InvocationRetryPolicyProvider` 在重试决策时提供最大重试次数、退避策略与延迟时长参数，时间参数严格使用毫秒精度的正数值。
 - **外部执行接入**：模型与工具的具体执行能力通过 `ModelGateway`、`ToolGateway` 与 `ConcurrencyAdmission` 抽象端口注入，使运行时领域模型与外部执行实现保持独立。
 - **局部能力端口**：`ToolResultHistoryMaterializer`、`RealtimeEventSink` 与 `HarnessThreadChangeSource` 作为按需装配的扩展端口；当缺少资源物化器时，涉及资源操作的工具结果执行严格的失败关闭保护。
@@ -340,7 +343,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 - [`HarnessRuntime.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java)、[`HarnessStore.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java)、[`AcceptCommandsControl.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AcceptCommandsControl.java)、[`StopControl.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/StopControl.java)、[`ThreadContextLock.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadContextLock.java)
 - [`EntryPath.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPath.java)、[`TurnPathValidator.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/TurnPathValidator.java)、[`ThreadState.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadState.java)
 - [`ModelInvocation.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocation.java)、[`ToolInvocation.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocation.java)、[`Work.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/work/Work.java)、[`ClaimedWork.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/work/ClaimedWork.java)
-- [`ManualCompactionControl.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionControl.java)、[`ThreadProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java)、[`ModelProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessor.java)、[`ToolProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java)
+- [`ManualCompactionControl.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionControl.java)、[`ThreadProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java)、[`ModelProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessor.java)、[`ModelExecution.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java)、[`StreamFlushConfig.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/StreamFlushConfig.java)、[`ToolProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java)
 - [`ModelRequestMaterializer.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java)、[`CompactionPlanner.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java)、[`ToolBinding.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)
 
 ### 关键测试守卫
@@ -350,7 +353,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 - [`HarnessRuntimeStopReplayTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeStopReplayTest.java)、[`HarnessRuntimeStopConcurrencyTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeStopConcurrencyTest.java)、[`HarnessRuntimeApprovalTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeApprovalTest.java)：覆盖 Stop 与审批决策的持久化幂等性与并发所有权围栏。
 - [`ThreadContextClassifierTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifierTest.java)、[`ThreadProcessorPlanningTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorPlanningTest.java)、[`ThreadProcessorToolBatchTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorToolBatchTest.java)：覆盖上下文纯分类、投机规划流程与兄弟工具批次应用。
 - [`ThreadProcessorCompactionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorCompactionTest.java)、[`HarnessRuntimeManualCompactionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeManualCompactionTest.java)、[`CompactionPlannerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlannerTest.java)：覆盖自动压缩、手工压缩同步边界、CAS 提交、切分、降级与无收益校验。
-- [`ModelProcessorTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessorTest.java)、[`ToolProcessorRecoveryTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorRecoveryTest.java)、[`WorkHeartbeatTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeatTest.java)：覆盖两阶段激活、UNKNOWN 状态恢复、租约续期与所有权围栏。
+- [`ModelProcessorTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessorTest.java)、[`ModelExecutionStreamFlushTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecutionStreamFlushTest.java)、[`StreamFlushConfigTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/StreamFlushConfigTest.java)、[`ToolProcessorRecoveryTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorRecoveryTest.java)、[`WorkHeartbeatTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeatTest.java)：覆盖两阶段激活、checkpoint 聚合与终态吸收、timer/容量/并发仲裁、UNKNOWN 恢复、租约续期与所有权围栏。
 - [`WorkTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/work/WorkTest.java)、[`ClaimedWorkTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/work/ClaimedWorkTest.java)、[`InMemoryWorkTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/InMemoryWorkTest.java)：覆盖 Work 调度状态纯函数跃迁、环境亲和性不可变性约束与 Store 调度契约（外部真实 PostgreSQL/Dispatcher 路由围栏参见 Infra 模块 [`PostgresqlWorkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkTest.java) 与 [Harness Infra](harness-infra.md)）。
 - [`ToolBindingTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBindingTest.java)、[`ToolBindingJsonCodecTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/invocation/codec/ToolBindingJsonCodecTest.java)、[`ConcurrencyAdmissionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/admission/ConcurrencyAdmissionTest.java)：覆盖 ToolBinding 参数校验、JSON 序列化、并发准入槽位预留与租约释放。
 
