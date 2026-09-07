@@ -179,6 +179,7 @@ export function useAgentThreadController(
     thread?.version,
     modelInvocation,
     toolInvocations,
+    modelAttemptFailures,
   )
   const timeline = buildThreadTimeline(
     entries,

@@ -9,7 +9,11 @@ function sleep(ms: number): Promise<void> {
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
-import type { ModelInvocationDTO, ToolInvocationDTO } from '@/shared/api/contracts/ai-runtime'
+import type {
+  ModelAttemptFailureDTO,
+  ModelInvocationDTO,
+  ToolInvocationDTO,
+} from '@/shared/api/contracts/ai-runtime'
 
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const THREAD_A_ID = 'aaaaaaaa-0000-4000-8000-000000000001'
@@ -26,6 +30,7 @@ interface RealtimeProps {
   enabled?: boolean
   invocation?: ModelInvocationDTO | null
   invocations?: ToolInvocationDTO[]
+  modelAttemptFailures?: ModelAttemptFailureDTO[]
 }
 
 function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
@@ -38,6 +43,7 @@ function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
         props.version ?? '42',
         props.invocation ?? modelInvocation(),
         props.invocations ?? [],
+        props.modelAttemptFailures ?? [],
       ),
     {
       initialProps,
@@ -318,6 +324,116 @@ describe('useHarnessThreadRealtime', () => {
     await waitFor(() => expect(result.current?.modelStream).toBeNull())
     emitRealtime(sockets, realtime(2, '-late-after-entry'))
     await waitFor(() => expect(result.current?.modelStream).toBeNull())
+  })
+
+  it('rejects late MODEL_DELTA for failed attempts in READY retry state without updating overlay or triggering gap recovery', async () => {
+    // 验证 READY retry 状态收到已失败 attempt 的 delta 时：既不更新 overlay，也不错误启动 gap recovery
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const retryInvocation: ModelInvocationDTO = {
+      ...modelInvocation(),
+      status: 'READY',
+      attempt: 1,
+      streamCheckpointJson: null,
+    }
+    const failures = [modelAttemptFailure(1, 'inv-1', '2')]
+    const { result, sockets } = renderRealtime(client, {
+      invocation: retryInvocation,
+      modelAttemptFailures: failures,
+    })
+    sockets.openLatest()
+
+    // 初始状态下 READY 无 checkpoint，overlay 保持为 null
+    expect(result.current?.modelStream).toBeNull()
+
+    // 1. 旧 attempt 1 的 sequence = 1 迟到 delta：不追加 overlay，overlay 保持 null
+    emitRealtime(sockets, realtime(1, 'stale-attempt-1', THREAD_ID, 'inv-1', 1))
+    await sleep(100)
+    expect(result.current?.modelStream).toBeNull()
+
+    // 2. 旧 attempt 1 的 sequence = 3 迟到 gap delta：不启动 gap recovery，不触发 snapshot refetch
+    emitRealtime(sockets, realtime(3, 'stale-gap-3', THREAD_ID, 'inv-1', 1))
+    await sleep(250)
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(result.current?.modelStream).toBeNull()
+  })
+
+  it('terminates in-flight gap recovery loop when the attempt is recorded as failed', async () => {
+    // 验证在途 gap recovery 循环在 attempt 记录到 modelAttemptFailures 时被判定为 terminal 并停止
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    sockets.openLatest()
+
+    // 发送 gap delta 启动 gap 恢复循环
+    emitRealtime(sockets, realtime(3, 'missing'))
+    expect(result.current?.modelStream).toBeNull()
+    await waitFor(() => expect(invalidate.mock.calls.length).toBe(1), { timeout: 2000 })
+
+    // Snapshot 更新为 READY retry 且包含该 attempt 的失败记录
+    rerender({
+      invocation: {
+        ...modelInvocation(),
+        status: 'READY',
+        attempt: 1,
+        streamCheckpointJson: null,
+      },
+      modelAttemptFailures: [modelAttemptFailure(1, 'inv-1', '2')],
+    })
+
+    // 等待超过退避时间，确认 recovery 循环已停止，不再继续发起 invalidate
+    const callsAfterFailure = invalidate.mock.calls.length
+    await sleep(600)
+    expect(invalidate.mock.calls.length).toBe(callsAfterFailure)
+  })
+
+  it('allows MODEL_DELTA for active attempt while rejecting late MODEL_DELTA for previously failed attempts', async () => {
+    // 验证当前 attempt 2 为活跃流式时，既能拒绝旧 attempt 1 的迟到 delta，又可正常应用当前 attempt 2 的 delta
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const runningAttempt2: ModelInvocationDTO = {
+      ...modelInvocation(),
+      status: 'RUNNING',
+      attempt: 2,
+      streamCheckpointJson: '{"attempt":2,"text":"","thinking":"","sequence":0}',
+    }
+    const failures = [modelAttemptFailure(1, 'inv-1', '2')]
+    const { result, sockets } = renderRealtime(client, {
+      invocation: runningAttempt2,
+      modelAttemptFailures: failures,
+    })
+    sockets.openLatest()
+
+    // 1. 旧 attempt 1 的迟到 delta：被拒绝
+    emitRealtime(sockets, realtime(1, 'late-attempt-1', THREAD_ID, 'inv-1', 1))
+    await sleep(100)
+    expect(result.current?.modelStream).toBeNull()
+
+    // 2. 当前 attempt 2 的 active delta：正常流式应用
+    emitRealtime(sockets, realtime(1, 'active-attempt-2', THREAD_ID, 'inv-1', 2))
+    await waitFor(() => expect(result.current?.modelStream?.text).toBe('active-attempt-2'))
+    expect(result.current?.modelStream?.attempt).toBe(2)
+  })
+
+  it('does not reject MODEL_DELTA when failure belongs to a different invocation', async () => {
+    // 验证 modelAttemptFailures 中若属于其他 invocationId，不误伤当前 invocation 的相同 attempt 序号
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const runningInvocation: ModelInvocationDTO = {
+      ...modelInvocation('inv-current'),
+      status: 'RUNNING',
+      attempt: 1,
+      streamCheckpointJson: '{"attempt":1,"text":"","thinking":"","sequence":0}',
+    }
+    // 属于另一个 invocation 的 attempt 1 失败记录
+    const otherFailures = [modelAttemptFailure(1, 'inv-other', '2')]
+    const { result, sockets } = renderRealtime(client, {
+      invocation: runningInvocation,
+      modelAttemptFailures: otherFailures,
+    })
+    sockets.openLatest()
+
+    // 当前 invocation 'inv-current' 的 attempt 1 delta 应当被正常接收与应用
+    emitRealtime(sockets, realtime(1, 'hello-current', THREAD_ID, 'inv-current', 1))
+    await waitFor(() => expect(result.current?.modelStream?.text).toBe('hello-current'))
   })
 
   it('replaces a higher-sequence streaming overlay with the durable terminal projection', async () => {
@@ -1084,11 +1200,32 @@ function realtime(
   text: string,
   threadId = THREAD_ID,
   invocationId = 'inv-1',
+  attempt = 1,
 ) {
   return JSON.stringify({
-    threadId, subjectKind: 'MODEL_INVOCATION', subjectId: invocationId, attempt: 1, sequence,
+    threadId, subjectKind: 'MODEL_INVOCATION', subjectId: invocationId, attempt, sequence,
     type: 'MODEL_DELTA', payload: { kind: 'TEXT_DELTA', text }, createdAt: '2026-01-01T00:00:00Z',
   })
+}
+
+function modelAttemptFailure(
+  attempt = 1,
+  invocationId = 'inv-1',
+  sequence = '2',
+): ModelAttemptFailureDTO {
+  return {
+    modelInvocationId: invocationId,
+    turnStartEntryId: 'entry-1',
+    requestHeadEntryId: 'entry-1',
+    attempt,
+    sequence,
+    text: 'partial',
+    thinking: '',
+    errorCode: 'TRANSIENT',
+    errorMessage: 'failure',
+    failedAt: '2026-01-01T00:00:00Z',
+    retryAt: '2026-01-01T00:00:02Z',
+  }
 }
 
 function toolPartial(text: string, invocationId = 'inv-tool-1', attempt = 1) {

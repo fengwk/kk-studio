@@ -1,4 +1,8 @@
-import type { ModelInvocationDTO, ToolInvocationDTO } from '@/shared/api/contracts/ai-runtime'
+import type {
+  ModelAttemptFailureDTO,
+  ModelInvocationDTO,
+  ToolInvocationDTO,
+} from '@/shared/api/contracts/ai-runtime'
 import { taskStatusFingerprint } from '@/features/ai/runtime/task-status'
 import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types'
 import { toResourceAttachment } from '@/features/ai/runtime/thread-timeline/content-utils'
@@ -308,6 +312,25 @@ export function isRealtimeModelDeltaGap(
     && current.invocationId === delta.invocationId
     && current.attempt === delta.attempt
     && delta.sequence > current.sequence + 1
+}
+
+/**
+ * 判断指定 attempt 是否属于当前 invocation 已在 Snapshot 中由 durable failedAttempts 记录的旧 attempt。
+ * 仅按 modelInvocationId + 正整数 attempt 匹配，遵循 fail-safe 原则。
+ */
+export function isFailedAttempt(
+  attempt: number,
+  invocation: ModelInvocationDTO | null,
+  modelAttemptFailures: readonly ModelAttemptFailureDTO[] = [],
+): boolean {
+  if (invocation == null || !Number.isSafeInteger(attempt) || attempt <= 0) {
+    return false
+  }
+  return modelAttemptFailures.some(
+    (failure) =>
+      failure?.modelInvocationId === invocation.id
+      && failure.attempt === attempt,
+  )
 }
 
 /**
