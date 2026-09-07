@@ -9,6 +9,7 @@ import java.io.InputStream;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -16,6 +17,8 @@ import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -27,9 +30,12 @@ import java.util.concurrent.locks.ReentrantLock;
  * <ul>
  *   <li>单一可线性化状态机仲裁：PENDING -> RUNNING -> COMPLETED / FAILED / CANCELLED。
  *   <li>启动门（start gate）防护：在工作器提交与调度器任务安排就绪前，工作器绝不碰 HttpClient。
- *   <li>所有生命周期回调严格串行化，且支持从回调内部安全重入 {@link #cancel()} 而不死锁。
- *   <li>{@link #cancel()} 返回后，绝不触发任何新的回调；与终态回调竞争具有确定性胜者。
- *   <li>资源关闭与取消能够识别当前工作线程，防止终态工作器发生自中断。
+ *   <li>检测并安全拒绝 direct / caller-runs executor 的 inline execution，防止流死锁。
+ *   <li>所有生命周期回调严格串行化，且仅在权威状态 RUNNING 下派发；终态后任何非终态回调为零。
+ *   <li>支持从回调内部安全重入 {@link #cancel()} 而不死锁。
+ *   <li>竞态安全的 Future 挂接：任何 future 一经挂接若已处于终态必须立即 cancel。
+ *   <li>非显式 cancel 导致的 {@link InterruptedException} 按基础 transport I/O 语义分类并保留中断标志。
+ *   <li>饱和截止时间与自适应 Watchdog 周期调度，彻底杜绝长周期溢出与短超时延迟。
  * </ul>
  */
 final class HttpSseStreamExecution implements ProviderStream {
@@ -50,12 +56,16 @@ final class HttpSseStreamExecution implements ProviderStream {
   private final ReentrantLock callbackLock = new ReentrantLock();
   private final CountDownLatch startGate = new CountDownLatch(1);
 
+  private final Thread streamCallingThread;
+  private final AtomicBoolean inlineExecutionDetected = new AtomicBoolean(false);
+
   private final long totalTimeoutNanos;
   private final long idleTimeoutNanos;
   private final long startNano;
   private final long totalDeadlineNano;
   private volatile long lastActivityNano;
 
+  private final Object futureLock = new Object();
   private volatile Thread workerThread;
   private volatile Future<?> workerFuture;
   private volatile ScheduledFuture<?> watchdogFuture;
@@ -73,16 +83,78 @@ final class HttpSseStreamExecution implements ProviderStream {
     this.limits = Objects.requireNonNull(limits, "limits must not be null");
     this.callback = Objects.requireNonNull(callback, "callback must not be null");
 
+    this.streamCallingThread = Thread.currentThread();
     this.startNano = System.nanoTime();
-    this.totalTimeoutNanos = timeoutPolicy.modelCallTimeout().toNanos();
-    this.idleTimeoutNanos = timeoutPolicy.modelCallIdleTimeout().toNanos();
-    this.totalDeadlineNano = startNano + totalTimeoutNanos;
+    this.totalTimeoutNanos = safeDurationToNanos(timeoutPolicy.modelCallTimeout());
+    this.idleTimeoutNanos = safeDurationToNanos(timeoutPolicy.modelCallIdleTimeout());
+    this.totalDeadlineNano = saturatedAdd(startNano, totalTimeoutNanos);
     this.lastActivityNano = startNano;
   }
 
-  void attachFutures(Future<?> workerFuture, ScheduledFuture<?> watchdogFuture) {
-    this.workerFuture = workerFuture;
-    this.watchdogFuture = watchdogFuture;
+  static long safeDurationToNanos(Duration duration) {
+    if (duration == null || duration.isNegative() || duration.isZero()) {
+      return 0L;
+    }
+    long seconds = duration.getSeconds();
+    int nanos = duration.getNano();
+    if (seconds >= Long.MAX_VALUE / 1_000_000_000L) {
+      return Long.MAX_VALUE;
+    }
+    long nanosFromSeconds = seconds * 1_000_000_000L;
+    if (Long.MAX_VALUE - nanosFromSeconds < nanos) {
+      return Long.MAX_VALUE;
+    }
+    return nanosFromSeconds + nanos;
+  }
+
+  static long saturatedAdd(long a, long b) {
+    long res = a + b;
+    if (((a ^ res) & (b ^ res)) < 0) {
+      return a > 0 ? Long.MAX_VALUE : Long.MIN_VALUE;
+    }
+    return res;
+  }
+
+  long watchdogIntervalNanos() {
+    long minTimeout = Math.min(totalTimeoutNanos, idleTimeoutNanos);
+    if (minTimeout <= 0) {
+      return TimeUnit.MILLISECONDS.toNanos(1);
+    }
+    long half = minTimeout / 2;
+    return Math.max(
+        TimeUnit.MILLISECONDS.toNanos(1), Math.min(TimeUnit.MILLISECONDS.toNanos(25), half));
+  }
+
+  boolean isInlineExecutionDetected() {
+    return inlineExecutionDetected.get();
+  }
+
+  void attachWorkerFuture(Future<?> workerFuture) {
+    synchronized (futureLock) {
+      this.workerFuture = workerFuture;
+      if (isTerminal()) {
+        cancelFutureSafe(workerFuture, true);
+      }
+    }
+  }
+
+  void attachWatchdogFuture(ScheduledFuture<?> watchdogFuture) {
+    synchronized (futureLock) {
+      this.watchdogFuture = watchdogFuture;
+      if (isTerminal()) {
+        cancelFutureSafe(watchdogFuture, false);
+      }
+    }
+  }
+
+  private void cancelFutureSafe(Future<?> future, boolean mayInterruptIfRunning) {
+    if (future != null) {
+      if (mayInterruptIfRunning && Thread.currentThread() == workerThread) {
+        future.cancel(false);
+      } else {
+        future.cancel(mayInterruptIfRunning);
+      }
+    }
   }
 
   void openStartGate() {
@@ -99,7 +171,6 @@ final class HttpSseStreamExecution implements ProviderStream {
     if (state.get() == STATE_CANCELLED) {
       return;
     }
-    // 尝试 CAS 进入 CANCELLED 状态
     int current = state.get();
     while (current == STATE_PENDING || current == STATE_RUNNING) {
       if (state.compareAndSet(current, STATE_CANCELLED)) {
@@ -109,7 +180,6 @@ final class HttpSseStreamExecution implements ProviderStream {
     }
 
     if (current == STATE_PENDING || current == STATE_RUNNING) {
-      // 获得锁并释放，以确保如果当前正有回调在执行，等待其退出；随后绝不再有新回调开始
       callbackLock.lock();
       try {
         closeResources();
@@ -124,16 +194,51 @@ final class HttpSseStreamExecution implements ProviderStream {
     return state.get() == STATE_CANCELLED;
   }
 
+  static boolean isTerminal(int state) {
+    return state == STATE_CANCELLED || state == STATE_COMPLETED || state == STATE_FAILED;
+  }
+
+  boolean isTerminal() {
+    return isTerminal(state.get());
+  }
+
   int currentState() {
     return state.get();
   }
 
+  private boolean isTotalTimeoutExceeded(long now) {
+    if (totalTimeoutNanos == Long.MAX_VALUE) {
+      return false;
+    }
+    return (now - startNano) >= totalTimeoutNanos;
+  }
+
+  private boolean isIdleTimeoutExceeded(long now) {
+    if (idleTimeoutNanos == Long.MAX_VALUE) {
+      return false;
+    }
+    return (now - lastActivityNano) >= idleTimeoutNanos;
+  }
+
   void runWorker() {
+    // 检测 inline execution，防止 direct / caller-runs executor 导致 stream 调用死锁
+    if (Thread.currentThread() == streamCallingThread) {
+      inlineExecutionDetected.set(true);
+      state.set(STATE_CANCELLED);
+      closeResources();
+      return;
+    }
+
     workerThread = Thread.currentThread();
     try {
       startGate.await();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      if (state.get() != STATE_CANCELLED) {
+        dispatchFailure(
+            new TransportException(
+                TransportErrorKind.IO, "Worker interrupted while awaiting start gate", e));
+      }
       return;
     }
 
@@ -147,14 +252,13 @@ final class HttpSseStreamExecution implements ProviderStream {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       if (state.get() != STATE_CANCELLED) {
-        dispatchFailure(
-            new TransportException(TransportErrorKind.CANCELLED, "Request interrupted", e));
+        dispatchFailure(new TransportException(TransportErrorKind.IO, "Request interrupted", e));
       }
       return;
     } catch (IOException e) {
-      if (state.get() != STATE_CANCELLED) {
+      if (state.get() == STATE_RUNNING) {
         long now = System.nanoTime();
-        if (now >= totalDeadlineNano) {
+        if (isTotalTimeoutExceeded(now)) {
           triggerTimeout("Total call duration exceeded " + timeoutPolicy.modelCallTimeout());
         } else {
           dispatchFailure(
@@ -186,7 +290,7 @@ final class HttpSseStreamExecution implements ProviderStream {
       dispatchFailure(
           new TransportException(
               TransportErrorKind.INVALID_RESPONSE,
-              "Invalid Content-Type for SSE stream: " + contentType,
+              "Invalid Content-Type for SSE stream; expected text/event-stream",
               statusCode,
               null,
               headers,
@@ -202,25 +306,37 @@ final class HttpSseStreamExecution implements ProviderStream {
     }
 
     // 读取 SSE 响应流并增量解析
-    IncrementalSseParser parser = new IncrementalSseParser(limits, this::dispatchEvent);
+    IncrementalSseParser parser =
+        new IncrementalSseParser(
+            limits,
+            event -> {
+              if (state.get() != STATE_RUNNING || !dispatchEvent(event)) {
+                throw new StreamTerminatedException();
+              }
+            });
     byte[] buffer = new byte[8192];
     try {
       int read;
-      while ((read = responseBodyStream.read(buffer)) != -1) {
+      while (state.get() == STATE_RUNNING && (read = responseBodyStream.read(buffer)) != -1) {
         lastActivityNano = System.nanoTime();
-        if (state.get() == STATE_CANCELLED) {
+        parser.feed(buffer, 0, read);
+        if (state.get() != STATE_RUNNING) {
           return;
         }
-        parser.feed(buffer, 0, read);
       }
-      parser.flush();
-      dispatchComplete();
+      if (state.get() == STATE_RUNNING) {
+        parser.flush();
+        dispatchComplete();
+      }
+    } catch (StreamTerminatedException e) {
+      // 终态已流转或回调失败，worker 立即停止后续读取和解析
+      return;
     } catch (IOException e) {
-      if (state.get() != STATE_CANCELLED) {
+      if (state.get() == STATE_RUNNING) {
         long now = System.nanoTime();
-        if (now >= totalDeadlineNano) {
+        if (isTotalTimeoutExceeded(now)) {
           triggerTimeout("Total call duration exceeded " + timeoutPolicy.modelCallTimeout());
-        } else if (now - lastActivityNano >= idleTimeoutNanos) {
+        } else if (isIdleTimeoutExceeded(now)) {
           triggerTimeout("Stream idle timeout exceeded " + timeoutPolicy.modelCallIdleTimeout());
         } else {
           dispatchFailure(
@@ -229,7 +345,7 @@ final class HttpSseStreamExecution implements ProviderStream {
         }
       }
     } catch (TransportException te) {
-      if (state.get() != STATE_CANCELLED) {
+      if (state.get() == STATE_RUNNING) {
         dispatchFailure(te);
       }
     } finally {
@@ -244,20 +360,18 @@ final class HttpSseStreamExecution implements ProviderStream {
 
     long now = System.nanoTime();
     // 检查总调用超时
-    if (now >= totalDeadlineNano) {
+    if (isTotalTimeoutExceeded(now)) {
       triggerTimeout("Total call duration exceeded " + timeoutPolicy.modelCallTimeout());
       return;
     }
     // 检查无活动闲置超时
-    if (now - lastActivityNano >= idleTimeoutNanos) {
+    if (isIdleTimeoutExceeded(now)) {
       triggerTimeout("Stream idle timeout exceeded " + timeoutPolicy.modelCallIdleTimeout());
     }
   }
 
   private void triggerTimeout(String reason) {
-    if (state.get() == STATE_CANCELLED
-        || state.get() == STATE_COMPLETED
-        || state.get() == STATE_FAILED) {
+    if (isTerminal()) {
       return;
     }
     dispatchFailure(new TransportException(TransportErrorKind.TIMEOUT, reason));
@@ -270,11 +384,11 @@ final class HttpSseStreamExecution implements ProviderStream {
       TransportErrorKind kind) {
     BoundedErrorResult result = readBoundedErrorBody(stream);
     long now = System.nanoTime();
-    if (now >= totalDeadlineNano) {
+    if (isTotalTimeoutExceeded(now)) {
       triggerTimeout("Total call duration exceeded " + timeoutPolicy.modelCallTimeout());
       return;
     }
-    if (now - lastActivityNano >= idleTimeoutNanos) {
+    if (isIdleTimeoutExceeded(now)) {
       triggerTimeout("Stream idle timeout exceeded " + timeoutPolicy.modelCallIdleTimeout());
       return;
     }
@@ -308,7 +422,7 @@ final class HttpSseStreamExecution implements ProviderStream {
       // 读取上限为 max + 1，以便精确暴露 truncated 标志
       while ((r = in.read(buf, 0, Math.min(buf.length, (max + 1) - totalRead))) != -1) {
         lastActivityNano = System.nanoTime();
-        if (state.get() == STATE_CANCELLED) {
+        if (isTerminal()) {
           break;
         }
         totalRead += r;
@@ -333,7 +447,7 @@ final class HttpSseStreamExecution implements ProviderStream {
   private boolean dispatchOpen(HttpOpenMetadata metadata) {
     callbackLock.lock();
     try {
-      if (state.get() == STATE_CANCELLED) {
+      if (state.get() != STATE_RUNNING) {
         return false;
       }
       callback.onOpen(metadata);
@@ -349,17 +463,19 @@ final class HttpSseStreamExecution implements ProviderStream {
     }
   }
 
-  private void dispatchEvent(ServerSentEvent event) {
+  private boolean dispatchEvent(ServerSentEvent event) {
     callbackLock.lock();
     try {
-      if (state.get() == STATE_CANCELLED) {
-        return;
+      if (state.get() != STATE_RUNNING) {
+        return false;
       }
       callback.onEvent(event);
+      return true;
     } catch (Throwable t) {
       dispatchFailureLocked(
           new TransportException(
               TransportErrorKind.CALLBACK_FAILED, "onEvent callback threw an exception", t));
+      return false;
     } finally {
       callbackLock.unlock();
     }
@@ -369,12 +485,13 @@ final class HttpSseStreamExecution implements ProviderStream {
     callbackLock.lock();
     try {
       int current = state.get();
-      if (current == STATE_CANCELLED || current == STATE_COMPLETED || current == STATE_FAILED) {
+      if (isTerminal(current)) {
         return;
       }
       if (!state.compareAndSet(current, STATE_COMPLETED)) {
         return;
       }
+      closeResources();
       try {
         callback.onComplete();
       } catch (Throwable ignored) {
@@ -396,7 +513,7 @@ final class HttpSseStreamExecution implements ProviderStream {
 
   private void dispatchFailureLocked(TransportException error) {
     int current = state.get();
-    if (current == STATE_CANCELLED || current == STATE_COMPLETED || current == STATE_FAILED) {
+    if (isTerminal(current)) {
       return;
     }
     if (!state.compareAndSet(current, STATE_FAILED)) {
@@ -412,12 +529,9 @@ final class HttpSseStreamExecution implements ProviderStream {
 
   private void closeResources() {
     closeActiveStream();
-    if (watchdogFuture != null) {
-      watchdogFuture.cancel(false);
-    }
-    // 只有在当前线程不是 worker 线程自身时才中断 worker，避免 worker 自中断
-    if (workerFuture != null && Thread.currentThread() != workerThread) {
-      workerFuture.cancel(true);
+    synchronized (futureLock) {
+      cancelFutureSafe(watchdogFuture, false);
+      cancelFutureSafe(workerFuture, true);
     }
   }
 
@@ -456,4 +570,6 @@ final class HttpSseStreamExecution implements ProviderStream {
     }
     return true;
   }
+
+  private static final class StreamTerminatedException extends RuntimeException {}
 }

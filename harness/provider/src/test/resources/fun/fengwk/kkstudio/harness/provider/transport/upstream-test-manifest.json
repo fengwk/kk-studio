@@ -19,691 +19,1756 @@
     "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
     "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java"
   ],
-  "unresolvedCases": [],
+  "statistics": {
+    "totalCases": 115,
+    "portedPassedCases": 51,
+    "outOfScopeCases": 64
+  },
   "cases": [
     {
       "caseId": "case-001:shouldParseSimpleSingleLineEvent",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldParseSimpleSingleLineEvent",
+      "invocationCount": 7,
+      "invocationDimensions": [
+        "7 variants of leading/trailing blank lines and newlines"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldParseSimpleSingleLineEvent",
-      "executionStatus": "PASSED",
-      "notes": "简单单行 data 事件解析（含各前导/尾随空白与换行变体）"
+      "notes": "简单单行 data 事件解析（参数化 7 种换行/空白变体）"
     },
     {
       "caseId": "case-002:shouldParseMultiLineDataEvent",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldParseMultiLineDataEvent",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldParseMultiLineDataEvent",
-      "executionStatus": "PASSED",
-      "notes": "多行 data 以 \\n 拼接"
+      "notes": "多行 data 拼接"
     },
     {
       "caseId": "case-003:shouldParseEventWithAllFields",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldParseEventWithAllFields",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldParseEventWithAllFields",
-      "executionStatus": "PASSED",
-      "notes": "提取 event 与 data，安全忽略 id 与 retry"
+      "notes": "提取 event 与 data 字段"
     },
     {
       "caseId": "case-004:shouldParseMultipleEvents",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldParseMultipleEvents",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldParseMultipleEvents",
-      "executionStatus": "PASSED",
-      "notes": "顺序分发多个事件"
+      "notes": "多事件顺序解析"
     },
     {
       "caseId": "case-005:shouldIgnoreCommentsAndEmptyLines",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldIgnoreCommentsAndEmptyLines",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldIgnoreCommentsAndEmptyLines",
-      "executionStatus": "PASSED",
-      "notes": "冒号注释行与多余空行安全忽略"
+      "notes": "忽略注释与空行"
     },
     {
       "caseId": "case-006:shouldHandleStreamWithNoEvents",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldHandleStreamWithNoEvents",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldHandleStreamWithNoEvents",
-      "executionStatus": "PASSED",
-      "notes": "空输入不分发事件"
+      "notes": "空流处理"
     },
     {
       "caseId": "case-007:shouldPreserveAdditionalLeadingWhitespaceInData",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldPreserveAdditionalLeadingWhitespaceInData",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldPreserveAdditionalLeadingWhitespaceInData",
-      "executionStatus": "PASSED",
-      "notes": "仅剔除首个空格，保留额外前导空格"
+      "notes": "保留 data 额外前导空白"
     },
     {
       "caseId": "case-008:shouldPreserveTrailingWhitespaceInData",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldPreserveTrailingWhitespaceInData",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldPreserveTrailingWhitespaceInData",
-      "executionStatus": "PASSED",
-      "notes": "保留尾随空白"
+      "notes": "保留 data 尾随空白"
     },
     {
       "caseId": "case-009:shouldNotRemoveAnyCharacterWhenDataHasNoLeadingSpace",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldNotRemoveAnyCharacterWhenDataHasNoLeadingSpace",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldNotRemoveAnyCharacterWhenDataHasNoLeadingSpace",
-      "executionStatus": "PASSED",
-      "notes": "无空格时保留全部字符"
+      "notes": "无前导空格时保留首字符"
     },
     {
       "caseId": "case-010:shouldHandleIOException",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "shouldHandleIOException",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "shouldHandleIOException",
-      "executionStatus": "PASSED",
-      "notes": "真实输入流 I/O 故障驱动并验证安全终止"
+      "notes": "输入流 IO 异常传播"
     },
     {
       "caseId": "case-011:parse_stops_emitting_after_the_listener_cancels",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "parse_stops_emitting_after_the_listener_cancels",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "parse_stops_emitting_after_the_listener_cancels",
-      "executionStatus": "PASSED",
-      "notes": "取消后停止后续事件分发"
+      "notes": "监听器取消后停止派发"
     },
     {
       "caseId": "case-012:parse_handles_cr_and_crlf_line_endings",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "parse_handles_cr_and_crlf_line_endings",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "parse_handles_cr_and_crlf_line_endings",
-      "executionStatus": "PASSED",
-      "notes": "同时兼容 CRLF 与孤立 CR 换行"
+      "notes": "兼容 CR 与 CRLF 换行"
     },
     {
       "caseId": "case-013:parse_trims_event_field_and_strips_one_leading_space_from_data",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "parse_trims_event_field_and_strips_one_leading_space_from_data",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "parse_trims_event_field_and_strips_one_leading_space_from_data",
-      "executionStatus": "PASSED",
-      "notes": "event 做全 trim，data 仅剥除单个前导空格"
+      "notes": "修剪 event 并剔除 data 首空格"
     },
     {
       "caseId": "case-014:incremental_trims_event_field_and_strips_one_leading_space_from_data",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_trims_event_field_and_strips_one_leading_space_from_data",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_trims_event_field_and_strips_one_leading_space_from_data",
-      "executionStatus": "PASSED",
-      "notes": "增量模式与全量模式空格处理对齐"
+      "notes": "增量修剪 event 与 data 首空格"
     },
     {
       "caseId": "case-015:a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "a_parser_that_does_not_support_incremental_parsing_reports_it_as_not_async",
-      "executionStatus": "PASSED",
-      "notes": "实质断言：本仓原生全增量式解析，单字节推进无阻塞 fallback"
+      "notes": "非增量解析器异步支持断言"
     },
     {
       "caseId": "case-016:incremental_parses_single_event_in_one_chunk",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_parses_single_event_in_one_chunk",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_parses_single_event_in_one_chunk",
-      "executionStatus": "PASSED",
-      "notes": "增量单 chunk 单事件"
+      "notes": "单 chunk 解析单事件"
     },
     {
       "caseId": "case-017:incremental_parses_event_split_across_chunks",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_parses_event_split_across_chunks",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_parses_event_split_across_chunks",
-      "executionStatus": "PASSED",
-      "notes": "增量跨 chunk 组装事件"
+      "notes": "跨 chunk 拼接事件"
     },
     {
       "caseId": "case-018:incremental_handles_crlf_line_endings",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_handles_crlf_line_endings",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_handles_crlf_line_endings",
-      "executionStatus": "PASSED",
-      "notes": "增量 CRLF 换行支持"
+      "notes": "增量 CRLF 换行处理"
     },
     {
       "caseId": "case-019:incremental_parses_multiple_events",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_parses_multiple_events",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_parses_multiple_events",
-      "executionStatus": "PASSED",
-      "notes": "增量多事件分发"
+      "notes": "增量解析多事件"
     },
     {
       "caseId": "case-020:incremental_joins_multiline_data",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_joins_multiline_data",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_joins_multiline_data",
-      "executionStatus": "PASSED",
-      "notes": "增量多行拼接"
+      "notes": "增量多行 data 拼接"
     },
     {
       "caseId": "case-021:incremental_ignores_comment_id_and_retry_lines",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_ignores_comment_id_and_retry_lines",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_ignores_comment_id_and_retry_lines",
-      "executionStatus": "PASSED",
-      "notes": "增量忽略 comment、id 与 retry"
+      "notes": "增量忽略注释、id与retry"
     },
     {
       "caseId": "case-022:incremental_flush_emits_trailing_event_without_terminating_blank_line",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_flush_emits_trailing_event_without_terminating_blank_line",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_flush_emits_trailing_event_without_terminating_blank_line",
-      "executionStatus": "PASSED",
-      "notes": "增量 flush 自动交付未空行闭合事件"
+      "notes": "flush 交付未终结尾随事件"
     },
     {
       "caseId": "case-023:incremental_flush_completes_a_pending_partial_line",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_flush_completes_a_pending_partial_line",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_flush_completes_a_pending_partial_line",
-      "executionStatus": "PASSED",
-      "notes": "增量 flush 补齐未换行的行"
+      "notes": "flush 补全未终结行"
     },
     {
       "caseId": "case-024:incremental_flush_returns_empty_when_nothing_is_pending",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_flush_returns_empty_when_nothing_is_pending",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_flush_returns_empty_when_nothing_is_pending",
-      "executionStatus": "PASSED",
-      "notes": "增量无未决数据时不重复分发"
+      "notes": "无未决数据时 flush 为空"
     },
     {
       "caseId": "case-025:incremental_decodes_utf8_multibyte_char_split_across_chunks",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/sse/DefaultServerSentEventParserTest.java",
       "upstreamMethod": "incremental_decodes_utf8_multibyte_char_split_across_chunks",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
       "localMethod": "incremental_decodes_utf8_multibyte_char_split_across_chunks",
-      "executionStatus": "PASSED",
-      "notes": "增量跨 chunk 正确组装 UTF-8 多字节字符"
+      "notes": "跨 chunk 组装 UTF-8 多字节字符"
     },
     {
       "caseId": "case-026:should_return_successful_http_response",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_return_successful_http_response",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_return_successful_http_response",
-      "executionStatus": "PASSED",
-      "notes": "成功 200 HTTP 响应接收并交付"
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "ExecutionMode.SYNC",
+        "ExecutionMode.ASYNC"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module provides streaming SSE transport only; non-streaming synchronous HTTP response API is out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "非流式普通 HTTP 请求响应不在本模块支持范围内"
     },
     {
-      "caseId": "case-027:should_return_successful_http_response",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_return_successful_http_response",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_return_successful_http_response",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端成功 200 HTTP 响应接收并交付"
-    },
-    {
-      "caseId": "case-028:should_deliver_response_off_the_calling_thread_executeAsync",
+      "caseId": "case-027:should_deliver_response_off_the_calling_thread_executeAsync",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_deliver_response_off_the_calling_thread_executeAsync",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_deliver_response_off_the_calling_thread_executeAsync",
-      "executionStatus": "PASSED",
-      "notes": "受管 worker 异步线程派发响应，不阻塞调用线程"
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module provides streaming SSE transport only; non-streaming executeAsync API is out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "非流式 executeAsync 异步响应不在本模块支持范围内"
     },
     {
-      "caseId": "case-029:should_deliver_response_off_the_calling_thread_executeAsync",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_deliver_response_off_the_calling_thread_executeAsync",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_deliver_response_off_the_calling_thread_executeAsync",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端受管 worker 异步派发响应"
-    },
-    {
-      "caseId": "case-030:should_throw_400",
+      "caseId": "case-028:should_throw_400",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_throw_400",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_throw_400",
-      "executionStatus": "PASSED",
-      "notes": "400 Bad Request 映射为 REQUEST_ERROR"
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "ExecutionMode.SYNC",
+        "ExecutionMode.ASYNC"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module provides streaming SSE transport only; non-streaming HTTP execute API 400 exception is out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "非流式 execute 异常断言不在本模块支持范围内"
     },
     {
-      "caseId": "case-031:should_throw_400",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_throw_400",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_throw_400",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端 400 Bad Request 映射为 REQUEST_ERROR"
-    },
-    {
-      "caseId": "case-032:should_throw_401",
+      "caseId": "case-029:should_throw_401",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_throw_401",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_throw_401",
-      "executionStatus": "PASSED",
-      "notes": "401 Unauthorized 映射为 AUTHENTICATION_ERROR"
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "ExecutionMode.SYNC",
+        "ExecutionMode.ASYNC"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module provides streaming SSE transport only; non-streaming HTTP execute API 401 exception is out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "非流式 execute 异常断言不在本模块支持范围内"
     },
     {
-      "caseId": "case-033:should_throw_401",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_throw_401",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_throw_401",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端 401 Unauthorized 映射为 AUTHENTICATION_ERROR"
-    },
-    {
-      "caseId": "case-034:should_stream_successful_response",
+      "caseId": "case-030:should_stream_successful_response",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_stream_successful_response",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "StreamingMode.LISTENER",
+        "StreamingMode.PUBLISHER"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_stream_successful_response",
-      "executionStatus": "PASSED",
-      "notes": "流式多事件连续交付并正常终态"
+      "notes": "流式成功接收 SSE 响应（覆盖受管 LISTENER 传输模式）"
     },
     {
-      "caseId": "case-035:should_stream_successful_response",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_stream_successful_response",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_stream_successful_response",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端流式多事件连续交付"
-    },
-    {
-      "caseId": "case-036:should_cancel_streaming",
+      "caseId": "case-031:should_cancel_streaming",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_cancel_streaming",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "StreamingMode.LISTENER",
+        "StreamingMode.PUBLISHER"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_cancel_streaming",
-      "executionStatus": "PASSED",
-      "notes": "流式读取中显式 cancel()"
+      "notes": "流式传输取消断开连接（覆盖受管 LISTENER 传输模式）"
     },
     {
-      "caseId": "case-037:should_cancel_streaming",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_cancel_streaming",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_cancel_streaming",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端流式显式取消"
-    },
-    {
-      "caseId": "case-038:should_stream_response_with_double_newline",
+      "caseId": "case-032:should_stream_response_with_double_newline",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_stream_response_with_double_newline",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "StreamingMode.LISTENER",
+        "StreamingMode.PUBLISHER"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_stream_response_with_double_newline",
-      "executionStatus": "PASSED",
-      "notes": "双换行闭合流式事件响应"
+      "notes": "双换行分隔流事件分发（覆盖受管 LISTENER 传输模式）"
     },
     {
-      "caseId": "case-039:should_stream_response_with_double_newline",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_stream_response_with_double_newline",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_stream_response_with_double_newline",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端双换行流式响应"
-    },
-    {
-      "caseId": "case-040:should_deliver_error_when_streaming_400",
+      "caseId": "case-033:should_deliver_error_when_streaming_400",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_deliver_error_when_streaming_400",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "StreamingMode.LISTENER",
+        "StreamingMode.PUBLISHER"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_deliver_error_when_streaming_400",
-      "executionStatus": "PASSED",
-      "notes": "流式请求遇到 400 派发错误"
+      "notes": "流式响应 400 交付错误终态（覆盖受管 LISTENER 传输模式）"
     },
     {
-      "caseId": "case-041:should_deliver_error_when_streaming_400",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_deliver_error_when_streaming_400",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_deliver_error_when_streaming_400",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端流式 400 派发错误"
-    },
-    {
-      "caseId": "case-042:should_not_fail_when_listener_onOpen_throws_exception",
+      "caseId": "case-034:should_not_fail_when_listener_onOpen_throws_exception",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_not_fail_when_listener_onOpen_throws_exception",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_not_fail_when_listener_onOpen_throws_exception",
-      "executionStatus": "PASSED",
-      "notes": "onOpen 抛异常时受保护转换为 CALLBACK_FAILED 终态"
+      "notes": "onOpen 抛出异常安全隔离转终态"
     },
     {
-      "caseId": "case-043:should_not_fail_when_listener_onOpen_throws_exception",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_not_fail_when_listener_onOpen_throws_exception",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_not_fail_when_listener_onOpen_throws_exception",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端 onOpen 抛异常保护"
-    },
-    {
-      "caseId": "case-044:should_not_fail_when_listener_onEvent_throws_exception",
+      "caseId": "case-035:should_not_fail_when_listener_onEvent_throws_exception",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_not_fail_when_listener_onEvent_throws_exception",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_not_fail_when_listener_onEvent_throws_exception",
-      "executionStatus": "PASSED",
-      "notes": "onEvent 抛异常时受保护转换为 CALLBACK_FAILED 终态"
+      "notes": "onEvent 抛出异常安全隔离转终态"
     },
     {
-      "caseId": "case-045:should_not_fail_when_listener_onEvent_throws_exception",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_not_fail_when_listener_onEvent_throws_exception",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_not_fail_when_listener_onEvent_throws_exception",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端 onEvent 抛异常保护"
-    },
-    {
-      "caseId": "case-046:should_not_fail_when_listener_onError_throws_exception",
+      "caseId": "case-036:should_not_fail_when_listener_onError_throws_exception",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_not_fail_when_listener_onError_throws_exception",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_not_fail_when_listener_onError_throws_exception",
-      "executionStatus": "PASSED",
-      "notes": "终态回调抛异常被安全吞掉，不产生第二终态"
+      "notes": "onError 抛出异常被安全吸收不产生第二终态"
     },
     {
-      "caseId": "case-047:should_not_fail_when_listener_onError_throws_exception",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_not_fail_when_listener_onError_throws_exception",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_not_fail_when_listener_onError_throws_exception",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端终态回调抛异常保护"
-    },
-    {
-      "caseId": "case-048:should_deliver_error_when_streaming_connect_fails",
+      "caseId": "case-037:should_deliver_error_when_streaming_connect_fails",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_deliver_error_when_streaming_connect_fails",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "StreamingMode.LISTENER",
+        "StreamingMode.PUBLISHER"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_deliver_error_when_streaming_connect_fails",
-      "executionStatus": "PASSED",
-      "notes": "流式连接失败派发 IO 错误"
+      "notes": "建连失败交付错误终态（覆盖受管 LISTENER 传输模式）"
     },
     {
-      "caseId": "case-049:should_deliver_error_when_streaming_connect_fails",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_deliver_error_when_streaming_connect_fails",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_deliver_error_when_streaming_connect_fails",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端流式连接失败派发 IO 错误"
-    },
-    {
-      "caseId": "case-050:should_return_successful_http_response_form_data",
+      "caseId": "case-038:should_return_successful_http_response_form_data",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_return_successful_http_response_form_data",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_return_successful_http_response_form_data",
-      "executionStatus": "PASSED",
-      "notes": "等价支持表单载荷请求体"
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "ExecutionMode.SYNC",
+        "ExecutionMode.ASYNC"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module does not provide multipart/form-data upload builders or non-streaming form submission APIs",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Multipart 表单构建与普通响应不在本模块支持范围内"
     },
     {
-      "caseId": "case-051:should_return_successful_http_response_form_data",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
-      "upstreamMethod": "should_return_successful_http_response_form_data",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_return_successful_http_response_form_data",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端等价支持表单请求体"
-    },
-    {
-      "caseId": "case-052:should_return_binary_response_sync",
+      "caseId": "case-039:should_return_binary_response_sync",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientIT.java",
       "upstreamMethod": "should_return_binary_response_sync",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_return_binary_response_sync",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module provides text/event-stream SSE streaming only; binary MP3 response download is out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "二进制 MP3 同步下载不在本模块支持范围内"
+    },
+    {
+      "caseId": "case-040:should_return_successful_http_response",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_return_successful_http_response",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "ExecutionMode.SYNC",
+        "ExecutionMode.ASYNC"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module provides streaming SSE transport only; non-streaming synchronous HTTP response API is out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "非流式普通 HTTP 请求响应不在本模块支持范围内"
+    },
+    {
+      "caseId": "case-041:should_deliver_response_off_the_calling_thread_executeAsync",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_deliver_response_off_the_calling_thread_executeAsync",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module provides streaming SSE transport only; non-streaming executeAsync API is out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "非流式 executeAsync 异步响应不在本模块支持范围内"
+    },
+    {
+      "caseId": "case-042:should_throw_400",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_throw_400",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "ExecutionMode.SYNC",
+        "ExecutionMode.ASYNC"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module provides streaming SSE transport only; non-streaming HTTP execute API 400 exception is out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "非流式 execute 异常断言不在本模块支持范围内"
+    },
+    {
+      "caseId": "case-043:should_throw_401",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_throw_401",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "ExecutionMode.SYNC",
+        "ExecutionMode.ASYNC"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module provides streaming SSE transport only; non-streaming HTTP execute API 401 exception is out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "非流式 execute 异常断言不在本模块支持范围内"
+    },
+    {
+      "caseId": "case-044:should_stream_successful_response",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_stream_successful_response",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "StreamingMode.LISTENER",
+        "StreamingMode.PUBLISHER"
+      ],
+      "status": "PORTED",
       "executionStatus": "PASSED",
-      "notes": "等价支持二进制请求体"
+      "capabilityMismatch": null,
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_stream_successful_response",
+      "notes": "流式成功接收 SSE 响应（覆盖受管 LISTENER 传输模式）"
+    },
+    {
+      "caseId": "case-045:should_cancel_streaming",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_cancel_streaming",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "StreamingMode.LISTENER",
+        "StreamingMode.PUBLISHER"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_cancel_streaming",
+      "notes": "流式传输取消断开连接（覆盖受管 LISTENER 传输模式）"
+    },
+    {
+      "caseId": "case-046:should_stream_response_with_double_newline",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_stream_response_with_double_newline",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "StreamingMode.LISTENER",
+        "StreamingMode.PUBLISHER"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_stream_response_with_double_newline",
+      "notes": "双换行分隔流事件分发（覆盖受管 LISTENER 传输模式）"
+    },
+    {
+      "caseId": "case-047:should_deliver_error_when_streaming_400",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_deliver_error_when_streaming_400",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "StreamingMode.LISTENER",
+        "StreamingMode.PUBLISHER"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_deliver_error_when_streaming_400",
+      "notes": "流式响应 400 交付错误终态（覆盖受管 LISTENER 传输模式）"
+    },
+    {
+      "caseId": "case-048:should_not_fail_when_listener_onOpen_throws_exception",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_not_fail_when_listener_onOpen_throws_exception",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_not_fail_when_listener_onOpen_throws_exception",
+      "notes": "onOpen 抛出异常安全隔离转终态"
+    },
+    {
+      "caseId": "case-049:should_not_fail_when_listener_onEvent_throws_exception",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_not_fail_when_listener_onEvent_throws_exception",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_not_fail_when_listener_onEvent_throws_exception",
+      "notes": "onEvent 抛出异常安全隔离转终态"
+    },
+    {
+      "caseId": "case-050:should_not_fail_when_listener_onError_throws_exception",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_not_fail_when_listener_onError_throws_exception",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_not_fail_when_listener_onError_throws_exception",
+      "notes": "onError 抛出异常被安全吸收不产生第二终态"
+    },
+    {
+      "caseId": "case-051:should_deliver_error_when_streaming_connect_fails",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_deliver_error_when_streaming_connect_fails",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "StreamingMode.LISTENER",
+        "StreamingMode.PUBLISHER"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "should_deliver_error_when_streaming_connect_fails",
+      "notes": "建连失败交付错误终态（覆盖受管 LISTENER 传输模式）"
+    },
+    {
+      "caseId": "case-052:should_return_successful_http_response_form_data",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
+      "upstreamMethod": "should_return_successful_http_response_form_data",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "ExecutionMode.SYNC",
+        "ExecutionMode.ASYNC"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module does not provide multipart/form-data upload builders or non-streaming form submission APIs",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Multipart 表单构建与普通响应不在本模块支持范围内"
     },
     {
       "caseId": "case-053:should_return_binary_response_sync",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientIT.java",
       "upstreamMethod": "should_return_binary_response_sync",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_return_binary_response_sync",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端等价支持二进制请求体"
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module provides text/event-stream SSE streaming only; binary MP3 response download is out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "二进制 MP3 同步下载不在本模块支持范围内"
     },
     {
       "caseId": "case-054:cancelling_the_future_releases_the_caller",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientCancellationIT.java",
       "upstreamMethod": "cancelling_the_future_releases_the_caller",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "cancelling_the_future_releases_the_caller",
-      "executionStatus": "PASSED",
-      "notes": "取消操作立即返回释放调用方"
+      "notes": "取消流立即返回释放调用方"
     },
     {
-      "caseId": "case-055:cancelling_the_future_releases_the_caller",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientCancellationIT.java",
-      "upstreamMethod": "cancelling_the_future_releases_the_caller",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "cancelling_the_future_releases_the_caller",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端取消立即释放调用方"
-    },
-    {
-      "caseId": "case-056:cancelling_the_future_aborts_the_request_and_closes_the_connection",
+      "caseId": "case-055:cancelling_the_future_aborts_the_request_and_closes_the_connection",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientCancellationIT.java",
       "upstreamMethod": "cancelling_the_future_aborts_the_request_and_closes_the_connection",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "cancelling_the_future_aborts_the_request_and_closes_the_connection",
+      "notes": "取消流立即关闭底层网络连接"
+    },
+    {
+      "caseId": "case-056:cancelling_the_future_releases_the_caller",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientCancellationIT.java",
+      "upstreamMethod": "cancelling_the_future_releases_the_caller",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
       "executionStatus": "PASSED",
-      "notes": "取消操作中止网络请求并关闭 TCP 连接"
+      "capabilityMismatch": null,
+      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
+      "localMethod": "cancelling_the_future_releases_the_caller",
+      "notes": "取消流立即返回释放调用方"
     },
     {
       "caseId": "case-057:cancelling_the_future_aborts_the_request_and_closes_the_connection",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientCancellationIT.java",
       "upstreamMethod": "cancelling_the_future_aborts_the_request_and_closes_the_connection",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "cancelling_the_future_aborts_the_request_and_closes_the_connection",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端取消关闭底层连接"
+      "notes": "取消流立即关闭底层网络连接"
     },
     {
       "caseId": "case-058:should_timeout_on_read_sync",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientTimeoutIT.java",
       "upstreamMethod": "should_timeout_on_read_sync",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_timeout_on_read_sync",
-      "executionStatus": "PASSED",
-      "notes": "单调时钟总时长超时（Total Timeout）触发"
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module does not provide synchronous execute API",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "非流式同步 read 超时不在本模块支持范围内"
     },
     {
-      "caseId": "case-059:should_timeout_on_read_sync",
-      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientTimeoutIT.java",
-      "upstreamMethod": "should_timeout_on_read_sync",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "should_timeout_on_read_sync",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端单调时钟总时长超时触发"
-    },
-    {
-      "caseId": "case-060:should_timeout_on_read_async",
+      "caseId": "case-059:should_timeout_on_read_async",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientTimeoutIT.java",
       "upstreamMethod": "should_timeout_on_read_async",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_timeout_on_read_async",
-      "executionStatus": "PASSED",
-      "notes": "无活动闲置超时（Idle Timeout）精确触发"
+      "notes": "异步流读取超时触发错误终态"
+    },
+    {
+      "caseId": "case-060:should_timeout_on_read_sync",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientTimeoutIT.java",
+      "upstreamMethod": "should_timeout_on_read_sync",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module does not provide synchronous execute API",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "非流式同步 read 超时不在本模块支持范围内"
     },
     {
       "caseId": "case-061:should_timeout_on_read_async",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientTimeoutIT.java",
       "upstreamMethod": "should_timeout_on_read_async",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_timeout_on_read_async",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端无活动闲置超时触发"
+      "notes": "异步流读取超时触发错误终态"
     },
     {
       "caseId": "case-062:should_preserve_line_separators_of_error_response_body",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
       "upstreamMethod": "should_preserve_line_separators_of_error_response_body",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_preserve_line_separators_of_error_response_body",
-      "executionStatus": "PASSED",
-      "notes": "保留非 2xx 响应换行符"
+      "notes": "错误正文保留原始换行符"
     },
     {
       "caseId": "case-063:should_decode_error_response_body_as_utf8",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
       "upstreamMethod": "should_decode_error_response_body_as_utf8",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_decode_error_response_body_as_utf8",
-      "executionStatus": "PASSED",
-      "notes": "错误响应正文按 UTF-8 正确解码"
+      "notes": "错误正文 UTF-8 解码"
     },
     {
       "caseId": "case-064:should_not_fail_on_successful_response",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientErrorBodyTest.java",
       "upstreamMethod": "should_not_fail_on_successful_response",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "should_not_fail_on_successful_response",
-      "executionStatus": "PASSED",
-      "notes": "成功响应不触发错误"
+      "notes": "200 成功流不触发错误"
     },
     {
       "caseId": "case-065:overflowing_the_stream_buffer_aborts_the_request_and_closes_the_connection",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientStreamOverflowTest.java",
       "upstreamMethod": "overflowing_the_stream_buffer_aborts_the_request_and_closes_the_connection",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "PORTED",
+      "executionStatus": "PASSED",
+      "capabilityMismatch": null,
       "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
       "localMethod": "overflowing_the_stream_buffer_aborts_the_request_and_closes_the_connection",
-      "executionStatus": "PASSED",
-      "notes": "超出有界字节限制中止请求并关闭套接字"
+      "notes": "流缓冲区溢出中止请求并关闭连接"
     },
     {
       "caseId": "case-066:publisher_is_cold_and_each_subscribe_initiates_a_new_request",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/HttpClientPublisherIT.java",
       "upstreamMethod": "publisher_is_cold_and_each_subscribe_initiates_a_new_request",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "publisher_is_cold_and_each_subscribe_initiates_a_new_request",
-      "executionStatus": "PASSED",
-      "notes": "冷流特性：每次 stream() 发起全新独立网络生命周期"
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module does not provide Reactive Streams Publisher API; cold publisher multi-subscription is out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams Cold Publisher 语义超出本模块范围"
     },
     {
       "caseId": "case-067:publisher_is_cold_and_each_subscribe_initiates_a_new_request",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientPublisherIT.java",
       "upstreamMethod": "publisher_is_cold_and_each_subscribe_initiates_a_new_request",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "publisher_is_cold_and_each_subscribe_initiates_a_new_request",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端冷流特性：每次调用发起新请求"
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module does not provide Reactive Streams Publisher API; cold publisher multi-subscription is out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams Cold Publisher 语义超出本模块范围"
     },
     {
-      "caseId": "case-068:blockHound_detects_blocking_on_a_policed_thread",
+      "caseId": "case-068:publisher_path_does_not_block_the_transport_threads",
       "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/AbstractHttpClientPublisherNonBlockingIT.java",
-      "upstreamMethod": "blockHound_detects_blocking_on_a_policed_thread",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "blockHound_detects_blocking_on_a_policed_thread",
-      "executionStatus": "PASSED",
-      "notes": "等价非阻塞隔离：回调在受管 worker 隔离线程分发"
+      "upstreamMethod": "publisher_path_does_not_block_the_transport_threads",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "logging=false",
+        "logging=true"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module explicitly executes blocking JDK HttpClient.send on managed worker threads by design; BlockHound non-blocking transport thread assertions are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "BlockHound 非阻塞 transport 线程检测超出受管阻塞 worker 设计范围"
     },
     {
       "caseId": "case-069:blockHound_detects_blocking_on_a_policed_thread",
+      "upstreamSource": "langchain4j-http-client/src/test/java/dev/langchain4j/http/client/AbstractHttpClientPublisherNonBlockingIT.java",
+      "upstreamMethod": "blockHound_detects_blocking_on_a_policed_thread",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module explicitly executes blocking JDK HttpClient.send on managed worker threads by design; BlockHound non-blocking transport thread assertions are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "BlockHound 阻塞调用拦截超出受管阻塞 worker 设计范围"
+    },
+    {
+      "caseId": "case-070:publisher_path_does_not_block_the_transport_threads",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientPublisherNonBlockingIT.java",
+      "upstreamMethod": "publisher_path_does_not_block_the_transport_threads",
+      "invocationCount": 2,
+      "invocationDimensions": [
+        "logging=false",
+        "logging=true"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module explicitly executes blocking JDK HttpClient.send on managed worker threads by design; BlockHound non-blocking transport thread assertions are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "BlockHound 非阻塞 transport 线程检测超出受管阻塞 worker 设计范围"
+    },
+    {
+      "caseId": "case-071:blockHound_detects_blocking_on_a_policed_thread",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/JdkHttpClientPublisherNonBlockingIT.java",
       "upstreamMethod": "blockHound_detects_blocking_on_a_policed_thread",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "blockHound_detects_blocking_on_a_policed_thread",
-      "executionStatus": "PASSED",
-      "notes": "JDK 客户端等价非阻塞隔离验证"
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module explicitly executes blocking JDK HttpClient.send on managed worker threads by design; BlockHound non-blocking transport thread assertions are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "BlockHound 阻塞调用拦截超出受管阻塞 worker 设计范围"
     },
     {
-      "caseId": "case-070:http_streaming_event_tck_serial_delivery_and_terminal_guarantees",
+      "caseId": "case-072:optional_spec104_mustSignalOnErrorWhenFails",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
-      "upstreamMethod": "http_streaming_event_tck_serial_delivery_and_terminal_guarantees",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "http_streaming_event_tck_serial_delivery_and_terminal_guarantees",
-      "executionStatus": "PASSED",
-      "notes": "Reactive TCK 串行通知、单终态与取消终止规范保证"
+      "upstreamMethod": "optional_spec104_mustSignalOnErrorWhenFails",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 optional_spec104_mustSignalOnErrorWhenFails 超出本模块回调模型范围"
     },
     {
-      "caseId": "case-071:should_build_body_with_single_form_field",
+      "caseId": "case-073:optional_spec105_emptyStreamMustTerminateBySignallingOnComplete",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "optional_spec105_emptyStreamMustTerminateBySignallingOnComplete",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 optional_spec105_emptyStreamMustTerminateBySignallingOnComplete 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-074:optional_spec111_maySupportMultiSubscribe",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "optional_spec111_maySupportMultiSubscribe",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 optional_spec111_maySupportMultiSubscribe 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-075:optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingManyUpfront",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingManyUpfront",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingManyUpfront 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-076:optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingManyUpfrontAndCompleteAsExpected",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingManyUpfrontAndCompleteAsExpected",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingManyUpfrontAndCompleteAsExpected 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-077:optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingOneByOne",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingOneByOne",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 optional_spec111_multicast_mustProduceTheSameElementsInTheSameSequenceToAllOfItsSubscribersWhenRequestingOneByOne 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-078:optional_spec111_registeredSubscribersMustReceiveOnNextOrOnCompleteSignals",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "optional_spec111_registeredSubscribersMustReceiveOnNextOrOnCompleteSignals",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 optional_spec111_registeredSubscribersMustReceiveOnNextOrOnCompleteSignals 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-079:optional_spec309_requestNegativeNumberMaySignalIllegalArgumentExceptionWithSpecificMessage",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "optional_spec309_requestNegativeNumberMaySignalIllegalArgumentExceptionWithSpecificMessage",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 optional_spec309_requestNegativeNumberMaySignalIllegalArgumentExceptionWithSpecificMessage 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-080:required_createPublisher1MustProduceAStreamOfExactly1Element",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_createPublisher1MustProduceAStreamOfExactly1Element",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_createPublisher1MustProduceAStreamOfExactly1Element 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-081:required_createPublisher3MustProduceAStreamOfExactly3Elements",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_createPublisher3MustProduceAStreamOfExactly3Elements",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_createPublisher3MustProduceAStreamOfExactly3Elements 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-082:required_spec101_subscriptionRequestMustResultInTheCorrectNumberOfProducedElements",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec101_subscriptionRequestMustResultInTheCorrectNumberOfProducedElements",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec101_subscriptionRequestMustResultInTheCorrectNumberOfProducedElements 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-083:required_spec102_maySignalLessThanRequestedAndTerminateSubscription",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec102_maySignalLessThanRequestedAndTerminateSubscription",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec102_maySignalLessThanRequestedAndTerminateSubscription 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-084:required_spec105_mustSignalOnCompleteWhenFiniteStreamTerminates",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec105_mustSignalOnCompleteWhenFiniteStreamTerminates",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec105_mustSignalOnCompleteWhenFiniteStreamTerminates 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-085:required_spec107_mustNotEmitFurtherSignalsOnceOnCompleteHasBeenSignalled",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec107_mustNotEmitFurtherSignalsOnceOnCompleteHasBeenSignalled",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec107_mustNotEmitFurtherSignalsOnceOnCompleteHasBeenSignalled 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-086:required_spec109_mayRejectCallsToSubscribeIfPublisherIsUnableOrUnwillingToServeThemRejectionMustTriggerOnErrorAfterOnSubscribe",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec109_mayRejectCallsToSubscribeIfPublisherIsUnableOrUnwillingToServeThemRejectionMustTriggerOnErrorAfterOnSubscribe",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec109_mayRejectCallsToSubscribeIfPublisherIsUnableOrUnwillingToServeThemRejectionMustTriggerOnErrorAfterOnSubscribe 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-087:required_spec109_mustIssueOnSubscribeForNonNullSubscriber",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec109_mustIssueOnSubscribeForNonNullSubscriber",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec109_mustIssueOnSubscribeForNonNullSubscriber 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-088:required_spec109_subscribeThrowNPEOnNullSubscriber",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec109_subscribeThrowNPEOnNullSubscriber",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec109_subscribeThrowNPEOnNullSubscriber 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-089:required_spec302_mustAllowSynchronousRequestCallsFromOnNextAndOnSubscribe",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec302_mustAllowSynchronousRequestCallsFromOnNextAndOnSubscribe",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec302_mustAllowSynchronousRequestCallsFromOnNextAndOnSubscribe 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-090:required_spec303_mustNotAllowUnboundedRecursion",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec303_mustNotAllowUnboundedRecursion",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec303_mustNotAllowUnboundedRecursion 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-091:required_spec306_afterSubscriptionIsCancelledRequestMustBeNops",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec306_afterSubscriptionIsCancelledRequestMustBeNops",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec306_afterSubscriptionIsCancelledRequestMustBeNops 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-092:required_spec307_afterSubscriptionIsCancelledAdditionalCancelationsMustBeNops",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec307_afterSubscriptionIsCancelledAdditionalCancelationsMustBeNops",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec307_afterSubscriptionIsCancelledAdditionalCancelationsMustBeNops 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-093:required_spec309_requestNegativeNumberMustSignalIllegalArgumentException",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec309_requestNegativeNumberMustSignalIllegalArgumentException",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec309_requestNegativeNumberMustSignalIllegalArgumentException 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-094:required_spec309_requestZeroMustSignalIllegalArgumentException",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec309_requestZeroMustSignalIllegalArgumentException",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec309_requestZeroMustSignalIllegalArgumentException 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-095:required_spec312_cancelMustMakeThePublisherToEventuallyStopSignaling",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec312_cancelMustMakeThePublisherToEventuallyStopSignaling",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec312_cancelMustMakeThePublisherToEventuallyStopSignaling 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-096:required_spec313_cancelMustMakeThePublisherEventuallyDropAllReferencesToTheSubscriber",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec313_cancelMustMakeThePublisherEventuallyDropAllReferencesToTheSubscriber",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec313_cancelMustMakeThePublisherEventuallyDropAllReferencesToTheSubscriber 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-097:required_spec317_mustNotSignalOnErrorWhenPendingAboveLongMaxValue",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec317_mustNotSignalOnErrorWhenPendingAboveLongMaxValue",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec317_mustNotSignalOnErrorWhenPendingAboveLongMaxValue 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-098:required_spec317_mustSupportACumulativePendingElementCountUpToLongMaxValue",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec317_mustSupportACumulativePendingElementCountUpToLongMaxValue",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec317_mustSupportACumulativePendingElementCountUpToLongMaxValue 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-099:required_spec317_mustSupportAPendingElementCountUpToLongMaxValue",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_spec317_mustSupportAPendingElementCountUpToLongMaxValue",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_spec317_mustSupportAPendingElementCountUpToLongMaxValue 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-100:required_validate_boundedDepthOfOnNextAndRequestRecursion",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_validate_boundedDepthOfOnNextAndRequestRecursion",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_validate_boundedDepthOfOnNextAndRequestRecursion 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-101:required_validate_maxElementsFromPublisher",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "required_validate_maxElementsFromPublisher",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 required_validate_maxElementsFromPublisher 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-102:stochastic_spec103_mustSignalOnMethodsSequentially",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "stochastic_spec103_mustSignalOnMethodsSequentially",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 stochastic_spec103_mustSignalOnMethodsSequentially 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-103:untested_spec106_mustConsiderSubscriptionCancelledAfterOnErrorOrOnCompleteHasBeenCalled",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "untested_spec106_mustConsiderSubscriptionCancelledAfterOnErrorOrOnCompleteHasBeenCalled",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 untested_spec106_mustConsiderSubscriptionCancelledAfterOnErrorOrOnCompleteHasBeenCalled 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-104:untested_spec107_mustNotEmitFurtherSignalsOnceOnErrorHasBeenSignalled",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "untested_spec107_mustNotEmitFurtherSignalsOnceOnErrorHasBeenSignalled",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 untested_spec107_mustNotEmitFurtherSignalsOnceOnErrorHasBeenSignalled 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-105:untested_spec108_possiblyCanceledSubscriptionShouldNotReceiveOnErrorOrOnCompleteSignals",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "untested_spec108_possiblyCanceledSubscriptionShouldNotReceiveOnErrorOrOnCompleteSignals",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 untested_spec108_possiblyCanceledSubscriptionShouldNotReceiveOnErrorOrOnCompleteSignals 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-106:untested_spec109_subscribeShouldNotThrowNonFatalThrowable",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "untested_spec109_subscribeShouldNotThrowNonFatalThrowable",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 untested_spec109_subscribeShouldNotThrowNonFatalThrowable 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-107:untested_spec110_rejectASubscriptionRequestIfTheSameSubscriberSubscribesTwice",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "untested_spec110_rejectASubscriptionRequestIfTheSameSubscriberSubscribesTwice",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 untested_spec110_rejectASubscriptionRequestIfTheSameSubscriberSubscribesTwice 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-108:untested_spec304_requestShouldNotPerformHeavyComputations",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "untested_spec304_requestShouldNotPerformHeavyComputations",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 untested_spec304_requestShouldNotPerformHeavyComputations 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-109:untested_spec305_cancelMustNotSynchronouslyPerformHeavyComputation",
+      "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/HttpStreamingEventPublisherTckTest.java",
+      "upstreamMethod": "untested_spec305_cancelMustNotSynchronouslyPerformHeavyComputation",
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module uses managed callback-based streaming (HttpSseCallback) rather than Reactive Streams Publisher API; Reactive Streams TCK backpressure and subscription rules are out of scope",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Reactive Streams TCK 规则 untested_spec305_cancelMustNotSynchronouslyPerformHeavyComputation 超出本模块回调模型范围"
+    },
+    {
+      "caseId": "case-110:should_build_body_with_single_form_field",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java",
       "upstreamMethod": "should_build_body_with_single_form_field",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "multipart_request_headers_and_body_passed_through_correctly",
-      "executionStatus": "PASSED",
-      "notes": "等价支持 multipart 报文体与 boundary 标头透传"
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module does not provide MultipartBodyPublisher or multipart form-data request body builder utility",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "单字段 multipart 请求体构建超出本模块范围"
     },
     {
-      "caseId": "case-072:should_build_body_with_file",
+      "caseId": "case-111:should_build_body_with_file",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java",
       "upstreamMethod": "should_build_body_with_file",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "multipart_request_headers_and_body_passed_through_correctly",
-      "executionStatus": "PASSED",
-      "notes": "等价支持 multipart 文件上传载荷透传"
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module does not provide MultipartBodyPublisher or multipart form-data request body builder utility",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "文件部件 multipart 请求体构建超出本模块范围"
     },
     {
-      "caseId": "case-073:should_build_body_with_field_then_file",
+      "caseId": "case-112:should_build_body_with_field_then_file",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java",
       "upstreamMethod": "should_build_body_with_field_then_file",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "multipart_request_headers_and_body_passed_through_correctly",
-      "executionStatus": "PASSED",
-      "notes": "等价支持复合字段与文件 multipart 载荷"
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module does not provide MultipartBodyPublisher or multipart form-data request body builder utility",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "字段与文件混合 multipart 请求体构建超出本模块范围"
     },
     {
-      "caseId": "case-074:should_omit_content_type_header_when_content_type_is_null",
+      "caseId": "case-113:should_omit_content_type_header_when_content_type_is_null",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java",
       "upstreamMethod": "should_omit_content_type_header_when_content_type_is_null",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "multipart_request_headers_and_body_passed_through_correctly",
-      "executionStatus": "PASSED",
-      "notes": "等价支持请求头 Content-Type 策略"
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module does not provide MultipartBodyPublisher or multipart form-data request body builder utility",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "部件 Content-Type 为空时省略标头超出本模块范围"
     },
     {
-      "caseId": "case-075:should_omit_content_type_header_when_content_type_is_blank",
+      "caseId": "case-114:should_omit_content_type_header_when_content_type_is_blank",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java",
       "upstreamMethod": "should_omit_content_type_header_when_content_type_is_blank",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "multipart_request_headers_and_body_passed_through_correctly",
-      "executionStatus": "PASSED",
-      "notes": "等价支持空白 Content-Type 策略"
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module does not provide MultipartBodyPublisher or multipart form-data request body builder utility",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "部件 Content-Type 为空白时省略标头超出本模块范围"
     },
     {
-      "caseId": "case-076:content_type_should_carry_the_boundary_used_in_the_body",
+      "caseId": "case-115:content_type_should_carry_the_boundary_used_in_the_body",
       "upstreamSource": "http-clients/langchain4j-http-client-jdk/src/test/java/dev/langchain4j/http/client/jdk/MultipartBodyPublisherTest.java",
       "upstreamMethod": "content_type_should_carry_the_boundary_used_in_the_body",
-      "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-      "localMethod": "multipart_request_headers_and_body_passed_through_correctly",
-      "executionStatus": "PASSED",
-      "notes": "等价支持 Content-Type 携带 boundary 规范"
+      "invocationCount": 1,
+      "invocationDimensions": [
+        "single invocation"
+      ],
+      "status": "OUT_OF_SCOPE",
+      "executionStatus": "OUT_OF_SCOPE",
+      "capabilityMismatch": "Module does not provide MultipartBodyPublisher or multipart form-data request body builder utility",
+      "localClass": null,
+      "localMethod": null,
+      "notes": "Content-Type 携带 multipart boundary 超出本模块范围"
     }
   ]
 }
