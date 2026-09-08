@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "author": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "style": {
+      "type": "string",
+      "enum": [
+        "classical",
+        "modern"
+      ]
+    },
+    "publicationYear": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "author",
+    "title"
+  ],
+  "additionalProperties": false
+}

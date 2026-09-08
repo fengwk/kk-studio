@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "person": {
+      "$ref": "#/$defs/Person"
+    }
+  },
+  "required": [
+    "person"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Person": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
