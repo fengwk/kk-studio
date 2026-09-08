@@ -1,0 +1,82 @@
+{
+  "completed": {
+    "id": "resp_complete_123",
+    "object": "response",
+    "status": "completed",
+    "model": "gpt-5.4-mini",
+    "output": [
+      {
+        "id": "msg_comp_1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Task finished successfully."
+          }
+        ]
+      }
+    ],
+    "usage": {
+      "input_tokens": 100,
+      "output_tokens": 50,
+      "total_tokens": 150,
+      "input_tokens_details": {
+        "cached_tokens": 30,
+        "cache_write_tokens": 10
+      },
+      "output_tokens_details": {
+        "reasoning_tokens": 20
+      }
+    }
+  },
+  "incomplete_max_tokens": {
+    "id": "resp_incomp_len",
+    "object": "response",
+    "status": "incomplete",
+    "incomplete_details": {
+      "reason": "max_output_tokens"
+    },
+    "model": "gpt-5.4-mini",
+    "output": [
+      {
+        "id": "msg_incomp_1",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Partial text before token limit"
+          }
+        ]
+      }
+    ]
+  },
+  "incomplete_content_filter": {
+    "id": "resp_incomp_filter",
+    "object": "response",
+    "status": "incomplete",
+    "incomplete_details": {
+      "reason": "content_filter"
+    },
+    "model": "gpt-5.4-mini",
+    "output": []
+  },
+  "incomplete_unknown_reason": {
+    "id": "resp_incomp_unknown",
+    "object": "response",
+    "status": "incomplete",
+    "incomplete_details": {
+      "reason": "future_unsupported_reason"
+    },
+    "model": "gpt-5.4-mini",
+    "output": []
+  },
+  "incomplete_missing_details": {
+    "id": "resp_incomp_nodetails",
+    "object": "response",
+    "status": "incomplete",
+    "model": "gpt-5.4-mini",
+    "output": []
+  }
+}

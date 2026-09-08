@@ -1,0 +1,79 @@
+{
+  "standard_request": {
+    "model": "gpt-5.4-mini",
+    "stream": true,
+    "store": false,
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "max_output_tokens": 1000,
+    "reasoning": {
+      "effort": "low",
+      "summary": "auto"
+    },
+    "tools": [
+      {
+        "type": "function",
+        "name": "getWeather",
+        "description": "Get current weather",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "required": ["city"]
+        },
+        "strict": false
+      }
+    ],
+    "input": [
+      {
+        "type": "message",
+        "role": "system",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "You are a helpful assistant."
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "What is the weather in Paris?"
+          }
+        ]
+      }
+    ]
+  },
+  "multimodal_request": {
+    "model": "gpt-5.4-mini",
+    "stream": true,
+    "store": false,
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Inspect the attached image and document."
+          },
+          {
+            "type": "input_image",
+            "image_url": "https://example.com/sample.png",
+            "detail": "auto"
+          },
+          {
+            "type": "input_file",
+            "file_url": "https://example.com/sample.pdf"
+          }
+        ]
+      }
+    ]
+  }
+}
