@@ -89,6 +89,7 @@ final class OpenAiResponsesStreamAccumulator {
   private long rawInputTokens = 0L;
   private long rawOutputTokens = 0L;
   private long rawTotalTokens = 0L;
+  private boolean hasRawTotalTokens = false;
   private long cachedTokens = 0L;
   private long cacheWriteTokens = 0L;
   private long reasoningTokens = 0L;
@@ -347,7 +348,10 @@ final class OpenAiResponsesStreamAccumulator {
       hasUsage = true;
       rawInputTokens = usageNode.path("input_tokens").asLong(0L);
       rawOutputTokens = usageNode.path("output_tokens").asLong(0L);
-      rawTotalTokens = usageNode.path("total_tokens").asLong(0L);
+      if (usageNode.has("total_tokens") && !usageNode.get("total_tokens").isNull()) {
+        hasRawTotalTokens = true;
+        rawTotalTokens = usageNode.path("total_tokens").asLong(0L);
+      }
 
       JsonNode inDetails = usageNode.get("input_tokens_details");
       if (inDetails != null && inDetails.isObject()) {
@@ -474,10 +478,7 @@ final class OpenAiResponsesStreamAccumulator {
     // Token 用量归一化
     long ordinaryInput = Math.max(0L, rawInputTokens - cachedTokens - cacheWriteTokens);
     long ordinaryOutput = Math.max(0L, rawOutputTokens - reasoningTokens);
-    long providerTotalTokens = rawTotalTokens;
-    if (providerTotalTokens == 0L && hasUsage) {
-      providerTotalTokens = rawInputTokens + rawOutputTokens;
-    }
+    long providerTotalTokens = hasRawTotalTokens ? rawTotalTokens : 0L;
 
     ModelUsage usage =
         new ModelUsage(
@@ -490,11 +491,13 @@ final class OpenAiResponsesStreamAccumulator {
             providerTotalTokens);
     ModelCost cost = ModelCost.calculate(request.model().pricing(), usage);
 
-    // 白名单 rawUsageJson
+    // 白名单 rawUsageJson：仅当 native 响应中实际包含 total_tokens 时才保留，不自行凭空合成
     ObjectNode rawUsageNode = NODES.objectNode();
     rawUsageNode.put("input_tokens", rawInputTokens);
     rawUsageNode.put("output_tokens", rawOutputTokens);
-    rawUsageNode.put("total_tokens", providerTotalTokens);
+    if (hasRawTotalTokens) {
+      rawUsageNode.put("total_tokens", rawTotalTokens);
+    }
     ObjectNode inDetails = rawUsageNode.putObject("input_tokens_details");
     inDetails.put("cached_tokens", cachedTokens);
     inDetails.put("cache_write_tokens", cacheWriteTokens);

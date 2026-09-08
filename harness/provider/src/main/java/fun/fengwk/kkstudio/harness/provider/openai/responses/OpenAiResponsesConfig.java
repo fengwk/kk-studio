@@ -64,11 +64,10 @@ public record OpenAiResponsesConfig(OpenAiPromptCacheMode openAiPromptCacheMode)
       if (!modeNode.isTextual()) {
         throw new IllegalArgumentException("openAiPromptCacheMode must be a string");
       }
-      String modeText = modeNode.asText();
       try {
-        mode = OpenAiPromptCacheMode.valueOf(modeText);
+        mode = OpenAiPromptCacheMode.valueOf(modeNode.asText().trim());
       } catch (IllegalArgumentException e) {
-        throw new IllegalArgumentException("unsupported openAiPromptCacheMode: " + modeText);
+        throw new IllegalArgumentException("unsupported openAiPromptCacheMode");
       }
     }
 

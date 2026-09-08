@@ -147,7 +147,8 @@ public class ModelExecutionConfiguration {
                 PromptCacheBreakpoint.SYSTEM,
                 PromptCacheBreakpoint.TOOLS,
                 PromptCacheBreakpoint.CONVERSATION)),
-        (credential, configJson) -> new AnthropicProviderAdapter(transport, credential));
+        (credential, configJson) ->
+            new AnthropicProviderAdapter(transport, credential, configJson));
   }
 
   @Bean(name = "googleProviderFactory")

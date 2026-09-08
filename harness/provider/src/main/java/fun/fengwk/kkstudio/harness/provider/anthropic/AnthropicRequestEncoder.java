@@ -237,6 +237,11 @@ final class AnthropicRequestEncoder {
       return;
     }
 
+    String effort = request.variant().reasoningEffort();
+    if (effort.isBlank() || "none".equals(effort.trim())) {
+      return;
+    }
+
     AnthropicThinkingMode mode = config.anthropicThinkingMode();
     switch (mode) {
       case ADAPTIVE -> {
@@ -244,10 +249,9 @@ final class AnthropicRequestEncoder {
         thinking.put("type", "adaptive");
 
         ObjectNode outputConfig = root.putObject("output_config");
-        outputConfig.put("effort", request.variant().reasoningEffort());
+        outputConfig.put("effort", effort);
       }
       case BUDGET -> {
-        String effort = request.variant().reasoningEffort();
         int budgetTokens = mapBudgetTokens(effort);
         if (budgetTokens >= maxTokens) {
           throw new ProviderException(

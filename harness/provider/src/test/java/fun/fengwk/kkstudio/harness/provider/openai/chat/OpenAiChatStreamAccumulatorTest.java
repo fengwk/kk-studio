@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -681,6 +682,33 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(0L, usage2.cacheWriteTokens());
     assertEquals(0L, usage2.totalTokens());
     assertEquals("{}", completion2.response().rawUsageJson());
+  }
+
+  @Test
+  @DisplayName(
+      "缺失 total_tokens 时 providerTotalTokens 严格为 0，不合成 prompt+completion，保留原生 rawUsageJson")
+  void testMissingTotalTokensPreservesZeroWithoutSynthesis() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        """
+        {"id":"chat-no-total","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":15,"completion_tokens":25}}
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(15L, usage.inputTokens());
+    assertEquals(25L, usage.outputTokens());
+    // 关键断言：缺失 total_tokens 时严格置 0，不合成 40
+    assertEquals(0L, usage.providerTotalTokens());
+    assertEquals(0L, usage.totalTokens());
+    assertEquals(40L, usage.categorizedTokens());
+
+    // 验证 rawUsageJson 原样保留，未合成 total_tokens 字段
+    String rawJson = completion.response().rawUsageJson();
+    assertTrue(rawJson.contains("\"prompt_tokens\":15"));
+    assertTrue(rawJson.contains("\"completion_tokens\":25"));
+    assertFalse(rawJson.contains("total_tokens"));
   }
 
   @Test

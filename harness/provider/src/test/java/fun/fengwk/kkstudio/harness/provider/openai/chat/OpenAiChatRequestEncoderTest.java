@@ -163,6 +163,101 @@ class OpenAiChatRequestEncoderTest {
   }
 
   @Test
+  @DisplayName("DEEPSEEK thinking format 与 STANDARD 格式编码对比测试")
+  void testDeepSeekThinkingFormatEncoding() throws Exception {
+    ModelDescriptor reasoningModel =
+        new ModelDescriptor(
+            "deepseek",
+            "deepseek-reasoner",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            modelDesc.pricing());
+    OpenAiChatConfiguration deepseekConfig =
+        OpenAiChatConfiguration.parse("{\"openAiChatThinkingFormat\":\"DEEPSEEK\"}");
+    ProviderMessage userMsg =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve math")));
+
+    // 1. DEEPSEEK 格式下 reasoning=true 且 effort="low" -> thinking:{type:"enabled"} 且
+    // reasoning_effort:"low"
+    ModelVariant variantLow =
+        new ModelVariant("v1", null, null, null, null, null, null, null, "low");
+    ProviderRequest reqLow =
+        new ProviderRequest(
+            reasoningModel, variantLow, List.of(userMsg), List.of(), ProviderCacheControl.none());
+    JsonNode rootLow =
+        MAPPER.readTree(encoder.encode(reqLow, descriptor, deepseekConfig).bodyUtf8Bytes());
+    assertEquals("enabled", rootLow.path("thinking").path("type").asText());
+    assertEquals("low", rootLow.path("reasoning_effort").asText());
+
+    // 2. DEEPSEEK 格式下 reasoning=true 且 effort="none" -> thinking:{type:"disabled"} 且无
+    // reasoning_effort
+    ModelVariant variantNone =
+        new ModelVariant("v2", null, null, null, null, null, null, null, "none");
+    ProviderRequest reqNone =
+        new ProviderRequest(
+            reasoningModel, variantNone, List.of(userMsg), List.of(), ProviderCacheControl.none());
+    JsonNode rootNone =
+        MAPPER.readTree(encoder.encode(reqNone, descriptor, deepseekConfig).bodyUtf8Bytes());
+    assertEquals("disabled", rootNone.path("thinking").path("type").asText());
+    assertFalse(rootNone.has("reasoning_effort"));
+
+    // 3. DEEPSEEK 格式下 reasoning=true 且 effort=null (通过 "off" 规范化为 null) ->
+    // thinking:{type:"disabled"} 且无 reasoning_effort
+    ModelVariant variantOff =
+        new ModelVariant("v3", null, null, null, null, null, null, null, "off");
+    ProviderRequest reqOff =
+        new ProviderRequest(
+            reasoningModel, variantOff, List.of(userMsg), List.of(), ProviderCacheControl.none());
+    JsonNode rootOff =
+        MAPPER.readTree(encoder.encode(reqOff, descriptor, deepseekConfig).bodyUtf8Bytes());
+    assertEquals("disabled", rootOff.path("thinking").path("type").asText());
+    assertFalse(rootOff.has("reasoning_effort"));
+
+    // 4. DEEPSEEK 格式下 reasoning=true 且 variant.reasoningEffort 为 null -> thinking:{type:"disabled"}
+    // 且无 reasoning_effort
+    ProviderRequest reqDefaultVariant =
+        new ProviderRequest(
+            reasoningModel,
+            defaultVariant,
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode rootDefaultVariant =
+        MAPPER.readTree(
+            encoder.encode(reqDefaultVariant, descriptor, deepseekConfig).bodyUtf8Bytes());
+    assertEquals("disabled", rootDefaultVariant.path("thinking").path("type").asText());
+    assertFalse(rootDefaultVariant.has("reasoning_effort"));
+
+    // 5. DEEPSEEK 格式下 reasoning=false 且 effort="low" -> 均不生成 thinking 和 reasoning_effort
+    ProviderRequest reqNonReasoningWithEffort =
+        new ProviderRequest(
+            modelDesc, variantLow, List.of(userMsg), List.of(), ProviderCacheControl.none());
+    JsonNode rootNonReasoningWithEffort =
+        MAPPER.readTree(
+            encoder.encode(reqNonReasoningWithEffort, descriptor, deepseekConfig).bodyUtf8Bytes());
+    assertFalse(rootNonReasoningWithEffort.has("thinking"));
+    assertFalse(rootNonReasoningWithEffort.has("reasoning_effort"));
+
+    // 6. DEEPSEEK 格式下 reasoning=false 且 effort=null -> 均不生成 thinking 和 reasoning_effort
+    ProviderRequest reqNonReasoningNull =
+        new ProviderRequest(
+            modelDesc, defaultVariant, List.of(userMsg), List.of(), ProviderCacheControl.none());
+    JsonNode rootNonReasoningNull =
+        MAPPER.readTree(
+            encoder.encode(reqNonReasoningNull, descriptor, deepseekConfig).bodyUtf8Bytes());
+    assertFalse(rootNonReasoningNull.has("thinking"));
+    assertFalse(rootNonReasoningNull.has("reasoning_effort"));
+
+    // 7. STANDARD 格式下保持字节级兼容：有 effort 时仅出 reasoning_effort，不出 thinking
+    OpenAiChatConfiguration standardConfig = OpenAiChatConfiguration.defaults();
+    JsonNode rootStandard =
+        MAPPER.readTree(encoder.encode(reqLow, descriptor, standardConfig).bodyUtf8Bytes());
+    assertFalse(rootStandard.has("thinking"));
+    assertEquals("low", rootStandard.path("reasoning_effort").asText());
+  }
+
+  @Test
   @DisplayName("TopK 不受支持时严格拒绝抛出 INVALID_REQUEST")
   void testRejectTopK() {
     ModelVariant variant = new ModelVariant("v", null, null, null, 10, null, null, null, null);

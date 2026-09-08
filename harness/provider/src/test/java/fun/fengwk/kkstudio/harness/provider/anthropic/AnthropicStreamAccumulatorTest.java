@@ -788,7 +788,9 @@ class AnthropicStreamAccumulatorTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals(20, completion.response().usage().cacheWriteTokens());
     assertEquals(10, completion.response().usage().cacheWriteLongTokens());
-    assertEquals(140, completion.response().usage().totalTokens());
+    assertEquals(0, completion.response().usage().totalTokens());
+    assertEquals(0, completion.response().usage().providerTotalTokens());
+    assertEquals(140, completion.response().usage().categorizedTokens());
   }
 
   @Test

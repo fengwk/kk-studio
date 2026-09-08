@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.provider.openai.responses;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -89,12 +90,16 @@ class OpenAiResponsesConfigTest {
             IllegalArgumentException.class, () -> OpenAiResponsesConfig.parse("[\"abc\"]"));
     assertEquals("provider config must be a JSON object", ex2.getMessage());
 
-    // 未知模式枚举值
+    // 未知模式枚举值（不回显输入值且不保留 cause）
     IllegalArgumentException ex3 =
         assertThrows(
             IllegalArgumentException.class,
-            () -> OpenAiResponsesConfig.parse("{\"openAiPromptCacheMode\": \"UNKNOWN_MODE\"}"));
-    assertTrue(ex3.getMessage().contains("unsupported openAiPromptCacheMode"));
+            () ->
+                OpenAiResponsesConfig.parse(
+                    "{\"openAiPromptCacheMode\": \"UNKNOWN_SECRET_MODE\"}"));
+    assertEquals("unsupported openAiPromptCacheMode", ex3.getMessage());
+    assertFalse(ex3.getMessage().contains("UNKNOWN_SECRET_MODE"));
+    assertNull(ex3.getCause());
 
     // 非文本模式字段
     IllegalArgumentException ex4 =

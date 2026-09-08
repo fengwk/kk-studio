@@ -106,10 +106,27 @@ Reactor、JDBC 与外部 HTTP 客户端。
 [`AnthropicProviderAdapter`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/anthropic/AnthropicProviderAdapter.java)
 基于 `ProviderDescriptor.endpoint` 解析 `/messages`，移除 base URL 的 user-info、query 与 fragment。
 请求同时发送标准 `x-api-key` 与 `Authorization: Bearer`，不发送 `anthropic-beta`。
+适配器按 `AnthropicConfiguration`（`anthropicThinkingMode`：`ADAPTIVE` / `BUDGET`）解析配置；配置解析严格屏蔽原始输入与底层异常回显。
+在 `reasoningEffort` 为 `none`、空白或 `null` 时，完全抑制 `thinking` 与 `output_config` 字段。
+`AnthropicStreamAccumulator` 将原生总 token 置为 `0L`（Anthropic Messages 协议不提供原生 `total_tokens`），分类分项明细保留在 `ModelUsage.categorizedTokens()` 中。
 
 `AnthropicRequestEncoder` 对请求体实施 32 MiB 上限，并把 Runtime semantic history 编码为 Anthropic content
 blocks。`AnthropicStreamAccumulator` 按原生 block index 独立维护交错工具调用，usage 按累计快照更新；只有
 `message_stop` 证明协议成功。COMPLETE 可保存已验证的 opaque replay，FILTERED 撤回未完成协议内容，LENGTH
 把未闭合工具参数固化为 diagnostic 而不伪造 `{}`。
+
+### OpenAI Chat Completions
+
+[`OpenAiChatProviderAdapter`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/chat/OpenAiChatProviderAdapter.java)
+支持标准 OpenAI Chat Completions 协议，通过 `OpenAiChatConfiguration` 支持扩展参数：
+- `openAiChatThinkingFormat`（`STANDARD` / `DEEPSEEK`）：在 `DEEPSEEK` 格式下，当模型声明 `reasoning=true` 时，若未启用思考（`reasoningEffort` 为 `none`、空白或 `null`）显式发送 `thinking: {"type": "disabled"}` 并省略 `reasoning_effort`；若启用思考则发送 `thinking: {"type": "enabled"}` 并附带 `reasoning_effort`；对于非 reasoning 模型或 `STANDARD` 格式保持标准编码。
+- 缺失原生 `total_tokens` 时，`OpenAiChatStreamAccumulator` 保持 `providerTotalTokens = 0L`，不人为合成 input + output。
+
+### OpenAI Responses
+
+[`OpenAiResponsesProviderAdapter`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesProviderAdapter.java)
+支持 OpenAI Responses 协议，通过 `OpenAiResponsesConfig` 提供配置支持（异常消息消毒，不回显输入与 cause）：
+- 推理编码：当 `reasoningEffort` 为 `none` 时仅生成 `reasoning: {"effort": "none"}`，省略 `summary` 且不包含 `reasoning.encrypted_content`；启用思考时生成 `reasoning: {"effort": ..., "summary": "auto"}` 并注入顶层 `include: ["reasoning.encrypted_content"]`。
+- Token 审计：当服务端事件流 usage 缺失 `total_tokens` 时，原生总 token 置为 `0L`，且 `rawUsageJson` 白名单中不输出 `total_tokens` 键。
 
 上级：[系统设计](../system-design.md)。相关文档：[Harness Runtime](harness-runtime.md)。

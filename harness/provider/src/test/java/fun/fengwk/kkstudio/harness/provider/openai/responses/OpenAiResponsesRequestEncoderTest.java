@@ -140,6 +140,58 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals(200, root.path("max_output_tokens").asInt());
     assertEquals("low", root.path("reasoning").path("effort").asText());
     assertEquals("auto", root.path("reasoning").path("summary").asText());
+    assertEquals("reasoning.encrypted_content", root.path("include").get(0).asText());
+  }
+
+  @Test
+  void test_reasoningEffortOffAndEnabledEncodings() throws Exception {
+    // 1. effort = "none" -> emit reasoning:{effort:"none"} only; omit summary and omit include
+    ProviderRequest reqOff =
+        request(new ModelVariant("v1", 200, 0.5, 0.8, null, null, null, List.of(), "none"));
+    JsonNode rootOff =
+        MAPPER.readTree(
+            encoder
+                .encode(reqOff, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
+                .bodyUtf8Bytes());
+    assertEquals("none", rootOff.path("reasoning").path("effort").asText());
+    assertFalse(rootOff.path("reasoning").has("summary"));
+    assertFalse(rootOff.has("include"));
+
+    // 2. effort = "high" -> emit reasoning:{effort:"high", summary:"auto"} and
+    // include:["reasoning.encrypted_content"]
+    ProviderRequest reqEnabled =
+        request(new ModelVariant("v1", 200, 0.5, 0.8, null, null, null, List.of(), "high"));
+    JsonNode rootEnabled =
+        MAPPER.readTree(
+            encoder
+                .encode(reqEnabled, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
+                .bodyUtf8Bytes());
+    assertEquals("high", rootEnabled.path("reasoning").path("effort").asText());
+    assertEquals("auto", rootEnabled.path("reasoning").path("summary").asText());
+    assertEquals(1, rootEnabled.path("include").size());
+    assertEquals("reasoning.encrypted_content", rootEnabled.path("include").get(0).asText());
+
+    // 3. effort = null -> omit reasoning and include
+    ProviderRequest reqNull =
+        request(new ModelVariant("v1", 200, 0.5, 0.8, null, null, null, List.of(), null));
+    JsonNode rootNull =
+        MAPPER.readTree(
+            encoder
+                .encode(reqNull, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
+                .bodyUtf8Bytes());
+    assertFalse(rootNull.has("reasoning"));
+    assertFalse(rootNull.has("include"));
+
+    // 4. effort = "   " -> omit reasoning and include
+    ProviderRequest reqBlank =
+        request(new ModelVariant("v1", 200, 0.5, 0.8, null, null, null, List.of(), "   "));
+    JsonNode rootBlank =
+        MAPPER.readTree(
+            encoder
+                .encode(reqBlank, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
+                .bodyUtf8Bytes());
+    assertFalse(rootBlank.has("reasoning"));
+    assertFalse(rootBlank.has("include"));
   }
 
   /** 验证严格拒绝 unsupported penalties 和 stopSequences 与 topK。 */

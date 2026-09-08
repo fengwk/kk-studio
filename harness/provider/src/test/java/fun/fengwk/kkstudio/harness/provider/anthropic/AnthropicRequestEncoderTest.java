@@ -761,6 +761,83 @@ class AnthropicRequestEncoderTest {
     JsonNode root3 = MAPPER.readTree(budgetEncoder.encode(req3, descriptor).bodyUtf8Bytes());
     assertFalse(root3.has("thinking"));
     assertFalse(root3.has("output_config"));
+
+    // 4. model.reasoning = true 且 variant.reasoningEffort = "none"
+    ModelVariant variantNoneEffort =
+        new ModelVariant("v", 4096, null, null, null, null, null, List.of(), "none");
+    ProviderRequest req4 =
+        new ProviderRequest(
+            reasoningModel,
+            variantNoneEffort,
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode root4 = MAPPER.readTree(budgetEncoder.encode(req4, descriptor).bodyUtf8Bytes());
+    assertFalse(root4.has("thinking"), "BUDGET mode with effort='none' must omit thinking");
+    assertFalse(
+        root4.has("output_config"), "BUDGET mode with effort='none' must omit output_config");
+
+    // 5. model.reasoning = true 且 variant.reasoningEffort 为纯空白
+    ModelVariant variantBlankEffort =
+        new ModelVariant("v", 4096, null, null, null, null, null, List.of(), "   ");
+    ProviderRequest req5 =
+        new ProviderRequest(
+            reasoningModel,
+            variantBlankEffort,
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode root5 = MAPPER.readTree(budgetEncoder.encode(req5, descriptor).bodyUtf8Bytes());
+    assertFalse(root5.has("thinking"), "BUDGET mode with blank effort must omit thinking");
+    assertFalse(
+        root5.has("output_config"), "BUDGET mode with blank effort must omit output_config");
+  }
+
+  @Test
+  void omitsThinkingAndOutputConfigWhenReasoningEffortIsNoneOrBlankInAdaptiveMode()
+      throws IOException {
+    AnthropicRequestEncoder adaptiveEncoder =
+        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.ADAPTIVE));
+    ModelDescriptor reasoningModel =
+        new ModelDescriptor(
+            "test-anthropic",
+            "claude-3-7-sonnet",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            pricing());
+
+    // 1. variant.reasoningEffort = "none"
+    ModelVariant variantNone =
+        new ModelVariant("v", 4096, null, null, null, null, null, List.of(), "none");
+    ProviderRequest reqNone =
+        new ProviderRequest(
+            reasoningModel,
+            variantNone,
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode rootNone =
+        MAPPER.readTree(adaptiveEncoder.encode(reqNone, descriptor).bodyUtf8Bytes());
+    assertFalse(rootNone.has("thinking"), "ADAPTIVE mode with effort='none' must omit thinking");
+    assertFalse(
+        rootNone.has("output_config"), "ADAPTIVE mode with effort='none' must omit output_config");
+
+    // 2. variant.reasoningEffort = "  "
+    ModelVariant variantBlank =
+        new ModelVariant("v", 4096, null, null, null, null, null, List.of(), "  ");
+    ProviderRequest reqBlank =
+        new ProviderRequest(
+            reasoningModel,
+            variantBlank,
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode rootBlank =
+        MAPPER.readTree(adaptiveEncoder.encode(reqBlank, descriptor).bodyUtf8Bytes());
+    assertFalse(rootBlank.has("thinking"), "ADAPTIVE mode with blank effort must omit thinking");
+    assertFalse(
+        rootBlank.has("output_config"), "ADAPTIVE mode with blank effort must omit output_config");
   }
 
   @Test
