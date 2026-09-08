@@ -59,6 +59,8 @@ final class OpenAiChatRequestEncoder {
 
   private static final Set<String> ALLOWED_REPLAY_FIELDS =
       Set.of("role", "content", "tool_calls", "reasoning_content", "reasoning_details");
+  private static final Set<String> ALLOWED_TOOL_CALL_FIELDS = Set.of("id", "type", "function");
+  private static final Set<String> ALLOWED_TOOL_FUNCTION_FIELDS = Set.of("name", "arguments");
 
   OpenAiChatEncodedRequest encode(
       ProviderRequest request, ProviderDescriptor descriptor, OpenAiChatConfiguration config) {
@@ -449,7 +451,7 @@ final class OpenAiChatRequestEncoder {
     // 校验 reasoning_details 类型
     if (payload.has("reasoning_details")) {
       JsonNode detailsNode = payload.get("reasoning_details");
-      if (!detailsNode.isNull() && !detailsNode.isObject()) {
+      if (!detailsNode.isNull() && !detailsNode.isObject() && !detailsNode.isArray()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "invalid OpenAI chat assistant replay payload: illegal reasoning_details type");
@@ -471,6 +473,16 @@ final class OpenAiChatRequestEncoder {
               ProviderErrorKind.INVALID_REQUEST,
               "invalid OpenAI chat assistant replay payload: tool call must be a JSON object");
         }
+        Iterator<String> callFields = callNode.fieldNames();
+        while (callFields.hasNext()) {
+          String field = callFields.next();
+          if (!ALLOWED_TOOL_CALL_FIELDS.contains(field)) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST,
+                "invalid OpenAI chat assistant replay payload: unknown field in tool call: "
+                    + field);
+          }
+        }
         if (!callNode.has("id")
             || !callNode.get("id").isTextual()
             || callNode.get("id").textValue().isBlank()) {
@@ -478,9 +490,9 @@ final class OpenAiChatRequestEncoder {
               ProviderErrorKind.INVALID_REQUEST,
               "invalid OpenAI chat assistant replay payload: tool call id must be a non-blank string");
         }
-        if (callNode.has("type")
-            && (!callNode.get("type").isTextual()
-                || !"function".equals(callNode.get("type").textValue()))) {
+        if (!callNode.has("type")
+            || !callNode.get("type").isTextual()
+            || !"function".equals(callNode.get("type").textValue())) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST,
               "invalid OpenAI chat assistant replay payload: tool call type must be function");
@@ -491,6 +503,16 @@ final class OpenAiChatRequestEncoder {
               "invalid OpenAI chat assistant replay payload: tool call function must be a JSON object");
         }
         JsonNode fnNode = callNode.get("function");
+        Iterator<String> fnFields = fnNode.fieldNames();
+        while (fnFields.hasNext()) {
+          String field = fnFields.next();
+          if (!ALLOWED_TOOL_FUNCTION_FIELDS.contains(field)) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST,
+                "invalid OpenAI chat assistant replay payload: unknown field in tool call function: "
+                    + field);
+          }
+        }
         if (!fnNode.has("name")
             || !fnNode.get("name").isTextual()
             || fnNode.get("name").textValue().isBlank()) {
