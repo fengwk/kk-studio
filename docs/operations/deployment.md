@@ -436,7 +436,7 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
 | distributed | node identity/ports | `DISTRIBUTED_ENV_A_NAME`、`DISTRIBUTED_ENV_B_NAME`、`DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN`、`DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN`、`DISTRIBUTED_APP_A_PORT`、`DISTRIBUTED_APP_B_PORT` |
 | reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_ENV_NAME`、`RELIABILITY_REGISTRATION_TOKEN` |
 | supply-chain | reports/images/cache | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`TRIVY_SKIP_DB_UPDATE` |
-| explicit `--real` E2E | host-only credential sync | `TEST_GEMINI_*`、`TEST_OPENAI_*`、`TEST_MINIMAX_ANTHROPIC_*`、`TEST_DEEPSEEK_*` |
+| explicit `--real` E2E | host-only credential sync | `TEST_GOOGLE_*`、`TEST_OPENAI_*`、`TEST_MINIMAX_ANTHROPIC_*`、`TEST_DEEPSEEK_*` |
 | reliability Agent matrix | host-only credential sync | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
 | explicit Seedance prepare-only | external Hub/workspace | `OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID` |
 

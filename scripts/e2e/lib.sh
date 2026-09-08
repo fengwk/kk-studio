@@ -169,7 +169,7 @@ start_backend() {
   # Pass PostgreSQL connection overrides when set; e2e profile defaults are only for local loops.
   # Explicitly scrub all real TEST_* credential environment variables from backend Java process
   nohup env \
-    -u TEST_GEMINI_BASE_URL -u TEST_GEMINI_API_KEY \
+    -u TEST_GOOGLE_BASE_URL -u TEST_GOOGLE_API_KEY \
     -u TEST_OPENAI_BASE_URL -u TEST_OPENAI_API_KEY \
     -u TEST_MINIMAX_ANTHROPIC_BASE_URL -u TEST_MINIMAX_ANTHROPIC_API_KEY \
     -u TEST_DEEPSEEK_BASE_URL -u TEST_DEEPSEEK_API_KEY \
@@ -199,8 +199,8 @@ sync_e2e_provider_credentials() {
   step "Syncing provider E2E credentials from env (secrets not printed)"
   env \
     -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
-    TEST_GEMINI_BASE_URL="${TEST_GEMINI_BASE_URL-}" \
-    TEST_GEMINI_API_KEY="${TEST_GEMINI_API_KEY-}" \
+    TEST_GOOGLE_BASE_URL="${TEST_GOOGLE_BASE_URL-}" \
+    TEST_GOOGLE_API_KEY="${TEST_GOOGLE_API_KEY-}" \
     TEST_OPENAI_BASE_URL="${TEST_OPENAI_BASE_URL-}" \
     TEST_OPENAI_API_KEY="${TEST_OPENAI_API_KEY-}" \
     TEST_MINIMAX_ANTHROPIC_BASE_URL="${TEST_MINIMAX_ANTHROPIC_BASE_URL-}" \

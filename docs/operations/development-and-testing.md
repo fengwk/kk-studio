@@ -411,7 +411,7 @@ node scripts/e2e/ui-smoke.mjs \
 ### 8.5 Real credentials 和付费边界
 
 - 真实 E2E 要求以下四组完整 pair，任一组缺失或只提供一半都会在同步前失败：
-  - `TEST_GEMINI_BASE_URL` + `TEST_GEMINI_API_KEY`
+  - `TEST_GOOGLE_BASE_URL` + `TEST_GOOGLE_API_KEY`
   - `TEST_OPENAI_BASE_URL` + `TEST_OPENAI_API_KEY`
   - `TEST_MINIMAX_ANTHROPIC_BASE_URL` + `TEST_MINIMAX_ANTHROPIC_API_KEY`
   - `TEST_DEEPSEEK_BASE_URL` + `TEST_DEEPSEEK_API_KEY`

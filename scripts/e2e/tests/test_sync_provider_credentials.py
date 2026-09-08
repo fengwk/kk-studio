@@ -9,8 +9,8 @@ from scripts.e2e.sync_provider_credentials import (
     PROVIDER_SPECS,
     TEST_DEEPSEEK_API_KEY,
     TEST_DEEPSEEK_BASE_URL,
-    TEST_GEMINI_API_KEY,
-    TEST_GEMINI_BASE_URL,
+    TEST_GOOGLE_API_KEY,
+    TEST_GOOGLE_BASE_URL,
     TEST_MINIMAX_ANTHROPIC_API_KEY,
     TEST_MINIMAX_ANTHROPIC_BASE_URL,
     TEST_OPENAI_API_KEY,
@@ -99,7 +99,7 @@ class TestNormalizeBaseUrl(unittest.TestCase):
             normalize_base_url(
                 "https://generativelanguage.googleapis.com///",
                 requires_v1_suffix=False,
-                env_name=TEST_GEMINI_BASE_URL,
+                env_name=TEST_GOOGLE_BASE_URL,
                 provider_name="google",
             ),
         )
@@ -266,8 +266,8 @@ class TestSyncProviderCredentials(unittest.TestCase):
     def test_complete_four_pairs_execute_one_get_and_four_puts(self):
         calls = []
         env = {
-            TEST_GEMINI_BASE_URL: "https://generativelanguage.googleapis.com///",
-            TEST_GEMINI_API_KEY: "secret-gemini",
+            TEST_GOOGLE_BASE_URL: "https://generativelanguage.googleapis.com///",
+            TEST_GOOGLE_API_KEY: "secret-gemini",
             TEST_OPENAI_BASE_URL: "https://api.openai.com///",
             TEST_OPENAI_API_KEY: "secret-openai",
             TEST_MINIMAX_ANTHROPIC_BASE_URL: "https://api.minimax.example/anthropic/v1///",
@@ -321,8 +321,8 @@ class TestSyncProviderCredentials(unittest.TestCase):
     def test_missing_seed_provider_fails_before_any_put(self):
         calls = []
         env = {
-            TEST_GEMINI_BASE_URL: "https://generativelanguage.googleapis.com",
-            TEST_GEMINI_API_KEY: "secret-gemini",
+            TEST_GOOGLE_BASE_URL: "https://generativelanguage.googleapis.com",
+            TEST_GOOGLE_API_KEY: "secret-gemini",
             TEST_OPENAI_BASE_URL: "https://api.openai.com",
             TEST_OPENAI_API_KEY: "secret-openai",
         }
@@ -343,8 +343,8 @@ class TestSyncProviderCredentials(unittest.TestCase):
     def test_provider_type_mismatch_fails_before_any_put(self):
         calls = []
         env = {
-            TEST_GEMINI_BASE_URL: "https://generativelanguage.googleapis.com",
-            TEST_GEMINI_API_KEY: "secret-gemini",
+            TEST_GOOGLE_BASE_URL: "https://generativelanguage.googleapis.com",
+            TEST_GOOGLE_API_KEY: "secret-gemini",
         }
         # google row with wrong providerType
         rows = seed_rows(google={"providerType": "wrong_type"})
@@ -410,8 +410,8 @@ class TestSyncProviderCredentials(unittest.TestCase):
         secret = "secret-super-sensitive-12345"
         base_endpoint = "https://private.secret.endpoint.com"
         env = {
-            TEST_GEMINI_BASE_URL: f"{base_endpoint}/gemini",
-            TEST_GEMINI_API_KEY: secret,
+            TEST_GOOGLE_BASE_URL: f"{base_endpoint}/gemini",
+            TEST_GOOGLE_API_KEY: secret,
         }
 
         lines = sync_provider_credentials(
