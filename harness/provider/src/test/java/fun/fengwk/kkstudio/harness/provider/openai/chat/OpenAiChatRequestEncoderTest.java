@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -34,6 +35,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
@@ -756,6 +760,7 @@ class OpenAiChatRequestEncoderTest {
     ArrayNode badCalls = badToolPayload.putArray("tool_calls");
     ObjectNode callWithoutFn = badCalls.addObject();
     callWithoutFn.put("id", "c1");
+    callWithoutFn.put("type", "function");
     // missing function node
     ProviderReplayState badToolState =
         new ProviderReplayState(
@@ -1350,5 +1355,325 @@ class OpenAiChatRequestEncoderTest {
     assertEquals("fallback result", wireAsst.path("content").asText());
     assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
     assertFalse(wireAsst.has("reasoning_content"));
+  }
+
+  @Test
+  @DisplayName("tool_calls 嵌套白名单与 type=function 强校验（即使 hash mismatch 也不得忽略）")
+  void testToolCallsNestedWhitelistAndTypeRequirement() {
+    // 测试意图：验证 tool_calls 每个元素仅允许 id/type/function，function 仅允许 name/arguments，
+    // 且强校验 type='function'；即使 affinity/hash 不匹配，任何未知嵌套字段或非法 type 均必须抛出 INVALID_REQUEST。
+    ProviderMessage user1 =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    String mismatchedHash = "e".repeat(64);
+
+    // 1. call 节点包含未知嵌套字段
+    ObjectNode badCallFieldPayload = MAPPER.createObjectNode();
+    badCallFieldPayload.put("role", "assistant");
+    ArrayNode calls1 = badCallFieldPayload.putArray("tool_calls");
+    ObjectNode call1 = calls1.addObject();
+    call1.put("id", "c1");
+    call1.put("type", "function");
+    call1.put("extra_call_field", "value");
+    ObjectNode fn1 = call1.putObject("function");
+    fn1.put("name", "fn");
+    fn1.put("arguments", "{}");
+    ProviderReplayState state1 =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            mismatchedHash,
+            badCallFieldPayload);
+    ProviderMessage msg1 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+            state1);
+    ProviderRequest req1 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, msg1),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex1 =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(req1, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
+
+    // 2. function 节点包含未知嵌套字段
+    ObjectNode badFnFieldPayload = MAPPER.createObjectNode();
+    badFnFieldPayload.put("role", "assistant");
+    ArrayNode calls2 = badFnFieldPayload.putArray("tool_calls");
+    ObjectNode call2 = calls2.addObject();
+    call2.put("id", "c1");
+    call2.put("type", "function");
+    ObjectNode fn2 = call2.putObject("function");
+    fn2.put("name", "fn");
+    fn2.put("arguments", "{}");
+    fn2.put("extra_fn_field", "value");
+    ProviderReplayState state2 =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            mismatchedHash,
+            badFnFieldPayload);
+    ProviderMessage msg2 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+            state2);
+    ProviderRequest req2 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, msg2),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex2 =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(req2, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
+
+    // 3. 缺少 type 字段
+    ObjectNode missingTypePayload = MAPPER.createObjectNode();
+    missingTypePayload.put("role", "assistant");
+    ArrayNode calls3 = missingTypePayload.putArray("tool_calls");
+    ObjectNode call3 = calls3.addObject();
+    call3.put("id", "c1");
+    ObjectNode fn3 = call3.putObject("function");
+    fn3.put("name", "fn");
+    fn3.put("arguments", "{}");
+    ProviderReplayState state3 =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            mismatchedHash,
+            missingTypePayload);
+    ProviderMessage msg3 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+            state3);
+    ProviderRequest req3 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, msg3),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex3 =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(req3, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
+
+    // 4. type 字段不是 "function"
+    ObjectNode badTypePayload = MAPPER.createObjectNode();
+    badTypePayload.put("role", "assistant");
+    ArrayNode calls4 = badTypePayload.putArray("tool_calls");
+    ObjectNode call4 = calls4.addObject();
+    call4.put("id", "c1");
+    call4.put("type", "custom");
+    ObjectNode fn4 = call4.putObject("function");
+    fn4.put("name", "fn");
+    fn4.put("arguments", "{}");
+    ProviderReplayState state4 =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            mismatchedHash,
+            badTypePayload);
+    ProviderMessage msg4 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+            state4);
+    ProviderRequest req4 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, msg4),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex4 =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(req4, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex4.kind());
+  }
+
+  @Test
+  @DisplayName("reasoning_details 为标量时拒绝抛出 INVALID_REQUEST")
+  void testRejectScalarReasoningDetails() {
+    // 测试意图：验证 reasoning_details 仅支持 object 或 array（允许不透明内容），若为 scalar（如 string 或 int）必须抛出
+    // INVALID_REQUEST。
+    ProviderMessage user1 =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    String hash = "0".repeat(64);
+
+    // 1. string 标量
+    ObjectNode scalarStringPayload = MAPPER.createObjectNode();
+    scalarStringPayload.put("role", "assistant");
+    scalarStringPayload.put("content", "text");
+    scalarStringPayload.put("reasoning_details", "scalar-string");
+    ProviderReplayState state1 =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            hash,
+            scalarStringPayload);
+    ProviderMessage msg1 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("text")), state1);
+    ProviderRequest req1 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, msg1),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex1 =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(req1, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
+
+    // 2. int 标量
+    ObjectNode scalarIntPayload = MAPPER.createObjectNode();
+    scalarIntPayload.put("role", "assistant");
+    scalarIntPayload.put("content", "text");
+    scalarIntPayload.put("reasoning_details", 12345);
+    ProviderReplayState state2 =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            hash,
+            scalarIntPayload);
+    ProviderMessage msg2 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("text")), state2);
+    ProviderRequest req2 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, msg2),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex2 =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(req2, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
+  }
+
+  @Test
+  @DisplayName("Accumulator 生成包含 array reasoning_details 的 replay 并在次轮被 Encoder 成功回放")
+  void testAccumulatorToReplayStateToNextTurnEncoderWithArrayReasoningDetails() throws Exception {
+    // 测试意图：端到端验证 Accumulator 聚合流式多段 reasoning_details 数组，生成的 ProviderReplayState
+    // 携带 ArrayNode reasoning_details，在次轮请求中作为 ASSISTANT 历史消息被 OpenAiChatRequestEncoder 成功编码，
+    // 并且 wire JSON 保留完整的 reasoning_details 数组，验证数组类型 round-trip。
+    ProviderMessage turn1User =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")));
+    ProviderRequest turn1Req =
+        new ProviderRequest(
+            modelDesc, defaultVariant, List.of(turn1User), List.of(), ProviderCacheControl.none());
+
+    OpenAiChatEncodedRequest encodedTurn1 =
+        encoder.encode(turn1Req, descriptor, OpenAiChatConfiguration.defaults());
+    String sourcePrefixHash = encodedTurn1.sourcePrefixHash();
+
+    OpenAiChatStreamBridge bridge =
+        new OpenAiChatStreamBridge(
+            new ProviderStreamHandler() {
+              @Override
+              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+              @Override
+              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+
+              @Override
+              public void onError(ProviderException error, ProviderStream stream) {}
+            });
+
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), sourcePrefixHash, bridge);
+
+    accumulator.handleData(
+        """
+        {
+          "id": "c_arr",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "role": "assistant",
+              "reasoning_content": "Solving...",
+              "reasoning_details": [{"step": 1, "status": "thinking"}]
+            }
+          }]
+        }
+        """);
+    accumulator.handleData(
+        """
+        {
+          "id": "c_arr",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "content": "Result 42",
+              "reasoning_details": [{"step": 2, "status": "completed"}]
+            },
+            "finish_reason": "stop"
+          }],
+          "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertNotNull(completion.replayState());
+    assertTrue(completion.replayState().payload().path("reasoning_details").isArray());
+    assertEquals(2, completion.replayState().payload().path("reasoning_details").size());
+
+    // 次轮请求：包含 turn1User、turn1Asst (使用 completion 生成的文本、思考和 replayState) 以及 turn2User
+    ProviderMessage turn1Asst =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderThinkingBlock(completion.response().thinking()),
+                new ProviderTextBlock(completion.response().text())),
+            completion.replayState());
+    ProviderMessage turn2User =
+        new ProviderMessage(
+            ProviderMessageRole.USER, List.of(new ProviderTextBlock("Explain more")));
+
+    ProviderRequest turn2Req =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(turn1User, turn1Asst, turn2User),
+            List.of(),
+            ProviderCacheControl.none());
+
+    OpenAiChatEncodedRequest encodedTurn2 =
+        encoder.encode(turn2Req, descriptor, OpenAiChatConfiguration.defaults());
+    JsonNode wireRoot = MAPPER.readTree(encodedTurn2.bodyUtf8Bytes());
+    ArrayNode wireMessages = (ArrayNode) wireRoot.path("messages");
+    assertEquals(3, wireMessages.size());
+
+    JsonNode wireAsst = wireMessages.get(1);
+    assertEquals("assistant", wireAsst.path("role").asText());
+    assertEquals("Result 42", wireAsst.path("content").asText());
+    assertEquals("Solving...", wireAsst.path("reasoning_content").asText());
+    assertTrue(wireAsst.path("reasoning_details").isArray());
+    assertEquals(2, wireAsst.path("reasoning_details").size());
+    assertEquals(1, wireAsst.path("reasoning_details").get(0).path("step").asInt());
+    assertEquals("completed", wireAsst.path("reasoning_details").get(1).path("status").asText());
   }
 }
