@@ -1,0 +1,5 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Gemini"}]}}]}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":" streaming"}]}}]}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":" response."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}

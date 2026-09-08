@@ -1,0 +1,1 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_loc","name":"getLocation","args":{"ip":"127.0.0.1"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":15,"candidatesTokenCount":6,"totalTokenCount":21}}
