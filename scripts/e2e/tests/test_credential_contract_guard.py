@@ -1,18 +1,24 @@
-"""Permanent guards for the MiniMax-only real E2E credential boundary."""
+"""Permanent guards for the four-provider real E2E credential boundary."""
 
 import ast
+from pathlib import Path
 import re
 import unittest
-from pathlib import Path
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 ALLOWED_CREDENTIAL_ENVIRONMENTS = {
-    "TEST_MINIMAX_BASE_URL",
-    "TEST_MINIMAX_API_KEY",
+    "TEST_GEMINI_BASE_URL",
+    "TEST_GEMINI_API_KEY",
+    "TEST_OPENAI_BASE_URL",
+    "TEST_OPENAI_API_KEY",
+    "TEST_MINIMAX_ANTHROPIC_BASE_URL",
+    "TEST_MINIMAX_ANTHROPIC_API_KEY",
+    "TEST_DEEPSEEK_BASE_URL",
+    "TEST_DEEPSEEK_API_KEY",
 }
-NON_MINIMAX_CREDENTIAL = re.compile(
-    r"\bTEST_(?!MINIMAX_(?:BASE_URL|API_KEY)\b)[A-Z0-9_]+_(?:BASE_URL|API_KEY)\b"
+NON_ALLOWED_CREDENTIAL = re.compile(
+    r"\bTEST_(?!(?:GEMINI|OPENAI|MINIMAX_ANTHROPIC|DEEPSEEK|MINIMAX)_(?:BASE_URL|API_KEY)\b)[A-Z0-9_]+_(?:BASE_URL|API_KEY)\b"
 )
 CREDENTIAL_ENVIRONMENT = re.compile(r"^TEST_[A-Z0-9_]+_(?:BASE_URL|API_KEY)$")
 
@@ -42,12 +48,12 @@ def production_files():
 
 
 class TestCredentialContractGuard(unittest.TestCase):
-    """Prevent reintroducing multiple credential inputs or app-side synchronization."""
+    """Prevent reintroducing unapproved credential inputs or app-side synchronization."""
 
-    def test_production_scopes_contain_no_non_minimax_credential_environment(self):
+    def test_production_scopes_contain_no_unallowed_credential_environment(self):
         offenders = []
         for path in production_files():
-            matches = NON_MINIMAX_CREDENTIAL.findall(path.read_text())
+            matches = NON_ALLOWED_CREDENTIAL.findall(path.read_text())
             if matches:
                 offenders.append(f"{path.relative_to(REPOSITORY_ROOT)}: {matches}")
 

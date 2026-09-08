@@ -106,6 +106,9 @@ class AnthropicModelProviderUnitTest {
 
   @AfterEach
   void tearDown() {
+    if (client != null) {
+      client.shutdownNow();
+    }
     if (exec != null) {
       exec.shutdownNow();
     }

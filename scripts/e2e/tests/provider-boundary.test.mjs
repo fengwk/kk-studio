@@ -3,18 +3,17 @@ import test from 'node:test'
 
 import { assertProviderExecutionBoundary } from '../lib/provider-boundary.mjs'
 
-test('free mode accepts only the explicitly unconfigured seed provider', () => {
-  // Test intent: free runners may start only when no credential or endpoint can route a paid call.
+test('free mode accepts only an entirely unconfigured provider catalog', () => {
+  // Test intent: free runners may start only when no catalog row can route a paid call.
   assert.doesNotThrow(() =>
     assertProviderExecutionBoundary({
       real: false,
-      providers: [{ name: 'minimax', configured: false, baseUrl: null }],
-    }),
-  )
-  assert.doesNotThrow(() =>
-    assertProviderExecutionBoundary({
-      real: false,
-      providers: [{ name: 'minimax', configured: false }],
+      providers: [
+        { name: 'google', configured: false, baseUrl: null },
+        { name: 'openai', configured: false },
+        { name: 'minimax-anthropic', configured: false, baseUrl: null },
+        { name: 'deepseek', configured: false, baseUrl: null },
+      ],
     }),
   )
 })
@@ -25,9 +24,14 @@ test('free mode fails closed without exposing provider details', () => {
   for (const providers of [
     [],
     null,
+    [null],
     [{ name: 'minimax', configured: true, baseUrl: null }],
     [{ name: 'minimax', configured: false, baseUrl: endpoint }],
     [{ name: 'minimax', baseUrl: null }],
+    [
+      { name: 'minimax', configured: false, baseUrl: null },
+      { name: 'openai', configured: true, baseUrl: null },
+    ],
   ]) {
     let error = null
     try {
@@ -36,7 +40,7 @@ test('free mode fails closed without exposing provider details', () => {
       error = caught
     }
     assert(error instanceof Error)
-    assert.match(error.message, /free E2E requires seed provider minimax/)
+    assert.match(error.message, /free E2E requires every catalog provider/)
     assert.equal(error.message.includes(endpoint), false)
   }
 })
@@ -64,6 +68,6 @@ test('real mode bypasses the free-provider state guard', () => {
         real: 'true',
         providers: [{ name: 'minimax', configured: true }],
       }),
-    /free E2E requires seed provider minimax/,
+    /free E2E requires every catalog provider/,
   )
 })

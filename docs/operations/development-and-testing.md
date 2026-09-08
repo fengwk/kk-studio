@@ -68,9 +68,10 @@ flowchart TD
 
 `start` 会停止受管进程、检查端口、用 Maven clean package backend、按需执行
 `npm install`，等待 backend API ready 后启动 Vite。`e2e` profile 启用时，
-宿主同步器将 `TEST_MINIMAX_BASE_URL` 与 `TEST_MINIMAX_API_KEY` 的完整 pair
-经 backend API 写入 E2E database 中由 seed 创建的 Provider row；credential
-不进入 seed SQL/resource，密钥不打印。
+宿主同步器按需读取 Google、OpenAI Responses、MiniMax Anthropic 和 DeepSeek
+四组完整 credential pair，经 backend API 写入 E2E database 中对应的 seed
+Provider row；backend Java 进程会显式移除这些宿主变量，credential 不进入 seed
+SQL/resource，密钥与 endpoint 不打印。
 
 Vite 配置默认只监听 `127.0.0.1`，并使用 Vite 自带的 Host allowlist。需要容器
 或远程开发时由调用方通过命令行 `--host` 显式覆盖，仓库默认不向全部网卡开放。
@@ -272,13 +273,13 @@ python3 scripts/security/check-sensitive-data.py
 git diff --check
 ```
 
-`--docs` 必须以 `Total registered: 78` 结束；精确 case inventory、标题和
+`--docs` 必须以 `Total registered: 85` 结束；精确 case inventory、标题和
 requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局、Markdown
 链接、H1、源码路径和旧词守卫。敏感数据门禁扫描当前 tracked 文件和非 ignored
 未跟踪文件，覆盖高置信密钥、Webhook、个人绝对路径和已知私有环境标识；命中时
 只输出规则与 `path:line`。该入口不扫描 Git 历史，历史审计是公开策略中的独立步骤。
 
-## 8. E2E：API levels、flags 和当前 78-case matrix
+## 8. E2E：API levels、flags 和当前 85-case matrix
 
 ### 8.1 入口和 flags
 
@@ -306,12 +307,12 @@ requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局
 | Flag | 当前语义 |
 | --- | --- |
 | `--rebuild` | Java 21 clean package，重启 backend/frontend；带 tools 时也处理 Daemon |
-| `--real` | 启用真实 Provider cases，要求 `TEST_MINIMAX_BASE_URL` 和 `TEST_MINIMAX_API_KEY` |
+| `--real` | 启用四模型真实 Provider cases，要求四组完整的 `TEST_*_BASE_URL` / `TEST_*_API_KEY` |
 | `--with-tools` | 启用 Daemon/Tool cases |
 | `--with-branch` | 启用 branch case，并自动打开 `--real` |
 | `--with-canvas-storage` | 启用 Canvas Resource/Blob contract，backend 必须有 S3 配置 |
 | `--with-canvas-function` | 启用 fake Canvas Function；隐含 storage、rebuild 和 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true` |
-| `--distributed` | 启停 `deploy/distributed` 双节点 mock topology，并在可适用免费矩阵上启用分布式 cases；不启动宿主单实例栈，不读取宿主 MiniMax 凭据 |
+| `--distributed` | 启停 `deploy/distributed` 双节点 mock topology，并在可适用免费矩阵上启用分布式 cases；不启动宿主单实例栈，不读取宿主真实 Provider 凭据 |
 | `--ui` | 在 API matrix 后执行 Playwright UI matrix |
 | `--only CASE_ID` | 只运行指定 case，可重复 |
 | `--level L1\|L2\|L3\|L4\|L5` | 过滤 API level，可重复；UI 不属于此过滤器 |
@@ -343,11 +344,11 @@ requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局
 当前默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是
 `http://127.0.0.1:5173`；`scripts/e2e.sh` 会把两者传给 runner。
 
-只有 `--real` 会读取并同步宿主 `TEST_MINIMAX_*`。免费、`--rebuild`、
-`--with-tools`、`--ui` 与 `--with-canvas-function` 都忽略这组宿主凭据。
-未带 `--real` 时，API 与 UI runner 会在首个 case 前检查 seed `minimax`
-必须明确为 `configured=false` 且无非空 `baseUrl`；复用曾执行真实 E2E
-的 database 会 fail-closed，需改用全新未配置的 E2E database。
+只有 `--real` 会读取并同步四组宿主 Provider credential。免费、`--rebuild`、
+`--with-tools`、`--ui` 与 `--with-canvas-function` 都忽略这些宿主凭据。
+未带 `--real` 时，API 与 UI runner 会在首个 case 前检查 catalog 中每个 Provider
+都必须明确为 `configured=false` 且无 `baseUrl`；复用曾执行真实 E2E 的 database
+会 fail-closed，需改用全新未配置的 E2E database。
 
 `--rebuild` 默认允许 Maven 在线解析依赖；只有显式设置
 `E2E_MAVEN_OFFLINE=true` 时 backend 与 Daemon/runtime classpath
@@ -360,9 +361,9 @@ Daemon environment root 默认是其下的 `environment`，可由
 | Level | 注册数 | 默认/开关 | 当前覆盖 |
 | --- | ---: | --- | --- |
 | L1 | 68 | 默认执行 64；storage/function/attachment case 需显式开关 | 免费 API contract、CRUD、Session/Thread、command batch、CAS、idempotency、i18n、model attempt、Canvas API |
-| L2 | 3 | `--real` | 真实文本 turn、真实 task delegation、stop partial/replay/continue |
+| L2 | 6 | `--real` 默认选择四模型文本缓存与 stop；task delegation 还需 `--with-tools` | 四模型文本与 Prompt Cache、真实 task delegation、stop partial/replay/continue |
 | L3 | 1 | `--real --with-branch` | 同 Session `ENTRY` 分支 Thread |
-| L4 | 3 | `--with-tools`；真实 Tool turn 还需 `--real --with-tools --with-canvas-storage` | Environment READY 与 14 个原子 capability 投影、directories、approval 后 Resource 外部化 |
+| L4 | 7 | `--with-tools`；四模型 Tool 需再加 `--real`，Resource 外部化需再加 `--with-canvas-storage` | Environment READY 与 capability 投影、directories、四模型 terminal replay、approval 后 Resource 外部化 |
 | L5 | 3 | `--distributed` | 双节点分布式 mock topology：跨节点 Environment CRUD 共享状态、双向 directory mailbox 路由、DB loss fail-closed 与有界 recovery |
 | UI/L5 | 注册 39，默认 36 | `--ui`；额外 `--with-tools`、`--real` | Playwright 页面、Composer、debug、settings 和 runtime UI |
 
@@ -389,7 +390,7 @@ DB loss fail-closed 与有界 recovery。对应 gates 分别是 `--real`、`--re
 ### 8.4 UI matrix：注册 39，默认 36
 
 UI 由 `scripts/e2e/ui-smoke.mjs`、`scripts/e2e/ui/composer-matrix.mjs` 和
-`scripts/e2e/ui/workspace-contracts.mjs` 注册；它不是 78 个 API case 的一部分。
+`scripts/e2e/ui/workspace-contracts.mjs` 注册；它不是 85 个 API case 的一部分。
 UI categories 是页面/runtime、Composer/debug 和 Workspace contract；`--ui` 是
 总 gate，默认执行 36 项无成本/无 daemon 用例；`--with-tools` 增加 2 项
 （Environment Workspace 创建与 ToolCard approval/layout），`--real` 增加 1 项真实
@@ -409,14 +410,24 @@ node scripts/e2e/ui-smoke.mjs \
 
 ### 8.5 Real credentials 和付费边界
 
-- 真实 E2E 只接受完整 pair：`TEST_MINIMAX_BASE_URL` +
-  `TEST_MINIMAX_API_KEY`。Base URL 去除尾部斜杠并补为 `/v1`；真实 case
-  固定校验 `minimax/MiniMax-M2.7`，不会静默换 provider/model。
-- 只有显式 `--real` 才调用宿主同步器，并通过 backend API 将 pair 写入
-  E2E database 中由 seed 创建的 Provider row；credential 不进入 seed
-  SQL/resource。Compose、Dockerfile、image layer 和 container environment
-  不接收这两个值。不要把 `docker inspect`、完整 endpoint 或数据库
-  credential 内容放进报告。
+- 真实 E2E 要求以下四组完整 pair，任一组缺失或只提供一半都会在同步前失败：
+  - `TEST_GEMINI_BASE_URL` + `TEST_GEMINI_API_KEY`
+  - `TEST_OPENAI_BASE_URL` + `TEST_OPENAI_API_KEY`
+  - `TEST_MINIMAX_ANTHROPIC_BASE_URL` + `TEST_MINIMAX_ANTHROPIC_API_KEY`
+  - `TEST_DEEPSEEK_BASE_URL` + `TEST_DEEPSEEK_API_KEY`
+- 对应模型固定为 `google/gemini-3.8-flash`、`openai/gpt-5.6-luna`、
+  `minimax-anthropic/MiniMax-M3` 和 `deepseek/deepseek-v4-flash`，不会静默换
+  provider/model。OpenAI 与 DeepSeek Base URL 去除尾部斜杠并补齐 `/v1`；
+  Gemini 与 MiniMax Anthropic 只去除尾部斜杠，保留调用方提供的协议 base path。
+- 只有显式 `--real` 才调用宿主同步器，并通过 backend API 将四组 pair 写入
+  E2E database 中对应的 seed Provider row；credential 不进入 seed SQL/resource。
+  Compose、Dockerfile、image layer、backend/Daemon environment 和报告不接收这些值。
+  不要把 `docker inspect`、完整 endpoint 或数据库 credential 内容放进报告。
+- 未带 `--real` 时，runner 对整个 Provider catalog 执行 fail-closed 检查，任何
+  configured row 或非空 `baseUrl` 都会阻止免费矩阵运行。
+- reliability 的八用例 Agent 矩阵继续使用独立的
+  `TEST_MINIMAX_BASE_URL` + `TEST_MINIMAX_API_KEY`，只更新其隔离 database 中的
+  `minimax` Responses Provider，不扩大四模型 E2E 的输入集合。
 - 默认 L1、性能 baseline、`deploy/test/run.sh` 和
   `scripts/reliability/regression.sh` 不调用真实 Provider。
 - 真实 Seedance prepare-only 只能显式执行：
@@ -753,7 +764,7 @@ docker compose -f deploy/test/compose.yaml --profile app down --volumes --remove
 | local app unhealthy | `docker compose -f deploy/local/compose.yaml ps`；`docker compose -f deploy/local/compose.yaml logs app postgres` | 先确认 PostgreSQL health，再检查 `/actuator/health` |
 | Canvas test 健康失败 | `docker compose -f deploy/test/compose.yaml ps`；`docker compose -f deploy/test/compose.yaml logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |
 | E2E 只跑少数 case | `node scripts/e2e/run-matrix.mjs --list`；确认 `--real`、`--with-tools`、`--with-canvas-storage`、`--with-canvas-function` | 通过 `requires` 和 level 过滤是当前行为 |
-| 真实 Provider 不可用 | `test -n "$TEST_MINIMAX_BASE_URL"`；`test -n "$TEST_MINIMAX_API_KEY"` | 必须显式 `--real`，只用宿主同步器；不要放入 Compose/image/container |
+| 真实 Provider 不可用 | 检查 8 个 `TEST_{GEMINI,OPENAI,MINIMAX_ANTHROPIC,DEEPSEEK}_{BASE_URL,API_KEY}` 变量是否均非空 | 必须显式 `--real`，只用宿主同步器；不要放入 Compose/image/container |
 | reliability 环境未 READY | `./scripts/reliability/stack.sh status`；`./scripts/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |
 | 敏感数据门禁失败 | `python3 scripts/security/check-sensitive-data.py` | 只按输出的规则和位置排查；不要把完整敏感值复制到日志或 Issue |
 | performance/supply-chain 失败 | 阅读 `reports/performance/latest/report.md` 或 `reports/supply-chain/latest/summary.md` | 阈值、在线源、JSON 完整性和 zero-vulnerability 都不能放宽 |
@@ -766,9 +777,9 @@ L0  validate / Spotless / Checkstyle / type-check / sensitive-data gate
     ├─ Java unit + integration + JaCoCo report（critical-class gate on verify）
     └─ Frontend Vitest + ESLint + Vite build + v8 coverage
 L1  free API contract matrix (default 64 / registered 68)
-L2  real Provider text/task/stop (explicit --real)
+L2  real Provider text-cache/task/stop (6 registered; explicit --real)
 L3  real same-session branch (explicit --with-branch)
-L4  Environment/Tool/approval (explicit --with-tools; real tool adds S3)
+L4  Environment/Tool/approval (7 registered; explicit --with-tools; Resource case adds S3)
 L5  Playwright UI (default 36 / registered 39; --ui + gates)
 D   distributed two-node mock topology (explicit --distributed; orthogonal capability)
 R   reliability regression + optional eight-case Agent matrix

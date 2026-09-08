@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
@@ -19,19 +20,37 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /** 验证 Anthropic 组件的 toString 与异常脱敏安全约束。 */
 class AnthropicSecurityAndArchitectureTest {
 
+  private HttpClient httpClient;
+  private ExecutorService workerExecutor;
+  private ScheduledExecutorService scheduler;
+
+  @AfterEach
+  void tearDown() {
+    if (httpClient != null) {
+      httpClient.shutdownNow();
+    }
+    if (workerExecutor != null) {
+      workerExecutor.shutdownNow();
+    }
+    if (scheduler != null) {
+      scheduler.shutdownNow();
+    }
+  }
+
   @Test
   void toStringNeverLeaksApiKeyOrRequestBody() {
     String sensitiveKey = "sk-ant-api03-TOP-SECRET-KEY-123456789";
-    JdkHttpSseTransport transport =
-        new JdkHttpSseTransport(
-            HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build(),
-            Executors.newSingleThreadExecutor(),
-            Executors.newSingleThreadScheduledExecutor());
+    httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+    workerExecutor = Executors.newSingleThreadExecutor();
+    scheduler = Executors.newSingleThreadScheduledExecutor();
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
 
     AnthropicProviderAdapter adapter = new AnthropicProviderAdapter(transport, sensitiveKey);
     assertFalse(adapter.toString().contains(sensitiveKey));
@@ -59,11 +78,10 @@ class AnthropicSecurityAndArchitectureTest {
 
   @Test
   void rejectsNonAnthropicDescriptor() {
-    JdkHttpSseTransport transport =
-        new JdkHttpSseTransport(
-            HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build(),
-            Executors.newSingleThreadExecutor(),
-            Executors.newSingleThreadScheduledExecutor());
+    httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+    workerExecutor = Executors.newSingleThreadExecutor();
+    scheduler = Executors.newSingleThreadScheduledExecutor();
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
 
     AnthropicProviderAdapter adapter = new AnthropicProviderAdapter(transport, "key");
     ProviderDescriptor openAiDescriptor =

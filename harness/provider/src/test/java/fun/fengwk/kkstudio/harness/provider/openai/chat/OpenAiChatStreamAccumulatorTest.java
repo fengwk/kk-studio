@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -21,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
@@ -415,5 +417,361 @@ class OpenAiChatStreamAccumulatorTest {
 
     accumulator.handleData("{\"choices\":[{\"delta\":{\"content\":\"incomplete\"}}]}");
     assertThrows(ProviderException.class, accumulator::finish);
+  }
+
+  @Test
+  @DisplayName("三种 read placement 之标准 nested prompt_tokens_details.cached_tokens 互斥度量与原始 JSON 保持")
+  void testUsageReadPlacementNestedPromptTokensDetails() throws Exception {
+    // 测试意图：验证标准 nested prompt_tokens_details.cached_tokens 正确解析为 cacheReadTokens，
+    // 按 ordinaryInput = max(0, prompt_tokens - cacheRead - cacheWrite) 规则互斥扣减，并完整保真 rawUsageJson。
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"nested\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 30,
+            "total_tokens": 130,
+            "prompt_tokens_details": {
+              "cached_tokens": 40
+            }
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(40L, usage.cacheReadTokens());
+    assertEquals(0L, usage.cacheWriteTokens());
+    assertEquals(60L, usage.inputTokens());
+    assertEquals(30L, usage.outputTokens());
+    assertEquals(130L, usage.totalTokens());
+    assertEquals(130L, usage.categorizedTokens());
+
+    JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
+    assertEquals(40L, rawUsage.path("prompt_tokens_details").path("cached_tokens").asLong());
+  }
+
+  @Test
+  @DisplayName("三种 read placement 之 DeepSeek 顶层 prompt_cache_hit_tokens 互斥度量与 miss tokens 隔离")
+  void testUsageReadPlacementDeepSeekTopLevelHitAndMissMutualExclusion() throws Exception {
+    // 测试意图：验证 DeepSeek 风格顶层 prompt_cache_hit_tokens 解析为 cacheReadTokens，
+    // prompt_cache_miss_tokens 作为普通未缓存输入由 ordinaryInput 吸收且绝不误算为 cacheWriteTokens，
+    // rawUsageJson 保留 hit 与 miss 原始事实。
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"deepseek\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_cache_hit_tokens": 75,
+            "prompt_cache_miss_tokens": 25
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(75L, usage.cacheReadTokens());
+    assertEquals(0L, usage.cacheWriteTokens());
+    assertEquals(25L, usage.inputTokens());
+    assertEquals(20L, usage.outputTokens());
+    assertEquals(120L, usage.totalTokens());
+    assertEquals(120L, usage.categorizedTokens());
+
+    JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
+    assertEquals(75L, rawUsage.path("prompt_cache_hit_tokens").asLong());
+    assertEquals(25L, rawUsage.path("prompt_cache_miss_tokens").asLong());
+  }
+
+  @Test
+  @DisplayName("三种 read placement 之兼容顶层 cached_tokens 互斥度量与 rawUsageJson 保持")
+  void testUsageReadPlacementTopLevelCachedTokens() throws Exception {
+    // 测试意图：验证部分兼容实现（如 Kimi）顶层 cached_tokens 正确解析为 cacheReadTokens，
+    // 完成 ordinaryInput 互斥扣减并保真 rawUsageJson。
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"kimi\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 80,
+            "completion_tokens": 15,
+            "total_tokens": 95,
+            "cached_tokens": 30
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(30L, usage.cacheReadTokens());
+    assertEquals(0L, usage.cacheWriteTokens());
+    assertEquals(50L, usage.inputTokens());
+    assertEquals(15L, usage.outputTokens());
+    assertEquals(95L, usage.totalTokens());
+    assertEquals(95L, usage.categorizedTokens());
+
+    JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
+    assertEquals(30L, rawUsage.path("cached_tokens").asLong());
+  }
+
+  @Test
+  @DisplayName("优先级覆盖：标准 nested 字段优先于顶层 prompt_cache_hit_tokens 与 cached_tokens")
+  void testUsageNestedPriorityOverTopLevelHitAndTopLevelCached() {
+    // 测试意图：验证明确优先级：当 nested prompt_tokens_details.cached_tokens、顶层 prompt_cache_hit_tokens
+    // 与顶层 cached_tokens 同时存在时，必须严格取 nested cached_tokens。
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"priority\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "total_tokens": 110,
+            "prompt_cache_hit_tokens": 50,
+            "cached_tokens": 60,
+            "prompt_tokens_details": {
+              "cached_tokens": 20
+            }
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(20L, usage.cacheReadTokens());
+    assertEquals(80L, usage.inputTokens());
+  }
+
+  @Test
+  @DisplayName("优先级覆盖：无 nested 时顶层 prompt_cache_hit_tokens 优先于顶层 cached_tokens")
+  void testUsageTopLevelHitPriorityOverTopLevelCached() {
+    // 测试意图：验证在无 nested 缓存字段时，顶层 prompt_cache_hit_tokens 优先级高于顶层 cached_tokens。
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"fallback\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "total_tokens": 110,
+            "prompt_cache_hit_tokens": 45,
+            "cached_tokens": 55
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(45L, usage.cacheReadTokens());
+    assertEquals(55L, usage.inputTokens());
+  }
+
+  @Test
+  @DisplayName("支持 nested cache_write_tokens 与 cache_creation_input_tokens")
+  void testUsageCacheWriteTokensSupport() {
+    // 测试意图：验证 cache write 支持 nested cache_write_tokens 与 cache_creation_input_tokens 两种命名，
+    // 并与 prompt_tokens 构成三方互斥度量。
+    OpenAiChatStreamAccumulator accumulator1 = createAccumulator();
+    accumulator1.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"w1\"},\"finish_reason\":\"stop\"}]}");
+    accumulator1.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_tokens_details": {
+              "cached_tokens": 30,
+              "cache_write_tokens": 20
+            }
+          }
+        }
+        """);
+    accumulator1.handleData("[DONE]");
+
+    ProviderCompletion completion1 = accumulator1.finish();
+    ModelUsage usage1 = completion1.response().usage();
+    assertEquals(30L, usage1.cacheReadTokens());
+    assertEquals(20L, usage1.cacheWriteTokens());
+    assertEquals(50L, usage1.inputTokens()); // 100 - 30 - 20
+
+    OpenAiChatStreamAccumulator accumulator2 = createAccumulator();
+    accumulator2.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"w2\"},\"finish_reason\":\"stop\"}]}");
+    accumulator2.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_tokens_details": {
+              "cached_tokens": 15,
+              "cache_creation_input_tokens": 25
+            }
+          }
+        }
+        """);
+    accumulator2.handleData("[DONE]");
+
+    ProviderCompletion completion2 = accumulator2.finish();
+    ModelUsage usage2 = completion2.response().usage();
+    assertEquals(15L, usage2.cacheReadTokens());
+    assertEquals(25L, usage2.cacheWriteTokens());
+    assertEquals(60L, usage2.inputTokens()); // 100 - 15 - 25
+  }
+
+  @Test
+  @DisplayName("无缓存字段时 cache 用量默认为 0，完全无 usage 时所有用量归零")
+  void testUsageWithoutCacheFieldsDefaultsToZero() {
+    // 测试意图：验证 usage 中不存在任何缓存字段时，cacheRead 与 cacheWrite 默认为 0，
+    // inputTokens 与 prompt_tokens 完全一致；且流中未发送 usage 块时所有用量均安全默认为 0。
+    OpenAiChatStreamAccumulator accumulator1 = createAccumulator();
+    accumulator1.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"plain\"},\"finish_reason\":\"stop\"}]}");
+    accumulator1.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 50,
+            "completion_tokens": 10,
+            "total_tokens": 60
+          }
+        }
+        """);
+    accumulator1.handleData("[DONE]");
+
+    ProviderCompletion completion1 = accumulator1.finish();
+    ModelUsage usage1 = completion1.response().usage();
+    assertEquals(0L, usage1.cacheReadTokens());
+    assertEquals(0L, usage1.cacheWriteTokens());
+    assertEquals(50L, usage1.inputTokens());
+    assertEquals(10L, usage1.outputTokens());
+    assertEquals(60L, usage1.totalTokens());
+
+    OpenAiChatStreamAccumulator accumulator2 = createAccumulator();
+    accumulator2.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"no_usage\"},\"finish_reason\":\"stop\"}]}");
+    accumulator2.handleData("[DONE]");
+
+    ProviderCompletion completion2 = accumulator2.finish();
+    ModelUsage usage2 = completion2.response().usage();
+    assertEquals(0L, usage2.inputTokens());
+    assertEquals(0L, usage2.outputTokens());
+    assertEquals(0L, usage2.cacheReadTokens());
+    assertEquals(0L, usage2.cacheWriteTokens());
+    assertEquals(0L, usage2.totalTokens());
+    assertEquals("{}", completion2.response().rawUsageJson());
+  }
+
+  @Test
+  @DisplayName("非法负数严格映射为 INVALID_RESPONSE，绝不被静默篡改")
+  void testUsageNegativeFieldsFailStrictResponseValidation() {
+    // 测试意图：验证所有计量维度的非法负数在接收 usage 块时立即失败，确保异步回调可稳定映射为
+    // INVALID_RESPONSE，而不是让未检查异常逃逸或将负数静默截断。
+    assertInvalidUsage(
+        "{\"prompt_tokens\":-1,\"completion_tokens\":10,\"total_tokens\":9}", "prompt_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10,\"completion_tokens\":10,\"total_tokens\":20,"
+            + "\"prompt_tokens_details\":{\"cached_tokens\":-1}}",
+        "prompt_tokens_details.cached_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10,\"completion_tokens\":10,\"total_tokens\":20,"
+            + "\"prompt_cache_hit_tokens\":-1}",
+        "prompt_cache_hit_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10,\"completion_tokens\":10,\"total_tokens\":20,"
+            + "\"cached_tokens\":-1}",
+        "cached_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10,\"completion_tokens\":-1,\"total_tokens\":9}", "completion_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10,\"completion_tokens\":10,\"total_tokens\":-1}", "total_tokens");
+  }
+
+  @Test
+  @DisplayName("usage 非整数或 details 非 Object 时严格映射为 INVALID_RESPONSE")
+  void testUsageInvalidShapesFailStrictResponseValidation() {
+    // 测试意图：验证字符串、浮点数、null 计量值及错误 details shape 不会被 Jackson asLong
+    // 宽松转换为 0；流式中间块的 usage:null 仍按协议允许。
+    assertInvalidUsage(
+        "{\"prompt_tokens\":\"10\",\"completion_tokens\":1,\"total_tokens\":11}", "prompt_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10.5,\"completion_tokens\":1,\"total_tokens\":11}", "prompt_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":null,\"completion_tokens\":1,\"total_tokens\":1}", "prompt_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10,\"completion_tokens\":1,\"total_tokens\":11,"
+            + "\"prompt_tokens_details\":[]}",
+        "prompt_tokens_details");
+
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData("{\"usage\":null,\"choices\":[]}");
+  }
+
+  @Test
+  @DisplayName("promptTokens 小于 cachedTokens 时 ordinaryInput 互斥计算安全截断为 0")
+  void testUsagePromptTokensLessThanCachedTokensClampedToZero() {
+    // 测试意图：验证当上游报告的合法 cachedTokens 大于 promptTokens 时，
+    // ordinaryInput = max(0, prompt_tokens - cacheRead - cacheWrite) 正确截断为 0，
+    // 且合法通过 ModelUsage 校验。
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"clamp\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 20,
+            "completion_tokens": 10,
+            "total_tokens": 30,
+            "prompt_cache_hit_tokens": 30
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(0L, usage.inputTokens());
+    assertEquals(30L, usage.cacheReadTokens());
+    assertEquals(10L, usage.outputTokens());
+  }
+
+  private OpenAiChatStreamAccumulator createAccumulator() {
+    return new OpenAiChatStreamAccumulator(
+        request,
+        descriptor,
+        OpenAiChatConfiguration.defaults(),
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        bridge);
+  }
+
+  private void assertInvalidUsage(String usageJson, String field) {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    ProviderException failure =
+        assertThrows(
+            ProviderException.class, () -> accumulator.handleData("{\"usage\":" + usageJson + "}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, failure.kind());
+    assertTrue(failure.getMessage().contains(field));
   }
 }

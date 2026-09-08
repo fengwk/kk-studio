@@ -33,7 +33,7 @@ usage() {
 Usage: $0 {start|stop|restart|status|logs|tail}
 
 Commands:
-  start    Clean-package backend, optionally sync the MiniMax E2E credential pair, then start backend and frontend.
+  start    Clean-package backend, optionally sync the four real E2E providers, then start backend and frontend.
   stop     Stop managed dev servers and, by default, listeners on dev ports.
   restart  Stop then start.
   status   Print process status and URLs.
@@ -44,9 +44,11 @@ Environment:
   BACKEND_PORT=18080
   FRONTEND_PORT=5173
   SPRING_PROFILES_ACTIVE=e2e   # dev/e2e 均使用 PostgreSQL；dev=stub seed，e2e=real provider seed
-  TEST_MINIMAX_API_KEY / TEST_MINIMAX_BASE_URL
-  # e2e profile: the complete MiniMax pair is written to seed provider name=minimax after backend readiness
-  # the base URL is normalized to end with /v1
+  TEST_GEMINI_BASE_URL / TEST_GEMINI_API_KEY
+  TEST_OPENAI_BASE_URL / TEST_OPENAI_API_KEY
+  TEST_MINIMAX_ANTHROPIC_BASE_URL / TEST_MINIMAX_ANTHROPIC_API_KEY
+  TEST_DEEPSEEK_BASE_URL / TEST_DEEPSEEK_API_KEY
+  # e2e profile: complete pairs are written to the matching seeded providers after backend readiness
   DEV_KILL_PORTS=true
   DEV_SKIP_PACKAGE=false
   DEV_SKIP_NPM_INSTALL=false
@@ -82,13 +84,21 @@ profile_enabled() {
   esac
 }
 
-# Synchronize the complete MiniMax credential pair into the seeded provider after backend readiness.
+# Synchronize complete real-provider credential pairs after backend readiness.
 sync_e2e_provider_credentials() {
   require_cmd python3
-  step "Syncing MiniMax E2E credentials from env (secrets not printed)"
-  BACKEND_URL="$BACKEND_URL" \
-  TEST_MINIMAX_API_KEY="${TEST_MINIMAX_API_KEY-}" TEST_MINIMAX_BASE_URL="${TEST_MINIMAX_BASE_URL-}" \
-  python3 "$APP_HOME/scripts/e2e/sync_provider_credentials.py" --backend-url "$BACKEND_URL"
+  step "Syncing provider E2E credentials from env (secrets not printed)"
+  env \
+    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+    TEST_GEMINI_BASE_URL="${TEST_GEMINI_BASE_URL-}" \
+    TEST_GEMINI_API_KEY="${TEST_GEMINI_API_KEY-}" \
+    TEST_OPENAI_BASE_URL="${TEST_OPENAI_BASE_URL-}" \
+    TEST_OPENAI_API_KEY="${TEST_OPENAI_API_KEY-}" \
+    TEST_MINIMAX_ANTHROPIC_BASE_URL="${TEST_MINIMAX_ANTHROPIC_BASE_URL-}" \
+    TEST_MINIMAX_ANTHROPIC_API_KEY="${TEST_MINIMAX_ANTHROPIC_API_KEY-}" \
+    TEST_DEEPSEEK_BASE_URL="${TEST_DEEPSEEK_BASE_URL-}" \
+    TEST_DEEPSEEK_API_KEY="${TEST_DEEPSEEK_API_KEY-}" \
+    python3 "$APP_HOME/scripts/e2e/sync_provider_credentials.py" --backend-url "$BACKEND_URL"
 }
 
 stop_pid_file() {
@@ -212,7 +222,13 @@ start_all() {
 
   step "Starting backend on $BACKEND_URL"
   read -r -a java_opts <<< "${JAVA_OPTS:-}"
-  run_detached "$BACKEND_LOG" "$java_home/bin/java" "${java_opts[@]}" -jar "$BACKEND_JAR" \
+  run_detached "$BACKEND_LOG" env \
+    -u TEST_GEMINI_BASE_URL -u TEST_GEMINI_API_KEY \
+    -u TEST_OPENAI_BASE_URL -u TEST_OPENAI_API_KEY \
+    -u TEST_MINIMAX_ANTHROPIC_BASE_URL -u TEST_MINIMAX_ANTHROPIC_API_KEY \
+    -u TEST_DEEPSEEK_BASE_URL -u TEST_DEEPSEEK_API_KEY \
+    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+    "$java_home/bin/java" "${java_opts[@]}" -jar "$BACKEND_JAR" \
     --spring.profiles.active="$SPRING_PROFILE" \
     --server.address="$BACKEND_HOST" \
     --server.port="$BACKEND_PORT"

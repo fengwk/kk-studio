@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.platform.catalog.provider.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -85,6 +87,22 @@ public class AgentProviderMutationFactoryTest {
     assertThrows(
         AiValidationException.class,
         () -> factory.newProvider(invalidTimeout.getName(), invalidTimeout));
+  }
+
+  @Test
+  public void shouldNotRetainMalformedExistingConfigurationCause() {
+    // 测试意图：更新路径读取损坏的持久配置时，不把可能携带原始配置的解析器 cause 暴露给
+    // Web 异常边界。
+    AgentProvider provider =
+        existingProvider("initial-secret", "{\"credential\":\"sensitive-value\"");
+    AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
+    update.setProviderType("openai");
+
+    AiValidationException error =
+        assertThrows(AiValidationException.class, () -> factory().update(provider, update));
+
+    assertFalse(error.getMessage().contains("sensitive-value"));
+    assertNull(error.getCause());
   }
 
   @Test

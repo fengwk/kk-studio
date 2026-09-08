@@ -153,7 +153,8 @@ up_stack() {
   BACKEND_URL="$APP_URL" \
     TEST_MINIMAX_API_KEY="${TEST_MINIMAX_API_KEY-}" \
     TEST_MINIMAX_BASE_URL="${TEST_MINIMAX_BASE_URL-}" \
-    python3 "$REPO_ROOT/scripts/e2e/sync_provider_credentials.py" --backend-url "$APP_URL"
+    python3 "$REPO_ROOT/scripts/reliability/sync_minimax_credentials.py" \
+      --backend-url "$APP_URL"
 }
 
 require_clean_anchor() {

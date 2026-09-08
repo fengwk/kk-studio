@@ -295,7 +295,7 @@ DISTRIBUTED_APP_B_PORT=18083
 
 两个 App 共享同一 PostgreSQL database 与 MinIO bucket；`node-a-db` 可被
 `disconnect-db-a` 单独断开，`daemon-a` 网络与 daemon workspace 不受影响。本栈
-不读取宿主 MiniMax 凭据；真实模型仍只能经 `scripts/e2e.sh` 显式 `--real` 同步。
+不读取宿主真实 Provider 凭据；真实模型仍只能经 `scripts/e2e.sh` 显式 `--real` 同步。
 
 ### 8.3 生命周期入口
 
@@ -436,7 +436,8 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
 | distributed | node identity/ports | `DISTRIBUTED_ENV_A_NAME`、`DISTRIBUTED_ENV_B_NAME`、`DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN`、`DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN`、`DISTRIBUTED_APP_A_PORT`、`DISTRIBUTED_APP_B_PORT` |
 | reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_ENV_NAME`、`RELIABILITY_REGISTRATION_TOKEN` |
 | supply-chain | reports/images/cache | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`TRIVY_SKIP_DB_UPDATE` |
-| explicit `--real` E2E | host-only credential sync | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
+| explicit `--real` E2E | host-only credential sync | `TEST_GEMINI_*`、`TEST_OPENAI_*`、`TEST_MINIMAX_ANTHROPIC_*`、`TEST_DEEPSEEK_*` |
+| reliability Agent matrix | host-only credential sync | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
 | explicit Seedance prepare-only | external Hub/workspace | `OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID` |
 
 ### 11.2 Secrets
@@ -450,11 +451,11 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
   仅由 `canvas-test` seed 将其启用并指向隔离网络内的
   `http://opencli-hub:8080` fake Hub。真实 prepare-only smoke 必须显式提供
   外部 Hub origin。
-- `scripts/e2e.sh` 只在显式 `--real` 时消费
-  `TEST_MINIMAX_BASE_URL`/`TEST_MINIMAX_API_KEY`；reliability stack 保留其
-  独立的可选宿主同步。两条路径都只经 HTTP 写入各自专用 database，不把
-  credential 放入 Compose environment、Dockerfile、image layer、Daemon
-  command 或报告。
+- `scripts/e2e.sh` 只在显式 `--real` 时消费 Google、OpenAI Responses、
+  MiniMax Anthropic 和 DeepSeek 的四组完整 credential pair；reliability stack
+  独立消费旧 `TEST_MINIMAX_BASE_URL`/`TEST_MINIMAX_API_KEY` pair。两条路径都只经
+  HTTP 写入各自专用 database，不把 credential 放入 Compose environment、
+  Dockerfile、image layer、backend/Daemon command 或报告。
 - 各测试栈的 registration token 是测试隔离配置，用于栈内 gateway handshake；
   不写入公共 Environment projection 或报告。
 - `NVD_API_KEY` 只由 supply-chain 脚本写入临时 mode-600 Maven settings；

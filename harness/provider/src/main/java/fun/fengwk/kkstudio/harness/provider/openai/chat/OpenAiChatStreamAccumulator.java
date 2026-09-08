@@ -126,8 +126,12 @@ final class OpenAiChatStreamAccumulator {
       this.serviceTier = root.get("service_tier").asText();
     }
 
-    // 处理 usage
-    if (root.has("usage") && root.get("usage").isObject()) {
+    // 处理 usage；流式中间块允许显式 null，其他非 Object 形态严格拒绝。
+    if (root.has("usage") && !root.get("usage").isNull()) {
+      if (!root.get("usage").isObject()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "usage must be a JSON object");
+      }
       parseUsageSnapshot(root.get("usage"));
     }
 
@@ -235,30 +239,99 @@ final class OpenAiChatStreamAccumulator {
   }
 
   private void parseUsageSnapshot(JsonNode usageNode) {
-    this.promptTokens = usageNode.path("prompt_tokens").asLong(0L);
-    this.completionTokens = usageNode.path("completion_tokens").asLong(0L);
-    this.totalTokens = usageNode.path("total_tokens").asLong(promptTokens + completionTokens);
+    this.promptTokens = optionalNonNegativeLong(usageNode, "prompt_tokens", 0L);
+    this.completionTokens = optionalNonNegativeLong(usageNode, "completion_tokens", 0L);
+    this.totalTokens =
+        usageNode.has("total_tokens")
+            ? requiredNonNegativeLong(usageNode.get("total_tokens"), "total_tokens")
+            : addUsageValues(promptTokens, completionTokens);
 
-    JsonNode promptDetails = usageNode.path("prompt_tokens_details");
-    if (promptDetails.isObject()) {
-      this.cachedTokens = promptDetails.path("cached_tokens").asLong(0L);
-      if (promptDetails.has("cache_write_tokens")) {
-        this.cacheWriteTokens = promptDetails.path("cache_write_tokens").asLong(0L);
-      } else if (promptDetails.has("cache_creation_input_tokens")) {
-        this.cacheWriteTokens = promptDetails.path("cache_creation_input_tokens").asLong(0L);
-      }
+    JsonNode promptDetails = optionalObject(usageNode, "prompt_tokens_details");
+    if (promptDetails != null && promptDetails.has("cached_tokens")) {
+      this.cachedTokens =
+          requiredNonNegativeLong(
+              promptDetails.get("cached_tokens"), "prompt_tokens_details.cached_tokens");
+    } else if (usageNode.has("prompt_cache_hit_tokens")) {
+      this.cachedTokens =
+          requiredNonNegativeLong(
+              usageNode.get("prompt_cache_hit_tokens"), "prompt_cache_hit_tokens");
+    } else if (usageNode.has("cached_tokens")) {
+      this.cachedTokens = requiredNonNegativeLong(usageNode.get("cached_tokens"), "cached_tokens");
+    } else {
+      this.cachedTokens = 0L;
     }
 
-    JsonNode completionDetails = usageNode.path("completion_tokens_details");
-    if (completionDetails.isObject()) {
-      this.reasoningTokens = completionDetails.path("reasoning_tokens").asLong(0L);
+    if (promptDetails != null && promptDetails.has("cache_write_tokens")) {
+      this.cacheWriteTokens =
+          requiredNonNegativeLong(
+              promptDetails.get("cache_write_tokens"), "prompt_tokens_details.cache_write_tokens");
+    } else if (promptDetails != null && promptDetails.has("cache_creation_input_tokens")) {
+      this.cacheWriteTokens =
+          requiredNonNegativeLong(
+              promptDetails.get("cache_creation_input_tokens"),
+              "prompt_tokens_details.cache_creation_input_tokens");
+    } else {
+      this.cacheWriteTokens = 0L;
+    }
+
+    JsonNode completionDetails = optionalObject(usageNode, "completion_tokens_details");
+    if (completionDetails != null && completionDetails.has("reasoning_tokens")) {
+      this.reasoningTokens =
+          requiredNonNegativeLong(
+              completionDetails.get("reasoning_tokens"),
+              "completion_tokens_details.reasoning_tokens");
+    } else {
+      this.reasoningTokens = 0L;
     }
 
     try {
       this.rawUsageJson = OBJECT_MAPPER.writeValueAsString(usageNode);
-    } catch (JsonProcessingException ignored) {
-      this.rawUsageJson = "{}";
+    } catch (JsonProcessingException exception) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "cannot preserve provider usage payload");
     }
+  }
+
+  private static JsonNode optionalObject(JsonNode parent, String field) {
+    JsonNode value = parent.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: " + field);
+    }
+    return value;
+  }
+
+  private static long optionalNonNegativeLong(JsonNode parent, String field, long fallback) {
+    JsonNode value = parent.get(field);
+    return value == null ? fallback : requiredNonNegativeLong(value, field);
+  }
+
+  private static long requiredNonNegativeLong(JsonNode value, String field) {
+    if (value == null
+        || !value.isIntegralNumber()
+        || !value.canConvertToLong()
+        || value.longValue() < 0L) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: " + field);
+    }
+    return value.longValue();
+  }
+
+  private static long addUsageValues(long left, long right) {
+    try {
+      return Math.addExact(left, right);
+    } catch (ArithmeticException exception) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "provider usage values overflow");
+    }
+  }
+
+  private static long uncachedTokens(long total, long firstExcluded, long secondExcluded) {
+    long excluded = addUsageValues(firstExcluded, secondExcluded);
+    return excluded >= total ? 0L : total - excluded;
   }
 
   private static GenerationStopReason mapFinishReason(String reason) {
@@ -330,8 +403,9 @@ final class OpenAiChatStreamAccumulator {
     }
 
     // 互斥 Usage 计算
-    long ordinaryInput = Math.max(0L, promptTokens - cachedTokens - cacheWriteTokens);
-    long ordinaryOutput = Math.max(0L, completionTokens - reasoningTokens);
+    long ordinaryInput = uncachedTokens(promptTokens, cachedTokens, cacheWriteTokens);
+    long ordinaryOutput =
+        reasoningTokens >= completionTokens ? 0L : completionTokens - reasoningTokens;
     long inputTokens = ordinaryInput;
     long outputTokens = ordinaryOutput;
     long cacheReadTokens = cachedTokens;

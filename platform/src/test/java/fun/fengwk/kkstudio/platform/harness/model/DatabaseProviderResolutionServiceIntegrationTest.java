@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
@@ -206,6 +207,45 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
             () -> resolution.resolve(ProviderType.ANTHROPIC, request));
     assertEquals("provider type drift: frozen=ANTHROPIC current=GOOGLE", drift.getMessage());
     assertEquals(0, google.openCount, "协议漂移不得打开新 factory");
+  }
+
+  /** 意图：验证数据库中 provider 行配置更新后，动态能力工厂在下一次 attempt 立即读取最新 config 并生效。 */
+  @Test
+  void resolveUsesDynamicConfigAwarePromptCacheCapabilityFromDatabase() {
+    String name = "dynamic-cache-provider-" + System.nanoTime();
+    ProviderFactory dynamicFactory =
+        ProviderFactory.of(
+            ProviderType.OPENAI,
+            configJson -> {
+              if (configJson != null && configJson.contains("LEGACY")) {
+                return PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT));
+              }
+              return PromptCacheCapability.automatic();
+            },
+            (cred, cfg) -> new CapturingFactory(ProviderType.OPENAI).create(cred, cfg));
+    DatabaseProviderResolutionService resolution = resolution(dynamicFactory);
+
+    AgentProviderDTO created =
+        createProvider(name, "openai", "https://example.com/v1", "secret", 10_000L);
+    ProviderRequest request =
+        request(name, ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"));
+
+    // 默认配置下能力为 AUTOMATIC，无法表达显式 AFFINITY，故规范化降级为 none()
+    ProviderResolutionService.ResolvedExecution first =
+        resolution.resolve(ProviderType.OPENAI, request);
+    assertEquals(ProviderCacheControl.none(), first.effectiveRequest().cacheControl());
+
+    // 更新 provider 配置为 LEGACY 缓存模式
+    AgentProvider provider = providerRepository.getByName(name);
+    provider.setConfigJson("{\"openAiPromptCacheMode\":\"LEGACY\"}");
+    providerRepository.updateByName(provider, provider.getVersion());
+
+    // 更新后下一次 attempt 解析：动态能力变为 AFFINITY，有效请求成功保留 AFFINITY 缓存控制
+    ProviderResolutionService.ResolvedExecution second =
+        resolution.resolve(ProviderType.OPENAI, request);
+    assertEquals(
+        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"),
+        second.effectiveRequest().cacheControl());
   }
 
   private DatabaseProviderResolutionService resolution(ProviderFactory... factories) {

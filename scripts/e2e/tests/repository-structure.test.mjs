@@ -84,6 +84,7 @@ test('repository structure guard verifies root and harness POM module lists', ()
     'tool',
     'environment',
     'runtime',
+    'provider',
     'contributor-api',
     'builtin',
     'infra',

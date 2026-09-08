@@ -8,6 +8,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
+import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
+import fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatProviderAdapter;
+import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -18,9 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
-import fun.fengwk.kkstudio.platform.harness.model.provider.GoogleProviderAdapter;
-import fun.fengwk.kkstudio.platform.harness.model.provider.OpenAiProviderAdapter;
-import fun.fengwk.kkstudio.platform.harness.model.provider.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.net.http.HttpClient;
@@ -115,20 +115,24 @@ public class ModelExecutionConfiguration {
 
   @Bean(name = "openaiProviderFactory")
   @ConditionalOnMissingBean(name = "openaiProviderFactory")
-  public ProviderFactory openaiProviderFactory() {
+  public ProviderFactory openaiProviderFactory(
+      @Qualifier("modelExecutionTransport") JdkHttpSseTransport transport) {
     return ProviderFactory.of(
         ProviderType.OPENAI,
-        PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-        (credential, configJson) -> new OpenAiProviderAdapter(credential));
+        OpenAiChatProviderAdapter::promptCacheCapability,
+        (credential, configJson) ->
+            new OpenAiChatProviderAdapter(transport, credential, configJson));
   }
 
   @Bean(name = "openaiResponsesProviderFactory")
   @ConditionalOnMissingBean(name = "openaiResponsesProviderFactory")
-  public ProviderFactory openaiResponsesProviderFactory() {
+  public ProviderFactory openaiResponsesProviderFactory(
+      @Qualifier("modelExecutionTransport") JdkHttpSseTransport transport) {
     return ProviderFactory.of(
         ProviderType.OPENAI_RESPONSES,
-        PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-        (credential, configJson) -> new OpenAiResponsesProviderAdapter(credential));
+        OpenAiResponsesProviderAdapter::resolvePromptCacheCapability,
+        (credential, configJson) ->
+            new OpenAiResponsesProviderAdapter(transport, credential, configJson));
   }
 
   @Bean(name = "anthropicProviderFactory")
@@ -148,11 +152,12 @@ public class ModelExecutionConfiguration {
 
   @Bean(name = "googleProviderFactory")
   @ConditionalOnMissingBean(name = "googleProviderFactory")
-  public ProviderFactory googleProviderFactory() {
+  public ProviderFactory googleProviderFactory(
+      @Qualifier("modelExecutionTransport") JdkHttpSseTransport transport) {
     return ProviderFactory.of(
         ProviderType.GOOGLE,
         PromptCacheCapability.automatic(),
-        (credential, configJson) -> new GoogleProviderAdapter(credential));
+        (credential, configJson) -> new GeminiProviderAdapter(transport, credential));
   }
 
   @Bean

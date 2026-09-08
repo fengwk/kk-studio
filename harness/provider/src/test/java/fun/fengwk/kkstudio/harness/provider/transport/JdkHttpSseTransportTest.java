@@ -100,6 +100,9 @@ class JdkHttpSseTransportTest {
     if (httpServer != null) {
       httpServer.stop(0);
     }
+    if (httpClient != null) {
+      httpClient.shutdownNow();
+    }
     if (workerExecutor != null) {
       workerExecutor.shutdownNow();
     }
@@ -1449,9 +1452,13 @@ class JdkHttpSseTransportTest {
   void redirecting_http_client_is_rejected_in_constructor() {
     HttpClient redirectClient =
         HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new JdkHttpSseTransport(redirectClient, workerExecutor, scheduler));
+    try {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> new JdkHttpSseTransport(redirectClient, workerExecutor, scheduler));
+    } finally {
+      redirectClient.shutdownNow();
+    }
   }
 
   /** 契约测试：第一阶段 workerExecutor 拒绝时同步抛出 EXECUTOR_REJECTED 异常。 */
@@ -1823,6 +1830,7 @@ class JdkHttpSseTransportTest {
   void watchdog_terminal_prevents_late_headers_closes_stream_without_reading() throws Exception {
     AtomicInteger bodyReadCount = new AtomicInteger();
     AtomicInteger bodyCloseCount = new AtomicInteger();
+    CountDownLatch bodyClosed = new CountDownLatch(1);
 
     InputStream trackingBody =
         new InputStream() {
@@ -1841,6 +1849,7 @@ class JdkHttpSseTransportTest {
           @Override
           public void close() {
             bodyCloseCount.incrementAndGet();
+            bodyClosed.countDown();
           }
         };
 
@@ -1877,6 +1886,7 @@ class JdkHttpSseTransportTest {
       workerFuture.get(5, TimeUnit.SECONDS);
     } catch (Exception ignored) {
     }
+    assertTrue(bodyClosed.await(5, TimeUnit.SECONDS), "late response body was not closed");
 
     // 核心断言：body 绝未读取，且流被且仅被 close 一次
     assertEquals(
@@ -2120,11 +2130,7 @@ class JdkHttpSseTransportTest {
     RecordingCallback callback = new RecordingCallback();
     HttpSseStreamExecution execution =
         new HttpSseStreamExecution(
-            HttpClient.newHttpClient(),
-            request,
-            ModelCallTimeoutPolicy.DEFAULT,
-            HttpSseLimits.DEFAULT,
-            callback);
+            httpClient, request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
 
     assertEquals(HttpSseStreamExecution.STATE_PENDING, execution.currentState());
     assertFalse(execution.isCancelled());
@@ -2177,7 +2183,7 @@ class JdkHttpSseTransportTest {
     RecordingCallback callback = new RecordingCallback();
     HttpSseStreamExecution execution =
         new HttpSseStreamExecution(
-            HttpClient.newHttpClient(),
+            httpClient,
             request,
             new ModelCallTimeoutPolicy(Duration.ofNanos(1), Duration.ofNanos(1)),
             HttpSseLimits.DEFAULT,
@@ -2196,7 +2202,7 @@ class JdkHttpSseTransportTest {
     HttpSseLimits limits = new HttpSseLimits(1024, 1024, 1024 * 1024, 5);
     HttpSseStreamExecution execution =
         new HttpSseStreamExecution(
-            HttpClient.newHttpClient(), request, ModelCallTimeoutPolicy.DEFAULT, limits, callback);
+            httpClient, request, ModelCallTimeoutPolicy.DEFAULT, limits, callback);
 
     byte[] sourceData = "0123456789".getBytes(StandardCharsets.UTF_8);
     ByteArrayInputStream in = new ByteArrayInputStream(sourceData);

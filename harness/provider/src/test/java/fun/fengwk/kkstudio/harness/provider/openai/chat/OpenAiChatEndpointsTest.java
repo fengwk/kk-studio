@@ -84,6 +84,9 @@ class OpenAiChatEndpointsTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> OpenAiChatEndpoints.resolveChatCompletionsUri("http:///path"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> OpenAiChatEndpoints.resolveChatCompletionsUri("http://:8080/path"));
   }
 
   @Test

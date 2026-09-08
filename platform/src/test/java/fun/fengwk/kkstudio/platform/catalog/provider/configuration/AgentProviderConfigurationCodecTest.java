@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.provider.configuration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -53,6 +54,19 @@ class AgentProviderConfigurationCodecTest {
         IllegalArgumentException.class,
         () -> codec.readTimeoutPolicy("{\"modelCallIdleTimeoutMillis\":0}"));
     assertThrows(IllegalArgumentException.class, () -> codec.mergeTimeoutPolicy("{}", -1L, null));
+  }
+
+  @Test
+  void malformedConfigurationDoesNotRetainParserCause() {
+    // 测试意图：持久配置可能含敏感扩展值；语法失败只保留稳定错误，不挂载可能携带原文的
+    // Jackson cause。
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> codec.readTimeoutPolicy("{\"credential\":\"sensitive-value\""));
+
+    assertEquals("persisted provider configJson must be valid JSON", error.getMessage());
+    assertNull(error.getCause());
   }
 
   @Test

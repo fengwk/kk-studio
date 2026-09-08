@@ -85,6 +85,49 @@
     }
   },
   {
+    "provider": "minimax-anthropic",
+    "name": "MiniMax-M3",
+    "description": "MiniMax-M3",
+    "config": {
+      "limit": {
+        "context": 1048576,
+        "output": 131072
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 0.3,
+        "outputPerMillionTokens": 1.2,
+        "cacheReadPerMillionTokens": 0.06,
+        "cacheWritePerMillionTokens": 0,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 1.2
+      },
+      "defaultVariant": "high",
+      "variants": [
+        {
+          "id": "off",
+          "reasoningEffort": "none"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        }
+      ]
+    }
+  },
+  {
     "provider": "openai",
     "name": "gpt-5.4",
     "description": "GPT-5.4",
@@ -590,6 +633,57 @@
         "reasoningPerMillionTokens": 7.5
       },
       "defaultVariant": "high",
+      "variants": [
+        {
+          "id": "minimal",
+          "reasoningEffort": "minimal"
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low"
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium"
+        },
+        {
+          "id": "high",
+          "reasoningEffort": "high"
+        }
+      ]
+    }
+  },
+  {
+    "provider": "google",
+    "name": "gemini-3.8-flash",
+    "description": "Gemini 3.8 Flash",
+    "config": {
+      "limit": {
+        "context": 1048576,
+        "output": 65536
+      },
+      "abilities": {
+        "tools": true,
+        "reasoning": true,
+        "inputModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      },
+      "pricing": {
+        "currency": "USD",
+        "pricingTier": "pi-base",
+        "serviceTier": "default",
+        "serviceTierMultiplier": 1,
+        "version": "pi-0.82.1",
+        "inputPerMillionTokens": 0.75,
+        "outputPerMillionTokens": 3.75,
+        "cacheReadPerMillionTokens": 0.075,
+        "cacheWritePerMillionTokens": 0,
+        "cacheWriteLongPerMillionTokens": 0,
+        "reasoningPerMillionTokens": 0
+      },
+      "defaultVariant": "minimal",
       "variants": [
         {
           "id": "minimal",

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,9 @@ import java.util.concurrent.atomic.AtomicReference;
 /** 测试意图：验证 OpenAI Chat Provider Adapter 的能力、工厂方法、类型匹配及匿名与认证模式。 */
 class OpenAiChatModelProviderUnitTest {
 
+  private HttpClient httpClient;
+  private ExecutorService workerExecutor;
+  private ScheduledExecutorService scheduler;
   private JdkHttpSseTransport transport;
   private ProviderDescriptor descriptor;
   private ModelDescriptor modelDesc;
@@ -52,9 +56,9 @@ class OpenAiChatModelProviderUnitTest {
 
   @BeforeEach
   void setUp() {
-    ExecutorService workerExecutor = Executors.newCachedThreadPool();
-    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    HttpClient httpClient =
+    workerExecutor = Executors.newCachedThreadPool();
+    scheduler = Executors.newSingleThreadScheduledExecutor();
+    httpClient =
         HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
@@ -84,6 +88,19 @@ class OpenAiChatModelProviderUnitTest {
         new ModelDescriptor(
             "openai", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
     defaultVariant = new ModelVariant("default", null, null, null, null, null, null, null, null);
+  }
+
+  @AfterEach
+  void tearDown() {
+    if (httpClient != null) {
+      httpClient.shutdownNow();
+    }
+    if (workerExecutor != null) {
+      workerExecutor.shutdownNow();
+    }
+    if (scheduler != null) {
+      scheduler.shutdownNow();
+    }
   }
 
   @Test

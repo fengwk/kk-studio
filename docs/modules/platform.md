@@ -47,7 +47,7 @@ Platform 不是 HTTP composition root，也不承载浏览器协议、Spring Boo
 | Contributor port | `kk-studio-harness-contributor-api`、`kk-studio-harness-builtin` | `HarnessCatalog`、`ToolContribution`、`BranchView` 与 Builtin 贡献者 |
 | HTTP share | `kk-studio-share` | Platform service 使用的 DTO 与 JSON wire 类型 |
 | Persistence | MyBatis、PostgreSQL、`convention4j-spring-boot-starter` | Catalog、Chat、Settings、Storage 和 ComfyUI workflow API |
-| Model/third-party | LangChain4j Provider/MCP modules、`convention4j-comfyui`、AWS SDK S3、JsonPath | 外部 Provider、MCP、ComfyUI、S3 和 selector |
+| Model/third-party | LangChain4j MCP module、`convention4j-comfyui`、AWS SDK S3、JsonPath | MCP、ComfyUI、S3 和 selector |
 
 `kk-studio-schema`、`kk-studio-canvas-infra`、Harness runtime `test-jar`、Flyway 和
 Testcontainers 都是 test scope；Platform main 不直接依赖 `harness-infra`、`web` 或 `harness-daemon`。这些边界由
@@ -67,10 +67,8 @@ web composition root
 ```
 
 Platform 只依赖 `canvas-core` 的 Canvas port；Canvas PostgreSQL implementation 位于
-`canvas-infra`，只在 Platform 测试基座或 web composition 中装配。Platform 的 provider adapter 包
-`fun.fengwk.kkstudio.platform.harness.model.provider`可以使用 LangChain4j 或其他 SDK，但其公共签名只能使用
-`harness-runtime` 的 `model.provider` 类型；约束见
-`platform/src/main/java/fun/fengwk/kkstudio/platform/harness/model/provider/package-info.java`。
+`canvas-infra`，只在 Platform 测试基座或 web composition 中装配。Platform 的模型层全面使用
+`harness-provider` 的原生协议适配器，其公共签名统一遵循 `harness-runtime` 的 `model.provider` 类型。
 
 ## 核心子域 / API
 
@@ -240,14 +238,11 @@ virtual-thread-per-task executor，Model admission 默认容量来自 `kk-studio
 4. 通过 `ProviderResourceMaterializer`物化当前 attempt 的 Resource：图片在 30 MiB 内联为 data URI，audio/video
    使用 signed URL；Storage 不可用时 Resource 变为确定性文本回退。
 
-OpenAI Chat、OpenAI Responses 与 Google adapter 继续把 LangChain4j SDK 细节封装在 Platform provider
-包内。Anthropic 使用 [`harness-provider`](harness-provider.md) 的原生 Messages adapter：Platform 复用
-`modelExecutionExecutor` 作为受管虚拟线程 worker，提供禁止重定向的长生命周期 JDK `HttpClient`，并以独立 daemon
-Watchdog 调度器落实 total/idle timeout。Anthropic factory 声明 SHORT/LONG 与
-SYSTEM/TOOLS/CONVERSATION 能力；默认规划仍选择 SHORT，执行期基于完整历史重新求断点交集。
-
-`LangChainModelProvider` 统一其余三个旧 SDK adapter 的 stream delta、thinking、tool call、usage、stop reason
-和 Provider error；错误消息截断并移除 Bearer/API key/token 等敏感值。
+四个 Provider（OpenAI Chat、OpenAI Responses、Anthropic、Google）均使用 [`harness-provider`](harness-provider.md)
+的原生协议适配器，共享 `modelExecutionTransport`（基于 JDK 21 `HttpClient`、受管虚拟线程 worker 与 Watchdog 调度器）。
+OpenAI Chat 与 OpenAI Responses 接入 Provider config-aware Prompt Cache capability 动态解析；Anthropic 固定声明
+SHORT/LONG 与 SYSTEM/TOOLS/CONVERSATION 能力（默认规划选择 SHORT，执行期基于完整历史重新求断点交集）；Google（Gemini）
+固定声明 AUTOMATIC 能力。
 
 `PlatformModelGateway.start`的 admission 顺序和结果语义是：
 

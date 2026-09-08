@@ -142,7 +142,7 @@ class TestBuildScripts(unittest.TestCase):
         )
 
     def test_e2e_provider_credentials_are_synchronized_only_for_real_mode(self):
-        """Free stack setup must never consume host MiniMax credentials."""
+        """Free stack setup must never consume host real-provider credentials."""
         script = (REPOSITORY_ROOT / "scripts/e2e.sh").read_text()
         ensure_stack = function_body(
             REPOSITORY_ROOT / "scripts/e2e/lib.sh",
@@ -163,6 +163,35 @@ class TestBuildScripts(unittest.TestCase):
             ),
         )
         self.assertNotIn("sync_e2e_provider_credentials", ensure_stack)
+
+    def test_dev_scrubs_backend_credentials_and_syncs_only_the_four_e2e_pairs(self):
+        """Dev may sync host pairs after readiness, but backend Java must never inherit them."""
+        script_path = REPOSITORY_ROOT / "scripts/dev.sh"
+        script = script_path.read_text()
+        start_all = function_body(script_path, "start_all")
+        sync = function_body(script_path, "sync_e2e_provider_credentials")
+        e2e_names = [
+            "TEST_GEMINI_BASE_URL",
+            "TEST_GEMINI_API_KEY",
+            "TEST_OPENAI_BASE_URL",
+            "TEST_OPENAI_API_KEY",
+            "TEST_MINIMAX_ANTHROPIC_BASE_URL",
+            "TEST_MINIMAX_ANTHROPIC_API_KEY",
+            "TEST_DEEPSEEK_BASE_URL",
+            "TEST_DEEPSEEK_API_KEY",
+        ]
+
+        for name in e2e_names:
+            self.assertIn(f"-u {name}", start_all)
+            self.assertIn(f'{name}="${{{name}-}}"', sync)
+        self.assertIn("-u TEST_MINIMAX_BASE_URL", start_all)
+        self.assertIn("-u TEST_MINIMAX_API_KEY", start_all)
+        self.assertNotIn("TEST_MINIMAX_BASE_URL=", sync)
+        self.assertNotIn("TEST_MINIMAX_API_KEY=", sync)
+        self.assertIn(
+            "scripts/reliability/sync_minimax_credentials.py",
+            (REPOSITORY_ROOT / "scripts/reliability/stack.sh").read_text(),
+        )
 
     def test_container_canvas_smoke_requires_current_dto_without_thread_id(self):
         """The Docker smoke must enforce the current Canvas DTO, which omits threadId."""

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,14 +31,17 @@ import java.util.concurrent.ScheduledExecutorService;
  */
 class OpenAiChatSecurityAndArchitectureTest {
 
+  private HttpClient httpClient;
+  private ExecutorService workerExecutor;
+  private ScheduledExecutorService scheduler;
   private JdkHttpSseTransport transport;
   private ProviderDescriptor descriptor;
 
   @BeforeEach
   void setUp() {
-    ExecutorService workerExecutor = Executors.newCachedThreadPool();
-    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    HttpClient httpClient =
+    workerExecutor = Executors.newCachedThreadPool();
+    scheduler = Executors.newSingleThreadScheduledExecutor();
+    httpClient =
         HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
@@ -50,6 +54,19 @@ class OpenAiChatSecurityAndArchitectureTest {
             ProviderType.OPENAI,
             "https://api.openai.com/v1",
             new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
+  }
+
+  @AfterEach
+  void tearDown() {
+    if (httpClient != null) {
+      httpClient.shutdownNow();
+    }
+    if (workerExecutor != null) {
+      workerExecutor.shutdownNow();
+    }
+    if (scheduler != null) {
+      scheduler.shutdownNow();
+    }
   }
 
   @Test

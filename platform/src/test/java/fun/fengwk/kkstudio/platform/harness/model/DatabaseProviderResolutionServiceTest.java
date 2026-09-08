@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -161,6 +163,26 @@ class DatabaseProviderResolutionServiceTest {
   }
 
   @Test
+  void resolveWrapsPersistedConfigurationFailureWithoutUntrustedCause() {
+    // 意图：损坏的持久 Provider 配置可能含敏感内容；解析边界只暴露稳定定位信息，不保留原始
+    // Jackson cause 或配置片段。
+    AgentProvider p = provider(ProviderType.OPENAI, ENDPOINT);
+    p.setConfigJson("{\"credential\":\"sensitive-value\"");
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(p);
+    DatabaseProviderResolutionService resolution =
+        resolution(openAiFactory(PromptCacheCapability.automatic()));
+
+    IllegalArgumentException failure =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
+
+    assertEquals("cannot parse provider configuration for " + PROVIDER_NAME, failure.getMessage());
+    assertFalse(failure.getMessage().contains("sensitive-value"));
+    assertNull(failure.getCause());
+  }
+
+  @Test
   void resolveWrapsFactoryCreateFailure() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     ProviderFactory factory =
@@ -176,7 +198,82 @@ class DatabaseProviderResolutionServiceTest {
             IllegalArgumentException.class,
             () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
     assertEquals("cannot create provider adapter for " + PROVIDER_NAME, failure.getMessage());
-    assertEquals("factory boom", failure.getCause().getMessage());
+    assertNull(failure.getCause());
+  }
+
+  /** 意图：当 factory.promptCacheCapability(configJson) 抛出异常时，包装为明确的安全异常，不回显 config payload。 */
+  @Test
+  void resolveWrapsPromptCacheCapabilityResolutionFailureSafely() {
+    AgentProvider p = provider(ProviderType.OPENAI, ENDPOINT);
+    p.setConfigJson("{\"secretCredential\":\"bearer-12345\"}");
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(p);
+
+    ProviderFactory factory =
+        factory(
+            ProviderType.OPENAI,
+            PromptCacheCapability.automatic(),
+            adapter(ProviderType.OPENAI, mock(ModelProvider.class)));
+    when(factory.promptCacheCapability("{\"secretCredential\":\"bearer-12345\"}"))
+        .thenThrow(
+            new IllegalArgumentException("cannot resolve prompt cache capability: bearer-12345"));
+
+    DatabaseProviderResolutionService resolution = resolution(factory);
+    IllegalArgumentException failure =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
+    assertEquals(
+        "cannot resolve prompt cache capability for " + PROVIDER_NAME, failure.getMessage());
+    assertFalse(failure.getMessage().contains("bearer-12345"));
+    assertNull(failure.getCause());
+  }
+
+  /** 意图：当 factory.promptCacheCapability(configJson) 返回 null 时，严格抛出安全异常。 */
+  @Test
+  void resolveRejectsNullPromptCacheCapabilityFromFactory() {
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
+
+    ProviderFactory factory =
+        factory(
+            ProviderType.OPENAI,
+            PromptCacheCapability.automatic(),
+            adapter(ProviderType.OPENAI, mock(ModelProvider.class)));
+    when(factory.promptCacheCapability(any())).thenReturn(null);
+
+    DatabaseProviderResolutionService resolution = resolution(factory);
+    IllegalArgumentException failure =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
+    assertEquals(
+        "cannot resolve prompt cache capability for " + PROVIDER_NAME, failure.getMessage());
+  }
+
+  /** 意图：验证 resolve 传递 provider.configJson 动态解析能力，并基于解析结果规范化 effective request。 */
+  @Test
+  void resolveNormalizesEffectiveRequestUsingConfigAwareCapability() {
+    AgentProvider p = provider(ProviderType.OPENAI, ENDPOINT);
+    String dynamicConfig = "{\"openAiPromptCacheMode\":\"LEGACY\"}";
+    p.setConfigJson(dynamicConfig);
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(p);
+
+    ProviderFactory factory =
+        factory(
+            ProviderType.OPENAI,
+            PromptCacheCapability.automatic(),
+            adapter(ProviderType.OPENAI, mock(ModelProvider.class)));
+    when(factory.promptCacheCapability(dynamicConfig))
+        .thenReturn(PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
+
+    DatabaseProviderResolutionService resolution = resolution(factory);
+    ProviderRequest req =
+        request(ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"));
+    ProviderResolutionService.ResolvedExecution resolved =
+        resolution.resolve(ProviderType.OPENAI, req);
+
+    assertEquals(
+        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"),
+        resolved.effectiveRequest().cacheControl());
   }
 
   @Test
@@ -351,7 +448,7 @@ class DatabaseProviderResolutionServiceTest {
         assertThrows(
             IllegalArgumentException.class, () -> resolved.openProvider(resolved.timeoutPolicy()));
     assertEquals("cannot create ModelProvider for " + PROVIDER_NAME, failure.getMessage());
-    assertEquals("adapter boom", failure.getCause().getMessage());
+    assertNull(failure.getCause());
   }
 
   @Test
@@ -371,16 +468,14 @@ class DatabaseProviderResolutionServiceTest {
         assertThrows(
             IllegalArgumentException.class, () -> resolved.openProvider(resolved.timeoutPolicy()));
     assertEquals("cannot create ModelProvider for " + PROVIDER_NAME, failure.getMessage());
-    assertTrue(
-        failure.getCause() instanceof IllegalArgumentException,
-        "无消息的 IllegalArgumentException 也必须被包装而不是原样透传");
+    assertNull(failure.getCause());
   }
 
   @Test
   void openProviderWrapsIllegalArgumentExceptionWithUnrelatedMessage() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     ProviderAdapter adapter = adapter(ProviderType.OPENAI, mock(ModelProvider.class));
-    // 消息不带约定前缀的 IllegalArgumentException 也必须包装：只有约定的前缀错误才原样透传。
+    // 任意 adapter 异常都必须转换为无 cause 的稳定错误，不能透传实现细节。
     when(adapter.create(any(ProviderDescriptor.class)))
         .thenThrow(new IllegalArgumentException("broken adapter"));
     DatabaseProviderResolutionService resolution =
@@ -395,16 +490,16 @@ class DatabaseProviderResolutionServiceTest {
         assertThrows(
             IllegalArgumentException.class, () -> resolved.openProvider(resolved.timeoutPolicy()));
     assertEquals("cannot create ModelProvider for " + PROVIDER_NAME, failure.getMessage());
-    assertEquals("broken adapter", failure.getCause().getMessage());
+    assertNull(failure.getCause());
   }
 
   @Test
-  void openProviderPreservesCannotCreateModelProviderError() {
+  void openProviderDoesNotTrustPrefixedAdapterError() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     ProviderAdapter adapter = adapter(ProviderType.OPENAI, mock(ModelProvider.class));
-    // adapter 已按本服务约定抛出带前缀的错误：原样保留，避免丢失具体原因。
+    // 不可信 adapter 即使伪造约定前缀，也不能绕过脱敏边界。
     IllegalArgumentException original =
-        new IllegalArgumentException("cannot create ModelProvider for x: broken");
+        new IllegalArgumentException("cannot create ModelProvider for x: sensitive-value");
     when(adapter.create(any(ProviderDescriptor.class))).thenThrow(original);
     DatabaseProviderResolutionService resolution =
         resolution(
@@ -417,7 +512,9 @@ class DatabaseProviderResolutionServiceTest {
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class, () -> resolved.openProvider(resolved.timeoutPolicy()));
-    assertSame(original, failure);
+    assertEquals("cannot create ModelProvider for " + PROVIDER_NAME, failure.getMessage());
+    assertFalse(failure.getMessage().contains("sensitive-value"));
+    assertNull(failure.getCause());
   }
 
   // ---------- cache hint 规范化 ----------
@@ -694,6 +791,7 @@ class DatabaseProviderResolutionServiceTest {
     ProviderFactory factory = mock(ProviderFactory.class);
     when(factory.providerType()).thenReturn(type);
     when(factory.promptCacheCapability()).thenReturn(capability);
+    when(factory.promptCacheCapability(any())).thenReturn(capability);
     when(factory.create(anyString(), anyString())).thenReturn(adapter);
     return factory;
   }
