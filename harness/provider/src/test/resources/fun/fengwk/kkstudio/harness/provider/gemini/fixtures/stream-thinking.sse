@@ -1,0 +1,3 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Analyzing query...","thought":true,"thoughtSignature":"sig_stream_test"}]}}]}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Result is 42."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":8,"thoughtsTokenCount":4,"totalTokenCount":20}}
