@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.math.BigDecimal;
@@ -166,7 +167,9 @@ class OpenAiChatThinkingTest {
     ProviderMessage turn1Asst =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("The sum is 2.")),
+            List.of(
+                new ProviderThinkingBlock("Step 1: calculate. Step 2: result is 2."),
+                new ProviderTextBlock("The sum is 2.")),
             replayState);
     ProviderMessage user2 =
         new ProviderMessage(

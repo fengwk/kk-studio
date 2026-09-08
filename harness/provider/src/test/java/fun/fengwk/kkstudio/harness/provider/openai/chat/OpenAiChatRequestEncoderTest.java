@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
@@ -396,7 +397,9 @@ class OpenAiChatRequestEncoderTest {
     ProviderMessage validAsstMsg =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("Why did chicken cross road?")),
+            List.of(
+                new ProviderThinkingBlock("A classic joke is appropriate."),
+                new ProviderTextBlock("Why did chicken cross road?")),
             validReplayState);
     ProviderMessage userMsg2 =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Why?")));
@@ -436,7 +439,9 @@ class OpenAiChatRequestEncoderTest {
     ProviderMessage illegalAsstMsg =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("Why did chicken cross road?")),
+            List.of(
+                new ProviderThinkingBlock("A classic joke is appropriate."),
+                new ProviderTextBlock("Why did chicken cross road?")),
             illegalReplayState);
     ProviderRequest illegalReq =
         new ProviderRequest(
@@ -449,13 +454,16 @@ class OpenAiChatRequestEncoderTest {
         ProviderException.class,
         () -> encoder.encode(illegalReq, descriptor, OpenAiChatConfiguration.defaults()));
 
-    // 3. runtime 判定不可回放（前缀 hash 不匹配），语义 fallback
+    // 3. runtime 判定不可回放（前缀 hash 不匹配），但 payload 合法一致时，语义 fallback
+    ObjectNode fallbackPayload = MAPPER.createObjectNode();
+    fallbackPayload.put("role", "assistant");
+    fallbackPayload.put("content", "Fallback answer");
     ProviderReplayState mismatchedHashReplayState =
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_CHAT,
             descriptor.affinity("gpt-4o"),
             "0".repeat(64),
-            validPayload);
+            fallbackPayload);
     ProviderMessage fallbackAsstMsg =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
@@ -980,5 +988,367 @@ class OpenAiChatRequestEncoderTest {
     ArrayNode messages = (ArrayNode) rootBreak.path("messages");
     JsonNode userNode = messages.get(0);
     assertTrue(userNode.path("content").get(0).path("prompt_cache_breakpoint").asBoolean());
+  }
+
+  @Test
+  @DisplayName("TOOL 消息多块按原顺序完整串联且拒绝未知块")
+  void testToolMessageMultiBlockAndUnsupportedBlocks() throws Exception {
+    // 测试意图：验证 TOOL message 的唯一 ProviderToolResultBlock 内，按原顺序完整处理任意数量的 Text 与 Json 块，
+    // JSON 不得丢弃，多块采用确定性文本串联；遇到任何其他类型块（如 Image）必须抛出 ProviderErrorKind.INVALID_REQUEST。
+    ProviderMessage userMsg =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("call tool")));
+
+    // 1. 多个 Text 和 Json 块顺序拼接
+    ProviderToolResultBlock multiBlockResult =
+        new ProviderToolResultBlock(
+            "call_multi",
+            "calc",
+            List.of(
+                new ProviderTextBlock("Result: "),
+                new ProviderJsonBlock("{\"score\":99}"),
+                new ProviderTextBlock(" done")),
+            false,
+            "{}");
+    ProviderMessage toolMsg =
+        new ProviderMessage(ProviderMessageRole.TOOL, List.of(multiBlockResult));
+    ProviderRequest reqMulti =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(userMsg, toolMsg),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode rootMulti =
+        MAPPER.readTree(
+            encoder
+                .encode(reqMulti, descriptor, OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+    assertEquals(
+        "Result: {\"score\":99} done", rootMulti.path("messages").get(1).path("content").asText());
+
+    // 2. 包含非法块（例如 ProviderImageBlock）必须抛出 INVALID_REQUEST
+    ProviderToolResultBlock badBlockResult =
+        new ProviderToolResultBlock(
+            "call_bad",
+            "calc",
+            List.of(
+                new ProviderTextBlock("Result: "),
+                new ProviderImageBlock("image/png", "http://example.com/img.png")),
+            false,
+            "{}");
+    ProviderMessage badToolMsg =
+        new ProviderMessage(ProviderMessageRole.TOOL, List.of(badBlockResult));
+    ProviderRequest reqBadTool =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(userMsg, badToolMsg),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(reqBadTool, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+  }
+
+  @Test
+  @DisplayName("同 format payload 即使 affinity/hash 失配也必须先严格校验 shape、白名单和 durable 一致性")
+  void testReplayValidationBeforeAffinityOrHashCheck() throws Exception {
+    // 测试意图：验证同 OPENAI_CHAT format 时，即使 affinity 或 sourcePrefixHash 失配，
+    // 也必须先严格校验 payload 的 shape、白名单与 durable 一致性，损坏时必须抛出 INVALID_REQUEST，严禁静默 fallback。
+    ProviderMessage user1 =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    String mismatchedHash = "f".repeat(64);
+
+    // 1. hash 不匹配且 role 非法（非 assistant）-> 必须抛出 INVALID_REQUEST
+    ObjectNode badRolePayload = MAPPER.createObjectNode();
+    badRolePayload.put("role", "system");
+    badRolePayload.put("content", "text");
+    ProviderReplayState badRoleState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            mismatchedHash,
+            badRolePayload);
+    ProviderMessage badRoleMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("text")), badRoleState);
+    ProviderRequest reqBadRole =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, badRoleMsg),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException exRole =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(reqBadRole, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exRole.kind());
+
+    // 2. hash 不匹配且包含未知字段 -> 必须抛出 INVALID_REQUEST
+    ObjectNode unknownFieldPayload = MAPPER.createObjectNode();
+    unknownFieldPayload.put("role", "assistant");
+    unknownFieldPayload.put("content", "text");
+    unknownFieldPayload.put("illegal_field", "value");
+    ProviderReplayState unknownFieldState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            mismatchedHash,
+            unknownFieldPayload);
+    ProviderMessage unknownFieldMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("text")),
+            unknownFieldState);
+    ProviderRequest reqUnknownField =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, unknownFieldMsg),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException exField =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(reqUnknownField, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exField.kind());
+
+    // 3. hash 不匹配且 reasoning_content 与 durable ProviderThinkingBlock 不一致 -> 必须抛出 INVALID_REQUEST
+    ObjectNode mismatchThinkingPayload = MAPPER.createObjectNode();
+    mismatchThinkingPayload.put("role", "assistant");
+    mismatchThinkingPayload.put("content", "text");
+    mismatchThinkingPayload.put("reasoning_content", "fabricated reasoning");
+    ProviderReplayState mismatchThinkingState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            mismatchedHash,
+            mismatchThinkingPayload);
+    // durable 中没有 ProviderThinkingBlock
+    ProviderMessage mismatchThinkingMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("text")),
+            mismatchThinkingState);
+    ProviderRequest reqMismatchThinking =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, mismatchThinkingMsg),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException exThinking =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(
+                    reqMismatchThinking, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exThinking.kind());
+
+    // 4. hash 不匹配但 payload 完全合法且与 durable 一致 -> 允许降级为语义 fallback
+    ObjectNode validFallbackPayload = MAPPER.createObjectNode();
+    validFallbackPayload.put("role", "assistant");
+    validFallbackPayload.put("content", "text");
+    ProviderReplayState validFallbackState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            mismatchedHash,
+            validFallbackPayload);
+    ProviderMessage validFallbackMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("text")),
+            validFallbackState);
+    ProviderRequest reqValidFallback =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, validFallbackMsg),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode rootFallback =
+        MAPPER.readTree(
+            encoder
+                .encode(reqValidFallback, descriptor, OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+    assertEquals("assistant", rootFallback.path("messages").get(1).path("role").asText());
+    assertEquals("text", rootFallback.path("messages").get(1).path("content").asText());
+  }
+
+  @Test
+  @DisplayName("tool_calls 损坏子结构校验并阻止构造器抛裸 IllegalArgumentException")
+  void testReplayToolCallsShapeValidationPreventsRawIllegalArgumentException() {
+    // 测试意图：验证 tool_calls 各种损坏形态（非 array、缺少 id、name/arguments 为空等）均被严格校验抛出
+    // ProviderErrorKind.INVALID_REQUEST，避免 ProviderToolCall 构造器抛出裸的 IllegalArgumentException。
+    ProviderMessage user1 =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    String hash = "0".repeat(64);
+
+    // 1. tool_calls 为非 array
+    ObjectNode nonArrPayload = MAPPER.createObjectNode();
+    nonArrPayload.put("role", "assistant");
+    nonArrPayload.put("tool_calls", "not-array");
+    ProviderReplayState state1 =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT, descriptor.affinity("gpt-4o"), hash, nonArrPayload);
+    ProviderMessage msg1 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+            state1);
+    ProviderRequest req1 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, msg1),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex1 =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(req1, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
+
+    // 2. tool call 的 id 为 blank
+    ObjectNode blankIdPayload = MAPPER.createObjectNode();
+    blankIdPayload.put("role", "assistant");
+    ArrayNode calls2 = blankIdPayload.putArray("tool_calls");
+    ObjectNode call2 = calls2.addObject();
+    call2.put("id", "   ");
+    call2.put("type", "function");
+    ObjectNode fn2 = call2.putObject("function");
+    fn2.put("name", "fn");
+    fn2.put("arguments", "{}");
+    ProviderReplayState state2 =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT, descriptor.affinity("gpt-4o"), hash, blankIdPayload);
+    ProviderMessage msg2 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+            state2);
+    ProviderRequest req2 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, msg2),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex2 =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(req2, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
+
+    // 3. tool call 的 function arguments 为 blank（若直接构造 ProviderToolCall 会抛 IllegalArgumentException）
+    ObjectNode blankArgsPayload = MAPPER.createObjectNode();
+    blankArgsPayload.put("role", "assistant");
+    ArrayNode calls3 = blankArgsPayload.putArray("tool_calls");
+    ObjectNode call3 = calls3.addObject();
+    call3.put("id", "c1");
+    call3.put("type", "function");
+    ObjectNode fn3 = call3.putObject("function");
+    fn3.put("name", "fn");
+    fn3.put("arguments", "   ");
+    ProviderReplayState state3 =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            hash,
+            blankArgsPayload);
+    ProviderMessage msg3 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+            state3);
+    ProviderRequest req3 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, msg3),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex3 =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(req3, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
+
+    // 4. tool call 的 function name 为 blank
+    ObjectNode blankNamePayload = MAPPER.createObjectNode();
+    blankNamePayload.put("role", "assistant");
+    ArrayNode calls4 = blankNamePayload.putArray("tool_calls");
+    ObjectNode call4 = calls4.addObject();
+    call4.put("id", "c1");
+    call4.put("type", "function");
+    ObjectNode fn4 = call4.putObject("function");
+    fn4.put("name", "   ");
+    fn4.put("arguments", "{}");
+    ProviderReplayState state4 =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            hash,
+            blankNamePayload);
+    ProviderMessage msg4 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+            state4);
+    ProviderRequest req4 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, msg4),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex4 =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(req4, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex4.kind());
+  }
+
+  @Test
+  @DisplayName("非 OPENAI_CHAT format 的 replay 自动进行 semantic fallback")
+  void testReplayNonOpenAiChatFormatSemanticFallback() throws Exception {
+    // 测试意图：验证非 OPENAI_CHAT format（如 ANTHROPIC_MESSAGES）直接走语义回退，不校验 OPENAI_CHAT payload
+    ProviderMessage user1 =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    ObjectNode anthropicPayload = MAPPER.createObjectNode();
+    anthropicPayload.put("type", "message");
+    ProviderReplayState anthropicState =
+        new ProviderReplayState(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            descriptor.affinity("claude-3-5-sonnet"),
+            "a".repeat(64),
+            anthropicPayload);
+    ProviderMessage asstMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderThinkingBlock("think dropped"),
+                new ProviderTextBlock("fallback result"),
+                new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{\"a\":1}"))),
+            anthropicState);
+    ProviderRequest req =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            List.of(user1, asstMsg),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode root =
+        MAPPER.readTree(
+            encoder.encode(req, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
+    JsonNode wireAsst = root.path("messages").get(1);
+    assertEquals("assistant", wireAsst.path("role").asText());
+    assertEquals("fallback result", wireAsst.path("content").asText());
+    assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
+    assertFalse(wireAsst.has("reasoning_content"));
   }
 }
