@@ -147,7 +147,7 @@ final class GeminiRequestEncoder {
             encodeAssistantBlock(currentParts, block);
           }
         }
-      } else if (msg.role() == ProviderMessageRole.USER || msg.role() == ProviderMessageRole.TOOL) {
+      } else { // USER or TOOL
         String wireRole = "user";
 
         if (currentParts == null || !wireRole.equals(currentRole)) {
@@ -165,15 +165,9 @@ final class GeminiRequestEncoder {
           for (ProviderContentBlock block : msg.contents()) {
             if (block instanceof ProviderToolResultBlock resultBlock) {
               encodeToolResultBlock(currentParts, resultBlock);
-            } else {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST,
-                  "TOOL message must only contain ProviderToolResultBlock");
             }
           }
         }
-      } else {
-        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "unsupported message role");
       }
     }
 
@@ -396,10 +390,7 @@ final class GeminiRequestEncoder {
         return NODES.objectNode().put("result", "");
       } else if (size == 1) {
         ProviderContentBlock single = textAndJsonBlocks.get(0);
-        if (single instanceof ProviderTextBlock tb) {
-          // 单文本使用 response.result
-          return NODES.objectNode().put("result", tb.text() != null ? tb.text() : "");
-        } else if (single instanceof ProviderJsonBlock jb) {
+        if (single instanceof ProviderJsonBlock jb) {
           JsonNode parsed = parseStrictJson(jb.json(), "invalid JSON block in tool result");
           if (parsed.isObject()) {
             // 单 JSON object 可直接作为 response object
@@ -408,6 +399,10 @@ final class GeminiRequestEncoder {
             // 其他单 JSON 放在 result
             return NODES.objectNode().set("result", parsed);
           }
+        } else {
+          ProviderTextBlock tb = (ProviderTextBlock) single;
+          // 单文本使用 response.result
+          return NODES.objectNode().put("result", tb.text() != null ? tb.text() : "");
         }
       } else {
         // 多个 text/JSON 使用有序 results 数组
@@ -429,11 +424,12 @@ final class GeminiRequestEncoder {
         wrapper.put("result", "");
       } else if (size == 1) {
         ProviderContentBlock single = textAndJsonBlocks.get(0);
-        if (single instanceof ProviderTextBlock tb) {
-          wrapper.put("result", tb.text() != null ? tb.text() : "");
-        } else if (single instanceof ProviderJsonBlock jb) {
+        if (single instanceof ProviderJsonBlock jb) {
           JsonNode parsed = parseStrictJson(jb.json(), "invalid JSON block in tool result");
           wrapper.set("result", parsed);
+        } else {
+          ProviderTextBlock tb = (ProviderTextBlock) single;
+          wrapper.put("result", tb.text() != null ? tb.text() : "");
         }
       } else {
         ArrayNode results = NODES.arrayNode();
@@ -448,9 +444,6 @@ final class GeminiRequestEncoder {
       }
       return wrapper;
     }
-
-    throw new ProviderException(
-        ProviderErrorKind.INVALID_REQUEST, "unsupported content block in tool result");
   }
 
   private static void encodeAssistantBlock(ArrayNode parts, ProviderContentBlock block) {
