@@ -600,6 +600,48 @@ class OpenAiResponsesRequestEncoderTest {
   }
 
   /**
+   * 测试意图：验证回放 tool_call 的 arguments 与 durable 必须完全一致； 即使 affinity 或 prefixHash 故意失配，参数被篡改的 payload
+   * 也必须抛出 INVALID_REQUEST 而非回退。
+   */
+  @Test
+  void test_replayState_alteredToolArgumentsRejectedEvenWhenAffinityOrHashMismatch() {
+    ProviderDescriptor desc = createDescriptor();
+
+    ObjectNode alteredArgsPayload = MAPPER.createObjectNode();
+    alteredArgsPayload
+        .putArray("output")
+        .addObject()
+        .put("type", "function_call")
+        .put("call_id", "call_1")
+        .put("name", "get_weather")
+        .put("arguments", "{\"city\":\"Beijing\"}");
+
+    // 故意设置失配的 affinity 和 hash
+    ProviderReplayState replayMismatchAffinityAndHash =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_RESPONSES,
+            desc.affinity("completely_different_model"),
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            alteredArgsPayload);
+
+    ProviderMessage msg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderToolCallBlock(
+                    new ProviderToolCall("call_1", "get_weather", "{\"city\":\"Shanghai\"}"))),
+            replayMismatchAffinityAndHash);
+
+    ProviderException ex =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(request(List.of(msg)), desc, OpenAiResponsesConfig.defaultConfig()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    assertTrue(ex.getMessage().contains("replay tool call mismatch with durable tool call"));
+  }
+
+  /**
    * 测试意图：验证 replay thinking 与 durable thinking 的一致性校验； 严禁 opaque reasoning 替换另一段 durable thinking。
    */
   @Test
@@ -1427,6 +1469,21 @@ class OpenAiResponsesRequestEncoderTest {
                             List.of(
                                 new ProviderToolCallBlock(
                                     new ProviderToolCall("c1", "different_tool", "{}"))),
+                            rsToolMismatch))),
+                desc,
+                OpenAiResponsesConfig.defaultConfig()));
+
+    assertThrows(
+        ProviderException.class,
+        () ->
+            encoder.encode(
+                request(
+                    List.of(
+                        new ProviderMessage(
+                            ProviderMessageRole.ASSISTANT,
+                            List.of(
+                                new ProviderToolCallBlock(
+                                    new ProviderToolCall("c1", "calc", "{\"diff\":true}"))),
                             rsToolMismatch))),
                 desc,
                 OpenAiResponsesConfig.defaultConfig()));
