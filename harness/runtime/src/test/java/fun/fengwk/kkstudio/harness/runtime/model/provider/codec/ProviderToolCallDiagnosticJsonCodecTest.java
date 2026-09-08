@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider.codec;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -109,9 +111,50 @@ class ProviderToolCallDiagnosticJsonCodecTest {
     overflowIndex.put("callIndex", ((long) Integer.MAX_VALUE) + 1L);
     assertThrows(IllegalArgumentException.class, () -> codec.decode(overflowIndex.toString()));
 
+    // extra sensitive field does not leak field name or value
+    String sensitiveKey = "SECRET_TOKEN_KEY_12345";
+    ObjectNode extraField = codec.encodeNode(sampleDiagnostic());
+    extraField.put(sensitiveKey, "secret_val");
+    IllegalArgumentException exExtra =
+        assertThrows(IllegalArgumentException.class, () -> codec.decode(extraField.toString()));
+    assertFalse(exExtra.getMessage().contains(sensitiveKey));
+    assertFalse(exExtra.getMessage().contains("secret_val"));
+    assertNull(exExtra.getCause());
+
+    // malformed JSON does not leak cause
+    IllegalArgumentException exMalformed =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                codec.decode(
+                    "{\"type\":\"tool_call_diagnostic\",\"secret\":\"SECRET_LEAK\"malformed"));
+    assertFalse(exMalformed.getMessage().contains("SECRET_LEAK"));
+    assertNull(exMalformed.getCause());
+
+    // fractional callIndex (e.g. 0.5) must be rejected
+    ObjectNode fractionalIndex = codec.encodeNode(sampleDiagnostic());
+    fractionalIndex.put("callIndex", 0.5);
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(fractionalIndex.toString()));
+
     // null checks
     assertThrows(NullPointerException.class, () -> codec.encode(null));
     assertThrows(NullPointerException.class, () -> codec.decode(null));
+  }
+
+  @Test
+  void normalizesAndRoundTripsNullPartialArgumentsAsEmptyObservedPrefix() {
+    ProviderToolCallDiagnostic diagnostic =
+        new ProviderToolCallDiagnostic(
+            1, "call-null-args", "fetch", null, "tool call truncated before arguments received");
+
+    String encoded = codec.encode(diagnostic);
+    ProviderToolCallDiagnostic decoded = codec.decode(encoded);
+
+    assertEquals(diagnostic.callIndex(), decoded.callIndex());
+    assertEquals(diagnostic.id(), decoded.id());
+    assertEquals(diagnostic.name(), decoded.name());
+    assertEquals("", decoded.partialArguments());
+    assertEquals(diagnostic.message(), decoded.message());
   }
 
   private ProviderToolCallDiagnostic sampleDiagnostic() {

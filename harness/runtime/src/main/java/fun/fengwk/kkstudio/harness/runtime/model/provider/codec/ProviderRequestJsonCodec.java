@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
@@ -48,7 +49,7 @@ import java.util.UUID;
  * <p>原始 JSON 字符串（{@code json}、{@code argumentsJson}、{@code detailsJson}、{@code
  * inputSchemaJson}）原样保留； enum {@code Set} 字段按 enum name 排序，使输出在跨 JVM 时保持 deterministic。
  *
- * <p>本 codec 服务于 durable 路径（Model invocation request 持久化 / 重放）：媒体块（IMAGE/AUDIO/VIDEO）携带
+ * <p>本 codec 服务于 durable 路径（Model invocation request 持久化 / 重放）：媒体块（IMAGE/DOCUMENT/AUDIO/VIDEO）携带
  * attempt-only 的 presigned source，encode/decode 一律确定性拒绝；{@code resource} 块是唯一允许的 durable 媒体引用。有效
  * attempt 请求（含媒体块）只存在于内存，由 provider adapter 直接发出，绝不经过本 codec 重序列化。
  */
@@ -256,6 +257,7 @@ public final class ProviderRequestJsonCodec {
       return node;
     }
     if (content instanceof ProviderImageBlock
+        || content instanceof ProviderDocumentBlock
         || content instanceof ProviderAudioBlock
         || content instanceof ProviderVideoBlock) {
       throw new IllegalArgumentException(

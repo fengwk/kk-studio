@@ -30,8 +30,8 @@ import java.util.UUID;
  *   <li>{@link PromptCacheMode#AFFINITY} 即使没有 system/tools 也派生 affinity key，输出 {@link
  *       ProviderCacheControl#affinity}。
  *   <li>{@link PromptCacheMode#BREAKPOINTS} 求 capability 支持 breakpoints 与请求实际内容的交集： leading SYSTEM
- *       存在才允许 SYSTEM，tools 非空才允许 TOOLS；如无有效 breakpoint 则输出 {@code none()}， 否则输出 {@link
- *       ProviderCacheControl#breakpoints}。
+ *       存在才允许 SYSTEM，tools 非空才允许 TOOLS，非 SYSTEM 对话消息非空才允许 CONVERSATION；如无有效 breakpoint 则输出 {@code
+ *       none()}， 否则输出 {@link ProviderCacheControl#breakpoints}。
  * </ul>
  */
 public final class PromptCacheRequestFinalizer {
@@ -81,6 +81,9 @@ public final class PromptCacheRequestFinalizer {
     if (supported.contains(PromptCacheBreakpoint.TOOLS) && !request.tools().isEmpty()) {
       resolved.add(PromptCacheBreakpoint.TOOLS);
     }
+    if (supported.contains(PromptCacheBreakpoint.CONVERSATION) && hasConversationContent(request)) {
+      resolved.add(PromptCacheBreakpoint.CONVERSATION);
+    }
     if (resolved.isEmpty()) {
       return ProviderCacheControl.none();
     }
@@ -94,5 +97,14 @@ public final class PromptCacheRequestFinalizer {
     }
     ProviderMessage first = request.messages().get(0);
     return first.role() == ProviderMessageRole.SYSTEM;
+  }
+
+  private static boolean hasConversationContent(ProviderRequest request) {
+    for (ProviderMessage message : request.messages()) {
+      if (message.role() != ProviderMessageRole.SYSTEM && !message.contents().isEmpty()) {
+        return true;
+      }
+    }
+    return false;
   }
 }

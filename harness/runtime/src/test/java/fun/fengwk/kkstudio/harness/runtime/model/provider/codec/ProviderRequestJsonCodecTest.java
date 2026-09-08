@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
@@ -307,6 +308,7 @@ class ProviderRequestJsonCodecTest {
     List<ProviderContentBlock> mediaBlocks =
         List.of(
             new ProviderImageBlock("image/png", "data:image/png;base64,AAA"),
+            new ProviderDocumentBlock("application/pdf", "data:application/pdf;base64,AAA"),
             new ProviderAudioBlock("audio/wav", "https://example.test/audio.wav"),
             new ProviderVideoBlock("video/mp4", "https://example.test/video.mp4"));
     for (ProviderContentBlock media : mediaBlocks) {
@@ -337,6 +339,12 @@ class ProviderRequestJsonCodecTest {
     ObjectNode node = NODES.objectNode();
     if (media instanceof ProviderImageBlock value) {
       node.put("type", "image");
+      node.put("mediaType", value.mediaType());
+      node.put("source", value.source());
+      return node;
+    }
+    if (media instanceof ProviderDocumentBlock value) {
+      node.put("type", "document");
       node.put("mediaType", value.mediaType());
       node.put("source", value.source());
       return node;

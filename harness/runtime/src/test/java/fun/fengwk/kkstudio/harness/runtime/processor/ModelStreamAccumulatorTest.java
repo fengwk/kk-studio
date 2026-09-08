@@ -1,8 +1,11 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -325,5 +329,221 @@ class ModelStreamAccumulatorTest {
         accumulator.complete(response("hello", "", List.of()));
     assertEquals("hello", completion.response().text());
     assertEquals(List.of(), completion.gaps());
+  }
+
+  /** 意图：验证尾部不完整 tool-call 流出后，通过 diagnostic 成功 reconcile 且不再误报遗漏。 */
+  @Test
+  void reconcilesTrailingIncompleteToolCallDiagnostic() {
+    ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
+    accumulator.append(new ProviderStreamEvent.ToolCallDelta(0, "call_0", "weather", "{\"loc\":"));
+    accumulator.append(new ProviderStreamEvent.ToolCallDelta(0, null, null, "\"Paris\"}"));
+    accumulator.append(new ProviderStreamEvent.ToolCallDelta(1, "call_1", "calc", "{\"expr\":"));
+
+    ProviderToolCall completeCall =
+        new ProviderToolCall("call_0", "weather", "{\"loc\":\"Paris\"}");
+    ProviderToolCallDiagnostic diagnostic =
+        new ProviderToolCallDiagnostic(
+            1,
+            "call_1",
+            "calc",
+            "{\"expr\":",
+            "model output truncated before tool arguments formed valid JSON");
+
+    ProviderResponse resp =
+        new ProviderResponse(
+            "",
+            "",
+            List.of(completeCall),
+            GenerationStopReason.LENGTH,
+            new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+            new ModelCost(
+                "USD",
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO),
+            null,
+            null,
+            "{}",
+            List.of(diagnostic));
+
+    ModelStreamAccumulator.Completion completion = accumulator.complete(resp);
+    assertEquals(List.of(), completion.gaps());
+    assertEquals(1, completion.response().toolCalls().size());
+    assertEquals(1, completion.response().toolCallDiagnostics().size());
+  }
+
+  /** 意图：验证 complete 与 incomplete 混合时按原始 index 准确校验与生成 gap。 */
+  @Test
+  void reconcilesMixedCompleteAndIncompleteToolCalls() {
+    ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
+    // call 0 是 incomplete，call 1 是 complete
+    accumulator.append(new ProviderStreamEvent.ToolCallDelta(0, "call_0", "search", "{\"q\":"));
+    accumulator.append(new ProviderStreamEvent.ToolCallDelta(1, "call_1", "calc", null));
+
+    ProviderToolCallDiagnostic diagnostic =
+        new ProviderToolCallDiagnostic(
+            0,
+            "call_0",
+            "search",
+            "{\"q\":",
+            "model output truncated before tool arguments formed valid JSON");
+    ProviderToolCall completeCall = new ProviderToolCall("call_1", "calc", "{\"expr\":\"1+1\"}");
+
+    ProviderResponse resp =
+        new ProviderResponse(
+            "",
+            "",
+            List.of(completeCall),
+            GenerationStopReason.LENGTH,
+            new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+            new ModelCost(
+                "USD",
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO),
+            null,
+            null,
+            "{}",
+            List.of(diagnostic));
+
+    ModelStreamAccumulator.Completion completion = accumulator.complete(resp);
+    assertEquals(1, completion.gaps().size());
+    assertEquals(
+        new ProviderStreamEvent.ToolCallDelta(1, null, null, "{\"expr\":\"1+1\"}"),
+        completion.gaps().get(0));
+  }
+
+  /** 意图：验证 diagnostic 的 observed 字段与流式片段冲突时拒绝。 */
+  @Test
+  void rejectsConflictingDiagnostic() {
+    ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
+    accumulator.append(
+        new ProviderStreamEvent.ToolCallDelta(0, "call_0", "search", "{\"q\":\"abc\""));
+
+    ProviderToolCallDiagnostic conflictArgs =
+        new ProviderToolCallDiagnostic(0, "call_0", "search", "{\"q\":\"other\"", "truncated");
+
+    ProviderResponse resp =
+        new ProviderResponse(
+            "",
+            "",
+            List.of(),
+            GenerationStopReason.LENGTH,
+            new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+            new ModelCost(
+                "USD",
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO),
+            null,
+            null,
+            "{}",
+            List.of(conflictArgs));
+
+    assertThrows(IllegalArgumentException.class, () -> accumulator.complete(resp));
+  }
+
+  /** 意图：验证 thinking 缺失补齐时，durable response 依然完整保留 toolCallDiagnostics。 */
+  @Test
+  void persistsDiagnosticsWhenThinkingIsSynthesized() {
+    ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
+    accumulator.append(new ProviderStreamEvent.ThinkingDelta("deep thought"));
+    accumulator.append(new ProviderStreamEvent.ToolCallDelta(0, "call_0", "search", "{\"q\":"));
+
+    ProviderToolCallDiagnostic diagnostic =
+        new ProviderToolCallDiagnostic(0, "call_0", "search", "{\"q\":", "truncated");
+
+    ProviderResponse respWithoutThinking =
+        new ProviderResponse(
+            "",
+            "",
+            List.of(),
+            GenerationStopReason.LENGTH,
+            new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+            new ModelCost(
+                "USD",
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO),
+            null,
+            null,
+            "{}",
+            List.of(diagnostic));
+
+    ModelStreamAccumulator.Completion completion = accumulator.complete(respWithoutThinking);
+    assertEquals("deep thought", completion.response().thinking());
+    assertEquals(1, completion.response().toolCallDiagnostics().size());
+    assertEquals(diagnostic, completion.response().toolCallDiagnostics().get(0));
+  }
+
+  /** 意图：验证 FILTERED 终态触发 provider protocol withdrawal，安全忽略已流出的 tool fragment，不产生 gap 也不报错。 */
+  @Test
+  void filteredStopReasonIgnoresStreamedToolFragmentsWithoutGapOrError() {
+    ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
+    accumulator.append(new ProviderStreamEvent.TextDelta("I cannot proceed."));
+    accumulator.append(
+        new ProviderStreamEvent.ToolCallDelta(0, "call_withdrawn", "run_cmd", "{\"cmd\":"));
+
+    ProviderResponse filteredResp =
+        new ProviderResponse(
+            "I cannot proceed.",
+            "",
+            List.of(),
+            GenerationStopReason.FILTERED,
+            new ModelUsage(10L, 5L, 0L, 0L, 0L, 0L, 15L),
+            new ModelCost(
+                "USD",
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO),
+            null,
+            null,
+            "{}",
+            List.of());
+
+    ModelStreamAccumulator.Completion completion = accumulator.complete(filteredResp);
+    assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
+    assertEquals("I cannot proceed.", completion.response().text());
+    assertTrue(completion.response().toolCalls().isEmpty());
+    assertTrue(completion.response().toolCallDiagnostics().isEmpty());
+    assertTrue(completion.gaps().isEmpty());
+  }
+
+  /** 意图：验证 appendIdentity 在 tool call identity 冲突时，异常消息脱敏，不泄漏原始值且无 cause。 */
+  @Test
+  void appendIdentityThrowsSanitizedExceptionWithoutCauseOrLeakedSecrets() {
+    ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
+    accumulator.append(new ProviderStreamEvent.ToolCallDelta(0, "prefix_SECRET_1", null, null));
+
+    IllegalArgumentException ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                accumulator.append(
+                    new ProviderStreamEvent.ToolCallDelta(0, "conflict_SECRET_2", null, null)));
+
+    assertEquals("streamed tool call identity conflict", ex.getMessage());
+    assertFalse(ex.getMessage().contains("SECRET"));
+    assertNull(ex.getCause());
   }
 }

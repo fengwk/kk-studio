@@ -128,6 +128,41 @@ class HistoryPayloadMapperTest {
     assertEquals(diagnostic, decoded);
   }
 
+  /** 意图：验证 complete calls 与 diagnostics 按原始 call index 顺序交错投影，而不是把 diagnostics 全部移到末尾。 */
+  @Test
+  void assistantPayloadPreservesInterleavedOutcomeOrderOfCallsAndDiagnostics() {
+    ProviderToolCall call1 = new ProviderToolCall("call-1", "bash", "{}");
+    ProviderToolCall call3 = new ProviderToolCall("call-3", "read", "{}");
+    ProviderToolCallDiagnostic diag2 =
+        new ProviderToolCallDiagnostic(1, "call-2", "grep", "{", "truncated");
+
+    ProviderResponse response =
+        new ProviderResponse(
+            "result",
+            "",
+            List.of(call1, call3),
+            GenerationStopReason.LENGTH,
+            usage(),
+            cost(),
+            "req",
+            null,
+            "{}",
+            List.of(diag2));
+
+    MessagePayload payload = MAPPER.assistantPayload(response, List.of(binding()));
+    assertEquals(4, payload.message().contents().size());
+    assertEquals("result", ((TextMessageContent) payload.message().contents().get(0)).text());
+    assertEquals(
+        "call-1", ((ToolCallMessageContent) payload.message().contents().get(1)).toolCallId());
+    assertTrue(payload.message().contents().get(2) instanceof JsonMessageContent);
+    ProviderToolCallDiagnostic decodedDiag =
+        new ProviderToolCallDiagnosticJsonCodec()
+            .decode(((JsonMessageContent) payload.message().contents().get(2)).json());
+    assertEquals(diag2, decodedDiag);
+    assertEquals(
+        "call-3", ((ToolCallMessageContent) payload.message().contents().get(3)).toolCallId());
+  }
+
   @Test
   void assistantPayloadWithOnlyThinkingOrEmptyContentFallsBackToEmptyText() {
     MessagePayload thinkingOnly =

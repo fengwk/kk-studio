@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.model.provider.codec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -399,6 +400,70 @@ class ProviderReplayStateJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new ProviderReplayAffinity(ProviderType.OPENAI, "p", genId, "  m  "));
+  }
+
+  /** 意图：验证 codec 校验失败或 JSON 解析失败时，异常 message、toString 与 cause chain 绝不泄漏敏感字段名、payload 或值。 */
+  @Test
+  void exceptionsDoNotLeakOpaquePayloadSecretsOrFieldNamesInMessageOrCauseChain() {
+    String sensitiveFieldName = "SECRET_TOP_SECRET_API_KEY_9999";
+    ObjectNode extraFieldNode = (ObjectNode) codec.encodeNode(sampleState());
+    extraFieldNode.put(sensitiveFieldName, "sensitive_value");
+
+    IllegalArgumentException exField =
+        assertThrows(IllegalArgumentException.class, () -> codec.decode(extraFieldNode.toString()));
+    assertDoesNotContainInChain(exField, sensitiveFieldName);
+    assertDoesNotContainInChain(exField, "sensitive_value");
+
+    // malformed JSON 语法错误带有敏感值时，Jackson 原生堆栈与 cause 不得暴露
+    String sensitivePayloadValue = "VERY_SENSITIVE_LEAKABLE_TOKEN_ABC123";
+    String malformedJson =
+        "{\"format\":\"anthropic_messages\",\"secret\":\"" + sensitivePayloadValue + "\",malformed";
+    IllegalArgumentException exMalformed =
+        assertThrows(IllegalArgumentException.class, () -> codec.decode(malformedJson));
+    assertDoesNotContainInChain(exMalformed, sensitivePayloadValue);
+    assertNull(exMalformed.getCause());
+
+    // 非法 UUID 值也不得原样反射
+    String sensitiveBadUuid = "MALFORMED_UUID_CONTAINING_SECRET_DATA";
+    ObjectNode badUuidNode = (ObjectNode) codec.encodeNode(sampleState());
+    ((ObjectNode) badUuidNode.get("affinity")).put("connectionGenerationId", sensitiveBadUuid);
+    IllegalArgumentException exUuid =
+        assertThrows(IllegalArgumentException.class, () -> codec.decode(badUuidNode.toString()));
+    assertDoesNotContainInChain(exUuid, sensitiveBadUuid);
+
+    // 非法 format 值与 providerType 也不得原样反射
+    String badFormat = "UNKNOWN_SECRET_FORMAT_XYZ";
+    ObjectNode badFormatNode = (ObjectNode) codec.encodeNode(sampleState());
+    badFormatNode.put("format", badFormat);
+    IllegalArgumentException exFormat =
+        assertThrows(IllegalArgumentException.class, () -> codec.decode(badFormatNode.toString()));
+    assertDoesNotContainInChain(exFormat, badFormat);
+    assertNull(exFormat.getCause());
+
+    String badType = "UNKNOWN_SECRET_PROVIDER_TYPE_XYZ";
+    ObjectNode badTypeNode = (ObjectNode) codec.encodeNode(sampleState());
+    ((ObjectNode) badTypeNode.get("affinity")).put("providerType", badType);
+    IllegalArgumentException exType =
+        assertThrows(IllegalArgumentException.class, () -> codec.decode(badTypeNode.toString()));
+    assertDoesNotContainInChain(exType, badType);
+    assertNull(exType.getCause());
+  }
+
+  private static void assertDoesNotContainInChain(Throwable throwable, String sensitive) {
+    Throwable current = throwable;
+    while (current != null) {
+      String msg = current.getMessage();
+      if (msg != null) {
+        assertFalse(
+            msg.contains(sensitive),
+            () -> "exception message must not contain sensitive string: " + msg);
+      }
+      String str = current.toString();
+      assertFalse(
+          str.contains(sensitive),
+          () -> "exception toString must not contain sensitive string: " + str);
+      current = current.getCause();
+    }
   }
 
   private ProviderReplayState sampleState() {

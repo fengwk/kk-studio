@@ -55,7 +55,11 @@ public final class ProviderToolCallDiagnosticJsonCodec {
     } else {
       node.put("name", diagnostic.name());
     }
-    node.put("partialArguments", diagnostic.partialArguments());
+    if (diagnostic.partialArguments() == null) {
+      node.putNull("partialArguments");
+    } else {
+      node.put("partialArguments", diagnostic.partialArguments());
+    }
     node.put("message", diagnostic.message());
     return node;
   }
@@ -71,16 +75,15 @@ public final class ProviderToolCallDiagnosticJsonCodec {
 
     String type = text(root, "type");
     if (!TYPE_TAG.equals(type)) {
-      throw new IllegalArgumentException(
-          "expected diagnostic type " + TYPE_TAG + ", but got " + type);
+      throw new IllegalArgumentException("expected diagnostic type " + TYPE_TAG);
     }
     long callIndex = nonNegativeLong(root, "callIndex");
     if (callIndex > Integer.MAX_VALUE) {
-      throw new IllegalArgumentException("callIndex overflow: " + callIndex);
+      throw new IllegalArgumentException("callIndex overflow");
     }
     String id = decodeNullableText(root, "id");
     String name = decodeNullableText(root, "name");
-    String partialArguments = text(root, "partialArguments");
+    String partialArguments = decodeNullableText(root, "partialArguments");
     String message = text(root, "message");
 
     return new ProviderToolCallDiagnostic((int) callIndex, id, name, partialArguments, message);
@@ -94,7 +97,7 @@ public final class ProviderToolCallDiagnosticJsonCodec {
       }
       return node;
     } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("malformed tool call diagnostic JSON", error);
+      throw new IllegalArgumentException("malformed tool call diagnostic JSON");
     }
   }
 
@@ -102,7 +105,7 @@ public final class ProviderToolCallDiagnosticJsonCodec {
     try {
       return OBJECT_MAPPER.writeValueAsString(node);
     } catch (JsonProcessingException error) {
-      throw new IllegalStateException("cannot encode tool call diagnostic JSON", error);
+      throw new IllegalStateException("cannot encode tool call diagnostic JSON");
     }
   }
 
@@ -134,7 +137,7 @@ public final class ProviderToolCallDiagnosticJsonCodec {
 
   private static long nonNegativeLong(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (value == null || !value.canConvertToLong()) {
+    if (value == null || !value.isIntegralNumber() || !value.canConvertToLong()) {
       throw new IllegalArgumentException(field + " must be an integer");
     }
     long converted = value.asLong();
@@ -146,24 +149,13 @@ public final class ProviderToolCallDiagnosticJsonCodec {
 
   private static void requireFields(ObjectNode node, Set<String> expected, String context) {
     if (node.size() != expected.size()) {
-      throw new IllegalArgumentException(
-          context
-              + " field count mismatch: expected "
-              + expected
-              + ", but got "
-              + fieldNames(node));
+      throw new IllegalArgumentException(context + " field count mismatch");
     }
     for (String name : expected) {
       if (!node.has(name)) {
         throw new IllegalArgumentException(context + " missing required field: " + name);
       }
     }
-  }
-
-  private static Set<String> fieldNames(ObjectNode node) {
-    Set<String> fields = new LinkedHashSet<>();
-    node.fieldNames().forEachRemaining(fields::add);
-    return fields;
   }
 
   private static Set<String> orderedSet(String... values) {

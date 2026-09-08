@@ -4,6 +4,7 @@ package fun.fengwk.kkstudio.harness.runtime.model.provider;
 public sealed interface ProviderContentBlock
     permits ProviderTextBlock,
         ProviderImageBlock,
+        ProviderDocumentBlock,
         ProviderAudioBlock,
         ProviderVideoBlock,
         ProviderThinkingBlock,

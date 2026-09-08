@@ -27,8 +27,8 @@ import java.util.Set;
 /**
  * {@link ProviderResponse} 的严格、确定性 JSON codec。顶层严格字段为 {@code text}、{@code thinking}、{@code
  * toolCalls}、 {@code stopReason}、{@code usage}、{@code cost}、{@code requestId}、{@code
- * serviceTier}、{@code rawUsageJson}；每个 嵌套层都要求精确字段集合，并以 {@link IllegalArgumentException}
- * 拒绝未知/缺失/类型错误的值。
+ * serviceTier}、{@code rawUsageJson}、{@code toolCallDiagnostics}；每个嵌套层都要求精确字段集合，并以 {@link
+ * IllegalArgumentException} 拒绝未知/缺失/类型错误的值。
  *
  * <p>{@code rawUsageJson} 原样保留；{@link ModelCost} 中的 {@link BigDecimal} 字段以 {@code toPlainString()}
  * 字符串输出。

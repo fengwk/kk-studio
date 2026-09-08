@@ -1,14 +1,18 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Provider 流完成时提供的完整响应快照。
@@ -34,6 +38,11 @@ public record ProviderResponse(
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final String EMPTY_USAGE_JSON = "{}";
 
+  static {
+    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+  }
+
   public ProviderResponse {
     text = text == null ? "" : text;
     thinking = thinking == null ? "" : thinking;
@@ -46,6 +55,7 @@ public record ProviderResponse(
     rawUsageJson = normalizeRawUsageJson(rawUsageJson);
     toolCallDiagnostics =
         toolCallDiagnostics == null ? List.of() : List.copyOf(toolCallDiagnostics);
+    validateDiagnostics(toolCalls, toolCallDiagnostics, stopReason);
   }
 
   public ProviderResponse(
@@ -89,11 +99,39 @@ public record ProviderResponse(
     try {
       node = OBJECT_MAPPER.readTree(value);
     } catch (JsonProcessingException exception) {
-      throw new IllegalArgumentException("rawUsageJson must contain JSON", exception);
+      throw new IllegalArgumentException("rawUsageJson must contain JSON");
     }
     if (!node.isObject() && !node.isArray()) {
       throw new IllegalArgumentException("rawUsageJson must be a JSON object or array");
     }
     return value;
+  }
+
+  private static void validateDiagnostics(
+      List<ProviderToolCall> toolCalls,
+      List<ProviderToolCallDiagnostic> diagnostics,
+      GenerationStopReason stopReason) {
+    if (stopReason == GenerationStopReason.FILTERED && !diagnostics.isEmpty()) {
+      throw new IllegalArgumentException(
+          "FILTERED responses must not contain tool call diagnostics");
+    }
+    int totalOutcomes = toolCalls.size() + diagnostics.size();
+    Set<Integer> seenIndices = new HashSet<>();
+    for (ProviderToolCallDiagnostic diagnostic : diagnostics) {
+      if (diagnostic == null) {
+        throw new IllegalArgumentException("toolCallDiagnostic must not be null");
+      }
+      int index = diagnostic.callIndex();
+      if (index < 0 || index >= totalOutcomes) {
+        throw new IllegalArgumentException(
+            "toolCallDiagnostic callIndex out of bounds: "
+                + index
+                + ", totalOutcomes: "
+                + totalOutcomes);
+      }
+      if (!seenIndices.add(index)) {
+        throw new IllegalArgumentException("duplicate toolCallDiagnostic callIndex: " + index);
+      }
+    }
   }
 }
