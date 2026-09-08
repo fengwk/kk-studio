@@ -12,6 +12,7 @@ export const REAL_MODEL_DEFINITIONS = [
     providerName: 'google',
     modelName: 'gemini-3.8-flash',
     variant: 'minimal',
+    variants: ['minimal', 'low', 'medium', 'high'],
     providerType: 'google',
   },
   {
@@ -20,6 +21,7 @@ export const REAL_MODEL_DEFINITIONS = [
     providerName: 'openai',
     modelName: 'gpt-5.6-luna',
     variant: 'off',
+    variants: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
     providerType: 'openai_response',
   },
   {
@@ -28,6 +30,7 @@ export const REAL_MODEL_DEFINITIONS = [
     providerName: 'minimax-anthropic',
     modelName: 'MiniMax-M3',
     variant: 'off',
+    variants: ['off', 'minimal', 'low', 'medium', 'high'],
     providerType: 'anthropic',
   },
   {
@@ -36,6 +39,7 @@ export const REAL_MODEL_DEFINITIONS = [
     providerName: 'deepseek',
     modelName: 'deepseek-v4-flash',
     variant: 'off',
+    variants: ['off', 'low', 'high', 'max'],
     providerType: 'openai',
   },
 ]

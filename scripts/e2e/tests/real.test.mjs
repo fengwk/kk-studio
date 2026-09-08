@@ -9,6 +9,7 @@ import {
   buildCachePrefix,
   buildTextCacheSystemPrompt,
   assertAssistantUsage,
+  assertProviderUsageAlgebra,
   sanitizeArtifact,
   resolveRealModel,
   requireRealMiniMaxM3,
@@ -79,6 +80,7 @@ test('四指定模型声明式定义与 seed/credential 公共契约完全一致
     providerName: 'google',
     modelName: 'gemini-3.8-flash',
     variant: 'minimal',
+    variants: ['minimal', 'low', 'medium', 'high'],
     providerType: 'google',
   })
 
@@ -89,6 +91,7 @@ test('四指定模型声明式定义与 seed/credential 公共契约完全一致
     providerName: 'openai',
     modelName: 'gpt-5.6-luna',
     variant: 'off',
+    variants: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
     providerType: 'openai_response',
   })
 
@@ -99,6 +102,7 @@ test('四指定模型声明式定义与 seed/credential 公共契约完全一致
     providerName: 'minimax-anthropic',
     modelName: 'MiniMax-M3',
     variant: 'off',
+    variants: ['off', 'minimal', 'low', 'medium', 'high'],
     providerType: 'anthropic',
   })
 
@@ -109,6 +113,7 @@ test('四指定模型声明式定义与 seed/credential 公共契约完全一致
     providerName: 'deepseek',
     modelName: 'deepseek-v4-flash',
     variant: 'off',
+    variants: ['off', 'low', 'high', 'max'],
     providerType: 'openai',
   })
 
@@ -266,7 +271,12 @@ test('resolveRealModel 与安全 resolver 校验 catalog 契约，失败时仅�
       name: 'gemini-3.8-flash',
       config: {
         defaultVariant: 'minimal',
-        variants: [{ id: 'minimal' }, { id: 'standard' }],
+        variants: [
+          { id: 'minimal' },
+          { id: 'low' },
+          { id: 'medium' },
+          { id: 'high' },
+        ],
       },
     },
   ]
@@ -306,5 +316,102 @@ test('resolveRealModel 与安全 resolver 校验 catalog 契约，失败时仅�
       assert.ok(err.message.includes('provider minimax-anthropic not found in catalog'))
       return true
     },
+  )
+})
+
+test('assertProviderUsageAlgebra 针对四大厂商规范代数严格断言正确与违规 fixture', () => {
+  // 测试意图：使用合成 fixture 严密验证四大供应商（Google、OpenAI Responses、Anthropic、DeepSeek）的归一化 ModelUsage 代数等式及非法边界。
+
+  // 1. Google Gemini
+  const validGemini = {
+    inputTokens: 100,
+    outputTokens: 20,
+    cacheReadTokens: 50,
+    cacheWriteTokens: 0,
+    cacheWriteLongTokens: 0,
+    reasoningTokens: 30,
+    providerTotalTokens: 200, // 100 + 50 + 20 + 30
+  }
+  assert.doesNotThrow(() => assertProviderUsageAlgebra(validGemini, 'google'))
+  // 违规：Gemini 不支持 cacheWriteTokens
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validGemini, cacheWriteTokens: 5 }, 'google'),
+    /cacheWriteTokens must be 0/,
+  )
+  // 违规：providerTotal 算术不平
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validGemini, providerTotalTokens: 199 }, 'google'),
+    /Gemini providerTotalTokens algebra mismatch/,
+  )
+
+  // 2. OpenAI Responses
+  const validOpenAi = {
+    inputTokens: 80,
+    outputTokens: 20,
+    cacheReadTokens: 20,
+    cacheWriteTokens: 10,
+    cacheWriteLongTokens: 0,
+    reasoningTokens: 15,
+    providerTotalTokens: 145, // wireInput (80+20+10=110) + wireOutput (20+15=35) = 145
+  }
+  assert.doesNotThrow(() => assertProviderUsageAlgebra(validOpenAi, 'openai_response'))
+  // 违规：OpenAI Responses 不支持 cacheWriteLongTokens
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validOpenAi, cacheWriteLongTokens: 5 }, 'openai_response'),
+    /cacheWriteLongTokens must be 0/,
+  )
+  // 违规：providerTotal 算术不平
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validOpenAi, providerTotalTokens: 140 }, 'openai_response'),
+    /OpenAI Responses providerTotalTokens algebra mismatch/,
+  )
+
+  // 3. Anthropic
+  const validAnthropicZeroTotal = {
+    inputTokens: 100,
+    outputTokens: 50,
+    cacheReadTokens: 25,
+    cacheWriteTokens: 15,
+    cacheWriteLongTokens: 10,
+    reasoningTokens: 0,
+    providerTotalTokens: 0, // Anthropic 允许缺失/0
+  }
+  assert.doesNotThrow(() => assertProviderUsageAlgebra(validAnthropicZeroTotal, 'anthropic'))
+  const validAnthropicWithTotal = {
+    ...validAnthropicZeroTotal,
+    providerTotalTokens: 200, // 100 + 50 + 25 + 15 + 10
+  }
+  assert.doesNotThrow(() => assertProviderUsageAlgebra(validAnthropicWithTotal, 'anthropic'))
+  // 违规：Anthropic reasoningTokens 归一化 DTO 必须为 0（因 wire 计入 outputTokens，不重复计数）
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validAnthropicZeroTotal, reasoningTokens: 5 }, 'anthropic'),
+    /Anthropic reasoningTokens must be 0 in normalized DTO/,
+  )
+  // 违规：providerTotal 算术不平
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validAnthropicWithTotal, providerTotalTokens: 199 }, 'anthropic'),
+    /Anthropic providerTotalTokens algebra mismatch/,
+  )
+
+  // 4. DeepSeek (OpenAI Chat)
+  const validDeepSeek = {
+    inputTokens: 100,
+    outputTokens: 20,
+    cacheReadTokens: 30,
+    cacheWriteTokens: 0,
+    cacheWriteLongTokens: 0,
+    reasoningTokens: 40,
+    providerTotalTokens: 190, // wirePrompt (100+30=130) + wireCompletion (20+40=60) = 190
+  }
+  assert.doesNotThrow(() => assertProviderUsageAlgebra(validDeepSeek, 'openai'))
+  // 违规：DeepSeek 不支持 cacheWriteTokens
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validDeepSeek, cacheWriteTokens: 10 }, 'openai'),
+    /cacheWriteTokens must be 0/,
+  )
+  // 违规：providerTotal 算术不平
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validDeepSeek, providerTotalTokens: 180 }, 'openai'),
+    /DeepSeek providerTotalTokens algebra mismatch/,
   )
 })
