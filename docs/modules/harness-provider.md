@@ -20,6 +20,9 @@
   映射 `ttl: "1h"`，canonical prefix hash 递归排除 `cache_control`。
 - 真实对齐 LangChain4j 1.20.0（Git 提交 `3a2f4dca6fb447e4d191624b3d588952ed9f4ce9`）shared HTTP 与 JDK 范围内的 15 个源文件、共 115 个 active 测试方法：按 invocation 展开共 141 个测试项，49 applicable invocations passed / 92 explicit OOS（含同步非流式 HTTP、Multipart 构建器、Reactive Streams TCK 38 项、BlockHound 非阻塞检测、PUBLISHER 异步流分支以及语义不兼容的静默异常吞没用例），所有 OOS 项明确标记为 `NOT_EXECUTED_OUT_OF_SCOPE` 并详述 capability mismatch，以机器可读清单 `upstream-test-manifest.json` 固化对齐口径。
 - 真实对齐 LangChain4j 1.20.0（Git 提交 `3a2f4dca6fb447e4d191624b3d588952ed9f4ce9`）`langchain4j-anthropic` 模块全部 40 个测试源文件和追踪继承/组合的核心基座方法（共 423 个方法），按参数维度展开共 577 个 invocation：实现 155 applicable passed / 422 explicit OOS / 0 pending / 121 credential-bound real interop not executed。所有 PORTED 目标测试均通过反射机制验证本地方法存在且标注 `@Test` 或 `@ParameterizedTest`，坚决拒绝虚假对等；全部 422 项 OUT_OF_SCOPE 明确标记为 `NOT_EXECUTED_OUT_OF_SCOPE` 并详述架构不匹配原因；121 项依赖真实凭据的测试独立维护 `realInteropStatus = NOT_EXECUTED_REQUIRES_CREDENTIAL`，以机器可读清单 `upstream-test-manifest.json` 固化全量可审计口径。
+- OpenAI Responses 对齐 `langchain4j-open-ai` 中全部 15 个 Responses 测试源文件、165 个 invocation：53 PORTED / 112 OUT_OF_SCOPE / 0 pending，93 个真实凭据 invocation 独立标记为 `NOT_EXECUTED_REQUIRES_CREDENTIAL`。
+- OpenAI Chat 对齐 `langchain4j-open-ai` 全部 70 个测试源文件、659 个 invocation：247 PORTED / 412 OUT_OF_SCOPE / 0 pending，390 个真实凭据 invocation 独立标记为 `NOT_EXECUTED_REQUIRES_CREDENTIAL`。
+- Gemini 对齐 `langchain4j-google-ai-gemini` 全部 51 个测试源文件、676 个 invocation：190 PORTED / 486 OUT_OF_SCOPE / 0 pending，281 个真实凭据 invocation 独立标记为 `NOT_EXECUTED_REQUIRES_CREDENTIAL`。
 
 ### 协作边界
 
@@ -51,6 +54,9 @@ Reactor、JDBC 与外部 HTTP 客户端。
 | --- | --- | --- |
 | `fun.fengwk.kkstudio.harness.provider.transport` | JDK 21 HttpClient 异步流式传输、增量 SSE 字节解析器、有界流限制、响应元数据与 Secret-Safe 传输异常 | 仅依赖 `harness-runtime` 基础模型与 JDK 标准库；禁止暴露任何敏感凭据或包含未清洗的异常上下文 |
 | `fun.fengwk.kkstudio.harness.provider.anthropic` | Anthropic Messages wire 编码、流式聚合、cache、usage、错误、replay 与 Runtime adapter | 只经 transport 发起 I/O；opaque replay 不进入公共 DTO、日志或异常 |
+| `fun.fengwk.kkstudio.harness.provider.gemini` | Google AI Gemini GenerateContent wire 编码、流式聚合、隐式 Prompt Cache 与 Runtime adapter | 只经 transport 发起 I/O；固定声明 AUTOMATIC 缓存能力 |
+| `fun.fengwk.kkstudio.harness.provider.openai.chat` | OpenAI Chat Completions wire 编码、流式聚合、动态 Prompt Cache、tool call 与 Runtime adapter | 只经 transport 发起 I/O；按 configJson 动态解析 PromptCacheCapability |
+| `fun.fengwk.kkstudio.harness.provider.openai.responses` | OpenAI Responses wire 编码、流式聚合、动态 Prompt Cache 与 Runtime adapter | 只经 transport 发起 I/O；按 configJson 动态解析 PromptCacheCapability |
 
 ## 核心模型 / API
 

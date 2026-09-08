@@ -100,7 +100,7 @@ registerCase({
   id: 'seed.agent_and_provider',
   level: 'L1',
   title: 'Agent/Provider seed 可用',
-  docs: 'seed Agent 以 name/model 引用；Provider 以 name 标识，七种协议映射正确',
+  docs: 'seed Agent 以 name/model 引用；Provider 以 name 标识，八种协议映射正确',
   async run(ctx) {
     const { json: agentsJson } = await ctx.call(
       'GET',
@@ -140,6 +140,7 @@ registerCase({
       ['google', 'google'],
       ['anthropic', 'anthropic'],
       ['zai', 'openai'],
+      ['minimax-anthropic', 'anthropic'],
     ])
     for (const [name, providerType] of expectedProviderTypes) {
       const provider = providers.find((candidate) => candidate.name === name)

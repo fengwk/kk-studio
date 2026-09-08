@@ -56,6 +56,7 @@ class AnthropicModelProviderIntegrationTest {
   private int port;
   private ExecutorService workerExecutor;
   private ScheduledExecutorService scheduler;
+  private HttpClient client;
   private JdkHttpSseTransport transport;
 
   @BeforeEach
@@ -67,7 +68,7 @@ class AnthropicModelProviderIntegrationTest {
     workerExecutor = Executors.newCachedThreadPool();
     scheduler = Executors.newSingleThreadScheduledExecutor();
 
-    HttpClient client =
+    client =
         HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
@@ -79,6 +80,9 @@ class AnthropicModelProviderIntegrationTest {
   void tearDown() {
     if (server != null) {
       server.stop(0);
+    }
+    if (client != null) {
+      client.shutdownNow();
     }
     if (workerExecutor != null) {
       workerExecutor.shutdownNow();

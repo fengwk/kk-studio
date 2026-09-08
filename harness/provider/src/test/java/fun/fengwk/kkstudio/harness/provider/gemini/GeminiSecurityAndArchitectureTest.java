@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
@@ -33,19 +34,37 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /** 验证 Gemini 组件的 toString、架构无外部 SDK 依赖与凭据安全约束。 */
 class GeminiSecurityAndArchitectureTest {
 
+  private HttpClient httpClient;
+  private ExecutorService workerExecutor;
+  private ScheduledExecutorService scheduler;
+
+  @AfterEach
+  void tearDown() {
+    if (httpClient != null) {
+      httpClient.shutdownNow();
+    }
+    if (workerExecutor != null) {
+      workerExecutor.shutdownNow();
+    }
+    if (scheduler != null) {
+      scheduler.shutdownNow();
+    }
+  }
+
   @Test
   void toStringNeverLeaksApiKeyOrRequestBody() {
     String sensitiveKey = "AIzaSySecretApiKey123456789";
-    JdkHttpSseTransport transport =
-        new JdkHttpSseTransport(
-            HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build(),
-            Executors.newSingleThreadExecutor(),
-            Executors.newSingleThreadScheduledExecutor());
+    httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+    workerExecutor = Executors.newSingleThreadExecutor();
+    scheduler = Executors.newSingleThreadScheduledExecutor();
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
 
     GeminiProviderAdapter adapter = new GeminiProviderAdapter(transport, sensitiveKey);
     assertFalse(adapter.toString().contains(sensitiveKey));
@@ -73,11 +92,10 @@ class GeminiSecurityAndArchitectureTest {
 
   @Test
   void rejectsNonGoogleDescriptor() {
-    JdkHttpSseTransport transport =
-        new JdkHttpSseTransport(
-            HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build(),
-            Executors.newSingleThreadExecutor(),
-            Executors.newSingleThreadScheduledExecutor());
+    httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+    workerExecutor = Executors.newSingleThreadExecutor();
+    scheduler = Executors.newSingleThreadScheduledExecutor();
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
 
     GeminiProviderAdapter adapter = new GeminiProviderAdapter(transport, "key");
     ProviderDescriptor anthropicDescriptor =
@@ -93,11 +111,10 @@ class GeminiSecurityAndArchitectureTest {
 
   @Test
   void reportsPromptCacheAutomaticCapability() {
-    JdkHttpSseTransport transport =
-        new JdkHttpSseTransport(
-            HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build(),
-            Executors.newSingleThreadExecutor(),
-            Executors.newSingleThreadScheduledExecutor());
+    httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+    workerExecutor = Executors.newSingleThreadExecutor();
+    scheduler = Executors.newSingleThreadScheduledExecutor();
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
 
     GeminiProviderAdapter adapter = new GeminiProviderAdapter(transport, "key");
     assertEquals(PromptCacheCapability.automatic(), adapter.promptCacheCapability());

@@ -88,21 +88,31 @@ docker compose -f deploy/local/compose.yaml down -v
 | `KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_BYTES` | `16777216` | 每个 Daemon 连接的出站待发送 UTF-8 总字节上限（含在途帧） |
 | `KK_STUDIO_ENVIRONMENT_GATEWAY_SEND_TIMEOUT` | `10s` | 单帧 WebSocket 发送超时；超时后关闭连接 |
 
-## 真实 E2E MiniMax 凭证
+## 真实 E2E Provider 凭证
 
 Compose 和 app 不注入、传递或读取任何真实 Provider 凭证。真实 E2E 必须从宿主执行
 `./scripts/e2e.sh --real`；runner 在 backend ready 后调用唯一的
 `scripts/e2e/sync_provider_credentials.py`，通过 backend API 更新 E2E database
-中由 seed 创建的 MiniMax Provider row；credential 不进入 seed SQL/resource。
+中由 seed 创建的 Google、OpenAI Responses、MiniMax Anthropic 和 DeepSeek Provider
+row；credential 不进入 seed SQL/resource。
 
-唯一允许的 credential pair 是 `TEST_MINIMAX_BASE_URL` 与 `TEST_MINIMAX_API_KEY`，必须
-同时提供；Base URL 会去除尾部斜杠并补为 `/v1`。真实用例和默认 E2E Agent 固定使用
-`minimax/MiniMax-M2.7`。同步不会输出密钥，也不应通过 app environment 手工同步。
+允许且必须完整提供的四组 pair 是：
+
+- `TEST_GEMINI_BASE_URL` / `TEST_GEMINI_API_KEY`
+- `TEST_OPENAI_BASE_URL` / `TEST_OPENAI_API_KEY`
+- `TEST_MINIMAX_ANTHROPIC_BASE_URL` / `TEST_MINIMAX_ANTHROPIC_API_KEY`
+- `TEST_DEEPSEEK_BASE_URL` / `TEST_DEEPSEEK_API_KEY`
+
+OpenAI 与 DeepSeek Base URL 会去除尾部斜杠并补齐 `/v1`；Gemini 与 MiniMax
+Anthropic 保留调用方提供的协议 base path。真实矩阵固定使用
+`google/gemini-3.8-flash`、`openai/gpt-5.6-luna`、
+`minimax-anthropic/MiniMax-M3` 和 `deepseek/deepseek-v4-flash`。同步不会输出
+密钥或 endpoint，也不应通过 app environment 手工同步。
 
 E2E profile 通过 Flyway 执行
 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 和
-[`R__e2e_seed.sql`](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql)。seed 仍保留
-7 个 Provider 和 19 个 Pi 模型 catalog，但不包含真实凭证；真实凭证不会写入镜像、SQL
+[`R__e2e_seed.sql`](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql)。seed 保留
+8 个 Provider 和 21 个 Pi 模型 catalog，但不包含真实凭证；真实凭证不会写入镜像、SQL
 seed 或仓库。
 
 数据库首次初始化的约束：

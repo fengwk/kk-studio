@@ -32,10 +32,11 @@ final class OpenAiChatEndpoints {
     if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
       throw new IllegalArgumentException("endpoint scheme must be http or https");
     }
-    if (uri.getUserInfo() != null || uri.getRawUserInfo() != null) {
-      throw new IllegalArgumentException("endpoint must not contain user-info");
+    String rawAuthority = uri.getRawAuthority();
+    if (rawAuthority == null || rawAuthority.isBlank()) {
+      throw new IllegalArgumentException("endpoint must contain a valid host");
     }
-    if (uri.getRawAuthority() != null && uri.getRawAuthority().contains("@")) {
+    if (uri.getUserInfo() != null || uri.getRawUserInfo() != null || rawAuthority.contains("@")) {
       throw new IllegalArgumentException("endpoint must not contain user-info");
     }
     if (uri.getRawQuery() != null || uri.getQuery() != null) {
@@ -47,14 +48,7 @@ final class OpenAiChatEndpoints {
     if (uri.getHost() == null || uri.getHost().isBlank()) {
       throw new IllegalArgumentException("endpoint must contain a valid host");
     }
-    String rawAuthority = uri.getRawAuthority();
-    if (rawAuthority == null || rawAuthority.isBlank()) {
-      throw new IllegalArgumentException("endpoint must contain a valid host");
-    }
     String rawPath = uri.getRawPath();
-    if (rawPath == null) {
-      rawPath = "";
-    }
     while (rawPath.endsWith("/")) {
       rawPath = rawPath.substring(0, rawPath.length() - 1);
     }

@@ -55,6 +55,7 @@ class OpenAiResponsesStreamingDecoderTest {
   private int port;
   private ExecutorService workerExecutor;
   private ScheduledExecutorService scheduler;
+  private HttpClient httpClient;
   private JdkHttpSseTransport transport;
 
   @BeforeEach
@@ -66,7 +67,7 @@ class OpenAiResponsesStreamingDecoderTest {
     workerExecutor = Executors.newCachedThreadPool();
     scheduler = Executors.newSingleThreadScheduledExecutor();
 
-    HttpClient httpClient =
+    httpClient =
         HttpClient.newBuilder()
             .executor(workerExecutor)
             .followRedirects(HttpClient.Redirect.NEVER)
@@ -80,6 +81,9 @@ class OpenAiResponsesStreamingDecoderTest {
   void tearDown() {
     if (server != null) {
       server.stop(0);
+    }
+    if (httpClient != null) {
+      httpClient.shutdownNow();
     }
     if (workerExecutor != null) {
       workerExecutor.shutdownNow();

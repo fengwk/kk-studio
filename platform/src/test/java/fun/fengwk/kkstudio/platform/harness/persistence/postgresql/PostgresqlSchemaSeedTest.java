@@ -108,13 +108,14 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void e2eSeedCatalogAndMiniMaxCredentialTargetAreDeterministic() throws Exception {
+  void e2eSeedCatalogAndMiniMaxCredentialTargetsAreDeterministic() throws Exception {
     try (Connection conn = newConnection()) {
       applyE2eDatabase(conn);
       try (Statement st = conn.createStatement()) {
         assertEquals(
             "anthropic:anthropic,deepseek:openai,google:google,minimax:openai_response,"
-                + "openai:openai_response,xai:openai_response,zai:openai",
+                + "minimax-anthropic:anthropic,openai:openai_response,xai:openai_response,"
+                + "zai:openai",
             singleString(
                 st,
                 "select string_agg(name || ':' || provider_type, ',' order by name)"
@@ -126,6 +127,13 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 st,
                 "select name || ':' || provider_type from agent_provider where name = 'minimax'"),
             "the MiniMax credential synchronizer targets the minimax provider name");
+        assertEquals(
+            "minimax-anthropic:anthropic",
+            singleString(
+                st,
+                "select name || ':' || provider_type from agent_provider"
+                    + " where name = 'minimax-anthropic'"),
+            "the real E2E credential synchronizer targets the minimax-anthropic provider name");
       }
     }
   }
@@ -404,8 +412,8 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           rs.getLong(1),
           "no e2e provider may carry a credential; a real secret must never be checked in");
     }
-    assertSingleCount(conn, "agent_provider", 7L);
-    assertSingleCount(conn, "agent_model", 19L);
+    assertSingleCount(conn, "agent_provider", 8L);
+    assertSingleCount(conn, "agent_model", 21L);
     assertSingleCount(conn, "agent_definition", 1L);
     try (Statement st = conn.createStatement()) {
       assertEquals(

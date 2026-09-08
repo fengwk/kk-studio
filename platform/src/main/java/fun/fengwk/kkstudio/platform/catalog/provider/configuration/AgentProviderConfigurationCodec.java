@@ -84,7 +84,7 @@ public final class AgentProviderConfigurationCodec {
       }
       return (ObjectNode) config;
     } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("persisted provider configJson must be valid JSON", error);
+      throw new IllegalArgumentException("persisted provider configJson must be valid JSON");
     }
   }
 

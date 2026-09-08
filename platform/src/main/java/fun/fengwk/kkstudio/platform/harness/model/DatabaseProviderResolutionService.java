@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
@@ -33,9 +34,9 @@ import java.util.UUID;
  * baseUrl / credential / config 选择当前 {@link ProviderFactory} 并构造 adapter；Provider 更新后下一次 attempt
  * 立即使用新连接事实，删除后确定性 not found，同名重建后解析到新行。
  *
- * <p>持久 request 中已有的 {@link ProviderCacheControl} 按当前 factory 的 {@link
- * ProviderFactory#promptCacheCapability()} 规范化：当前 capability 无法表达时降级为 {@code none()}，否则按当前
- * capability 重求形态、retention 与断点。
+ * <p>持久 request 中已有的 {@link ProviderCacheControl} 按当前 {@code provider.configJson} 下 factory 的
+ * {@link ProviderFactory#promptCacheCapability(String)} 规范化：当前 capability 无法表达时降级为 {@code
+ * none()}，否则按当前 capability 重求形态、retention 与断点。
  */
 @Component
 public final class DatabaseProviderResolutionService implements ProviderResolutionService {
@@ -85,8 +86,12 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
                 () ->
                     new IllegalArgumentException(
                         "ProviderFactory is not registered for " + providerType));
-    ModelCallTimeoutPolicy timeoutPolicy =
-        providerConfigurationCodec.readTimeoutPolicy(provider.getConfigJson());
+    ModelCallTimeoutPolicy timeoutPolicy;
+    try {
+      timeoutPolicy = providerConfigurationCodec.readTimeoutPolicy(provider.getConfigJson());
+    } catch (RuntimeException error) {
+      throw new IllegalArgumentException("cannot parse provider configuration for " + providerName);
+    }
     String baseUrl = provider.getBaseUrl();
     UUID connectionGenerationId = provider.getConnectionGenerationId();
     if (connectionGenerationId == null) {
@@ -100,8 +105,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
     try {
       adapter = factory.create(provider.getCredential(), provider.getConfigJson());
     } catch (RuntimeException error) {
-      throw new IllegalArgumentException(
-          "cannot create provider adapter for " + providerName, error);
+      throw new IllegalArgumentException("cannot create provider adapter for " + providerName);
     }
     if (adapter == null) {
       throw new IllegalArgumentException(
@@ -114,6 +118,18 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
               + " for "
               + providerType);
     }
+    PromptCacheCapability promptCacheCapability;
+    try {
+      promptCacheCapability = factory.promptCacheCapability(provider.getConfigJson());
+      if (promptCacheCapability == null) {
+        throw new IllegalStateException(
+            "ProviderFactory returned null promptCacheCapability for " + providerName);
+      }
+    } catch (RuntimeException error) {
+      // Provider 扩展可能在异常中携带原始配置；此边界只暴露稳定、安全的定位信息，不保留不可信 cause。
+      throw new IllegalArgumentException(
+          "cannot resolve prompt cache capability for " + providerName);
+    }
     ProviderRequest effectiveRequest =
         new ProviderRequest(
             request.model(),
@@ -121,7 +137,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
             // 每次 attempt 物化 durable Resource：durable 请求只含 blobId/name/preview，media URL 仅存在于有效请求。
             resourceMaterializer.materialize(request.messages(), request.model().inputModalities()),
             request.tools(),
-            normalizeCacheControl(request, factory.promptCacheCapability()));
+            normalizeCacheControl(request, promptCacheCapability));
     return new ResolvedExecution(
         effectiveRequest,
         timeoutPolicy,
@@ -133,22 +149,17 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
                   baseUrl,
                   effectiveTimeoutPolicy,
                   connectionGenerationId);
+          ModelProvider modelProvider;
           try {
-            var modelProvider = adapter.create(descriptor);
-            if (modelProvider == null) {
-              throw new IllegalArgumentException(
-                  "cannot create ModelProvider for " + providerName + ": null provider");
-            }
-            return modelProvider;
+            modelProvider = adapter.create(descriptor);
           } catch (RuntimeException error) {
-            if (error instanceof IllegalArgumentException
-                && error.getMessage() != null
-                && error.getMessage().startsWith("cannot create ModelProvider")) {
-              throw error;
-            }
-            throw new IllegalArgumentException(
-                "cannot create ModelProvider for " + providerName, error);
+            throw new IllegalArgumentException("cannot create ModelProvider for " + providerName);
           }
+          if (modelProvider == null) {
+            throw new IllegalArgumentException(
+                "cannot create ModelProvider for " + providerName + ": null provider");
+          }
+          return modelProvider;
         });
   }
 

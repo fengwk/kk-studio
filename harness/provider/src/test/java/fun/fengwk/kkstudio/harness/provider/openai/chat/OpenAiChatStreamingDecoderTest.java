@@ -59,6 +59,7 @@ class OpenAiChatStreamingDecoderTest {
   private int port;
   private ExecutorService workerExecutor;
   private ScheduledExecutorService scheduler;
+  private HttpClient httpClient;
   private JdkHttpSseTransport transport;
   private ProviderDescriptor descriptor;
   private ModelDescriptor modelDesc;
@@ -72,7 +73,7 @@ class OpenAiChatStreamingDecoderTest {
 
     workerExecutor = Executors.newCachedThreadPool();
     scheduler = Executors.newSingleThreadScheduledExecutor();
-    HttpClient httpClient =
+    httpClient =
         HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
@@ -109,8 +110,15 @@ class OpenAiChatStreamingDecoderTest {
     if (server != null) {
       server.stop(0);
     }
-    workerExecutor.shutdownNow();
-    scheduler.shutdownNow();
+    if (httpClient != null) {
+      httpClient.shutdownNow();
+    }
+    if (workerExecutor != null) {
+      workerExecutor.shutdownNow();
+    }
+    if (scheduler != null) {
+      scheduler.shutdownNow();
+    }
   }
 
   @Test

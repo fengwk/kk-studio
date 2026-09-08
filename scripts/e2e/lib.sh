@@ -4,7 +4,7 @@
 # 共享函数库：e2e 入口与各 case 共用。
 # 约定：
 # - 默认 backend=127.0.0.1:18081、frontend=127.0.0.1:5173、profile=e2e
-# - 使用 PostgreSQL durable 库；重启 backend 后由宿主 E2E runner 重新同步 MiniMax credential
+# - 使用 PostgreSQL durable 库；重启 backend 后由宿主 E2E runner 重新同步 provider credentials
 # - frontend Vite 代理必须指向当前 backend：API_PROXY_TARGET=http://$BACKEND_HOST:$BACKEND_PORT
 # - daemon 不是 fat jar，必须用 -cp（daemon jar + 其自身 runtime 依赖 classpath）启动 DaemonMain，而非 harness-runtime 模块 classpath
 
@@ -167,7 +167,14 @@ start_backend() {
   : >"$WORK_DIR/backend.log"
   step "Starting backend $BACKEND_URL profile=$SPRING_PROFILE"
   # Pass PostgreSQL connection overrides when set; e2e profile defaults are only for local loops.
-  nohup env JAVA_HOME="$java_home" \
+  # Explicitly scrub all real TEST_* credential environment variables from backend Java process
+  nohup env \
+    -u TEST_GEMINI_BASE_URL -u TEST_GEMINI_API_KEY \
+    -u TEST_OPENAI_BASE_URL -u TEST_OPENAI_API_KEY \
+    -u TEST_MINIMAX_ANTHROPIC_BASE_URL -u TEST_MINIMAX_ANTHROPIC_API_KEY \
+    -u TEST_DEEPSEEK_BASE_URL -u TEST_DEEPSEEK_API_KEY \
+    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+    JAVA_HOME="$java_home" \
     ${KK_STUDIO_DB_URL:+KK_STUDIO_DB_URL="$KK_STUDIO_DB_URL"} \
     ${KK_STUDIO_DB_USER:+KK_STUDIO_DB_USER="$KK_STUDIO_DB_USER"} \
     ${KK_STUDIO_DB_PASSWORD:+KK_STUDIO_DB_PASSWORD="$KK_STUDIO_DB_PASSWORD"} \
@@ -186,13 +193,21 @@ start_backend() {
     120
 }
 
-# Synchronize the complete MiniMax credential pair into the seeded provider after backend readiness.
+# Synchronize provider credential pairs into the seeded providers after backend readiness.
 sync_e2e_provider_credentials() {
   require_cmd python3
-  step "Syncing MiniMax E2E credentials from env (secrets not printed)"
-  BACKEND_URL="$BACKEND_URL" \
-  TEST_MINIMAX_API_KEY="${TEST_MINIMAX_API_KEY-}" TEST_MINIMAX_BASE_URL="${TEST_MINIMAX_BASE_URL-}" \
-  python3 "$REPO_ROOT/scripts/e2e/sync_provider_credentials.py" --backend-url "$BACKEND_URL"
+  step "Syncing provider E2E credentials from env (secrets not printed)"
+  env \
+    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+    TEST_GEMINI_BASE_URL="${TEST_GEMINI_BASE_URL-}" \
+    TEST_GEMINI_API_KEY="${TEST_GEMINI_API_KEY-}" \
+    TEST_OPENAI_BASE_URL="${TEST_OPENAI_BASE_URL-}" \
+    TEST_OPENAI_API_KEY="${TEST_OPENAI_API_KEY-}" \
+    TEST_MINIMAX_ANTHROPIC_BASE_URL="${TEST_MINIMAX_ANTHROPIC_BASE_URL-}" \
+    TEST_MINIMAX_ANTHROPIC_API_KEY="${TEST_MINIMAX_ANTHROPIC_API_KEY-}" \
+    TEST_DEEPSEEK_BASE_URL="${TEST_DEEPSEEK_BASE_URL-}" \
+    TEST_DEEPSEEK_API_KEY="${TEST_DEEPSEEK_API_KEY-}" \
+    python3 "$REPO_ROOT/scripts/e2e/sync_provider_credentials.py" --backend-url "$BACKEND_URL"
 }
 
 start_frontend() {

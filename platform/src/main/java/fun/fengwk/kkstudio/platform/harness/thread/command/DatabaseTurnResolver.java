@@ -238,7 +238,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
             agent.getSystemPrompt(), currentEnvironment, skillBindings, subagentBindings, path);
     ProviderCacheControl cacheControl =
         cacheControl(
-            descriptor, variant, preamble, toolBindings, sessionId, cachePolicy(providerFactory));
+            descriptor,
+            variant,
+            preamble,
+            toolBindings,
+            sessionId,
+            cachePolicy(providerFactory, provider.getConfigJson(), selection.providerName()));
     return new TurnResolver.Resolved(
         new ModelRequestSpec(
             providerType,
@@ -538,8 +543,17 @@ public final class DatabaseTurnResolver implements TurnResolver {
         .orElse(null);
   }
 
-  private static PromptCachePolicy cachePolicy(ProviderFactory providerFactory) {
-    PromptCacheCapability capability = providerFactory.promptCacheCapability();
+  private static PromptCachePolicy cachePolicy(
+      ProviderFactory providerFactory, String configJson, String providerName) {
+    PromptCacheCapability capability;
+    try {
+      capability = providerFactory.promptCacheCapability(configJson);
+      if (capability == null) {
+        throw new IllegalStateException("promptCacheCapability returned null");
+      }
+    } catch (Exception error) {
+      throw rejection("invalid prompt cache configuration for provider: " + providerName);
+    }
     PromptCacheRetention retention =
         capability.supports(PromptCacheRetention.SHORT)
             ? PromptCacheRetention.SHORT

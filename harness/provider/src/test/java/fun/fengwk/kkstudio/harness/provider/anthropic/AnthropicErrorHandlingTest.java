@@ -74,6 +74,7 @@ class AnthropicErrorHandlingTest {
   private int port;
   private ExecutorService workerExecutor;
   private ScheduledExecutorService scheduler;
+  private HttpClient client;
   private JdkHttpSseTransport transport;
 
   @BeforeEach
@@ -85,7 +86,7 @@ class AnthropicErrorHandlingTest {
     workerExecutor = Executors.newCachedThreadPool();
     scheduler = Executors.newSingleThreadScheduledExecutor();
 
-    HttpClient client =
+    client =
         HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
@@ -97,6 +98,9 @@ class AnthropicErrorHandlingTest {
   void tearDown() {
     if (server != null) {
       server.stop(0);
+    }
+    if (client != null) {
+      client.shutdownNow();
     }
     if (workerExecutor != null) {
       workerExecutor.shutdownNow();

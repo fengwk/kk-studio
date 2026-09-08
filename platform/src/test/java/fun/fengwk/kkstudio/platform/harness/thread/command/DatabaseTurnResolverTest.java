@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -994,6 +995,60 @@ class DatabaseTurnResolverTest {
         breakpoints.cacheControl().breakpoints());
   }
 
+  /** 意图：验证 live turn 规划会正确传递当前 provider 的 configJson 解析动态 promptCacheCapability。 */
+  @Test
+  void planningPassesProviderConfigJsonToResolvePromptCacheCapability() {
+    Fixture fixture =
+        new Fixture(
+            List.of(),
+            List.of(),
+            List.of(),
+            Set.of(),
+            ProviderType.OPENAI,
+            ProviderType.OPENAI,
+            PromptCacheCapability.automatic(),
+            true);
+    String dynamicConfig = "{\"customCache\":true}";
+    fixture.provider.setConfigJson(dynamicConfig);
+
+    // 针对指定 configJson 返回带有 SHORT retention 的 affinity 能力
+    ProviderFactory factory = fixture.resolverProviderFactory();
+    when(factory.promptCacheCapability(dynamicConfig))
+        .thenReturn(PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings(null, "default")));
+    assertEquals(PromptCacheRetention.SHORT, spec.cacheControl().retention());
+    assertTrue(spec.cacheControl().affinityKey().startsWith("pc1-"));
+  }
+
+  /** 意图：当 provider 配置导致 PromptCacheCapability 解析抛出异常或返回 null 时，Turn planning 确定性拒绝且不泄漏 config。 */
+  @Test
+  void planningRejectsInvalidProviderSpecificConfigDeterministically() {
+    Fixture fixture =
+        new Fixture(
+            List.of(),
+            List.of(),
+            List.of(),
+            Set.of(),
+            ProviderType.OPENAI,
+            ProviderType.OPENAI,
+            PromptCacheCapability.automatic(),
+            true);
+    String secretConfig = "{\"apiKey\":\"super-secret-token\",\"malformed\":true}";
+    fixture.provider.setConfigJson(secretConfig);
+
+    ProviderFactory factory = fixture.resolverProviderFactory();
+    when(factory.promptCacheCapability(secretConfig))
+        .thenThrow(new IllegalArgumentException("syntax error in super-secret-token"));
+
+    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings(null, "default")));
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
+    assertEquals(
+        "invalid prompt cache configuration for provider: provider", rejected.error().message());
+    assertFalse(rejected.error().message().contains("super-secret-token"));
+    assertFalse(rejected.error().message().contains("syntax error"));
+  }
+
   @Test
   void propagatesInfrastructureExceptionsInsteadOfRejecting() {
     Fixture missingAgent = new Fixture(List.of(), List.of(), List.of());
@@ -1759,6 +1814,7 @@ class DatabaseTurnResolverTest {
     private final AgentDefinition agent = new AgentDefinition();
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private final AgentProvider provider = new AgentProvider();
+    private final ProviderFactory providerFactory = mock(ProviderFactory.class);
     private final DatabaseTurnResolver resolver;
 
     private Fixture(List<String> tools, List<String> skills, List<ToolDescriptor> hostDescriptors) {
@@ -1906,9 +1962,9 @@ class DatabaseTurnResolverTest {
 
       modelSupportsTools(true);
       modelSupportsReasoning(true);
-      ProviderFactory providerFactory = mock(ProviderFactory.class);
       when(providerFactory.providerType()).thenReturn(factoryType);
       when(providerFactory.promptCacheCapability()).thenReturn(cacheCapability);
+      when(providerFactory.promptCacheCapability(any())).thenReturn(cacheCapability);
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
       SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, Duration.ZERO, 50);
@@ -2128,6 +2184,10 @@ class DatabaseTurnResolverTest {
     private TurnResolver.Rejected rejected(EntryPath path) {
       TurnResolver.Result result = resolver.resolve(THREAD_ID, path, null);
       return assertInstanceOf(TurnResolver.Rejected.class, result);
+    }
+
+    private ProviderFactory resolverProviderFactory() {
+      return providerFactory;
     }
 
     private void connectingEnvironment(EnvironmentBinding environment) {

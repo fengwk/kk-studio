@@ -441,7 +441,7 @@ async function verifyProviderExecutionBoundary(args) {
     '/api/ai/catalog/providers?pageNumber=1&pageSize=50',
   )
   assertProviderExecutionBoundary({ real: false, providers: pageResults(json) })
-  console.log('Provider boundary: free mode confirmed minimax is unconfigured')
+  console.log('Provider boundary: free mode confirmed every provider is unconfigured')
 }
 
 async function main(argv) {

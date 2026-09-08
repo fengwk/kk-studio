@@ -106,7 +106,7 @@ final class AgentProviderMutationFactory {
           credential,
           configJson);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      throw new AiValidationException(RESOURCE, error.getMessage());
     }
   }
 

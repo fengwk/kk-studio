@@ -82,6 +82,7 @@ class AnthropicStreamingDecoderTest {
   private int port;
   private ExecutorService workerExecutor;
   private ScheduledExecutorService scheduler;
+  private HttpClient client;
   private JdkHttpSseTransport transport;
 
   @BeforeEach
@@ -93,7 +94,7 @@ class AnthropicStreamingDecoderTest {
     workerExecutor = Executors.newCachedThreadPool();
     scheduler = Executors.newSingleThreadScheduledExecutor();
 
-    HttpClient client =
+    client =
         HttpClient.newBuilder()
             .executor(workerExecutor)
             .connectTimeout(Duration.ofSeconds(3))
@@ -106,6 +107,9 @@ class AnthropicStreamingDecoderTest {
   void tearDown() {
     if (server != null) {
       server.stop(0);
+    }
+    if (client != null) {
+      client.shutdownNow();
     }
     if (workerExecutor != null) {
       workerExecutor.shutdownNow();

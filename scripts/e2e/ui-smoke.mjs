@@ -22,6 +22,7 @@ import {
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
+import { MINIMAX_ANTHROPIC_M3 } from './lib/real-models.mjs'
 import { createDurationTimer } from './lib/time.mjs'
 import { assertReadOnlyZeroFooter } from './ui/assertions.mjs'
 import { runComposerMatrix } from './ui/composer-matrix.mjs'
@@ -41,6 +42,9 @@ const PI_MODEL_NAMES = JSON.parse(
     'utf8',
   ),
 ).map((model) => model.name)
+const REAL_UI_MODEL = MINIMAX_ANTHROPIC_M3
+const REAL_UI_MODEL_ID = `${REAL_UI_MODEL.providerName}/${REAL_UI_MODEL.modelName}`
+const REAL_UI_MODEL_SELECTOR_LABEL = `${REAL_UI_MODEL_ID} · ${REAL_UI_MODEL.variant}`
 
 function parseArgs(argv) {
   const args = {
@@ -112,24 +116,25 @@ async function apiDeleteByName(backendUrl, resource, name) {
   return true
 }
 
-async function requireRealMiniMaxM27(backendUrl) {
-  const { json: agentsJson } = await apiJson(backendUrl, 'GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=50')
+async function requireRealMiniMaxM3(backendUrl, modelDef = MINIMAX_ANTHROPIC_M3) {
   const { json: modelsJson } = await apiJson(backendUrl, 'GET', '/api/ai/catalog/models?pageNumber=1&pageSize=50')
   const { json: providersJson } = await apiJson(backendUrl, 'GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=50')
-  const agents = agentsJson?.data?.results || []
   const models = modelsJson?.data?.results || []
   const providers = providersJson?.data?.results || []
-  const agent = agents.find((candidate) => candidate.name === 'default-assistant')
   const model = models.find(
     (candidate) =>
-      candidate.providerName === 'minimax' && candidate.name === 'MiniMax-M2.7',
+      candidate.providerName === modelDef.providerName && candidate.name === modelDef.modelName,
   )
   const provider = providers.find((candidate) => candidate.name === model?.providerName)
   assert(
-    provider?.name === 'minimax'
-      && model?.name === 'MiniMax-M2.7'
-      && agent?.model === `${model.providerName}/${model.name}`,
-    `real UI test must use default-assistant with minimax/MiniMax-M2.7: ${JSON.stringify({ agent, model, provider })}`,
+    provider?.name === modelDef.providerName
+      && provider.providerType === modelDef.providerType
+      && provider.configured === true
+      && typeof provider.baseUrl === 'string'
+      && provider.baseUrl.trim().length > 0
+      && model?.name === modelDef.modelName
+      && model.config?.variants?.some((variant) => variant.id === modelDef.variant),
+    `real UI test requires configured ${modelDef.providerName}/${modelDef.modelName} with variant ${modelDef.variant}`,
   )
 }
 
@@ -142,7 +147,7 @@ async function requireProviderExecutionBoundary(backendUrl, real) {
   )
   const providers = json?.data?.results || []
   assertProviderExecutionBoundary({ real: false, providers })
-  console.log('Provider boundary: free UI mode confirmed minimax is unconfigured')
+  console.log('Provider boundary: free UI mode confirmed every provider is unconfigured')
 }
 
 function assert(cond, msg) {
@@ -267,7 +272,7 @@ async function main(argv) {
     call: (method, requestPath, body) =>
       apiJson(args.backendUrl, method, requestPath, body),
   }
-  if (args.real) await requireRealMiniMaxM27(args.backendUrl)
+  if (args.real) await requireRealMiniMaxM3(args.backendUrl, MINIMAX_ANTHROPIC_M3)
 
   const browserEnv = { ...process.env }
   if (!args.headed) {
@@ -898,8 +903,8 @@ async function main(argv) {
         name: tempAgentName,
         description: `Temporary e2e agent for ${args.daemonEnv}`,
         systemPrompt: 'You are an e2e test agent.',
-        model: 'minimax/MiniMax-M2.7',
-        variant: 'high',
+        model: REAL_UI_MODEL_ID,
+        variant: REAL_UI_MODEL.variant,
         environmentId: card.id,
         config: { toolIds: [], skills: [], subagents: [] },
       })
@@ -972,55 +977,71 @@ async function main(argv) {
   if (args.real) {
     await run('ui.chat.blank_first_send_real', 'Blank pane 首发真实消息并出现用户气泡', async (caseArt) => {
       const title = `e2e-ui-send-${stamp}`
-      await goto('/chats')
-      await page.getByText('新建 Chat', { exact: true }).click()
-      await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
-      await selectCustomOption(
-        page,
-        page.getByRole('button', { name: 'Agent' }),
-        'default-assistant',
+      const realAgentName = `e2e-ui-real-agent-${stamp}`
+      const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/ai/catalog/agents', {
+        name: realAgentName,
+        description: 'Temporary real UI E2E agent.',
+        systemPrompt: 'Reply concisely and never call tools.',
+        model: REAL_UI_MODEL_ID,
+        variant: REAL_UI_MODEL.variant,
+        config: { toolIds: [], skills: [], subagents: [] },
+      })
+      assert(
+        agentCreateRes.status === 201,
+        `failed to create real UI agent '${realAgentName}' (expected 201, got ${agentCreateRes.status})`,
       )
-      await page.getByRole('button', { name: '确认创建' }).click()
-      // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
-      const composer = page.getByLabel('给 AI 发送消息')
-      await composer.waitFor({ state: 'visible', timeout: 15_000 })
-      await composer.fill('只回复单词 OK，不要调用工具。')
-      await page.getByRole('button', { name: '发送消息' }).click()
-      // 用户消息应进入 timeline；assistant 成功与否取决于 Provider
-      await page.getByText('只回复单词 OK，不要调用工具。').first().waitFor({ state: 'visible', timeout: 30_000 })
-      await page.getByRole('button', { name: '权限模式' }).waitFor({ state: 'visible', timeout: 30_000 })
-      await page.getByRole('button', { name: 'Model 与 Variant' })
-        .filter({ hasText: 'minimax/MiniMax-M2.7 · high' })
-        .waitFor({ state: 'visible', timeout: 30_000 })
-      const status = page.getByLabel('会话状态')
-      if (await status.count() > 0) {
-        assert(await status.getByRole('button').count() === 0, 'Footer must remain readonly')
-        const statusText = await status.innerText()
-        assert(!statusText.includes('agent:'), `Footer leaked Agent: ${statusText}`)
-        assert(!statusText.includes('MiniMax-M2.7'), `Footer leaked Model: ${statusText}`)
-        assert(!statusText.includes('notify:'), `Footer leaked Notification: ${statusText}`)
-      }
-      await shot(caseArt, 'first-send-user')
-      // 等待一轮结束（最长 90s）
-      let assistantText = ''
-      for (let i = 0; i < 90; i++) {
-        const assistantTurns = page.locator('.thread-turn-assistant')
-        const count = await assistantTurns.count()
-        if (count > 0) {
-          assistantText = (await assistantTurns.last().innerText()).trim()
-          if (/\bOK\b/i.test(assistantText)) {
-            break
-          }
-          if (/助手回复失败|FAILED|失败/i.test(assistantText)) {
-            throw new Error(`real assistant response failed: ${assistantText}`)
-          }
+      try {
+        await goto('/chats')
+        await page.getByText('新建 Chat', { exact: true }).click()
+        await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
+        await selectCustomOption(
+          page,
+          page.getByRole('button', { name: 'Agent' }),
+          realAgentName,
+        )
+        await page.getByRole('button', { name: '确认创建' }).click()
+        // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
+        const composer = page.getByLabel('给 AI 发送消息')
+        await composer.waitFor({ state: 'visible', timeout: 15_000 })
+        await composer.fill('只回复单词 OK，不要调用工具。')
+        await page.getByRole('button', { name: '发送消息' }).click()
+        await page.getByText('只回复单词 OK，不要调用工具。').first().waitFor({ state: 'visible', timeout: 30_000 })
+        await page.getByRole('button', { name: '权限模式' }).waitFor({ state: 'visible', timeout: 30_000 })
+        await page.getByRole('button', { name: 'Model 与 Variant' })
+          .filter({ hasText: REAL_UI_MODEL_SELECTOR_LABEL })
+          .waitFor({ state: 'visible', timeout: 30_000 })
+        const status = page.getByLabel('会话状态')
+        if (await status.count() > 0) {
+          assert(await status.getByRole('button').count() === 0, 'Footer must remain readonly')
+          const statusText = await status.innerText()
+          assert(!statusText.includes('agent:'), `Footer leaked Agent: ${statusText}`)
+          assert(!statusText.includes(REAL_UI_MODEL.modelName), `Footer leaked Model: ${statusText}`)
+          assert(!statusText.includes('notify:'), `Footer leaked Notification: ${statusText}`)
         }
-        await page.waitForTimeout(1000)
+        await shot(caseArt, 'first-send-user')
+        // 等待一轮结束（最长 90s）
+        let assistantText = ''
+        for (let i = 0; i < 90; i++) {
+          const assistantTurns = page.locator('.thread-turn-assistant')
+          const count = await assistantTurns.count()
+          if (count > 0) {
+            assistantText = (await assistantTurns.last().innerText()).trim()
+            if (/\bOK\b/i.test(assistantText)) {
+              break
+            }
+            if (/助手回复失败|FAILED|失败/i.test(assistantText)) {
+              throw new Error(`real assistant response failed: ${assistantText}`)
+            }
+          }
+          await page.waitForTimeout(1000)
+        }
+        await shot(caseArt, 'first-send-done')
+        assert(/\bOK\b/i.test(assistantText), `expected assistant reply containing OK, got: ${assistantText || '(empty)'}`)
+        expectNoFatal(pageErrors, consoleErrors)
+      } finally {
+        await apiDeleteByName(args.backendUrl, 'chats', title)
+        await apiDeleteByName(args.backendUrl, 'agents', realAgentName)
       }
-      await shot(caseArt, 'first-send-done')
-      assert(/\bOK\b/i.test(assistantText), `expected assistant reply containing OK, got: ${assistantText || '(empty)'}`)
-      expectNoFatal(pageErrors, consoleErrors)
-      await apiDeleteByName(args.backendUrl, 'chats', title)
     })
   }
 

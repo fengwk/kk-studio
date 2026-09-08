@@ -4,7 +4,7 @@
 # 快速开始：
 #   ./scripts/e2e.sh                  # 复用已启动服务，跑 L1（免费）
 #   ./scripts/e2e.sh --rebuild        # 强制 Java 21 clean package 并重启 backend/frontend
-#   ./scripts/e2e.sh --real           # + 真 MiniMax 文本轮次（需 TEST_MINIMAX_*）
+#   ./scripts/e2e.sh --real           # + 真实四 Provider 轮次（需 8 个 TEST_* 变量）
 #   ./scripts/e2e.sh --real --with-branch
 #   ./scripts/e2e.sh --real --with-tools --with-canvas-storage  # 真实 Tool turn（Resource 外部化需 S3）
 #   ./scripts/e2e.sh --distributed    # + 双节点 distributed mock topology（免费）
@@ -51,7 +51,7 @@ Usage: ./scripts/e2e.sh [options]
 
 Options:
   --rebuild         Force clean package backend + restart backend/frontend (+daemon if tools)
-  --real            Enable real provider cases (requires TEST_MINIMAX_BASE_URL/API_KEY)
+  --real            Enable real provider cases (requires all 8 TEST_*_BASE_URL/API_KEY credentials)
   --with-tools      Enable daemon/tool cases (starts/reuses daemon)
   --with-branch     Enable branch usage cases (implies --real)
   --with-canvas-storage  Enable Canvas Resource/Blob storage contract (backend S3 config required; also a precondition of real tool.read_turn)
@@ -67,10 +67,12 @@ Options:
 Env:
   BACKEND_PORT=18081
   FRONTEND_PORT=5173
-  TEST_MINIMAX_API_KEY / TEST_MINIMAX_BASE_URL
+  TEST_GEMINI_BASE_URL / TEST_GEMINI_API_KEY
+  TEST_OPENAI_BASE_URL / TEST_OPENAI_API_KEY
+  TEST_MINIMAX_ANTHROPIC_BASE_URL / TEST_MINIMAX_ANTHROPIC_API_KEY
+  TEST_DEEPSEEK_BASE_URL / TEST_DEEPSEEK_API_KEY
   # consumed only with --real; free modes never synchronize host credentials
-  # --real synchronizes the complete pair to seed provider name=minimax after backend readiness
-  # the base URL is normalized to end with /v1
+  # --real validates all 8 variables are non-empty before startup and synchronizes them to backend
   JAVA_HOME_21=...
   E2E_MAVEN_OFFLINE=true  # opt into Maven -o; default is online
   E2E_WORK_DIR=...        # default: $REPO_ROOT/runtime/e2e
@@ -147,20 +149,49 @@ if [ "$DISTRIBUTED" = "true" ]; then
   trap cleanup_distributed EXIT
 fi
 
+# Gate real provider credentials before any process startup or HTTP request
+if [ "$REAL" = "true" ]; then
+  REAL_CREDENTIAL_VARS=(
+    TEST_GEMINI_BASE_URL
+    TEST_GEMINI_API_KEY
+    TEST_OPENAI_BASE_URL
+    TEST_OPENAI_API_KEY
+    TEST_MINIMAX_ANTHROPIC_BASE_URL
+    TEST_MINIMAX_ANTHROPIC_API_KEY
+    TEST_DEEPSEEK_BASE_URL
+    TEST_DEEPSEEK_API_KEY
+  )
+  missing_vars=()
+  for var_name in "${REAL_CREDENTIAL_VARS[@]}"; do
+    if [ -z "${!var_name-}" ]; then
+      missing_vars+=("$var_name")
+    fi
+  done
+  if [ ${#missing_vars[@]} -gt 0 ]; then
+    die "--real requires all 8 credential variables to be set non-empty; missing: ${missing_vars[*]}"
+  fi
+fi
+
 # 1) ensure stack（--distributed 时栈即 deploy/distributed，跳过宿主单实例栈）
 if [ "$DISTRIBUTED" != "true" ]; then
   ensure_stack "$REBUILD" "$WITH_TOOLS"
 fi
 
-# 2) synchronize the MiniMax pair; --real uses the seeded MiniMax model
+# 2) synchronize provider credentials; --real uses seeded providers
 if [ "$REAL" = "true" ]; then
   sync_e2e_provider_credentials
 fi
 if [ "$REAL" = "true" ]; then
-  minimax_ready=$(curl -fsS "$BACKEND_URL/api/ai/catalog/providers?pageNumber=1&pageSize=20" \
-    | python3 -c 'import sys,json; d=json.load(sys.stdin); rows=((d.get("data") or {}).get("results") or []); p=next((r for r in rows if r.get("name")=="minimax"), {}); print("1" if p.get("configured") and p.get("baseUrl") else "0")')
-  if [ "$minimax_ready" != "1" ]; then
-    die "TEST_MINIMAX_BASE_URL and TEST_MINIMAX_API_KEY are required for --real"
+  providers_ready=$(curl -fsS "$BACKEND_URL/api/ai/catalog/providers?pageNumber=1&pageSize=50" \
+    | python3 -c 'import sys,json
+d=json.load(sys.stdin)
+rows=((d.get("data") or {}).get("results") or [])
+target_names={"google", "openai", "minimax-anthropic", "deepseek"}
+configured=set(r.get("name") for r in rows if r.get("configured") and r.get("baseUrl"))
+missing=target_names - configured
+print("missing:" + ",".join(sorted(missing)) if missing else "ok")')
+  if [ "$providers_ready" != "ok" ]; then
+    die "All 4 target providers (google, openai, minimax-anthropic, deepseek) must be configured for --real ($providers_ready)"
   fi
 fi
 
