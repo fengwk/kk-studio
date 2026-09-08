@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
@@ -34,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -98,9 +100,7 @@ final class GeminiRequestEncoder {
           part.put("text", textBlock.text());
         } else {
           throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "systemInstruction parts must be text; unsupported content block: "
-                  + block.getClass().getSimpleName());
+              ProviderErrorKind.INVALID_REQUEST, "systemInstruction parts must be text");
         }
       }
     }
@@ -111,56 +111,28 @@ final class GeminiRequestEncoder {
     // 3. tools 映射
     ArrayNode toolsArray = encodeTools(root, request.tools());
 
-    // 4. contents 映射与 prefix hash 维护
+    // 4. contents 映射与 prefix hash 维护（严格按当前实际构建的、已合并相邻同 role 的 wire contents 计算）
     ArrayNode contentsArray = root.putArray("contents");
-    ArrayNode prefixContents = NODES.arrayNode();
 
     String currentRole = null;
     ArrayNode currentParts = null;
 
     for (int i = 0; i < conversationMessages.size(); i++) {
       ProviderMessage msg = conversationMessages.get(i);
-      String currentPrefixHash =
-          GeminiPrefixHasher.calculateHash(systemInstruction, toolsArray, prefixContents);
 
-      String wireRole;
-      if (msg.role() == ProviderMessageRole.USER || msg.role() == ProviderMessageRole.TOOL) {
-        wireRole = "user";
-      } else if (msg.role() == ProviderMessageRole.ASSISTANT) {
-        wireRole = "model";
-      } else {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "unsupported message role: " + msg.role());
-      }
+      if (msg.role() == ProviderMessageRole.ASSISTANT) {
+        String wireRole = "model";
+        // 每个历史 assistant 的比较点是加入该 assistant 前，按真实 wire contents 计算
+        String currentPrefixHash =
+            GeminiPrefixHasher.calculateHash(systemInstruction, toolsArray, contentsArray);
 
-      if (currentParts == null || !wireRole.equals(currentRole)) {
-        ObjectNode contentNode = contentsArray.addObject();
-        contentNode.put("role", wireRole);
-        currentRole = wireRole;
-        currentParts = contentNode.putArray("parts");
-      }
-
-      ObjectNode prefixMsgNode = NODES.objectNode();
-      prefixMsgNode.put("role", wireRole);
-      ArrayNode prefixMsgParts = prefixMsgNode.putArray("parts");
-
-      if (msg.role() == ProviderMessageRole.USER) {
-        for (ProviderContentBlock block : msg.contents()) {
-          encodeUserBlock(currentParts, block);
-          encodeUserBlock(prefixMsgParts, block);
+        if (currentParts == null || !wireRole.equals(currentRole)) {
+          ObjectNode contentNode = contentsArray.addObject();
+          contentNode.put("role", wireRole);
+          currentRole = wireRole;
+          currentParts = contentNode.putArray("parts");
         }
-      } else if (msg.role() == ProviderMessageRole.TOOL) {
-        for (ProviderContentBlock block : msg.contents()) {
-          if (block instanceof ProviderToolResultBlock resultBlock) {
-            encodeToolResultBlock(currentParts, resultBlock);
-            encodeToolResultBlock(prefixMsgParts, resultBlock);
-          } else {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST,
-                "TOOL message must only contain ProviderToolResultBlock");
-          }
-        }
-      } else { // ASSISTANT (model)
+
         if (canReplay(
             msg.replayState(),
             descriptor,
@@ -169,17 +141,40 @@ final class GeminiRequestEncoder {
             msg.contents())) {
           for (JsonNode partNode : msg.replayState().payload().path("parts")) {
             currentParts.add(partNode.deepCopy());
-            prefixMsgParts.add(partNode.deepCopy());
           }
         } else {
           for (ProviderContentBlock block : msg.contents()) {
             encodeAssistantBlock(currentParts, block);
-            encodeAssistantBlock(prefixMsgParts, block);
           }
         }
-      }
+      } else if (msg.role() == ProviderMessageRole.USER || msg.role() == ProviderMessageRole.TOOL) {
+        String wireRole = "user";
 
-      prefixContents.add(prefixMsgNode);
+        if (currentParts == null || !wireRole.equals(currentRole)) {
+          ObjectNode contentNode = contentsArray.addObject();
+          contentNode.put("role", wireRole);
+          currentRole = wireRole;
+          currentParts = contentNode.putArray("parts");
+        }
+
+        if (msg.role() == ProviderMessageRole.USER) {
+          for (ProviderContentBlock block : msg.contents()) {
+            encodeUserBlock(currentParts, block);
+          }
+        } else { // TOOL
+          for (ProviderContentBlock block : msg.contents()) {
+            if (block instanceof ProviderToolResultBlock resultBlock) {
+              encodeToolResultBlock(currentParts, resultBlock);
+            } else {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST,
+                  "TOOL message must only contain ProviderToolResultBlock");
+            }
+          }
+        }
+      } else {
+        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "unsupported message role");
+      }
     }
 
     if (contentsArray.size() == 0) {
@@ -188,7 +183,7 @@ final class GeminiRequestEncoder {
     }
 
     String finalPrefixHash =
-        GeminiPrefixHasher.calculateHash(systemInstruction, toolsArray, prefixContents);
+        GeminiPrefixHasher.calculateHash(systemInstruction, toolsArray, contentsArray);
 
     try {
       byte[] bytes = OBJECT_MAPPER.writeValueAsBytes(root);
@@ -257,8 +252,7 @@ final class GeminiRequestEncoder {
           thinkingConfig.put("thinkingLevel", effort);
         } else {
           throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "unknown or unsupported reasoning effort: " + reasoningEffort);
+              ProviderErrorKind.INVALID_REQUEST, "unknown or unsupported reasoning effort");
         }
       }
     }
@@ -282,13 +276,8 @@ final class GeminiRequestEncoder {
       if (tool.description() != null && !tool.description().isBlank()) {
         fn.put("description", tool.description());
       }
-      JsonNode schemaNode;
-      try {
-        schemaNode = OBJECT_MAPPER.readTree(tool.inputSchemaJson());
-      } catch (JsonProcessingException exception) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "tool inputSchemaJson is not valid JSON");
-      }
+      JsonNode schemaNode =
+          parseStrictJson(tool.inputSchemaJson(), "tool inputSchemaJson is not valid JSON");
       if (!schemaNode.isObject()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "tool parameters must be a JSON object");
@@ -321,8 +310,7 @@ final class GeminiRequestEncoder {
       return;
     }
     throw new ProviderException(
-        ProviderErrorKind.INVALID_REQUEST,
-        "unsupported content block for Gemini request: " + block.getClass().getSimpleName());
+        ProviderErrorKind.INVALID_REQUEST, "unsupported content block in user message");
   }
 
   private static void encodeMediaBlock(ArrayNode parts, String mediaType, String source) {
@@ -354,39 +342,115 @@ final class GeminiRequestEncoder {
               && !scheme.equalsIgnoreCase("https")
               && !scheme.equalsIgnoreCase("gs"))) {
         throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "media fileUri scheme must be http, https or gs: " + source);
+            ProviderErrorKind.INVALID_REQUEST, "media fileUri scheme must be http, https or gs");
       }
       ObjectNode part = parts.addObject();
       ObjectNode fileData = part.putObject("fileData");
       fileData.put("mimeType", mediaType);
       fileData.put("fileUri", source);
     } catch (IllegalArgumentException ex) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid media source URI: " + source);
+      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "invalid media source URI");
     }
   }
 
   private static void encodeToolResultBlock(ArrayNode parts, ProviderToolResultBlock resultBlock) {
+    List<ProviderContentBlock> textAndJsonBlocks = new ArrayList<>();
+    List<ProviderContentBlock> mediaBlocks = new ArrayList<>();
+
+    for (ProviderContentBlock block : resultBlock.contents()) {
+      if (block instanceof ProviderTextBlock || block instanceof ProviderJsonBlock) {
+        textAndJsonBlocks.add(block);
+      } else if (block instanceof ProviderImageBlock
+          || block instanceof ProviderAudioBlock
+          || block instanceof ProviderVideoBlock
+          || block instanceof ProviderDocumentBlock) {
+        mediaBlocks.add(block);
+      } else {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "unsupported content block in tool result");
+      }
+    }
+
+    JsonNode responseObj = encodeToolResultResponse(textAndJsonBlocks, resultBlock.error());
+
     ObjectNode part = parts.addObject();
     ObjectNode functionResponse = part.putObject("functionResponse");
     functionResponse.put("name", resultBlock.toolName());
     if (resultBlock.toolCallId() != null && !resultBlock.toolCallId().isBlank()) {
       functionResponse.put("id", resultBlock.toolCallId());
     }
+    functionResponse.set("response", responseObj);
 
-    ObjectNode responseObj = functionResponse.putObject("response");
-    StringBuilder textBuilder = new StringBuilder();
-    for (ProviderContentBlock b : resultBlock.contents()) {
-      if (b instanceof ProviderTextBlock tb) {
-        textBuilder.append(tb.text());
+    for (ProviderContentBlock mediaBlock : mediaBlocks) {
+      encodeUserBlock(parts, mediaBlock);
+    }
+  }
+
+  private static JsonNode encodeToolResultResponse(
+      List<ProviderContentBlock> textAndJsonBlocks, boolean isError) {
+    int size = textAndJsonBlocks.size();
+
+    if (!isError) {
+      if (size == 0) {
+        // 空文本使用 response.result
+        return NODES.objectNode().put("result", "");
+      } else if (size == 1) {
+        ProviderContentBlock single = textAndJsonBlocks.get(0);
+        if (single instanceof ProviderTextBlock tb) {
+          // 单文本使用 response.result
+          return NODES.objectNode().put("result", tb.text() != null ? tb.text() : "");
+        } else if (single instanceof ProviderJsonBlock jb) {
+          JsonNode parsed = parseStrictJson(jb.json(), "invalid JSON block in tool result");
+          if (parsed.isObject()) {
+            // 单 JSON object 可直接作为 response object
+            return parsed.deepCopy();
+          } else {
+            // 其他单 JSON 放在 result
+            return NODES.objectNode().set("result", parsed);
+          }
+        }
+      } else {
+        // 多个 text/JSON 使用有序 results 数组
+        ArrayNode results = NODES.arrayNode();
+        for (ProviderContentBlock b : textAndJsonBlocks) {
+          if (b instanceof ProviderTextBlock tb) {
+            results.add(tb.text() != null ? tb.text() : "");
+          } else if (b instanceof ProviderJsonBlock jb) {
+            results.add(parseStrictJson(jb.json(), "invalid JSON block in tool result"));
+          }
+        }
+        return NODES.objectNode().set("results", results);
       }
+    } else {
+      // error=true 时用明确的 error wrapper 且不覆盖原始 JSON
+      ObjectNode wrapper = NODES.objectNode();
+      wrapper.put("error", true);
+      if (size == 0) {
+        wrapper.put("result", "");
+      } else if (size == 1) {
+        ProviderContentBlock single = textAndJsonBlocks.get(0);
+        if (single instanceof ProviderTextBlock tb) {
+          wrapper.put("result", tb.text() != null ? tb.text() : "");
+        } else if (single instanceof ProviderJsonBlock jb) {
+          JsonNode parsed = parseStrictJson(jb.json(), "invalid JSON block in tool result");
+          wrapper.set("result", parsed);
+        }
+      } else {
+        ArrayNode results = NODES.arrayNode();
+        for (ProviderContentBlock b : textAndJsonBlocks) {
+          if (b instanceof ProviderTextBlock tb) {
+            results.add(tb.text() != null ? tb.text() : "");
+          } else if (b instanceof ProviderJsonBlock jb) {
+            results.add(parseStrictJson(jb.json(), "invalid JSON block in tool result"));
+          }
+        }
+        wrapper.set("results", results);
+      }
+      return wrapper;
     }
-    responseObj.put("response", textBuilder.toString());
-    responseObj.put("output", textBuilder.toString());
-    if (resultBlock.error()) {
-      responseObj.put("error", true);
-    }
+
+    throw new ProviderException(
+        ProviderErrorKind.INVALID_REQUEST, "unsupported content block in tool result");
   }
 
   private static void encodeAssistantBlock(ArrayNode parts, ProviderContentBlock block) {
@@ -422,8 +486,7 @@ final class GeminiRequestEncoder {
       return;
     }
     throw new ProviderException(
-        ProviderErrorKind.INVALID_REQUEST,
-        "unsupported ASSISTANT content block: " + block.getClass().getSimpleName());
+        ProviderErrorKind.INVALID_REQUEST, "unsupported ASSISTANT content block");
   }
 
   private static boolean canReplay(
@@ -438,96 +501,241 @@ final class GeminiRequestEncoder {
     if (replayState.format() != ProviderReplayFormat.GEMINI_CONTENT) {
       return false;
     }
+
+    // 同 format (GEMINI_CONTENT) payload 无论 affinity/hash 是否匹配都先严格校验！
+    // 损坏必须 INVALID_REQUEST！
+    validateGeminiReplayPayload(replayState.payload(), durableContents);
+
+    // 校验通过后再按 affinity/hash 决定 replay/fallback
     if (!replayState.affinity().equals(descriptor.affinity(requestedModel))) {
       return false;
     }
     if (!replayState.sourcePrefixHash().equals(currentPrefixHash)) {
       return false;
     }
-    JsonNode payload = replayState.payload();
-    if (!payload.isObject() || !payload.has("parts") || !payload.get("parts").isArray()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload: missing parts array");
-    }
-    ArrayNode partsArray = (ArrayNode) payload.get("parts");
-    boolean valid = validatePayloadAgainstDurable(partsArray, durableContents);
-    if (!valid) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "invalid Gemini replay payload: content does not match durable contents");
-    }
     return true;
   }
 
-  private static boolean validatePayloadAgainstDurable(
-      ArrayNode partsArray, List<ProviderContentBlock> durableContents) {
-    StringBuilder payloadText = new StringBuilder();
-    StringBuilder payloadThinking = new StringBuilder();
-    List<ProviderToolCall> payloadCalls = new ArrayList<>();
+  private static void validateGeminiReplayPayload(
+      JsonNode payload, List<ProviderContentBlock> durableContents) {
+    if (payload == null || !payload.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+    }
 
-    for (JsonNode item : partsArray) {
-      if (!item.isObject()) {
-        return false;
-      }
-      boolean hasRecognizedField = false;
-
-      if (item.has("text") && item.get("text").isTextual()) {
-        hasRecognizedField = true;
-        if (item.has("thought") && item.get("thought").asBoolean(false)) {
-          payloadThinking.append(item.get("text").asText());
-        } else {
-          payloadText.append(item.get("text").asText());
-        }
-      }
-
-      if (item.has("functionCall") && item.get("functionCall").isObject()) {
-        hasRecognizedField = true;
-        JsonNode fn = item.get("functionCall");
-        if (!fn.has("name") || !fn.get("name").isTextual()) {
-          return false;
-        }
-        String name = fn.get("name").asText();
-        String id = (fn.has("id") && fn.get("id").isTextual()) ? fn.get("id").asText() : name;
-        String args = fn.has("args") ? fn.get("args").toString() : "{}";
-        payloadCalls.add(new ProviderToolCall(id, name, args));
-      }
-
-      if (!hasRecognizedField) {
-        return false;
+    // 严格检查顶级字段白名单：只能有 role 和 parts，禁止无关字段混入
+    Iterator<String> topFields = payload.fieldNames();
+    while (topFields.hasNext()) {
+      String f = topFields.next();
+      if (!"role".equals(f) && !"parts".equals(f)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
       }
     }
 
+    if (!payload.has("role")
+        || !payload.get("role").isTextual()
+        || !"model".equals(payload.get("role").asText())) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+    }
+
+    if (!payload.has("parts") || !payload.get("parts").isArray()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+    }
+
+    ArrayNode partsArray = (ArrayNode) payload.get("parts");
+
+    StringBuilder payloadText = new StringBuilder();
+    StringBuilder payloadThinking = new StringBuilder();
+    record ReplayPayloadCall(String id, String name, String argsJson) {}
+    List<ReplayPayloadCall> payloadCalls = new ArrayList<>();
+
+    for (JsonNode item : partsArray) {
+      if (!item.isObject()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+      }
+
+      // 白名单 shape 检查：必须且只能是 Text/Thinking part 或 FunctionCall part
+      // 不允许无关字段混入，保留 thoughtSignature 原位
+      boolean hasText = item.has("text");
+      boolean hasFunctionCall = item.has("functionCall");
+
+      if (hasText && hasFunctionCall) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+      }
+      if (!hasText && !hasFunctionCall) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+      }
+
+      if (hasText) {
+        if (!item.get("text").isTextual()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+        }
+        Iterator<String> it = item.fieldNames();
+        while (it.hasNext()) {
+          String fn = it.next();
+          if ("text".equals(fn)) {
+            continue;
+          }
+          if ("thought".equals(fn)) {
+            if (!item.get(fn).isBoolean()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+            }
+          } else if ("thoughtSignature".equals(fn)) {
+            if (!item.get(fn).isTextual()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+            }
+          } else {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+          }
+        }
+
+        String txt = item.get("text").asText();
+        if (item.has("thought") && item.get("thought").asBoolean()) {
+          payloadThinking.append(txt);
+        } else {
+          payloadText.append(txt);
+        }
+      } else { // hasFunctionCall
+        JsonNode fn = item.get("functionCall");
+        if (!fn.isObject()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+        }
+        Iterator<String> it = item.fieldNames();
+        while (it.hasNext()) {
+          String fnName = it.next();
+          if ("functionCall".equals(fnName)) {
+            continue;
+          }
+          if ("thoughtSignature".equals(fnName)) {
+            if (!item.get(fnName).isTextual()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+            }
+          } else {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+          }
+        }
+
+        if (!fn.has("name") || !fn.get("name").isTextual()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+        }
+        Iterator<String> fnFields = fn.fieldNames();
+        while (fnFields.hasNext()) {
+          String fnField = fnFields.next();
+          if ("name".equals(fnField)) {
+            continue;
+          }
+          if ("id".equals(fnField)) {
+            if (!fn.get("id").isTextual()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+            }
+          } else if ("args".equals(fnField)) {
+            if (!fn.get("args").isObject()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+            }
+          } else {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+          }
+        }
+
+        String name = fn.get("name").asText();
+        String id = fn.has("id") ? fn.get("id").asText() : null;
+        String argsJson = fn.has("args") ? fn.get("args").toString() : "{}";
+        payloadCalls.add(new ReplayPayloadCall(id, name, argsJson));
+      }
+    }
+
+    // 提取 durable 内容
     StringBuilder durableText = new StringBuilder();
     StringBuilder durableThinking = new StringBuilder();
     List<ProviderToolCall> durableCalls = new ArrayList<>();
 
     for (ProviderContentBlock block : durableContents) {
       if (block instanceof ProviderTextBlock tb) {
-        durableText.append(tb.text());
+        durableText.append(tb.text() != null ? tb.text() : "");
       } else if (block instanceof ProviderThinkingBlock tb) {
-        durableThinking.append(tb.thinking());
+        durableThinking.append(tb.thinking() != null ? tb.thinking() : "");
       } else if (block instanceof ProviderToolCallBlock tcb) {
         durableCalls.add(tcb.toolCall());
+      } else {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
       }
     }
 
+    // 比对 text 与 thinking
     if (!payloadText.toString().equals(durableText.toString())) {
-      return false;
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
     }
     if (!payloadThinking.toString().equals(durableThinking.toString())) {
-      return false;
-    }
-    if (payloadCalls.size() != durableCalls.size()) {
-      return false;
-    }
-    for (int i = 0; i < payloadCalls.size(); i++) {
-      ProviderToolCall pCall = payloadCalls.get(i);
-      ProviderToolCall dCall = durableCalls.get(i);
-      if (!pCall.name().equals(dCall.name())) {
-        return false;
-      }
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
     }
 
-    return true;
+    // 比对 tool calls 数量、id、name、arguments 全一致
+    if (payloadCalls.size() != durableCalls.size()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+    }
+    for (int i = 0; i < payloadCalls.size(); i++) {
+      ReplayPayloadCall pCall = payloadCalls.get(i);
+      ProviderToolCall dCall = durableCalls.get(i);
+      if (!Objects.equals(pCall.name(), dCall.name())) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+      }
+      String pId = (pCall.id() != null && !pCall.id().isBlank()) ? pCall.id() : null;
+      String dId = (dCall.id() != null && !dCall.id().isBlank()) ? dCall.id() : null;
+      if (!Objects.equals(pId, dId)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+      }
+      try {
+        JsonNode pArgs = OBJECT_MAPPER.readTree(pCall.argsJson());
+        JsonNode dArgs = OBJECT_MAPPER.readTree(dCall.argumentsJson());
+        if (!Objects.equals(pArgs, dArgs)) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+        }
+      } catch (Exception e) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+      }
+    }
+  }
+
+  private static JsonNode parseStrictJson(String json, String fixedErrorMessage) {
+    if (json == null || json.isBlank()) {
+      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, fixedErrorMessage);
+    }
+    try (JsonParser parser = OBJECT_MAPPER.createParser(json)) {
+      JsonNode node = OBJECT_MAPPER.readTree(parser);
+      if (node == null) {
+        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, fixedErrorMessage);
+      }
+      if (parser.nextToken() != null) {
+        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, fixedErrorMessage);
+      }
+      return node;
+    } catch (Exception ex) {
+      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, fixedErrorMessage);
+    }
   }
 }
