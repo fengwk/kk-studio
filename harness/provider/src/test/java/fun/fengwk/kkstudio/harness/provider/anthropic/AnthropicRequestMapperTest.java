@@ -994,8 +994,7 @@ class AnthropicRequestMapperTest {
 
   /** 测试意图：用户消息以 Base64 PDF 结尾时，前面的文本块无标记，末尾的 document 块被打上缓存标记。 */
   @Test
-  void should_apply_cache_control_to_last_content_block_of_user_message_ending_with_pdf()
-      throws IOException {
+  void should_apply_cache_control_to_last_content_block_of_base64_pdf_message() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
@@ -1116,8 +1115,7 @@ class AnthropicRequestMapperTest {
 
   /** 测试意图：当策略为 NONE 时，PDF 内容块绝不带 cache_control 标记。 */
   @Test
-  void should_not_apply_cache_control_to_pdf_content_without_cache_control_attribute()
-      throws IOException {
+  void should_not_apply_cache_control_to_base64_pdf_without_breakpoint() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
@@ -1245,8 +1243,7 @@ class AnthropicRequestMapperTest {
 
   /** 测试意图：当指定 SYSTEM 断点时，缓存标记必须打在最后一个系统块上，前面的系统块不带标记。 */
   @Test
-  void should_enable_system_message_caching_per_request_when_model_default_is_disabled()
-      throws IOException {
+  void should_mark_last_system_block_when_system_breakpoint_is_enabled() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
@@ -1274,8 +1271,7 @@ class AnthropicRequestMapperTest {
 
   /** 测试意图：当断点集合中未包含 SYSTEM 时，即使存在前置系统消息也不注入缓存标记。 */
   @Test
-  void should_disable_system_message_caching_per_request_when_model_default_is_enabled()
-      throws IOException {
+  void should_leave_system_blocks_unmarked_without_system_breakpoint() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
@@ -1301,7 +1297,7 @@ class AnthropicRequestMapperTest {
 
   /** 测试意图：当指定 TOOLS 断点时，缓存标记必须打在最后一个工具定义上，前面的工具不带标记。 */
   @Test
-  void should_enable_tool_caching_per_request_when_model_default_is_disabled() throws IOException {
+  void should_mark_last_tool_when_tools_breakpoint_is_enabled() throws IOException {
     ProviderToolDefinition tool1 =
         new ProviderToolDefinition(
             "calc1", "first calculator", "{\"type\":\"object\",\"properties\":{}}");
@@ -1330,7 +1326,7 @@ class AnthropicRequestMapperTest {
 
   /** 测试意图：当断点集合中未包含 TOOLS 时，工具定义数组中不注入缓存标记。 */
   @Test
-  void should_disable_tool_caching_per_request_when_model_default_is_enabled() throws IOException {
+  void should_leave_tools_unmarked_without_tools_breakpoint() throws IOException {
     ProviderToolDefinition tool =
         new ProviderToolDefinition("calc", "calculator", "{\"type\":\"object\",\"properties\":{}}");
 
@@ -1352,8 +1348,7 @@ class AnthropicRequestMapperTest {
 
   /** 测试意图：当请求指定 ProviderCacheControl.none() 时，整条请求中的 system、tools 与 messages 均无缓存标记。 */
   @Test
-  void should_fall_back_to_model_default_when_request_does_not_specify_caching()
-      throws IOException {
+  void should_emit_no_cache_markers_when_cache_control_is_none() throws IOException {
     ProviderToolDefinition tool =
         new ProviderToolDefinition("calc", "calculator", "{\"type\":\"object\",\"properties\":{}}");
 
@@ -1507,9 +1502,7 @@ class AnthropicRequestMapperTest {
 
   /** 测试意图：连续的前置系统消息均被聚合到顶层 system 数组中，messages 数组中不包含任何 SYSTEM 消息。 */
   @Test
-  void
-      mid_conversation_system_messages_disabled_sends_all_system_messages_via_top_level_system_prompt()
-          throws IOException {
+  void should_encode_leading_system_messages_in_top_level_system_prompt() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
@@ -1578,7 +1571,7 @@ class AnthropicRequestMapperTest {
 
   /** 测试意图：验证 kk-studio 默认且唯一行为是不支持会话中 SYSTEM 消息，坚决不虚构内联开关外壳。 */
   @Test
-  void should_not_mid_conversation_system_messages_by_default() {
+  void should_reject_mid_conversation_system_messages_by_default() {
     ProviderRequest request =
         request(
             defaultVariant(),

@@ -391,6 +391,71 @@ class AnthropicStreamingDecoderTest {
         41850, usageRoot.path("cache_miss_reason").path("cache_missed_input_tokens").asLong());
   }
 
+  /** 测试意图：当 message_start 未包含 diagnostics 字段时，rawUsageJson 中不得出现 cache_miss_reason。 */
+  @Test
+  void shouldOmitCacheMissReasonWhenDiagnosticsAreAbsent() throws Exception {
+    ProviderRequest request = sampleRequest();
+    ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);
+
+    AnthropicStreamAccumulator accumulator =
+        new AnthropicStreamAccumulator(
+            request, descriptor, VALID_PREFIX_HASH, new AnthropicStreamBridge(new NoopHandler()));
+
+    accumulator.handleEvent(
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_diag_absent\",\"usage\":{\"input_tokens\":120}}}");
+    accumulator.handleEvent(
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":15}}");
+    accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertNotNull(completion);
+    ProviderResponse response = completion.response();
+    assertEquals(GenerationStopReason.COMPLETE, response.stopReason());
+    assertEquals(120, response.usage().inputTokens());
+    assertEquals(15, response.usage().outputTokens());
+
+    JsonNode usageRoot = MAPPER.readTree(response.rawUsageJson());
+    assertFalse(
+        usageRoot.has("cache_miss_reason"),
+        "rawUsageJson must not contain cache_miss_reason when diagnostics is absent");
+  }
+
+  /**
+   * 测试意图：当 message_start 包含 diagnostics 节点但为空对象（无 cache_miss_reason）时，rawUsageJson 中不得包含
+   * cache_miss_reason。
+   */
+  @Test
+  void shouldOmitCacheMissReasonWhenDiagnosticsHaveNoReason() throws Exception {
+    ProviderRequest request = sampleRequest();
+    ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);
+
+    AnthropicStreamAccumulator accumulator =
+        new AnthropicStreamAccumulator(
+            request, descriptor, VALID_PREFIX_HASH, new AnthropicStreamBridge(new NoopHandler()));
+
+    accumulator.handleEvent(
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_diag_empty\",\"usage\":{\"input_tokens\":200},\"diagnostics\":{}}}");
+    accumulator.handleEvent(
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":25}}");
+    accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertNotNull(completion);
+    ProviderResponse response = completion.response();
+    assertEquals(GenerationStopReason.COMPLETE, response.stopReason());
+    assertEquals(200, response.usage().inputTokens());
+    assertEquals(25, response.usage().outputTokens());
+
+    JsonNode usageRoot = MAPPER.readTree(response.rawUsageJson());
+    assertFalse(
+        usageRoot.has("cache_miss_reason"),
+        "rawUsageJson must not contain cache_miss_reason when diagnostics has no reason");
+  }
+
   @Test
   void shouldHandleCacheCreation5mAnd1hBreakdown() {
     ProviderRequest request = sampleRequest();

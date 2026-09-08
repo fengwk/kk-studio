@@ -134,7 +134,7 @@ class AnthropicMessagesWireTest {
    * stream=true。
    */
   @Test
-  void shouldSendCorrectHttpRequest() throws Exception {
+  void should_send_correct_native_streaming_http_request() throws Exception {
     AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
     CountDownLatch serverLatch = new CountDownLatch(1);
 
@@ -176,7 +176,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证通过真实端点流式调用完成完整的消息创建与文本聚合流程。 */
   @Test
-  void shouldSendCreateMessageRequest() throws Exception {
+  void should_stream_create_message_and_aggregate_response() throws Exception {
     server.createContext(
         "/v1/messages", exchange -> respondSseText(exchange, "msg_create_1", "Hello, world!"));
 
@@ -196,7 +196,8 @@ class AnthropicMessagesWireTest {
 
   /** 验证当没有提供 API Key 时适配器发送请求时不包含认证请求头，且服务端鉴权失败时正确映射为 AUTHENTICATION 错误。 */
   @Test
-  void should_fail_to_create_without_api_key() throws Exception {
+  void should_omit_auth_headers_and_map_server_authentication_failure_when_credential_absent()
+      throws Exception {
     AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
     server.createContext(
         "/v1/messages",
@@ -236,7 +237,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证在正常原生请求体中不序列化诊断字段 diagnostics。 */
   @Test
-  void shouldOmitDiagnosticsFieldWhenNotSet() throws Exception {
+  void should_omit_diagnostics_from_native_streaming_request() throws Exception {
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("test")), null, null);
@@ -248,7 +249,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证原生请求体中不序列化 SDK 层扩展字段 custom_parameters。 */
   @Test
-  void shouldFlattenCustomParametersWithoutSerializingCustomParametersField() throws Exception {
+  void should_not_serialize_sdk_custom_parameters_wrapper() throws Exception {
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("test")), null, null);
@@ -260,7 +261,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证在正常原生传输路径上不会附加 anthropic-beta 请求头。 */
   @Test
-  void shouldIncludeBetaHeaderWhenSet() throws Exception {
+  void should_not_send_anthropic_beta_header() throws Exception {
     AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
     CountDownLatch serverLatch = new CountDownLatch(1);
 
@@ -318,9 +319,14 @@ class AnthropicMessagesWireTest {
   @ParameterizedTest
   @ValueSource(
       strings = {
-        "claude-3-5-haiku-20241022",
-        "claude-custom-deployment-enterprise-v1",
-        "claude-instant-1.2"
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-opus-4-5-20251101",
+        "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5-20251001",
+        "claude-opus-4-1-20250805"
       })
   void should_support_all_string_model_names(String modelName) throws Exception {
     ProviderDescriptor descriptor = createDescriptor(null);
@@ -345,9 +351,9 @@ class AnthropicMessagesWireTest {
     assertEquals("claude-3-7-sonnet", root.path("model").asText());
   }
 
-  /** 验证当使用默认模型描述符时模型名称透传至线缆。 */
+  /** 验证生效的 ModelDescriptor 模型名称正确序列化至线缆模型字段。 */
   @Test
-  void should_respect_modelName_in_default_model_parameters() throws Exception {
+  void should_encode_effective_model_name_from_descriptor() throws Exception {
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-haiku-20240307", null, List.of(userTextMsg("hi")), null, null);
@@ -417,9 +423,9 @@ class AnthropicMessagesWireTest {
     assertEquals("END", root.path("stop_sequences").get(0).asText());
   }
 
-  /** 验证未指定 stop_sequences 时线缆请求体不包含 stop_sequences 字段。 */
+  /** 验证当 ModelVariant 未指定 stop_sequences 时线缆请求体省略 stop_sequences 字段。 */
   @Test
-  void should_respect_stopSequences_in_default_model_parameters() throws Exception {
+  void should_omit_stop_sequences_when_variant_has_none() throws Exception {
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("hi")), null, null);
@@ -443,9 +449,9 @@ class AnthropicMessagesWireTest {
     assertEquals(4096, root.path("max_tokens").asInt());
   }
 
-  /** 验证未提供 maxOutputTokens 时回退到 Anthropic 默认的 1024。 */
+  /** 验证当 ModelVariant 未提供 maxOutputTokens 时原生线缆默认使用 1024。 */
   @Test
-  void should_respect_maxOutputTokens_in_default_model_parameters() throws Exception {
+  void should_default_max_tokens_to_1024_when_variant_has_none() throws Exception {
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("hi")), null, null);
@@ -455,9 +461,9 @@ class AnthropicMessagesWireTest {
     assertEquals(1024, root.path("max_tokens").asInt(), "default max_tokens must be 1024");
   }
 
-  /** 验证当采样参数未指定时在线缆请求体中全部缺省省略。 */
+  /** 验证当可选的 ModelVariant 采样参数缺省时，线缆请求体中省略对应字段。 */
   @Test
-  void should_use_model_defaults_when_request_parameters_absent() throws Exception {
+  void should_use_native_wire_defaults_when_optional_variant_fields_absent() throws Exception {
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("hi")), null, null);
@@ -470,9 +476,9 @@ class AnthropicMessagesWireTest {
     assertFalse(root.has("stop_sequences"));
   }
 
-  /** 验证请求级别的参数设置正确覆盖模型默认设置。 */
+  /** 验证生效的 ModelVariant 采样与停止参数完整正确序列化至线缆请求负载。 */
   @Test
-  void should_override_model_settings_with_request_parameters() throws Exception {
+  void should_encode_effective_variant_parameters() throws Exception {
     ModelVariant variant =
         new ModelVariant("override", 512, 0.2, 0.5, 20, null, null, List.of("DONE"), null);
     ProviderDescriptor descriptor = createDescriptor(null);
@@ -491,7 +497,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证当设置了 Anthropic 不支持的 frequencyPenalty 或 presencePenalty 时抛出 INVALID_REQUEST 异常。 */
   @Test
-  void should_handle_non_anthropic_parameters_gracefully() {
+  void should_reject_unsupported_penalty_parameters() {
     ModelVariant variantWithFrequencyPenalty =
         new ModelVariant("penalty", null, null, null, null, 1.0, null, List.of(), null);
     ProviderDescriptor descriptor = createDescriptor(null);
@@ -514,7 +520,7 @@ class AnthropicMessagesWireTest {
    * 与 output_config.effort。
    */
   @Test
-  void should_support_output_config_effort_via_custom_parameters() throws Exception {
+  void should_encode_typed_reasoning_effort_as_adaptive_thinking() throws Exception {
     ModelDescriptor reasoningModel =
         new ModelDescriptor(
             "anthropic-reasoning",
@@ -559,11 +565,9 @@ class AnthropicMessagesWireTest {
     assertEquals(0.8, root.path("top_p").asDouble(), 0.001);
   }
 
-  /** 验证使用默认模型参数时线缆参数符合通用规范。 */
+  /** 验证通用变体字段缺省时原生线缆默认填充基础必要字段。 */
   @Test
-  void
-      should_respect_common_parameters_wrapped_in_integration_specific_class_in_default_model_parameters()
-          throws Exception {
+  void should_use_native_defaults_when_common_variant_fields_absent() throws Exception {
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("hi")), null, null);
@@ -675,7 +679,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证对话中间出现 SYSTEM 消息时被 AnthropicRequestEncoder 确定性拒绝并抛出 INVALID_REQUEST。 */
   @Test
-  void should_apply_mid_conversation_system_message() {
+  void should_reject_mid_conversation_system_message_before_io() {
     ProviderMessage u1 = userTextMsg("Hello");
     ProviderMessage sysMid =
         new ProviderMessage(
@@ -792,7 +796,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证传入 URL 格式的 PDF 文档时被确定性拒绝并抛出 INVALID_REQUEST。 */
   @Test
-  void should_fail_if_images_as_public_URLs_are_not_supported() {
+  void should_reject_public_url_document_source() {
     ProviderDocumentBlock docWithUrl =
         new ProviderDocumentBlock("application/pdf", "https://example.com/report.pdf");
     ProviderMessage msg = new ProviderMessage(ProviderMessageRole.USER, List.of(docWithUrl));
@@ -808,7 +812,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证传入不支持的图片格式（如 image/bmp）时被确定性拒绝。 */
   @Test
-  void should_fail_if_images_as_base64_encoded_strings_are_not_supported() {
+  void should_reject_unsupported_image_media_type() {
     ProviderImageBlock bmpImage =
         new ProviderImageBlock("image/bmp", "https://example.com/image.bmp");
     ProviderMessage msg = new ProviderMessage(ProviderMessageRole.USER, List.of(bmpImage));
@@ -1255,9 +1259,9 @@ class AnthropicMessagesWireTest {
     assertEquals("1h", lastBlockLong.path("cache_control").path("ttl").asText());
   }
 
-  /** 验证缓存保留不为 NONE 时断点集合为空将触发校验失败，且多个系统消息不会错误添加多个缓存断点。 */
+  /** 验证当提示缓存保留策略不为 NONE 但断点集合为空时，请求编码器校验失败并抛出 INVALID_REQUEST。 */
   @Test
-  void should_fail_if_more_than_four_system_message_with_cache() {
+  void should_reject_cache_retention_without_breakpoints() {
     ProviderCacheControl emptyBreakpointsWithRetention =
         new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff", Set.of());
     ProviderDescriptor descriptor = createDescriptor(null);
@@ -1401,7 +1405,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证服务端未按时响应导致超时触发时，流传输器正确向上层报告 TRANSIENT 异常。 */
   @Test
-  void should_handle_timeout() throws Exception {
+  void should_map_native_stream_timeout_to_transient_error() throws Exception {
     server.createContext(
         "/v1/messages",
         exchange -> {
@@ -1428,9 +1432,9 @@ class AnthropicMessagesWireTest {
     assertTrue(handler.error.get().getMessage().contains("timed out"));
   }
 
-  /** 验证基于自定义超时策略（如短空闲超时）的超时行为。 */
+  /** 验证原生流式传输严格遵循配置的 ModelCallTimeoutPolicy 自定义超时策略。 */
   @Test
-  void shouldUseCustomTimeout() throws Exception {
+  void should_honor_native_stream_timeout_policy() throws Exception {
     server.createContext(
         "/v1/messages",
         exchange -> {
@@ -1485,7 +1489,8 @@ class AnthropicMessagesWireTest {
 
   /** 验证用户在 onEvent 回调中抛出运行时异常时，传输层抑制二次错误上报，绝不产生二次终态。 */
   @Test
-  void should_propagate_user_exceptions_thrown_from_onPartialResponse() throws Exception {
+  void should_stop_stream_without_secondary_terminal_callback_when_on_event_throws()
+      throws Exception {
     server.createContext(
         "/v1/messages",
         exchange -> {
@@ -1539,7 +1544,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证用户在 onComplete 回调中抛出运行时异常时，绝不触发二次终态 onError。 */
   @Test
-  void should_propagate_user_exceptions_thrown_from_onCompleteResponse() throws Exception {
+  void should_not_emit_secondary_error_when_on_complete_throws() throws Exception {
     server.createContext(
         "/v1/messages", exchange -> respondSseText(exchange, "msg_complete_ex", "done"));
 
@@ -1577,7 +1582,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证当底层错误触发且用户 onError 回调中抛出运行时异常时，异常被安全隔离且不产生二次回调。 */
   @Test
-  void should_ignore_user_exceptions_thrown_from_onError() throws Exception {
+  void should_isolate_exception_thrown_by_on_error() throws Exception {
     server.createContext(
         "/v1/messages",
         exchange -> {
@@ -1623,7 +1628,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证服务端返回的 message_start 事件中携带的 cache_miss_reason 能够正确解析并存入 rawUsageJson。 */
   @Test
-  void shouldParseCacheMissReasonFromResponse() throws Exception {
+  void should_parse_cache_miss_reason_from_streaming_message_start() throws Exception {
     server.createContext(
         "/v1/messages",
         exchange -> {
@@ -1662,7 +1667,7 @@ class AnthropicMessagesWireTest {
 
   /** 验证两轮交互中第一轮无诊断原因，第二轮返回 model_changed 诊断原因的序列化状态。 */
   @Test
-  void should_return_null_diagnostics_on_first_turn_and_model_changed_on_second_turn()
+  void should_parse_absent_then_model_changed_cache_miss_reason_across_two_streams()
       throws Exception {
     AtomicInteger turn = new AtomicInteger(0);
     server.createContext(
