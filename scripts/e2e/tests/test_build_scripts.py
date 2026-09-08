@@ -171,8 +171,8 @@ class TestBuildScripts(unittest.TestCase):
         start_all = function_body(script_path, "start_all")
         sync = function_body(script_path, "sync_e2e_provider_credentials")
         e2e_names = [
-            "TEST_GEMINI_BASE_URL",
-            "TEST_GEMINI_API_KEY",
+            "TEST_GOOGLE_BASE_URL",
+            "TEST_GOOGLE_API_KEY",
             "TEST_OPENAI_BASE_URL",
             "TEST_OPENAI_API_KEY",
             "TEST_MINIMAX_ANTHROPIC_BASE_URL",

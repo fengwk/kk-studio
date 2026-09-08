@@ -5,7 +5,7 @@ Usage:
     sync_provider_credentials.py --backend-url http://localhost:18080
 
 Targets:
-    google:            TEST_GEMINI_BASE_URL / TEST_GEMINI_API_KEY
+    google:            TEST_GOOGLE_BASE_URL / TEST_GOOGLE_API_KEY
     openai:            TEST_OPENAI_BASE_URL / TEST_OPENAI_API_KEY
     minimax-anthropic: TEST_MINIMAX_ANTHROPIC_BASE_URL / TEST_MINIMAX_ANTHROPIC_API_KEY
     deepseek:          TEST_DEEPSEEK_BASE_URL / TEST_DEEPSEEK_API_KEY
@@ -29,8 +29,8 @@ import urllib.request
 DEFAULT_MODEL_CALL_TIMEOUT_MILLIS = 1800000
 DEFAULT_MODEL_CALL_IDLE_TIMEOUT_MILLIS = 120000
 
-TEST_GEMINI_BASE_URL = "TEST_GEMINI_BASE_URL"
-TEST_GEMINI_API_KEY = "TEST_GEMINI_API_KEY"
+TEST_GOOGLE_BASE_URL = "TEST_GOOGLE_BASE_URL"
+TEST_GOOGLE_API_KEY = "TEST_GOOGLE_API_KEY"
 TEST_OPENAI_BASE_URL = "TEST_OPENAI_BASE_URL"
 TEST_OPENAI_API_KEY = "TEST_OPENAI_API_KEY"
 TEST_MINIMAX_ANTHROPIC_BASE_URL = "TEST_MINIMAX_ANTHROPIC_BASE_URL"
@@ -53,8 +53,8 @@ PROVIDER_SPECS: List[ProviderSpec] = [
     ProviderSpec(
         name="google",
         provider_type="google",
-        base_url_env=TEST_GEMINI_BASE_URL,
-        api_key_env=TEST_GEMINI_API_KEY,
+        base_url_env=TEST_GOOGLE_BASE_URL,
+        api_key_env=TEST_GOOGLE_API_KEY,
         requires_v1_suffix=False,
         default_description="Google Gemini.",
     ),
@@ -224,8 +224,8 @@ def sync_provider_credentials(backend_url: str, env: Optional[dict] = None, urlo
 
     # Explicit reads to satisfy static guard inspections
     env_values = {
-        TEST_GEMINI_BASE_URL: env.get(TEST_GEMINI_BASE_URL),
-        TEST_GEMINI_API_KEY: env.get(TEST_GEMINI_API_KEY),
+        TEST_GOOGLE_BASE_URL: env.get(TEST_GOOGLE_BASE_URL),
+        TEST_GOOGLE_API_KEY: env.get(TEST_GOOGLE_API_KEY),
         TEST_OPENAI_BASE_URL: env.get(TEST_OPENAI_BASE_URL),
         TEST_OPENAI_API_KEY: env.get(TEST_OPENAI_API_KEY),
         TEST_MINIMAX_ANTHROPIC_BASE_URL: env.get(TEST_MINIMAX_ANTHROPIC_BASE_URL),
