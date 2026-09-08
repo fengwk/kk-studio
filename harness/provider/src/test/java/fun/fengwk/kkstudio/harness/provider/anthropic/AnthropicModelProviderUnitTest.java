@@ -512,4 +512,132 @@ class AnthropicModelProviderUnitTest {
     cb.onFailure(new TransportException(TransportErrorKind.CANCELLED, "cancelled"));
     assertNull(caught.get());
   }
+
+  @Test
+  void adapterWiringAndConfigurationBehavior() {
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(client, exec, sched);
+
+    // 1. 默认构造函数使用 ADAPTIVE
+    AnthropicProviderAdapter defaultAdapter = new AnthropicProviderAdapter(transport, "key-1");
+    assertEquals(
+        AnthropicThinkingMode.ADAPTIVE, defaultAdapter.configuration().anthropicThinkingMode());
+    assertEquals("AnthropicProviderAdapter[providerType=ANTHROPIC]", defaultAdapter.toString());
+
+    // 2. configJson 构造函数解析 BUDGET
+    AnthropicProviderAdapter budgetAdapter =
+        new AnthropicProviderAdapter(transport, "key-2", "{\"anthropicThinkingMode\":\"BUDGET\"}");
+    assertEquals(
+        AnthropicThinkingMode.BUDGET, budgetAdapter.configuration().anthropicThinkingMode());
+
+    // 3. 显式 AnthropicConfiguration 构造函数
+    AnthropicConfiguration explicitBudgetConfig =
+        new AnthropicConfiguration(AnthropicThinkingMode.BUDGET);
+    AnthropicProviderAdapter explicitAdapter =
+        new AnthropicProviderAdapter(transport, "key-3", explicitBudgetConfig);
+    assertEquals(explicitBudgetConfig, explicitAdapter.configuration());
+
+    // 4. static parseConfig 委托
+    assertEquals(
+        AnthropicThinkingMode.BUDGET,
+        AnthropicProviderAdapter.parseConfig("{\"anthropicThinkingMode\":\"BUDGET\"}")
+            .anthropicThinkingMode());
+
+    // 5. 非法 JSON 在 adapter 构造时被拒绝
+    assertThrows(
+        ProviderException.class, () -> new AnthropicProviderAdapter(transport, "key", "not-json"));
+
+    // 6. create(descriptor) 传递 configuration 到 AnthropicModelProvider
+    AnthropicModelProvider budgetModelProvider =
+        (AnthropicModelProvider) budgetAdapter.create(descriptor);
+    assertEquals(
+        AnthropicThinkingMode.BUDGET, budgetModelProvider.configuration().anthropicThinkingMode());
+  }
+
+  @Test
+  void modelProviderEmitsInvalidRequestOnBudgetConstraintViolationWithoutInvokingTransport() {
+    AtomicReference<Boolean> transportInvoked = new AtomicReference<>(false);
+    JdkHttpSseTransport hookTransport =
+        new JdkHttpSseTransport(client, exec, sched) {
+          @Override
+          public ProviderStream stream(
+              HttpRequest request,
+              ModelCallTimeoutPolicy timeoutPolicy,
+              HttpSseLimits limits,
+              HttpSseCallback callback) {
+            transportInvoked.set(true);
+            return new ProviderStream() {
+              @Override
+              public void cancel() {}
+
+              @Override
+              public boolean isCancelled() {
+                return false;
+              }
+            };
+          }
+        };
+
+    AnthropicConfiguration budgetConfig = new AnthropicConfiguration(AnthropicThinkingMode.BUDGET);
+    AnthropicModelProvider provider =
+        new AnthropicModelProvider(
+            hookTransport,
+            descriptor,
+            "key",
+            URI.create("https://api.anthropic.com/v1/messages"),
+            budgetConfig);
+
+    ModelDescriptor reasoningModel =
+        new ModelDescriptor(
+            "anthropic-unit",
+            "claude-3-7-sonnet",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            new ModelPricing(
+                "USD",
+                "tier-1",
+                "default",
+                BigDecimal.ONE,
+                "v1",
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO));
+
+    // 缺省 max_tokens 为 1024，minimal 为 1024：1024 >= 1024 触发校验失败
+    ProviderRequest violatingReq =
+        new ProviderRequest(
+            reasoningModel,
+            new ModelVariant("default", null, null, null, null, null, null, List.of(), "minimal"),
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    AtomicReference<ProviderException> caughtError = new AtomicReference<>();
+    provider.stream(
+        violatingReq,
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            caughtError.set(error);
+          }
+        });
+
+    assertFalse(
+        transportInvoked.get(), "Transport must not be invoked on request encoding failure");
+    assertNotNull(caughtError.get());
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, caughtError.get().kind());
+    assertEquals(
+        "budget_tokens must be strictly lower than max_tokens", caughtError.get().getMessage());
+  }
 }
