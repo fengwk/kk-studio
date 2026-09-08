@@ -1,0 +1,22 @@
+{
+  "id": "msg_sync_thinking_test",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-5-20250929",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "Synthesizing answer with internal reasoning.",
+      "signature": "sig_sync_test_fixture"
+    },
+    {
+      "type": "text",
+      "text": "The final verified answer."
+    }
+  ],
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 15,
+    "output_tokens": 30
+  }
+}
