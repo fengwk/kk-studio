@@ -91,7 +91,7 @@
     "config": {
       "limit": {
         "context": 1048576,
-        "output": 131072
+        "output": 512000
       },
       "abilities": {
         "tools": true,
@@ -106,7 +106,7 @@
         "pricingTier": "pi-base",
         "serviceTier": "default",
         "serviceTierMultiplier": 1,
-        "version": "pi-0.82.1",
+        "version": "pi-0.85.1",
         "inputPerMillionTokens": 0.3,
         "outputPerMillionTokens": 1.2,
         "cacheReadPerMillionTokens": 0.06,
@@ -118,11 +118,27 @@
       "variants": [
         {
           "id": "off",
-          "reasoningEffort": "none"
+          "maxOutputTokens": 4096
+        },
+        {
+          "id": "minimal",
+          "reasoningEffort": "minimal",
+          "maxOutputTokens": 2048
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low",
+          "maxOutputTokens": 4096
+        },
+        {
+          "id": "medium",
+          "reasoningEffort": "medium",
+          "maxOutputTokens": 16384
         },
         {
           "id": "high",
-          "reasoningEffort": "high"
+          "reasoningEffort": "high",
+          "maxOutputTokens": 32768
         }
       ]
     }
@@ -259,39 +275,45 @@
         "pricingTier": "pi-base",
         "serviceTier": "default",
         "serviceTierMultiplier": 1,
-        "version": "pi-0.82.1",
-        "inputPerMillionTokens": 1,
-        "outputPerMillionTokens": 6,
-        "cacheReadPerMillionTokens": 0.1,
-        "cacheWritePerMillionTokens": 1.25,
+        "version": "pi-0.85.1",
+        "inputPerMillionTokens": 0.2,
+        "outputPerMillionTokens": 1.2,
+        "cacheReadPerMillionTokens": 0.02,
+        "cacheWritePerMillionTokens": 0.25,
         "cacheWriteLongPerMillionTokens": 0,
-        "reasoningPerMillionTokens": 6
+        "reasoningPerMillionTokens": 1.2
       },
       "defaultVariant": "max",
       "variants": [
         {
           "id": "off",
-          "reasoningEffort": "none"
+          "reasoningEffort": "none",
+          "maxOutputTokens": 4096
         },
         {
           "id": "low",
-          "reasoningEffort": "low"
+          "reasoningEffort": "low",
+          "maxOutputTokens": 4096
         },
         {
           "id": "medium",
-          "reasoningEffort": "medium"
+          "reasoningEffort": "medium",
+          "maxOutputTokens": 8192
         },
         {
           "id": "high",
-          "reasoningEffort": "high"
+          "reasoningEffort": "high",
+          "maxOutputTokens": 8192
         },
         {
           "id": "xhigh",
-          "reasoningEffort": "xhigh"
+          "reasoningEffort": "xhigh",
+          "maxOutputTokens": 16384
         },
         {
           "id": "max",
-          "reasoningEffort": "max"
+          "reasoningEffort": "max",
+          "maxOutputTokens": 16384
         }
       ]
     }
@@ -467,8 +489,8 @@
     "description": "DeepSeek V4 Flash",
     "config": {
       "limit": {
-        "context": 272000,
-        "output": 128000
+        "context": 1000000,
+        "output": 384000
       },
       "abilities": {
         "tools": true,
@@ -482,7 +504,7 @@
         "pricingTier": "pi-base",
         "serviceTier": "default",
         "serviceTierMultiplier": 1,
-        "version": "pi-0.82.1",
+        "version": "pi-0.85.1",
         "inputPerMillionTokens": 0.14,
         "outputPerMillionTokens": 0.28,
         "cacheReadPerMillionTokens": 0.0028,
@@ -493,15 +515,23 @@
       "defaultVariant": "max",
       "variants": [
         {
-          "id": "off"
+          "id": "off",
+          "maxOutputTokens": 4096
+        },
+        {
+          "id": "low",
+          "reasoningEffort": "low",
+          "maxOutputTokens": 4096
         },
         {
           "id": "high",
-          "reasoningEffort": "high"
+          "reasoningEffort": "high",
+          "maxOutputTokens": 8192
         },
         {
           "id": "max",
-          "reasoningEffort": "max"
+          "reasoningEffort": "max",
+          "maxOutputTokens": 16384
         }
       ]
     }
@@ -675,31 +705,35 @@
         "pricingTier": "pi-base",
         "serviceTier": "default",
         "serviceTierMultiplier": 1,
-        "version": "pi-0.82.1",
+        "version": "pi-0.85.1",
         "inputPerMillionTokens": 0.75,
         "outputPerMillionTokens": 3.75,
         "cacheReadPerMillionTokens": 0.075,
         "cacheWritePerMillionTokens": 0,
         "cacheWriteLongPerMillionTokens": 0,
-        "reasoningPerMillionTokens": 0
+        "reasoningPerMillionTokens": 3.75
       },
       "defaultVariant": "minimal",
       "variants": [
         {
           "id": "minimal",
-          "reasoningEffort": "minimal"
+          "reasoningEffort": "minimal",
+          "maxOutputTokens": 4096
         },
         {
           "id": "low",
-          "reasoningEffort": "low"
+          "reasoningEffort": "low",
+          "maxOutputTokens": 4096
         },
         {
           "id": "medium",
-          "reasoningEffort": "medium"
+          "reasoningEffort": "medium",
+          "maxOutputTokens": 8192
         },
         {
           "id": "high",
-          "reasoningEffort": "high"
+          "reasoningEffort": "high",
+          "maxOutputTokens": 8192
         }
       ]
     }

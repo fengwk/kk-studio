@@ -134,6 +134,34 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 "select name || ':' || provider_type from agent_provider"
                     + " where name = 'minimax-anthropic'"),
             "the real E2E credential synchronizer targets the minimax-anthropic provider name");
+        assertEquals(
+            "GPT_5_6_EXPLICIT",
+            OBJECT_MAPPER
+                .readTree(
+                    singleString(
+                        st, "select config::text from agent_provider where name = 'openai'"))
+                .path("openAiPromptCacheMode")
+                .asText(),
+            "the openai provider config must declare explicit prompt cache mode for GPT-5.6");
+        assertEquals(
+            "BUDGET",
+            OBJECT_MAPPER
+                .readTree(
+                    singleString(
+                        st,
+                        "select config::text from agent_provider where name = 'minimax-anthropic'"))
+                .path("anthropicThinkingMode")
+                .asText(),
+            "the minimax-anthropic provider config must declare BUDGET thinking mode");
+        assertEquals(
+            "DEEPSEEK",
+            OBJECT_MAPPER
+                .readTree(
+                    singleString(
+                        st, "select config::text from agent_provider where name = 'deepseek'"))
+                .path("openAiChatThinkingFormat")
+                .asText(),
+            "the deepseek provider config must declare DEEPSEEK thinking format");
       }
     }
   }
@@ -451,7 +479,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       assertEquals(
           canonicalModels(expected),
           canonicalModels(actual),
-          "E2E models must match the effective Pi 0.82.1 catalog");
+          "E2E models must match the effective Pi catalog (with target paid-real models reconciled to Pi 0.85.1)");
     }
   }
 

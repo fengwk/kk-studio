@@ -21,7 +21,7 @@ export const REAL_MODEL_DEFINITIONS = [
     providerName: 'openai',
     modelName: 'gpt-5.6-luna',
     variant: 'off',
-    variants: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    variants: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
     providerType: 'openai_response',
   },
   {
