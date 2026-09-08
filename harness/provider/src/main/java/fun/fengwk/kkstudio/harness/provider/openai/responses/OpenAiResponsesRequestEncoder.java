@@ -683,7 +683,9 @@ final class OpenAiResponsesRequestEncoder {
     for (int i = 0; i < replayToolCalls.size(); i++) {
       ProviderToolCall rc = replayToolCalls.get(i);
       ProviderToolCall dc = durableToolCalls.get(i);
-      if (!rc.id().equals(dc.id()) || !rc.name().equals(dc.name())) {
+      if (!rc.id().equals(dc.id())
+          || !rc.name().equals(dc.name())
+          || !rc.argumentsJson().equals(dc.argumentsJson())) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "replay tool call mismatch with durable tool call at index " + i);
