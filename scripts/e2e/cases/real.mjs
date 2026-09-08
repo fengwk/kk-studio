@@ -121,10 +121,21 @@ export async function resolveRealModel(ctx, modelDef) {
     `model ${modelDef.providerName}/${modelDef.modelName} does not declare variant ${modelDef.variant}: ${JSON.stringify(variants)}`,
   )
 
+  if (Array.isArray(modelDef.variants)) {
+    const declaredVariantIds = variants.map((v) => v.id)
+    for (const exp of modelDef.variants) {
+      assert(
+        declaredVariantIds.includes(exp),
+        `model ${modelDef.providerName}/${modelDef.modelName} does not declare expected variant ${exp}: ${JSON.stringify(declaredVariantIds)}`,
+      )
+    }
+  }
+
   return {
     providerName: modelDef.providerName,
     modelName: modelDef.modelName,
     variant: modelDef.variant,
+    variants: modelDef.variants || [modelDef.variant],
     provider,
     model,
   }
@@ -136,9 +147,160 @@ export async function requireRealMiniMaxM3(ctx) {
 }
 
 /**
+ * 针对当前运行时 ModelUsage 各归一化字段校验厂商特定用量代数。
+ *
+ * 各字段含义（依据当前各 Java StreamAccumulator 实现）：
+ * - inputTokens: 互斥扣除 cached / cacheWrite 后的普通输入 token
+ * - outputTokens: 互斥扣除 reasoning 后的普通输出 token
+ * - cacheReadTokens: 命中的提示缓存 token
+ * - cacheWriteTokens: 写入的 5m 提示缓存 token（Anthropic / OpenAI Responses）
+ * - cacheWriteLongTokens: 写入的 1h 提示缓存 token（Anthropic）
+ * - reasoningTokens: 推理 token（Gemini: thoughtsTokenCount; OpenAI: reasoning_tokens; DeepSeek: reasoning_tokens; Anthropic: 0L，因已计入 output_tokens 不重复计费）
+ * - providerTotalTokens: 厂商报告的总 token（Anthropic 为 0L/未提供）
+ */
+export function assertProviderUsageAlgebra(usage, providerType, { modelName } = {}) {
+  assert(usage && typeof usage === 'object', `usage must be an object: ${JSON.stringify(usage)}`)
+
+  const requiredFields = [
+    'inputTokens',
+    'outputTokens',
+    'cacheReadTokens',
+    'cacheWriteTokens',
+    'cacheWriteLongTokens',
+    'reasoningTokens',
+    'providerTotalTokens',
+  ]
+  for (const field of requiredFields) {
+    const value = usage[field]
+    assert(
+      typeof value === 'number' && Number.isSafeInteger(value) && value >= 0,
+      `usage.${field} must be a non-negative safe integer, got: ${value} in ${JSON.stringify(usage)}`,
+    )
+  }
+
+  const {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    cacheWriteLongTokens,
+    reasoningTokens,
+    providerTotalTokens,
+  } = usage
+
+  switch (providerType) {
+    case 'google': {
+      // Gemini 协议：
+      // wire prompt = inputTokens + cacheReadTokens
+      // wire candidates = outputTokens
+      // wire thoughts = reasoningTokens
+      // 不支持 cacheWrite / cacheWriteLong
+      assert(cacheWriteTokens === 0, `Gemini cacheWriteTokens must be 0, got: ${cacheWriteTokens}`)
+      assert(cacheWriteLongTokens === 0, `Gemini cacheWriteLongTokens must be 0, got: ${cacheWriteLongTokens}`)
+
+      // providerTotal = prompt + candidates + thoughts = inputTokens + cacheReadTokens + outputTokens + reasoningTokens
+      if (providerTotalTokens > 0) {
+        const expectedTotal = inputTokens + cacheReadTokens + outputTokens + reasoningTokens
+        assert(
+          providerTotalTokens === expectedTotal,
+          `Gemini providerTotalTokens algebra mismatch: expected input(${inputTokens}) + cacheRead(${cacheReadTokens}) + output(${outputTokens}) + reasoning(${reasoningTokens}) = ${expectedTotal}, got ${providerTotalTokens}`,
+        )
+      }
+      break
+    }
+
+    case 'openai_response': {
+      // OpenAI Responses 协议：
+      // rawInputTokens = inputTokens + cacheReadTokens + cacheWriteTokens
+      // rawOutputTokens = outputTokens + reasoningTokens
+      // 不支持 cacheWriteLong
+      assert(cacheWriteLongTokens === 0, `OpenAI Responses cacheWriteLongTokens must be 0, got: ${cacheWriteLongTokens}`)
+
+      const wireInput = inputTokens + cacheReadTokens + cacheWriteTokens
+      const wireOutput = outputTokens + reasoningTokens
+      assert(
+        cacheReadTokens <= wireInput,
+        `cacheReadTokens (${cacheReadTokens}) must be <= wireInput (${wireInput})`,
+      )
+      assert(
+        cacheWriteTokens <= wireInput,
+        `cacheWriteTokens (${cacheWriteTokens}) must be <= wireInput (${wireInput})`,
+      )
+      assert(
+        reasoningTokens <= wireOutput,
+        `reasoningTokens (${reasoningTokens}) must be <= wireOutput (${wireOutput})`,
+      )
+
+      // providerTotal = rawInput + rawOutput = wireInput + wireOutput
+      if (providerTotalTokens > 0) {
+        const expectedTotal = wireInput + wireOutput
+        assert(
+          providerTotalTokens === expectedTotal,
+          `OpenAI Responses providerTotalTokens algebra mismatch: expected wireInput(${wireInput}) + wireOutput(${wireOutput}) = ${expectedTotal}, got ${providerTotalTokens}`,
+        )
+      }
+      break
+    }
+
+    case 'anthropic': {
+      // Anthropic 协议：
+      // inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens (5m), cacheWriteLongTokens (1h)
+      // reasoningTokens 在 Anthropic wire outputTokens 中包含，归一化 DTO 设为 0L 避免重复计费
+      assert(reasoningTokens === 0, `Anthropic reasoningTokens must be 0 in normalized DTO, got: ${reasoningTokens}`)
+
+      // providerTotalTokens 可能为 0（Wire 响应未提供 total_tokens 字段）
+      if (providerTotalTokens > 0) {
+        const expectedTotal = inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens + cacheWriteLongTokens
+        assert(
+          providerTotalTokens === expectedTotal,
+          `Anthropic providerTotalTokens algebra mismatch: expected sum = ${expectedTotal}, got ${providerTotalTokens}`,
+        )
+      }
+      break
+    }
+
+    case 'openai': {
+      // DeepSeek (通过 OpenAI Chat Completions 协议接入)：
+      // promptTokens = inputTokens + cacheReadTokens
+      // completionTokens = outputTokens + reasoningTokens
+      // 不支持 cacheWrite / cacheWriteLong
+      assert(cacheWriteTokens === 0, `DeepSeek/OpenAI Chat cacheWriteTokens must be 0, got: ${cacheWriteTokens}`)
+      assert(cacheWriteLongTokens === 0, `DeepSeek/OpenAI Chat cacheWriteLongTokens must be 0, got: ${cacheWriteLongTokens}`)
+
+      const wirePrompt = inputTokens + cacheReadTokens
+      const wireCompletion = outputTokens + reasoningTokens
+      assert(
+        cacheReadTokens <= wirePrompt,
+        `cacheReadTokens (${cacheReadTokens}) must be <= wirePrompt (${wirePrompt})`,
+      )
+      assert(
+        reasoningTokens <= wireCompletion,
+        `reasoningTokens (${reasoningTokens}) must be <= wireCompletion (${wireCompletion})`,
+      )
+
+      // providerTotal = wirePrompt + wireCompletion
+      if (providerTotalTokens > 0) {
+        const expectedTotal = wirePrompt + wireCompletion
+        assert(
+          providerTotalTokens === expectedTotal,
+          `DeepSeek providerTotalTokens algebra mismatch: expected wirePrompt(${wirePrompt}) + wireCompletion(${wireCompletion}) = ${expectedTotal}, got ${providerTotalTokens}`,
+        )
+      }
+      break
+    }
+
+    default:
+      break
+  }
+}
+
+/**
  * 严格断言 Assistant Metadata Usage 七字段均为非负安全整数，且当 requirePositiveIO 为 true 时校验事实有效。
  */
-export function assertAssistantUsage(usage, { requirePositiveIO = true } = {}) {
+export function assertAssistantUsage(
+  usage,
+  { requirePositiveIO = true, providerType, modelName } = {},
+) {
   assert(usage && typeof usage === 'object', `usage must be an object: ${JSON.stringify(usage)}`)
   const requiredFields = [
     'inputTokens',
@@ -156,35 +318,70 @@ export function assertAssistantUsage(usage, { requirePositiveIO = true } = {}) {
       `usage.${field} must be a non-negative safe integer, got: ${value} in ${JSON.stringify(usage)}`,
     )
   }
+
   if (requirePositiveIO) {
-    assert(
-      usage.inputTokens > 0,
-      `usage.inputTokens must be > 0: ${JSON.stringify(usage)}`,
-    )
-    assert(
-      usage.outputTokens > 0,
-      `usage.outputTokens must be > 0: ${JSON.stringify(usage)}`,
-    )
-    assert(
-      usage.providerTotalTokens > 0,
-      `usage.providerTotalTokens must be > 0: ${JSON.stringify(usage)}`,
-    )
+    if (providerType === 'anthropic') {
+      assert(
+        usage.inputTokens + usage.cacheReadTokens > 0,
+        `inputTokens + cacheReadTokens must be > 0: ${JSON.stringify(usage)}`,
+      )
+      assert(
+        usage.outputTokens > 0,
+        `outputTokens must be > 0: ${JSON.stringify(usage)}`,
+      )
+      // Anthropic providerTotalTokens 允许为 0
+    } else if (!providerType) {
+      // 向后兼容旧单元测试：未指定 providerType 时严格要求 inputTokens > 0 与 outputTokens > 0
+      assert(
+        usage.inputTokens > 0,
+        `usage.inputTokens must be > 0: ${JSON.stringify(usage)}`,
+      )
+      assert(
+        usage.outputTokens > 0,
+        `outputTokens must be > 0: ${JSON.stringify(usage)}`,
+      )
+      assert(
+        usage.providerTotalTokens > 0,
+        `usage.providerTotalTokens must be > 0: ${JSON.stringify(usage)}`,
+      )
+    } else {
+      assert(
+        usage.inputTokens + usage.cacheReadTokens > 0,
+        `inputTokens + cacheReadTokens must be > 0: ${JSON.stringify(usage)}`,
+      )
+      assert(
+        usage.outputTokens + usage.reasoningTokens > 0,
+        `outputTokens + reasoningTokens must be > 0: ${JSON.stringify(usage)}`,
+      )
+      assert(
+        usage.providerTotalTokens > 0,
+        `providerTotalTokens must be > 0: ${JSON.stringify(usage)}`,
+      )
+    }
+  }
+
+  if (providerType) {
+    assertProviderUsageAlgebra(usage, providerType, { modelName })
   }
 }
 
 /**
- * 脱敏写入 artifact 的数据：过滤所有凭证、密钥与 base URL。
+ * 脱敏写入 artifact 的数据：过滤所有凭证、密钥、base URL、原始 usage JSON、replay payload、thinking 全文与 HTTP bodies。
  */
 export function sanitizeArtifact(data) {
   if (data === null || data === undefined) return data
   if (typeof data === 'string') {
-    return data
+    let sanitized = data
       .replace(/https?:\/\/[^\s"']+/g, '[REDACTED_URL]')
       .replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [REDACTED]')
       .replace(
         /\b(TEST_[A-Z0-9_]*(?:API_KEY|BASE_URL)|apiKey|credential|authorization|secret|password)=([^\s&]+)/gi,
         '$1=[REDACTED]',
       )
+    if (sanitized.length > 160) {
+      sanitized = `${sanitized.slice(0, 120)}...[TRUNCATED]`
+    }
+    return sanitized
   }
   if (Array.isArray(data)) {
     return data.map((item) => sanitizeArtifact(item))
@@ -203,6 +400,27 @@ export function sanitizeArtifact(data) {
         || (lower.includes('token') && !lower.includes('tokens'))
       ) {
         result[key] = '[REDACTED]'
+      } else if (lower === 'rawusagejson') {
+        result[key] = '[REDACTED_RAW_USAGE]'
+      } else if (lower === 'replaystate' || lower === 'replaypayload' || lower === 'payload') {
+        result[key] = '[REDACTED_REPLAY_PAYLOAD]'
+      } else if (lower === 'thoughtsignature' || lower === 'signature' || lower === 'signatures') {
+        result[key] = '[REDACTED_SIGNATURE]'
+      } else if (
+        lower === 'encryptedreasoning'
+        || lower === 'reasoningcontent'
+        || lower === 'reasoning_content'
+      ) {
+        result[key] = '[REDACTED_REASONING_CONTENT]'
+      } else if (lower === 'thinking' || lower === 'thought' || lower === 'thoughts') {
+        result[key] = typeof value === 'string' ? { present: true, length: value.length } : '[REDACTED_THINKING]'
+      } else if (
+        lower === 'httpbody'
+        || lower === 'body'
+        || lower === 'requestbody'
+        || lower === 'responsebody'
+      ) {
+        result[key] = '[REDACTED_HTTP_BODY]'
       } else if (lower === 'url' && typeof value === 'string') {
         result[key] = '[REDACTED_URL]'
       } else {
@@ -344,7 +562,28 @@ for (const def of REAL_MODEL_DEFINITIONS) {
         )
 
         const firstAssistantPayload = parseEntryPayload(firstAssistantEntry)
-        assertAssistantUsage(firstAssistantPayload.assistantMetadata?.usage, { requirePositiveIO: true })
+        const firstUsage = firstAssistantPayload.assistantMetadata?.usage
+        assertAssistantUsage(firstUsage, {
+          requirePositiveIO: true,
+          providerType: def.providerType,
+          modelName: def.modelName,
+        })
+
+        if (def.providerType === 'google' || def.providerType === 'openai') {
+          assert(
+            firstUsage.cacheWriteTokens === 0,
+            `${def.providerType} does not support cache write, cacheWriteTokens must be 0`,
+          )
+          assert(
+            firstUsage.cacheWriteLongTokens === 0,
+            `${def.providerType} cacheWriteLongTokens must be 0`,
+          )
+        } else if (def.providerType === 'openai_response' || def.providerType === 'anthropic') {
+          assert(
+            firstUsage.cacheWriteTokens >= 0,
+            `${def.providerType} cacheWriteTokens must be non-negative`,
+          )
+        }
 
         let cacheHit = false
         const followUpRecords = []
@@ -391,12 +630,16 @@ for (const def of REAL_MODEL_DEFINITIONS) {
 
           const roundPayload = parseEntryPayload(roundAssistant)
           const usage = roundPayload.assistantMetadata?.usage
-          assertAssistantUsage(usage, { requirePositiveIO: true })
+          assertAssistantUsage(usage, {
+            requirePositiveIO: true,
+            providerType: def.providerType,
+            modelName: def.modelName,
+          })
 
           followUpRecords.push({
             round,
             usage,
-            reply: roundText,
+            replySnippet: roundText.slice(0, 80),
           })
 
           if (usage.cacheReadTokens > 0) {
@@ -422,8 +665,8 @@ for (const def of REAL_MODEL_DEFINITIONS) {
               },
               threadId,
               firstRound: {
-                usage: firstAssistantPayload.assistantMetadata?.usage,
-                reply: firstText,
+                usage: firstUsage,
+                replySnippet: firstText.slice(0, 80),
               },
               followUpRecords,
             }),
@@ -448,10 +691,108 @@ for (const def of REAL_MODEL_DEFINITIONS) {
     level: 'L4',
     title: `${def.title} 真实工具调用与 terminal replay`,
     requires: ['real', 'tools'],
-    docs: `验证 ${def.providerName}/${def.modelName}（variant ${def.variant}）：创建临时 Agent，仅启用无需 Environment 的 base.goal.get；提示模型必须调用 get_goal 恰好一次、参数 {}，收到结果后回复唯一 marker；等待 IDLE 后严格断言：恰好一个 durable ASSISTANT tool_call（name get_goal，argumentsJson 是空 Object）、一个匹配 callId 的 TOOL tool_result 且文本含“no current branch goal”，随后 normal final Assistant 含 marker，Turn COMPLETED；两次模型 Assistant metadata usage 合法，写脱敏 artifact`,
+    docs: `验证 ${def.providerName}/${def.modelName}：执行支持变体的推理 smoke，并在最强 variant 下运行真实工具调用（get_goal）与 terminal replay 闭环；严格校验 tool_call、tool_result、最终 ASSISTANT marker、两次模型调用及 provider-specific usage 代数与 replay 证据，写脱敏 artifact`,
     async run(ctx) {
       const resolved = await resolveRealModel(ctx, def)
       const suffix = cid().slice(0, 8)
+      const variantsToTest = resolved.variants || [def.variant]
+      const testedVariants = []
+
+      // 1. Multi-level reasoning smoke across all declared distinct variants
+      for (const variant of variantsToTest) {
+        let varAgent = null
+        let varChat = null
+        try {
+          const varSuffix = cid().slice(0, 8)
+          const varMarker = `REASON-${def.idSuffix}-${variant}-${varSuffix}`
+          const { json: varAgentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
+            name: `e2e-reason-${def.idSuffix}-${variant}-${varSuffix}`,
+            description: `Temporary reasoning agent for ${def.title} ${variant}.`,
+            systemPrompt:
+              'You are a precise reasoning assistant. Compute the answer carefully and reply with the required marker.',
+            model: `${resolved.providerName}/${resolved.modelName}`,
+            variant,
+            config: { toolIds: [], skills: [], subagents: [] },
+          })
+          varAgent = envelopeData(varAgentJson)
+          varChat = await createChat(ctx, {
+            title: `e2e-reason-chat-${def.idSuffix}-${variant}-${varSuffix}`,
+            agentName: varAgent.name,
+            yoloEnabled: false,
+          })
+
+          const varSessionId = cid()
+          const varThreadId = cid()
+          const varPrompt = `Calculate 29 * 31. State the final product clearly and append this marker: ${varMarker}`
+          const accepted = await createNewSession(ctx, {
+            owner: chatOwner(varChat.id),
+            sessionId: varSessionId,
+            threadId: varThreadId,
+            rootSettings: branchSettingsOf(varAgent, {
+              providerName: resolved.providerName,
+              modelName: resolved.modelName,
+              variant,
+            }),
+            yoloEnabled: false,
+            commands: [userMessageCommand(varPrompt, cid())],
+          })
+          assert(
+            accepted.acceptedCommands[0]?.type === 'USER_MESSAGE',
+            `expected USER_MESSAGE command: ${JSON.stringify(accepted.acceptedCommands)}`,
+          )
+
+          const varQuiescent = await waitForQuiescentThread(ctx, varThreadId, {
+            timeoutMs: 180_000,
+            intervalMs: 500,
+          })
+          assert(varQuiescent.status === 'IDLE', `thread not IDLE: ${JSON.stringify(varQuiescent)}`)
+
+          const varSnapshot = await getThreadSnapshot(ctx, varThreadId)
+          const varEntries = varSnapshot.entries || []
+          assert(
+            !varEntries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
+            `unexpected ASSISTANT_ERROR in variant ${variant}: ${JSON.stringify(varEntries)}`,
+          )
+
+          const varAssistants = normalAssistantEntries(varEntries)
+          assert(varAssistants.length > 0, `no assistant entry in variant ${variant}`)
+          const varAssistant = varAssistants.at(-1)
+          const varPayload = parseEntryPayload(varAssistant)
+          const varUsage = varPayload.assistantMetadata?.usage
+          assertAssistantUsage(varUsage, {
+            requirePositiveIO: true,
+            providerType: def.providerType,
+            modelName: def.modelName,
+          })
+
+          const hasThinkingContent = (varPayload.message?.contents || []).some(
+            (c) => c?.type === 'thinking',
+          )
+          const hasReasoningTokens = (varUsage?.reasoningTokens || 0) > 0
+
+          testedVariants.push({
+            variant,
+            inputTokens: varUsage.inputTokens,
+            outputTokens: varUsage.outputTokens,
+            reasoningTokens: varUsage.reasoningTokens,
+            providerTotalTokens: varUsage.providerTotalTokens,
+            hasThinkingContent,
+            hasReasoningTokens,
+            replySnippet: messageText(varAssistant).slice(0, 80),
+          })
+        } finally {
+          await cleanupChat(ctx, varChat)
+          await cleanupAgent(ctx, varAgent)
+        }
+      }
+
+      assert(
+        testedVariants.length === variantsToTest.length,
+        `expected all ${variantsToTest.length} variants tested, got ${testedVariants.length}`,
+      )
+
+      // 2. Strongest-level replay/tool roundtrip
+      const strongestVariant = variantsToTest.at(-1)
       const marker = `GOAL-DONE-${cid().slice(0, 8)}`
       let agent = null
       let chat = null
@@ -464,7 +805,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
             + 'When instructed by the user, you MUST call the get_goal tool exactly once with arguments {}. '
             + 'Do not call any other tool. After receiving the tool result, answer the user with the requested marker.',
           model: `${resolved.providerName}/${resolved.modelName}`,
-          variant: resolved.variant,
+          variant: strongestVariant,
           config: {
             toolIds: ['base.goal.get'],
             skills: [],
@@ -490,7 +831,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           rootSettings: branchSettingsOf(agent, {
             providerName: resolved.providerName,
             modelName: resolved.modelName,
-            variant: resolved.variant,
+            variant: strongestVariant,
           }),
           yoloEnabled: false,
           commands: [userMessageCommand(userPrompt, cid())],
@@ -610,9 +951,51 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           `expected COMPLETED TURN_END: ${JSON.stringify(lastTurnEndPayload)}`,
         )
 
-        // 两次模型 Assistant metadata usage 合法
-        assertAssistantUsage(toolCallPayload.assistantMetadata?.usage, { requirePositiveIO: true })
-        assertAssistantUsage(finalAssistantPayload.assistantMetadata?.usage, { requirePositiveIO: true })
+        // 两次模型 Assistant metadata usage 合法且符合 provider-specific algebra
+        const toolCallUsage = toolCallPayload.assistantMetadata?.usage
+        const finalAssistantUsage = finalAssistantPayload.assistantMetadata?.usage
+        assertAssistantUsage(toolCallUsage, {
+          requirePositiveIO: true,
+          providerType: def.providerType,
+          modelName: def.modelName,
+        })
+        assertAssistantUsage(finalAssistantUsage, {
+          requirePositiveIO: true,
+          providerType: def.providerType,
+          modelName: def.modelName,
+        })
+
+        // 校验最强级别下的 reasoning / thinking durable evidence
+        const hasToolCallThinking = (toolCallPayload.message?.contents || []).some(
+          (c) => c?.type === 'thinking',
+        )
+        const hasToolCallReasoningTokens = (toolCallUsage?.reasoningTokens || 0) > 0
+        const hasFinalThinking = (finalAssistantPayload.message?.contents || []).some(
+          (c) => c?.type === 'thinking',
+        )
+        const hasFinalReasoningTokens = (finalAssistantUsage?.reasoningTokens || 0) > 0
+
+        if (def.providerType === 'google') {
+          assert(
+            hasToolCallReasoningTokens || hasToolCallThinking || hasFinalReasoningTokens || hasFinalThinking,
+            `Gemini high variant must demonstrate reasoning evidence (reasoningTokens > 0 or thinking content)`,
+          )
+        } else if (def.providerType === 'openai_response') {
+          assert(
+            hasToolCallReasoningTokens || hasToolCallThinking || hasFinalReasoningTokens || hasFinalThinking,
+            `OpenAI Responses max variant must demonstrate reasoning evidence`,
+          )
+        } else if (def.providerType === 'anthropic') {
+          assert(
+            hasToolCallThinking || hasFinalThinking || (toolCallUsage?.outputTokens || 0) > 0,
+            `Anthropic BUDGET high variant must demonstrate durable invocation evidence`,
+          )
+        } else if (def.providerType === 'openai') {
+          assert(
+            hasToolCallReasoningTokens || hasToolCallThinking || hasFinalReasoningTokens || hasFinalThinking,
+            `DeepSeek Chat max variant must demonstrate reasoning evidence`,
+          )
+        }
 
         ctx.writeArtifact(
           `real-tool-${def.idSuffix}.json`,
@@ -621,22 +1004,27 @@ for (const def of REAL_MODEL_DEFINITIONS) {
               modelDef: {
                 providerName: def.providerName,
                 modelName: def.modelName,
-                variant: def.variant,
+                variant: strongestVariant,
                 providerType: def.providerType,
               },
+              testedVariants,
               threadId,
               toolCall: {
                 callId,
                 toolName: toolCallContent.toolName,
                 argumentsJson: toolCallContent.argumentsJson,
-                usage: toolCallPayload.assistantMetadata?.usage,
+                usage: toolCallUsage,
+                hasThinking: hasToolCallThinking,
+                hasReasoningTokens: hasToolCallReasoningTokens,
               },
               toolResult: {
-                resultText,
+                resultSnippet: resultText.slice(0, 80),
               },
               finalAssistant: {
-                reply: finalText,
-                usage: finalAssistantPayload.assistantMetadata?.usage,
+                replySnippet: finalText.slice(0, 80),
+                usage: finalAssistantUsage,
+                hasThinking: hasFinalThinking,
+                hasReasoningTokens: hasFinalReasoningTokens,
               },
             }),
             null,
