@@ -15,8 +15,8 @@ import {
   requireRealMiniMaxM3,
 } from '../cases/real.mjs'
 
-test('八个指定 real case 正确注册到 case registry 且旧 text_turn 移除', () => {
-  // 测试意图：确保四个声明式模型文本+缓存 case 和四个真实工具 case 正确注册，旧单模型 real.text_turn 已被彻底移除，注册表保持干净且可单独 --only 运行。
+test('十二个指定 real case 正确注册到 case registry 且旧 text_turn 移除', () => {
+  // 测试意图：确保四个声明式模型文本+缓存 case、四个多推理级别烟雾 case 和四个真实工具 case 正确注册，旧单模型 real.text_turn 已被彻底移除，注册表保持干净且可单独 --only 运行。
   const caseIds = ALL_CASES.map((c) => c.id)
 
   const expectedTextCacheIds = [
@@ -27,6 +27,16 @@ test('八个指定 real case 正确注册到 case registry 且旧 text_turn 移�
   ]
   for (const id of expectedTextCacheIds) {
     assert.equal(caseIds.includes(id), true, `missing text cache case: ${id}`)
+  }
+
+  const expectedReasoningLevelsIds = [
+    'real.reasoning_levels.google_gemini',
+    'real.reasoning_levels.openai_responses',
+    'real.reasoning_levels.minimax_anthropic',
+    'real.reasoning_levels.deepseek_chat',
+  ]
+  for (const id of expectedReasoningLevelsIds) {
+    assert.equal(caseIds.includes(id), true, `missing reasoning levels case: ${id}`)
   }
 
   const expectedToolIds = [
@@ -42,13 +52,18 @@ test('八个指定 real case 正确注册到 case registry 且旧 text_turn 移�
   assert.equal(caseIds.includes('real.text_turn'), false, 'legacy real.text_turn must be removed')
 })
 
-test('真实用例矩阵 capability 声明严格对齐规范（text_cache 仅 real，tool 与 delegation 需 real+tools）', () => {
+test('真实用例矩阵 capability 声明严格对齐规范（text_cache/reasoning_levels 仅 real，tool 与 delegation 需 real+tools）', () => {
   // 测试意图：验证用例依赖的前置条件声明准确无误，避免无工具环境误跑工具测试或真实工具 case 遗漏 tools capability 标记。
   for (const def of REAL_MODEL_DEFINITIONS) {
     const textCacheCase = ALL_CASES.find((c) => c.id === `real.text_cache.${def.idSuffix}`)
     assert.ok(textCacheCase, `text cache case not found for ${def.idSuffix}`)
     assert.equal(textCacheCase.level, 'L2')
     assert.deepEqual([...textCacheCase.requires].sort(), ['real'])
+
+    const reasoningCase = ALL_CASES.find((c) => c.id === `real.reasoning_levels.${def.idSuffix}`)
+    assert.ok(reasoningCase, `reasoning levels case not found for ${def.idSuffix}`)
+    assert.equal(reasoningCase.level, 'L2')
+    assert.deepEqual([...reasoningCase.requires].sort(), ['real'])
 
     const toolCase = ALL_CASES.find((c) => c.id === `real.tool.${def.idSuffix}`)
     assert.ok(toolCase, `tool case not found for ${def.idSuffix}`)
@@ -91,7 +106,7 @@ test('四指定模型声明式定义与 seed/credential 公共契约完全一致
     providerName: 'openai',
     modelName: 'gpt-5.6-luna',
     variant: 'off',
-    variants: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    variants: ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
     providerType: 'openai_response',
   })
 
@@ -374,23 +389,18 @@ test('assertProviderUsageAlgebra 针对四大厂商规范代数严格断言正�
     cacheWriteTokens: 15,
     cacheWriteLongTokens: 10,
     reasoningTokens: 0,
-    providerTotalTokens: 0, // Anthropic 允许缺失/0
+    providerTotalTokens: 0, // Anthropic 闭包后必须为 0
   }
   assert.doesNotThrow(() => assertProviderUsageAlgebra(validAnthropicZeroTotal, 'anthropic'))
-  const validAnthropicWithTotal = {
-    ...validAnthropicZeroTotal,
-    providerTotalTokens: 200, // 100 + 50 + 25 + 15 + 10
-  }
-  assert.doesNotThrow(() => assertProviderUsageAlgebra(validAnthropicWithTotal, 'anthropic'))
   // 违规：Anthropic reasoningTokens 归一化 DTO 必须为 0（因 wire 计入 outputTokens，不重复计数）
   assert.throws(
     () => assertProviderUsageAlgebra({ ...validAnthropicZeroTotal, reasoningTokens: 5 }, 'anthropic'),
     /Anthropic reasoningTokens must be 0 in normalized DTO/,
   )
-  // 违规：providerTotal 算术不平
+  // 违规：Anthropic providerTotalTokens 必须为 0，任何非零均为非法
   assert.throws(
-    () => assertProviderUsageAlgebra({ ...validAnthropicWithTotal, providerTotalTokens: 199 }, 'anthropic'),
-    /Anthropic providerTotalTokens algebra mismatch/,
+    () => assertProviderUsageAlgebra({ ...validAnthropicZeroTotal, providerTotalTokens: 200 }, 'anthropic'),
+    /Anthropic providerTotalTokens must be 0 in normalized DTO/,
   )
 
   // 4. DeepSeek (OpenAI Chat)

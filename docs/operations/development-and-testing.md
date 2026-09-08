@@ -273,13 +273,13 @@ python3 scripts/security/check-sensitive-data.py
 git diff --check
 ```
 
-`--docs` 必须以 `Total registered: 85` 结束；精确 case inventory、标题和
+`--docs` 必须以 `Total registered: 89` 结束；精确 case inventory、标题和
 requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局、Markdown
 链接、H1、源码路径和旧词守卫。敏感数据门禁扫描当前 tracked 文件和非 ignored
 未跟踪文件，覆盖高置信密钥、Webhook、个人绝对路径和已知私有环境标识；命中时
 只输出规则与 `path:line`。该入口不扫描 Git 历史，历史审计是公开策略中的独立步骤。
 
-## 8. E2E：API levels、flags 和当前 85-case matrix
+## 8. E2E：API levels、flags 和当前 89-case matrix
 
 ### 8.1 入口和 flags
 
@@ -361,7 +361,7 @@ Daemon environment root 默认是其下的 `environment`，可由
 | Level | 注册数 | 默认/开关 | 当前覆盖 |
 | --- | ---: | --- | --- |
 | L1 | 68 | 默认执行 64；storage/function/attachment case 需显式开关 | 免费 API contract、CRUD、Session/Thread、command batch、CAS、idempotency、i18n、model attempt、Canvas API |
-| L2 | 6 | `--real` 默认选择四模型文本缓存与 stop；task delegation 还需 `--with-tools` | 四模型文本与 Prompt Cache、真实 task delegation、stop partial/replay/continue |
+| L2 | 10 | `--real` 默认选择四模型文本缓存、多推理级别烟雾与 stop；task delegation 还需 `--with-tools` | 四模型文本与 Prompt Cache、四模型多推理级别烟雾、真实 task delegation、stop partial/replay/continue |
 | L3 | 1 | `--real --with-branch` | 同 Session `ENTRY` 分支 Thread |
 | L4 | 7 | `--with-tools`；四模型 Tool 需再加 `--real`，Resource 外部化需再加 `--with-canvas-storage` | Environment READY 与 capability 投影、directories、四模型 terminal replay、approval 后 Resource 外部化 |
 | L5 | 3 | `--distributed` | 双节点分布式 mock topology：跨节点 Environment CRUD 共享状态、双向 directory mailbox 路由、DB loss fail-closed 与有界 recovery |
@@ -377,7 +377,7 @@ L1 的默认关闭 categories 是 storage upload、attachment 和 fake Function�
 
 L1 的 categories 是 seed/catalog、Thread command、CRUD、i18n、settings/events、
 model attempt 和 Canvas API；storage、attachment 和 fake Function 由显式开关
-启用。L2 的 categories 是真实文本 turn、task delegation 和 stop/partial/replay；
+启用。L2 的 categories 是真实文本 turn、多推理级别烟雾、task delegation 和 stop/partial/replay；
 L3 是同一 Session 的 `ENTRY` 分支；L4 是 Environment READY 与原子 capability
 投影、directory、approval 和 Resource externalization；L5 是双节点分布式 mock topology，
 覆盖跨节点 Environment CRUD 共享状态、双向 owner mailbox marker 目录路由、
@@ -390,7 +390,7 @@ DB loss fail-closed 与有界 recovery。对应 gates 分别是 `--real`、`--re
 ### 8.4 UI matrix：注册 39，默认 36
 
 UI 由 `scripts/e2e/ui-smoke.mjs`、`scripts/e2e/ui/composer-matrix.mjs` 和
-`scripts/e2e/ui/workspace-contracts.mjs` 注册；它不是 85 个 API case 的一部分。
+`scripts/e2e/ui/workspace-contracts.mjs` 注册；它不是 89 个 API case 的一部分。
 UI categories 是页面/runtime、Composer/debug 和 Workspace contract；`--ui` 是
 总 gate，默认执行 36 项无成本/无 daemon 用例；`--with-tools` 增加 2 项
 （Environment Workspace 创建与 ToolCard approval/layout），`--real` 增加 1 项真实

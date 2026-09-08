@@ -123,12 +123,11 @@ export async function resolveRealModel(ctx, modelDef) {
 
   if (Array.isArray(modelDef.variants)) {
     const declaredVariantIds = variants.map((v) => v.id)
-    for (const exp of modelDef.variants) {
-      assert(
-        declaredVariantIds.includes(exp),
-        `model ${modelDef.providerName}/${modelDef.modelName} does not declare expected variant ${exp}: ${JSON.stringify(declaredVariantIds)}`,
-      )
-    }
+    assert(
+      declaredVariantIds.length === modelDef.variants.length
+        && declaredVariantIds.every((v, i) => v === modelDef.variants[i]),
+      `model ${modelDef.providerName}/${modelDef.modelName} variant contract mismatch: expected ${JSON.stringify(modelDef.variants)}, got ${JSON.stringify(declaredVariantIds)}`,
+    )
   }
 
   return {
@@ -248,14 +247,11 @@ export function assertProviderUsageAlgebra(usage, providerType, { modelName } = 
       // reasoningTokens 在 Anthropic wire outputTokens 中包含，归一化 DTO 设为 0L 避免重复计费
       assert(reasoningTokens === 0, `Anthropic reasoningTokens must be 0 in normalized DTO, got: ${reasoningTokens}`)
 
-      // providerTotalTokens 可能为 0（Wire 响应未提供 total_tokens 字段）
-      if (providerTotalTokens > 0) {
-        const expectedTotal = inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens + cacheWriteLongTokens
-        assert(
-          providerTotalTokens === expectedTotal,
-          `Anthropic providerTotalTokens algebra mismatch: expected sum = ${expectedTotal}, got ${providerTotalTokens}`,
-        )
-      }
+      // providerTotalTokens 必须恰好为 0（Wire 响应未提供 total_tokens 字段，归一化设为 0L）
+      assert(
+        providerTotalTokens === 0,
+        `Anthropic providerTotalTokens must be 0 in normalized DTO, got: ${providerTotalTokens}`,
+      )
       break
     }
 
@@ -295,13 +291,20 @@ export function assertProviderUsageAlgebra(usage, providerType, { modelName } = 
 }
 
 /**
+ * 安全格式化诊断用 JSON 字符串（递归脱敏后序列化）。
+ */
+export function safeDiagnosticJson(obj, indent = 2) {
+  return JSON.stringify(sanitizeArtifact(obj), null, indent)
+}
+
+/**
  * 严格断言 Assistant Metadata Usage 七字段均为非负安全整数，且当 requirePositiveIO 为 true 时校验事实有效。
  */
 export function assertAssistantUsage(
   usage,
   { requirePositiveIO = true, providerType, modelName } = {},
 ) {
-  assert(usage && typeof usage === 'object', `usage must be an object: ${JSON.stringify(usage)}`)
+  assert(usage && typeof usage === 'object', `usage must be an object: ${safeDiagnosticJson(usage)}`)
   const requiredFields = [
     'inputTokens',
     'outputTokens',
@@ -315,47 +318,65 @@ export function assertAssistantUsage(
     const value = usage[field]
     assert(
       typeof value === 'number' && Number.isSafeInteger(value) && value >= 0,
-      `usage.${field} must be a non-negative safe integer, got: ${value} in ${JSON.stringify(usage)}`,
+      `usage.${field} must be a non-negative safe integer, got: ${value} in ${safeDiagnosticJson(usage)}`,
     )
   }
 
   if (requirePositiveIO) {
     if (providerType === 'anthropic') {
+      const totalInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens + usage.cacheWriteLongTokens
       assert(
-        usage.inputTokens + usage.cacheReadTokens > 0,
-        `inputTokens + cacheReadTokens must be > 0: ${JSON.stringify(usage)}`,
+        totalInput > 0,
+        `inputTokens + cacheReadTokens + cacheWriteTokens + cacheWriteLongTokens must be > 0: ${safeDiagnosticJson(usage)}`,
       )
       assert(
         usage.outputTokens > 0,
-        `outputTokens must be > 0: ${JSON.stringify(usage)}`,
+        `outputTokens must be > 0: ${safeDiagnosticJson(usage)}`,
       )
-      // Anthropic providerTotalTokens 允许为 0
+      assert(
+        usage.providerTotalTokens === 0,
+        `Anthropic providerTotalTokens must be 0: ${safeDiagnosticJson(usage)}`,
+      )
+    } else if (providerType === 'openai_response') {
+      const totalInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens + usage.cacheWriteLongTokens
+      assert(
+        totalInput > 0,
+        `inputTokens + cacheReadTokens + cacheWriteTokens + cacheWriteLongTokens must be > 0: ${safeDiagnosticJson(usage)}`,
+      )
+      assert(
+        usage.outputTokens + usage.reasoningTokens > 0,
+        `outputTokens + reasoningTokens must be > 0: ${safeDiagnosticJson(usage)}`,
+      )
+      assert(
+        usage.providerTotalTokens > 0,
+        `providerTotalTokens must be > 0: ${safeDiagnosticJson(usage)}`,
+      )
     } else if (!providerType) {
       // 向后兼容旧单元测试：未指定 providerType 时严格要求 inputTokens > 0 与 outputTokens > 0
       assert(
         usage.inputTokens > 0,
-        `usage.inputTokens must be > 0: ${JSON.stringify(usage)}`,
+        `usage.inputTokens must be > 0: ${safeDiagnosticJson(usage)}`,
       )
       assert(
         usage.outputTokens > 0,
-        `outputTokens must be > 0: ${JSON.stringify(usage)}`,
+        `outputTokens must be > 0: ${safeDiagnosticJson(usage)}`,
       )
       assert(
         usage.providerTotalTokens > 0,
-        `usage.providerTotalTokens must be > 0: ${JSON.stringify(usage)}`,
+        `usage.providerTotalTokens must be > 0: ${safeDiagnosticJson(usage)}`,
       )
     } else {
       assert(
         usage.inputTokens + usage.cacheReadTokens > 0,
-        `inputTokens + cacheReadTokens must be > 0: ${JSON.stringify(usage)}`,
+        `inputTokens + cacheReadTokens must be > 0: ${safeDiagnosticJson(usage)}`,
       )
       assert(
         usage.outputTokens + usage.reasoningTokens > 0,
-        `outputTokens + reasoningTokens must be > 0: ${JSON.stringify(usage)}`,
+        `outputTokens + reasoningTokens must be > 0: ${safeDiagnosticJson(usage)}`,
       )
       assert(
         usage.providerTotalTokens > 0,
-        `providerTotalTokens must be > 0: ${JSON.stringify(usage)}`,
+        `providerTotalTokens must be > 0: ${safeDiagnosticJson(usage)}`,
       )
     }
   }
@@ -387,6 +408,15 @@ export function sanitizeArtifact(data) {
     return data.map((item) => sanitizeArtifact(item))
   }
   if (typeof data === 'object') {
+    // 语义内容类型脱敏：thinking / redacted_thinking
+    if (data.type === 'thinking' || data.type === 'redacted_thinking') {
+      return {
+        type: data.type,
+        present: true,
+        textLength: typeof data.text === 'string' ? data.text.length : 0,
+      }
+    }
+
     const result = {}
     for (const [key, value] of Object.entries(data)) {
       const lower = key.toLowerCase()
@@ -683,7 +713,137 @@ for (const def of REAL_MODEL_DEFINITIONS) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. 四指定模型工具 case 注册 (L4, requires: ['real', 'tools'])
+// 2. 四指定模型多推理级别烟雾测试 case 注册 (L2, requires: ['real'])
+// ---------------------------------------------------------------------------
+
+export async function runRealReasoningLevelsSmoke(ctx, def) {
+  const resolved = await resolveRealModel(ctx, def)
+  const variantsToTest = resolved.variants || [def.variant]
+  const testedVariants = []
+
+  for (const variant of variantsToTest) {
+    let varAgent = null
+    let varChat = null
+    try {
+      const varSuffix = cid().slice(0, 8)
+      const varMarker = `REASON-${def.idSuffix}-${variant}-${varSuffix}`
+      const { json: varAgentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
+        name: `e2e-reason-${def.idSuffix}-${variant}-${varSuffix}`,
+        description: `Temporary reasoning agent for ${def.title} ${variant}.`,
+        systemPrompt:
+          'You are a precise reasoning assistant. Compute the answer carefully and reply with the required marker.',
+        model: `${resolved.providerName}/${resolved.modelName}`,
+        variant,
+        config: { toolIds: [], skills: [], subagents: [] },
+      })
+      varAgent = envelopeData(varAgentJson)
+      varChat = await createChat(ctx, {
+        title: `e2e-reason-chat-${def.idSuffix}-${variant}-${varSuffix}`,
+        agentName: varAgent.name,
+        yoloEnabled: false,
+      })
+
+      const varSessionId = cid()
+      const varThreadId = cid()
+      const varPrompt = `Calculate 29 * 31. State the final product clearly and append this marker: ${varMarker}`
+      const accepted = await createNewSession(ctx, {
+        owner: chatOwner(varChat.id),
+        sessionId: varSessionId,
+        threadId: varThreadId,
+        rootSettings: branchSettingsOf(varAgent, {
+          providerName: resolved.providerName,
+          modelName: resolved.modelName,
+          variant,
+        }),
+        yoloEnabled: false,
+        commands: [userMessageCommand(varPrompt, cid())],
+      })
+      assert(
+        accepted.acceptedCommands[0]?.type === 'USER_MESSAGE',
+        `expected USER_MESSAGE command: ${safeDiagnosticJson(accepted.acceptedCommands)}`,
+      )
+
+      const varQuiescent = await waitForQuiescentThread(ctx, varThreadId, {
+        timeoutMs: 180_000,
+        intervalMs: 500,
+      })
+      assert(varQuiescent.status === 'IDLE', `thread not IDLE: ${safeDiagnosticJson(varQuiescent)}`)
+
+      const varSnapshot = await getThreadSnapshot(ctx, varThreadId)
+      const varEntries = varSnapshot.entries || []
+      assert(
+        !varEntries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
+        `unexpected ASSISTANT_ERROR in variant ${variant}: ${safeDiagnosticJson(varEntries)}`,
+      )
+
+      const varAssistants = normalAssistantEntries(varEntries)
+      assert(varAssistants.length > 0, `no assistant entry in variant ${variant}`)
+      const varAssistant = varAssistants.at(-1)
+      const varPayload = parseEntryPayload(varAssistant)
+      const varUsage = varPayload.assistantMetadata?.usage
+      assertAssistantUsage(varUsage, {
+        requirePositiveIO: true,
+        providerType: def.providerType,
+        modelName: def.modelName,
+      })
+
+      const hasThinkingContent = (varPayload.message?.contents || []).some(
+        (c) => c?.type === 'thinking',
+      )
+      const hasReasoningTokens = (varUsage?.reasoningTokens || 0) > 0
+
+      testedVariants.push({
+        variant,
+        inputTokens: varUsage.inputTokens,
+        outputTokens: varUsage.outputTokens,
+        reasoningTokens: varUsage.reasoningTokens,
+        providerTotalTokens: varUsage.providerTotalTokens,
+        hasThinkingContent,
+        hasReasoningTokens,
+        replySnippet: messageText(varAssistant).slice(0, 80),
+      })
+    } finally {
+      await cleanupChat(ctx, varChat)
+      await cleanupAgent(ctx, varAgent)
+    }
+  }
+
+  assert(
+    testedVariants.length === variantsToTest.length,
+    `expected all ${variantsToTest.length} variants tested, got ${testedVariants.length}`,
+  )
+
+  ctx.writeArtifact(
+    `real-reasoning-levels-${def.idSuffix}.json`,
+    safeDiagnosticJson(
+      {
+        modelDef: {
+          providerName: def.providerName,
+          modelName: def.modelName,
+          providerType: def.providerType,
+        },
+        testedVariants,
+      },
+      2,
+    ),
+  )
+}
+
+for (const def of REAL_MODEL_DEFINITIONS) {
+  registerCase({
+    id: `real.reasoning_levels.${def.idSuffix}`,
+    level: 'L2',
+    title: `${def.title} 多推理级别烟雾测试`,
+    requires: ['real'],
+    docs: `验证 ${def.providerName}/${def.modelName}：遍历所有声明变体（${def.variants.join(', ')}），为每个 variant 创建临时 Agent 运行简短推理任务，断言无 ASSISTANT_ERROR，校验七字段用量及代数等式，记录 thinking/reasoning 证据，写脱敏 artifact`,
+    async run(ctx) {
+      await runRealReasoningLevelsSmoke(ctx, def)
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// 3. 四指定模型工具 case 注册 (L4, requires: ['real', 'tools'])
 // ---------------------------------------------------------------------------
 for (const def of REAL_MODEL_DEFINITIONS) {
   registerCase({
@@ -691,108 +851,11 @@ for (const def of REAL_MODEL_DEFINITIONS) {
     level: 'L4',
     title: `${def.title} 真实工具调用与 terminal replay`,
     requires: ['real', 'tools'],
-    docs: `验证 ${def.providerName}/${def.modelName}：执行支持变体的推理 smoke，并在最强 variant 下运行真实工具调用（get_goal）与 terminal replay 闭环；严格校验 tool_call、tool_result、最终 ASSISTANT marker、两次模型调用及 provider-specific usage 代数与 replay 证据，写脱敏 artifact`,
+    docs: `验证 ${def.providerName}/${def.modelName}：在最强 variant 下运行真实工具调用（get_goal）与 terminal replay 闭环；严格校验 tool_call、首轮推理证据、tool_result、最终 ASSISTANT marker、两次模型调用及 provider-specific usage 代数与 replay 证据，写脱敏 artifact`,
     async run(ctx) {
       const resolved = await resolveRealModel(ctx, def)
       const suffix = cid().slice(0, 8)
-      const variantsToTest = resolved.variants || [def.variant]
-      const testedVariants = []
-
-      // 1. Multi-level reasoning smoke across all declared distinct variants
-      for (const variant of variantsToTest) {
-        let varAgent = null
-        let varChat = null
-        try {
-          const varSuffix = cid().slice(0, 8)
-          const varMarker = `REASON-${def.idSuffix}-${variant}-${varSuffix}`
-          const { json: varAgentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
-            name: `e2e-reason-${def.idSuffix}-${variant}-${varSuffix}`,
-            description: `Temporary reasoning agent for ${def.title} ${variant}.`,
-            systemPrompt:
-              'You are a precise reasoning assistant. Compute the answer carefully and reply with the required marker.',
-            model: `${resolved.providerName}/${resolved.modelName}`,
-            variant,
-            config: { toolIds: [], skills: [], subagents: [] },
-          })
-          varAgent = envelopeData(varAgentJson)
-          varChat = await createChat(ctx, {
-            title: `e2e-reason-chat-${def.idSuffix}-${variant}-${varSuffix}`,
-            agentName: varAgent.name,
-            yoloEnabled: false,
-          })
-
-          const varSessionId = cid()
-          const varThreadId = cid()
-          const varPrompt = `Calculate 29 * 31. State the final product clearly and append this marker: ${varMarker}`
-          const accepted = await createNewSession(ctx, {
-            owner: chatOwner(varChat.id),
-            sessionId: varSessionId,
-            threadId: varThreadId,
-            rootSettings: branchSettingsOf(varAgent, {
-              providerName: resolved.providerName,
-              modelName: resolved.modelName,
-              variant,
-            }),
-            yoloEnabled: false,
-            commands: [userMessageCommand(varPrompt, cid())],
-          })
-          assert(
-            accepted.acceptedCommands[0]?.type === 'USER_MESSAGE',
-            `expected USER_MESSAGE command: ${JSON.stringify(accepted.acceptedCommands)}`,
-          )
-
-          const varQuiescent = await waitForQuiescentThread(ctx, varThreadId, {
-            timeoutMs: 180_000,
-            intervalMs: 500,
-          })
-          assert(varQuiescent.status === 'IDLE', `thread not IDLE: ${JSON.stringify(varQuiescent)}`)
-
-          const varSnapshot = await getThreadSnapshot(ctx, varThreadId)
-          const varEntries = varSnapshot.entries || []
-          assert(
-            !varEntries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
-            `unexpected ASSISTANT_ERROR in variant ${variant}: ${JSON.stringify(varEntries)}`,
-          )
-
-          const varAssistants = normalAssistantEntries(varEntries)
-          assert(varAssistants.length > 0, `no assistant entry in variant ${variant}`)
-          const varAssistant = varAssistants.at(-1)
-          const varPayload = parseEntryPayload(varAssistant)
-          const varUsage = varPayload.assistantMetadata?.usage
-          assertAssistantUsage(varUsage, {
-            requirePositiveIO: true,
-            providerType: def.providerType,
-            modelName: def.modelName,
-          })
-
-          const hasThinkingContent = (varPayload.message?.contents || []).some(
-            (c) => c?.type === 'thinking',
-          )
-          const hasReasoningTokens = (varUsage?.reasoningTokens || 0) > 0
-
-          testedVariants.push({
-            variant,
-            inputTokens: varUsage.inputTokens,
-            outputTokens: varUsage.outputTokens,
-            reasoningTokens: varUsage.reasoningTokens,
-            providerTotalTokens: varUsage.providerTotalTokens,
-            hasThinkingContent,
-            hasReasoningTokens,
-            replySnippet: messageText(varAssistant).slice(0, 80),
-          })
-        } finally {
-          await cleanupChat(ctx, varChat)
-          await cleanupAgent(ctx, varAgent)
-        }
-      }
-
-      assert(
-        testedVariants.length === variantsToTest.length,
-        `expected all ${variantsToTest.length} variants tested, got ${testedVariants.length}`,
-      )
-
-      // 2. Strongest-level replay/tool roundtrip
-      const strongestVariant = variantsToTest.at(-1)
+      const strongestVariant = (resolved.variants || [def.variant]).at(-1)
       const marker = `GOAL-DONE-${cid().slice(0, 8)}`
       let agent = null
       let chat = null
@@ -838,20 +901,20 @@ for (const def of REAL_MODEL_DEFINITIONS) {
         })
         assert(
           accepted.acceptedCommands[0]?.type === 'USER_MESSAGE',
-          `expected USER_MESSAGE command: ${JSON.stringify(accepted.acceptedCommands)}`,
+          `expected USER_MESSAGE command: ${safeDiagnosticJson(accepted.acceptedCommands)}`,
         )
 
         const finalThread = await waitForQuiescentThread(ctx, threadId, {
           timeoutMs: 180_000,
           intervalMs: 500,
         })
-        assert(finalThread.status === 'IDLE', `thread not IDLE: ${JSON.stringify(finalThread)}`)
+        assert(finalThread.status === 'IDLE', `thread not IDLE: ${safeDiagnosticJson(finalThread)}`)
 
         const snapshot = await getThreadSnapshot(ctx, threadId)
         const entries = snapshot.entries || []
         assert(
           !entries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
-          `unexpected ASSISTANT_ERROR in tool turn: ${JSON.stringify(entries)}`,
+          `unexpected ASSISTANT_ERROR in tool turn: ${safeDiagnosticJson(entries)}`,
         )
 
         // 收集所有 durable tool_call
@@ -869,7 +932,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
 
         assert(
           toolCalls.length === 1,
-          `expected exactly one durable ASSISTANT tool_call, got ${toolCalls.length}: ${JSON.stringify(toolCalls.map((t) => t.content))}`,
+          `expected exactly one durable ASSISTANT tool_call, got ${toolCalls.length}: ${safeDiagnosticJson(toolCalls.map((t) => t.content))}`,
         )
         const { entry: toolCallEntry, payload: toolCallPayload, content: toolCallContent } = toolCalls[0]
         assert(
@@ -886,7 +949,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           `argumentsJson must be an empty object, got: ${toolCallContent.argumentsJson}`,
         )
         const callId = toolCallContent.toolCallId
-        assert(callId && typeof callId === 'string', `toolCallId missing: ${JSON.stringify(toolCallContent)}`)
+        assert(callId && typeof callId === 'string', `toolCallId missing: ${safeDiagnosticJson(toolCallContent)}`)
 
         // 收集匹配 callId 的 durable TOOL tool_result
         const toolResults = []
@@ -932,7 +995,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
 
         assert(
           normalAssistantsAfterTool.length === 1,
-          `expected exactly one final assistant message after tool, got ${normalAssistantsAfterTool.length}: ${JSON.stringify(normalAssistantsAfterTool)}`,
+          `expected exactly one final assistant message after tool, got ${normalAssistantsAfterTool.length}: ${safeDiagnosticJson(normalAssistantsAfterTool)}`,
         )
         const finalAssistantEntry = normalAssistantsAfterTool[0]
         const finalAssistantPayload = parseEntryPayload(finalAssistantEntry)
@@ -944,11 +1007,11 @@ for (const def of REAL_MODEL_DEFINITIONS) {
 
         // Turn COMPLETED
         const turnEndEntries = entries.filter((e) => entryType(e) === 'TURN_END')
-        assert(turnEndEntries.length >= 1, `expected at least one TURN_END: ${JSON.stringify(entries)}`)
+        assert(turnEndEntries.length >= 1, `expected at least one TURN_END: ${safeDiagnosticJson(entries)}`)
         const lastTurnEndPayload = parseEntryPayload(turnEndEntries.at(-1))
         assert(
           lastTurnEndPayload.outcome === 'COMPLETED' && lastTurnEndPayload.continueModel === false,
-          `expected COMPLETED TURN_END: ${JSON.stringify(lastTurnEndPayload)}`,
+          `expected COMPLETED TURN_END: ${safeDiagnosticJson(lastTurnEndPayload)}`,
         )
 
         // 两次模型 Assistant metadata usage 合法且符合 provider-specific algebra
@@ -965,49 +1028,48 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           modelName: def.modelName,
         })
 
-        // 校验最强级别下的 reasoning / thinking durable evidence
+        // 强回放断言：必须证明在第二个请求之前，首次工具调用模型响应即已存在推理证据
         const hasToolCallThinking = (toolCallPayload.message?.contents || []).some(
           (c) => c?.type === 'thinking',
         )
-        const hasToolCallReasoningTokens = (toolCallUsage?.reasoningTokens || 0) > 0
+        const toolCallReasoningTokens = toolCallUsage?.reasoningTokens || 0
         const hasFinalThinking = (finalAssistantPayload.message?.contents || []).some(
           (c) => c?.type === 'thinking',
         )
-        const hasFinalReasoningTokens = (finalAssistantUsage?.reasoningTokens || 0) > 0
+        const finalReasoningTokens = finalAssistantUsage?.reasoningTokens || 0
 
         if (def.providerType === 'google') {
           assert(
-            hasToolCallReasoningTokens || hasToolCallThinking || hasFinalReasoningTokens || hasFinalThinking,
-            `Gemini high variant must demonstrate reasoning evidence (reasoningTokens > 0 or thinking content)`,
+            toolCallReasoningTokens > 0 || hasToolCallThinking,
+            `Gemini ${strongestVariant} variant must demonstrate reasoning on first tool-call response (reasoningTokens > 0 or thinking content)`,
           )
         } else if (def.providerType === 'openai_response') {
           assert(
-            hasToolCallReasoningTokens || hasToolCallThinking || hasFinalReasoningTokens || hasFinalThinking,
-            `OpenAI Responses max variant must demonstrate reasoning evidence`,
+            toolCallReasoningTokens > 0 || hasToolCallThinking,
+            `OpenAI Responses ${strongestVariant} variant must demonstrate reasoning on first tool-call response (reasoningTokens > 0 or thinking content)`,
           )
         } else if (def.providerType === 'anthropic') {
           assert(
-            hasToolCallThinking || hasFinalThinking || (toolCallUsage?.outputTokens || 0) > 0,
-            `Anthropic BUDGET high variant must demonstrate durable invocation evidence`,
+            hasToolCallThinking,
+            `Anthropic BUDGET ${strongestVariant} variant must demonstrate durable thinking content on first tool-call response before tool execution`,
           )
         } else if (def.providerType === 'openai') {
           assert(
-            hasToolCallReasoningTokens || hasToolCallThinking || hasFinalReasoningTokens || hasFinalThinking,
-            `DeepSeek Chat max variant must demonstrate reasoning evidence`,
+            toolCallReasoningTokens > 0 || hasToolCallThinking,
+            `DeepSeek Chat ${strongestVariant} variant must demonstrate reasoning on first tool-call response (reasoningTokens > 0 or thinking content)`,
           )
         }
 
         ctx.writeArtifact(
           `real-tool-${def.idSuffix}.json`,
-          JSON.stringify(
-            sanitizeArtifact({
+          safeDiagnosticJson(
+            {
               modelDef: {
                 providerName: def.providerName,
                 modelName: def.modelName,
                 variant: strongestVariant,
                 providerType: def.providerType,
               },
-              testedVariants,
               threadId,
               toolCall: {
                 callId,
@@ -1015,7 +1077,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
                 argumentsJson: toolCallContent.argumentsJson,
                 usage: toolCallUsage,
                 hasThinking: hasToolCallThinking,
-                hasReasoningTokens: hasToolCallReasoningTokens,
+                hasReasoningTokens: toolCallReasoningTokens > 0,
               },
               toolResult: {
                 resultSnippet: resultText.slice(0, 80),
@@ -1024,10 +1086,9 @@ for (const def of REAL_MODEL_DEFINITIONS) {
                 replySnippet: finalText.slice(0, 80),
                 usage: finalAssistantUsage,
                 hasThinking: hasFinalThinking,
-                hasReasoningTokens: hasFinalReasoningTokens,
+                hasReasoningTokens: finalReasoningTokens > 0,
               },
-            }),
-            null,
+            },
             2,
           ),
         )

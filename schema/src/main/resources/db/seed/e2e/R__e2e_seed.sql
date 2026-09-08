@@ -33,7 +33,7 @@ insert into agent_provider (
      '00000000-0000-0000-0000-000000000003'::uuid,
      current_timestamp, current_timestamp, 0),
     ('deepseek', 'DeepSeek (OpenAI Chat Completions).', 'openai', null, null,
-     '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
+     '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000,"openAiChatThinkingFormat":"DEEPSEEK"}',
      '00000000-0000-0000-0000-000000000004'::uuid,
      current_timestamp, current_timestamp, 0),
     ('google', 'Google Gemini.', 'google', null, null,
@@ -53,9 +53,11 @@ insert into agent_provider (
      '00000000-0000-0000-0000-000000000008'::uuid,
      current_timestamp, current_timestamp, 0);
 
--- Effective Pi 0.82.1 model snapshot. `minimax-responses` is mapped to provider
--- `minimax`; all other provider names match. Variants are Pi's supported thinking
--- levels after applying ~/.pi/agent/models.json and clamping its default `max` level.
+-- Effective Pi 0.82.1 model snapshot, with four target paid-real models reconciled
+-- to Pi 0.85.1 (gemini-3.8-flash, gpt-5.6-luna, MiniMax-M3, deepseek-v4-flash).
+-- `minimax-responses` is mapped to provider `minimax`; all other provider names match.
+-- Variants are Pi's supported thinking levels after applying ~/.pi/agent/models.json
+-- and clamping its default `max` level.
 with model_seed (
     provider_name, name, description, context_window, max_output_tokens,
     input_modalities, default_variant, variants,
@@ -64,18 +66,18 @@ with model_seed (
   values
     ('minimax', 'MiniMax-M2.7', 'MiniMax-M2.7 (Responses)', 204800, 131072, '["TEXT"]'::jsonb, 'high', '[{"id":"off","reasoningEffort":"none"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 0.3, 1.2, 0.06, 0.375, 1.2),
     ('minimax', 'MiniMax-M3', 'MiniMax-M3 (Responses)', 450000, 128000, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"off","reasoningEffort":"none"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 0.3, 1.2, 0.06, 0, 1.2),
-    ('minimax-anthropic', 'MiniMax-M3', 'MiniMax-M3', 1048576, 512000, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"off","reasoningEffort":"none"},{"id":"minimal","reasoningEffort":"minimal","maxOutputTokens":2048},{"id":"low","reasoningEffort":"low","maxOutputTokens":4096},{"id":"medium","reasoningEffort":"medium","maxOutputTokens":16384},{"id":"high","reasoningEffort":"high","maxOutputTokens":32768}]'::jsonb, 0.3, 1.2, 0.06, 0, 1.2),
+    ('minimax-anthropic', 'MiniMax-M3', 'MiniMax-M3', 1048576, 512000, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"off","maxOutputTokens":4096},{"id":"minimal","reasoningEffort":"minimal","maxOutputTokens":2048},{"id":"low","reasoningEffort":"low","maxOutputTokens":4096},{"id":"medium","reasoningEffort":"medium","maxOutputTokens":16384},{"id":"high","reasoningEffort":"high","maxOutputTokens":32768}]'::jsonb, 0.3, 1.2, 0.06, 0, 1.2),
     ('openai', 'gpt-5.4', 'GPT-5.4', 272000, 128000, '["TEXT","IMAGE"]'::jsonb, 'xhigh', '[{"id":"off","reasoningEffort":"none"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"xhigh","reasoningEffort":"xhigh"}]'::jsonb, 2.5, 15, 0.25, 0, 15),
     ('openai', 'gpt-5.5', 'GPT-5.5', 272000, 128000, '["TEXT","IMAGE"]'::jsonb, 'xhigh', '[{"id":"off","reasoningEffort":"none"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"xhigh","reasoningEffort":"xhigh"}]'::jsonb, 5, 30, 0.5, 0, 30),
-    ('openai', 'gpt-5.6-luna', 'GPT-5.6 Luna', 272000, 128000, '["TEXT","IMAGE"]'::jsonb, 'max', '[{"id":"off","reasoningEffort":"none"},{"id":"minimal"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"xhigh","reasoningEffort":"xhigh"},{"id":"max","reasoningEffort":"max"}]'::jsonb, 0.2, 1.2, 0.02, 0.25, 1.2),
+    ('openai', 'gpt-5.6-luna', 'GPT-5.6 Luna', 272000, 128000, '["TEXT","IMAGE"]'::jsonb, 'max', '[{"id":"off","reasoningEffort":"none","maxOutputTokens":4096},{"id":"low","reasoningEffort":"low","maxOutputTokens":4096},{"id":"medium","reasoningEffort":"medium","maxOutputTokens":8192},{"id":"high","reasoningEffort":"high","maxOutputTokens":8192},{"id":"xhigh","reasoningEffort":"xhigh","maxOutputTokens":16384},{"id":"max","reasoningEffort":"max","maxOutputTokens":16384}]'::jsonb, 0.2, 1.2, 0.02, 0.25, 1.2),
     ('openai', 'gpt-5.6-sol', 'GPT-5.6 Sol', 272000, 128000, '["TEXT","IMAGE"]'::jsonb, 'max', '[{"id":"off","reasoningEffort":"none"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"xhigh","reasoningEffort":"xhigh"},{"id":"max","reasoningEffort":"max"}]'::jsonb, 5, 30, 0.5, 6.25, 30),
     ('openai', 'gpt-5.6-terra', 'GPT-5.6 Terra', 272000, 128000, '["TEXT","IMAGE"]'::jsonb, 'max', '[{"id":"off","reasoningEffort":"none"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"xhigh","reasoningEffort":"xhigh"},{"id":"max","reasoningEffort":"max"}]'::jsonb, 2.5, 15, 0.25, 3.125, 15),
     ('xai', 'grok-4.5', 'Grok 4.5', 500000, 500000, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 2, 6, 0.3, 0, 6),
-    ('deepseek', 'deepseek-v4-flash', 'DeepSeek V4 Flash', 1000000, 384000, '["TEXT"]'::jsonb, 'max', '[{"id":"off"},{"id":"low","reasoningEffort":"low"},{"id":"high","reasoningEffort":"high"},{"id":"max","reasoningEffort":"max"}]'::jsonb, 0.14, 0.28, 0.0028, 0, 0.28),
+    ('deepseek', 'deepseek-v4-flash', 'DeepSeek V4 Flash', 1000000, 384000, '["TEXT"]'::jsonb, 'max', '[{"id":"off","maxOutputTokens":4096},{"id":"low","reasoningEffort":"low","maxOutputTokens":4096},{"id":"high","reasoningEffort":"high","maxOutputTokens":8192},{"id":"max","reasoningEffort":"max","maxOutputTokens":16384}]'::jsonb, 0.14, 0.28, 0.0028, 0, 0.28),
     ('deepseek', 'deepseek-v4-pro', 'DeepSeek V4 Pro', 272000, 128000, '["TEXT"]'::jsonb, 'max', '[{"id":"off"},{"id":"high","reasoningEffort":"high"},{"id":"max","reasoningEffort":"max"}]'::jsonb, 0.435, 0.87, 0.003625, 0, 0.87),
     ('google', 'gemini-3.5-flash', 'Gemini 3.5 Flash', 1048576, 65536, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"minimal","reasoningEffort":"minimal"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 1.5, 9, 0.15, 0, 9),
     ('google', 'gemini-3.6-flash', 'Gemini 3.6 Flash', 1048576, 65536, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"minimal","reasoningEffort":"minimal"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 1.5, 7.5, 0.15, 0, 7.5),
-    ('google', 'gemini-3.8-flash', 'Gemini 3.8 Flash', 1048576, 65536, '["TEXT","IMAGE"]'::jsonb, 'minimal', '[{"id":"minimal","reasoningEffort":"minimal"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 0.75, 3.75, 0.075, 0, 3.75),
+    ('google', 'gemini-3.8-flash', 'Gemini 3.8 Flash', 1048576, 65536, '["TEXT","IMAGE"]'::jsonb, 'minimal', '[{"id":"minimal","reasoningEffort":"minimal","maxOutputTokens":4096},{"id":"low","reasoningEffort":"low","maxOutputTokens":4096},{"id":"medium","reasoningEffort":"medium","maxOutputTokens":8192},{"id":"high","reasoningEffort":"high","maxOutputTokens":8192}]'::jsonb, 0.75, 3.75, 0.075, 0, 3.75),
     ('google', 'gemini-3.1-pro-preview', 'Gemini 3.1 Pro Preview', 1048576, 65536, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"low","reasoningEffort":"low"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 2, 12, 0.2, 0, 12),
     ('anthropic', 'claude-sonnet-4-6', 'Claude Sonnet 4.6', 1000000, 128000, '["TEXT","IMAGE"]'::jsonb, 'max', '[{"id":"off"},{"id":"minimal","reasoningEffort":"low"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"max","reasoningEffort":"max"}]'::jsonb, 3, 15, 0.3, 3.75, 0),
     ('anthropic', 'claude-opus-4-6', 'Claude Opus 4.6', 1000000, 128000, '["TEXT","IMAGE"]'::jsonb, 'max', '[{"id":"off"},{"id":"minimal","reasoningEffort":"low"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"max","reasoningEffort":"max"}]'::jsonb, 5, 25, 0.5, 6.25, 0),
@@ -107,7 +109,14 @@ select
             'pricingTier', 'pi-base',
             'serviceTier', 'default',
             'serviceTierMultiplier', 1,
-            'version', 'pi-0.82.1',
+            'version',
+                case when (provider_name = 'google' and name = 'gemini-3.8-flash')
+                       or (provider_name = 'openai' and name = 'gpt-5.6-luna')
+                       or (provider_name = 'minimax-anthropic' and name = 'MiniMax-M3')
+                       or (provider_name = 'deepseek' and name = 'deepseek-v4-flash')
+                     then 'pi-0.85.1'
+                     else 'pi-0.82.1'
+                end,
             'inputPerMillionTokens', input_price,
             'outputPerMillionTokens', output_price,
             'cacheReadPerMillionTokens', cache_read_price,
