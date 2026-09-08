@@ -65,9 +65,29 @@ final class AnthropicRequestEncoder {
   private static final int MAX_CACHE_BREAKPOINTS = 3;
   private static final int MAX_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
 
+  private final AnthropicConfiguration configuration;
+
+  AnthropicRequestEncoder() {
+    this(AnthropicConfiguration.defaults());
+  }
+
+  AnthropicRequestEncoder(AnthropicConfiguration configuration) {
+    this.configuration = Objects.requireNonNull(configuration, "configuration");
+  }
+
+  AnthropicConfiguration configuration() {
+    return configuration;
+  }
+
   AnthropicEncodedRequest encode(ProviderRequest request, ProviderDescriptor descriptor) {
+    return encode(request, descriptor, this.configuration);
+  }
+
+  AnthropicEncodedRequest encode(
+      ProviderRequest request, ProviderDescriptor descriptor, AnthropicConfiguration config) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(descriptor, "descriptor");
+    Objects.requireNonNull(config, "config");
 
     validatePenalties(request.variant());
     validateCacheControl(request.cacheControl());
@@ -83,7 +103,7 @@ final class AnthropicRequestEncoder {
     root.put("stream", true);
 
     applySamplingParameters(root, request.variant());
-    applyReasoningParameters(root, request);
+    applyReasoningParameters(root, request, config, maxTokens);
 
     ArrayNode toolsArray = encodeTools(request.tools());
 
@@ -209,16 +229,51 @@ final class AnthropicRequestEncoder {
     }
   }
 
-  private static void applyReasoningParameters(ObjectNode root, ProviderRequest request) {
-    if (request.model().reasoning()
-        && request.variant() != null
-        && request.variant().reasoningEffort() != null) {
-      ObjectNode thinking = root.putObject("thinking");
-      thinking.put("type", "adaptive");
-
-      ObjectNode outputConfig = root.putObject("output_config");
-      outputConfig.put("effort", request.variant().reasoningEffort());
+  private static void applyReasoningParameters(
+      ObjectNode root, ProviderRequest request, AnthropicConfiguration config, int maxTokens) {
+    if (!request.model().reasoning()
+        || request.variant() == null
+        || request.variant().reasoningEffort() == null) {
+      return;
     }
+
+    AnthropicThinkingMode mode = config.anthropicThinkingMode();
+    switch (mode) {
+      case ADAPTIVE -> {
+        ObjectNode thinking = root.putObject("thinking");
+        thinking.put("type", "adaptive");
+
+        ObjectNode outputConfig = root.putObject("output_config");
+        outputConfig.put("effort", request.variant().reasoningEffort());
+      }
+      case BUDGET -> {
+        String effort = request.variant().reasoningEffort();
+        int budgetTokens = mapBudgetTokens(effort);
+        if (budgetTokens >= maxTokens) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "budget_tokens must be strictly lower than max_tokens");
+        }
+        ObjectNode thinking = root.putObject("thinking");
+        thinking.put("type", "enabled");
+        thinking.put("budget_tokens", budgetTokens);
+      }
+    }
+  }
+
+  private static int mapBudgetTokens(String effort) {
+    if (effort == null) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "unsupported reasoning effort for budget thinking");
+    }
+    return switch (effort) {
+      case "minimal" -> 1024;
+      case "low" -> 2048;
+      case "medium" -> 8192;
+      case "high" -> 16384;
+      default -> throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "unsupported reasoning effort for budget thinking");
+    };
   }
 
   private static ArrayNode encodeTools(List<ProviderToolDefinition> tools) {

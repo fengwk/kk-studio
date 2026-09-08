@@ -569,6 +569,246 @@ class AnthropicRequestEncoderTest {
   }
 
   @Test
+  void appliesReasoningBudgetForSupportedEfforts() throws IOException {
+    AnthropicRequestEncoder budgetEncoder =
+        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
+    ModelDescriptor reasoningModel =
+        new ModelDescriptor(
+            "test-anthropic",
+            "claude-3-7-sonnet",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            pricing());
+
+    List<String> efforts = List.of("minimal", "low", "medium", "high");
+    List<Integer> expectedBudgets = List.of(1024, 2048, 8192, 16384);
+    List<Integer> maxTokensList = List.of(2048, 4096, 16384, 32768);
+
+    for (int i = 0; i < efforts.size(); i++) {
+      String effort = efforts.get(i);
+      int expectedBudget = expectedBudgets.get(i);
+      int maxTokens = maxTokensList.get(i);
+
+      ModelVariant variant =
+          new ModelVariant("v", maxTokens, null, null, null, null, null, List.of(), effort);
+      ProviderRequest req =
+          new ProviderRequest(
+              reasoningModel,
+              variant,
+              List.of(userMsg(new ProviderTextBlock("hi"))),
+              List.of(),
+              ProviderCacheControl.none());
+
+      AnthropicEncodedRequest encoded = budgetEncoder.encode(req, descriptor);
+      JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
+
+      assertEquals("enabled", root.path("thinking").path("type").asText());
+      assertEquals(expectedBudget, root.path("thinking").path("budget_tokens").asInt());
+      assertFalse(
+          root.has("output_config"),
+          "BUDGET mode must omit output_config, but was: " + root.path("output_config"));
+    }
+  }
+
+  @Test
+  void rejectsBudgetWhenBudgetTokensNotStrictlyLowerThanMaxTokens() {
+    AnthropicRequestEncoder budgetEncoder =
+        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
+    ModelDescriptor reasoningModel =
+        new ModelDescriptor(
+            "test-anthropic",
+            "claude-3-7-sonnet",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            pricing());
+
+    // 1. 缺省 max_tokens 为 1024，minimal 映射为 1024：1024 >= 1024 拒绝
+    ModelVariant variantDefaultMax =
+        new ModelVariant("v", null, null, null, null, null, null, List.of(), "minimal");
+    ProviderRequest req1 =
+        new ProviderRequest(
+            reasoningModel,
+            variantDefaultMax,
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex1 =
+        assertThrows(ProviderException.class, () -> budgetEncoder.encode(req1, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
+    assertEquals("budget_tokens must be strictly lower than max_tokens", ex1.getMessage());
+
+    // 2. 显式 max_tokens = 2048，low 映射为 2048：2048 >= 2048 拒绝
+    ModelVariant variantEqual =
+        new ModelVariant("v", 2048, null, null, null, null, null, List.of(), "low");
+    ProviderRequest req2 =
+        new ProviderRequest(
+            reasoningModel,
+            variantEqual,
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex2 =
+        assertThrows(ProviderException.class, () -> budgetEncoder.encode(req2, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
+    assertEquals("budget_tokens must be strictly lower than max_tokens", ex2.getMessage());
+
+    // 3. 显式 max_tokens = 4096，high 映射为 16384：16384 >= 4096 拒绝
+    ModelVariant variantLower =
+        new ModelVariant("v", 4096, null, null, null, null, null, List.of(), "high");
+    ProviderRequest req3 =
+        new ProviderRequest(
+            reasoningModel,
+            variantLower,
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex3 =
+        assertThrows(ProviderException.class, () -> budgetEncoder.encode(req3, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
+    assertEquals("budget_tokens must be strictly lower than max_tokens", ex3.getMessage());
+  }
+
+  @Test
+  void rejectsUnsupportedEffortsInBudgetMode() {
+    AnthropicRequestEncoder budgetEncoder =
+        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
+    ModelDescriptor reasoningModel =
+        new ModelDescriptor(
+            "test-anthropic",
+            "claude-3-7-sonnet",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            pricing());
+
+    for (String unsupportedEffort : List.of("xhigh", "max", "arbitrary", "ultra")) {
+      ModelVariant variant =
+          new ModelVariant("v", 65536, null, null, null, null, null, List.of(), unsupportedEffort);
+      ProviderRequest req =
+          new ProviderRequest(
+              reasoningModel,
+              variant,
+              List.of(userMsg(new ProviderTextBlock("hi"))),
+              List.of(),
+              ProviderCacheControl.none());
+
+      ProviderException ex =
+          assertThrows(ProviderException.class, () -> budgetEncoder.encode(req, descriptor));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+      assertEquals("unsupported reasoning effort for budget thinking", ex.getMessage());
+    }
+  }
+
+  @Test
+  void omitsThinkingAndOutputConfigWhenReasoningNotRequestedInBudgetMode() throws IOException {
+    AnthropicRequestEncoder budgetEncoder =
+        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
+
+    // 1. model.reasoning = false 且 variant 带有 reasoningEffort
+    ModelDescriptor nonReasoningModel =
+        new ModelDescriptor(
+            "test-anthropic",
+            "claude-3-5-sonnet",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            false,
+            pricing());
+    ModelVariant variantWithEffort =
+        new ModelVariant("v", 4096, null, null, null, null, null, List.of(), "high");
+    ProviderRequest req1 =
+        new ProviderRequest(
+            nonReasoningModel,
+            variantWithEffort,
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode root1 = MAPPER.readTree(budgetEncoder.encode(req1, descriptor).bodyUtf8Bytes());
+    assertFalse(root1.has("thinking"));
+    assertFalse(root1.has("output_config"));
+
+    // 2. model.reasoning = true 但 variant.reasoningEffort = null
+    ModelDescriptor reasoningModel =
+        new ModelDescriptor(
+            "test-anthropic",
+            "claude-3-7-sonnet",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            pricing());
+    ModelVariant variantNullEffort =
+        new ModelVariant("v", 4096, null, null, null, null, null, List.of(), null);
+    ProviderRequest req2 =
+        new ProviderRequest(
+            reasoningModel,
+            variantNullEffort,
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode root2 = MAPPER.readTree(budgetEncoder.encode(req2, descriptor).bodyUtf8Bytes());
+    assertFalse(root2.has("thinking"));
+    assertFalse(root2.has("output_config"));
+
+    // 3. model.reasoning = false 且 variant.reasoningEffort = null
+    ProviderRequest req3 =
+        new ProviderRequest(
+            nonReasoningModel,
+            variantNullEffort,
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode root3 = MAPPER.readTree(budgetEncoder.encode(req3, descriptor).bodyUtf8Bytes());
+    assertFalse(root3.has("thinking"));
+    assertFalse(root3.has("output_config"));
+  }
+
+  @Test
+  void adaptiveModePreservesEffortAndOmitsBudgetTokens() throws IOException {
+    AnthropicRequestEncoder adaptiveEncoder =
+        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.ADAPTIVE));
+    ModelDescriptor reasoningModel =
+        new ModelDescriptor(
+            "test-anthropic",
+            "claude-3-7-sonnet",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            pricing());
+
+    // 验证 ADAPTIVE 模式即使 max_tokens 小于 1024 也不受 budget constraint 限制
+    ModelVariant variant =
+        new ModelVariant("v", 512, null, null, null, null, null, List.of(), "high");
+    ProviderRequest req =
+        new ProviderRequest(
+            reasoningModel,
+            variant,
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    JsonNode root = MAPPER.readTree(adaptiveEncoder.encode(req, descriptor).bodyUtf8Bytes());
+    assertEquals("adaptive", root.path("thinking").path("type").asText());
+    assertEquals("high", root.path("output_config").path("effort").asText());
+    assertFalse(root.path("thinking").has("budget_tokens"));
+
+    // 验证 ADAPTIVE 模式透传 xhigh 不被拒绝
+    ModelVariant variantXhigh =
+        new ModelVariant("v", 512, null, null, null, null, null, List.of(), "xhigh");
+    ProviderRequest reqXhigh =
+        new ProviderRequest(
+            reasoningModel,
+            variantXhigh,
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode rootXhigh =
+        MAPPER.readTree(adaptiveEncoder.encode(reqXhigh, descriptor).bodyUtf8Bytes());
+    assertEquals("adaptive", rootXhigh.path("thinking").path("type").asText());
+    assertEquals("xhigh", rootXhigh.path("output_config").path("effort").asText());
+  }
+
+  @Test
   void rejectsPenaltiesAndUnsupportedToolResultBlocks() {
     // frequencyPenalty / presencePenalty
     ModelVariant variantWithPenalty =

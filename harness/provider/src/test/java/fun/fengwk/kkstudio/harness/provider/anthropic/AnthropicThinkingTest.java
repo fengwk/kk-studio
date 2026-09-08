@@ -844,6 +844,108 @@ class AnthropicThinkingTest {
         completion.replayState().payload().path("content").get(0).path("signature").asText());
   }
 
+  /**
+   * 验证 BUDGET 模式下的完整生命周期： 1. 编码阶段：thinking.type=enabled、budget_tokens=8192，且完全省略 output_config； 2.
+   * 流式阶段：正确派发 ThinkingDelta、TextDelta 并由 Accumulator 完成终态组装； 3. 重放阶段：在后续轮次中正确以原生 thinking 块重放。
+   */
+  @Test
+  void should_support_budget_thinking_mode_wire_and_stream() throws IOException {
+    AnthropicRequestEncoder budgetEncoder =
+        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
+
+    ModelDescriptor modelDesc = createReasoningModel("MiniMax-M3");
+    ModelVariant variant =
+        new ModelVariant("default", 16384, null, null, null, null, null, List.of(), "medium");
+    ProviderMessage userMsg =
+        new ProviderMessage(
+            ProviderMessageRole.USER,
+            List.of(new ProviderTextBlock("Explain quantum superposition.")));
+    ProviderRequest turn1Request =
+        new ProviderRequest(
+            modelDesc, variant, List.of(userMsg), List.of(), ProviderCacheControl.none());
+
+    AnthropicEncodedRequest encodedTurn1 = budgetEncoder.encode(turn1Request, descriptor);
+    JsonNode turn1WireRoot = MAPPER.readTree(encodedTurn1.bodyUtf8Bytes());
+
+    assertEquals("MiniMax-M3", turn1WireRoot.path("model").asText());
+    assertEquals("enabled", turn1WireRoot.path("thinking").path("type").asText());
+    assertEquals(8192, turn1WireRoot.path("thinking").path("budget_tokens").asInt());
+    assertFalse(turn1WireRoot.has("output_config"), "BUDGET mode must omit output_config");
+
+    String frozenPrefixHash = encodedTurn1.sourcePrefixHash();
+    assertNotNull(frozenPrefixHash);
+
+    RecordingStreamHandler handler = new RecordingStreamHandler();
+    AnthropicStreamBridge bridge = new AnthropicStreamBridge(handler);
+    AnthropicStreamAccumulator accumulator =
+        new AnthropicStreamAccumulator(turn1Request, descriptor, frozenPrefixHash, bridge);
+
+    accumulator.handleEvent(
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_minimax_1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}");
+    accumulator.handleEvent(
+        "content_block_start",
+        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"Thinking: \"}}");
+    accumulator.handleEvent(
+        "content_block_delta",
+        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Quantum states...\"}}");
+    accumulator.handleEvent(
+        "content_block_delta",
+        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig_minimax_budget\"}}");
+    accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
+    accumulator.handleEvent(
+        "content_block_start",
+        "{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}");
+    accumulator.handleEvent(
+        "content_block_delta",
+        "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Superposition means...\"}}");
+    accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":1}");
+    accumulator.handleEvent(
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":20}}");
+    accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+
+    ProviderCompletion completion = accumulator.finish();
+    bridge.emitComplete(completion);
+
+    assertEquals(3, handler.events.size());
+    assertInstanceOf(ProviderStreamEvent.ThinkingDelta.class, handler.events.get(0));
+    assertInstanceOf(ProviderStreamEvent.ThinkingDelta.class, handler.events.get(1));
+    assertInstanceOf(ProviderStreamEvent.TextDelta.class, handler.events.get(2));
+
+    assertEquals("Thinking: Quantum states...", completion.response().thinking());
+    assertEquals("Superposition means...", completion.response().text());
+    assertNotNull(completion.replayState());
+
+    // 轮次 2：重放轮次 1 的 assistant 生成并验证 wire 内容
+    ProviderMessage assistantMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderThinkingBlock("Thinking: Quantum states..."),
+                new ProviderTextBlock("Superposition means...")),
+            completion.replayState());
+    ProviderMessage userMsg2 =
+        new ProviderMessage(
+            ProviderMessageRole.USER, List.of(new ProviderTextBlock("Tell me more.")));
+    ProviderRequest turn2Request =
+        new ProviderRequest(
+            modelDesc,
+            variant,
+            List.of(userMsg, assistantMsg, userMsg2),
+            List.of(),
+            ProviderCacheControl.none());
+
+    AnthropicEncodedRequest encodedTurn2 = budgetEncoder.encode(turn2Request, descriptor);
+    JsonNode turn2WireRoot = MAPPER.readTree(encodedTurn2.bodyUtf8Bytes());
+    JsonNode wireAsstMsg = turn2WireRoot.path("messages").get(1);
+    assertEquals("assistant", wireAsstMsg.path("role").asText());
+    assertEquals("thinking", wireAsstMsg.path("content").get(0).path("type").asText());
+    assertEquals(
+        "sig_minimax_budget", wireAsstMsg.path("content").get(0).path("signature").asText());
+    assertEquals("text", wireAsstMsg.path("content").get(1).path("type").asText());
+  }
+
   private static ModelDescriptor createReasoningModel(String modelName) {
     return new ModelDescriptor(
         "anthropic-thinking",

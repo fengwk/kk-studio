@@ -50,6 +50,7 @@
                                         <include>fun.fengwk.kkstudio.harness.provider.transport.HttpSseStreamExecution</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParser</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.transport.TransportException</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicConfiguration</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicEndpoints</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicPrefixHasher</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicEncodedRequest</include>
