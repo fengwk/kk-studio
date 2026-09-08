@@ -67,7 +67,7 @@ public record PromptCacheCapability(
   }
 
   /**
-   * 工厂：harness 在 system 和/或 tools 上显式打 cache_control 标记模式。
+   * 工厂：harness 在 Provider 支持的请求前缀位置显式打 cache_control 标记模式。
    *
    * @param supportedRetentions 至少包含一个非 NONE 的 retention
    * @param supportedBreakpoints 至少包含一个 breakpoint

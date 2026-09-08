@@ -301,8 +301,8 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     public PromptCacheCapability promptCacheCapability() {
       return switch (providerType) {
         case ANTHROPIC -> PromptCacheCapability.breakpoints(
-            Set.of(PromptCacheRetention.SHORT),
-            EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS));
+            Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
+            EnumSet.allOf(PromptCacheBreakpoint.class));
         case GOOGLE -> PromptCacheCapability.automatic();
         default -> PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT));
       };

@@ -240,10 +240,14 @@ virtual-thread-per-task executor，Model admission 默认容量来自 `kk-studio
 4. 通过 `ProviderResourceMaterializer`物化当前 attempt 的 Resource：图片在 30 MiB 内联为 data URI，audio/video
    使用 signed URL；Storage 不可用时 Resource 变为确定性文本回退。
 
-四个 adapter 把 SDK 细节封装在 provider 包内。OpenAI adapter 支持 OpenAI-compatible endpoint 与 MiniMax
-reasoning split；Responses adapter 使用 official client；Anthropic adapter 校验 breakpoint 并映射 thinking；
-Google adapter 映射 Gemini thinking level。`LangChainModelProvider`统一 stream delta、thinking、tool call、
-usage、stop reason 和 Provider error；错误消息截断并移除 Bearer/API key/token 等敏感值。
+OpenAI Chat、OpenAI Responses 与 Google adapter 继续把 LangChain4j SDK 细节封装在 Platform provider
+包内。Anthropic 使用 [`harness-provider`](harness-provider.md) 的原生 Messages adapter：Platform 复用
+`modelExecutionExecutor` 作为受管虚拟线程 worker，提供禁止重定向的长生命周期 JDK `HttpClient`，并以独立 daemon
+Watchdog 调度器落实 total/idle timeout。Anthropic factory 声明 SHORT/LONG 与
+SYSTEM/TOOLS/CONVERSATION 能力；默认规划仍选择 SHORT，执行期基于完整历史重新求断点交集。
+
+`LangChainModelProvider` 统一其余三个旧 SDK adapter 的 stream delta、thinking、tool call、usage、stop reason
+和 Provider error；错误消息截断并移除 Bearer/API key/token 等敏感值。
 
 `PlatformModelGateway.start`的 admission 顺序和结果语义是：
 

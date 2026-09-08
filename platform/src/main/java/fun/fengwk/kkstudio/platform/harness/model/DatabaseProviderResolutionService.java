@@ -194,6 +194,9 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
     if (supported.contains(PromptCacheBreakpoint.TOOLS) && !request.tools().isEmpty()) {
       resolved.add(PromptCacheBreakpoint.TOOLS);
     }
+    if (supported.contains(PromptCacheBreakpoint.CONVERSATION) && hasConversationContent(request)) {
+      resolved.add(PromptCacheBreakpoint.CONVERSATION);
+    }
     if (resolved.isEmpty()) {
       return ProviderCacheControl.none();
     }
@@ -218,5 +221,14 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
     }
     ProviderMessage first = request.messages().get(0);
     return first.role() == ProviderMessageRole.SYSTEM;
+  }
+
+  private static boolean hasConversationContent(ProviderRequest request) {
+    for (ProviderMessage message : request.messages()) {
+      if (message.role() != ProviderMessageRole.SYSTEM && !message.contents().isEmpty()) {
+        return true;
+      }
+    }
+    return false;
   }
 }

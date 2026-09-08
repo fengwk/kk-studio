@@ -521,6 +521,25 @@ class AnthropicRequestEncoderTest {
     assertEquals("ephemeral", lastMsgBlock.path("cache_control").path("type").asText());
   }
 
+  /** 意图：Anthropic 只接受显式断点控制，AFFINITY 形态必须在发起网络请求前确定性拒绝。 */
+  @Test
+  void rejectsAffinityCacheControlWithoutBreakpoints() {
+    ProviderRequest request =
+        request(
+            defaultVariant(),
+            List.of(userMsg(new ProviderTextBlock("User"))),
+            List.of(),
+            ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "test-affinity"));
+
+    ProviderException error =
+        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
+
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+    assertEquals(
+        "Anthropic prompt cache control requires at least one breakpoint (SYSTEM, TOOLS, CONVERSATION)",
+        error.getMessage());
+  }
+
   @Test
   void appliesReasoningAdaptiveAndEffortWhenEnabled() throws IOException {
     ModelDescriptor reasoningModel =

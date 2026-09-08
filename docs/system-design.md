@@ -177,7 +177,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `harness/tool` | Tool identity、descriptor、call/result 与 Tool JSON codecs（Result 组合 ResultContent） | 依赖 `harness-common` 与 Jackson |
 | `harness/environment` | Environment binding、Capability SPI/catalog 与 Daemon v1 wire（CapabilityResult 组合 ResultContent） | 依赖 `harness-common` 与 Jackson，绝不依赖 `harness-tool` |
 | `harness/runtime` | Session/Entry/Thread/Command/Invocation/Work 状态机与 processors | 依赖 `harness-common`、`harness-tool`、`harness-environment`、Jackson、SLF4J、JGit |
-| `harness/provider` | JDK 21 HttpClient + SSE 传输与增量解析基础设施 | 依赖 `harness-runtime`，无 Spring 依赖，安全脱敏 |
+| `harness/provider` | JDK 21 HttpClient + SSE 传输、增量解析与原生 Anthropic Messages 协议 | 直接依赖仅 `harness-runtime` 与 Jackson，无 Spring/LangChain4j 依赖 |
 | `harness/contributor-api` | trusted Contributor 的 Catalog、BranchView、统一 Tool、effect 与 projector API | 生产依赖 `harness-tool`、`harness-environment`，不进生产 Common/Runtime |
 | `harness/builtin` | 第一方内置 15 工具、goal.state 与 context projector | 依赖 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment`、Jackson |
 | `harness/infra` | PostgreSQL HarnessStore、Work dispatcher、realtime、Resource store | 依赖 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Spring JDBC、PostgreSQL |
@@ -202,6 +202,7 @@ platform -> harness-tool -> harness-common
 platform -> harness-environment -> harness-common
 platform -> harness-builtin -> harness-contributor-api
 platform -> harness-runtime
+platform -> harness-provider -> harness-runtime
 platform -> harness-contributor-api
 harness-daemon -> harness-common
 harness-daemon -> harness-environment -> harness-common
