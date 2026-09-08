@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.provider.openai.responses;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -1624,5 +1625,101 @@ class OpenAiResponsesRequestEncoderTest {
                                     "image/png", "http://example.com/invalid path with spaces"))))),
                 desc,
                 OpenAiResponsesConfig.defaultConfig()));
+  }
+
+  /**
+   * 测试意图：验证工具调用参数 arguments 为非 Object（畸形、数组、标量、JSON null）时，在 replay 与 fallback 均严格抛出
+   * INVALID_REQUEST 且无原始参数泄露。
+   */
+  @Test
+  void test_toolArguments_strictObjectValidationInReplayAndFallback() {
+    ProviderDescriptor desc = createDescriptor();
+    String validHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    String mismatchedHash = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+
+    List<String> invalidArgs =
+        List.of("12345", "\"scalar_string\"", "true", "[1, 2, 3]", "{\"unclosed\":", "null");
+
+    for (String badArg : invalidArgs) {
+      // 1. Semantic fallback: durable 中的 toolCall.argumentsJson 为非 Object
+      ProviderMessage fallbackMsg =
+          new ProviderMessage(
+              ProviderMessageRole.ASSISTANT,
+              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))),
+              null);
+      ProviderException exFallback =
+          assertThrows(
+              ProviderException.class,
+              () ->
+                  encoder.encode(
+                      request(List.of(fallbackMsg)), desc, OpenAiResponsesConfig.defaultConfig()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, exFallback.kind());
+      assertNull(exFallback.getCause());
+      assertFalse(exFallback.getMessage().contains(badArg));
+
+      // 2. Replay payload: function_call.arguments 为非 Object（即使 hash 不匹配也必须严格拦截）
+      ObjectNode badReplayPayload = MAPPER.createObjectNode();
+      badReplayPayload
+          .putArray("output")
+          .addObject()
+          .put("type", "function_call")
+          .put("call_id", "c1")
+          .put("name", "calc")
+          .put("arguments", badArg);
+
+      ProviderReplayState badReplayState =
+          new ProviderReplayState(
+              ProviderReplayFormat.OPENAI_RESPONSES,
+              desc.affinity("gpt-5.4-mini"),
+              mismatchedHash,
+              badReplayPayload);
+      ProviderMessage replayMsg =
+          new ProviderMessage(
+              ProviderMessageRole.ASSISTANT,
+              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))),
+              badReplayState);
+      ProviderException exReplay =
+          assertThrows(
+              ProviderException.class,
+              () ->
+                  encoder.encode(
+                      request(List.of(replayMsg)), desc, OpenAiResponsesConfig.defaultConfig()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, exReplay.kind());
+      assertNull(exReplay.getCause());
+      assertFalse(exReplay.getMessage().contains(badArg));
+
+      // 3. Replay durable: durable 中的 toolCall.argumentsJson 为非 Object
+      ObjectNode validPayload = MAPPER.createObjectNode();
+      validPayload
+          .putArray("output")
+          .addObject()
+          .put("type", "function_call")
+          .put("call_id", "c1")
+          .put("name", "calc")
+          .put("arguments", "{}");
+
+      ProviderReplayState replayStateWithBadDurable =
+          new ProviderReplayState(
+              ProviderReplayFormat.OPENAI_RESPONSES,
+              desc.affinity("gpt-5.4-mini"),
+              validHash,
+              validPayload);
+      ProviderMessage msgWithBadDurable =
+          new ProviderMessage(
+              ProviderMessageRole.ASSISTANT,
+              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))),
+              replayStateWithBadDurable);
+      ProviderException exDurable =
+          assertThrows(
+              ProviderException.class,
+              () ->
+                  encoder.encode(
+                      request(List.of(msgWithBadDurable)),
+                      desc,
+                      OpenAiResponsesConfig.defaultConfig()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, exDurable.kind());
+      assertNull(exDurable.getCause());
+      assertFalse(exDurable.getMessage().contains(badArg));
+    }
   }
 }

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -11,83 +12,136 @@ import java.net.URI;
 /** 验证 Anthropic 端点规范化与安全性校验。 */
 class AnthropicEndpointsTest {
 
+  /** 意图：验证标准 baseUrl 正确追加 /messages。 */
   @Test
   void resolvesStandardEndpointWithoutTrailingSlash() {
     URI uri = AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com/v1");
     assertEquals("https://api.anthropic.com/v1/messages", uri.toString());
   }
 
+  /** 意图：验证带尾部斜杠的标准 baseUrl 规范化后正确追加 /messages。 */
   @Test
   void resolvesStandardEndpointWithTrailingSlash() {
     URI uri = AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com/v1/");
     assertEquals("https://api.anthropic.com/v1/messages", uri.toString());
   }
 
+  /** 意图：验证保留自定义端口。 */
   @Test
   void resolvesHttpEndpointWithCustomPort() {
     URI uri = AnthropicEndpoints.resolveMessagesUri("http://127.0.0.1:8080");
     assertEquals("http://127.0.0.1:8080/messages", uri.toString());
+
+    URI httpsUri = AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com:9443/v1");
+    assertEquals("https://api.anthropic.com:9443/v1/messages", httpsUri.toString());
   }
 
+  /** 意图：验证原生 IPv6 authority（方括号及可选端口）保真保留。 */
   @Test
   void resolvesHttpEndpointWithIpv6HostAndPort() {
-    URI uri = AnthropicEndpoints.resolveMessagesUri("http://[::1]:8443/v1");
-    assertEquals("http://[::1]:8443/v1/messages", uri.toString());
+    URI uriWithPort = AnthropicEndpoints.resolveMessagesUri("http://[::1]:8443/v1");
+    assertEquals("http://[::1]:8443/v1/messages", uriWithPort.toString());
+    assertEquals("[::1]:8443", uriWithPort.getRawAuthority());
+
+    URI uriWithoutPort = AnthropicEndpoints.resolveMessagesUri("https://[2001:db8::1]/v1/");
+    assertEquals("https://[2001:db8::1]/v1/messages", uriWithoutPort.toString());
+    assertEquals("[2001:db8::1]", uriWithoutPort.getRawAuthority());
   }
 
+  /** 意图：验证已进行 URL 编码的 base path 保真，绝不进行二次编码。 */
+  @Test
+  void preservesAlreadyEscapedBasePathWithoutDoubleEncoding() {
+    URI uri = AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com/custom%20path/v1");
+    assertEquals("https://api.anthropic.com/custom%20path/v1/messages", uri.toString());
+    assertEquals("/custom%20path/v1/messages", uri.getRawPath());
+    assertFalse(uri.getRawPath().contains("%2520"));
+  }
+
+  /** 意图：验证空端点被安全拒绝且无 cause。 */
   @Test
   void rejectsBlankOrNullEndpoint() {
-    assertThrows(IllegalArgumentException.class, () -> AnthropicEndpoints.resolveMessagesUri(null));
-    assertThrows(
-        IllegalArgumentException.class, () -> AnthropicEndpoints.resolveMessagesUri("   "));
+    IllegalArgumentException ex1 =
+        assertThrows(
+            IllegalArgumentException.class, () -> AnthropicEndpoints.resolveMessagesUri(null));
+    assertNull(ex1.getCause());
+
+    IllegalArgumentException ex2 =
+        assertThrows(
+            IllegalArgumentException.class, () -> AnthropicEndpoints.resolveMessagesUri("   "));
+    assertNull(ex2.getCause());
   }
 
+  /** 意图：验证非法 scheme 被拒绝且无敏感信息泄露或底层 cause。 */
   @Test
   void rejectsInvalidScheme() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> AnthropicEndpoints.resolveMessagesUri("ftp://api.anthropic.com"));
-  }
-
-  @Test
-  void rejectsUserInfo() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> AnthropicEndpoints.resolveMessagesUri("https://user:pass@api.anthropic.com/v1"));
-  }
-
-  @Test
-  void rejectsQuery() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com/v1?key=val"));
-  }
-
-  @Test
-  void rejectsFragment() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com/v1#section"));
-  }
-
-  @Test
-  void rejectsMalformedUriSyntax() {
+    String sensitive = "ftp://sensitive-credential-endpoint";
     IllegalArgumentException ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> AnthropicEndpoints.resolveMessagesUri("://invalid"));
+            IllegalArgumentException.class, () -> AnthropicEndpoints.resolveMessagesUri(sensitive));
     assertNull(ex.getCause());
+    assertFalse(ex.getMessage().contains("sensitive-credential-endpoint"));
   }
 
+  /** 意图：验证 user-info 被拒绝且密码等敏感凭据不回显，无底层 cause。 */
+  @Test
+  void rejectsUserInfo() {
+    String sensitive = "https://user:super_secret_password@api.anthropic.com/v1";
+    IllegalArgumentException ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> AnthropicEndpoints.resolveMessagesUri(sensitive));
+    assertNull(ex.getCause());
+    assertFalse(ex.getMessage().contains("super_secret_password"));
+  }
+
+  /** 意图：验证 query 参数被拒绝且查询串敏感数据不回显，无底层 cause。 */
+  @Test
+  void rejectsQuery() {
+    String sensitive = "https://api.anthropic.com/v1?api_key=secret_token_123";
+    IllegalArgumentException ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> AnthropicEndpoints.resolveMessagesUri(sensitive));
+    assertNull(ex.getCause());
+    assertFalse(ex.getMessage().contains("secret_token_123"));
+  }
+
+  /** 意图：验证 fragment 被拒绝且片段敏感数据不回显，无底层 cause。 */
+  @Test
+  void rejectsFragment() {
+    String sensitive = "https://api.anthropic.com/v1#secret_section";
+    IllegalArgumentException ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> AnthropicEndpoints.resolveMessagesUri(sensitive));
+    assertNull(ex.getCause());
+    assertFalse(ex.getMessage().contains("secret_section"));
+  }
+
+  /** 意图：验证非法语法端点被拒绝且异常脱敏，无底层 cause。 */
+  @Test
+  void rejectsMalformedUriSyntax() {
+    String sensitive = "://invalid_secret_path";
+    IllegalArgumentException ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> AnthropicEndpoints.resolveMessagesUri(sensitive));
+    assertNull(ex.getCause());
+    assertFalse(ex.getMessage().contains("invalid_secret_path"));
+  }
+
+  /** 意图：验证缺失合法 host 时被安全拒绝且无 cause。 */
   @Test
   void rejectsMissingHost() {
-    assertThrows(
-        IllegalArgumentException.class, () -> AnthropicEndpoints.resolveMessagesUri("http://"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> AnthropicEndpoints.resolveMessagesUri("http:///path"));
+    IllegalArgumentException ex1 =
+        assertThrows(
+            IllegalArgumentException.class, () -> AnthropicEndpoints.resolveMessagesUri("http://"));
+    assertNull(ex1.getCause());
+
+    IllegalArgumentException ex2 =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> AnthropicEndpoints.resolveMessagesUri("http:///path"));
+    assertNull(ex2.getCause());
   }
 
+  /** 意图：验证无 path 的域名能正确追加 /messages。 */
   @Test
   void resolvesHostWithoutPath() {
     URI uri = AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com");

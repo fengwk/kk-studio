@@ -219,6 +219,8 @@ final class GeminiStreamAccumulator {
       return;
     }
 
+    validateParts(partsArray);
+
     boolean isCumulativeSnapshot = checkCumulativeSnapshot(partsArray);
 
     if (isCumulativeSnapshot) {
@@ -238,8 +240,7 @@ final class GeminiStreamAccumulator {
         boolean hasThoughtSignature =
             partNode.has("thoughtSignature") && !partNode.get("thoughtSignature").isNull();
         boolean hasText = partNode.has("text") && !partNode.get("text").isNull();
-        boolean hasFunctionCall =
-            partNode.has("functionCall") && partNode.get("functionCall").isObject();
+        boolean hasFunctionCall = partNode.has("functionCall");
 
         if (hasText
             && !isThought
@@ -256,6 +257,43 @@ final class GeminiStreamAccumulator {
         } else {
           TrackedPart newPart = createAndEmitNewPart(partNode);
           trackedParts.add(newPart);
+        }
+      }
+    }
+  }
+
+  private void validateParts(ArrayNode partsArray) {
+    for (JsonNode partNode : partsArray) {
+      if (partNode == null || !partNode.isObject()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "candidate part must be a JSON object");
+      }
+      if (partNode.has("functionCall")) {
+        JsonNode fnNode = partNode.get("functionCall");
+        if (fnNode == null || fnNode.isNull() || !fnNode.isObject()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE, "functionCall must be a JSON object");
+        }
+        if (!fnNode.has("name")
+            || fnNode.get("name") == null
+            || !fnNode.get("name").isTextual()
+            || fnNode.get("name").asText().isBlank()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE, "functionCall name must be a non-blank string");
+        }
+        if (!fnNode.has("args")
+            || fnNode.get("args") == null
+            || fnNode.get("args").isNull()
+            || !fnNode.get("args").isObject()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE,
+              "functionCall args must be an explicit JSON object");
+        }
+        if (fnNode.has("id") && fnNode.get("id") != null && !fnNode.get("id").isNull()) {
+          if (!fnNode.get("id").isTextual() || fnNode.get("id").asText().isBlank()) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_RESPONSE, "functionCall id must be a non-blank string");
+          }
         }
       }
     }
@@ -337,15 +375,15 @@ final class GeminiStreamAccumulator {
       }
     }
 
-    if (partNode.has("functionCall") && partNode.get("functionCall").isObject()) {
+    if (partNode.has("functionCall")) {
       JsonNode fnNode = partNode.get("functionCall");
-      tp.functionCallName = fnNode.path("name").asText("");
-      String id = fnNode.path("id").asText(null);
-      if (id == null || id.isBlank()) {
-        id = "call_" + nextToolOrdinal;
-      }
+      tp.functionCallName = fnNode.get("name").asText();
+      String id =
+          (fnNode.has("id") && !fnNode.get("id").isNull())
+              ? fnNode.get("id").asText()
+              : "call_" + nextToolOrdinal;
       tp.functionCallId = id;
-      tp.functionCallArgs = fnNode.has("args") ? fnNode.get("args") : NODES.objectNode();
+      tp.functionCallArgs = fnNode.get("args");
       emitFunctionCall(tp);
     }
 
@@ -356,8 +394,17 @@ final class GeminiStreamAccumulator {
     if (tp.functionCallEmitted) {
       return;
     }
+    if (tp.functionCallId == null
+        || tp.functionCallId.isBlank()
+        || tp.functionCallName == null
+        || tp.functionCallName.isBlank()
+        || tp.functionCallArgs == null
+        || !tp.functionCallArgs.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "invalid function call in stream emission");
+    }
     tp.functionCallEmitted = true;
-    String argsJson = tp.functionCallArgs != null ? tp.functionCallArgs.toString() : "{}";
+    String argsJson = tp.functionCallArgs.toString();
     ProviderToolCall toolCall =
         new ProviderToolCall(tp.functionCallId, tp.functionCallName, argsJson);
     collectedToolCalls.add(toolCall);
@@ -431,16 +478,19 @@ final class GeminiStreamAccumulator {
     for (TrackedPart tp : trackedParts) {
       ObjectNode partNode = partsArray.addObject();
       if (tp.isFunctionCall()) {
+        if (tp.functionCallName == null
+            || tp.functionCallName.isBlank()
+            || tp.functionCallArgs == null
+            || !tp.functionCallArgs.isObject()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
+        }
         ObjectNode fnNode = partNode.putObject("functionCall");
         fnNode.put("name", tp.functionCallName);
         if (tp.functionCallId != null && !tp.functionCallId.isBlank()) {
           fnNode.put("id", tp.functionCallId);
         }
-        if (tp.functionCallArgs != null) {
-          fnNode.set("args", tp.functionCallArgs);
-        } else {
-          fnNode.putObject("args");
-        }
+        fnNode.set("args", tp.functionCallArgs);
         if (tp.thoughtSignature != null && !tp.thoughtSignature.isBlank()) {
           partNode.put("thoughtSignature", tp.thoughtSignature);
         }

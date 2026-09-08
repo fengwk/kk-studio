@@ -622,6 +622,10 @@ final class GeminiRequestEncoder {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
         }
+        if (!fn.has("args") || !fn.get("args").isObject()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+        }
         Iterator<String> fnFields = fn.fieldNames();
         while (fnFields.hasNext()) {
           String fnField = fnFields.next();
@@ -646,7 +650,7 @@ final class GeminiRequestEncoder {
 
         String name = fn.get("name").asText();
         String id = fn.has("id") ? fn.get("id").asText() : null;
-        String argsJson = fn.has("args") ? fn.get("args").toString() : "{}";
+        String argsJson = fn.get("args").toString();
         payloadCalls.add(new ReplayPayloadCall(id, name, argsJson));
       }
     }
@@ -662,7 +666,13 @@ final class GeminiRequestEncoder {
       } else if (block instanceof ProviderThinkingBlock tb) {
         durableThinking.append(tb.thinking() != null ? tb.thinking() : "");
       } else if (block instanceof ProviderToolCallBlock tcb) {
-        durableCalls.add(tcb.toolCall());
+        ProviderToolCall call = tcb.toolCall();
+        JsonNode dNode = parseStrictJson(call.argumentsJson(), "invalid Gemini replay payload");
+        if (!dNode.isObject()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+        }
+        durableCalls.add(call);
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.provider.openai.chat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -1770,5 +1771,108 @@ class OpenAiChatRequestEncoderTest {
     assertEquals(2, wireAsst.path("reasoning_details").size());
     assertEquals(1, wireAsst.path("reasoning_details").get(0).path("step").asInt());
     assertEquals("completed", wireAsst.path("reasoning_details").get(1).path("status").asText());
+  }
+
+  @Test
+  @DisplayName(
+      "工具参数为非 Object（畸形、数组、标量、JSON null）在 replay 与 fallback 均严格抛出 INVALID_REQUEST 且无原始参数泄露")
+  void testToolArgumentsStrictObjectValidationInReplayAndFallback() {
+    ProviderMessage user1 =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    String hash = "0".repeat(64);
+    String mismatchedHash = "1".repeat(64);
+
+    List<String> invalidArgs =
+        List.of("12345", "\"scalar_string\"", "true", "[1, 2, 3]", "{\"unclosed\":", "null");
+
+    for (String badArg : invalidArgs) {
+      // 1. Semantic fallback: durable 中的 toolCall.argumentsJson 为非 Object
+      ProviderMessage fallbackMsg =
+          new ProviderMessage(
+              ProviderMessageRole.ASSISTANT,
+              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))),
+              null);
+      ProviderRequest fallbackReq =
+          new ProviderRequest(
+              modelDesc,
+              defaultVariant,
+              List.of(user1, fallbackMsg),
+              List.of(),
+              ProviderCacheControl.none());
+      ProviderException exFallback =
+          assertThrows(
+              ProviderException.class,
+              () -> encoder.encode(fallbackReq, descriptor, OpenAiChatConfiguration.defaults()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, exFallback.kind());
+      assertNull(exFallback.getCause());
+      assertFalse(exFallback.getMessage().contains(badArg));
+
+      // 2. Replay payload: tool_calls function.arguments 为非 Object（即使 hash 不匹配也必须严格拦截）
+      ObjectNode badReplayPayload = MAPPER.createObjectNode();
+      badReplayPayload.put("role", "assistant");
+      ArrayNode tcArr = badReplayPayload.putArray("tool_calls");
+      ObjectNode tcObj = tcArr.addObject();
+      tcObj.put("id", "c1").put("type", "function");
+      tcObj.putObject("function").put("name", "calc").put("arguments", badArg);
+
+      ProviderReplayState badReplayState =
+          new ProviderReplayState(
+              ProviderReplayFormat.OPENAI_CHAT,
+              descriptor.affinity("gpt-4o"),
+              mismatchedHash,
+              badReplayPayload);
+      ProviderMessage replayMsg =
+          new ProviderMessage(
+              ProviderMessageRole.ASSISTANT,
+              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))),
+              badReplayState);
+      ProviderRequest replayReq =
+          new ProviderRequest(
+              modelDesc,
+              defaultVariant,
+              List.of(user1, replayMsg),
+              List.of(),
+              ProviderCacheControl.none());
+      ProviderException exReplay =
+          assertThrows(
+              ProviderException.class,
+              () -> encoder.encode(replayReq, descriptor, OpenAiChatConfiguration.defaults()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, exReplay.kind());
+      assertNull(exReplay.getCause());
+      assertFalse(exReplay.getMessage().contains(badArg));
+
+      // 3. Replay durable: durable 中的 toolCall.argumentsJson 为非 Object
+      ObjectNode validPayload = MAPPER.createObjectNode();
+      validPayload.put("role", "assistant");
+      ArrayNode validTcArr = validPayload.putArray("tool_calls");
+      ObjectNode validTc = validTcArr.addObject();
+      validTc.put("id", "c1").put("type", "function");
+      validTc.putObject("function").put("name", "calc").put("arguments", "{}");
+
+      ProviderReplayState replayStateWithBadDurable =
+          new ProviderReplayState(
+              ProviderReplayFormat.OPENAI_CHAT, descriptor.affinity("gpt-4o"), hash, validPayload);
+      ProviderMessage msgWithBadDurable =
+          new ProviderMessage(
+              ProviderMessageRole.ASSISTANT,
+              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))),
+              replayStateWithBadDurable);
+      ProviderRequest reqWithBadDurable =
+          new ProviderRequest(
+              modelDesc,
+              defaultVariant,
+              List.of(user1, msgWithBadDurable),
+              List.of(),
+              ProviderCacheControl.none());
+      ProviderException exDurable =
+          assertThrows(
+              ProviderException.class,
+              () ->
+                  encoder.encode(
+                      reqWithBadDurable, descriptor, OpenAiChatConfiguration.defaults()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, exDurable.kind());
+      assertNull(exDurable.getCause());
+      assertFalse(exDurable.getMessage().contains(badArg));
+    }
   }
 }

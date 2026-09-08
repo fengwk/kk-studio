@@ -483,27 +483,34 @@ final class AnthropicRequestEncoder {
     if (replayState.format() != ProviderReplayFormat.ANTHROPIC_MESSAGES) {
       return false;
     }
-    if (!replayState.affinity().equals(descriptor.affinity(requestedModel))) {
-      return false;
-    }
-    if (!replayState.sourcePrefixHash().equals(currentPrefixHash)) {
-      return false;
-    }
+
+    // 1. 同 format replay 无论 affinity/hash 是否匹配，必须先严格校验 shape/白名单/durable 一致性
     JsonNode payload = replayState.payload();
-    if (!payload.isObject()
+    if (payload == null
+        || !payload.isObject()
         || payload.size() != 2
         || !payload.has("role")
         || !payload.get("role").isTextual()
         || !"assistant".equals(payload.get("role").textValue())
         || !payload.has("content")
         || !payload.get("content").isArray()) {
-      return false;
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload");
     }
     ArrayNode contentArray = (ArrayNode) payload.get("content");
-    return validatePayloadAgainstDurable(contentArray, durableContents);
+    validatePayloadAgainstDurable(contentArray, durableContents);
+
+    // 2. 校验通过后，再判断 affinity 与 prefix hash；失配时安全 fallback
+    if (!replayState.affinity().equals(descriptor.affinity(requestedModel))) {
+      return false;
+    }
+    if (!replayState.sourcePrefixHash().equals(currentPrefixHash)) {
+      return false;
+    }
+    return true;
   }
 
-  private static boolean validatePayloadAgainstDurable(
+  private static void validatePayloadAgainstDurable(
       ArrayNode contentArray, List<ProviderContentBlock> durableContents) {
     StringBuilder payloadText = new StringBuilder();
     StringBuilder payloadThinking = new StringBuilder();
@@ -511,16 +518,19 @@ final class AnthropicRequestEncoder {
 
     for (JsonNode item : contentArray) {
       if (!item.isObject() || !item.has("type") || !item.get("type").isTextual()) {
-        return false;
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload block");
       }
       String type = item.get("type").textValue();
       if (!ALLOWED_REPLAY_CONTENT_TYPES.contains(type)) {
-        return false;
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "disallowed replay content block type: " + type);
       }
       switch (type) {
         case "text" -> {
           if (item.size() != 2 || !item.has("text") || !item.get("text").isTextual()) {
-            return false;
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "invalid text block in replay payload");
           }
           payloadText.append(item.get("text").textValue());
         }
@@ -531,7 +541,8 @@ final class AnthropicRequestEncoder {
               || !item.has("signature")
               || !item.get("signature").isTextual()
               || item.get("signature").textValue().isBlank()) {
-            return false;
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "invalid thinking block in replay payload");
           }
           payloadThinking.append(item.get("thinking").textValue());
         }
@@ -540,7 +551,9 @@ final class AnthropicRequestEncoder {
               || !item.has("data")
               || !item.get("data").isTextual()
               || item.get("data").textValue().isBlank()) {
-            return false;
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST,
+                "invalid redacted_thinking block in replay payload");
           }
         }
         case "tool_use" -> {
@@ -553,7 +566,8 @@ final class AnthropicRequestEncoder {
               || item.get("name").textValue().isBlank()
               || !item.has("input")
               || !item.get("input").isObject()) {
-            return false;
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "invalid tool_use block in replay payload");
           }
           payloadCalls.add(
               new ProviderToolCall(
@@ -561,9 +575,8 @@ final class AnthropicRequestEncoder {
                   item.get("name").textValue(),
                   item.get("input").toString()));
         }
-        default -> {
-          return false;
-        }
+        default -> throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "unsupported replay block type: " + type);
       }
     }
 
@@ -578,38 +591,48 @@ final class AnthropicRequestEncoder {
       } else if (block instanceof ProviderThinkingBlock pb) {
         durableThinking.append(pb.thinking());
       } else if (block instanceof ProviderToolCallBlock cb) {
-        durableCalls.add(cb.toolCall());
+        ProviderToolCall call = cb.toolCall();
+        parseJsonObject(call.argumentsJson(), "durable tool call arguments must be a JSON object");
+        durableCalls.add(call);
       } else {
-        return false;
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "unsupported durable block in assistant message");
       }
     }
 
     if (!payloadText.toString().equals(durableText.toString())) {
-      return false;
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "replay payload text does not match durable content");
     }
     if (!payloadThinking.toString().equals(durableThinking.toString())) {
-      return false;
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "replay payload thinking does not match durable content");
     }
     if (payloadCalls.size() != durableCalls.size()) {
-      return false;
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "replay payload tool call count does not match durable content");
     }
     for (int i = 0; i < payloadCalls.size(); i++) {
       ProviderToolCall pCall = payloadCalls.get(i);
       ProviderToolCall dCall = durableCalls.get(i);
       if (!pCall.id().equals(dCall.id()) || !pCall.name().equals(dCall.name())) {
-        return false;
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "replay payload tool call id/name does not match durable content");
       }
-      try {
-        JsonNode pInput = OBJECT_MAPPER.readTree(pCall.argumentsJson());
-        JsonNode dInput = OBJECT_MAPPER.readTree(dCall.argumentsJson());
-        if (!pInput.equals(dInput)) {
-          return false;
-        }
-      } catch (JsonProcessingException exception) {
-        return false;
+      JsonNode pInput =
+          parseJsonObject(pCall.argumentsJson(), "replay tool call input must be a JSON object");
+      JsonNode dInput =
+          parseJsonObject(
+              dCall.argumentsJson(), "durable tool call arguments must be a JSON object");
+      if (!pInput.equals(dInput)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "replay payload tool call arguments do not match durable content");
       }
     }
-    return true;
   }
 
   private static ObjectNode encodeAssistantFallbackBlock(ProviderContentBlock block) {
@@ -639,22 +662,28 @@ final class AnthropicRequestEncoder {
       node.put("type", "tool_use");
       node.put("id", call.id());
       node.put("name", call.name());
-      JsonNode inputNode;
-      try {
-        inputNode = OBJECT_MAPPER.readTree(call.argumentsJson());
-      } catch (JsonProcessingException exception) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "toolCall argumentsJson is not valid JSON");
-      }
-      if (!inputNode.isObject()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "tool_use input must be a JSON object");
-      }
+      JsonNode inputNode =
+          parseJsonObject(call.argumentsJson(), "tool_use input must be a JSON object");
       node.set("input", inputNode);
       return node;
     }
     throw new ProviderException(
         ProviderErrorKind.INVALID_REQUEST, "unsupported assistant block type");
+  }
+
+  private static JsonNode parseJsonObject(String json, String errorMessage) {
+    if (json == null || json.isBlank()) {
+      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
+    }
+    try (JsonParser parser = OBJECT_MAPPER.createParser(json)) {
+      JsonNode node = OBJECT_MAPPER.readTree(parser);
+      if (node == null || !node.isObject() || parser.nextToken() != null) {
+        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
+      }
+      return node;
+    } catch (Exception e) {
+      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
+    }
   }
 
   private static void applyCacheMarkers(

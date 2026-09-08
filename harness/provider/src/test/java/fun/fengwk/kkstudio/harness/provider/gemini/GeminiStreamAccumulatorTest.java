@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.provider.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -499,5 +500,233 @@ class GeminiStreamAccumulatorTest {
     assertEquals(25, raw.get("candidatesTokenCount").asInt());
     assertEquals(10, raw.get("thoughtsTokenCount").asInt());
     assertEquals(125, raw.get("totalTokenCount").asInt());
+  }
+
+  /** 意图：验证显式合法的空对象参数 {} 正确保留在 toolCalls 与 replayState 中，不发生异常。 */
+  @Test
+  void test_validExplicitEmptyObjectFunctionCallArgs() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    String chunk =
+        """
+        {
+          "candidates": [{
+            "content": {
+              "role": "model",
+              "parts": [{
+                "functionCall": {
+                  "id": "call_custom_1",
+                  "name": "get_current_time",
+                  "args": {}
+                }
+              }]
+            },
+            "finishReason": "STOP"
+          }]
+        }
+        """;
+
+    accumulator.handleEvent("message", chunk);
+    ProviderCompletion completion = accumulator.finish();
+    ProviderResponse response = completion.response();
+
+    assertEquals(GenerationStopReason.COMPLETE, response.stopReason());
+    assertEquals(1, response.toolCalls().size());
+    ProviderToolCall call = response.toolCalls().get(0);
+    assertEquals("call_custom_1", call.id());
+    assertEquals("get_current_time", call.name());
+    assertEquals("{}", call.argumentsJson());
+
+    assertNotNull(completion.replayState());
+    JsonNode replayPart = completion.replayState().payload().get("parts").get(0);
+    JsonNode replayFn = replayPart.get("functionCall");
+    assertEquals("get_current_time", replayFn.get("name").asText());
+    assertEquals("call_custom_1", replayFn.get("id").asText());
+    assertTrue(replayFn.get("args").isObject());
+    assertEquals(0, replayFn.get("args").size());
+  }
+
+  /** 意图：验证缺失 args 字段的 functionCall 严格抛出 INVALID_RESPONSE，绝不隐式合成 {}。 */
+  @Test
+  void test_missingFunctionCallArgsThrowsInvalidResponse() {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    String chunk =
+        """
+        {
+          "candidates": [{
+            "content": {
+              "role": "model",
+              "parts": [{
+                "functionCall": {
+                  "name": "get_time"
+                }
+              }]
+            },
+            "finishReason": "STOP"
+          }]
+        }
+        """;
+
+    ProviderException ex =
+        assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+  }
+
+  /** 意图：验证 args 字段若为非 Object（字符串、数组、数字、null 等），严格抛出 INVALID_RESPONSE 且绝不泄露敏感参数。 */
+  @Test
+  void test_nonObjectFunctionCallArgsThrowsInvalidResponseAndDoesNotLeakPayload() {
+    List<String> invalidArgsList =
+        List.of("\"sensitive_password_12345\"", "[1, 2, 3]", "12345", "null");
+
+    for (String invalidArgs : invalidArgsList) {
+      GeminiStreamAccumulator accumulator =
+          new GeminiStreamAccumulator(
+              request,
+              descriptor,
+              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+              bridge);
+
+      String chunk =
+          "{\"candidates\": [{\"content\": {\"role\": \"model\", \"parts\": [{\"functionCall\": {\"name\": \"query\", \"args\": "
+              + invalidArgs
+              + "}}]}, \"finishReason\": \"STOP\"}]}";
+
+      ProviderException ex =
+          assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+      assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+      assertFalse(
+          ex.getMessage().contains("sensitive_password_12345"),
+          "exception must not leak raw sensitive argument");
+      assertFalse(ex.getMessage().contains("12345"), "exception must not leak raw argument value");
+    }
+  }
+
+  /** 意图：验证 functionCall name 缺失、空白或非字符串类型时，严格抛出 INVALID_RESPONSE。 */
+  @Test
+  void test_invalidOrMissingFunctionCallNameThrowsInvalidResponse() {
+    List<String> invalidNameSnippets =
+        List.of(
+            "\"args\": {}",
+            "\"name\": \"\", \"args\": {}",
+            "\"name\": \"   \", \"args\": {}",
+            "\"name\": null, \"args\": {}",
+            "\"name\": 123, \"args\": {}",
+            "\"name\": [\"tool\"], \"args\": {}");
+
+    for (String snippet : invalidNameSnippets) {
+      GeminiStreamAccumulator accumulator =
+          new GeminiStreamAccumulator(
+              request,
+              descriptor,
+              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+              bridge);
+
+      String chunk =
+          "{\"candidates\": [{\"content\": {\"role\": \"model\", \"parts\": [{\"functionCall\": {"
+              + snippet
+              + "}}]}, \"finishReason\": \"STOP\"}]}";
+
+      ProviderException ex =
+          assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+      assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    }
+  }
+
+  /** 意图：验证 optional id 若显式提供但为空白或非字符串类型时抛出 INVALID_RESPONSE；若为 null 或省略则允许并合成协议 ID。 */
+  @Test
+  void test_invalidFunctionCallIdThrowsInvalidResponse() throws Exception {
+    List<String> invalidIdSnippets =
+        List.of(
+            "\"id\": \"\", \"name\": \"query\", \"args\": {}",
+            "\"id\": \"   \", \"name\": \"query\", \"args\": {}",
+            "\"id\": 123, \"name\": \"query\", \"args\": {}",
+            "\"id\": [\"id1\"], \"name\": \"query\", \"args\": {}");
+
+    for (String snippet : invalidIdSnippets) {
+      GeminiStreamAccumulator accumulator =
+          new GeminiStreamAccumulator(
+              request,
+              descriptor,
+              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+              bridge);
+
+      String chunk =
+          "{\"candidates\": [{\"content\": {\"role\": \"model\", \"parts\": [{\"functionCall\": {"
+              + snippet
+              + "}}]}, \"finishReason\": \"STOP\"}]}";
+
+      ProviderException ex =
+          assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+      assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    }
+
+    // 验证 id 为 null 时成功接收并合成 call_0
+    GeminiStreamAccumulator validNullIdAcc =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+    String validNullIdChunk =
+        """
+        {
+          "candidates": [{
+            "content": {
+              "role": "model",
+              "parts": [{
+                "functionCall": {
+                  "id": null,
+                  "name": "query",
+                  "args": {}
+                }
+              }]
+            },
+            "finishReason": "STOP"
+          }]
+        }
+        """;
+    validNullIdAcc.handleEvent("message", validNullIdChunk);
+    ProviderCompletion comp = validNullIdAcc.finish();
+    assertEquals("call_0", comp.response().toolCalls().get(0).id());
+  }
+
+  /** 意图：验证 functionCall 字段本身若为非 Object（标量、数组、null），严格抛出 INVALID_RESPONSE 且不泄露 payload。 */
+  @Test
+  void test_nonObjectFunctionCallThrowsInvalidResponseAndDoesNotLeakPayload() {
+    List<String> nonObjectFcList =
+        List.of("\"sensitive_secret_blob_123\"", "[1, 2, 3]", "99999", "null");
+
+    for (String nonObjectFc : nonObjectFcList) {
+      GeminiStreamAccumulator accumulator =
+          new GeminiStreamAccumulator(
+              request,
+              descriptor,
+              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+              bridge);
+
+      String chunk =
+          "{\"candidates\": [{\"content\": {\"role\": \"model\", \"parts\": [{\"functionCall\": "
+              + nonObjectFc
+              + "}]}, \"finishReason\": \"STOP\"}]}";
+
+      ProviderException ex =
+          assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+      assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+      assertFalse(
+          ex.getMessage().contains("sensitive_secret_blob_123"),
+          "exception must not leak raw secret payload");
+      assertFalse(ex.getMessage().contains("99999"), "exception must not leak raw scalar payload");
+    }
   }
 }

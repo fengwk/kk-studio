@@ -379,11 +379,13 @@ final class OpenAiResponsesRequestEncoder {
     }
 
     for (ProviderToolCallBlock call : toolCalls) {
+      ProviderToolCall tc = call.toolCall();
+      parseJsonObject(tc.argumentsJson(), "toolCall argumentsJson must be a JSON object");
       ObjectNode fc = inputItems.addObject();
       fc.put("type", "function_call");
-      fc.put("call_id", call.toolCall().id());
-      fc.put("name", call.toolCall().name());
-      fc.put("arguments", call.toolCall().argumentsJson());
+      fc.put("call_id", tc.id());
+      fc.put("name", tc.name());
+      fc.put("arguments", tc.argumentsJson());
     }
   }
 
@@ -642,6 +644,7 @@ final class OpenAiResponsesRequestEncoder {
                 ProviderErrorKind.INVALID_REQUEST, "function_call missing string arguments");
           }
           String args = item.get("arguments").textValue();
+          parseJsonObject(args, "function_call arguments must be a JSON object");
           replayToolCalls.add(new ProviderToolCall(callId, name, args));
         }
         default -> throw new ProviderException(
@@ -659,7 +662,9 @@ final class OpenAiResponsesRequestEncoder {
       } else if (block instanceof ProviderThinkingBlock thb) {
         durableThinking.append(thb.thinking());
       } else if (block instanceof ProviderToolCallBlock tcb) {
-        durableToolCalls.add(tcb.toolCall());
+        ProviderToolCall tc = tcb.toolCall();
+        parseJsonObject(tc.argumentsJson(), "durable tool call arguments must be a JSON object");
+        durableToolCalls.add(tc);
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
@@ -809,6 +814,21 @@ final class OpenAiResponsesRequestEncoder {
     } catch (IllegalArgumentException e) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "media source is not a valid URI");
+    }
+  }
+
+  private static JsonNode parseJsonObject(String json, String errorMessage) {
+    if (json == null || json.isBlank()) {
+      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
+    }
+    try (JsonParser parser = OBJECT_MAPPER.createParser(json)) {
+      JsonNode node = OBJECT_MAPPER.readTree(parser);
+      if (node == null || !node.isObject() || parser.nextToken() != null) {
+        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
+      }
+      return node;
+    } catch (Exception e) {
+      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
     }
   }
 }
