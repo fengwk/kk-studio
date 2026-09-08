@@ -1,0 +1,596 @@
+package fun.fengwk.kkstudio.harness.provider.openai.chat;
+
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
+
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
+
+/**
+ * OpenAI Chat Completions 协议请求编码器。
+ *
+ * <p>负责将运行时 {@link ProviderRequest} 转换为符合 OpenAI 规范的 UTF-8 请求 JSON 字节数组， 并提取冻结的 sourcePrefixHash。
+ */
+final class OpenAiChatRequestEncoder {
+
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+  static {
+    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+  }
+
+  private static final Set<String> ALLOWED_REPLAY_FIELDS =
+      Set.of("role", "content", "tool_calls", "reasoning_content", "reasoning_details");
+
+  OpenAiChatEncodedRequest encode(
+      ProviderRequest request, ProviderDescriptor descriptor, OpenAiChatConfiguration config) {
+    Objects.requireNonNull(request, "request");
+    Objects.requireNonNull(descriptor, "descriptor");
+    Objects.requireNonNull(config, "config");
+
+    validateSamplingParameters(request.variant());
+
+    ObjectNode root = NODES.objectNode();
+    root.put("model", request.model().modelName());
+    root.put("stream", true);
+
+    ObjectNode streamOptions = root.putObject("stream_options");
+    streamOptions.put("include_usage", config.includeUsage());
+
+    applyReasoningEffort(root, request.variant());
+    applySamplingParameters(root, request.variant());
+
+    ArrayNode toolsArray = encodeTools(request.tools());
+    if (toolsArray != null && !toolsArray.isEmpty()) {
+      root.set("tools", toolsArray);
+    }
+
+    // 从左到右构建 wire messages 并维护 prefix hash
+    ArrayNode wireMessagesArray = NODES.arrayNode();
+    for (ProviderMessage message : request.messages()) {
+      if (message.role() == ProviderMessageRole.ASSISTANT) {
+        String currentPrefixHash =
+            OpenAiChatPrefixHasher.calculateHash(toolsArray, wireMessagesArray);
+        wireMessagesArray.add(
+            encodeAssistantMessage(
+                message, descriptor, request.model().modelName(), currentPrefixHash));
+      } else {
+        wireMessagesArray.add(encodeMessage(message, config));
+      }
+    }
+
+    // 冻结当前请求新 assistant 生成前的 sourcePrefixHash
+    String sourcePrefixHash = OpenAiChatPrefixHasher.calculateHash(toolsArray, wireMessagesArray);
+
+    // 应用 Prompt Cache 策略与断点打标
+    applyPromptCache(root, wireMessagesArray, request.cacheControl(), config);
+
+    root.set("messages", wireMessagesArray);
+
+    byte[] bodyUtf8Bytes;
+    try {
+      bodyUtf8Bytes = OBJECT_MAPPER.writeValueAsString(root).getBytes(StandardCharsets.UTF_8);
+    } catch (JsonProcessingException exception) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "failed to serialize OpenAI chat request to JSON");
+    }
+
+    return new OpenAiChatEncodedRequest(bodyUtf8Bytes, sourcePrefixHash);
+  }
+
+  private static void validateSamplingParameters(ModelVariant variant) {
+    if (variant == null) {
+      return;
+    }
+    if (variant.topK() != null) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "OpenAI chat does not support top_k");
+    }
+  }
+
+  private static void applyReasoningEffort(ObjectNode root, ModelVariant variant) {
+    if (variant != null
+        && variant.reasoningEffort() != null
+        && !variant.reasoningEffort().isBlank()) {
+      root.put("reasoning_effort", variant.reasoningEffort());
+    }
+  }
+
+  private static void applySamplingParameters(ObjectNode root, ModelVariant variant) {
+    if (variant == null) {
+      return;
+    }
+    if (variant.temperature() != null) {
+      root.put("temperature", variant.temperature());
+    }
+    if (variant.topP() != null) {
+      root.put("top_p", variant.topP());
+    }
+    if (variant.maxOutputTokens() != null) {
+      root.put("max_tokens", variant.maxOutputTokens());
+    }
+    if (variant.frequencyPenalty() != null) {
+      root.put("frequency_penalty", variant.frequencyPenalty());
+    }
+    if (variant.presencePenalty() != null) {
+      root.put("presence_penalty", variant.presencePenalty());
+    }
+    if (variant.stopSequences() != null && !variant.stopSequences().isEmpty()) {
+      ArrayNode stopArray = root.putArray("stop");
+      for (String stop : variant.stopSequences()) {
+        stopArray.add(stop);
+      }
+    }
+  }
+
+  private static ArrayNode encodeTools(List<ProviderToolDefinition> tools) {
+    if (tools == null || tools.isEmpty()) {
+      return null;
+    }
+    ArrayNode toolsArray = NODES.arrayNode();
+    for (ProviderToolDefinition tool : tools) {
+      ObjectNode toolNode = toolsArray.addObject();
+      toolNode.put("type", "function");
+      ObjectNode functionNode = toolNode.putObject("function");
+      functionNode.put("name", tool.name());
+      functionNode.put("description", tool.description());
+      try {
+        JsonNode params = OBJECT_MAPPER.readTree(tool.inputSchemaJson());
+        if (!params.isObject()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "tool inputSchemaJson must be a JSON object: " + tool.name());
+        }
+        functionNode.set("parameters", params);
+      } catch (JsonProcessingException exception) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "invalid tool inputSchemaJson for tool: " + tool.name());
+      }
+    }
+    return toolsArray;
+  }
+
+  private static ObjectNode encodeMessage(ProviderMessage message, OpenAiChatConfiguration config) {
+    return switch (message.role()) {
+      case SYSTEM -> encodeSystemMessage(message);
+      case USER -> encodeUserMessage(message, config);
+      case TOOL -> encodeToolMessage(message);
+      case ASSISTANT -> throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "ASSISTANT message should be encoded with prefix hash context");
+    };
+  }
+
+  private static ObjectNode encodeSystemMessage(ProviderMessage message) {
+    ObjectNode msgNode = NODES.objectNode();
+    msgNode.put("role", "system");
+    StringBuilder sb = new StringBuilder();
+    for (ProviderContentBlock block : message.contents()) {
+      if (block instanceof ProviderTextBlock tb) {
+        sb.append(tb.text());
+      } else {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "SYSTEM message contains unsupported block: " + block.getClass().getSimpleName());
+      }
+    }
+    msgNode.put("content", sb.toString());
+    return msgNode;
+  }
+
+  private static ObjectNode encodeUserMessage(
+      ProviderMessage message, OpenAiChatConfiguration config) {
+    ObjectNode msgNode = NODES.objectNode();
+    msgNode.put("role", "user");
+
+    // 检查是否包含媒体块或仅单一文本
+    boolean hasNonText = false;
+    for (ProviderContentBlock block : message.contents()) {
+      if (block instanceof ProviderVideoBlock) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "OpenAI chat does not support VIDEO");
+      }
+      if (!(block instanceof ProviderTextBlock)) {
+        hasNonText = true;
+      }
+    }
+
+    if (!hasNonText && message.contents().size() == 1) {
+      ProviderTextBlock textBlock = (ProviderTextBlock) message.contents().get(0);
+      msgNode.put("content", textBlock.text());
+      return msgNode;
+    }
+
+    ArrayNode contents = msgNode.putArray("content");
+    for (ProviderContentBlock block : message.contents()) {
+      if (block instanceof ProviderTextBlock tb) {
+        ObjectNode textPart = contents.addObject();
+        textPart.put("type", "text");
+        textPart.put("text", tb.text());
+      } else if (block instanceof ProviderImageBlock ib) {
+        if (!config.mediaTypes().contains(OpenAiChatConfiguration.MediaType.IMAGE)) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "IMAGE media type is not enabled in configuration");
+        }
+        ObjectNode imgPart = contents.addObject();
+        imgPart.put("type", "image_url");
+        ObjectNode imgUrl = imgPart.putObject("image_url");
+        imgUrl.put("url", ib.source());
+      } else if (block instanceof ProviderAudioBlock ab) {
+        if (!config.mediaTypes().contains(OpenAiChatConfiguration.MediaType.AUDIO)) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "AUDIO media type is not enabled in configuration");
+        }
+        String source = ab.source().trim();
+        if (source.startsWith("http://") || source.startsWith("https://")) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "OpenAI chat audio requires base64 data; downloading or fabricating from URL is not supported");
+        }
+        String data;
+        String format;
+        if (source.startsWith("data:")) {
+          int commaIdx = source.indexOf(',');
+          if (commaIdx == -1) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "invalid data URI for audio");
+          }
+          String header = source.substring(0, commaIdx);
+          data = source.substring(commaIdx + 1);
+          format = extractAudioFormatFromMime(header);
+        } else {
+          data = source;
+          format = extractAudioFormatFromMime(ab.mediaType());
+        }
+        ObjectNode audioPart = contents.addObject();
+        audioPart.put("type", "input_audio");
+        ObjectNode inputAudio = audioPart.putObject("input_audio");
+        inputAudio.put("data", data);
+        inputAudio.put("format", format);
+      } else if (block instanceof ProviderDocumentBlock db) {
+        if (!config.mediaTypes().contains(OpenAiChatConfiguration.MediaType.PDF)) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST, "PDF media type is not enabled in configuration");
+        }
+        String mime = db.mediaType().toLowerCase(Locale.ROOT);
+        if (!mime.contains("pdf")) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "unsupported document media type: " + db.mediaType());
+        }
+        String fileData = db.source();
+        if (!fileData.startsWith("data:")
+            && !fileData.startsWith("http://")
+            && !fileData.startsWith("https://")) {
+          fileData = "data:application/pdf;base64," + fileData;
+        }
+        ObjectNode docPart = contents.addObject();
+        docPart.put("type", "file");
+        ObjectNode fileObj = docPart.putObject("file");
+        fileObj.put("file_data", fileData);
+        fileObj.put("filename", "pdf_file");
+      } else {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "unsupported block in user message: " + block.getClass().getSimpleName());
+      }
+    }
+    return msgNode;
+  }
+
+  private static String extractAudioFormatFromMime(String mimeOrHeader) {
+    String lower = mimeOrHeader.toLowerCase(Locale.ROOT);
+    if (lower.contains("wav")) {
+      return "wav";
+    }
+    if (lower.contains("mp3") || lower.contains("mpeg")) {
+      return "mp3";
+    }
+    throw new ProviderException(
+        ProviderErrorKind.INVALID_REQUEST, "unsupported audio format: " + mimeOrHeader);
+  }
+
+  private static ObjectNode encodeAssistantMessage(
+      ProviderMessage message,
+      ProviderDescriptor descriptor,
+      String requestedModel,
+      String currentPrefixHash) {
+    ObjectNode msgNode = NODES.objectNode();
+    msgNode.put("role", "assistant");
+
+    ProviderReplayState replayState = message.replayState();
+    if (replayState != null) {
+      if (replayState.format() == ProviderReplayFormat.OPENAI_CHAT) {
+        boolean runtimeMatch =
+            currentPrefixHash != null
+                && replayState.affinity().equals(descriptor.affinity(requestedModel))
+                && replayState.sourcePrefixHash().equals(currentPrefixHash);
+        if (runtimeMatch) {
+          // 同 format 且上下文匹配时，校验 payload 合法性：同 format 但 payload 非法应拒绝！
+          validateReplayPayload(replayState.payload(), message.contents());
+
+          JsonNode payload = replayState.payload();
+          if (payload.has("content") && !payload.get("content").isNull()) {
+            msgNode.set("content", payload.get("content").deepCopy());
+          }
+          if (payload.has("tool_calls") && payload.get("tool_calls").isArray()) {
+            msgNode.set("tool_calls", payload.get("tool_calls").deepCopy());
+          }
+          if (payload.has("reasoning_content") && !payload.get("reasoning_content").isNull()) {
+            msgNode.set("reasoning_content", payload.get("reasoning_content").deepCopy());
+          }
+          if (payload.has("reasoning_details") && !payload.get("reasoning_details").isNull()) {
+            msgNode.set("reasoning_details", payload.get("reasoning_details").deepCopy());
+          }
+          return msgNode;
+        }
+        // runtime 判定不可回放（affinity 或 sourcePrefixHash 不匹配），语义 fallback
+      }
+      // 其他 format（非 OPENAI_CHAT 跨 Provider），runtime 判定不可回放，语义 fallback
+    }
+
+    // 语义回退（semantic fallback）
+    StringBuilder textBuilder = new StringBuilder();
+    ArrayNode toolCallsArray = NODES.arrayNode();
+    for (ProviderContentBlock block : message.contents()) {
+      if (block instanceof ProviderTextBlock tb) {
+        textBuilder.append(tb.text());
+      } else if (block instanceof ProviderToolCallBlock cb) {
+        ObjectNode callNode = toolCallsArray.addObject();
+        callNode.put("id", cb.toolCall().id());
+        callNode.put("type", "function");
+        ObjectNode fnNode = callNode.putObject("function");
+        fnNode.put("name", cb.toolCall().name());
+        fnNode.put("arguments", cb.toolCall().argumentsJson());
+      } else if (block instanceof ProviderThinkingBlock) {
+        // Fallback 时 OpenAI 官方标准不保留 thinking 文本块
+      } else {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "unsupported block in ASSISTANT message: " + block.getClass().getSimpleName());
+      }
+    }
+    if (!textBuilder.isEmpty() || toolCallsArray.isEmpty()) {
+      msgNode.put("content", textBuilder.toString());
+    }
+    if (!toolCallsArray.isEmpty()) {
+      msgNode.set("tool_calls", toolCallsArray);
+    }
+    return msgNode;
+  }
+
+  private static void validateReplayPayload(
+      JsonNode payload, List<ProviderContentBlock> durableContents) {
+    if (payload == null || !payload.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "invalid OpenAI chat assistant replay payload: not a JSON object");
+    }
+    if (!payload.has("role")
+        || !payload.get("role").isTextual()
+        || !"assistant".equals(payload.get("role").textValue())) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "invalid OpenAI chat assistant replay payload: illegal role");
+    }
+
+    // 校验未知字段：只允许 ALLOWED_REPLAY_FIELDS
+    var fields = payload.fieldNames();
+    while (fields.hasNext()) {
+      String field = fields.next();
+      if (!ALLOWED_REPLAY_FIELDS.contains(field)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "invalid OpenAI chat assistant replay payload: unknown field " + field);
+      }
+    }
+
+    if (!validatePayloadAgainstDurable(payload, durableContents)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "invalid OpenAI chat assistant replay payload: mismatch with durable contents");
+    }
+  }
+
+  private static boolean validatePayloadAgainstDurable(
+      JsonNode payload, List<ProviderContentBlock> durableContents) {
+    String payloadText = "";
+    if (payload.has("content") && payload.get("content").isTextual()) {
+      payloadText = payload.get("content").textValue();
+    }
+
+    List<ProviderToolCall> payloadCalls = new ArrayList<>();
+    if (payload.has("tool_calls") && payload.get("tool_calls").isArray()) {
+      for (JsonNode callNode : payload.get("tool_calls")) {
+        if (!callNode.isObject() || !callNode.has("id") || !callNode.has("function")) {
+          return false;
+        }
+        String id = callNode.path("id").asText();
+        JsonNode fnNode = callNode.path("function");
+        String name = fnNode.path("name").asText();
+        String args = fnNode.path("arguments").asText();
+        payloadCalls.add(new ProviderToolCall(id, name, args));
+      }
+    }
+
+    StringBuilder durableText = new StringBuilder();
+    List<ProviderToolCall> durableCalls = new ArrayList<>();
+    for (ProviderContentBlock block : durableContents) {
+      if (block instanceof ProviderTextBlock tb) {
+        durableText.append(tb.text());
+      } else if (block instanceof ProviderToolCallBlock cb) {
+        durableCalls.add(cb.toolCall());
+      }
+    }
+
+    if (!payloadText.equals(durableText.toString())) {
+      return false;
+    }
+    if (payloadCalls.size() != durableCalls.size()) {
+      return false;
+    }
+    for (int i = 0; i < payloadCalls.size(); i++) {
+      ProviderToolCall p = payloadCalls.get(i);
+      ProviderToolCall d = durableCalls.get(i);
+      if (!p.id().equals(d.id())
+          || !p.name().equals(d.name())
+          || !p.argumentsJson().equals(d.argumentsJson())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static ObjectNode encodeToolMessage(ProviderMessage message) {
+    if (message.contents().size() != 1
+        || !(message.contents().get(0) instanceof ProviderToolResultBlock resultBlock)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "TOOL message must contain exactly one ProviderToolResultBlock");
+    }
+    ObjectNode msgNode = NODES.objectNode();
+    msgNode.put("role", "tool");
+    msgNode.put("tool_call_id", resultBlock.toolCallId());
+
+    StringBuilder sb = new StringBuilder();
+    for (ProviderContentBlock block : resultBlock.contents()) {
+      if (block instanceof ProviderTextBlock tb) {
+        sb.append(tb.text());
+      } else if (block instanceof ProviderJsonBlock jb) {
+        sb.append(jb.json());
+      }
+    }
+    msgNode.put("content", sb.toString());
+    return msgNode;
+  }
+
+  private static void applyPromptCache(
+      ObjectNode root,
+      ArrayNode wireMessagesArray,
+      ProviderCacheControl cacheControl,
+      OpenAiChatConfiguration config) {
+    switch (config.promptCacheMode()) {
+      case AUTOMATIC -> {
+        // AUTOMATIC: 不发任何 cache hint
+      }
+      case LEGACY -> {
+        if (cacheControl != null && cacheControl.retention() != PromptCacheRetention.NONE) {
+          root.put("prompt_cache_key", cacheControl.affinityKey());
+          if (cacheControl.retention() == PromptCacheRetention.SHORT) {
+            root.put("prompt_cache_retention", "in_memory");
+          } else if (cacheControl.retention() == PromptCacheRetention.LONG) {
+            root.put("prompt_cache_retention", "24h");
+          }
+        }
+      }
+      case GPT_5_6_EXPLICIT -> {
+        // 根节点始终发 prompt_cache_options mode=explicit ttl=30m
+        ObjectNode cacheOptions = root.putObject("prompt_cache_options");
+        cacheOptions.put("mode", "explicit");
+        cacheOptions.put("ttl", "30m");
+
+        if (cacheControl != null && cacheControl.retention() != PromptCacheRetention.NONE) {
+          root.put("prompt_cache_key", cacheControl.affinityKey());
+
+          // 1. SYSTEM breakpoint: 最后一个 system 消息的最后一个 content part
+          if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.SYSTEM)) {
+            markSystemBreakpoint(wireMessagesArray);
+          }
+
+          // 2. CONVERSATION breakpoint: 最后一个 conversation 消息的最后一个可标记 content part
+          if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.CONVERSATION)) {
+            markConversationBreakpoint(wireMessagesArray);
+          }
+        }
+      }
+    }
+  }
+
+  private static void markSystemBreakpoint(ArrayNode wireMessagesArray) {
+    for (int i = wireMessagesArray.size() - 1; i >= 0; i--) {
+      JsonNode msgNode = wireMessagesArray.get(i);
+      if (msgNode.isObject() && "system".equals(msgNode.path("role").asText())) {
+        attachBreakpointToMessage((ObjectNode) msgNode);
+        return;
+      }
+    }
+  }
+
+  private static void markConversationBreakpoint(ArrayNode wireMessagesArray) {
+    for (int i = wireMessagesArray.size() - 1; i >= 0; i--) {
+      JsonNode msgNode = wireMessagesArray.get(i);
+      if (msgNode.isObject() && !"system".equals(msgNode.path("role").asText())) {
+        if (attachBreakpointToMessage((ObjectNode) msgNode)) {
+          return;
+        }
+      }
+    }
+  }
+
+  private static boolean attachBreakpointToMessage(ObjectNode msgNode) {
+    if (!msgNode.has("content")) {
+      return false;
+    }
+    JsonNode contentNode = msgNode.get("content");
+    if (contentNode.isTextual()) {
+      String text = contentNode.textValue();
+      ArrayNode parts = NODES.arrayNode();
+      ObjectNode part = parts.addObject();
+      part.put("type", "text");
+      part.put("text", text);
+      part.put("prompt_cache_breakpoint", true);
+      msgNode.set("content", parts);
+      return true;
+    } else if (contentNode.isArray()) {
+      ArrayNode parts = (ArrayNode) contentNode;
+      if (!parts.isEmpty()) {
+        JsonNode lastPart = parts.get(parts.size() - 1);
+        if (lastPart.isObject()) {
+          ((ObjectNode) lastPart).put("prompt_cache_breakpoint", true);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "chunks": [
+    {
+      "id": "chatcmpl-tools-1",
+      "object": "chat.completion.chunk",
+      "model": "gpt-4o",
+      "choices": [
+        {
+          "index": 0,
+          "delta": {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "call_weather_1",
+                "type": "function",
+                "function": {
+                  "name": "get_weather",
+                  "arguments": "{\"location\":"
+                }
+              }
+            ]
+          },
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-tools-1",
+      "object": "chat.completion.chunk",
+      "model": "gpt-4o",
+      "choices": [
+        {
+          "index": 0,
+          "delta": {
+            "tool_calls": [
+              {
+                "index": 0,
+                "function": {
+                  "arguments": "\"Tokyo\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 50,
+        "completion_tokens": 15,
+        "total_tokens": 65,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        }
+      }
+    }
+  ]
+}
