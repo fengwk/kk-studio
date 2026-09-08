@@ -1,0 +1,36 @@
+{
+  "stateless_replay_payload": {
+    "output": [
+      {
+        "id": "rs_123",
+        "type": "reasoning",
+        "encrypted_content": "enc_reasoning_abc",
+        "summary": [
+          {
+            "type": "summary_text",
+            "text": "Thinking steps about weather lookup"
+          }
+        ]
+      },
+      {
+        "id": "msg_456",
+        "type": "message",
+        "role": "assistant",
+        "phase": "plan",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Checking weather for you..."
+          }
+        ]
+      },
+      {
+        "id": "fc_789",
+        "type": "function_call",
+        "call_id": "call_paris",
+        "name": "getWeather",
+        "arguments": "{\"city\":\"Paris\"}"
+      }
+    ]
+  }
+}

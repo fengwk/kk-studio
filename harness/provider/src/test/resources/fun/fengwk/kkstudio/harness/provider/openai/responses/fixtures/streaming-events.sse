@@ -1,0 +1,30 @@
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":"Thinking about "}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","delta":"Paris weather."}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"getWeather"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"city\":\""}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"Paris\"}"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","item_id":"fc_1","arguments":"{\"city\":\"Paris\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"getWeather","arguments":"{\"city\":\"Paris\"}"}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"The weather "}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"is sunny."}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_stream_test","model":"gpt-5.4-mini","status":"completed","service_tier":"default","usage":{"input_tokens":120,"output_tokens":60,"total_tokens":180,"input_tokens_details":{"cached_tokens":40,"cache_write_tokens":20},"output_tokens_details":{"reasoning_tokens":15}},"output":[{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Paris weather."}]},{"id":"fc_1","type":"function_call","call_id":"call_1","name":"getWeather","arguments":"{\"city\":\"Paris\"}"},{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"The weather is sunny."}]}]}}
+
