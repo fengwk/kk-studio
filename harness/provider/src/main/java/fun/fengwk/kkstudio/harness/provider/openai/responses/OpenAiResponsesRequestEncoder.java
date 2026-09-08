@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
@@ -26,12 +27,14 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -56,8 +59,17 @@ final class OpenAiResponsesRequestEncoder {
   private static final Set<String> ALLOWED_IMAGE_TYPES =
       Set.of("image/jpeg", "image/png", "image/gif", "image/webp");
   private static final String ALLOWED_DOCUMENT_TYPE = "application/pdf";
+  private static final Set<String> ALLOWED_PAYLOAD_FIELDS = Set.of("output");
   private static final Set<String> ALLOWED_REPLAY_ITEM_TYPES =
       Set.of("message", "reasoning", "function_call");
+  private static final Set<String> ALLOWED_MESSAGE_FIELDS =
+      Set.of("type", "role", "content", "id", "phase");
+  private static final Set<String> ALLOWED_MESSAGE_CONTENT_FIELDS = Set.of("type", "text");
+  private static final Set<String> ALLOWED_REASONING_FIELDS =
+      Set.of("type", "summary", "encrypted_content", "id");
+  private static final Set<String> ALLOWED_SUMMARY_FIELDS = Set.of("type", "text");
+  private static final Set<String> ALLOWED_FUNCTION_CALL_FIELDS =
+      Set.of("type", "call_id", "id", "name", "arguments");
 
   OpenAiResponsesEncodedRequest encode(
       ProviderRequest request, ProviderDescriptor descriptor, OpenAiResponsesConfig config) {
@@ -371,9 +383,21 @@ final class OpenAiResponsesRequestEncoder {
       toolOutput.put("output", "");
       return;
     }
-    if (contents.size() == 1 && contents.get(0) instanceof ProviderTextBlock tb) {
-      toolOutput.put("output", tb.text());
-      return;
+    if (contents.size() == 1) {
+      ProviderContentBlock single = contents.get(0);
+      if (single instanceof ProviderTextBlock textBlock) {
+        toolOutput.put("output", textBlock.text());
+        return;
+      }
+      if (single instanceof ProviderJsonBlock jsonBlock) {
+        toolOutput.put("output", jsonBlock.json());
+        return;
+      }
+      if (!(single instanceof ProviderImageBlock)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "Unsupported content block type in tool result: " + single.getClass().getSimpleName());
+      }
     }
 
     ArrayNode array = toolOutput.putArray("output");
@@ -382,6 +406,10 @@ final class OpenAiResponsesRequestEncoder {
         ObjectNode item = array.addObject();
         item.put("type", "input_text");
         item.put("text", textBlock.text());
+      } else if (block instanceof ProviderJsonBlock jsonBlock) {
+        ObjectNode item = array.addObject();
+        item.put("type", "input_text");
+        item.put("text", jsonBlock.json());
       } else if (block instanceof ProviderImageBlock imgBlock) {
         validateImageType(imgBlock.mediaType());
         validateUri(imgBlock.source());
@@ -407,16 +435,14 @@ final class OpenAiResponsesRequestEncoder {
       return false;
     }
     if (replayState.format() != ProviderReplayFormat.OPENAI_RESPONSES) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "invalid replay format: expected OPENAI_RESPONSES but was " + replayState.format());
+      return false;
     }
 
     JsonNode payload = replayState.payload();
     ArrayNode outputArray = extractOutputArray(payload);
     validateReplayOutputAgainstDurable(outputArray, durableContents);
 
-    // 代际/前缀校验：失配由 runtime 投影负责，此处回退到语义编码
+    // 代际/前缀校验：失配回退到语义编码
     if (!replayState.affinity().equals(descriptor.affinity(requestedModel))) {
       return false;
     }
@@ -432,6 +458,7 @@ final class OpenAiResponsesRequestEncoder {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "invalid replay payload: must be a JSON object");
     }
+    validateAllowedFields(payload, ALLOWED_PAYLOAD_FIELDS, "replay payload");
     JsonNode outputNode = payload.get("output");
     if (outputNode == null || !outputNode.isArray()) {
       throw new ProviderException(
@@ -445,10 +472,16 @@ final class OpenAiResponsesRequestEncoder {
       ArrayNode outputArray, List<ProviderContentBlock> durableContents) {
     StringBuilder replayText = new StringBuilder();
     StringBuilder replayThinking = new StringBuilder();
-    List<String> replayToolCallIds = new ArrayList<>();
+    List<ProviderToolCall> replayToolCalls = new ArrayList<>();
 
     for (JsonNode item : outputArray) {
-      if (!item.isObject() || !item.has("type") || !item.get("type").isTextual()) {
+      if (!item.isObject()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid replay output item: must be a JSON object");
+      }
+      if (!item.has("type")
+          || !item.get("type").isTextual()
+          || item.get("type").textValue().isBlank()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "invalid replay output item: missing string type");
       }
@@ -459,46 +492,155 @@ final class OpenAiResponsesRequestEncoder {
       }
       switch (type) {
         case "message" -> {
-          if (!item.has("role") || !"assistant".equals(item.path("role").asText())) {
+          validateAllowedFields(item, ALLOWED_MESSAGE_FIELDS, "message item");
+          if (!item.has("role")
+              || !item.get("role").isTextual()
+              || !"assistant".equals(item.get("role").textValue())) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
                 "replay message item must have role='assistant'");
           }
-          JsonNode content = item.get("content");
-          if (content != null && content.isArray()) {
-            for (JsonNode block : content) {
-              if (block.isObject() && "output_text".equals(block.path("type").asText())) {
-                replayText.append(block.path("text").asText(""));
-              }
+          if (item.has("id")) {
+            if (!item.get("id").isTextual() || item.get("id").textValue().isBlank()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST, "replay message id must be non-blank string");
             }
+          }
+          if (item.has("phase")) {
+            if (!item.get("phase").isTextual() || item.get("phase").textValue().isBlank()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST,
+                  "replay message phase must be non-blank string");
+            }
+          }
+          JsonNode content = item.get("content");
+          if (content == null || !content.isArray()) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "replay message content must be an array");
+          }
+          for (JsonNode block : content) {
+            if (!block.isObject()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST,
+                  "replay message content block must be an object");
+            }
+            validateAllowedFields(block, ALLOWED_MESSAGE_CONTENT_FIELDS, "message content block");
+            if (!block.has("type")
+                || !block.get("type").isTextual()
+                || !"output_text".equals(block.get("type").textValue())) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST,
+                  "replay message content block type must be 'output_text'");
+            }
+            if (!block.has("text") || !block.get("text").isTextual()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST,
+                  "replay message content block must have string text");
+            }
+            replayText.append(block.get("text").textValue());
           }
         }
         case "reasoning" -> {
-          JsonNode summary = item.get("summary");
-          if (summary != null && summary.isArray()) {
-            for (JsonNode s : summary) {
-              if (s.isObject() && "summary_text".equals(s.path("type").asText())) {
-                replayThinking.append(s.path("text").asText(""));
-              }
+          validateAllowedFields(item, ALLOWED_REASONING_FIELDS, "reasoning item");
+          if (item.has("id")) {
+            if (!item.get("id").isTextual() || item.get("id").textValue().isBlank()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST,
+                  "replay reasoning id must be non-blank string");
             }
+          }
+          boolean itemHasEncrypted = false;
+          if (item.has("encrypted_content")) {
+            JsonNode encNode = item.get("encrypted_content");
+            if (!encNode.isTextual() || encNode.textValue().isBlank()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST,
+                  "replay reasoning encrypted_content must be non-blank string");
+            }
+            itemHasEncrypted = true;
+          }
+          boolean itemHasSummary = false;
+          if (item.has("summary")) {
+            JsonNode summary = item.get("summary");
+            if (!summary.isArray()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST, "replay reasoning summary must be an array");
+            }
+            for (JsonNode s : summary) {
+              if (!s.isObject()) {
+                throw new ProviderException(
+                    ProviderErrorKind.INVALID_REQUEST,
+                    "replay reasoning summary block must be an object");
+              }
+              validateAllowedFields(s, ALLOWED_SUMMARY_FIELDS, "reasoning summary block");
+              if (!s.has("type")
+                  || !s.get("type").isTextual()
+                  || !"summary_text".equals(s.get("type").textValue())) {
+                throw new ProviderException(
+                    ProviderErrorKind.INVALID_REQUEST,
+                    "replay reasoning summary block type must be 'summary_text'");
+              }
+              if (!s.has("text") || !s.get("text").isTextual()) {
+                throw new ProviderException(
+                    ProviderErrorKind.INVALID_REQUEST,
+                    "replay reasoning summary block must have string text");
+              }
+              replayThinking.append(s.get("text").textValue());
+              itemHasSummary = true;
+            }
+          }
+          if (!itemHasEncrypted && !itemHasSummary) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST,
+                "replay reasoning must contain either encrypted_content or non-empty summary");
           }
         }
         case "function_call" -> {
-          String callId = item.path("call_id").asText(null);
+          validateAllowedFields(item, ALLOWED_FUNCTION_CALL_FIELDS, "function_call item");
+          String callId = null;
+          if (item.has("call_id")) {
+            if (!item.get("call_id").isTextual() || item.get("call_id").textValue().isBlank()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST,
+                  "function_call call_id must be non-blank string");
+            }
+            callId = item.get("call_id").textValue();
+          }
+          if (item.has("id")) {
+            if (!item.get("id").isTextual() || item.get("id").textValue().isBlank()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_REQUEST, "function_call id must be non-blank string");
+            }
+            if (callId == null) {
+              callId = item.get("id").textValue();
+            }
+          }
           if (callId == null || callId.isBlank()) {
-            callId = item.path("id").asText(null);
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "function_call missing call_id or id");
           }
-          if (callId != null) {
-            replayToolCallIds.add(callId);
+          if (!item.has("name")
+              || !item.get("name").isTextual()
+              || item.get("name").textValue().isBlank()) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "function_call missing non-blank string name");
           }
+          String name = item.get("name").textValue();
+          if (!item.has("arguments") || !item.get("arguments").isTextual()) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "function_call missing string arguments");
+          }
+          String args = item.get("arguments").textValue();
+          replayToolCalls.add(new ProviderToolCall(callId, name, args));
         }
-        default -> {}
+        default -> throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "unsupported replay item type: " + type);
       }
     }
 
     StringBuilder durableText = new StringBuilder();
     StringBuilder durableThinking = new StringBuilder();
-    List<String> durableToolCallIds = new ArrayList<>();
+    List<ProviderToolCall> durableToolCalls = new ArrayList<>();
 
     for (ProviderContentBlock block : durableContents) {
       if (block instanceof ProviderTextBlock tb) {
@@ -506,7 +648,12 @@ final class OpenAiResponsesRequestEncoder {
       } else if (block instanceof ProviderThinkingBlock thb) {
         durableThinking.append(thb.thinking());
       } else if (block instanceof ProviderToolCallBlock tcb) {
-        durableToolCallIds.add(tcb.toolCall().id());
+        durableToolCalls.add(tcb.toolCall());
+      } else {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "durable content block not supported in assistant message replay: "
+                + block.getClass().getSimpleName());
       }
     }
 
@@ -515,10 +662,44 @@ final class OpenAiResponsesRequestEncoder {
           ProviderErrorKind.INVALID_REQUEST,
           "replay text content mismatch with durable message content");
     }
-    if (!replayToolCallIds.equals(durableToolCallIds)) {
+    if (!durableThinking.isEmpty()) {
+      if (!replayThinking.toString().equals(durableThinking.toString())) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "replay thinking content mismatch with durable message thinking");
+      }
+    } else {
+      if (!replayThinking.isEmpty()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "replay thinking content mismatch with durable message thinking");
+      }
+    }
+    if (replayToolCalls.size() != durableToolCalls.size()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
-          "replay tool call IDs mismatch with durable tool calls");
+          "replay tool calls count mismatch with durable tool calls");
+    }
+    for (int i = 0; i < replayToolCalls.size(); i++) {
+      ProviderToolCall rc = replayToolCalls.get(i);
+      ProviderToolCall dc = durableToolCalls.get(i);
+      if (!rc.id().equals(dc.id()) || !rc.name().equals(dc.name())) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "replay tool call mismatch with durable tool call at index " + i);
+      }
+    }
+  }
+
+  private static void validateAllowedFields(
+      JsonNode node, Set<String> allowedFields, String context) {
+    Iterator<String> fields = node.fieldNames();
+    while (fields.hasNext()) {
+      String field = fields.next();
+      if (!allowedFields.contains(field)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "disallowed field '" + field + "' in " + context);
+      }
     }
   }
 
