@@ -1,8 +1,5 @@
 package fun.fengwk.kkstudio.harness.daemon.skill;
 
-import dev.langchain4j.skills.FileSystemSkill;
-import dev.langchain4j.skills.FileSystemSkillLoader;
-
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 
 import java.io.IOException;
@@ -18,7 +15,7 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
- * 从 CLI 配置的 skill 目录发现并登记本地 Skills（使用 LangChain4j {@link FileSystemSkillLoader}）。
+ * 从 CLI 配置的 skill 目录发现并登记本地 Skills。
  *
  * <p>配置目录本身含 {@code SKILL.md} 时登记为一个 skill；否则发现直接子目录中的 skill。同名 skill 在启动时拒绝。 capabilities 仅暴露
  * name/description；{@link #loadBody(String)} 只返回 skill 指令正文（front matter 之外的 instruction content）。
@@ -92,34 +89,6 @@ public final class DaemonSkillRegistry {
   }
 
   private static DaemonSkill loadSkill(Path skillDir, String source) {
-    FileSystemSkill skill;
-    try {
-      skill = FileSystemSkillLoader.loadSkill(skillDir);
-    } catch (RuntimeException error) {
-      String cause = error.getMessage();
-      throw new IllegalArgumentException(
-          "cannot load SKILL.md from "
-              + skillDir
-              + " ("
-              + source
-              + ")"
-              + (cause == null ? "" : ": " + cause),
-          error);
-    }
-    String name = skill.name();
-    String description = skill.description();
-    if (name == null || name.isBlank()) {
-      throw new IllegalArgumentException(
-          "invalid SKILL.md metadata at " + skillDir + " (" + source + "): missing non-blank name");
-    }
-    if (description == null || description.isBlank()) {
-      throw new IllegalArgumentException(
-          "invalid SKILL.md metadata at "
-              + skillDir
-              + " ("
-              + source
-              + "): missing non-blank description");
-    }
-    return new DaemonSkill(name, description, skill.content());
+    return SkillFrontMatterParser.parse(skillDir, source);
   }
 }

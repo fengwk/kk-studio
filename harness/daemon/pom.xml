@@ -27,10 +27,6 @@
             <artifactId>org.eclipse.jgit</artifactId>
         </dependency>
         <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-skills</artifactId>
-        </dependency>
-        <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-environment</artifactId>
         </dependency>
