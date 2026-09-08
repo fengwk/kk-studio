@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -19,7 +20,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -223,6 +226,12 @@ class PlatformArchitectureTest {
         "cannot locate platform/pom.xml from " + mainJava + " or " + cwd);
   }
 
+  private static final Set<String> REQUIRED_LANGCHAIN_DECLARATIONS =
+      Set.of(
+          "pom.xml|dependencyManagement|dev.langchain4j|langchain4j-bom",
+          "platform/pom.xml|dependencies|dev.langchain4j|langchain4j-core",
+          "platform/pom.xml|dependencies|dev.langchain4j|langchain4j-mcp");
+
   /**
    * 全仓 POM 架构守卫：LangChain4j 依赖禁止重新进入 reactor，除 platform 的 MCP 适配器（langchain4j-core、langchain4j-mcp）
    * 与根 POM 的版本管理（langchain4j-bom）外，任何其他 artifact 或模块声明都会被拦截。
@@ -243,17 +252,80 @@ class PlatformArchitectureTest {
             .filter(PlatformArchitectureTest::isAllowedLangChainDependency)
             .toList();
 
+    Set<String> allowedIdentitySet = new LinkedHashSet<>();
+    List<String> duplicateDeclarations = new ArrayList<>();
+    for (DeclaredDependency dep : allowedFound) {
+      if (!allowedIdentitySet.add(dep.identity())) {
+        duplicateDeclarations.add(
+            String.format(
+                "duplicate allowed LangChain4j declaration in %s (%s): %s:%s",
+                dep.modulePath(), dep.context(), dep.groupId(), dep.artifactId()));
+      }
+    }
+
+    Set<String> missing = new LinkedHashSet<>(REQUIRED_LANGCHAIN_DECLARATIONS);
+    missing.removeAll(allowedIdentitySet);
+
+    assertTrue(
+        duplicateDeclarations.isEmpty(),
+        () ->
+            "Duplicate LangChain4j declarations detected across reactor POMs:\n"
+                + String.join("\n", duplicateDeclarations));
     assertEquals(
-        3,
+        REQUIRED_LANGCHAIN_DECLARATIONS,
+        allowedIdentitySet,
+        () ->
+            "Expected exact allowed LangChain4j declaration set mismatch. Missing: "
+                + missing
+                + ", actual found: "
+                + allowedIdentitySet);
+    assertEquals(
+        allowedIdentitySet.size(),
         allowedFound.size(),
         () ->
-            "Expected exactly 3 allowed LangChain4j declarations across reactor, but found: "
-                + allowedFound);
+            "Found "
+                + allowedFound.size()
+                + " allowed declarations but unique identity set has size "
+                + allowedIdentitySet.size());
     assertTrue(
         violations.isEmpty(),
         () ->
             "Disallowed LangChain4j dependencies detected across reactor POMs:\n"
                 + String.join("\n", violations));
+  }
+
+  /** 验证守卫逻辑能够精确识别重复声明与缺失声明，并提供明确诊断。 */
+  @Test
+  void langChainDependencyGuardDetectsDuplicatesAndMissingDeclarations() {
+    List<DeclaredDependency> duplicated =
+        List.of(
+            new DeclaredDependency(
+                "platform/pom.xml", "dependencies", "dev.langchain4j", "langchain4j-mcp", "1.19.0"),
+            new DeclaredDependency(
+                "platform/pom.xml", "dependencies", "dev.langchain4j", "langchain4j-mcp", "1.19.0"),
+            new DeclaredDependency(
+                "platform/pom.xml",
+                "dependencies",
+                "dev.langchain4j",
+                "langchain4j-mcp",
+                "1.19.0"));
+
+    assertEquals(3, duplicated.size());
+    Set<String> identitySet = new LinkedHashSet<>();
+    List<String> duplicates = new ArrayList<>();
+    for (DeclaredDependency dep : duplicated) {
+      if (!identitySet.add(dep.identity())) {
+        duplicates.add(dep.identity());
+      }
+    }
+    assertEquals(2, duplicates.size());
+    assertEquals(1, identitySet.size());
+
+    Set<String> missing = new LinkedHashSet<>(REQUIRED_LANGCHAIN_DECLARATIONS);
+    missing.removeAll(identitySet);
+    assertEquals(2, missing.size());
+    assertTrue(missing.contains("pom.xml|dependencyManagement|dev.langchain4j|langchain4j-bom"));
+    assertTrue(missing.contains("platform/pom.xml|dependencies|dev.langchain4j|langchain4j-core"));
   }
 
   /** 验证守卫逻辑对非法坐标、非法模块与非法上下文具备明确的违规拦截与诊断能力。 */
@@ -300,6 +372,132 @@ class PlatformArchitectureTest {
     assertTrue(violations.get(2).contains("io.github.langchain4j"));
     assertTrue(violations.get(3).contains("web/pom.xml"));
     assertTrue(violations.get(3).contains("dependencyManagement"));
+  }
+
+  /** 验证 profile、pluginManagement 等隐蔽上下文中的 LangChain 依赖均会被精确拦截。 */
+  @Test
+  void langChainDependencyGuardRejectsProfileAndPluginManagementDependencies() {
+    List<DeclaredDependency> simulated =
+        List.of(
+            new DeclaredDependency(
+                "platform/pom.xml",
+                "profile[ci]/dependencies",
+                "dev.langchain4j",
+                "langchain4j-mcp",
+                "1.19.0"),
+            new DeclaredDependency(
+                "pom.xml",
+                "profile[release]/dependencyManagement",
+                "dev.langchain4j",
+                "langchain4j-bom",
+                "1.19.0"),
+            new DeclaredDependency(
+                "platform/pom.xml",
+                "buildPluginManagement",
+                "dev.langchain4j",
+                "langchain4j-core",
+                "1.19.0"),
+            new DeclaredDependency(
+                "share/pom.xml",
+                "profile[coverage]/buildPluginManagement",
+                "dev.langchain4j",
+                "langchain4j-core",
+                "1.19.0"));
+
+    List<String> violations = findDisallowedLangChainDependencies(simulated);
+    assertEquals(4, violations.size());
+    assertTrue(violations.get(0).contains("profile[ci]/dependencies"));
+    assertTrue(violations.get(1).contains("profile[release]/dependencyManagement"));
+    assertTrue(violations.get(2).contains("buildPluginManagement"));
+    assertTrue(violations.get(3).contains("profile[coverage]/buildPluginManagement"));
+  }
+
+  /** 验证 DOM 提取能完整识别 profiles、pluginManagement 中的 dependency，且不会将 exclusion 误识别为 dependency。 */
+  @Test
+  void collectDeclaredDependenciesCapturesProfilesAndPluginManagementWithoutConfusingExclusions(
+      @TempDir Path tempDir) throws IOException {
+    Path dummyPom = tempDir.resolve("pom.xml");
+    String xml =
+        """
+        <project>
+          <modelVersion>4.0.0</modelVersion>
+          <groupId>fun.fengwk.test</groupId>
+          <artifactId>dummy</artifactId>
+          <version>1.0.0</version>
+          <dependencies>
+            <dependency>
+              <groupId>com.google.guava</groupId>
+              <artifactId>guava</artifactId>
+              <version>33.0.0-jre</version>
+              <exclusions>
+                <exclusion>
+                  <groupId>dev.langchain4j</groupId>
+                  <artifactId>langchain4j-core</artifactId>
+                </exclusion>
+              </exclusions>
+            </dependency>
+          </dependencies>
+          <build>
+            <pluginManagement>
+              <plugins>
+                <plugin>
+                  <groupId>org.apache.maven.plugins</groupId>
+                  <artifactId>maven-compiler-plugin</artifactId>
+                  <dependencies>
+                    <dependency>
+                      <groupId>dev.langchain4j</groupId>
+                      <artifactId>langchain4j-core</artifactId>
+                      <version>1.19.0</version>
+                    </dependency>
+                  </dependencies>
+                </plugin>
+              </plugins>
+            </pluginManagement>
+          </build>
+          <profiles>
+            <profile>
+              <id>test-profile</id>
+              <dependencies>
+                <dependency>
+                  <groupId>dev.langchain4j</groupId>
+                  <artifactId>langchain4j-mcp</artifactId>
+                  <version>1.19.0</version>
+                </dependency>
+              </dependencies>
+            </profile>
+          </profiles>
+        </project>
+        """;
+    Files.writeString(dummyPom, xml, StandardCharsets.UTF_8);
+
+    List<DeclaredDependency> dependencies = collectDeclaredDependencies(dummyPom, tempDir);
+    assertEquals(3, dependencies.size());
+
+    // 1. 普通依赖
+    assertEquals("com.google.guava:guava", dependencies.get(0).coordinate());
+    assertEquals("dependencies", dependencies.get(0).context());
+
+    // 2. buildPluginManagement 依赖
+    assertEquals("dev.langchain4j:langchain4j-core", dependencies.get(1).coordinate());
+    assertEquals("buildPluginManagement", dependencies.get(1).context());
+
+    // 3. profile 依赖
+    assertEquals("dev.langchain4j:langchain4j-mcp", dependencies.get(2).coordinate());
+    assertEquals("profile[test-profile]/dependencies", dependencies.get(2).context());
+
+    // 确保 exclusion 未被误识别为 dependency
+    assertFalse(
+        dependencies.stream()
+            .anyMatch(
+                d ->
+                    d.coordinate().equals("dev.langchain4j:langchain4j-core")
+                        && "dependencies".equals(d.context())));
+
+    // 违规检测：pluginManagement 与 profile 中的 langchain 依赖均被驳回
+    List<String> violations = findDisallowedLangChainDependencies(dependencies);
+    assertEquals(2, violations.size());
+    assertTrue(violations.stream().anyMatch(v -> v.contains("buildPluginManagement")));
+    assertTrue(violations.stream().anyMatch(v -> v.contains("profile[test-profile]/dependencies")));
   }
 
   /**
@@ -356,6 +554,10 @@ class PlatformArchitectureTest {
       String modulePath, String context, String groupId, String artifactId, String version) {
     String coordinate() {
       return groupId + ":" + artifactId;
+    }
+
+    String identity() {
+      return modulePath + "|" + context + "|" + groupId + "|" + artifactId;
     }
   }
 
@@ -495,33 +697,17 @@ class PlatformArchitectureTest {
     String relativePom = reactorRoot.relativize(pomPath).toString().replace('\\', '/');
     try (InputStream is = Files.newInputStream(pomPath)) {
       Document doc = parseXml(is);
-      Element project = doc.getDocumentElement();
-
-      // 1. <dependencies><dependency>
-      for (Element deps : childElements(project, "dependencies")) {
-        for (Element dep : childElements(deps, "dependency")) {
-          addDependencyIfPresent(result, relativePom, "dependencies", dep);
-        }
-      }
-
-      // 2. <dependencyManagement><dependencies><dependency>
-      for (Element dm : childElements(project, "dependencyManagement")) {
-        for (Element deps : childElements(dm, "dependencies")) {
-          for (Element dep : childElements(deps, "dependency")) {
-            addDependencyIfPresent(result, relativePom, "dependencyManagement", dep);
-          }
-        }
-      }
-
-      // 3. <build><plugins><plugin><dependencies><dependency>
-      for (Element build : childElements(project, "build")) {
-        for (Element plugins : childElements(build, "plugins")) {
-          for (Element plugin : childElements(plugins, "plugin")) {
-            for (Element deps : childElements(plugin, "dependencies")) {
-              for (Element dep : childElements(deps, "dependency")) {
-                addDependencyIfPresent(result, relativePom, "pluginDependencies", dep);
-              }
-            }
+      NodeList dependencyNodes = doc.getElementsByTagName("dependency");
+      for (int i = 0; i < dependencyNodes.getLength(); i++) {
+        Node node = dependencyNodes.item(i);
+        if (node.getNodeType() == Node.ELEMENT_NODE) {
+          Element dep = (Element) node;
+          String context = classifyContext(dep);
+          String groupId = childText(dep, "groupId");
+          String artifactId = childText(dep, "artifactId");
+          String version = childText(dep, "version");
+          if (groupId != null && artifactId != null) {
+            result.add(new DeclaredDependency(relativePom, context, groupId, artifactId, version));
           }
         }
       }
@@ -531,25 +717,68 @@ class PlatformArchitectureTest {
     return result;
   }
 
-  private static void addDependencyIfPresent(
-      List<DeclaredDependency> result, String modulePath, String context, Element depElement) {
-    String groupId = childText(depElement, "groupId");
-    String artifactId = childText(depElement, "artifactId");
-    String version = childText(depElement, "version");
-    if (groupId != null && artifactId != null) {
-      result.add(new DeclaredDependency(modulePath, context, groupId, artifactId, version));
+  private static String classifyContext(Element depElement) {
+    Node current = depElement.getParentNode();
+    List<String> tags = new ArrayList<>();
+    String profileId = null;
+    while (current != null && current.getNodeType() == Node.ELEMENT_NODE) {
+      Element el = (Element) current;
+      String tag = el.getTagName();
+      if ("profile".equals(tag)) {
+        String id = childText(el, "id");
+        profileId = (id != null && !id.isBlank()) ? id : "anonymous";
+      }
+      tags.add(tag);
+      current = current.getParentNode();
     }
+
+    boolean inProfile = tags.contains("profile");
+    boolean inDepManagement = tags.contains("dependencyManagement");
+    boolean inPluginManagement = tags.contains("pluginManagement");
+    boolean inPlugin = tags.contains("plugin");
+
+    String baseContext;
+    if (inPluginManagement) {
+      baseContext = "buildPluginManagement";
+    } else if (inPlugin) {
+      baseContext = "buildPlugins";
+    } else if (inDepManagement) {
+      baseContext = "dependencyManagement";
+    } else if (tags.contains("dependencies")) {
+      baseContext = "dependencies";
+    } else {
+      baseContext = "other";
+    }
+
+    if (inProfile) {
+      return "profile[" + profileId + "]/" + baseContext;
+    }
+    return baseContext;
   }
 
   private static Document parseXml(InputStream is) throws Exception {
     DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
     factory.setNamespaceAware(false);
     factory.setValidating(false);
-    factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-    factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
-    factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+    setFeatureIfSupported(factory, "http://apache.org/xml/features/disallow-doctype-decl", true);
+    setFeatureIfSupported(
+        factory, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+    setFeatureIfSupported(factory, "http://xml.org/sax/features/external-general-entities", false);
+    setFeatureIfSupported(
+        factory, "http://xml.org/sax/features/external-parameter-entities", false);
+    factory.setXIncludeAware(false);
+    factory.setExpandEntityReferences(false);
     DocumentBuilder builder = factory.newDocumentBuilder();
     return builder.parse(is);
+  }
+
+  private static void setFeatureIfSupported(
+      DocumentBuilderFactory factory, String feature, boolean value) {
+    try {
+      factory.setFeature(feature, value);
+    } catch (Exception ignored) {
+      // 当前 XML 解析器不支持该特性时安全忽略
+    }
   }
 
   private static List<Element> childElements(Element parent, String tagName) {
