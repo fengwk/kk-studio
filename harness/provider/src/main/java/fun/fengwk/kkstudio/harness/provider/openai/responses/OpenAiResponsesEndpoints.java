@@ -13,9 +13,10 @@ final class OpenAiResponsesEndpoints {
    *
    * <ul>
    *   <li>支持 http / https 协议；
-   *   <li>必须包含合法 host；
+   *   <li>必须包含合法 host 与 authority；
    *   <li>严格禁止 user-info、query、fragment；
-   *   <li>去除 baseUrl 尾部多余斜杠后安全追加 /responses（兼容已含 /v1 或其他前缀路径）。
+   *   <li>保留 raw authority、IPv6、端口和已转义 base path，规范去掉尾斜杠并追加 /responses；
+   *   <li>异常不得回显 endpoint 或任何凭证敏感信息。
    * </ul>
    */
   static URI resolveResponsesUri(String endpoint) {
@@ -32,16 +33,20 @@ final class OpenAiResponsesEndpoints {
     if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
       throw new IllegalArgumentException("endpoint scheme must be http or https");
     }
-    if (uri.getUserInfo() != null) {
+    if (uri.getUserInfo() != null || uri.getRawUserInfo() != null) {
       throw new IllegalArgumentException("endpoint must not contain user-info");
     }
-    if (uri.getRawQuery() != null) {
+    if (uri.getQuery() != null || uri.getRawQuery() != null) {
       throw new IllegalArgumentException("endpoint must not contain query");
     }
-    if (uri.getRawFragment() != null) {
+    if (uri.getFragment() != null || uri.getRawFragment() != null) {
       throw new IllegalArgumentException("endpoint must not contain fragment");
     }
-    if (uri.getHost() == null || uri.getHost().isBlank()) {
+    String rawAuthority = uri.getRawAuthority();
+    if (rawAuthority == null
+        || rawAuthority.isBlank()
+        || uri.getHost() == null
+        || uri.getHost().isBlank()) {
       throw new IllegalArgumentException("endpoint must contain a valid host");
     }
     String rawPath = uri.getRawPath();
@@ -52,7 +57,10 @@ final class OpenAiResponsesEndpoints {
       rawPath = rawPath.substring(0, rawPath.length() - 1);
     }
     String responsesPath = rawPath + "/responses";
-    String hostPort = uri.getPort() == -1 ? uri.getHost() : (uri.getHost() + ":" + uri.getPort());
-    return URI.create(scheme.toLowerCase(Locale.ROOT) + "://" + hostPort + responsesPath);
+    try {
+      return URI.create(scheme.toLowerCase(Locale.ROOT) + "://" + rawAuthority + responsesPath);
+    } catch (IllegalArgumentException exception) {
+      throw new IllegalArgumentException("endpoint is not a valid URI");
+    }
   }
 }
