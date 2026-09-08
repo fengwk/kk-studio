@@ -1,0 +1,58 @@
+{
+  "chunks": [
+    {
+      "id": "chatcmpl-thinking-1",
+      "object": "chat.completion.chunk",
+      "model": "deepseek-reasoner",
+      "choices": [
+        {
+          "index": 0,
+          "delta": {
+            "role": "assistant",
+            "reasoning_content": "Let me think carefully."
+          },
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-thinking-1",
+      "object": "chat.completion.chunk",
+      "model": "deepseek-reasoner",
+      "choices": [
+        {
+          "index": 0,
+          "delta": {
+            "reasoning_content": " The capital is Berlin."
+          },
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-thinking-1",
+      "object": "chat.completion.chunk",
+      "model": "deepseek-reasoner",
+      "choices": [
+        {
+          "index": 0,
+          "delta": {
+            "content": "Berlin is the capital of Germany."
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 15,
+        "completion_tokens": 20,
+        "total_tokens": 35,
+        "prompt_tokens_details": {
+          "cached_tokens": 5
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 12
+        }
+      }
+    }
+  ]
+}
