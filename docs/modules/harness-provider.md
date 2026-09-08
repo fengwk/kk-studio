@@ -19,9 +19,7 @@
 - Anthropic Prompt Cache 支持 SYSTEM、TOOLS、CONVERSATION 三类显式断点；SHORT 使用默认短 TTL，LONG
   映射 `ttl: "1h"`，canonical prefix hash 递归排除 `cache_control`。
 - 真实对齐 LangChain4j 1.20.0（Git 提交 `3a2f4dca6fb447e4d191624b3d588952ed9f4ce9`）shared HTTP 与 JDK 范围内的 15 个源文件、共 115 个 active 测试方法：按 invocation 展开共 141 个测试项，49 applicable invocations passed / 92 explicit OOS（含同步非流式 HTTP、Multipart 构建器、Reactive Streams TCK 38 项、BlockHound 非阻塞检测、PUBLISHER 异步流分支以及语义不兼容的静默异常吞没用例），所有 OOS 项明确标记为 `NOT_EXECUTED_OUT_OF_SCOPE` 并详述 capability mismatch，以机器可读清单 `upstream-test-manifest.json` 固化对齐口径。
-- Anthropic 来源清单枚举 LangChain4j `langchain4j-anthropic` 的 40 个测试源文件和继承基座，按参数维度展开
-  577 个 invocation；状态、目标测试和能力不匹配原因记录在 Anthropic 专属
-  `upstream-test-manifest.json`。
+- 真实对齐 LangChain4j 1.20.0（Git 提交 `3a2f4dca6fb447e4d191624b3d588952ed9f4ce9`）`langchain4j-anthropic` 模块全部 40 个测试源文件和追踪继承/组合的核心基座方法（共 423 个方法），按参数维度展开共 577 个 invocation：实现 155 applicable passed / 422 explicit OOS / 0 pending / 121 credential-bound real interop not executed。所有 PORTED 目标测试均通过反射机制验证本地方法存在且标注 `@Test` 或 `@ParameterizedTest`，坚决拒绝虚假对等；全部 422 项 OUT_OF_SCOPE 明确标记为 `NOT_EXECUTED_OUT_OF_SCOPE` 并详述架构不匹配原因；121 项依赖真实凭据的测试独立维护 `realInteropStatus = NOT_EXECUTED_REQUIRES_CREDENTIAL`，以机器可读清单 `upstream-test-manifest.json` 固化全量可审计口径。
 
 ### 协作边界
 
