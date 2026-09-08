@@ -70,6 +70,7 @@ final class AnthropicRequestEncoder {
     Objects.requireNonNull(descriptor, "descriptor");
 
     validatePenalties(request.variant());
+    validateCacheControl(request.cacheControl());
 
     ObjectNode root = NODES.objectNode();
     root.put("model", request.model().modelName());
@@ -173,6 +174,17 @@ final class AnthropicRequestEncoder {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "Anthropic does not support frequencyPenalty or presencePenalty");
+    }
+  }
+
+  private static void validateCacheControl(ProviderCacheControl cacheControl) {
+    if (cacheControl.retention() == PromptCacheRetention.NONE) {
+      return;
+    }
+    if (cacheControl.breakpoints().isEmpty()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "Anthropic prompt cache control requires at least one breakpoint (SYSTEM, TOOLS, CONVERSATION)");
     }
   }
 

@@ -11,9 +11,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
+import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -44,15 +48,20 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -62,6 +71,37 @@ import java.util.stream.Collectors;
 class ProviderAdapterContractTest {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+  private ExecutorService anthropicWorker;
+  private ScheduledExecutorService anthropicScheduler;
+  private HttpClient anthropicHttpClient;
+  private ProviderAdapter anthropicAdapter;
+
+  @BeforeEach
+  void setUpAnthropicTransport() {
+    anthropicWorker =
+        Executors.newThreadPerTaskExecutor(
+            Thread.ofVirtual().name("anthropic-contract-worker-", 0L).factory());
+    anthropicScheduler =
+        Executors.newSingleThreadScheduledExecutor(
+            Thread.ofPlatform().name("anthropic-contract-watchdog").daemon(true).factory());
+    anthropicHttpClient =
+        HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .executor(anthropicWorker)
+            .build();
+    anthropicAdapter =
+        new AnthropicProviderAdapter(
+            new JdkHttpSseTransport(anthropicHttpClient, anthropicWorker, anthropicScheduler),
+            "test-api-key");
+  }
+
+  @AfterEach
+  void closeAnthropicTransport() {
+    anthropicHttpClient.close();
+    anthropicScheduler.shutdownNow();
+    anthropicWorker.close();
+  }
 
   @Test
   @Timeout(30)
@@ -84,7 +124,7 @@ class ProviderAdapterContractTest {
         "{\"error\":{\"message\":\"contract probe\",\"type\":\"invalid_request_error\"}}");
     assertContract(
         ProviderType.ANTHROPIC,
-        new AnthropicProviderAdapter("test-api-key"),
+        anthropicAdapter,
         "/v1",
         "/v1/messages",
         "x-api-key",
@@ -124,7 +164,7 @@ class ProviderAdapterContractTest {
     JsonNode anthropic =
         reasoningBody(
             ProviderType.ANTHROPIC,
-            new AnthropicProviderAdapter("test-api-key"),
+            anthropicAdapter,
             "/v1",
             "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"probe\"}}");
     assertEquals("adaptive", anthropic.path("thinking").path("type").asText());
@@ -333,10 +373,7 @@ class ProviderAdapterContractTest {
     }
   }
 
-  /**
-   * Anthropic BREAKPOINTS 仅在 SHORT 形态下接受，必须显式声明 SYSTEM/TOOLS 中至少一个；NONE 两项均不启用，body 中不出现 {@code
-   * cache_control}；LONG/隐式空 control 抛 INVALID_REQUEST。
-   */
+  /** Anthropic 显式断点覆盖 SYSTEM/TOOLS/CONVERSATION；SHORT 使用默认 5m 标记，LONG 映射 1h，空断点控制在 I/O 前拒绝。 */
   @Test
   @Timeout(30)
   void anthropicMapsBreakpointsAndRejectsInvalidControls() throws Exception {
@@ -345,14 +382,14 @@ class ProviderAdapterContractTest {
     try (ProbeServer server = new ProbeServer(probe)) {
       server.start();
       ModelProvider provider =
-          new AnthropicProviderAdapter("test-api-key")
-              .create(
-                  new ProviderDescriptor(
-                      "provider",
-                      ProviderType.ANTHROPIC,
-                      server.endpoint("/v1"),
-                      timeoutPolicy(Duration.ofSeconds(5))));
-      assertAnthropicBreakpointsFor(provider, ProviderCacheControl.none(), false, false, server);
+          anthropicAdapter.create(
+              new ProviderDescriptor(
+                  "provider",
+                  ProviderType.ANTHROPIC,
+                  server.endpoint("/v1"),
+                  timeoutPolicy(Duration.ofSeconds(5))));
+      assertAnthropicBreakpointsFor(
+          provider, ProviderCacheControl.none(), false, false, false, null, server);
       assertAnthropicBreakpointsFor(
           provider,
           ProviderCacheControl.breakpoints(
@@ -361,6 +398,8 @@ class ProviderAdapterContractTest {
               EnumSet.of(PromptCacheBreakpoint.SYSTEM)),
           true,
           false,
+          false,
+          null,
           server);
       assertAnthropicBreakpointsFor(
           provider,
@@ -370,28 +409,35 @@ class ProviderAdapterContractTest {
               EnumSet.of(PromptCacheBreakpoint.TOOLS)),
           false,
           true,
+          false,
+          null,
           server);
       assertAnthropicBreakpointsFor(
           provider,
           ProviderCacheControl.breakpoints(
               PromptCacheRetention.SHORT,
-              "model-anthropic",
-              EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
+              "model-anthropic-conversation",
+              EnumSet.of(PromptCacheBreakpoint.CONVERSATION)),
+          false,
+          false,
           true,
-          true,
+          null,
           server);
-      assertControlRejected(
+      assertAnthropicBreakpointsFor(
           provider,
           ProviderCacheControl.breakpoints(
               PromptCacheRetention.LONG,
               "model-anthropic",
-              EnumSet.of(PromptCacheBreakpoint.SYSTEM)),
-          "Anthropic prompt cache retention",
+              EnumSet.allOf(PromptCacheBreakpoint.class)),
+          true,
+          true,
+          true,
+          "1h",
           server);
       assertControlRejected(
           provider,
           ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "model-anthropic"),
-          "Anthropic BREAKPOINTS requires at least SYSTEM or TOOLS",
+          "requires at least one breakpoint",
           server);
     }
   }
@@ -520,6 +566,9 @@ class ProviderAdapterContractTest {
       assertTrue(recorded.body().contains("text"));
       if (type == ProviderType.ANTHROPIC) {
         assertTrue(recorded.headers().containsKey("anthropic-version"));
+        assertEquals("test-api-key", recorded.headers().get("x-api-key"));
+        assertEquals("Bearer test-api-key", recorded.headers().get("authorization"));
+        assertFalse(recorded.headers().containsKey("anthropic-beta"));
       }
     }
   }
@@ -587,6 +636,8 @@ class ProviderAdapterContractTest {
       ProviderCacheControl control,
       boolean systemMarked,
       boolean toolsMarked,
+      boolean conversationMarked,
+      String expectedTtl,
       ProbeServer server)
       throws InterruptedException {
     AtomicReference<ProviderException> error = new AtomicReference<>();
@@ -614,6 +665,23 @@ class ProviderAdapterContractTest {
     assertEquals(
         systemMarked, hasField(body.path("system"), "cache_control"), () -> recorded.body());
     assertEquals(toolsMarked, hasField(body.path("tools"), "cache_control"), () -> recorded.body());
+    assertEquals(
+        conversationMarked,
+        hasField(body.path("messages"), "cache_control"),
+        () -> recorded.body());
+    List<JsonNode> cacheControls = cacheControls(body);
+    assertEquals(
+        (systemMarked ? 1 : 0) + (toolsMarked ? 1 : 0) + (conversationMarked ? 1 : 0),
+        cacheControls.size(),
+        () -> recorded.body());
+    for (JsonNode cacheControl : cacheControls) {
+      assertEquals("ephemeral", cacheControl.path("type").asText(), () -> recorded.body());
+      if (expectedTtl == null) {
+        assertFalse(cacheControl.has("ttl"), () -> recorded.body());
+      } else {
+        assertEquals(expectedTtl, cacheControl.path("ttl").asText(), () -> recorded.body());
+      }
+    }
     assertFalse(hasField(body, "prompt_cache_retention"));
   }
 
@@ -753,6 +821,28 @@ class ProviderAdapterContractTest {
       }
     }
     return false;
+  }
+
+  private static List<JsonNode> cacheControls(JsonNode node) {
+    List<JsonNode> result = new ArrayList<>();
+    collectCacheControls(node, result);
+    return result;
+  }
+
+  private static void collectCacheControls(JsonNode node, List<JsonNode> result) {
+    if (node.isObject()) {
+      JsonNode cacheControl = node.get("cache_control");
+      if (cacheControl != null) {
+        result.add(cacheControl);
+      }
+      for (Map.Entry<String, JsonNode> field : node.properties()) {
+        collectCacheControls(field.getValue(), result);
+      }
+    } else if (node.isArray()) {
+      for (JsonNode element : node) {
+        collectCacheControls(element, result);
+      }
+    }
   }
 
   private static ProviderRequest request(ProviderCacheControl control) {

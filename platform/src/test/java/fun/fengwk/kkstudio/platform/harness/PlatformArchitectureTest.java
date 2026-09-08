@@ -92,6 +92,9 @@ class PlatformArchitectureTest {
     assertTrue(
         pomText.contains("<artifactId>kk-studio-harness-common</artifactId>"),
         "platform/pom.xml must declare kk-studio-harness-common");
+    assertTrue(
+        pomText.contains("<artifactId>kk-studio-harness-provider</artifactId>"),
+        "platform/pom.xml must declare kk-studio-harness-provider");
     assertCanvasInfraIsTestScoped(pomText);
 
     assertTrue(

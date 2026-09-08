@@ -7,6 +7,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
+import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
@@ -16,18 +18,19 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
-import fun.fengwk.kkstudio.platform.harness.model.provider.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.platform.harness.model.provider.GoogleProviderAdapter;
 import fun.fengwk.kkstudio.platform.harness.model.provider.OpenAiProviderAdapter;
 import fun.fengwk.kkstudio.platform.harness.model.provider.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
+import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * 生产 {@code ModelExecution} 适配器的 Spring 装配。
@@ -54,6 +57,35 @@ public class ModelExecutionConfiguration {
   public ExecutorService modelExecutionExecutor() {
     return Executors.newThreadPerTaskExecutor(
         Thread.ofVirtual().name("model-provider-", 0L).factory());
+  }
+
+  /** 生产环境大模型 HTTP 调用共享的 JDK 21 HttpClient，遵循严格的重定向限制与受管 worker 执行器。 */
+  @Bean(name = "modelExecutionHttpClient", destroyMethod = "close")
+  @ConditionalOnMissingBean(name = "modelExecutionHttpClient")
+  public HttpClient modelExecutionHttpClient(
+      @Qualifier("modelExecutionExecutor") ExecutorService modelExecutionExecutor) {
+    return HttpClient.newBuilder()
+        .followRedirects(HttpClient.Redirect.NEVER)
+        .executor(modelExecutionExecutor)
+        .build();
+  }
+
+  /** 生产环境流式传输巡检专用的 daemon 调度器，随应用上下文关闭。 */
+  @Bean(name = "modelExecutionWatchdogScheduler", destroyMethod = "shutdownNow")
+  @ConditionalOnMissingBean(name = "modelExecutionWatchdogScheduler")
+  public ScheduledExecutorService modelExecutionWatchdogScheduler() {
+    return Executors.newSingleThreadScheduledExecutor(
+        Thread.ofPlatform().name("model-watchdog-", 0L).daemon(true).factory());
+  }
+
+  /** 基于 JDK 21 HttpClient、受管虚拟线程 worker 与 Watchdog 调度器的长生命周期受管 SSE 传输器。 */
+  @Bean(name = "modelExecutionTransport")
+  @ConditionalOnMissingBean(name = "modelExecutionTransport")
+  public JdkHttpSseTransport modelExecutionTransport(
+      @Qualifier("modelExecutionHttpClient") HttpClient httpClient,
+      @Qualifier("modelExecutionExecutor") ExecutorService modelExecutionExecutor,
+      @Qualifier("modelExecutionWatchdogScheduler") ScheduledExecutorService scheduler) {
+    return new JdkHttpSseTransport(httpClient, modelExecutionExecutor, scheduler);
   }
 
   @Bean
@@ -101,13 +133,17 @@ public class ModelExecutionConfiguration {
 
   @Bean(name = "anthropicProviderFactory")
   @ConditionalOnMissingBean(name = "anthropicProviderFactory")
-  public ProviderFactory anthropicProviderFactory() {
+  public ProviderFactory anthropicProviderFactory(
+      @Qualifier("modelExecutionTransport") JdkHttpSseTransport transport) {
     return ProviderFactory.of(
         ProviderType.ANTHROPIC,
         PromptCacheCapability.breakpoints(
-            Set.of(PromptCacheRetention.SHORT),
-            EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
-        (credential, configJson) -> new AnthropicProviderAdapter(credential));
+            Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
+            EnumSet.of(
+                PromptCacheBreakpoint.SYSTEM,
+                PromptCacheBreakpoint.TOOLS,
+                PromptCacheBreakpoint.CONVERSATION)),
+        (credential, configJson) -> new AnthropicProviderAdapter(transport, credential));
   }
 
   @Bean(name = "googleProviderFactory")

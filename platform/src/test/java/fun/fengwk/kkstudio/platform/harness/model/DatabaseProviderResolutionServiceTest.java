@@ -547,6 +547,39 @@ class DatabaseProviderResolutionServiceTest {
         "leading SYSTEM 与 tools 都命中 capability 断点能力");
   }
 
+  /** 意图：执行期使用完整历史重新求交集，确保原生 Anthropic 的最新对话断点不会被 durable spec 丢弃。 */
+  @Test
+  void breakpointsCapabilityResolvesSystemToolsAndConversationIntersection() {
+    when(repository.getByName(PROVIDER_NAME))
+        .thenReturn(provider(ProviderType.ANTHROPIC, ENDPOINT));
+    DatabaseProviderResolutionService resolution =
+        resolution(
+            factory(
+                ProviderType.ANTHROPIC,
+                PromptCacheCapability.breakpoints(
+                    Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
+                    EnumSet.allOf(PromptCacheBreakpoint.class)),
+                adapter(ProviderType.ANTHROPIC, mock(ModelProvider.class))));
+    ProviderResolutionService.ResolvedExecution resolved =
+        resolution.resolve(
+            ProviderType.ANTHROPIC,
+            request(
+                ProviderCacheControl.breakpoints(
+                    PromptCacheRetention.LONG,
+                    "pc-key",
+                    EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
+                List.of(
+                    new ProviderMessage(
+                        ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system"))),
+                    new ProviderMessage(
+                        ProviderMessageRole.USER, List.of(new ProviderTextBlock("history")))),
+                List.of(new ProviderToolDefinition("search", "search tool", "{}"))));
+    assertEquals(
+        ProviderCacheControl.breakpoints(
+            PromptCacheRetention.LONG, "pc-key", EnumSet.allOf(PromptCacheBreakpoint.class)),
+        resolved.effectiveRequest().cacheControl());
+  }
+
   @Test
   void breakpointsCapabilityKeepsOnlyToolsWhenLeadingIsNotSystem() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
