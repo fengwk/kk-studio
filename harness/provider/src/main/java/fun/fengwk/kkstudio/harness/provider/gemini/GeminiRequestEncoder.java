@@ -466,16 +466,13 @@ final class GeminiRequestEncoder {
       if (call.id() != null && !call.id().isBlank()) {
         functionCall.put("id", call.id());
       }
-      try {
-        JsonNode argsNode = OBJECT_MAPPER.readTree(call.argumentsJson());
-        if (argsNode.isObject()) {
-          functionCall.set("args", argsNode);
-        } else {
-          functionCall.putObject("args");
-        }
-      } catch (JsonProcessingException e) {
-        functionCall.putObject("args");
+      JsonNode argsNode =
+          parseStrictJson(call.argumentsJson(), "tool call arguments must be a valid JSON object");
+      if (!argsNode.isObject()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "tool call arguments must be a valid JSON object");
       }
+      functionCall.set("args", argsNode);
       return;
     }
     throw new ProviderException(
@@ -582,7 +579,7 @@ final class GeminiRequestEncoder {
                   ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
             }
           } else if ("thoughtSignature".equals(fn)) {
-            if (!item.get(fn).isTextual()) {
+            if (!item.get(fn).isTextual() || item.get(fn).asText().isBlank()) {
               throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
             }
@@ -611,7 +608,7 @@ final class GeminiRequestEncoder {
             continue;
           }
           if ("thoughtSignature".equals(fnName)) {
-            if (!item.get(fnName).isTextual()) {
+            if (!item.get(fnName).isTextual() || item.get(fnName).asText().isBlank()) {
               throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
             }
