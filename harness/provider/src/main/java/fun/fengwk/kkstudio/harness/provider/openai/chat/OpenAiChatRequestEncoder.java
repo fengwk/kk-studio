@@ -397,12 +397,14 @@ final class OpenAiChatRequestEncoder {
       if (block instanceof ProviderTextBlock tb) {
         textBuilder.append(tb.text());
       } else if (block instanceof ProviderToolCallBlock cb) {
+        ProviderToolCall call = cb.toolCall();
+        parseJsonObject(call.argumentsJson(), "toolCall argumentsJson must be a JSON object");
         ObjectNode callNode = toolCallsArray.addObject();
-        callNode.put("id", cb.toolCall().id());
+        callNode.put("id", call.id());
         callNode.put("type", "function");
         ObjectNode fnNode = callNode.putObject("function");
-        fnNode.put("name", cb.toolCall().name());
-        fnNode.put("arguments", cb.toolCall().argumentsJson());
+        fnNode.put("name", call.name());
+        fnNode.put("arguments", call.argumentsJson());
       } else if (block instanceof ProviderThinkingBlock) {
         // Fallback 时 OpenAI 官方标准不保留 thinking 文本块
       } else {
@@ -547,11 +549,13 @@ final class OpenAiChatRequestEncoder {
               ProviderErrorKind.INVALID_REQUEST,
               "invalid OpenAI chat assistant replay payload: tool call function arguments must be a non-blank string");
         }
+        String argumentsStr = fnNode.get("arguments").textValue();
+        parseJsonObject(
+            argumentsStr,
+            "invalid OpenAI chat assistant replay payload: tool call function arguments must be a JSON object");
         payloadCalls.add(
             new ProviderToolCall(
-                callNode.get("id").textValue(),
-                fnNode.get("name").textValue(),
-                fnNode.get("arguments").textValue()));
+                callNode.get("id").textValue(), fnNode.get("name").textValue(), argumentsStr));
       }
     }
 
@@ -566,7 +570,11 @@ final class OpenAiChatRequestEncoder {
       } else if (block instanceof ProviderThinkingBlock tb) {
         durableThinking.append(tb.thinking());
       } else if (block instanceof ProviderToolCallBlock cb) {
-        durableCalls.add(cb.toolCall());
+        ProviderToolCall call = cb.toolCall();
+        parseJsonObject(
+            call.argumentsJson(),
+            "invalid OpenAI chat assistant durable tool call arguments: must be a JSON object");
+        durableCalls.add(call);
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
@@ -728,5 +736,20 @@ final class OpenAiChatRequestEncoder {
       }
     }
     return false;
+  }
+
+  private static JsonNode parseJsonObject(String json, String errorMessage) {
+    if (json == null || json.isBlank()) {
+      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
+    }
+    try (JsonParser parser = OBJECT_MAPPER.createParser(json)) {
+      JsonNode node = OBJECT_MAPPER.readTree(parser);
+      if (node == null || !node.isObject() || parser.nextToken() != null) {
+        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
+      }
+      return node;
+    } catch (Exception e) {
+      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
+    }
   }
 }

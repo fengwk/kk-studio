@@ -11,6 +11,7 @@ import {
   assertAssistantUsage,
   assertProviderUsageAlgebra,
   sanitizeArtifact,
+  safeDiagnosticJson,
   resolveRealModel,
   requireRealMiniMaxM3,
 } from '../cases/real.mjs'
@@ -422,6 +423,303 @@ test('assertProviderUsageAlgebra 针对四大厂商规范代数严格断言正�
   // 违规：providerTotal 算术不平
   assert.throws(
     () => assertProviderUsageAlgebra({ ...validDeepSeek, providerTotalTokens: 180 }, 'openai'),
+    /DeepSeek providerTotalTokens algebra mismatch/,
+  )
+})
+
+test('sanitizeArtifact 与 safeDiagnosticJson 递归严格脱敏推理文本、回放载荷与敏感元数据', () => {
+  // 测试意图：确保 Anthropic thinking/redacted data/signature、OpenAI Responses reasoning summary/encrypted_content、OpenAI Chat reasoning_content/details、Gemini thought 兄弟 text/thoughtSignature、replay payload/raw usage/URL/credential/HTTP body 等任何敏感信息均无法在 sanitizeArtifact 与 safeDiagnosticJson 的序列化输出中存活，同时保留必要结构性长度与类型元数据。
+  const sensitiveSource = {
+    threadId: '00000000-0000-0000-0000-000000000001',
+    status: 'IDLE',
+    // 凭据与密钥
+    apiKey: 'sk-abcdef1234567890',
+    secretKey: 'top-secret-val',
+    password: 'super-secret-password',
+    authorization: 'Bearer super-secret-bearer-token',
+    gatewayToken: 'gateway-secret-token',
+    daemonToken: 'daemon-secret-token',
+    auth: { raw: 'nested-secret-auth' },
+    diagnostic: 'TEST_OPENAI_API_KEY=sensitive-key TEST_MINIMAX_API_KEY=another-key Bearer test-bearer-val',
+    // URL
+    url: 'https://api.openai.com/v1/chat/completions',
+    baseUrl: 'https://api.minimaxi.chat/v1',
+    endpointUrl: 'http://localhost:8080/api/v1',
+    endpoint: 'https://generativelanguage.googleapis.com',
+    message: 'Check download at https://example.com/blob/123 and http://internal.corp/data for detail',
+    // Anthropic thinking block & redacted thinking & signature
+    anthropicThinking: {
+      type: 'thinking',
+      thinking: 'secret thinking contents from Anthropic Claude model',
+      signature: 'anthropic-signature-123456',
+    },
+    anthropicRedacted: {
+      type: 'redacted_thinking',
+      data: 'encrypted-thinking-data-789012',
+    },
+    anthropicThinkingWithText: {
+      type: 'thinking',
+      text: 'thinking in text field',
+      signature: 'anthropic-sig-2',
+    },
+    // OpenAI Responses reasoning block, summary_text, encrypted_content
+    responsesReasoning: {
+      type: 'reasoning',
+      summary_text: 'OpenAI Responses reasoning summary text',
+      encrypted_content: 'responses-encrypted-content-abcdef',
+      id: 'rs_12345',
+    },
+    responsesSummaryBlock: {
+      type: 'summary_text',
+      text: 'standalone Responses summary block text',
+    },
+    encryptedReasoningStandalone: 'encrypted-reasoning-standalone-val',
+    summaryTextStandalone: 'summary-text-standalone-val',
+    summary: 'summary-standalone-val',
+    // OpenAI Chat reasoning_content, reasoning_details
+    reasoning_content: 'DeepSeek chat reasoning content text',
+    reasoning_details: [
+      { step: 'detailed reasoning step 1' },
+      { step: 'detailed reasoning step 2' },
+    ],
+    // Gemini thought part with thought: true (禁止残留兄弟 text 与 thoughtSignature)
+    geminiPart: {
+      thought: true,
+      text: 'Gemini internal thinking process that must be stripped completely',
+      thoughtSignature: 'gemini-signature-987654',
+    },
+    thoughtSignatureStandalone: 'gemini-signature-standalone-333',
+    // replayState, replayPayload, raw usage, HTTP bodies
+    replayState: { cursor: 'secret-cursor', messages: ['secret message'] },
+    replayPayload: { payloadData: 'secret-replay-payload-leak' },
+    rawUsageJson: '{"prompt_tokens":100,"completion_tokens":50}',
+    rawUsageSnippet: '{"usage":{"total":150,"raw_usage_leak":true}}',
+    httpBody: '{"stream":true,"prompt":"sensitive-http-body-leak"}',
+    requestBody: '{"secret":"request-body-leak"}',
+    responseBody: '{"secret":"response-body-leak"}',
+    payloadJson: '{"apiKey":"sk-nested-payload-secret","replayPayload":{"bad":"nested-replay-leak"},"url":"https://nested.url.com/api"}',
+    // 安全字段（应保留）
+    inputTokens: 100,
+    outputTokens: 50,
+    reasoningTokens: 25,
+    providerTotalTokens: 175,
+  }
+
+  const cleaned = sanitizeArtifact(sensitiveSource)
+  const sanitizedJson = JSON.stringify(cleaned)
+  const diagnosticJson = safeDiagnosticJson(sensitiveSource)
+
+  // 1. 验证两者输出中绝对不存在任何敏感明文
+  const sensitiveStrings = [
+    'sk-abcdef1234567890',
+    'top-secret-val',
+    'super-secret-password',
+    'super-secret-bearer-token',
+    'gateway-secret-token',
+    'daemon-secret-token',
+    'nested-secret-auth',
+    'sensitive-key',
+    'another-key',
+    'test-bearer-val',
+    'https://api.openai.com',
+    'https://api.minimaxi.chat',
+    'http://localhost:8080',
+    'https://generativelanguage.googleapis.com',
+    'https://example.com',
+    'http://internal.corp',
+    'secret thinking contents from Anthropic Claude model',
+    'anthropic-signature-123456',
+    'encrypted-thinking-data-789012',
+    'thinking in text field',
+    'anthropic-sig-2',
+    'OpenAI Responses reasoning summary text',
+    'standalone Responses summary block text',
+    'responses-encrypted-content-abcdef',
+    'encrypted-reasoning-standalone-val',
+    'summary-text-standalone-val',
+    'summary-standalone-val',
+    'DeepSeek chat reasoning content text',
+    'detailed reasoning step 1',
+    'detailed reasoning step 2',
+    'Gemini internal thinking process that must be stripped completely',
+    'gemini-signature-987654',
+    'gemini-signature-standalone-333',
+    'secret-cursor',
+    'secret-replay-payload-leak',
+    'prompt_tokens',
+    'completion_tokens',
+    'raw_usage_leak',
+    'sensitive-http-body-leak',
+    'request-body-leak',
+    'response-body-leak',
+    'sk-nested-payload-secret',
+    'nested-replay-leak',
+    'https://nested.url.com',
+  ]
+
+  for (const target of sensitiveStrings) {
+    assert.equal(
+      sanitizedJson.includes(target),
+      false,
+      `sanitizeArtifact leaked sensitive string: "${target}" in ${sanitizedJson}`,
+    )
+    assert.equal(
+      diagnosticJson.includes(target),
+      false,
+      `safeDiagnosticJson leaked sensitive string: "${target}" in ${diagnosticJson}`,
+    )
+  }
+
+  // 2. 验证结构性元数据保留
+  assert.equal(cleaned.geminiPart.thought, true)
+  assert.equal(cleaned.geminiPart.present, true)
+  assert.equal(typeof cleaned.geminiPart.text, 'undefined')
+  assert.equal(typeof cleaned.geminiPart.thoughtSignature, 'undefined')
+  assert.equal(typeof cleaned.geminiPart.textLength, 'number')
+  assert.ok(cleaned.geminiPart.textLength > 0)
+
+  assert.equal(cleaned.anthropicThinking.type, 'thinking')
+  assert.equal(cleaned.anthropicThinking.present, true)
+  assert.equal(typeof cleaned.anthropicThinking.thinking, 'undefined')
+  assert.equal(typeof cleaned.anthropicThinking.signature, 'undefined')
+  assert.ok(cleaned.anthropicThinking.length > 0)
+
+  assert.equal(cleaned.anthropicRedacted.type, 'redacted_thinking')
+  assert.equal(cleaned.anthropicRedacted.present, true)
+  assert.equal(typeof cleaned.anthropicRedacted.data, 'undefined')
+  assert.ok(cleaned.anthropicRedacted.length > 0)
+
+  assert.equal(cleaned.responsesReasoning.type, 'reasoning')
+  assert.equal(cleaned.responsesReasoning.present, true)
+  assert.equal(typeof cleaned.responsesReasoning.summary_text, 'undefined')
+  assert.equal(typeof cleaned.responsesReasoning.encrypted_content, 'undefined')
+  assert.equal(cleaned.responsesReasoning.id, 'rs_12345')
+  assert.equal(cleaned.responsesSummaryBlock.type, 'summary_text')
+  assert.equal(cleaned.responsesSummaryBlock.present, true)
+  assert.equal(typeof cleaned.responsesSummaryBlock.text, 'undefined')
+  assert.ok(cleaned.responsesSummaryBlock.length > 0)
+
+  // 3. 安全 Token 与状态字段正常保留
+  assert.equal(cleaned.inputTokens, 100)
+  assert.equal(cleaned.outputTokens, 50)
+  assert.equal(cleaned.reasoningTokens, 25)
+  assert.equal(cleaned.providerTotalTokens, 175)
+  assert.equal(cleaned.status, 'IDLE')
+})
+
+test('assertAssistantUsage 接受 OpenAI Responses 与 Chat 协议合法的 providerTotalTokens=0，但分类 token 为 0 时仍拒绝，正 total 仍做代数校验', () => {
+  // 测试意图：验证上游 Responses 与 Chat Completions 协议在未返回 total_tokens 时归一化为 providerTotalTokens=0 属于协议合法，此时断言必须放行通过；但分类 input/output 事实有效性校验不能被削弱（分类为 0 仍必须拒绝）；且当 providerTotalTokens > 0 时代数等式仍必须严格闭合。
+
+  // 1. OpenAI Responses (providerType: 'openai_response')
+  const responsesZeroTotal = {
+    inputTokens: 100,
+    outputTokens: 20,
+    cacheReadTokens: 10,
+    cacheWriteTokens: 5,
+    cacheWriteLongTokens: 0,
+    reasoningTokens: 15,
+    providerTotalTokens: 0, // 上游省略 total_tokens，协议合法为 0
+  }
+  // 零 total 且分类 token > 0 应成功放行
+  assert.doesNotThrow(() =>
+    assertAssistantUsage(responsesZeroTotal, {
+      providerType: 'openai_response',
+      requirePositiveIO: true,
+    }),
+  )
+
+  // 但分类输入全部为 0 时仍必须拒绝
+  assert.throws(
+    () =>
+      assertAssistantUsage(
+        {
+          ...responsesZeroTotal,
+          inputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+        { providerType: 'openai_response', requirePositiveIO: true },
+      ),
+    /inputTokens \+ cacheReadTokens \+ cacheWriteTokens \+ cacheWriteLongTokens must be > 0/,
+  )
+
+  // 分类输出与推理全部为 0 时仍必须拒绝
+  assert.throws(
+    () =>
+      assertAssistantUsage(
+        { ...responsesZeroTotal, outputTokens: 0, reasoningTokens: 0 },
+        { providerType: 'openai_response', requirePositiveIO: true },
+      ),
+    /outputTokens \+ reasoningTokens must be > 0/,
+  )
+
+  // 正 total 时严格执行代数校验：wireInput (100+10+5=115) + wireOutput (20+15=35) = 150
+  assert.doesNotThrow(() =>
+    assertAssistantUsage(
+      { ...responsesZeroTotal, providerTotalTokens: 150 },
+      { providerType: 'openai_response', requirePositiveIO: true },
+    ),
+  )
+  assert.throws(
+    () =>
+      assertAssistantUsage(
+        { ...responsesZeroTotal, providerTotalTokens: 149 },
+        { providerType: 'openai_response', requirePositiveIO: true },
+      ),
+    /OpenAI Responses providerTotalTokens algebra mismatch/,
+  )
+
+  // 2. OpenAI Chat / DeepSeek (providerType: 'openai')
+  const chatZeroTotal = {
+    inputTokens: 100,
+    outputTokens: 20,
+    cacheReadTokens: 30,
+    cacheWriteTokens: 0,
+    cacheWriteLongTokens: 0,
+    reasoningTokens: 40,
+    providerTotalTokens: 0, // 上游省略 total_tokens，协议合法为 0
+  }
+  // 零 total 且分类 token > 0 应成功放行
+  assert.doesNotThrow(() =>
+    assertAssistantUsage(chatZeroTotal, {
+      providerType: 'openai',
+      requirePositiveIO: true,
+    }),
+  )
+
+  // 但分类输入全部为 0 时仍必须拒绝
+  assert.throws(
+    () =>
+      assertAssistantUsage(
+        { ...chatZeroTotal, inputTokens: 0, cacheReadTokens: 0 },
+        { providerType: 'openai', requirePositiveIO: true },
+      ),
+    /inputTokens \+ cacheReadTokens must be > 0/,
+  )
+
+  // 分类输出与推理全部为 0 时仍必须拒绝
+  assert.throws(
+    () =>
+      assertAssistantUsage(
+        { ...chatZeroTotal, outputTokens: 0, reasoningTokens: 0 },
+        { providerType: 'openai', requirePositiveIO: true },
+      ),
+    /outputTokens \+ reasoningTokens must be > 0/,
+  )
+
+  // 正 total 时严格执行代数校验：wirePrompt (100+30=130) + wireCompletion (20+40=60) = 190
+  assert.doesNotThrow(() =>
+    assertAssistantUsage(
+      { ...chatZeroTotal, providerTotalTokens: 190 },
+      { providerType: 'openai', requirePositiveIO: true },
+    ),
+  )
+  assert.throws(
+    () =>
+      assertAssistantUsage(
+        { ...chatZeroTotal, providerTotalTokens: 189 },
+        { providerType: 'openai', requirePositiveIO: true },
+      ),
     /DeepSeek providerTotalTokens algebra mismatch/,
   )
 })

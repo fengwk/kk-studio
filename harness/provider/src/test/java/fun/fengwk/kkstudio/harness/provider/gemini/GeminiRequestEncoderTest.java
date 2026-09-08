@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.provider.gemini;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -1875,5 +1876,132 @@ class GeminiRequestEncoderTest {
         assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
     assertEquals("invalid Gemini replay payload", ex.getMessage());
+  }
+
+  /**
+   * 意图：验证工具调用参数 arguments 为畸形、数组、标量或 JSON null 时，在 semantic fallback 和 replay 校验中均抛出
+   * INVALID_REQUEST，且异常消息绝不泄漏原始参数。
+   */
+  @Test
+  void testToolArgumentsStrictObjectValidationInReplayAndFallback() {
+    List<String> invalidArgs =
+        List.of("12345", "\"scalar_string\"", "true", "[1, 2, 3]", "{\"unclosed\":", "null");
+
+    for (String badArg : invalidArgs) {
+      // 1. Fallback 场景
+      ProviderRequest reqFallback =
+          new ProviderRequest(
+              model(false),
+              DEFAULT_VARIANT,
+              List.of(
+                  new ProviderMessage(
+                      ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                  new ProviderMessage(
+                      ProviderMessageRole.ASSISTANT,
+                      List.of(
+                          new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", badArg))))),
+              List.of(),
+              ProviderCacheControl.none());
+      ProviderException exFallback =
+          assertThrows(ProviderException.class, () -> encoder.encode(reqFallback, descriptor()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, exFallback.kind());
+      assertNull(exFallback.getCause());
+      assertFalse(exFallback.getMessage().contains(badArg));
+
+      // 2. Replay 场景（durable 包含非法参数）
+      ObjectNode validPayload = MAPPER.createObjectNode();
+      validPayload.put("role", "model");
+      ObjectNode fn = validPayload.putArray("parts").addObject().putObject("functionCall");
+      fn.put("id", "c1").put("name", "fn");
+      fn.putObject("args");
+
+      ProviderReplayState rsDurableBad =
+          new ProviderReplayState(
+              ProviderReplayFormat.GEMINI_CONTENT,
+              descriptor().affinity("gemini-2.5-flash"),
+              "0000000000000000000000000000000000000000000000000000000000000000",
+              validPayload);
+      ProviderRequest reqDurableBad =
+          new ProviderRequest(
+              model(false),
+              DEFAULT_VARIANT,
+              List.of(
+                  new ProviderMessage(
+                      ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                  new ProviderMessage(
+                      ProviderMessageRole.ASSISTANT,
+                      List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", badArg))),
+                      rsDurableBad)),
+              List.of(),
+              ProviderCacheControl.none());
+      ProviderException exDurable =
+          assertThrows(ProviderException.class, () -> encoder.encode(reqDurableBad, descriptor()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, exDurable.kind());
+      assertNull(exDurable.getCause());
+      assertFalse(exDurable.getMessage().contains(badArg));
+    }
+
+    // 3. Replay payload 中的 functionCall 缺少 args 或 args 为非 Object（如数组、标量）
+    // 即使 affinity/hash 不匹配也必须严格拦截并抛出 INVALID_REQUEST，严禁静默 fallback 或自动补 {}
+    ObjectNode payloadMissingArgs = MAPPER.createObjectNode();
+    payloadMissingArgs.put("role", "model");
+    ObjectNode fnMissingArgs =
+        payloadMissingArgs.putArray("parts").addObject().putObject("functionCall");
+    fnMissingArgs.put("id", "c1").put("name", "fn");
+    // 不设 args 字段
+
+    ProviderReplayState rsMissingArgs =
+        new ProviderReplayState(
+            ProviderReplayFormat.GEMINI_CONTENT,
+            descriptor().affinity("mismatched-model"),
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            payloadMissingArgs);
+    ProviderRequest reqMissingArgs =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+                    rsMissingArgs)),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException exMissing =
+        assertThrows(ProviderException.class, () -> encoder.encode(reqMissingArgs, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exMissing.kind());
+    assertEquals("invalid Gemini replay payload", exMissing.getMessage());
+
+    // 4. Replay payload 中的 args 为数组
+    ObjectNode payloadArrayArgs = MAPPER.createObjectNode();
+    payloadArrayArgs.put("role", "model");
+    ObjectNode fnArrayArgs =
+        payloadArrayArgs.putArray("parts").addObject().putObject("functionCall");
+    fnArrayArgs.put("id", "c1").put("name", "fn");
+    fnArrayArgs.putArray("args").add(1).add(2);
+
+    ProviderReplayState rsArrayArgs =
+        new ProviderReplayState(
+            ProviderReplayFormat.GEMINI_CONTENT,
+            descriptor().affinity("mismatched-model"),
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            payloadArrayArgs);
+    ProviderRequest reqArrayArgs =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+                    rsArrayArgs)),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException exArray =
+        assertThrows(ProviderException.class, () -> encoder.encode(reqArrayArgs, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exArray.kind());
+    assertEquals("invalid Gemini replay payload", exArray.getMessage());
   }
 }

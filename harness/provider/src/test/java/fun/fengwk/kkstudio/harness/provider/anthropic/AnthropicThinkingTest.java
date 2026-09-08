@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -26,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
@@ -679,7 +681,7 @@ class AnthropicThinkingTest {
   }
 
   /**
-   * 验证当 ReplayState 内保存的 payload 与应用层 durable 内容不一致时，防篡改校验生效并自动降级为语义文本。
+   * 验证当 ReplayState 内保存的 payload 与应用层 durable 内容不一致时，防篡改校验生效并抛出 INVALID_REQUEST，杜绝静默降级。
    *
    * <p>测试意图：防止 payload 内容被恶意篡改导致发往模型的请求偏离实际历史记录。
    */
@@ -729,13 +731,9 @@ class AnthropicThinkingTest {
             List.of(),
             ProviderCacheControl.none());
 
-    AnthropicEncodedRequest encoded = encoder.encode(followUp, descriptor);
-    JsonNode asstWire = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1);
-    ArrayNode contents = (ArrayNode) asstWire.path("content");
-
-    // 不匹配拒绝 native 重放，降级为 text
-    assertEquals("text", contents.get(0).path("type").asText());
-    assertEquals("Tampered Thought in durable content", contents.get(0).path("text").asText());
+    ProviderException ex =
+        assertThrows(ProviderException.class, () -> encoder.encode(followUp, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
   }
 
   /**

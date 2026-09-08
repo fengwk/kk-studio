@@ -84,8 +84,10 @@ final class OpenAiResponsesStreamAccumulator {
 
   // 终态回放用有序 output items
   private final List<JsonNode> rawOutputItems = new ArrayList<>();
+  private boolean explicitTerminalOutputProcessed = false;
 
   // Token 用量
+  private JsonNode latestNativeUsageNode = null;
   private long rawInputTokens = 0L;
   private long rawOutputTokens = 0L;
   private long rawTotalTokens = 0L;
@@ -93,7 +95,6 @@ final class OpenAiResponsesStreamAccumulator {
   private long cachedTokens = 0L;
   private long cacheWriteTokens = 0L;
   private long reasoningTokens = 0L;
-  private boolean hasUsage = false;
   private ProviderCompletion finishedCompletion = null;
 
   private static final class WireToolCall {
@@ -102,6 +103,8 @@ final class OpenAiResponsesStreamAccumulator {
     String callId;
     String name;
     final StringBuilder argumentsBuffer = new StringBuilder();
+    boolean argumentsPresent = false;
+    boolean argumentsTextual = true;
     boolean argumentsDone = false;
     boolean itemDone = false;
 
@@ -204,7 +207,7 @@ final class OpenAiResponsesStreamAccumulator {
   private void handleCreated(JsonNode node) {
     JsonNode respNode = node.get("response");
     if (respNode != null && respNode.isObject()) {
-      extractResponseData(respNode);
+      extractResponseData(respNode, false);
     }
   }
 
@@ -256,6 +259,8 @@ final class OpenAiResponsesStreamAccumulator {
     if (itemId != null && toolsById.containsKey(itemId)) {
       WireToolCall tool = toolsById.get(itemId);
       tool.argumentsBuffer.append(delta);
+      tool.argumentsPresent = true;
+      tool.argumentsTextual = true;
       if (!delta.isEmpty()) {
         int index = toolIndices.getOrDefault(itemId, tool.index);
         bridge.emitEvent(new ProviderStreamEvent.ToolCallDelta(index, null, null, delta));
@@ -271,9 +276,79 @@ final class OpenAiResponsesStreamAccumulator {
       if (arguments != null) {
         tool.argumentsBuffer.setLength(0);
         tool.argumentsBuffer.append(arguments);
+        tool.argumentsPresent = true;
+        tool.argumentsTextual = true;
       }
       tool.argumentsDone = true;
     }
+  }
+
+  private WireToolCall findToolCall(String itemId, String callId) {
+    if (itemId != null && !itemId.isBlank()) {
+      WireToolCall byId = toolsById.get(itemId);
+      if (byId != null) {
+        return byId;
+      }
+    }
+    if (callId != null && !callId.isBlank()) {
+      WireToolCall byCallId = toolsById.get(callId);
+      if (byCallId != null) {
+        return byCallId;
+      }
+    }
+    for (WireToolCall t : toolsById.values()) {
+      if ((itemId != null && !itemId.isBlank() && (itemId.equals(t.id) || itemId.equals(t.callId)))
+          || (callId != null
+              && !callId.isBlank()
+              && (callId.equals(t.callId) || callId.equals(t.id)))) {
+        return t;
+      }
+    }
+    return null;
+  }
+
+  private void syncToolFromItem(JsonNode item, int defaultIndex) {
+    String itemId = item.path("id").asText(null);
+    String callId = item.path("call_id").asText(null);
+    WireToolCall tool = findToolCall(itemId, callId);
+    if (tool == null) {
+      int idx = defaultIndex >= 0 ? defaultIndex : nextToolIndex++;
+      String key =
+          (itemId != null && !itemId.isBlank())
+              ? itemId
+              : ((callId != null && !callId.isBlank()) ? callId : ("tool_" + idx));
+      tool = new WireToolCall(idx, itemId, callId, null);
+      toolsById.put(key, tool);
+    }
+    if (itemId != null && !itemId.isBlank()) {
+      tool.id = itemId;
+    }
+    if (callId != null && !callId.isBlank()) {
+      tool.callId = callId;
+    }
+    if (item.has("name")) {
+      tool.name = item.path("name").asText(null);
+    }
+    if (item.has("arguments")) {
+      if (item.get("arguments") != null && !item.get("arguments").isNull()) {
+        tool.argumentsPresent = true;
+        tool.argumentsTextual = item.get("arguments").isTextual();
+        if (tool.argumentsTextual) {
+          tool.argumentsBuffer.setLength(0);
+          tool.argumentsBuffer.append(item.get("arguments").asText());
+        }
+        tool.argumentsDone = true;
+      } else {
+        tool.argumentsPresent = false;
+        tool.argumentsDone = false;
+      }
+    } else {
+      if (tool.argumentsBuffer.length() == 0) {
+        tool.argumentsPresent = false;
+        tool.argumentsDone = false;
+      }
+    }
+    tool.itemDone = true;
   }
 
   private void handleOutputItemDone(JsonNode node) {
@@ -283,29 +358,8 @@ final class OpenAiResponsesStreamAccumulator {
     }
     String itemType = item.path("type").asText();
     if ("function_call".equals(itemType)) {
-      String itemId = item.path("id").asText(null);
-      String rawCallId = item.path("call_id").asText(null);
-      String effectiveCallId = (rawCallId == null || rawCallId.isBlank()) ? itemId : rawCallId;
-      String name = item.path("name").asText(null);
-      String arguments = item.path("arguments").asText(null);
       int outputIndex = node.path("output_index").asInt(nextToolIndex);
-
-      WireToolCall tool =
-          toolsById.computeIfAbsent(
-              itemId != null ? itemId : ("tool_" + outputIndex),
-              k -> new WireToolCall(outputIndex, itemId, effectiveCallId, name));
-      if (effectiveCallId != null && !effectiveCallId.isBlank()) {
-        tool.callId = effectiveCallId;
-      }
-      if (name != null && !name.isBlank()) {
-        tool.name = name;
-      }
-      if (arguments != null) {
-        tool.argumentsBuffer.setLength(0);
-        tool.argumentsBuffer.append(arguments);
-        tool.argumentsDone = true;
-      }
-      tool.itemDone = true;
+      syncToolFromItem(item, outputIndex);
     }
 
     rawOutputItems.add(item.deepCopy());
@@ -314,7 +368,7 @@ final class OpenAiResponsesStreamAccumulator {
   private void handleCompleted(JsonNode node) {
     terminalReceived = true;
     stopReason = GenerationStopReason.COMPLETE;
-    extractResponseData(node.get("response"));
+    extractResponseData(node.get("response"), true);
   }
 
   private void handleIncomplete(JsonNode node) {
@@ -329,10 +383,41 @@ final class OpenAiResponsesStreamAccumulator {
     } else {
       stopReason = GenerationStopReason.LENGTH;
     }
-    extractResponseData(responseNode);
+    extractResponseData(responseNode, true);
   }
 
-  private void extractResponseData(JsonNode responseNode) {
+  private static long parseNonNegativeLong(JsonNode node, String fieldName) {
+    if (node == null || node.isNull()) {
+      return 0L;
+    }
+    if (!node.isNumber() || !node.isIntegralNumber() || !node.canConvertToLong()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "invalid usage token count in field "
+              + fieldName
+              + ": must be an integral number within long range");
+    }
+    long val = node.asLong();
+    if (val < 0) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "invalid usage token count in field " + fieldName + ": must be non-negative");
+    }
+    return val;
+  }
+
+  private void resetUsage() {
+    latestNativeUsageNode = null;
+    rawInputTokens = 0L;
+    rawOutputTokens = 0L;
+    hasRawTotalTokens = false;
+    rawTotalTokens = 0L;
+    cachedTokens = 0L;
+    cacheWriteTokens = 0L;
+    reasoningTokens = 0L;
+  }
+
+  private void extractResponseData(JsonNode responseNode, boolean isTerminal) {
     if (responseNode == null || !responseNode.isObject()) {
       return;
     }
@@ -343,33 +428,101 @@ final class OpenAiResponsesStreamAccumulator {
       serviceTier = responseNode.path("service_tier").asText();
     }
 
-    JsonNode usageNode = responseNode.get("usage");
-    if (usageNode != null && usageNode.isObject()) {
-      hasUsage = true;
-      rawInputTokens = usageNode.path("input_tokens").asLong(0L);
-      rawOutputTokens = usageNode.path("output_tokens").asLong(0L);
-      if (usageNode.has("total_tokens") && !usageNode.get("total_tokens").isNull()) {
-        hasRawTotalTokens = true;
-        rawTotalTokens = usageNode.path("total_tokens").asLong(0L);
-      }
+    if (responseNode.has("usage")) {
+      JsonNode usageNode = responseNode.get("usage");
+      if (usageNode == null || usageNode.isNull()) {
+        resetUsage();
+      } else {
+        if (!usageNode.isObject()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE, "usage is not a JSON object");
+        }
+        resetUsage();
+        latestNativeUsageNode = usageNode.deepCopy();
 
-      JsonNode inDetails = usageNode.get("input_tokens_details");
-      if (inDetails != null && inDetails.isObject()) {
-        cachedTokens = inDetails.path("cached_tokens").asLong(0L);
-        cacheWriteTokens = inDetails.path("cache_write_tokens").asLong(0L);
-      }
+        rawInputTokens = parseNonNegativeLong(usageNode.get("input_tokens"), "input_tokens");
+        rawOutputTokens = parseNonNegativeLong(usageNode.get("output_tokens"), "output_tokens");
 
-      JsonNode outDetails = usageNode.get("output_tokens_details");
-      if (outDetails != null && outDetails.isObject()) {
-        reasoningTokens = outDetails.path("reasoning_tokens").asLong(0L);
+        JsonNode totalNode = usageNode.get("total_tokens");
+        if (totalNode != null && !totalNode.isNull()) {
+          hasRawTotalTokens = true;
+          rawTotalTokens = parseNonNegativeLong(totalNode, "total_tokens");
+        }
+
+        JsonNode inDetails = usageNode.get("input_tokens_details");
+        if (inDetails != null && !inDetails.isNull()) {
+          if (!inDetails.isObject()) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_RESPONSE, "input_tokens_details is not a JSON object");
+          }
+          cachedTokens = parseNonNegativeLong(inDetails.get("cached_tokens"), "cached_tokens");
+          cacheWriteTokens =
+              parseNonNegativeLong(inDetails.get("cache_write_tokens"), "cache_write_tokens");
+        }
+
+        JsonNode outDetails = usageNode.get("output_tokens_details");
+        if (outDetails != null && !outDetails.isNull()) {
+          if (!outDetails.isObject()) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_RESPONSE, "output_tokens_details is not a JSON object");
+          }
+          reasoningTokens =
+              parseNonNegativeLong(outDetails.get("reasoning_tokens"), "reasoning_tokens");
+        }
       }
     }
 
-    JsonNode outputNode = responseNode.get("output");
-    if (outputNode != null && outputNode.isArray()) {
-      rawOutputItems.clear();
-      for (JsonNode item : outputNode) {
-        rawOutputItems.add(item.deepCopy());
+    if (responseNode.has("output")) {
+      JsonNode outputNode = responseNode.get("output");
+      if (outputNode == null || outputNode.isNull() || !outputNode.isArray()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "response output must be a JSON array");
+      }
+      if (isTerminal) {
+        explicitTerminalOutputProcessed = true;
+        rawOutputItems.clear();
+        toolsById.clear();
+        toolIndices.clear();
+        nextToolIndex = 0;
+        textBuffer.setLength(0);
+        thinkingBuffer.setLength(0);
+        int outIdx = 0;
+        for (JsonNode item : outputNode) {
+          rawOutputItems.add(item.deepCopy());
+          if (item.isObject()) {
+            String itemType = item.path("type").asText();
+            if ("function_call".equals(itemType)) {
+              syncToolFromItem(item, outIdx);
+            } else if ("message".equals(itemType)) {
+              JsonNode content = item.get("content");
+              if (content != null) {
+                if (content.isArray()) {
+                  for (JsonNode c : content) {
+                    if (c.isObject() && "output_text".equals(c.path("type").asText())) {
+                      textBuffer.append(c.path("text").asText(""));
+                    }
+                  }
+                } else if (content.isTextual()) {
+                  textBuffer.append(content.asText());
+                }
+              }
+            } else if ("reasoning".equals(itemType)) {
+              JsonNode summary = item.get("summary");
+              if (summary != null) {
+                if (summary.isArray()) {
+                  for (JsonNode s : summary) {
+                    if (s.isObject() && "summary_text".equals(s.path("type").asText())) {
+                      thinkingBuffer.append(s.path("text").asText(""));
+                    }
+                  }
+                } else if (summary.isTextual()) {
+                  thinkingBuffer.append(summary.asText());
+                }
+              }
+            }
+          }
+          outIdx++;
+        }
       }
     }
   }
@@ -393,24 +546,26 @@ final class OpenAiResponsesStreamAccumulator {
     boolean canReplay =
         (stopReason == GenerationStopReason.COMPLETE || stopReason == GenerationStopReason.LENGTH);
 
-    // 从 rawOutputItems 中提取权威文本与思考内容（若有）
-    for (JsonNode item : rawOutputItems) {
-      String itemType = item.path("type").asText();
-      if ("message".equals(itemType)) {
-        JsonNode content = item.get("content");
-        if (content != null && content.isArray() && textBuffer.isEmpty()) {
-          for (JsonNode c : content) {
-            if ("output_text".equals(c.path("type").asText())) {
-              textBuffer.append(c.path("text").asText(""));
+    if (!explicitTerminalOutputProcessed) {
+      // 从 rawOutputItems 中提取权威文本与思考内容（若有且未在流式 delta 中收到）
+      for (JsonNode item : rawOutputItems) {
+        String itemType = item.path("type").asText();
+        if ("message".equals(itemType)) {
+          JsonNode content = item.get("content");
+          if (content != null && content.isArray() && textBuffer.isEmpty()) {
+            for (JsonNode c : content) {
+              if ("output_text".equals(c.path("type").asText())) {
+                textBuffer.append(c.path("text").asText(""));
+              }
             }
           }
-        }
-      } else if ("reasoning".equals(itemType)) {
-        JsonNode summary = item.get("summary");
-        if (summary != null && summary.isArray() && thinkingBuffer.isEmpty()) {
-          for (JsonNode s : summary) {
-            if ("summary_text".equals(s.path("type").asText())) {
-              thinkingBuffer.append(s.path("text").asText(""));
+        } else if ("reasoning".equals(itemType)) {
+          JsonNode summary = item.get("summary");
+          if (summary != null && summary.isArray() && thinkingBuffer.isEmpty()) {
+            for (JsonNode s : summary) {
+              if ("summary_text".equals(s.path("type").asText())) {
+                thinkingBuffer.append(s.path("text").asText(""));
+              }
             }
           }
         }
@@ -422,49 +577,61 @@ final class OpenAiResponsesStreamAccumulator {
       toolCallDiagnostics.clear();
       canReplay = false;
     } else {
-      // 评估所有工具调用的完整性
+      // 评估所有工具调用的完整性，严禁合成 {}
       int ordinal = 0;
       for (WireToolCall tool : toolsById.values()) {
-        String args = tool.argumentsBuffer.toString();
-        String effectiveCallId = tool.callId != null ? tool.callId : tool.id;
+        String effectiveCallId =
+            (tool.callId != null && !tool.callId.isBlank()) ? tool.callId : tool.id;
+        boolean hasValidId = effectiveCallId != null && !effectiveCallId.isBlank();
+        boolean hasValidName = tool.name != null && !tool.name.isBlank();
+        boolean hasArgs = tool.argumentsPresent || tool.argumentsBuffer.length() > 0;
+        boolean isTextual = tool.argumentsTextual;
+        String argsStr = tool.argumentsBuffer.toString();
+        JsonNode parsedArgs =
+            (isTextual && hasArgs && !argsStr.isBlank()) ? tryParseJsonObject(argsStr) : null;
 
-        if (args.isEmpty()) {
-          if (tool.itemDone || tool.argumentsDone) {
-            toolCalls.add(new ProviderToolCall(effectiveCallId, tool.name, "{}"));
-          } else {
-            if (stopReason == GenerationStopReason.LENGTH) {
-              toolCallDiagnostics.add(
-                  new ProviderToolCallDiagnostic(
-                      ordinal,
-                      effectiveCallId,
-                      tool.name,
-                      null,
-                      "tool call truncated before arguments received"));
-              canReplay = false;
-            } else {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_RESPONSE, "incomplete tool call missing arguments");
-            }
+        if (stopReason == GenerationStopReason.COMPLETE) {
+          if (!hasValidId) {
+            throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "tool call missing id");
           }
+          if (!hasValidName) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_RESPONSE, "tool call missing name");
+          }
+          if (!hasArgs || argsStr.isEmpty()) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_RESPONSE, "incomplete tool call missing arguments");
+          }
+          if (!isTextual) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_RESPONSE, "tool call arguments must be a JSON string");
+          }
+          if (parsedArgs == null) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_RESPONSE,
+                "tool call arguments cannot be parsed as JSON object");
+          }
+          toolCalls.add(new ProviderToolCall(effectiveCallId, tool.name, argsStr));
         } else {
-          JsonNode parsedArgs = tryParseJsonObject(args);
-          if (parsedArgs != null) {
-            toolCalls.add(new ProviderToolCall(effectiveCallId, tool.name, args));
+          // stopReason == GenerationStopReason.LENGTH
+          boolean valid = hasValidId && hasValidName && hasArgs && isTextual && parsedArgs != null;
+          if (valid) {
+            toolCalls.add(new ProviderToolCall(effectiveCallId, tool.name, argsStr));
           } else {
-            if (stopReason == GenerationStopReason.LENGTH) {
-              toolCallDiagnostics.add(
-                  new ProviderToolCallDiagnostic(
-                      ordinal,
-                      effectiveCallId,
-                      tool.name,
-                      args,
-                      "tool call arguments truncated or malformed"));
-              canReplay = false;
+            String diagId = hasValidId ? effectiveCallId : null;
+            String diagName = hasValidName ? tool.name : null;
+            String partialArgs = (isTextual && !argsStr.isEmpty()) ? argsStr : null;
+            String reason;
+            if (!hasValidId || !hasValidName) {
+              reason = "tool call truncated before identity received";
+            } else if (!hasArgs || argsStr.isEmpty()) {
+              reason = "tool call truncated before arguments received";
             } else {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_RESPONSE,
-                  "tool call arguments cannot be parsed as JSON object");
+              reason = "tool call arguments truncated or malformed";
             }
+            toolCallDiagnostics.add(
+                new ProviderToolCallDiagnostic(ordinal, diagId, diagName, partialArgs, reason));
+            canReplay = false;
           }
         }
         ordinal++;
@@ -475,7 +642,7 @@ final class OpenAiResponsesStreamAccumulator {
       canReplay = false;
     }
 
-    // Token 用量归一化
+    // Token 用量归一化：total_tokens 缺失时为 0L，不凭空合成
     long ordinaryInput = Math.max(0L, rawInputTokens - cachedTokens - cacheWriteTokens);
     long ordinaryOutput = Math.max(0L, rawOutputTokens - reasoningTokens);
     long providerTotalTokens = hasRawTotalTokens ? rawTotalTokens : 0L;
@@ -491,19 +658,18 @@ final class OpenAiResponsesStreamAccumulator {
             providerTotalTokens);
     ModelCost cost = ModelCost.calculate(request.model().pricing(), usage);
 
-    // 白名单 rawUsageJson：仅当 native 响应中实际包含 total_tokens 时才保留，不自行凭空合成
-    ObjectNode rawUsageNode = NODES.objectNode();
-    rawUsageNode.put("input_tokens", rawInputTokens);
-    rawUsageNode.put("output_tokens", rawOutputTokens);
-    if (hasRawTotalTokens) {
-      rawUsageNode.put("total_tokens", rawTotalTokens);
+    // rawUsageJson 高保真：直接保留上游原生 usage 结构，缺失时不伪造字段；无 usage 时产出 {}
+    String rawUsageJson;
+    if (latestNativeUsageNode != null) {
+      try {
+        rawUsageJson = OBJECT_MAPPER.writeValueAsString(latestNativeUsageNode);
+      } catch (Exception e) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "failed to serialize raw usage JSON");
+      }
+    } else {
+      rawUsageJson = "{}";
     }
-    ObjectNode inDetails = rawUsageNode.putObject("input_tokens_details");
-    inDetails.put("cached_tokens", cachedTokens);
-    inDetails.put("cache_write_tokens", cacheWriteTokens);
-    ObjectNode outDetails = rawUsageNode.putObject("output_tokens_details");
-    outDetails.put("reasoning_tokens", reasoningTokens);
-    String rawUsageJson = rawUsageNode.toString();
 
     ProviderResponse response =
         new ProviderResponse(
@@ -570,6 +736,10 @@ final class OpenAiResponsesStreamAccumulator {
                 textNode.put("text", c.path("text").asText(""));
               }
             }
+          } else if (srcContent != null && srcContent.isTextual()) {
+            ObjectNode textNode = contentArr.addObject();
+            textNode.put("type", "output_text");
+            textNode.put("text", srcContent.asText());
           }
         }
         case "reasoning" -> {
@@ -588,21 +758,67 @@ final class OpenAiResponsesStreamAccumulator {
                 sNode.put("text", s.path("text").asText(""));
               }
             }
+          } else if (summary != null && summary.isTextual()) {
+            ArrayNode sumArr = reasoning.putArray("summary");
+            ObjectNode sNode = sumArr.addObject();
+            sNode.put("type", "summary_text");
+            sNode.put("text", summary.asText());
           }
         }
         case "function_call" -> {
+          String itemId = item.path("id").asText(null);
+          String callId = item.path("call_id").asText(null);
+          WireToolCall tool = findToolCall(itemId, callId);
+
+          String effectiveCallId = null;
+          if (callId != null && !callId.isBlank()) {
+            effectiveCallId = callId;
+          } else if (itemId != null && !itemId.isBlank()) {
+            effectiveCallId = itemId;
+          } else if (tool != null) {
+            effectiveCallId =
+                (tool.callId != null && !tool.callId.isBlank()) ? tool.callId : tool.id;
+          }
+
+          String name = null;
+          if (item.has("name") && !item.path("name").asText().isBlank()) {
+            name = item.path("name").asText();
+          } else if (tool != null && tool.name != null && !tool.name.isBlank()) {
+            name = tool.name;
+          }
+
+          String args = null;
+          if (item.has("arguments") && item.get("arguments").isTextual()) {
+            args = item.get("arguments").asText();
+          } else if (tool != null && tool.argumentsTextual && tool.argumentsBuffer.length() > 0) {
+            args = tool.argumentsBuffer.toString();
+          }
+
+          if (effectiveCallId == null
+              || effectiveCallId.isBlank()
+              || name == null
+              || name.isBlank()
+              || args == null
+              || args.isBlank()
+              || tryParseJsonObject(args) == null) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
+          }
+
           ObjectNode fc = array.addObject();
           fc.put("type", "function_call");
-          String callId = item.path("call_id").asText(null);
-          if (callId == null || callId.isBlank()) {
-            callId = item.path("id").asText(null);
-          }
-          fc.put("call_id", callId);
-          fc.put("name", item.path("name").asText(""));
-          fc.put("arguments", item.path("arguments").asText("{}"));
+          fc.put("call_id", effectiveCallId);
+          fc.put("name", name);
+          fc.put("arguments", args);
         }
         default -> {}
       }
+    }
+
+    // 若显式处理了 terminal output 且 rawOutputItems 为空（例如 output: []），
+    // 则表示终端权威输出清空了所有内容，不得回退合成草稿 replay。
+    if (explicitTerminalOutputProcessed && rawOutputItems.isEmpty()) {
+      return array;
     }
 
     // 若 rawOutputItems 为空但有文本或工具调用，合成标准的 replay output
@@ -625,13 +841,23 @@ final class OpenAiResponsesStreamAccumulator {
         t.put("text", textBuffer.toString());
       }
       for (WireToolCall tool : toolsById.values()) {
+        String effectiveCallId =
+            (tool.callId != null && !tool.callId.isBlank()) ? tool.callId : tool.id;
+        String args = tool.argumentsBuffer.toString();
+        if (effectiveCallId == null
+            || effectiveCallId.isBlank()
+            || tool.name == null
+            || tool.name.isBlank()
+            || args.isBlank()
+            || tryParseJsonObject(args) == null) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
+        }
         ObjectNode fc = array.addObject();
         fc.put("type", "function_call");
-        String callId = tool.callId != null ? tool.callId : tool.id;
-        fc.put("call_id", callId);
+        fc.put("call_id", effectiveCallId);
         fc.put("name", tool.name);
-        String args = tool.argumentsBuffer.toString();
-        fc.put("arguments", args.isEmpty() ? "{}" : args);
+        fc.put("arguments", args);
       }
     }
 

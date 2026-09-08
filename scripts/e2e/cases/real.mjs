@@ -87,7 +87,7 @@ export async function resolveRealModel(ctx, modelDef) {
   const provider = providers.find((candidate) => candidate.name === modelDef.providerName)
   assert(
     provider,
-    `provider ${modelDef.providerName} not found in catalog: ${JSON.stringify(providers.map((p) => p.name))}`,
+    `provider ${modelDef.providerName} not found in catalog: ${safeDiagnosticJson(providers.map((p) => p.name))}`,
   )
   assert(
     provider.providerType === modelDef.providerType,
@@ -118,7 +118,7 @@ export async function resolveRealModel(ctx, modelDef) {
   const variants = model.config?.variants || []
   assert(
     Array.isArray(variants) && variants.some((v) => v.id === modelDef.variant),
-    `model ${modelDef.providerName}/${modelDef.modelName} does not declare variant ${modelDef.variant}: ${JSON.stringify(variants)}`,
+    `model ${modelDef.providerName}/${modelDef.modelName} does not declare variant ${modelDef.variant}: ${safeDiagnosticJson(variants)}`,
   )
 
   if (Array.isArray(modelDef.variants)) {
@@ -126,7 +126,7 @@ export async function resolveRealModel(ctx, modelDef) {
     assert(
       declaredVariantIds.length === modelDef.variants.length
         && declaredVariantIds.every((v, i) => v === modelDef.variants[i]),
-      `model ${modelDef.providerName}/${modelDef.modelName} variant contract mismatch: expected ${JSON.stringify(modelDef.variants)}, got ${JSON.stringify(declaredVariantIds)}`,
+      `model ${modelDef.providerName}/${modelDef.modelName} variant contract mismatch: expected ${safeDiagnosticJson(modelDef.variants)}, got ${safeDiagnosticJson(declaredVariantIds)}`,
     )
   }
 
@@ -158,7 +158,7 @@ export async function requireRealMiniMaxM3(ctx) {
  * - providerTotalTokens: 厂商报告的总 token（Anthropic 为 0L/未提供）
  */
 export function assertProviderUsageAlgebra(usage, providerType, { modelName } = {}) {
-  assert(usage && typeof usage === 'object', `usage must be an object: ${JSON.stringify(usage)}`)
+  assert(usage && typeof usage === 'object', `usage must be an object: ${safeDiagnosticJson(usage)}`)
 
   const requiredFields = [
     'inputTokens',
@@ -173,7 +173,7 @@ export function assertProviderUsageAlgebra(usage, providerType, { modelName } = 
     const value = usage[field]
     assert(
       typeof value === 'number' && Number.isSafeInteger(value) && value >= 0,
-      `usage.${field} must be a non-negative safe integer, got: ${value} in ${JSON.stringify(usage)}`,
+      `usage.${field} must be a non-negative safe integer, got: ${value} in ${safeDiagnosticJson(usage)}`,
     )
   }
 
@@ -324,7 +324,11 @@ export function assertAssistantUsage(
 
   if (requirePositiveIO) {
     if (providerType === 'anthropic') {
-      const totalInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens + usage.cacheWriteLongTokens
+      const totalInput =
+        usage.inputTokens
+        + usage.cacheReadTokens
+        + usage.cacheWriteTokens
+        + usage.cacheWriteLongTokens
       assert(
         totalInput > 0,
         `inputTokens + cacheReadTokens + cacheWriteTokens + cacheWriteLongTokens must be > 0: ${safeDiagnosticJson(usage)}`,
@@ -338,10 +342,34 @@ export function assertAssistantUsage(
         `Anthropic providerTotalTokens must be 0: ${safeDiagnosticJson(usage)}`,
       )
     } else if (providerType === 'openai_response') {
-      const totalInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens + usage.cacheWriteLongTokens
+      const totalInput =
+        usage.inputTokens
+        + usage.cacheReadTokens
+        + usage.cacheWriteTokens
+        + usage.cacheWriteLongTokens
       assert(
         totalInput > 0,
         `inputTokens + cacheReadTokens + cacheWriteTokens + cacheWriteLongTokens must be > 0: ${safeDiagnosticJson(usage)}`,
+      )
+      assert(
+        usage.outputTokens + usage.reasoningTokens > 0,
+        `outputTokens + reasoningTokens must be > 0: ${safeDiagnosticJson(usage)}`,
+      )
+      // OpenAI Responses 协议允许上游缺失 total_tokens 时的 providerTotalTokens=0；若 >0 则代数检查由 assertProviderUsageAlgebra 负责
+    } else if (providerType === 'openai') {
+      assert(
+        usage.inputTokens + usage.cacheReadTokens > 0,
+        `inputTokens + cacheReadTokens must be > 0: ${safeDiagnosticJson(usage)}`,
+      )
+      assert(
+        usage.outputTokens + usage.reasoningTokens > 0,
+        `outputTokens + reasoningTokens must be > 0: ${safeDiagnosticJson(usage)}`,
+      )
+      // OpenAI Chat 协议允许上游缺失 total_tokens 时的 providerTotalTokens=0；若 >0 则代数检查由 assertProviderUsageAlgebra 负责
+    } else if (providerType === 'google') {
+      assert(
+        usage.inputTokens + usage.cacheReadTokens > 0,
+        `inputTokens + cacheReadTokens must be > 0: ${safeDiagnosticJson(usage)}`,
       )
       assert(
         usage.outputTokens + usage.reasoningTokens > 0,
@@ -392,15 +420,30 @@ export function assertAssistantUsage(
 export function sanitizeArtifact(data) {
   if (data === null || data === undefined) return data
   if (typeof data === 'string') {
+    const trimmed = data.trim()
+    if (
+      (trimmed.startsWith('{') && trimmed.endsWith('}'))
+      || (trimmed.startsWith('[') && trimmed.endsWith(']'))
+    ) {
+      try {
+        const parsed = JSON.parse(data)
+        if (parsed && typeof parsed === 'object') {
+          return JSON.stringify(sanitizeArtifact(parsed))
+        }
+      } catch {
+        // 非合法 JSON，回退至纯文本脱敏
+      }
+    }
     let sanitized = data
-      .replace(/https?:\/\/[^\s"']+/g, '[REDACTED_URL]')
-      .replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [REDACTED]')
+      .replace(/https?:\/\/[^\s"'`<>{}]+/gi, '[REDACTED_URL]')
+      .replace(/\bBearer\s+[^\s"',]+/gi, 'Bearer [REDACTED]')
+      .replace(/\b(?:sk|key|token)-[A-Za-z0-9_-]{8,}\b/gi, '[REDACTED]')
       .replace(
-        /\b(TEST_[A-Z0-9_]*(?:API_KEY|BASE_URL)|apiKey|credential|authorization|secret|password)=([^\s&]+)/gi,
+        /\b(TEST_[A-Z0-9_]*(?:API_KEY|BASE_URL)|apiKey|credential|authorization|secret|password)=([^\s&"']+)/gi,
         '$1=[REDACTED]',
       )
-    if (sanitized.length > 160) {
-      sanitized = `${sanitized.slice(0, 120)}...[TRUNCATED]`
+    if (sanitized.length > 200) {
+      sanitized = `${sanitized.slice(0, 160)}...[TRUNCATED]`
     }
     return sanitized
   }
@@ -408,12 +451,45 @@ export function sanitizeArtifact(data) {
     return data.map((item) => sanitizeArtifact(item))
   }
   if (typeof data === 'object') {
-    // 语义内容类型脱敏：thinking / redacted_thinking
+    // 1. Gemini part with thought: true (禁止残留兄弟 text 与 thoughtSignature)
+    if (data.thought === true) {
+      return {
+        thought: true,
+        present: true,
+        textLength: typeof data.text === 'string' ? data.text.length : 0,
+      }
+    }
+
+    // 2. Anthropic thinking / redacted_thinking block (禁止残留 thinking 文本、签名或加密 data)
     if (data.type === 'thinking' || data.type === 'redacted_thinking') {
+      const length =
+        typeof data.text === 'string'
+          ? data.text.length
+          : typeof data.thinking === 'string'
+            ? data.thinking.length
+            : typeof data.data === 'string'
+              ? data.data.length
+              : 0
       return {
         type: data.type,
         present: true,
-        textLength: typeof data.text === 'string' ? data.text.length : 0,
+        length,
+      }
+    }
+
+    // 3. OpenAI Responses reasoning block (type: 'reasoning')
+    if (data.type === 'reasoning') {
+      return {
+        type: 'reasoning',
+        present: true,
+        ...(data.id ? { id: data.id } : {}),
+      }
+    }
+    if (data.type === 'summary_text') {
+      return {
+        type: 'summary_text',
+        present: true,
+        length: typeof data.text === 'string' ? data.text.length : 0,
       }
     }
 
@@ -426,33 +502,84 @@ export function sanitizeArtifact(data) {
         || lower.includes('password')
         || lower.includes('credential')
         || lower.includes('authorization')
-        || lower === 'baseurl'
+        || lower.includes('baseurl')
+        || lower.includes('base_url')
+        || lower === 'auth'
         || (lower.includes('token') && !lower.includes('tokens'))
       ) {
         result[key] = '[REDACTED]'
-      } else if (lower === 'rawusagejson') {
+      } else if (
+        lower === 'url'
+        || lower === 'endpoint'
+        || lower === 'endpointurl'
+        || lower === 'endpoint_url'
+        || lower.includes('url')
+      ) {
+        result[key] = '[REDACTED_URL]'
+      } else if (
+        lower.includes('rawusage')
+        || lower.includes('raw_usage')
+      ) {
         result[key] = '[REDACTED_RAW_USAGE]'
-      } else if (lower === 'replaystate' || lower === 'replaypayload' || lower === 'payload') {
+      } else if (
+        lower.includes('replaystate')
+        || lower.includes('replay_state')
+        || lower.includes('replaypayload')
+        || lower.includes('replay_payload')
+        || lower === 'payload'
+        || lower === 'payloadjson'
+        || lower === 'payload_json'
+      ) {
         result[key] = '[REDACTED_REPLAY_PAYLOAD]'
-      } else if (lower === 'thoughtsignature' || lower === 'signature' || lower === 'signatures') {
+      } else if (
+        lower === 'thoughttokens'
+        || lower === 'thought_tokens'
+        || lower === 'reasoningtokens'
+        || lower === 'reasoning_tokens'
+      ) {
+        result[key] = value
+      } else if (
+        lower.includes('thoughtsignature')
+        || lower.includes('thought_signature')
+        || lower === 'signature'
+        || lower === 'signatures'
+      ) {
         result[key] = '[REDACTED_SIGNATURE]'
       } else if (
-        lower === 'encryptedreasoning'
-        || lower === 'reasoningcontent'
-        || lower === 'reasoning_content'
+        lower.includes('encryptedreasoning')
+        || lower.includes('encrypted_reasoning')
+        || lower.includes('encryptedcontent')
+        || lower.includes('encrypted_content')
+      ) {
+        result[key] = '[REDACTED_ENCRYPTED_CONTENT]'
+      } else if (
+        lower.includes('summarytext')
+        || lower.includes('summary_text')
+        || lower === 'summary'
+      ) {
+        result[key] = '[REDACTED_SUMMARY]'
+      } else if (
+        lower.includes('reasoningcontent')
+        || lower.includes('reasoning_content')
+        || lower.includes('reasoningdetails')
+        || lower.includes('reasoning_details')
       ) {
         result[key] = '[REDACTED_REASONING_CONTENT]'
       } else if (lower === 'thinking' || lower === 'thought' || lower === 'thoughts') {
-        result[key] = typeof value === 'string' ? { present: true, length: value.length } : '[REDACTED_THINKING]'
+        result[key] =
+          typeof value === 'string'
+            ? { present: true, length: value.length }
+            : '[REDACTED_THINKING]'
       } else if (
-        lower === 'httpbody'
+        lower.includes('httpbody')
+        || lower.includes('http_body')
         || lower === 'body'
-        || lower === 'requestbody'
-        || lower === 'responsebody'
+        || lower.includes('requestbody')
+        || lower.includes('request_body')
+        || lower.includes('responsebody')
+        || lower.includes('response_body')
       ) {
         result[key] = '[REDACTED_HTTP_BODY]'
-      } else if (lower === 'url' && typeof value === 'string') {
-        result[key] = '[REDACTED_URL]'
       } else {
         result[key] = sanitizeArtifact(value)
       }
@@ -536,34 +663,34 @@ for (const def of REAL_MODEL_DEFINITIONS) {
         })
         assert(
           accepted.acceptedCommands[0]?.type === 'USER_MESSAGE',
-          `expected USER_MESSAGE command: ${JSON.stringify(accepted.acceptedCommands)}`,
+          `expected USER_MESSAGE command: ${safeDiagnosticJson(accepted.acceptedCommands)}`,
         )
 
         const firstQuiescent = await waitForQuiescentThread(ctx, threadId, {
           timeoutMs: 180_000,
           intervalMs: 500,
         })
-        assert(firstQuiescent.status === 'IDLE', `thread not IDLE: ${JSON.stringify(firstQuiescent)}`)
+        assert(firstQuiescent.status === 'IDLE', `thread not IDLE: ${safeDiagnosticJson(firstQuiescent)}`)
 
         const firstSnapshot = await getThreadSnapshot(ctx, threadId)
         assert(
           firstSnapshot.modelInvocation === null,
-          `IDLE snapshot must expose no active model invocation: ${JSON.stringify(firstSnapshot.modelInvocation)}`,
+          `IDLE snapshot must expose no active model invocation: ${safeDiagnosticJson(firstSnapshot.modelInvocation)}`,
         )
         assert(
           !('modelInvocations' in firstSnapshot),
-          `snapshot DTO has no modelInvocations[]: ${JSON.stringify(Object.keys(firstSnapshot))}`,
+          `snapshot DTO has no modelInvocations[]: ${safeDiagnosticJson(Object.keys(firstSnapshot))}`,
         )
         assert(
           (firstSnapshot.queuedCommands || []).length === 0,
-          `queued commands must be empty: ${JSON.stringify(firstSnapshot.queuedCommands)}`,
+          `queued commands must be empty: ${safeDiagnosticJson(firstSnapshot.queuedCommands)}`,
         )
 
         const firstEntries = firstSnapshot.entries || []
         const firstUserIndex = findUserEntryIndex(firstEntries, firstMarker)
         const firstTurnStartIndex = firstEntries.findIndex((entry) => entryType(entry) === 'TURN_START')
         const firstAssistants = normalAssistantEntries(firstEntries)
-        assert(firstAssistants.length > 0, `no normal assistant entry found: ${JSON.stringify(firstEntries)}`)
+        assert(firstAssistants.length > 0, `no normal assistant entry found: ${safeDiagnosticJson(firstEntries)}`)
         const firstAssistantEntry = firstAssistants.at(-1)
         const firstAssistantIndex = firstEntries.findIndex(
           (entry) => String(entry.entryId) === String(firstAssistantEntry.entryId),
@@ -576,13 +703,13 @@ for (const def of REAL_MODEL_DEFINITIONS) {
             && firstTurnStartIndex < firstUserIndex
             && firstUserIndex < firstAssistantIndex
             && firstAssistantIndex < firstTurnEndIndex,
-          `expected TURN_START -> USER -> normal ASSISTANT MESSAGE -> TURN_END(COMPLETED): ${JSON.stringify(firstEntries)}`,
+          `expected TURN_START -> USER -> normal ASSISTANT MESSAGE -> TURN_END(COMPLETED): ${safeDiagnosticJson(firstEntries)}`,
         )
 
         const firstTurnEndPayload = parseEntryPayload(firstEntries[firstTurnEndIndex])
         assert(
           firstTurnEndPayload.outcome === 'COMPLETED' && firstTurnEndPayload.continueModel === false,
-          `expected COMPLETED TURN_END: ${JSON.stringify(firstTurnEndPayload)}`,
+          `expected COMPLETED TURN_END: ${safeDiagnosticJson(firstTurnEndPayload)}`,
         )
 
         const firstText = messageText(firstAssistantEntry)
@@ -637,7 +764,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           })
           assert(
             quiescent.status === 'IDLE',
-            `thread not IDLE after follow-up round ${round}: ${JSON.stringify(quiescent)}`,
+            `thread not IDLE after follow-up round ${round}: ${safeDiagnosticJson(quiescent)}`,
           )
 
           const roundSnapshot = await getThreadSnapshot(ctx, threadId)
@@ -645,7 +772,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           const roundUserIndex = findUserEntryIndex(roundEntries, followUpMarker)
           assert(
             roundUserIndex >= 0,
-            `follow-up USER entry missing in round ${round}: ${JSON.stringify(roundEntries)}`,
+            `follow-up USER entry missing in round ${round}: ${safeDiagnosticJson(roundEntries)}`,
           )
 
           const entriesAfterUser = roundEntries.slice(roundUserIndex + 1)
@@ -680,7 +807,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
 
         assert(
           cacheHit,
-          `expected at least one follow-up turn to have cacheReadTokens > 0 for ${def.title}. Usages: ${JSON.stringify(followUpRecords)}`,
+          `expected at least one follow-up turn to have cacheReadTokens > 0 for ${def.title}. Usages: ${safeDiagnosticJson(followUpRecords)}`,
         )
 
         ctx.writeArtifact(
@@ -1147,7 +1274,7 @@ registerCase({
       )
       assert(
         JSON.stringify(parentAgent.config?.subagents) === JSON.stringify([childAgent.name]),
-        JSON.stringify(parentAgent),
+        safeDiagnosticJson(parentAgent),
       )
       chat = await createChat(ctx, {
         title: `e2e-task-${suffix}`,
@@ -1179,7 +1306,7 @@ registerCase({
         timeoutMs: 300_000,
         intervalMs: 500,
       })
-      assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
+      assert(finalThread.status === 'IDLE', safeDiagnosticJson(finalThread))
       const parentSnapshot = await getThreadSnapshot(ctx, parentThreadId)
       const taskResults = []
       for (const entry of parentSnapshot.entries || []) {
@@ -1192,9 +1319,9 @@ registerCase({
           }
         }
       }
-      assert(taskResults.length === 1, `expected one task result: ${JSON.stringify(taskResults)}`)
+      assert(taskResults.length === 1, `expected one task result: ${safeDiagnosticJson(taskResults)}`)
       const taskResult = taskResults[0]
-      assert(taskResult.rendererKey === 'task', JSON.stringify(taskResult))
+      assert(taskResult.rendererKey === 'task', safeDiagnosticJson(taskResult))
       const taskText = (taskResult.contents || [])
         .filter((content) => content?.type === 'text')
         .map((content) => String(content.text || ''))
@@ -1206,14 +1333,14 @@ registerCase({
 
       const childSnapshot = await getThreadSnapshot(ctx, taskId)
       const childRoot = (childSnapshot.entries || [])[0]
-      assert(entryType(childRoot) === 'ROOT', JSON.stringify(childSnapshot.entries))
+      assert(entryType(childRoot) === 'ROOT', safeDiagnosticJson(childSnapshot.entries))
       const context = parseEntryPayload(childRoot).subagentContext
       assert(
         String(context?.parentThreadId) === parentThreadId
           && String(context?.rootThreadId) === parentThreadId
           && canonicalUuid(context?.taskInvocationId, 'subagentContext.taskInvocationId')
           && context?.depth === 2,
-        `invalid child ROOT subagentContext: ${JSON.stringify(context)}`,
+        `invalid child ROOT subagentContext: ${safeDiagnosticJson(context)}`,
       )
       ctx.writeArtifact(
         'task-delegation.json',
@@ -1313,9 +1440,9 @@ registerCase({
       assert(
         Array.isArray(startResult?.acceptedCommands)
           && startResult.acceptedCommands.at(-1).type === 'USER_MESSAGE',
-        `initial message batch: ${JSON.stringify(startResult)}`,
+        `initial message batch: ${safeDiagnosticJson(startResult)}`,
       )
-      assert(firstDelta.text.trim(), `expected non-empty text delta: ${JSON.stringify(firstDelta)}`)
+      assert(firstDelta.text.trim(), `expected non-empty text delta: ${safeDiagnosticJson(firstDelta)}`)
 
       const beforeStop = await getThread(ctx, tid)
       const stopRequestId = cid()
@@ -1324,57 +1451,57 @@ registerCase({
         stopRequestId,
         expectedVersion,
       })
-      assert(stop.status === 'STOPPED', JSON.stringify(stop))
+      assert(stop.status === 'STOPPED', safeDiagnosticJson(stop))
       assert(
         stop.stoppedTurnEndEntryId != null,
-        JSON.stringify(stop),
+        safeDiagnosticJson(stop),
       )
       assert(
         Number(stop.thread.version) === Number(beforeStop.version) + 1,
-        `active stop must bump version by one: ${JSON.stringify({ beforeStop, stop })}`,
+        `active stop must bump version by one: ${safeDiagnosticJson({ beforeStop, stop })}`,
       )
 
       const entriesAfterStop = await snapshotEntries(ctx, tid)
       const abortedEntries = entriesAfterStop.filter((entry) => entryType(entry) === 'ASSISTANT_ABORTED')
       assert(
         abortedEntries.length === 1,
-        `expected exactly one ASSISTANT_ABORTED: ${JSON.stringify(entriesAfterStop)}`,
+        `expected exactly one ASSISTANT_ABORTED: ${safeDiagnosticJson(entriesAfterStop)}`,
       )
       const abortedEntry = abortedEntries[0]
       assertAssistantAbortedEntry(abortedEntry)
       const initialUserIndex = findUserEntryIndex(entriesAfterStop, initialMarker)
-      assert(initialUserIndex >= 0, `initial USER entry missing: ${JSON.stringify(entriesAfterStop)}`)
+      assert(initialUserIndex >= 0, `initial USER entry missing: ${safeDiagnosticJson(entriesAfterStop)}`)
       const realTurnEntries = entriesAfterStop.slice(initialUserIndex)
       assert(
         !realTurnEntries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
-        `expected partial aborted barrier, not ASSISTANT_ERROR: ${JSON.stringify(realTurnEntries)}`,
+        `expected partial aborted barrier, not ASSISTANT_ERROR: ${safeDiagnosticJson(realTurnEntries)}`,
       )
       assert(
         normalAssistantEntries(realTurnEntries).length === 0,
-        `stopped invocation must not materialize a normal assistant MESSAGE: ${JSON.stringify(realTurnEntries)}`,
+        `stopped invocation must not materialize a normal assistant MESSAGE: ${safeDiagnosticJson(realTurnEntries)}`,
       )
       const abortedIndex = entriesAfterStop.findIndex(
         (entry) => String(entry.entryId) === String(abortedEntry.entryId),
       )
       assert(
         abortedIndex > initialUserIndex,
-        `ASSISTANT_ABORTED must follow initial USER: ${JSON.stringify(entriesAfterStop)}`,
+        `ASSISTANT_ABORTED must follow initial USER: ${safeDiagnosticJson(entriesAfterStop)}`,
       )
 
       const replay = await stopThread(ctx, tid, {
         stopRequestId,
         expectedVersion,
       })
-      assert(replay.status === 'REPLAYED', JSON.stringify(replay))
+      assert(replay.status === 'REPLAYED', safeDiagnosticJson(replay))
       assert(
         String(replay.stoppedTurnEndEntryId) === String(stop.stoppedTurnEndEntryId),
-        `replay must identify the same stopped TURN_END: ${JSON.stringify({ stop, replay })}`,
+        `replay must identify the same stopped TURN_END: ${safeDiagnosticJson({ stop, replay })}`,
       )
-      assert(replay.cancelledCommandCount === 0, JSON.stringify(replay))
+      assert(replay.cancelledCommandCount === 0, safeDiagnosticJson(replay))
       assert(
         String(replay.thread.headEntryId) === String(stop.thread.headEntryId)
           && String(replay.thread.version) === String(stop.thread.version),
-        `replay must not mutate the Thread: ${JSON.stringify({ stop, replay })}`,
+        `replay must not mutate the Thread: ${safeDiagnosticJson({ stop, replay })}`,
       )
       ctx.writeArtifact(
         'stop-partial-after-stop.json',
@@ -1394,7 +1521,7 @@ registerCase({
         }),
         commands: [userMessageCommand(followUpPrompt, cid())],
       })
-      assert(followUp.acceptedCommands.length === 1, `follow-up batch: ${JSON.stringify(followUp)}`)
+      assert(followUp.acceptedCommands.length === 1, `follow-up batch: ${safeDiagnosticJson(followUp)}`)
       const finalThread = await waitForQuiescentThread(ctx, tid, {
         timeoutMs: 120_000,
         intervalMs: 500,
@@ -1404,13 +1531,13 @@ registerCase({
       assert(
         finalAbortedEntries.length === 1
           && String(finalAbortedEntries[0].entryId) === String(abortedEntry.entryId),
-        `aborted barrier changed after follow-up: ${JSON.stringify(finalEntries)}`,
+        `aborted barrier changed after follow-up: ${safeDiagnosticJson(finalEntries)}`,
       )
 
       const finalInitialUserIndex = findUserEntryIndex(finalEntries, initialMarker)
       assert(
         finalInitialUserIndex >= 0,
-        `initial USER entry missing after follow-up: ${JSON.stringify(finalEntries)}`,
+        `initial USER entry missing after follow-up: ${safeDiagnosticJson(finalEntries)}`,
       )
       const finalAbortedIndex = finalEntries.findIndex(
         (entry) => String(entry.entryId) === String(abortedEntry.entryId),
@@ -1420,7 +1547,7 @@ registerCase({
       const finalRealTurnAssistants = normalAssistantEntries(finalEntriesAfterInitial)
       assert(
         finalRealTurnAssistants.length === 1,
-        `expected exactly one normal assistant for follow-up: ${JSON.stringify(finalEntries)}`,
+        `expected exactly one normal assistant for follow-up: ${safeDiagnosticJson(finalEntries)}`,
       )
       const finalAssistantIndex = finalEntries.findIndex(
         (entry) => String(entry.entryId) === String(finalRealTurnAssistants[0].entryId),
@@ -1429,11 +1556,11 @@ registerCase({
         finalInitialUserIndex < finalAbortedIndex
           && finalAbortedIndex < followUpIndex
           && followUpIndex < finalAssistantIndex,
-        `expected USER -> ASSISTANT_ABORTED -> follow-up USER -> assistant MESSAGE: ${JSON.stringify(finalEntries)}`,
+        `expected USER -> ASSISTANT_ABORTED -> follow-up USER -> assistant MESSAGE: ${safeDiagnosticJson(finalEntries)}`,
       )
       assert(
         !finalEntriesAfterInitial.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
-        `unexpected cancellation barrier after durable partial: ${JSON.stringify(finalEntriesAfterInitial)}`,
+        `unexpected cancellation barrier after durable partial: ${safeDiagnosticJson(finalEntriesAfterInitial)}`,
       )
       ctx.writeArtifact(
         'stop-partial-continue.json',
@@ -1500,19 +1627,19 @@ registerCase({
         yoloEnabled: false,
         commands: [userMessageCommand(`Reply with word OK: ${mainMarker}`, cid())],
       })
-      assert(accepted.acceptedCommands.length === 1, JSON.stringify(accepted.acceptedCommands))
+      assert(accepted.acceptedCommands.length === 1, safeDiagnosticJson(accepted.acceptedCommands))
       const mainQuiescent = await waitForQuiescentThread(ctx, mainTid, {
         timeoutMs: 180_000,
         intervalMs: 500,
       })
-      assert(mainQuiescent.status === 'IDLE', JSON.stringify(mainQuiescent))
+      assert(mainQuiescent.status === 'IDLE', safeDiagnosticJson(mainQuiescent))
       const mainSnapshot = await getThreadSnapshot(ctx, mainTid)
       const mainAssistants = normalAssistantEntries(mainSnapshot.entries || [])
       assert(mainAssistants.length > 0, 'missing main assistant entry')
       const assistantEntryId = String(mainAssistants.at(-1).entryId)
 
       const current = await getThread(ctx, mainTid)
-      assert(String(current.sessionId) === String(sessionId), JSON.stringify(current))
+      assert(String(current.sessionId) === String(sessionId), safeDiagnosticJson(current))
       const mainBefore = {
         headEntryId: current.headEntryId,
         version: current.version,
@@ -1528,34 +1655,34 @@ registerCase({
         yoloEnabled: current.yoloEnabled,
         commands: [userMessageCommand(branchUserText, cid())],
       })
-      assert(String(branched.thread.sessionId) === String(sessionId), JSON.stringify(branched.thread))
+      assert(String(branched.thread.sessionId) === String(sessionId), safeDiagnosticJson(branched.thread))
       assert(
         String(branched.thread.threadId) === branchThreadId,
-        JSON.stringify(branched.thread),
+        safeDiagnosticJson(branched.thread),
       )
       assert(
         String(branched.acceptedCommands[0].sequence) === '1'
           && branched.acceptedCommands[0].type === 'USER_MESSAGE'
           && branched.replayed === false,
-        JSON.stringify(branched),
+        safeDiagnosticJson(branched),
       )
       const mainAfter = await getThread(ctx, mainTid)
       assert(
         String(mainAfter.headEntryId) === String(mainBefore.headEntryId)
           && String(mainAfter.version) === String(mainBefore.version)
           && String(mainAfter.nextCommandSequence) === String(mainBefore.nextCommandSequence),
-        JSON.stringify({ before: mainBefore, after: mainAfter }),
+        safeDiagnosticJson({ before: mainBefore, after: mainAfter }),
       )
 
       const finalThread = await waitForQuiescentThread(ctx, branchThreadId, {
         timeoutMs: 180_000,
         intervalMs: 500,
       })
-      assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
+      assert(finalThread.status === 'IDLE', safeDiagnosticJson(finalThread))
       const entries = await snapshotEntries(ctx, branchThreadId)
       assert(
         entries.some((entry) => String(entry.entryId) === String(assistantEntryId)),
-        `branch path must include the startEntry: ${JSON.stringify(entries)}`,
+        `branch path must include the startEntry: ${safeDiagnosticJson(entries)}`,
       )
       const branchUserIndex = findUserEntryIndex(entries, branchUserText)
       const assistantIndex = entries.findIndex(
@@ -1564,14 +1691,14 @@ registerCase({
       )
       assert(
         branchUserIndex >= 0 && branchUserIndex < assistantIndex,
-        `branch turn must follow the branch head: ${JSON.stringify(entries)}`,
+        `branch turn must follow the branch head: ${safeDiagnosticJson(entries)}`,
       )
       const branchAssistant = normalAssistantEntries(entries).at(-1)
       const text = messageText(branchAssistant)
       assert(/\bBRANCH\b/i.test(text), `expected BRANCH reply, got: ${text}`)
       assert(
         String(entries[0].sessionId) === String(sessionId),
-        `session must stay unchanged: ${JSON.stringify(entries[0])}`,
+        `session must stay unchanged: ${safeDiagnosticJson(entries[0])}`,
       )
       ctx.writeArtifact(
         'branch-snapshot.json',
@@ -1593,11 +1720,11 @@ registerCase({
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
-    assert(match?.status === 'READY', JSON.stringify(match))
+    assert(match?.status === 'READY', safeDiagnosticJson(match))
     canonicalUuid(match.id, 'match.id')
     assert(
       typeof match.rootPath === 'string' && match.rootPath.length > 0,
-      JSON.stringify(match),
+      safeDiagnosticJson(match),
     )
     const expectedCapabilityIds = [
       'fs.read',
@@ -1619,9 +1746,9 @@ registerCase({
       ids.length === expectedCapabilityIds.length
         && expectedCapabilityIds.every((id) => ids.includes(id))
         && actualCapabilities.every((capability) => capability.version === '1'),
-      JSON.stringify({ expectedCapabilityIds, actualCapabilities }),
+      safeDiagnosticJson({ expectedCapabilityIds, actualCapabilities }),
     )
-    assert(Array.isArray(match.skills), JSON.stringify(match))
+    assert(Array.isArray(match.skills), safeDiagnosticJson(match))
     assert(
       !Object.hasOwn(match, 'tools')
         && !Object.hasOwn(match, 'mcpServers')
@@ -1629,9 +1756,9 @@ registerCase({
         && !Object.hasOwn(match, 'workingDirectory')
         && !Object.hasOwn(match, 'timeZone')
         && !Object.hasOwn(match, 'note'),
-      JSON.stringify(match),
+      safeDiagnosticJson(match),
     )
-    assert(match.ready === true, JSON.stringify(match))
+    assert(match.ready === true, safeDiagnosticJson(match))
     ctx.vars.daemonEnvironment = match
   },
 })
@@ -1648,35 +1775,35 @@ registerCase({
     const base = `/api/harness/environments/${encodeURIComponent(envId)}/directories`
     const { json } = await ctx.call('GET', base)
     const dir = envelopeData(json)
-    assert(dir?.path === '.', JSON.stringify(json))
-    assert(dir.displayPath === '.', JSON.stringify(json))
-    assert(dir.parentPath === '.', JSON.stringify(json))
-    assert(typeof dir.truncated === 'boolean', JSON.stringify(json))
+    assert(dir?.path === '.', safeDiagnosticJson(json))
+    assert(dir.displayPath === '.', safeDiagnosticJson(json))
+    assert(dir.parentPath === '.', safeDiagnosticJson(json))
+    assert(typeof dir.truncated === 'boolean', safeDiagnosticJson(json))
     assert(
       !Object.hasOwn(dir, 'gitBranch') || dir.gitBranch === null || typeof dir.gitBranch === 'string',
-      JSON.stringify(json),
+      safeDiagnosticJson(json),
     )
-    assert(Array.isArray(dir.entries), JSON.stringify(json))
+    assert(Array.isArray(dir.entries), safeDiagnosticJson(json))
     for (const entry of dir.entries) {
       assert(
         typeof entry.name === 'string'
           && entry.name.length > 0
           && typeof entry.path === 'string'
           && entry.path.length > 0,
-        JSON.stringify(entry),
+        safeDiagnosticJson(entry),
       )
-      assert(!Object.hasOwn(entry, 'displayPath'), JSON.stringify(entry))
+      assert(!Object.hasOwn(entry, 'displayPath'), safeDiagnosticJson(entry))
       const prefix = dir.path === '.' ? '' : `${dir.path}/`
-      assert(entry.path.startsWith(prefix), JSON.stringify(entry))
-      assert(!entry.path.slice(prefix.length).includes('/'), JSON.stringify(entry))
-      assert(entry.name === entry.path.split('/').at(-1), JSON.stringify(entry))
+      assert(entry.path.startsWith(prefix), safeDiagnosticJson(entry))
+      assert(!entry.path.slice(prefix.length).includes('/'), safeDiagnosticJson(entry))
+      assert(entry.name === entry.path.split('/').at(-1), safeDiagnosticJson(entry))
     }
     const explicit = envelopeData(
       (await ctx.call('GET', `${base}?path=${encodeURIComponent('.')}`)).json,
     )
     assert(
       explicit.path === '.' && explicit.displayPath === '.' && explicit.parentPath === '.',
-      JSON.stringify(explicit),
+      safeDiagnosticJson(explicit),
     )
     const invalid = await expectHttpError(
       () => ctx.call('GET', `${base}?path=${encodeURIComponent('../escape')}`),
@@ -1721,8 +1848,8 @@ registerCase({
       },
     })
     const toolAgent = envelopeData(agentJson)
-    assert(toolAgent?.name, JSON.stringify(agentJson))
-    assert(toolAgent?.environmentId === ctx.vars.daemonEnvironment.id, JSON.stringify(agentJson))
+    assert(toolAgent?.name, safeDiagnosticJson(agentJson))
+    assert(toolAgent?.environmentId === ctx.vars.daemonEnvironment.id, safeDiagnosticJson(agentJson))
     let chat = null
     try {
       const agentConfig = toolAgent.config
@@ -1732,7 +1859,7 @@ registerCase({
           && JSON.stringify(agentConfig.toolIds) === JSON.stringify(['base.read'])
           && JSON.stringify(agentConfig.skills) === JSON.stringify([])
           && JSON.stringify(agentConfig.subagents) === JSON.stringify([]),
-        `temporary tool Agent config must be exactly toolIds=[base.read], skills=[], subagents=[]: ${JSON.stringify(toolAgent)}`,
+        `temporary tool Agent config must be exactly toolIds=[base.read], skills=[], subagents=[]: ${safeDiagnosticJson(toolAgent)}`,
       )
       const expectedEnvironment = {
         environmentId: ctx.vars.daemonEnvironment.id,
@@ -1787,7 +1914,7 @@ registerCase({
       const tid = accepted.thread.threadId
       assert(
         accepted.thread.branchSettings.workspacePath === '.',
-        JSON.stringify(accepted.thread.branchSettings),
+        safeDiagnosticJson(accepted.thread.branchSettings),
       )
       let waiting = null
       let terminal = null
@@ -1811,42 +1938,42 @@ registerCase({
       }
       assert(
         waiting,
-        `never reached TOOL_WAITING_APPROVAL on thread ${tid}: ${JSON.stringify(terminal)}`,
+        `never reached TOOL_WAITING_APPROVAL on thread ${tid}: ${safeDiagnosticJson(terminal)}`,
       )
       const readInvocation = waiting.toolInvocations.find(
         (invocation) => invocation.toolName === 'read',
       )
-      assert(readInvocation, `no WAITING_APPROVAL read invocation: ${JSON.stringify(waiting)}`)
-      assert(readInvocation.status === 'WAITING_APPROVAL', JSON.stringify(readInvocation))
+      assert(readInvocation, `no WAITING_APPROVAL read invocation: ${safeDiagnosticJson(waiting)}`)
+      assert(readInvocation.status === 'WAITING_APPROVAL', safeDiagnosticJson(readInvocation))
       assert(
         readInvocation.toolId === 'base.read',
-        `WAITING read invocation must identify base.read: ${JSON.stringify(readInvocation)}`,
+        `WAITING read invocation must identify base.read: ${safeDiagnosticJson(readInvocation)}`,
       )
       assert(
         !Object.hasOwn(readInvocation, 'toolBackend'),
-        `ToolInvocationDTO must not expose toolBackend: ${JSON.stringify(readInvocation)}`,
+        `ToolInvocationDTO must not expose toolBackend: ${safeDiagnosticJson(readInvocation)}`,
       )
       assert(
         JSON.stringify(readInvocation.environment) === JSON.stringify(expectedEnvironment),
-        `read invocation must freeze the complete Environment binding: ${JSON.stringify({
+        `read invocation must freeze the complete Environment binding: ${safeDiagnosticJson({
           readInvocation,
           expectedEnvironment,
         })}`,
       )
       assert(
         !Object.hasOwn(readInvocation, 'location'),
-        `ToolInvocationDTO must not expose location: ${JSON.stringify(readInvocation)}`,
+        `ToolInvocationDTO must not expose location: ${safeDiagnosticJson(readInvocation)}`,
       )
       assert(
         readInvocation.toolCallId
           && Number.isSafeInteger(readInvocation.attempt)
           && readInvocation.attempt === 0,
-        JSON.stringify(readInvocation),
+        safeDiagnosticJson(readInvocation),
       )
       const approvalJson = JSON.parse(readInvocation.approvalJson || '{}')
       assert(
         approvalJson.required === true && approvalJson.decision == null,
-        `approval must be required and undecided: ${JSON.stringify(approvalJson)}`,
+        `approval must be required and undecided: ${safeDiagnosticJson(approvalJson)}`,
       )
       ctx.writeArtifact(
         'waiting-approval.json',
@@ -1860,12 +1987,12 @@ registerCase({
         actor: 'web',
         reason: null,
       })
-      assert(String(decided.id) === String(readInvocation.id), JSON.stringify(decided))
-      assert(decided.status === 'READY', JSON.stringify(decided))
+      assert(String(decided.id) === String(readInvocation.id), safeDiagnosticJson(decided))
+      assert(decided.status === 'READY', safeDiagnosticJson(decided))
       const decidedApproval = JSON.parse(decided.approvalJson || '{}')
       assert(
         decidedApproval.decision === 'ALLOWED' && decidedApproval.decisionId === decisionId,
-        `durable decision is ALLOWED (input is ALLOW): ${JSON.stringify(decidedApproval)}`,
+        `durable decision is ALLOWED (input is ALLOW): ${safeDiagnosticJson(decidedApproval)}`,
       )
       const replay = await approveToolInvocation(ctx, tid, readInvocation.id, {
         decision: 'ALLOW',
@@ -1877,30 +2004,30 @@ registerCase({
       assert(
         replayApproval.decision === 'ALLOWED'
           && replayApproval.decidedAt === decidedApproval.decidedAt,
-        `approval replay must keep the original decision: ${JSON.stringify(replayApproval)}`,
+        `approval replay must keep the original decision: ${safeDiagnosticJson(replayApproval)}`,
       )
 
       const finalThread = await waitForQuiescentThread(ctx, tid, {
         timeoutMs: 180_000,
         intervalMs: 500,
       })
-      assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
+      assert(finalThread.status === 'IDLE', safeDiagnosticJson(finalThread))
       const finalSnapshot = await getThreadSnapshot(ctx, tid)
       const finalEntries = finalSnapshot.entries || []
       assert(
         !finalEntries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
-        `completed tool turn must not contain ASSISTANT_ERROR: ${JSON.stringify(finalEntries)}`,
+        `completed tool turn must not contain ASSISTANT_ERROR: ${safeDiagnosticJson(finalEntries)}`,
       )
       const assistantEntries = normalAssistantEntries(finalEntries)
       const finalAssistant = assistantEntries.at(-1)
       assert(
         finalAssistant && messageText(finalAssistant).trim().length > 0,
-        `completed tool turn must contain a non-empty final assistant reply: ${JSON.stringify(finalEntries)}`,
+        `completed tool turn must contain a non-empty final assistant reply: ${safeDiagnosticJson(finalEntries)}`,
       )
       const turnEndEntries = finalEntries.filter((entry) => entryType(entry) === 'TURN_END')
       assert(
         turnEndEntries.length > 0,
-        `completed tool turn must contain TURN_END: ${JSON.stringify(finalEntries)}`,
+        `completed tool turn must contain TURN_END: ${safeDiagnosticJson(finalEntries)}`,
       )
       const lastTurnEnd = parseEntryPayload(turnEndEntries.at(-1))
       assert(
@@ -1908,11 +2035,11 @@ registerCase({
           && lastTurnEnd.continueModel === false
           && lastTurnEnd.reason == null
           && lastTurnEnd.closeRequestId == null,
-        `expected final COMPLETED TURN_END: ${JSON.stringify(lastTurnEnd)}`,
+        `expected final COMPLETED TURN_END: ${safeDiagnosticJson(lastTurnEnd)}`,
       )
       assert(
         finalSnapshot.toolInvocations.length === 0,
-        `IDLE snapshot exposes no tool siblings: ${JSON.stringify(finalSnapshot.toolInvocations)}`,
+        `IDLE snapshot exposes no tool siblings: ${safeDiagnosticJson(finalSnapshot.toolInvocations)}`,
       )
       const toolEntries = finalEntries.filter((entry) => {
         if (entryType(entry) !== 'MESSAGE') return false
@@ -1921,7 +2048,7 @@ registerCase({
       })
       assert(
         toolEntries.length > 0,
-        `no durable TOOL MESSAGE entry: ${JSON.stringify(finalSnapshot.entries)}`,
+        `no durable TOOL MESSAGE entry: ${safeDiagnosticJson(finalSnapshot.entries)}`,
       )
       const resources = []
       const toolResultContents = []
@@ -1937,33 +2064,33 @@ registerCase({
       }
       assert(
         toolResultContents.length > 0,
-        `tool_result contents missing: ${JSON.stringify(finalSnapshot.entries)}`,
+        `tool_result contents missing: ${safeDiagnosticJson(finalSnapshot.entries)}`,
       )
       assert(
         resources.length >= 1,
-        `expected at least one externalized resource: ${JSON.stringify(toolResultContents)}`,
+        `expected at least one externalized resource: ${safeDiagnosticJson(toolResultContents)}`,
       )
       for (const resource of resources) {
         assert(
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
             String(resource.blobId || ''),
           ),
-          `durable resource must carry a blobId: ${JSON.stringify(resource)}`,
+          `durable resource must carry a blobId: ${safeDiagnosticJson(resource)}`,
         )
         assert(
           typeof resource.name === 'string' && resource.name.trim(),
-          `durable resource name must be present: ${JSON.stringify(resource)}`,
+          `durable resource name must be present: ${safeDiagnosticJson(resource)}`,
         )
         assert(
           resource.preview == null || typeof resource.preview === 'string',
-          `durable resource preview must be null or text: ${JSON.stringify(resource)}`,
+          `durable resource preview must be null or text: ${safeDiagnosticJson(resource)}`,
         )
         assert(
           !Object.hasOwn(resource, 'uri')
             && !Object.hasOwn(resource, 'mediaType')
             && !Object.hasOwn(resource, 'size')
             && !Object.hasOwn(resource, 'sha256'),
-          `durable history must not copy transient ResourceRef facts: ${JSON.stringify(resource)}`,
+          `durable history must not copy transient ResourceRef facts: ${safeDiagnosticJson(resource)}`,
         )
       }
       const managed = resources[0]
@@ -1972,16 +2099,16 @@ registerCase({
         `/api/storage/blobs/${managed.blobId}/download-url`,
       )
       const signed = envelopeData(signedJson)
-      assert(signed.method === 'GET', JSON.stringify(signed))
+      assert(signed.method === 'GET', safeDiagnosticJson(signed))
       assert(
         /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(String(signed.mediaType || '')),
-        `blob mediaType must be canonical: ${JSON.stringify(signed)}`,
+        `blob mediaType must be canonical: ${safeDiagnosticJson(signed)}`,
       )
       assertDecimalVersion(signed.sizeBytes, 'blob.sizeBytes')
       const signedSizeBytes = Number(signed.sizeBytes)
       assert(
         Number.isSafeInteger(signedSizeBytes) && signedSizeBytes > 0,
-        `blob sizeBytes must be a positive safe decimal: ${JSON.stringify(signed)}`,
+        `blob sizeBytes must be a positive safe decimal: ${safeDiagnosticJson(signed)}`,
       )
       assert(
         signedSizeBytes === Buffer.byteLength(expectedReadOutput),
@@ -2021,18 +2148,18 @@ function assertAssistantAbortedEntry(entry) {
   const payload = parseEntryPayload(entry)
   assert(
     Object.keys(payload).length === 1 && Object.hasOwn(payload, 'message'),
-    `ASSISTANT_ABORTED must contain only message: ${JSON.stringify(payload)}`,
+    `ASSISTANT_ABORTED must contain only message: ${safeDiagnosticJson(payload)}`,
   )
   assert(
     !Object.hasOwn(payload, 'assistantMetadata'),
-    `ASSISTANT_ABORTED must not carry assistantMetadata: ${JSON.stringify(payload)}`,
+    `ASSISTANT_ABORTED must not carry assistantMetadata: ${safeDiagnosticJson(payload)}`,
   )
   assert(
     payload.message?.role === 'ASSISTANT' && Array.isArray(payload.message?.contents),
-    `invalid ASSISTANT_ABORTED message: ${JSON.stringify(payload)}`,
+    `invalid ASSISTANT_ABORTED message: ${safeDiagnosticJson(payload)}`,
   )
   const contents = payload.message.contents
-  assert(contents.length > 0, `ASSISTANT_ABORTED contents must not be empty: ${JSON.stringify(payload)}`)
+  assert(contents.length > 0, `ASSISTANT_ABORTED contents must not be empty: ${safeDiagnosticJson(payload)}`)
   for (const content of contents) {
     assert(
       content
@@ -2040,16 +2167,16 @@ function assertAssistantAbortedEntry(entry) {
       && !Array.isArray(content)
       && (content.type === 'text' || content.type === 'thinking')
       && typeof content.text === 'string',
-      `ASSISTANT_ABORTED contains unsafe content: ${JSON.stringify(content)}`,
+      `ASSISTANT_ABORTED contains unsafe content: ${safeDiagnosticJson(content)}`,
     )
     assert(
       Object.keys(content).sort().join(',') === 'text,type',
-      `ASSISTANT_ABORTED content has unexpected fields: ${JSON.stringify(content)}`,
+      `ASSISTANT_ABORTED content has unexpected fields: ${safeDiagnosticJson(content)}`,
     )
   }
   assert(
     contents.some((content) => content.text.trim()),
-    `expected non-empty durable partial content: ${JSON.stringify(payload)}`,
+    `expected non-empty durable partial content: ${safeDiagnosticJson(payload)}`,
   )
 }
 
@@ -2088,7 +2215,7 @@ function parseEntryPayload(entry) {
     const payload = JSON.parse(entry?.payloadJson || '{}')
     assert(
       payload && typeof payload === 'object' && !Array.isArray(payload),
-      `expected entry payload object: ${JSON.stringify(entry)}`,
+      `expected entry payload object: ${safeDiagnosticJson(entry)}`,
     )
     return payload
   } catch (error) {

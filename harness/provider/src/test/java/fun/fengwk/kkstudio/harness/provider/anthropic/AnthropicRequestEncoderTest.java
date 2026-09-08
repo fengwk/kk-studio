@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.provider.anthropic;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -35,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
@@ -442,6 +444,9 @@ class AnthropicRequestEncoderTest {
         .put("thinking", "think text")
         .put("signature", "sig-123");
     content.addObject().put("type", "text").put("text", "response text");
+    ObjectNode toolNode = content.addObject();
+    toolNode.put("type", "tool_use").put("id", "call_1").put("name", "calc");
+    toolNode.putObject("input").put("x", 1);
 
     ProviderReplayState replayState =
         new ProviderReplayState(
@@ -1172,12 +1177,11 @@ class AnthropicRequestEncoderTest {
     ProviderMessage asst1 =
         asstMsg(
             List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))), replay1);
-    AnthropicEncodedRequest enc1 =
-        encoder.encode(
-            request(defaultVariant(), List.of(user, asst1), List.of(), ProviderCacheControl.none()),
-            descriptor);
-    // 触发 fallback 重放，tool_use 依然能够 fallback 编码
-    assertTrue(MAPPER.readTree(enc1.bodyUtf8Bytes()).path("messages").get(1).has("content"));
+    ProviderRequest req1 =
+        request(defaultVariant(), List.of(user, asst1), List.of(), ProviderCacheControl.none());
+    ProviderException ex1 =
+        assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
 
     // 2. payload contains unknown block type
     ObjectNode badPayload2 = NODES.objectNode();
@@ -1190,11 +1194,11 @@ class AnthropicRequestEncoderTest {
             expectedHash,
             badPayload2);
     ProviderMessage asst2 = asstMsg(List.of(new ProviderTextBlock("text")), replay2);
-    AnthropicEncodedRequest enc2 =
-        encoder.encode(
-            request(defaultVariant(), List.of(user, asst2), List.of(), ProviderCacheControl.none()),
-            descriptor);
-    assertTrue(MAPPER.readTree(enc2.bodyUtf8Bytes()).path("messages").get(1).has("content"));
+    ProviderRequest req2 =
+        request(defaultVariant(), List.of(user, asst2), List.of(), ProviderCacheControl.none());
+    ProviderException ex2 =
+        assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
   }
 
   @Test
@@ -1282,12 +1286,11 @@ class AnthropicRequestEncoderTest {
             expectedHash,
             payloadTextMismatch);
     ProviderMessage asstText = asstMsg(List.of(new ProviderTextBlock("B")), replayText);
-    AnthropicEncodedRequest enc1 =
-        encoder.encode(
-            request(
-                defaultVariant(), List.of(user, asstText), List.of(), ProviderCacheControl.none()),
-            descriptor);
-    assertTrue(MAPPER.readTree(enc1.bodyUtf8Bytes()).path("messages").get(1).has("content"));
+    ProviderRequest req1 =
+        request(defaultVariant(), List.of(user, asstText), List.of(), ProviderCacheControl.none());
+    ProviderException ex1 =
+        assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
 
     // 2. payloadThinking mismatch
     ObjectNode payloadThinkMismatch = NODES.objectNode();
@@ -1305,12 +1308,11 @@ class AnthropicRequestEncoderTest {
             expectedHash,
             payloadThinkMismatch);
     ProviderMessage asstThink = asstMsg(List.of(new ProviderThinkingBlock("think B")), replayThink);
-    AnthropicEncodedRequest enc2 =
-        encoder.encode(
-            request(
-                defaultVariant(), List.of(user, asstThink), List.of(), ProviderCacheControl.none()),
-            descriptor);
-    assertTrue(MAPPER.readTree(enc2.bodyUtf8Bytes()).path("messages").get(1).has("content"));
+    ProviderRequest req2 =
+        request(defaultVariant(), List.of(user, asstThink), List.of(), ProviderCacheControl.none());
+    ProviderException ex2 =
+        assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
 
     // 3. tool call args mismatch
     ObjectNode payloadToolMismatch = NODES.objectNode();
@@ -1329,12 +1331,11 @@ class AnthropicRequestEncoderTest {
         asstMsg(
             List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{\"x\":2}"))),
             replayTool);
-    AnthropicEncodedRequest enc3 =
-        encoder.encode(
-            request(
-                defaultVariant(), List.of(user, asstTool), List.of(), ProviderCacheControl.none()),
-            descriptor);
-    assertTrue(MAPPER.readTree(enc3.bodyUtf8Bytes()).path("messages").get(1).has("content"));
+    ProviderRequest req3 =
+        request(defaultVariant(), List.of(user, asstTool), List.of(), ProviderCacheControl.none());
+    ProviderException ex3 =
+        assertThrows(ProviderException.class, () -> encoder.encode(req3, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
   }
 
   @Test
@@ -1366,21 +1367,11 @@ class AnthropicRequestEncoderTest {
             expectedHash,
             noRolePayload);
     ProviderMessage asst1 = asstMsg(List.of(new ProviderTextBlock("hi")), replayNoRole);
-    AnthropicEncodedRequest enc1 =
-        encoder.encode(
-            request(defaultVariant(), List.of(user, asst1), List.of(), ProviderCacheControl.none()),
-            descriptor);
-    // fallback 重放成功
-    assertEquals(
-        "hi",
-        MAPPER
-            .readTree(enc1.bodyUtf8Bytes())
-            .path("messages")
-            .get(1)
-            .path("content")
-            .get(0)
-            .path("text")
-            .asText());
+    ProviderRequest req1 =
+        request(defaultVariant(), List.of(user, asst1), List.of(), ProviderCacheControl.none());
+    ProviderException ex1 =
+        assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
 
     // 带有额外未授权字段 (size != 2)
     ObjectNode extraPropPayload = NODES.objectNode();
@@ -1394,21 +1385,11 @@ class AnthropicRequestEncoderTest {
             expectedHash,
             extraPropPayload);
     ProviderMessage asst2 = asstMsg(List.of(new ProviderTextBlock("hi")), replayExtra);
-    AnthropicEncodedRequest enc2 =
-        encoder.encode(
-            request(defaultVariant(), List.of(user, asst2), List.of(), ProviderCacheControl.none()),
-            descriptor);
-    // fallback 重放成功
-    assertEquals(
-        "hi",
-        MAPPER
-            .readTree(enc2.bodyUtf8Bytes())
-            .path("messages")
-            .get(1)
-            .path("content")
-            .get(0)
-            .path("text")
-            .asText());
+    ProviderRequest req2 =
+        request(defaultVariant(), List.of(user, asst2), List.of(), ProviderCacheControl.none());
+    ProviderException ex2 =
+        assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
   }
 
   @Test
@@ -1579,5 +1560,174 @@ class AnthropicRequestEncoderTest {
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO);
+  }
+
+  /**
+   * 意图：验证同 format (ANTHROPIC_MESSAGES) 回放时，即使 affinity 或 sourcePrefixHash 失配，如果 payload 损坏或与
+   * durable 内容不一致，必须严格抛出 INVALID_REQUEST，杜绝被判定为可 fallback。
+   */
+  @Test
+  void rejectsCorruptedSameFormatReplayEvenUnderAffinityOrHashMismatch() {
+    ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
+    String mismatchedHash = "0000000000000000000000000000000000000000000000000000000000000002";
+
+    // 1. hash 不匹配且 tool_use input 缺失
+    ObjectNode badPayload = NODES.objectNode();
+    badPayload.put("role", "assistant");
+    badPayload
+        .putArray("content")
+        .addObject()
+        .put("type", "tool_use")
+        .put("id", "c1")
+        .put("name", "calc");
+    ProviderReplayState replay1 =
+        new ProviderReplayState(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            descriptor.affinity("claude-3-5-sonnet"),
+            mismatchedHash,
+            badPayload);
+    ProviderMessage asst1 =
+        asstMsg(
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{\"x\":1}"))),
+            replay1);
+    ProviderRequest req1 =
+        request(defaultVariant(), List.of(user, asst1), List.of(), ProviderCacheControl.none());
+    ProviderException ex1 =
+        assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
+
+    // 2. affinity 不匹配且 payload 文本与 durable 不一致
+    ProviderReplayAffinity mismatchedAffinity = descriptor.affinity("other-model");
+    ObjectNode textMismatchPayload = NODES.objectNode();
+    textMismatchPayload.put("role", "assistant");
+    textMismatchPayload
+        .putArray("content")
+        .addObject()
+        .put("type", "text")
+        .put("text", "mismatched");
+    ProviderReplayState replay2 =
+        new ProviderReplayState(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            mismatchedAffinity,
+            mismatchedHash,
+            textMismatchPayload);
+    ProviderMessage asst2 = asstMsg(List.of(new ProviderTextBlock("original")), replay2);
+    ProviderRequest req2 =
+        request(defaultVariant(), List.of(user, asst2), List.of(), ProviderCacheControl.none());
+    ProviderException ex2 =
+        assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
+  }
+
+  /**
+   * 意图：验证工具调用参数 arguments 为畸形、数组、标量或 JSON null 时，在 semantic fallback 和 durable 回放校验中均抛出
+   * INVALID_REQUEST，且异常消息绝不泄漏原始参数。
+   */
+  @Test
+  void rejectsInvalidToolCallArgumentsStrictlyWithoutLeakingRawValues() {
+    ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
+
+    List<String> invalidArguments =
+        List.of("12345", "\"scalar_string\"", "true", "[1, 2, 3]", "{\"unclosed\":", "null");
+
+    for (String badArg : invalidArguments) {
+      // 1. Fallback 场景（无 replayState）
+      ProviderMessage asstFallback =
+          asstMsg(
+              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))), null);
+      ProviderRequest reqFallback =
+          request(
+              defaultVariant(),
+              List.of(user, asstFallback),
+              List.of(),
+              ProviderCacheControl.none());
+      ProviderException exFallback =
+          assertThrows(ProviderException.class, () -> encoder.encode(reqFallback, descriptor));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, exFallback.kind());
+      assertNull(exFallback.getCause());
+      assertFalse(exFallback.getMessage().contains(badArg));
+
+      // 2. 同 format Replay 场景（durable 包含非法参数）
+      ObjectNode validPayload = NODES.objectNode();
+      validPayload.put("role", "assistant");
+      ObjectNode toolNode = validPayload.putArray("content").addObject();
+      toolNode.put("type", "tool_use").put("id", "c1").put("name", "calc");
+      toolNode.putObject("input");
+      ProviderReplayState replay =
+          new ProviderReplayState(
+              ProviderReplayFormat.ANTHROPIC_MESSAGES,
+              descriptor.affinity("claude-3-5-sonnet"),
+              "0000000000000000000000000000000000000000000000000000000000000000",
+              validPayload);
+      ProviderMessage asstReplay =
+          asstMsg(
+              List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", badArg))),
+              replay);
+      ProviderRequest reqReplay =
+          request(
+              defaultVariant(), List.of(user, asstReplay), List.of(), ProviderCacheControl.none());
+      ProviderException exReplay =
+          assertThrows(ProviderException.class, () -> encoder.encode(reqReplay, descriptor));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, exReplay.kind());
+      assertNull(exReplay.getCause());
+      assertFalse(exReplay.getMessage().contains(badArg));
+    }
+
+    // 3. Replay payload 中的 tool_use.input 为非 Object（如数组、标量）
+    ObjectNode payloadArrayInput = NODES.objectNode();
+    payloadArrayInput.put("role", "assistant");
+    ObjectNode toolArrayNode = payloadArrayInput.putArray("content").addObject();
+    toolArrayNode.put("type", "tool_use").put("id", "c1").put("name", "calc");
+    toolArrayNode.putArray("input").add(1).add(2);
+    ProviderReplayState replayArray =
+        new ProviderReplayState(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            descriptor.affinity("claude-3-5-sonnet"),
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            payloadArrayInput);
+    ProviderMessage asstArrayInput =
+        asstMsg(
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))),
+            replayArray);
+    ProviderRequest reqArrayInput =
+        request(
+            defaultVariant(),
+            List.of(user, asstArrayInput),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException exArray =
+        assertThrows(ProviderException.class, () -> encoder.encode(reqArrayInput, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exArray.kind());
+  }
+
+  /** 意图：验证不同 format (例如 OPENAI_CHAT) 的 replayState 能够安全降级为 semantic fallback 而不被同格式校验拦截。 */
+  @Test
+  void fallbackWhenReplayFormatDiffers() throws IOException {
+    ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
+    ObjectNode openAiPayload = NODES.objectNode();
+    openAiPayload.put("role", "assistant").put("content", "hello from openai");
+    ProviderReplayState differentFormatReplay =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("claude-3-5-sonnet"),
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            openAiPayload);
+
+    ProviderMessage asst =
+        asstMsg(
+            List.of(
+                new ProviderTextBlock("fallback response"),
+                new ProviderToolCallBlock(new ProviderToolCall("call_1", "calc", "{\"a\":1}"))),
+            differentFormatReplay);
+    ProviderRequest req =
+        request(defaultVariant(), List.of(user, asst), List.of(), ProviderCacheControl.none());
+    AnthropicEncodedRequest encoded = encoder.encode(req, descriptor);
+    JsonNode asstWire = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1);
+
+    assertEquals("text", asstWire.path("content").get(0).path("type").asText());
+    assertEquals("fallback response", asstWire.path("content").get(0).path("text").asText());
+    assertEquals("tool_use", asstWire.path("content").get(1).path("type").asText());
+    assertEquals("call_1", asstWire.path("content").get(1).path("id").asText());
+    assertEquals(1, asstWire.path("content").get(1).path("input").path("a").asInt());
   }
 }
