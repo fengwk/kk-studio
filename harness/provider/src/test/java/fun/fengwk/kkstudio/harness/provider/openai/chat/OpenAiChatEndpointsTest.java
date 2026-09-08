@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -98,6 +99,42 @@ class OpenAiChatEndpointsTest {
   void trimMultipleTrailingSlashes() {
     URI uri = OpenAiChatEndpoints.resolveChatCompletionsUri("https://api.openai.com/v1///");
     assertEquals("https://api.openai.com/v1/chat/completions", uri.toString());
+  }
+
+  @Test
+  @DisplayName("保留 IPv6 主机与端口")
+  void resolveIpv6EndpointWithPort() {
+    // 测试意图：确保 IPv6 地址的方括号保留且端口号拼接正确，不被拆散为主机丢失格式
+    URI uri1 = OpenAiChatEndpoints.resolveChatCompletionsUri("http://[::1]:8080/v1");
+    assertEquals("http://[::1]:8080/v1/chat/completions", uri1.toString());
+
+    URI uri2 = OpenAiChatEndpoints.resolveChatCompletionsUri("https://[2001:db8::1]/v1///");
+    assertEquals("https://[2001:db8::1]/v1/chat/completions", uri2.toString());
+  }
+
+  @Test
+  @DisplayName("保留已转义的 base path，不发生二次转义")
+  void preserveEscapedBasePath() {
+    // 测试意图：验证 baseUrl 中已有百分号编码的路径能够原样保留，不会被解码改变路径语义或被双重编码为 %25
+    URI uri = OpenAiChatEndpoints.resolveChatCompletionsUri("https://api.openai.com/v1%20custom/");
+    assertEquals("https://api.openai.com/v1%20custom/chat/completions", uri.toString());
+  }
+
+  @Test
+  @DisplayName("异常消息严格禁止回显 endpoint 或 credential")
+  void errorMessagesDoNotLeakCredentialsOrEndpoint() {
+    // 测试意图：安全加固验证，当端点包含敏感 credential、user-info 或非法路径时，抛出的异常信息绝不回显输入内容
+    String secretEndpoint =
+        "https://sensitiveUser:verySecretPassword@api.openai.com/v1?token=sensitiveToken";
+    IllegalArgumentException ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> OpenAiChatEndpoints.resolveChatCompletionsUri(secretEndpoint));
+    String msg = ex.getMessage();
+    assertFalse(msg.contains("sensitiveUser"));
+    assertFalse(msg.contains("verySecretPassword"));
+    assertFalse(msg.contains("sensitiveToken"));
+    assertFalse(msg.contains(secretEndpoint));
   }
 
   @Test
