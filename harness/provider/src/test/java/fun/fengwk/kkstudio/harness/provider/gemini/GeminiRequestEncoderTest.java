@@ -1454,9 +1454,92 @@ class GeminiRequestEncoderTest {
     assertEquals("unsupported ASSISTANT content block", ex.getMessage());
   }
 
-  /** 验证 Assistant Tool Call 参数为非 Object 或格式损坏时安全容错为 empty Object。 */
+  /**
+   * 验证 Assistant Tool Call 参数必须是完整的 JSON Object，非 Object/损坏/尾随/重复 key 严格抛出 INVALID_REQUEST，绝不补全为
+   * {}。
+   */
   @Test
-  void encodesAssistantToolCall_handlesNonObjectOrMalformedArgumentsGracefully() throws Exception {
+  void encodesAssistantToolCall_rejectsNonObjectOrMalformedArgumentsStrictly() {
+    // 1. 非 Object (如 JSON Array 或 Primitive)
+    ProviderRequest reqNonObj =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(
+                        new ProviderToolCallBlock(
+                            new ProviderToolCall("c1", "fn1", "[1, 2, 3]"))))),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex1 =
+        assertThrows(ProviderException.class, () -> encoder.encode(reqNonObj, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
+    assertEquals("tool call arguments must be a valid JSON object", ex1.getMessage());
+
+    // 2. 格式损坏的 JSON
+    ProviderRequest reqMalformed =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(
+                        new ProviderToolCallBlock(
+                            new ProviderToolCall("c2", "fn2", "{unclosed_json"))))),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex2 =
+        assertThrows(ProviderException.class, () -> encoder.encode(reqMalformed, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
+    assertEquals("tool call arguments must be a valid JSON object", ex2.getMessage());
+
+    // 3. 带有尾随内容的 JSON
+    ProviderRequest reqTrailing =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(
+                        new ProviderToolCallBlock(
+                            new ProviderToolCall("c3", "fn3", "{\"a\":1} trailing"))))),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex3 =
+        assertThrows(ProviderException.class, () -> encoder.encode(reqTrailing, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
+    assertEquals("tool call arguments must be a valid JSON object", ex3.getMessage());
+
+    // 4. 重复键的 JSON
+    ProviderRequest reqDuplicates =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(
+                        new ProviderToolCallBlock(
+                            new ProviderToolCall("c4", "fn4", "{\"k\":1,\"k\":2}"))))),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex4 =
+        assertThrows(ProviderException.class, () -> encoder.encode(reqDuplicates, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex4.kind());
+    assertEquals("tool call arguments must be a valid JSON object", ex4.getMessage());
+  }
+
+  /** 验证 Assistant Tool Call 参数为合法 JSON Object 时完整保留并正确序列化。 */
+  @Test
+  void encodesAssistantToolCall_preservesValidJsonObjectArguments() throws Exception {
     ProviderRequest request =
         new ProviderRequest(
             model(false),
@@ -1466,9 +1549,9 @@ class GeminiRequestEncoderTest {
                 new ProviderMessage(
                     ProviderMessageRole.ASSISTANT,
                     List.of(
-                        new ProviderToolCallBlock(new ProviderToolCall("c1", "fn1", "[1, 2, 3]")),
                         new ProviderToolCallBlock(
-                            new ProviderToolCall("c2", "fn2", "{unclosed_json"))))),
+                            new ProviderToolCall(
+                                "c1", "fn1", "{\"city\":\"Hangzhou\",\"score\":100}"))))),
             List.of(),
             ProviderCacheControl.none());
 
@@ -1476,11 +1559,12 @@ class GeminiRequestEncoderTest {
     JsonNode json = MAPPER.readTree(encoded.bodyUtf8Bytes());
     ArrayNode parts = (ArrayNode) json.get("contents").get(1).get("parts");
 
-    assertEquals(2, parts.size());
-    assertTrue(parts.get(0).get("functionCall").get("args").isObject());
-    assertEquals(0, parts.get(0).get("functionCall").get("args").size());
-    assertTrue(parts.get(1).get("functionCall").get("args").isObject());
-    assertEquals(0, parts.get(1).get("functionCall").get("args").size());
+    assertEquals(1, parts.size());
+    JsonNode fnCall = parts.get(0).get("functionCall");
+    assertEquals("fn1", fnCall.get("name").asText());
+    assertEquals("c1", fnCall.get("id").asText());
+    assertEquals("Hangzhou", fnCall.get("args").get("city").asText());
+    assertEquals(100, fnCall.get("args").get("score").asInt());
   }
 
   /** 验证 Tool Result 为空及 error 包含多块时的响应组织。 */
@@ -1643,7 +1727,7 @@ class GeminiRequestEncoderTest {
     item6.put("thought", "not_a_boolean");
     assertReplayInvalid(p6, List.of(new ProviderThinkingBlock("think")), dummyHash);
 
-    // 7. text part 中 thoughtSignature 不是 string
+    // 7. text part 中 thoughtSignature 不是 string 或为空白字符串
     ObjectNode p7 = MAPPER.createObjectNode();
     p7.put("role", "model");
     ObjectNode item7 = p7.putArray("parts").addObject();
@@ -1651,6 +1735,14 @@ class GeminiRequestEncoderTest {
     item7.put("thought", true);
     item7.put("thoughtSignature", 999);
     assertReplayInvalid(p7, List.of(new ProviderThinkingBlock("think")), dummyHash);
+
+    ObjectNode p7b = MAPPER.createObjectNode();
+    p7b.put("role", "model");
+    ObjectNode item7b = p7b.putArray("parts").addObject();
+    item7b.put("text", "think");
+    item7b.put("thought", true);
+    item7b.put("thoughtSignature", "   ");
+    assertReplayInvalid(p7b, List.of(new ProviderThinkingBlock("think")), dummyHash);
 
     // 8. functionCall part 中 functionCall 不是 object
     ObjectNode p8 = MAPPER.createObjectNode();
@@ -1668,7 +1760,7 @@ class GeminiRequestEncoderTest {
     assertReplayInvalid(
         p9, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
 
-    // 10. functionCall part 带有非 textual 的 thoughtSignature
+    // 10. functionCall part 带有非 textual 或 blank 的 thoughtSignature
     ObjectNode p10 = MAPPER.createObjectNode();
     p10.put("role", "model");
     ObjectNode item10 = p10.putArray("parts").addObject();
@@ -1676,6 +1768,16 @@ class GeminiRequestEncoderTest {
     item10.put("thoughtSignature", 12345);
     assertReplayInvalid(
         p10, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+
+    ObjectNode p10b = MAPPER.createObjectNode();
+    p10b.put("role", "model");
+    ObjectNode item10b = p10b.putArray("parts").addObject();
+    item10b.putObject("functionCall").put("name", "fn");
+    item10b.put("thoughtSignature", "");
+    assertReplayInvalid(
+        p10b,
+        List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+        dummyHash);
 
     // 11. functionCall 缺少 name 或 name 不是 textual
     ObjectNode p11 = MAPPER.createObjectNode();
