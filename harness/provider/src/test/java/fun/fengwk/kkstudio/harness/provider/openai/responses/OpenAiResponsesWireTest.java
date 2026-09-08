@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -198,6 +199,8 @@ class OpenAiResponsesWireTest {
     assertEquals(0.7, root.path("temperature").asDouble());
     assertEquals(0.9, root.path("top_p").asDouble());
     assertEquals("medium", root.path("reasoning").path("effort").asText());
+    assertEquals("auto", root.path("reasoning").path("summary").asText());
+    assertEquals("reasoning.encrypted_content", root.path("include").get(0).asText());
 
     JsonNode input = root.get("input");
     assertEquals(2, input.size());
@@ -282,5 +285,53 @@ class OpenAiResponsesWireTest {
     assertEquals("function_call_output", input.get(2).path("type").asText());
     assertEquals("c_math", input.get(2).path("call_id").asText());
     assertEquals("4", input.get(2).path("output").asText());
+  }
+
+  /** 验证 reasoning effort 为 "none" 时的 Wire 协议编码：仅生成 effort:"none"，省略 summary 与 include。 */
+  @Test
+  void test_offReasoningWirePayload() throws Exception {
+    ProviderRequest req =
+        request(
+            new ModelVariant("v1", 100, 0.7, 0.9, null, null, null, List.of(), "none"),
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Count to three.")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
+    OpenAiResponsesEncodedRequest enc =
+        encoder.encode(req, createDescriptor(), OpenAiResponsesConfig.defaultConfig());
+    JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
+
+    assertEquals("none", root.path("reasoning").path("effort").asText());
+    assertFalse(root.path("reasoning").has("summary"));
+    assertFalse(root.has("include"));
+  }
+
+  /** 验证启用推理与工具调用结合时的 Wire 协议编码：包含 reasoning、include 以及 tools 数组。 */
+  @Test
+  void test_enabledReasoningWithToolsWirePayload() throws Exception {
+    ProviderToolDefinition tool =
+        new ProviderToolDefinition("get_time", "get current time", "{\"type\":\"object\"}");
+    ProviderRequest req =
+        request(
+            new ModelVariant("v1", 100, 0.7, 0.9, null, null, null, List.of(), "high"),
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("What time is it?")))),
+            List.of(tool),
+            ProviderCacheControl.none());
+
+    OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
+    OpenAiResponsesEncodedRequest enc =
+        encoder.encode(req, createDescriptor(), OpenAiResponsesConfig.defaultConfig());
+    JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
+
+    assertEquals("high", root.path("reasoning").path("effort").asText());
+    assertEquals("auto", root.path("reasoning").path("summary").asText());
+    assertEquals("reasoning.encrypted_content", root.path("include").get(0).asText());
+    assertTrue(root.has("tools"));
+    assertEquals("get_time", root.path("tools").get(0).path("name").asText());
   }
 }

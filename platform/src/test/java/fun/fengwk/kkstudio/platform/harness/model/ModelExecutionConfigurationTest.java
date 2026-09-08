@@ -4,13 +4,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 
 import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
+import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicThinkingMode;
 import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
@@ -22,6 +25,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
@@ -222,6 +227,36 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
     assertEquals(
         EnumSet.allOf(PromptCacheBreakpoint.class),
         anthropicProviderFactory.promptCacheCapability().supportedBreakpoints());
+  }
+
+  /** 意图：验证 Anthropic 工厂将配置中的 anthropicThinkingMode 传递给适配器。 */
+  @Test
+  void anthropicFactoryAppliesConfiguredThinkingMode() {
+    AnthropicProviderAdapter adapter =
+        (AnthropicProviderAdapter)
+            anthropicProviderFactory.create("credential", "{\"anthropicThinkingMode\":\"BUDGET\"}");
+    assertEquals(AnthropicThinkingMode.BUDGET, adapter.configuration().anthropicThinkingMode());
+  }
+
+  /** 意图：验证 Anthropic 工厂拒绝非法配置且不回显配置内容与敏感信息，因果链无暴露。 */
+  @Test
+  void anthropicFactoryRejectsMalformedConfigurationWithoutExposingInput() {
+    String sensitiveConfig = "{\"anthropicThinkingMode\":\"SUPER_SECRET_VALUE\"}";
+    ProviderException ex =
+        assertThrows(
+            ProviderException.class,
+            () -> anthropicProviderFactory.create("credential", sensitiveConfig));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    assertFalse(ex.getMessage().contains("SUPER_SECRET_VALUE"));
+    assertNull(ex.getCause());
+
+    String malformedJson = "{\"anthropicThinkingMode\":";
+    ProviderException exMalformed =
+        assertThrows(
+            ProviderException.class,
+            () -> anthropicProviderFactory.create("credential", malformedJson));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exMalformed.kind());
+    assertNull(exMalformed.getCause());
   }
 
   private static void assertNativeModelProvider(

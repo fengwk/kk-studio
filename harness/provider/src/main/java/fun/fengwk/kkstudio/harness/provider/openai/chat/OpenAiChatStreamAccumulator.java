@@ -244,7 +244,7 @@ final class OpenAiChatStreamAccumulator {
     this.totalTokens =
         usageNode.has("total_tokens")
             ? requiredNonNegativeLong(usageNode.get("total_tokens"), "total_tokens")
-            : addUsageValues(promptTokens, completionTokens);
+            : 0L;
 
     JsonNode promptDetails = optionalObject(usageNode, "prompt_tokens_details");
     if (promptDetails != null && promptDetails.has("cached_tokens")) {

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.provider.openai.chat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 
 import java.util.Set;
@@ -106,14 +108,70 @@ class OpenAiChatConfigurationTest {
   }
 
   @Test
-  @DisplayName("不支持的枚举值严格拒绝")
-  void rejectUnsupportedEnumValues() {
-    assertThrows(
-        ProviderException.class,
-        () -> OpenAiChatConfiguration.parse("{\"openAiChatMediaTypes\": [\"VIDEO\"]}"));
-    assertThrows(
-        ProviderException.class,
-        () -> OpenAiChatConfiguration.parse("{\"openAiPromptCacheMode\": \"INVALID_MODE\"}"));
+  @DisplayName("不支持的枚举值严格拒绝且不泄露敏感配置内容")
+  void rejectUnsupportedEnumValuesWithoutEcho() {
+    ProviderException exMedia =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                OpenAiChatConfiguration.parse(
+                    "{\"openAiChatMediaTypes\": [\"SUPER_SECRET_MEDIA\"]}"));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exMedia.kind());
+    assertFalse(exMedia.getMessage().contains("SUPER_SECRET_MEDIA"));
+    assertNull(exMedia.getCause());
+
+    ProviderException exCache =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                OpenAiChatConfiguration.parse(
+                    "{\"openAiPromptCacheMode\": \"SUPER_SECRET_CACHE\"]}"));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exCache.kind());
+    assertNull(exCache.getCause());
+
+    ProviderException exCacheVal =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                OpenAiChatConfiguration.parse(
+                    "{\"openAiPromptCacheMode\": \"SUPER_SECRET_CACHE\"}"));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exCacheVal.kind());
+    assertFalse(exCacheVal.getMessage().contains("SUPER_SECRET_CACHE"));
+    assertNull(exCacheVal.getCause());
+
+    ProviderException exThinking =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                OpenAiChatConfiguration.parse(
+                    "{\"openAiChatThinkingFormat\": \"SUPER_SECRET_THINKING\"}"));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exThinking.kind());
+    assertFalse(exThinking.getMessage().contains("SUPER_SECRET_THINKING"));
+    assertNull(exThinking.getCause());
+  }
+
+  @Test
+  @DisplayName("openAiChatThinkingFormat 解析与默认值测试")
+  void parseThinkingFormat() {
+    OpenAiChatConfiguration configDefault = OpenAiChatConfiguration.defaults();
+    assertEquals(OpenAiChatConfiguration.ThinkingFormat.STANDARD, configDefault.thinkingFormat());
+    assertEquals(
+        OpenAiChatConfiguration.ThinkingFormat.STANDARD, configDefault.openAiChatThinkingFormat());
+
+    OpenAiChatConfiguration configDeepseek =
+        OpenAiChatConfiguration.parse("{\"openAiChatThinkingFormat\": \"DEEPSEEK\"}");
+    assertEquals(OpenAiChatConfiguration.ThinkingFormat.DEEPSEEK, configDeepseek.thinkingFormat());
+
+    OpenAiChatConfiguration configStandard =
+        OpenAiChatConfiguration.parse("{\"openAiChatThinkingFormat\": \"STANDARD\"}");
+    assertEquals(OpenAiChatConfiguration.ThinkingFormat.STANDARD, configStandard.thinkingFormat());
+
+    ProviderException exType =
+        assertThrows(
+            ProviderException.class,
+            () -> OpenAiChatConfiguration.parse("{\"openAiChatThinkingFormat\": 123}"));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exType.kind());
+    assertNull(exType.getCause());
   }
 
   @Test

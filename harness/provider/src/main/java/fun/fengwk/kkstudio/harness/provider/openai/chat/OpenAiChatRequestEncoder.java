@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
@@ -77,7 +78,7 @@ final class OpenAiChatRequestEncoder {
     ObjectNode streamOptions = root.putObject("stream_options");
     streamOptions.put("include_usage", config.includeUsage());
 
-    applyReasoningEffort(root, request.variant());
+    applyReasoningParameters(root, request.model(), request.variant(), config);
     applySamplingParameters(root, request.variant());
 
     ArrayNode toolsArray = encodeTools(request.tools());
@@ -128,11 +129,30 @@ final class OpenAiChatRequestEncoder {
     }
   }
 
-  private static void applyReasoningEffort(ObjectNode root, ModelVariant variant) {
-    if (variant != null
-        && variant.reasoningEffort() != null
-        && !variant.reasoningEffort().isBlank()) {
-      root.put("reasoning_effort", variant.reasoningEffort());
+  private static void applyReasoningParameters(
+      ObjectNode root,
+      ModelDescriptor model,
+      ModelVariant variant,
+      OpenAiChatConfiguration config) {
+    if (config.thinkingFormat() == OpenAiChatConfiguration.ThinkingFormat.DEEPSEEK) {
+      if (!model.reasoning()) {
+        return;
+      }
+      String effort = variant != null ? variant.reasoningEffort() : null;
+      if (effort == null || effort.isBlank() || "none".equals(effort.trim())) {
+        ObjectNode thinking = root.putObject("thinking");
+        thinking.put("type", "disabled");
+      } else {
+        ObjectNode thinking = root.putObject("thinking");
+        thinking.put("type", "enabled");
+        root.put("reasoning_effort", effort);
+      }
+    } else {
+      if (variant != null
+          && variant.reasoningEffort() != null
+          && !variant.reasoningEffort().isBlank()) {
+        root.put("reasoning_effort", variant.reasoningEffort());
+      }
     }
   }
 

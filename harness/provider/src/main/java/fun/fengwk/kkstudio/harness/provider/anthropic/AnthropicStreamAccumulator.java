@@ -309,15 +309,8 @@ final class AnthropicStreamAccumulator {
 
     String rawUsageJson = usageJsonNode.toString();
 
-    long providerTotalTokens;
-    try {
-      long sum = Math.addExact(this.inputTokens, this.outputTokens);
-      sum = Math.addExact(sum, this.cacheReadInputTokens);
-      providerTotalTokens = Math.addExact(sum, this.cacheCreationInputTokens);
-    } catch (ArithmeticException overflow) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, "total tokens arithmetic overflow");
-    }
+    // Anthropic Messages 无原生 total_tokens，不合成虚假总数，严格保留原生语义为 0
+    long providerTotalTokens = 0L;
 
     ModelUsage usage =
         new ModelUsage(

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -271,5 +272,53 @@ class OpenAiResponsesStreamAccumulatorTest {
     // invalid json throws INVALID_RESPONSE
     assertThrows(
         ProviderException.class, () -> accumulator.handleEvent(null, "not a valid json object"));
+  }
+
+  /** 验证当 native usage 缺失 total_tokens 时，providerTotalTokens 置 0 且 rawUsageJson 省略该字段，无虚假合成。 */
+  @Test
+  void test_missingTotalTokensPreservesZeroAndOmitsFromRawUsageJson() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            e -> {});
+
+    accumulator.processEvent(
+        MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_no_tot\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Done\"}]}}"));
+
+    // usage 块仅有 input_tokens 与 output_tokens，无 total_tokens
+    String completedEvent =
+        "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_no_tot\",\"status\":\"completed\","
+            + "\"usage\":{\"input_tokens\":40,\"output_tokens\":20,"
+            + "\"input_tokens_details\":{\"cached_tokens\":10,\"cache_write_tokens\":5},"
+            + "\"output_tokens_details\":{\"reasoning_tokens\":5}}}}";
+    accumulator.processEvent(MAPPER.readTree(completedEvent));
+
+    ProviderResponse resp = accumulator.response();
+    assertEquals("Done", resp.text());
+    assertEquals(GenerationStopReason.COMPLETE, resp.stopReason());
+
+    ModelUsage usage = resp.usage();
+    assertEquals(25L, usage.inputTokens());
+    assertEquals(15L, usage.outputTokens());
+    assertEquals(10L, usage.cacheReadTokens());
+    assertEquals(5L, usage.cacheWriteTokens());
+    assertEquals(5L, usage.reasoningTokens());
+    // 关键：缺失 total_tokens 时严格为 0，不合成 60
+    assertEquals(0L, usage.providerTotalTokens());
+    assertEquals(0L, usage.totalTokens());
+    assertEquals(60L, usage.categorizedTokens());
+
+    // 验证 rawUsageJson 白名单不包含 total_tokens
+    JsonNode rawUsage = MAPPER.readTree(resp.rawUsageJson());
+    assertEquals(40L, rawUsage.path("input_tokens").asLong());
+    assertEquals(20L, rawUsage.path("output_tokens").asLong());
+    assertFalse(
+        rawUsage.has("total_tokens"),
+        "rawUsageJson must omit total_tokens when absent from native usage");
   }
 }

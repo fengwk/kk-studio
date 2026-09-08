@@ -174,9 +174,20 @@ final class OpenAiResponsesRequestEncoder {
     if (variant == null || variant.reasoningEffort() == null) {
       return;
     }
+    String effort = variant.reasoningEffort();
+    if (effort.isBlank()) {
+      return;
+    }
+    if ("none".equals(effort.trim())) {
+      ObjectNode reasoning = root.putObject("reasoning");
+      reasoning.put("effort", "none");
+      return;
+    }
     ObjectNode reasoning = root.putObject("reasoning");
-    reasoning.put("effort", variant.reasoningEffort());
+    reasoning.put("effort", effort);
     reasoning.put("summary", "auto");
+    ArrayNode include = root.putArray("include");
+    include.add("reasoning.encrypted_content");
   }
 
   private static ArrayNode encodeTools(List<ProviderToolDefinition> tools) {

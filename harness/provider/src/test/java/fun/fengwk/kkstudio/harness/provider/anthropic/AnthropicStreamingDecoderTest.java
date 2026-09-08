@@ -178,12 +178,13 @@ class AnthropicStreamingDecoderTest {
     // 因包含非白名单原生 block，replayState 必须安全置为 null
     assertNull(completion.replayState());
 
-    // usage 正常合并
+    // usage 正常合并：Anthropic 无原生 total，providerTotalTokens 为 0，分类求和通过 categorizedTokens() 校验
     ModelUsage usage = response.usage();
     assertEquals(10, usage.inputTokens());
     assertEquals(5, usage.outputTokens());
-    assertEquals(15, usage.totalTokens());
-    assertEquals(15, usage.providerTotalTokens());
+    assertEquals(0, usage.totalTokens());
+    assertEquals(0, usage.providerTotalTokens());
+    assertEquals(15, usage.categorizedTokens());
   }
 
   /**
@@ -325,8 +326,9 @@ class AnthropicStreamingDecoderTest {
     assertEquals(20, usage.cacheReadTokens());
     assertEquals(10, usage.cacheWriteTokens());
     assertEquals(5, usage.cacheWriteLongTokens());
-    assertEquals(175, usage.totalTokens());
-    assertEquals(175, usage.providerTotalTokens());
+    assertEquals(0, usage.totalTokens());
+    assertEquals(0, usage.providerTotalTokens());
+    assertEquals(175, usage.categorizedTokens());
 
     // 校验 replayState 包含完整的原生 payload
     assertNotNull(completion.replayState());
@@ -500,8 +502,9 @@ class AnthropicStreamingDecoderTest {
     assertEquals(40, usage.cacheReadTokens());
     assertEquals(70, usage.cacheWriteTokens());
     assertEquals(30, usage.cacheWriteLongTokens());
-    assertEquals(415, usage.totalTokens());
-    assertEquals(415, usage.providerTotalTokens());
+    assertEquals(0, usage.totalTokens());
+    assertEquals(0, usage.providerTotalTokens());
+    assertEquals(415, usage.categorizedTokens());
 
     assertNotNull(response.rawUsageJson());
     assertTrue(response.rawUsageJson().contains("\"ephemeral_5m_input_tokens\":70"));
