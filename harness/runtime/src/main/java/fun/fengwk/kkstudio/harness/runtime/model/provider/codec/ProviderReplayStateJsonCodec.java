@@ -64,7 +64,12 @@ public final class ProviderReplayStateJsonCodec {
     ObjectNode root = object(node, "providerReplayState");
     requireFields(root, ROOT_FIELDS, "providerReplayState");
 
-    ProviderReplayFormat format = ProviderReplayFormat.fromWireValue(text(root, "format"));
+    ProviderReplayFormat format;
+    try {
+      format = ProviderReplayFormat.fromWireValue(text(root, "format"));
+    } catch (IllegalArgumentException ex) {
+      throw new IllegalArgumentException("unsupported provider replay format");
+    }
     ProviderReplayAffinity affinity = decodeAffinity(root.get("affinity"));
     String sourcePrefixHash = text(root, "sourcePrefixHash");
     JsonNode payloadNode = root.get("payload");
@@ -88,14 +93,18 @@ public final class ProviderReplayStateJsonCodec {
     ObjectNode object = object(node, "affinity");
     requireFields(object, AFFINITY_FIELDS, "affinity");
 
-    ProviderType providerType = ProviderType.fromWireValue(text(object, "providerType"));
+    ProviderType providerType;
+    try {
+      providerType = ProviderType.fromWireValue(text(object, "providerType"));
+    } catch (IllegalArgumentException ex) {
+      throw new IllegalArgumentException("unsupported provider type");
+    }
     String providerName = text(object, "providerName");
     UUID connectionGenerationId;
     try {
       connectionGenerationId = UUID.fromString(text(object, "connectionGenerationId"));
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          "affinity.connectionGenerationId must be a valid UUID", error);
+      throw new IllegalArgumentException("affinity.connectionGenerationId must be a valid UUID");
     }
     String modelName = text(object, "modelName");
 
@@ -111,7 +120,7 @@ public final class ProviderReplayStateJsonCodec {
       }
       return node;
     } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("malformed provider replay state JSON", error);
+      throw new IllegalArgumentException("malformed provider replay state JSON");
     }
   }
 
@@ -119,7 +128,7 @@ public final class ProviderReplayStateJsonCodec {
     try {
       return OBJECT_MAPPER.writeValueAsString(node);
     } catch (JsonProcessingException error) {
-      throw new IllegalStateException("cannot encode provider replay state JSON", error);
+      throw new IllegalStateException("cannot encode provider replay state JSON");
     }
   }
 
@@ -141,23 +150,13 @@ public final class ProviderReplayStateJsonCodec {
   private static void requireFields(ObjectNode node, Set<String> expected, String context) {
     if (node.size() != expected.size()) {
       throw new IllegalArgumentException(
-          context
-              + " field count mismatch: expected "
-              + expected
-              + ", but got "
-              + fieldNames(node));
+          context + " field count mismatch: expected " + expected.size() + " fields");
     }
     for (String name : expected) {
       if (!node.has(name)) {
         throw new IllegalArgumentException(context + " missing required field: " + name);
       }
     }
-  }
-
-  private static Set<String> fieldNames(ObjectNode node) {
-    Set<String> fields = new LinkedHashSet<>();
-    node.fieldNames().forEachRemaining(fields::add);
-    return fields;
   }
 
   private static Set<String> orderedSet(String... values) {

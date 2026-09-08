@@ -242,6 +242,48 @@ class PromptCacheRequestFinalizerTest {
     assertEquals(forged.tools(), after.tools());
   }
 
+  @Test
+  void breakpointsSupportsConversationBreakpointWhenPresent() {
+    ProviderMessage userMsg =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")));
+    ProviderRequest conversationOnly =
+        requestWith(ProviderCacheControl.none(), List.of(userMsg), List.of());
+    ProviderCacheControl resolved =
+        new PromptCacheRequestFinalizer(SESSION_ID)
+            .apply(
+                conversationOnly,
+                breakpointsPolicy(
+                    EnumSet.of(
+                        PromptCacheBreakpoint.SYSTEM,
+                        PromptCacheBreakpoint.TOOLS,
+                        PromptCacheBreakpoint.CONVERSATION)))
+            .cacheControl();
+    assertEquals(EnumSet.of(PromptCacheBreakpoint.CONVERSATION), resolved.breakpoints());
+
+    // 请求同时包含 system + tools + conversation
+    ProviderRequest allThree =
+        requestWith(
+            ProviderCacheControl.none(),
+            List.of(systemText("S1"), userMsg),
+            List.of(tool("alpha")));
+    ProviderCacheControl allResolved =
+        new PromptCacheRequestFinalizer(SESSION_ID)
+            .apply(
+                allThree,
+                breakpointsPolicy(
+                    EnumSet.of(
+                        PromptCacheBreakpoint.SYSTEM,
+                        PromptCacheBreakpoint.TOOLS,
+                        PromptCacheBreakpoint.CONVERSATION)))
+            .cacheControl();
+    assertEquals(
+        EnumSet.of(
+            PromptCacheBreakpoint.SYSTEM,
+            PromptCacheBreakpoint.TOOLS,
+            PromptCacheBreakpoint.CONVERSATION),
+        allResolved.breakpoints());
+  }
+
   private static ProviderMessage systemText(String text) {
     return new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock(text)));
   }

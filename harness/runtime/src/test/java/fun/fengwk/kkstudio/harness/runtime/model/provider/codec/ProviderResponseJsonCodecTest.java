@@ -117,18 +117,19 @@ class ProviderResponseJsonCodecTest {
             response.rawUsageJson());
     assertThrows(IllegalArgumentException.class, () -> codec.encode(invalidArguments));
 
-    ProviderResponse invalidUsage =
-        new ProviderResponse(
-            response.text(),
-            response.thinking(),
-            response.toolCalls(),
-            response.stopReason(),
-            response.usage(),
-            response.cost(),
-            response.requestId(),
-            response.serviceTier(),
-            "{\"total\":1,\"total\":2}");
-    assertThrows(IllegalArgumentException.class, () -> codec.encode(invalidUsage));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ProviderResponse(
+                response.text(),
+                response.thinking(),
+                response.toolCalls(),
+                response.stopReason(),
+                response.usage(),
+                response.cost(),
+                response.requestId(),
+                response.serviceTier(),
+                "{\"total\":1,\"total\":2}"));
   }
 
   /** 每个 response 对象层都独立拒绝未知、缺失以及类型错误的字段。 */

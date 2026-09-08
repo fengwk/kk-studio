@@ -19,6 +19,10 @@
             <artifactId>kk-studio-harness-runtime</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
@@ -42,10 +46,19 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun/fengwk/kkstudio/harness/provider/transport/JdkHttpSseTransport</include>
-                                        <include>fun/fengwk/kkstudio/harness/provider/transport/HttpSseStreamExecution</include>
-                                        <include>fun/fengwk/kkstudio/harness/provider/transport/IncrementalSseParser</include>
-                                        <include>fun/fengwk/kkstudio/harness/provider/transport/TransportException</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.transport.HttpSseStreamExecution</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParser</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.transport.TransportException</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicEndpoints</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicPrefixHasher</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicEncodedRequest</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicRequestEncoder</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicStreamAccumulator</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicErrorMapper</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicStreamBridge</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicModelProvider</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter</include>
                                     </includes>
                                     <limits>
                                         <limit>

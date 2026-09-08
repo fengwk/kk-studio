@@ -25,7 +25,9 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -66,13 +68,22 @@ public final class HistoryPayloadMapper {
     if (!response.text().isEmpty()) {
       contents.add(new TextMessageContent(response.text()));
     }
-    for (ProviderToolCall call : response.toolCalls()) {
-      contents.add(
-          new ToolCallMessageContent(
-              call.id(), call.name(), rendererKey(call.name(), bindings), call.argumentsJson()));
-    }
+    int totalOutcomes = response.toolCalls().size() + response.toolCallDiagnostics().size();
+    Map<Integer, ProviderToolCallDiagnostic> diagnosticByIndex = new HashMap<>();
     for (ProviderToolCallDiagnostic diagnostic : response.toolCallDiagnostics()) {
-      contents.add(new JsonMessageContent(diagnosticCodec.encode(diagnostic)));
+      diagnosticByIndex.put(diagnostic.callIndex(), diagnostic);
+    }
+    int toolCallIndex = 0;
+    for (int i = 0; i < totalOutcomes; i++) {
+      ProviderToolCallDiagnostic diagnostic = diagnosticByIndex.get(i);
+      if (diagnostic != null) {
+        contents.add(new JsonMessageContent(diagnosticCodec.encode(diagnostic)));
+      } else {
+        ProviderToolCall call = response.toolCalls().get(toolCallIndex++);
+        contents.add(
+            new ToolCallMessageContent(
+                call.id(), call.name(), rendererKey(call.name(), bindings), call.argumentsJson()));
+      }
     }
     if (contents.isEmpty()) {
       contents.add(new TextMessageContent(""));

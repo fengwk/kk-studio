@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -53,19 +55,41 @@ final class ModelStreamAccumulator {
     Objects.requireNonNull(response, "response");
     String textGap = textGap(response.text());
     String thinkingGap = thinkingGap(response.thinking());
-    if (partialToolCalls.keySet().stream()
-        .anyMatch(index -> index >= response.toolCalls().size())) {
-      throw new IllegalArgumentException("final response omits a streamed tool call");
-    }
-    List<ToolGap> toolGaps = new ArrayList<>(response.toolCalls().size());
-    for (int index = 0; index < response.toolCalls().size(); index++) {
-      ProviderToolCall complete = response.toolCalls().get(index);
-      PartialToolCall partial = partialToolCalls.get(index);
-      ToolGap gap =
-          partial == null
-              ? PartialToolCall.previewComplete(index, complete)
-              : partial.previewGap(index, complete);
-      toolGaps.add(gap);
+
+    List<ToolGap> toolGaps = new ArrayList<>();
+    if (response.stopReason() == GenerationStopReason.FILTERED) {
+      if (!response.toolCalls().isEmpty() || !response.toolCallDiagnostics().isEmpty()) {
+        throw new IllegalArgumentException(
+            "FILTERED response must not contain tool calls or diagnostics");
+      }
+      // FILTERED 属于 provider protocol withdrawal：忽略已有 partialToolCalls，不生成 tool gap
+    } else {
+      int totalOutcomes = response.toolCalls().size() + response.toolCallDiagnostics().size();
+      if (partialToolCalls.keySet().stream().anyMatch(index -> index >= totalOutcomes)) {
+        throw new IllegalArgumentException("final response omits a streamed tool call");
+      }
+      Map<Integer, ProviderToolCallDiagnostic> diagnosticByIndex = new HashMap<>();
+      for (ProviderToolCallDiagnostic diagnostic : response.toolCallDiagnostics()) {
+        diagnosticByIndex.put(diagnostic.callIndex(), diagnostic);
+      }
+      int completeCallIndex = 0;
+      for (int index = 0; index < totalOutcomes; index++) {
+        ProviderToolCallDiagnostic diagnostic = diagnosticByIndex.get(index);
+        if (diagnostic != null) {
+          PartialToolCall partial = partialToolCalls.get(index);
+          if (partial != null) {
+            partial.reconcileDiagnostic(diagnostic);
+          }
+        } else {
+          ProviderToolCall complete = response.toolCalls().get(completeCallIndex++);
+          PartialToolCall partial = partialToolCalls.get(index);
+          ToolGap gap =
+              partial == null
+                  ? PartialToolCall.previewComplete(index, complete)
+                  : partial.previewGap(index, complete);
+          toolGaps.add(gap);
+        }
+      }
     }
     List<ProviderStreamEvent> gaps = new ArrayList<>();
     if (textGap != null) {
@@ -106,10 +130,10 @@ final class ModelStreamAccumulator {
           if (thinkingGap != null) {
             thinking.append(thinkingGap);
           }
-          for (int index = 0; index < toolGaps.size(); index++) {
+          for (ToolGap gap : toolGaps) {
             PartialToolCall partial =
-                partialToolCalls.computeIfAbsent(index, ignored -> new PartialToolCall());
-            partial.applyGap(toolGaps.get(index));
+                partialToolCalls.computeIfAbsent(gap.index(), ignored -> new PartialToolCall());
+            partial.applyGap(gap);
           }
         });
   }
@@ -132,7 +156,8 @@ final class ModelStreamAccumulator {
         response.cost(),
         response.requestId(),
         response.serviceTier(),
-        response.rawUsageJson());
+        response.rawUsageJson(),
+        response.toolCallDiagnostics());
   }
 
   private String textGap(String complete) {
@@ -227,6 +252,21 @@ final class ModelStreamAccumulator {
       appendGap(arguments, gap.argumentsJson());
     }
 
+    private void reconcileDiagnostic(ProviderToolCallDiagnostic diagnostic) {
+      String streamedId = id.toString();
+      if (!streamedId.isEmpty() && !streamedId.equals(diagnostic.id())) {
+        throw new IllegalArgumentException("streamed tool call id conflicts with diagnostic");
+      }
+      String streamedName = name.toString();
+      if (!streamedName.isEmpty() && !streamedName.equals(diagnostic.name())) {
+        throw new IllegalArgumentException("streamed tool call name conflicts with diagnostic");
+      }
+      String streamedArgs = arguments.toString();
+      if (!streamedArgs.equals(diagnostic.partialArguments())) {
+        throw new IllegalArgumentException("streamed tool call arguments conflict with diagnostic");
+      }
+    }
+
     /** 接受首次值或当前值的前缀扩展，忽略重复及已接收前缀，并拒绝相互冲突的片段。 */
     private static void appendIdentity(StringBuilder target, String value) {
       if (value == null || value.isBlank()) {
@@ -244,8 +284,7 @@ final class ModelStreamAccumulator {
         target.append(value, current.length(), value.length());
         return;
       }
-      throw new IllegalArgumentException(
-          "streamed tool call identity conflicts: " + current + " vs " + value);
+      throw new IllegalArgumentException("streamed tool call identity conflict");
     }
 
     private static String previewGap(StringBuilder received, String complete) {
