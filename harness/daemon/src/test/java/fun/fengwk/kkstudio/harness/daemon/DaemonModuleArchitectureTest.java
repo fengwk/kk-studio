@@ -20,8 +20,7 @@ import java.util.stream.Stream;
  *
  * <p>Daemon 的 main 源码只允许依赖 JDK、Jackson、JGit（{@code org.eclipse.jgit.ignore.FastIgnoreRule}）、{@code
  * harness.common}、{@code harness.environment} 以及本模块自身包。 严禁直接依赖 {@code
- * harness.tool}、runtime/platform/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK。LangChain4j
- * 只允许出现在技能适配器包中： {@code dev.langchain4j.skills.*} 仅限 {@code .../daemon/skill/}。
+ * harness.tool}、runtime/platform/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK 和 LangChain4j。
  */
 class DaemonModuleArchitectureTest {
 
@@ -33,6 +32,7 @@ class DaemonModuleArchitectureTest {
           "fun.fengwk.kkstudio.harness.kernel.",
           "fun.fengwk.kkstudio.platform.",
           "fun.fengwk.kkstudio.web.",
+          "dev.langchain4j.",
           "org.springframework.",
           "org.mybatis.",
           "org.apache.ibatis.",
@@ -48,7 +48,6 @@ class DaemonModuleArchitectureTest {
           "com.google.genai.",
           "com.google.ai.");
 
-  private static final String SKILL_ADAPTER_PACKAGE = "/skill/";
   private static final Pattern STATIC_EXECUTOR_FIELD =
       Pattern.compile(
           "\\bstatic\\s+(?:final\\s+)?(?:[\\w.]*Executor(?:Service)?|"
@@ -147,6 +146,11 @@ class DaemonModuleArchitectureTest {
       if ("fun.fengwk.kk-studio:kk-studio-harness-tool".equals(coordinate)) {
         violations.add("daemon pom must not directly depend on kk-studio-harness-tool");
       }
+      if (coordinate.startsWith("dev.langchain4j:")
+          || coordinate.startsWith("io.github.langchain4j:")
+          || requiredTag(dependency, "artifactId").startsWith("langchain4j-")) {
+        violations.add("daemon pom must not declare langchain4j dependency: " + coordinate);
+      }
     }
     assertTrue(
         violations.isEmpty(),
@@ -170,9 +174,6 @@ class DaemonModuleArchitectureTest {
                       continue;
                     }
                     String imported = normalizeImport(trimmed);
-                    if (isAllowedLangChain4jImport(imported, relativePath)) {
-                      continue;
-                    }
                     for (String prefix : FORBIDDEN_IMPORT_PREFIXES) {
                       if (imported.startsWith(prefix)) {
                         violations.add(relativePath + ": " + trimmed);
@@ -188,14 +189,6 @@ class DaemonModuleArchitectureTest {
               });
     }
     return violations;
-  }
-
-  /** LangChain4j 类型只允许出现在 daemon 技能适配器包内。 */
-  private static boolean isAllowedLangChain4jImport(String imported, String relativePath) {
-    if (imported.startsWith("dev.langchain4j.skills.")) {
-      return relativePath.contains(SKILL_ADAPTER_PACKAGE);
-    }
-    return false;
   }
 
   private static boolean isAllowedImport(String imported) {

@@ -14,7 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-/** Skill 目录发现：LangChain4j front matter 解析、同名冲突与指令正文加载。 */
+/** Skill 目录发现：原生 front matter 解析、同名冲突与指令正文加载。 */
 class DaemonSkillRegistryTest {
 
   @TempDir Path tempDir;
