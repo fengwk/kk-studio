@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -1412,5 +1413,365 @@ class GeminiRequestEncoderTest {
     ProviderException ex2 =
         assertThrows(ProviderException.class, () -> encoder.encode(reqArgsMismatch, descriptor()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
+  }
+
+  /** 验证工具定义的 inputSchemaJson 必须是 JSON Object，非 Object 时抛出 INVALID_REQUEST。 */
+  @Test
+  void encodesToolDefinitions_validatesInputSchemaJsonObjectStrictly() {
+    ProviderToolDefinition arrayTool = new ProviderToolDefinition("arr_tool", "desc", "[1, 2]");
+    ProviderRequest req =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q")))),
+            List.of(arrayTool),
+            ProviderCacheControl.none());
+    ProviderException ex =
+        assertThrows(ProviderException.class, () -> encoder.encode(req, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    assertEquals("tool parameters must be a JSON object", ex.getMessage());
+  }
+
+  /** 验证 ASSISTANT 消息中包含不受支持的 block 类型时抛出 INVALID_REQUEST。 */
+  @Test
+  void encodesAssistantBlock_rejectsUnsupportedContentBlock() {
+    ProviderRequest request =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(new ProviderImageBlock("image/png", "https://example.com/a.png")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    ProviderException ex =
+        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    assertEquals("unsupported ASSISTANT content block", ex.getMessage());
+  }
+
+  /** 验证 Assistant Tool Call 参数为非 Object 或格式损坏时安全容错为 empty Object。 */
+  @Test
+  void encodesAssistantToolCall_handlesNonObjectOrMalformedArgumentsGracefully() throws Exception {
+    ProviderRequest request =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(
+                        new ProviderToolCallBlock(new ProviderToolCall("c1", "fn1", "[1, 2, 3]")),
+                        new ProviderToolCallBlock(
+                            new ProviderToolCall("c2", "fn2", "{unclosed_json"))))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    GeminiEncodedRequest encoded = encoder.encode(request, descriptor());
+    JsonNode json = MAPPER.readTree(encoded.bodyUtf8Bytes());
+    ArrayNode parts = (ArrayNode) json.get("contents").get(1).get("parts");
+
+    assertEquals(2, parts.size());
+    assertTrue(parts.get(0).get("functionCall").get("args").isObject());
+    assertEquals(0, parts.get(0).get("functionCall").get("args").size());
+    assertTrue(parts.get(1).get("functionCall").get("args").isObject());
+    assertEquals(0, parts.get(1).get("functionCall").get("args").size());
+  }
+
+  /** 验证 Tool Result 为空及 error 包含多块时的响应组织。 */
+  @Test
+  void encodesToolResultBlocks_emptyContentsAndMultiErrorResults() throws Exception {
+    // 1. error=false 且 contents 为空列表 -> {result: ""}
+    ProviderRequest reqEmptyOk =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn1", "{}")))),
+                new ProviderMessage(
+                    ProviderMessageRole.TOOL,
+                    List.of(new ProviderToolResultBlock("c1", "fn1", List.of(), false, "{}")))),
+            List.of(),
+            ProviderCacheControl.none());
+    GeminiEncodedRequest enc1 = encoder.encode(reqEmptyOk, descriptor());
+    JsonNode json1 = MAPPER.readTree(enc1.bodyUtf8Bytes());
+    JsonNode resp1 =
+        json1.get("contents").get(2).get("parts").get(0).get("functionResponse").get("response");
+    assertEquals("", resp1.get("result").asText());
+
+    // 2. error=true 且 contents 为空列表 -> {error: true, result: ""}
+    ProviderRequest reqEmptyErr =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn1", "{}")))),
+                new ProviderMessage(
+                    ProviderMessageRole.TOOL,
+                    List.of(new ProviderToolResultBlock("c1", "fn1", List.of(), true, "{}")))),
+            List.of(),
+            ProviderCacheControl.none());
+    GeminiEncodedRequest enc2 = encoder.encode(reqEmptyErr, descriptor());
+    JsonNode json2 = MAPPER.readTree(enc2.bodyUtf8Bytes());
+    JsonNode resp2 =
+        json2.get("contents").get(2).get("parts").get(0).get("functionResponse").get("response");
+    assertTrue(resp2.get("error").asBoolean());
+    assertEquals("", resp2.get("result").asText());
+
+    // 3. error=true 且多块内容 -> {error: true, results: [...]}
+    ProviderRequest reqMultiErr =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn1", "{}")))),
+                new ProviderMessage(
+                    ProviderMessageRole.TOOL,
+                    List.of(
+                        new ProviderToolResultBlock(
+                            "c1",
+                            "fn1",
+                            List.of(
+                                new ProviderTextBlock("failed part 1"),
+                                new ProviderJsonBlock("{\"step\":2}")),
+                            true,
+                            "{}")))),
+            List.of(),
+            ProviderCacheControl.none());
+    GeminiEncodedRequest enc3 = encoder.encode(reqMultiErr, descriptor());
+    JsonNode json3 = MAPPER.readTree(enc3.bodyUtf8Bytes());
+    JsonNode resp3 =
+        json3.get("contents").get(2).get("parts").get(0).get("functionResponse").get("response");
+    assertTrue(resp3.get("error").asBoolean());
+    assertTrue(resp3.has("results"));
+    ArrayNode results = (ArrayNode) resp3.get("results");
+    assertEquals(2, results.size());
+    assertEquals("failed part 1", results.get(0).asText());
+    assertEquals(2, results.get(1).get("step").asInt());
+  }
+
+  /** 验证 Media Source URI 严格校验（合法 data URI、合法的 scheme）。 */
+  @Test
+  void encodesMediaBlock_validatesMediaSourceUriStrictly() {
+    // 1. 非法 data URI
+    ProviderRequest reqBadData =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER,
+                    List.of(new ProviderImageBlock("image/png", "data:not_valid_data_uri")))),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex1 =
+        assertThrows(ProviderException.class, () -> encoder.encode(reqBadData, descriptor()));
+    assertEquals("invalid data URI in media source", ex1.getMessage());
+
+    // 2. 不被允许的 scheme (非 http/https/gs，如 file://)
+    ProviderRequest reqBadScheme =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER,
+                    List.of(new ProviderImageBlock("image/png", "file:///local/image.png")))),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException ex2 =
+        assertThrows(ProviderException.class, () -> encoder.encode(reqBadScheme, descriptor()));
+    assertEquals("media fileUri scheme must be http, https or gs", ex2.getMessage());
+  }
+
+  /** 验证 Replay Payload 结构边界校验（必须为 Object、parts 数组、每个 part 的类型与合法字段）。 */
+  @Test
+  void replay_validatesPayloadStructureAndPartsExhaustively() {
+    String dummyHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    // 1. parts 不是 Array
+    ObjectNode p1 = MAPPER.createObjectNode();
+    p1.put("role", "model");
+    p1.put("parts", "not_an_array");
+    assertReplayInvalid(p1, List.of(new ProviderTextBlock("text")), dummyHash);
+
+    // 2. parts 元素不是 Object
+    ObjectNode p2 = MAPPER.createObjectNode();
+    p2.put("role", "model");
+    p2.putArray("parts").add(12345);
+    assertReplayInvalid(p2, List.of(new ProviderTextBlock("text")), dummyHash);
+
+    // 3. part 同时包含 text 和 functionCall
+    ObjectNode p3 = MAPPER.createObjectNode();
+    p3.put("role", "model");
+    ObjectNode item3 = p3.putArray("parts").addObject();
+    item3.put("text", "text");
+    item3.putObject("functionCall").put("name", "fn");
+    assertReplayInvalid(p3, List.of(new ProviderTextBlock("text")), dummyHash);
+
+    // 4. part 既没有 text 也没有 functionCall
+    ObjectNode p4 = MAPPER.createObjectNode();
+    p4.put("role", "model");
+    p4.putArray("parts").addObject().put("dummy", true);
+    assertReplayInvalid(p4, List.of(new ProviderTextBlock("text")), dummyHash);
+
+    // 5. text part 中 text 不是 string
+    ObjectNode p5 = MAPPER.createObjectNode();
+    p5.put("role", "model");
+    p5.putArray("parts").addObject().put("text", 123);
+    assertReplayInvalid(p5, List.of(new ProviderTextBlock("123")), dummyHash);
+
+    // 6. text part 中 thought 不是 boolean
+    ObjectNode p6 = MAPPER.createObjectNode();
+    p6.put("role", "model");
+    ObjectNode item6 = p6.putArray("parts").addObject();
+    item6.put("text", "think");
+    item6.put("thought", "not_a_boolean");
+    assertReplayInvalid(p6, List.of(new ProviderThinkingBlock("think")), dummyHash);
+
+    // 7. text part 中 thoughtSignature 不是 string
+    ObjectNode p7 = MAPPER.createObjectNode();
+    p7.put("role", "model");
+    ObjectNode item7 = p7.putArray("parts").addObject();
+    item7.put("text", "think");
+    item7.put("thought", true);
+    item7.put("thoughtSignature", 999);
+    assertReplayInvalid(p7, List.of(new ProviderThinkingBlock("think")), dummyHash);
+
+    // 8. functionCall part 中 functionCall 不是 object
+    ObjectNode p8 = MAPPER.createObjectNode();
+    p8.put("role", "model");
+    p8.putArray("parts").addObject().put("functionCall", "not_an_object");
+    assertReplayInvalid(
+        p8, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+
+    // 9. functionCall part 顶级混入未授权字段
+    ObjectNode p9 = MAPPER.createObjectNode();
+    p9.put("role", "model");
+    ObjectNode item9 = p9.putArray("parts").addObject();
+    item9.putObject("functionCall").put("name", "fn");
+    item9.put("extraField", "bad");
+    assertReplayInvalid(
+        p9, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+
+    // 10. functionCall part 带有非 textual 的 thoughtSignature
+    ObjectNode p10 = MAPPER.createObjectNode();
+    p10.put("role", "model");
+    ObjectNode item10 = p10.putArray("parts").addObject();
+    item10.putObject("functionCall").put("name", "fn");
+    item10.put("thoughtSignature", 12345);
+    assertReplayInvalid(
+        p10, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+
+    // 11. functionCall 缺少 name 或 name 不是 textual
+    ObjectNode p11 = MAPPER.createObjectNode();
+    p11.put("role", "model");
+    ObjectNode item11 = p11.putArray("parts").addObject().putObject("functionCall");
+    item11.put("name", 123);
+    assertReplayInvalid(
+        p11, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+
+    // 12. functionCall 的 id 不是 textual
+    ObjectNode p12 = MAPPER.createObjectNode();
+    p12.put("role", "model");
+    ObjectNode item12 = p12.putArray("parts").addObject().putObject("functionCall");
+    item12.put("name", "fn");
+    item12.put("id", 123);
+    assertReplayInvalid(
+        p12,
+        List.of(new ProviderToolCallBlock(new ProviderToolCall("123", "fn", "{}"))),
+        dummyHash);
+
+    // 13. functionCall 的 args 不是 object
+    ObjectNode p13 = MAPPER.createObjectNode();
+    p13.put("role", "model");
+    ObjectNode item13 = p13.putArray("parts").addObject().putObject("functionCall");
+    item13.put("name", "fn");
+    item13.put("args", "[1, 2]");
+    assertReplayInvalid(
+        p13, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+
+    // 14. functionCall 内部混入未知字段
+    ObjectNode p14 = MAPPER.createObjectNode();
+    p14.put("role", "model");
+    ObjectNode item14 = p14.putArray("parts").addObject().putObject("functionCall");
+    item14.put("name", "fn");
+    item14.put("unknownField", "bad");
+    assertReplayInvalid(
+        p14, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+  }
+
+  /** 验证 Replay Payload 与 durable 内容比较时的分支覆盖（thinking 不一致、call 数量不一致、durable 非法 block）。 */
+  @Test
+  void replay_validatesDurableEquivalenceBranches() {
+    String dummyHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    // 1. Thinking 不一致
+    ObjectNode p1 = MAPPER.createObjectNode();
+    p1.put("role", "model");
+    ObjectNode item1 = p1.putArray("parts").addObject();
+    item1.put("text", "payload_thinking");
+    item1.put("thought", true);
+    assertReplayInvalid(
+        p1, List.of(new ProviderThinkingBlock("durable_different_thinking")), dummyHash);
+
+    // 2. Tool Calls 数量不一致
+    ObjectNode p2 = MAPPER.createObjectNode();
+    p2.put("role", "model");
+    ObjectNode item2 = p2.putArray("parts").addObject().putObject("functionCall");
+    item2.put("name", "fn1");
+    assertReplayInvalid(
+        p2,
+        List.of(
+            new ProviderToolCallBlock(new ProviderToolCall("c1", "fn1", "{}")),
+            new ProviderToolCallBlock(new ProviderToolCall("c2", "fn2", "{}"))),
+        dummyHash);
+
+    // 3. Durable 内容中包含不支持的 block (例如 ProviderDocumentBlock)
+    ObjectNode p3 = MAPPER.createObjectNode();
+    p3.put("role", "model");
+    p3.putArray("parts").addObject().put("text", "txt");
+    assertReplayInvalid(
+        p3,
+        List.of(new ProviderDocumentBlock("application/pdf", "https://example.com/doc.pdf")),
+        dummyHash);
+  }
+
+  private void assertReplayInvalid(
+      ObjectNode payload, List<ProviderContentBlock> durable, String hash) {
+    ProviderReplayState replayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.GEMINI_CONTENT,
+            descriptor().affinity("gemini-2.5-flash"),
+            hash,
+            payload);
+    ProviderRequest request =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(ProviderMessageRole.ASSISTANT, durable, replayState)),
+            List.of(),
+            ProviderCacheControl.none());
+
+    ProviderException ex =
+        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    assertEquals("invalid Gemini replay payload", ex.getMessage());
   }
 }
