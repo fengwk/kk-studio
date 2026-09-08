@@ -179,7 +179,7 @@ class GeminiRequestMapperTest {
     JsonNode fnResp = contents.get(2).get("parts").get(0).get("functionResponse");
     assertEquals("add", fnResp.get("name").asText());
     assertEquals("call_add", fnResp.get("id").asText());
-    assertEquals("2", fnResp.get("response").get("response").asText());
+    assertEquals("2", fnResp.get("response").get("result").asText());
   }
 
   /** 验证各种 finishReason 到 GenerationStopReason 的规范映射。 */

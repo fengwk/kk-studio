@@ -466,8 +466,7 @@ final class GeminiStreamAccumulator {
     try {
       return OBJECT_MAPPER.readTree(data);
     } catch (JsonProcessingException e) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, "malformed SSE data JSON: " + e.getMessage());
+      throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "malformed SSE data JSON");
     }
   }
 
