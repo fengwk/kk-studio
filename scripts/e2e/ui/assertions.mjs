@@ -12,3 +12,10 @@ export async function assertReadOnlyZeroFooter(scope, label) {
     throw new Error(`${label} must stay read-only, found ${buttons} button(s)`)
   }
 }
+
+export async function waitForSettledAssistantText(scope, timeout = 90_000) {
+  const text = scope.locator('.thread-turn-assistant .thread-assistant-text').last()
+  await text.waitFor({ state: 'visible', timeout })
+  await scope.locator('.thread-working').waitFor({ state: 'detached', timeout })
+  return (await text.innerText()).trim()
+}
