@@ -102,7 +102,7 @@ registerCase({
   id: 'seed.agent_and_provider',
   level: 'L1',
   title: 'Agent/Provider seed 可用',
-  docs: 'seed Agent 以 name/model 引用；Provider 以 name 标识，八种协议映射正确',
+  docs: 'seed Agent 以 name/model 引用；Provider 以 name 标识，八种协议映射及 nullable baseUrl wire 形态正确',
   async run(ctx) {
     const { json: agentsJson } = await ctx.call(
       'GET',
@@ -147,12 +147,18 @@ registerCase({
     for (const [name, providerType] of expectedProviderTypes) {
       const provider = providers.find((candidate) => candidate.name === name)
       assert(provider?.providerType === providerType, JSON.stringify({ name, providerType, provider }))
+      const hasBaseUrl = Object.hasOwn(provider, 'baseUrl')
+      assert(
+        !hasBaseUrl || (typeof provider.baseUrl === 'string' && provider.baseUrl.length > 0),
+        `AgentProviderDTO.baseUrl must be omitted or a non-empty string: ${JSON.stringify(provider)}`,
+      )
       assertExactFields(
         provider,
         [
           'name',
           'description',
           'providerType',
+          ...(hasBaseUrl ? ['baseUrl'] : []),
           'configured',
           'modelCallTimeoutMillis',
           'modelCallIdleTimeoutMillis',
