@@ -79,7 +79,9 @@ class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSuppor
   /** session_blob_ref.session_id 是 RESTRICT FK：先建真实 session 行。 */
   private void seedSession(UUID sessionId) {
     jdbc.update(
-        "insert into harness_session (id, created_at) values (?, current_timestamp)", sessionId);
+        "insert into harness_session (id, name, created_at) values (?, ?, current_timestamp)",
+        sessionId,
+        "test-session");
   }
 
   @Test

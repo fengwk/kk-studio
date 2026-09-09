@@ -145,7 +145,10 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
       """;
 
   private void seedDueThreadWork() {
-    jdbc.update("insert into harness_session (id, created_at) values (?, now())", SESSION_ID);
+    jdbc.update(
+        "insert into harness_session (id, name, created_at) values (?, ?, now())",
+        SESSION_ID,
+        "lifecycle-test-session");
     jdbc.update(
         "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
             + " created_at) values (?, ?, null, 'ROOT', ?::jsonb, now())",
@@ -154,12 +157,13 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
         ROOT_PAYLOAD_JSON);
     jdbc.update(
         "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-            + " yolo_enabled, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, false, 1, 0, now(), now())",
+            + " name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, ?, false, 1, 0, now(), now())",
         THREAD_ID,
         SESSION_ID,
         ROOT_ENTRY_ID,
-        CREATION_REQUEST_HASH);
+        CREATION_REQUEST_HASH,
+        "lifecycle-test-thread");
     jdbc.update(
         "insert into harness_work (target_type, target_id, available_at, wake_version)"
             + " values ('THREAD', ?, now(), 1)",

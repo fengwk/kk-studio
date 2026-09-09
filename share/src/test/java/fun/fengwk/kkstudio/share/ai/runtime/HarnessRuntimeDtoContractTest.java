@@ -120,6 +120,46 @@ class HarnessRuntimeDtoContractTest {
   }
 
   @Test
+  void nameUpdateDtoRejectsUnknownFieldsAndNonStringPrimitives() {
+    // 意图：rename 请求体严格边界必须由共享 DTO 直接拒绝（未知字段 + 非字符串 JSON primitive），不进入 mapper。
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                """
+                {"name":"ok","unknown":true}
+                """,
+                HarnessNameUpdateDTO.class));
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                """
+                {"name":42}
+                """, HarnessNameUpdateDTO.class));
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                """
+                {"name":["list"]}
+                """,
+                HarnessNameUpdateDTO.class));
+  }
+
+  @Test
+  void nameUpdateDtoAcceptsOnlyTheNameFieldAndRoundsItBack() throws Exception {
+    // 意图：唯一的合法 {name} 请求体必须精确 round-trip（长度/空白语义留给 Core 权威）。
+    HarnessNameUpdateDTO dto =
+        MAPPER.readValue(
+            """
+            {"name":"  display name  "}
+            """,
+            HarnessNameUpdateDTO.class);
+    assertEquals("  display name  ", dto.getName());
+  }
+
+  @Test
   void snapshotCarriesManualCompactionAvailabilityAndNullableReason() {
     HarnessThreadSnapshotDTO snapshot = new HarnessThreadSnapshotDTO();
     HarnessManualCompactionDTO availability = new HarnessManualCompactionDTO();

@@ -75,7 +75,9 @@ class PostgresqlCanvasSessionRepositoryIntegrationTest extends PostgresCanvasInf
   private UUID addHarnessSession() {
     UUID sessionId = UUID.randomUUID();
     jdbc.update(
-        "insert into harness_session (id, created_at) values (?, current_timestamp)", sessionId);
+        "insert into harness_session (id, name, created_at) values (?, ?, current_timestamp)",
+        sessionId,
+        "test-session");
     return sessionId;
   }
 

@@ -13,6 +13,9 @@ public class HarnessThreadSummaryDTO {
   /** Thread 主键：canonical UUID string。 */
   private String threadId;
 
+  /** Thread 的必需非空展示名称（服务端权威值）；主展示文本，绝不回退为 id。 */
+  private String name;
+
   /** Thread 创建时间（UTC Instant）。 */
   private Instant createdAt;
 

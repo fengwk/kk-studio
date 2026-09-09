@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.web.runtime;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.RenameSessionCommand;
+import fun.fengwk.kkstudio.harness.runtime.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
@@ -31,6 +33,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
@@ -147,6 +150,22 @@ public final class HarnessRuntimeRequestMapper {
         requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
   }
 
+  /** 把 PUT name 请求映射为 Session 重命名命令；只校验 name 存在且非 blank，规范化与长度上限由 Core {@code Names} 权威处理。 */
+  public static RenameSessionCommand toRenameSessionCommand(
+      String sessionId, HarnessNameUpdateDTO dto) {
+    requireNonNull(dto, "nameUpdateDTO");
+    return new RenameSessionCommand(
+        parseUuid(sessionId, "sessionId"), requireText(dto.getName(), "name"));
+  }
+
+  /** 把 PUT name 请求映射为 Thread 重命名命令；只校验 name 存在且非 blank，规范化与长度上限由 Core {@code Names} 权威处理。 */
+  public static RenameThreadCommand toRenameThreadCommand(
+      String threadId, HarnessNameUpdateDTO dto) {
+    requireNonNull(dto, "nameUpdateDTO");
+    return new RenameThreadCommand(
+        parseUuid(threadId, "threadId"), requireText(dto.getName(), "name"));
+  }
+
   public static ToolApprovalCommand toToolApprovalCommand(
       String threadId, String toolInvocationId, HarnessToolApprovalDTO dto) {
     requireNonNull(dto, "approvalDTO");
@@ -186,7 +205,7 @@ public final class HarnessRuntimeRequestMapper {
             null,
             requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
       }
-      case "ENTRY" -> {
+      case "NEW_THREAD" -> {
         requireForbidden(dto.hasRootSettingsField(), "target.rootSettings", "target type " + type);
         requireForbidden(
             dto.hasExpectedHeadEntryIdField(), "target.expectedHeadEntryId", "target type " + type);
@@ -194,7 +213,7 @@ public final class HarnessRuntimeRequestMapper {
             dto.hasExpectedNextCommandSequenceField(),
             "target.expectedNextCommandSequence",
             "target type " + type);
-        yield new AcceptCommandsTarget.Entry(
+        yield new AcceptCommandsTarget.NewThread(
             parseUuid(dto.getSessionId(), "target.sessionId"),
             parseUuid(dto.getStartEntryId(), "target.startEntryId"),
             parseUuid(dto.getThreadId(), "target.threadId"),

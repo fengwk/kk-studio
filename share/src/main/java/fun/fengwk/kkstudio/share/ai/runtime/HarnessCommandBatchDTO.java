@@ -12,7 +12,7 @@ public class HarnessCommandBatchDTO {
   /** Chat 或 Canvas owner。 */
   private HarnessCommandOwnerDTO owner;
 
-  /** NEW_SESSION、ENTRY 或 THREAD target。 */
+  /** NEW_SESSION、NEW_THREAD 或 THREAD target。 */
   private HarnessCommandTargetDTO target;
 
   /** 非空、按产品顺序排列的 SET_* + USER_MESSAGE 命令列表。 */

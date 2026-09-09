@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.runtime.RenameSessionCommand;
+import fun.fengwk.kkstudio.harness.runtime.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
@@ -26,6 +28,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
@@ -53,15 +56,15 @@ class HarnessRuntimeRequestMapperTest {
     AcceptCommandsCommand newSession =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
             request(newSessionTarget(), userCommand("new-session")));
-    AcceptCommandsCommand entry =
+    AcceptCommandsCommand newThread =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-            request(entryTarget(), userCommand("entry")));
+            request(newThreadTarget(), userCommand("entry")));
     AcceptCommandsCommand thread =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
             request(threadTarget(), userCommand("thread")));
 
     assertInstanceOf(AcceptCommandsTarget.NewSession.class, newSession.target());
-    assertInstanceOf(AcceptCommandsTarget.Entry.class, entry.target());
+    assertInstanceOf(AcceptCommandsTarget.NewThread.class, newThread.target());
     assertInstanceOf(AcceptCommandsTarget.Thread.class, thread.target());
     assertThrows(
         IllegalArgumentException.class,
@@ -181,6 +184,56 @@ class HarnessRuntimeRequestMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeRequestMapper.toToolApprovalCommand(THREAD_ID, idText(31), approval));
+  }
+
+  @Test
+  void mapsRenameCommandsThroughTheSameStrictUuidAndPresenceBoundary() {
+    // Session/Thread rename 共用同一 {name} bean；id 走 canonical UUID 解析，name 经 Core 权威规范化（构造器即折叠空白）。
+    HarnessNameUpdateDTO body = new HarnessNameUpdateDTO();
+    body.setName("  my session  ");
+
+    RenameSessionCommand sessionCommand =
+        HarnessRuntimeRequestMapper.toRenameSessionCommand(idText(2), body);
+    assertEquals(id(2), sessionCommand.sessionId());
+    assertEquals("my session", sessionCommand.name());
+
+    RenameThreadCommand threadCommand =
+        HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, body);
+    assertEquals(id(1), threadCommand.threadId());
+    assertEquals("my session", threadCommand.name());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toRenameSessionCommand("not-a-uuid", body));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(null, body));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toRenameSessionCommand(idText(2), null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, null));
+  }
+
+  @Test
+  void rejectsBlankNameWithoutTouchingCoreNormalization() {
+    // mapper 不能替 Core 做长度裁剪：blank 直接 400，非空白超长在命令构造器（Core 权威）中被拒绝。
+    HarnessNameUpdateDTO blank = new HarnessNameUpdateDTO();
+    blank.setName("   ");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toRenameSessionCommand(idText(2), blank));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, blank));
+
+    HarnessNameUpdateDTO overlong = new HarnessNameUpdateDTO();
+    overlong.setName("n".repeat(257));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, overlong),
+        "超长 name 必须由 Core 命令构造器拒绝，而不是在 web 层重复实现");
   }
 
   @Test
@@ -361,14 +414,14 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void rejectsTargetUnionViolationsAndUnknownType() {
-    // NEW_SESSION/ENTRY/THREAD 的字段集合互斥，未知 target 必须拒绝。
+    // NEW_SESSION/NEW_THREAD/THREAD 的字段集合互斥，未知 target 必须拒绝。
     HarnessCommandTargetDTO newSession = newSessionTarget();
     newSession.setStartEntryId(idText(8));
     assertTargetRejected(newSession);
 
-    HarnessCommandTargetDTO entry = entryTarget();
-    entry.setRootSettings(branchSettings());
-    assertTargetRejected(entry);
+    HarnessCommandTargetDTO newThread = newThreadTarget();
+    newThread.setRootSettings(branchSettings());
+    assertTargetRejected(newThread);
 
     HarnessCommandTargetDTO thread = threadTarget();
     thread.setSessionId(idText(2));
@@ -484,9 +537,9 @@ class HarnessRuntimeRequestMapperTest {
     return target;
   }
 
-  private static HarnessCommandTargetDTO entryTarget() {
+  private static HarnessCommandTargetDTO newThreadTarget() {
     HarnessCommandTargetDTO target = new HarnessCommandTargetDTO();
-    target.setType("ENTRY");
+    target.setType("NEW_THREAD");
     target.setSessionId(idText(2));
     target.setStartEntryId(idText(3));
     target.setThreadId(idText(1));

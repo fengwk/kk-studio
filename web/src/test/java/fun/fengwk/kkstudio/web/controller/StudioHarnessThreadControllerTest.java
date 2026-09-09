@@ -26,7 +26,9 @@ import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
+import fun.fengwk.kkstudio.harness.runtime.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
@@ -141,6 +143,80 @@ class StudioHarnessThreadControllerTest {
                 .content("{\"expectedVersion\":3}"))
         .andExpect(status().isBadRequest());
     verify(runtime, never()).compactThread(any(CompactThreadCommand.class));
+  }
+
+  /** 意图：验证 PUT /api/harness/threads/{threadId}/name 执行 Runtime 重命名并返回权威当前 Thread。 */
+  @Test
+  void renameThreadCallsRuntimeAndReturnsCanonicalNameAndVersion() throws Exception {
+    when(runtime.renameThread(any(RenameThreadCommand.class)))
+        .thenReturn(HarnessRuntimeTestFixtures.thread(id(1)));
+    when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
+
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/name")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"  new thread name  \"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.threadId").value(idText(1)))
+        .andExpect(jsonPath("$.data.name").value("thread"))
+        .andExpect(jsonPath("$.data.version").value("3"));
+
+    ArgumentCaptor<RenameThreadCommand> captor = ArgumentCaptor.forClass(RenameThreadCommand.class);
+    verify(runtime).renameThread(captor.capture());
+    assertEquals(id(1), captor.getValue().threadId());
+    assertEquals("new thread name", captor.getValue().name());
+  }
+
+  /** 意图：验证 rename body 的严格边界在到达 Runtime 前被拒绝（缺失/显式 null/非字符串/blank/超长/未知字段/404），错误不回显非法名称值。 */
+  @Test
+  void renameThreadRejectsStrictBodyViolationsAndMapsMissingThreadToNotFound() throws Exception {
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/name")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"ok\",\"unknown\":true}"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/name")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":42}"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/name")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/name")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":null}"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/name")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"   \"}"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/name")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + "x".repeat(257) + "\"}"))
+        .andExpect(status().isBadRequest());
+    verify(runtime, never()).renameThread(any(RenameThreadCommand.class));
+
+    when(runtime.renameThread(any(RenameThreadCommand.class)))
+        .thenThrow(new HarnessRuntimeNotFoundException("thread is missing"));
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/name")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"ok\"}"))
+        .andExpect(status().isNotFound());
   }
 
   /** 意图：验证 PUT /api/harness/threads/{threadId}/yolo 执行 CAS 更新并返回权威当前 Thread。 */

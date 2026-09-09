@@ -12,7 +12,7 @@ import lombok.Setter;
 @Data
 public class HarnessCommandTargetDTO {
 
-  /** target 类型：NEW_SESSION、ENTRY 或 THREAD。 */
+  /** target 类型：NEW_SESSION、NEW_THREAD 或 THREAD。 */
   private String type;
 
   private String sessionId;

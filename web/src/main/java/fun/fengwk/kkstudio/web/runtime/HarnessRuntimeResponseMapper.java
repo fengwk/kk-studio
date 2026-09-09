@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponse
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -75,6 +76,7 @@ public final class HarnessRuntimeResponseMapper {
     Objects.requireNonNull(snapshot, "snapshot");
     HarnessThreadDTO dto = new HarnessThreadDTO();
     dto.setThreadId(snapshot.thread().id().toString());
+    dto.setName(snapshot.thread().name());
     dto.setSessionId(snapshot.entryPath().root().sessionId().toString());
     dto.setHeadEntryId(snapshot.thread().headEntryId().toString());
     dto.setYoloEnabled(snapshot.thread().yoloEnabled());
@@ -242,6 +244,16 @@ public final class HarnessRuntimeResponseMapper {
     return dto;
   }
 
+  /** 可复用的 Session 身份/名称投影（rename 响应、accept 响应共用）。 */
+  public static HarnessSessionDTO toSessionDto(Session session) {
+    Objects.requireNonNull(session, "session");
+    HarnessSessionDTO dto = new HarnessSessionDTO();
+    dto.setSessionId(session.id().toString());
+    dto.setName(session.name());
+    dto.setCreatedAt(session.createdAt());
+    return dto;
+  }
+
   /** 映射命令接受结果，并使用接受后重新读取的当前 Thread snapshot 投影 Thread。 */
   public static HarnessAcceptedCommandsDTO toAcceptedCommandsDto(
       AcceptedCommands accepted, ThreadSnapshot currentSnapshot) {
@@ -252,10 +264,7 @@ public final class HarnessRuntimeResponseMapper {
           "accepted result and current snapshot thread do not match");
     }
     HarnessAcceptedCommandsDTO dto = new HarnessAcceptedCommandsDTO();
-    HarnessSessionDTO sessionDto = new HarnessSessionDTO();
-    sessionDto.setSessionId(accepted.session().id().toString());
-    sessionDto.setCreatedAt(accepted.session().createdAt());
-    dto.setSession(sessionDto);
+    dto.setSession(toSessionDto(accepted.session()));
     dto.setRootEntry(toEntryDto(accepted.rootEntry()));
     dto.setThread(toThreadDto(currentSnapshot));
     List<HarnessThreadCommandDTO> commands = new ArrayList<>(accepted.acceptedCommands().size());

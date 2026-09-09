@@ -143,7 +143,7 @@ class HarnessOneShotServiceTest {
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
     verify(runtime).acceptCommands(accept.capture(), eq(preflight));
     List<NewThreadCommand> prepared =
-        preflight.prepare(null, new Session(id(1), NOW), accept.getValue().commands());
+        preflight.prepare(null, new Session(id(1), "session", NOW), accept.getValue().commands());
     assertEquals(accept.getValue().commands(), prepared);
   }
 
@@ -175,12 +175,14 @@ class HarnessOneShotServiceTest {
                       id(1),
                       root.id(),
                       "0".repeat(64),
+                      "thread",
                       false,
                       accepted.size() + 1L,
                       0L,
                       NOW,
                       NOW);
-              return new AcceptedCommands(new Session(id(1), NOW), root, thread, accepted, false);
+              return new AcceptedCommands(
+                  new Session(id(1), "session", NOW), root, thread, accepted, false);
             });
   }
 
@@ -394,7 +396,16 @@ class HarnessOneShotServiceTest {
   private static ThreadState thread(
       UUID threadId, UUID sessionId, UUID head, long nextCommandSequence, long version) {
     return new ThreadState(
-        threadId, sessionId, head, "0".repeat(64), false, nextCommandSequence, version, NOW, NOW);
+        threadId,
+        sessionId,
+        head,
+        "0".repeat(64),
+        "thread",
+        false,
+        nextCommandSequence,
+        version,
+        NOW,
+        NOW);
   }
 
   private static ThreadSnapshot completed(String text) {

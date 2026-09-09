@@ -222,7 +222,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresT
         acceptanceService.accept(
             owner,
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.Entry(
+                new AcceptCommandsTarget.NewThread(
                     sessionId, initial.rootEntry().id(), entryThreadId, false),
                 List.of(
                     new NewThreadCommand(

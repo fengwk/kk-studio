@@ -37,8 +37,8 @@ import java.util.UUID;
 /**
  * Chat/Canvas 共享的 Harness 命令接受事务边界：唯一的产品用户归属入口。
  *
- * <p>一个 Spring 物理事务内完成：先按 target 完成 owner 授权（NEW_SESSION 确认 owner 存在；ENTRY/THREAD 确认目标 Session 已由该
- * owner 的归属边持有），再调用 {@link HarnessRuntime#acceptCommands} 把 Runtime store（同一
+ * <p>一个 Spring 物理事务内完成：先按 target 完成 owner 授权（NEW_SESSION 确认 owner 存在；NEW_THREAD/THREAD 确认目标 Session
+ * 已由该 owner 的归属边持有），再调用 {@link HarnessRuntime#acceptCommands} 把 Runtime store（同一
  * DataSource、PROPAGATION_REQUIRED）加入同一事务。仅在全新接受时调用内部 preflight：NEW_SESSION 原子插入 owner relation （锁
  * harness_session 行 + 检查另一张归属表），所有 target 把 USER_MESSAGE 的瞬时 ATTACHMENT 物化为 durable RESOURCE 并维护
  * Session blob ref，同时只允许 RESOURCE 复用目标 Session 已拥有的 ref。精确 replay 时 Runtime 不调用 preflight，因此不会重复
@@ -93,7 +93,7 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /**
    * 调用 Runtime 前完成 owner 授权：NEW_SESSION 对新 Session 只要求 owner 存在，但对已有 Session（包括 Runtime 精确
-   * replay）要求目标 Session 已由该 owner 持有；ENTRY/THREAD 始终要求目标 Session 已由该 owner 持有。
+   * replay）要求目标 Session 已由该 owner 持有；NEW_THREAD/THREAD 始终要求目标 Session 已由该 owner 持有。
    */
   private void authorize(OwnerRef owner, AcceptCommandsTarget target) {
     switch (target) {
@@ -103,9 +103,9 @@ public class HarnessCommandAcceptanceOrchestrator {
           requireOwnedSession(owner, newSession.sessionId());
         }
       }
-      case AcceptCommandsTarget.Entry entry -> {
+      case AcceptCommandsTarget.NewThread newThread -> {
         lockOwnerForKeyShare(owner);
-        requireOwnedSession(owner, entry.sessionId());
+        requireOwnedSession(owner, newThread.sessionId());
       }
       case AcceptCommandsTarget.Thread thread -> {
         lockOwnerForKeyShare(owner);
