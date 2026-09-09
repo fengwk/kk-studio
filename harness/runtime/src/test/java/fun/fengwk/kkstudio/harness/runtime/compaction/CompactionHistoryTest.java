@@ -142,6 +142,6 @@ class CompactionHistoryTest {
 
   private static ThreadState thread(UUID headEntryId) {
     return new ThreadState(
-        THREAD_ID, SESSION_ID, headEntryId, CREATION_REQUEST_HASH, false, 1, 0, NOW, NOW);
+        THREAD_ID, SESSION_ID, headEntryId, CREATION_REQUEST_HASH, "main", false, 1, 0, NOW, NOW);
   }
 }

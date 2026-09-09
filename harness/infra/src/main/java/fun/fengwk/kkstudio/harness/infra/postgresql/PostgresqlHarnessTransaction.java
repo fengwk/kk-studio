@@ -317,8 +317,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     checkOpen();
     Objects.requireNonNull(session, "session");
     update(
-        "insert into harness_session (id, created_at) values (?, ?)",
+        "insert into harness_session (id, name, created_at) values (?, ?, ?)",
         session.id(),
+        session.name(),
         PostgresqlHarnessRows.timestamp(session.createdAt()));
   }
 
@@ -327,6 +328,21 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     checkOpen();
     return queryOne(
         "select * from harness_session where id = ?", PostgresqlHarnessRows.SESSION, id);
+  }
+
+  @Override
+  public void updateSession(Session session) {
+    checkOpen();
+    Objects.requireNonNull(session, "session");
+    requireLocked(LockKey.session(session.id()));
+    Session stored =
+        findSession(session.id())
+            .orElseThrow(
+                () -> new IllegalArgumentException("session " + session.id() + " does not exist"));
+    Session.validateTransition(stored, session);
+    int updated =
+        update("update harness_session set name = ? where id = ?", session.name(), session.id());
+    requireSingleUpdate(updated, "session", session.id());
   }
 
   @Override
@@ -553,14 +569,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     update(
         """
         insert into harness_thread (
-            id, session_id, head_entry_id, creation_request_hash, yolo_enabled,
+            id, session_id, head_entry_id, creation_request_hash, name, yolo_enabled,
             next_command_sequence, version, created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         thread.id(),
         thread.sessionId(),
         thread.headEntryId(),
         thread.creationRequestHash(),
+        thread.name(),
         thread.yoloEnabled(),
         thread.nextCommandSequence(),
         thread.version(),
@@ -648,6 +665,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             """
             update harness_thread
             set head_entry_id = ?,
+                name = ?,
                 yolo_enabled = ?,
                 next_command_sequence = ?,
                 version = ?,
@@ -655,6 +673,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             where id = ?
             """,
             thread.headEntryId(),
+            thread.name(),
             thread.yoloEnabled(),
             thread.nextCommandSequence(),
             thread.version(),

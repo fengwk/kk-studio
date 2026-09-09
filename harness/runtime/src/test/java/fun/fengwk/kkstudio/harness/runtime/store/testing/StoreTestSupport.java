@@ -157,7 +157,7 @@ final class StoreTestSupport {
   }
 
   static Session session(UUID id) {
-    return new Session(id, T0);
+    return new Session(id, "session-" + id, T0);
   }
 
   static Entry rootEntry(UUID id, UUID sessionId) {
@@ -341,7 +341,15 @@ final class StoreTestSupport {
       Instant createdAt,
       Instant updatedAt) {
     return threadState(
-        id, sessionId, headEntryId, false, nextCommandSequence, version, createdAt, updatedAt);
+        id,
+        sessionId,
+        headEntryId,
+        "main",
+        false,
+        nextCommandSequence,
+        version,
+        createdAt,
+        updatedAt);
   }
 
   /** 允许显式指定 YOLO runtime policy、next sequence / version 与时间的 ThreadState 构造。 */
@@ -354,11 +362,35 @@ final class StoreTestSupport {
       long version,
       Instant createdAt,
       Instant updatedAt) {
+    return threadState(
+        id,
+        sessionId,
+        headEntryId,
+        "main",
+        yoloEnabled,
+        nextCommandSequence,
+        version,
+        createdAt,
+        updatedAt);
+  }
+
+  /** 允许显式指定名称、YOLO runtime policy、next sequence / version 与时间的 ThreadState 构造。 */
+  static ThreadState threadState(
+      UUID id,
+      UUID sessionId,
+      UUID headEntryId,
+      String name,
+      boolean yoloEnabled,
+      long nextCommandSequence,
+      long version,
+      Instant createdAt,
+      Instant updatedAt) {
     return new ThreadState(
         id,
         sessionId,
         headEntryId,
         CREATION_REQUEST_HASH,
+        name,
         yoloEnabled,
         nextCommandSequence,
         version,

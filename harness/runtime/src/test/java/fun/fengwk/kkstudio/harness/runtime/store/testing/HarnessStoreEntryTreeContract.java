@@ -72,9 +72,73 @@ public abstract class HarnessStoreEntryTreeContract {
   }
 
   @Test
+  void updateSessionReplacesOnlyNameUnderLockAndValidatesTransition() {
+    // 测试意图：updateSession 是唯一受支持的 Session 行变更——锁内仅替换 name，id/createdAt 不可变；
+    // 未锁、行不存在、身份改变都抛对应异常且行不被改动。
+    UUID sessionId = TestIds.id(10);
+    inTransaction(store, tx -> tx.insertSession(session(sessionId)));
+    Session stored = store.transaction(tx -> tx.findSession(sessionId)).orElseThrow();
+    Session renamed = new Session(sessionId, "renamed session", stored.createdAt());
+
+    // 未锁定时更新被拒。
+    assertThrows(
+        IllegalStateException.class, () -> inTransaction(store, tx -> tx.updateSession(renamed)));
+    // 锁定后更新成功且只替换名称。
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockSessionForKeyShare(sessionId).orElseThrow();
+          tx.updateSession(renamed);
+        });
+    assertEquals(renamed, store.transaction(tx -> tx.findSession(sessionId)).orElseThrow());
+
+    // 行不存在：lock 返回 empty（不产生锁），未锁定更新抛 IllegalStateException。
+    UUID ghostId = TestIds.id(11);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockSessionForKeyShare(ghostId);
+                  tx.updateSession(new Session(ghostId, "ghost", stored.createdAt()));
+                }));
+
+    // createdAt 身份字段改变被共享校验拒绝（updateSession 按候选 id 定位存储行，id 恒等于行 id）。
+    Session movedCreatedAt =
+        new Session(sessionId, "renamed session", stored.createdAt().plusSeconds(1));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockSessionForKeyShare(sessionId).orElseThrow();
+                  tx.updateSession(movedCreatedAt);
+                }));
+    // 拒绝后行保持原名。
+    assertEquals(renamed, store.transaction(tx -> tx.findSession(sessionId)).orElseThrow());
+  }
+
+  @Test
+  void updateSessionAcceptsExactReplayAndForUpdateLock() {
+    // 测试意图：updateSession 支持 lockSessionForUpdate（rename 控制面用）且 exact replay 是合法迁移。
+    UUID sessionId = TestIds.id(13);
+    inTransaction(store, tx -> tx.insertSession(session(sessionId)));
+    Session stored = store.transaction(tx -> tx.findSession(sessionId)).orElseThrow();
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockSessionForUpdate(sessionId).orElseThrow();
+          tx.updateSession(stored);
+        });
+    assertEquals(stored, store.transaction(tx -> tx.findSession(sessionId)).orElseThrow());
+  }
+
+  @Test
   void sessionEntryAndThreadTimestampsRejectSubMillisecondPrecision() {
     UUID sessionId = TestIds.id(1);
-    Session session = new Session(sessionId, T0.plusNanos(1));
+    Session session = new Session(sessionId, "session-" + sessionId, T0.plusNanos(1));
     assertThrows(
         IllegalArgumentException.class,
         () -> inTransaction(store, tx -> tx.insertSession(session)));
@@ -404,6 +468,31 @@ public abstract class HarnessStoreEntryTreeContract {
   }
 
   @Test
+  void updateThreadWithRenameCommitsNameChangeBumpingVersionExactlyOnce() {
+    // 测试意图：rename 复用 updateThread 既有路径——仅 name 变化（version 精确 +1、updatedAt 推进）可落库；
+    // head / sequence / creationRequestHash / createdAt 不变；exact replay 被接受。
+    Baseline baseline = seedThreadBaseline(store);
+    ThreadState stored = store.transaction(tx -> tx.findThread(baseline.threadId())).orElseThrow();
+    ThreadState renamed = stored.renameThread("branch 分析", T2);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId()).orElseThrow();
+          tx.updateThread(renamed);
+        });
+    ThreadState committed =
+        store.transaction(tx -> tx.findThread(baseline.threadId())).orElseThrow();
+    assertEquals(renamed, committed);
+    assertEquals("branch 分析", committed.name());
+    assertEquals(stored.version() + 1L, committed.version());
+    assertEquals(T2, committed.updatedAt());
+    assertEquals(stored.headEntryId(), committed.headEntryId());
+    assertEquals(stored.creationRequestHash(), committed.creationRequestHash());
+    assertEquals(stored.nextCommandSequence(), committed.nextCommandSequence());
+    assertEquals(stored.createdAt(), committed.createdAt());
+  }
+
+  @Test
   void updateThreadRejectsChangedCreatedAt() {
     Baseline baseline = seedThreadBaseline(store);
     assertThrows(
@@ -422,6 +511,31 @@ public abstract class HarnessStoreEntryTreeContract {
                           locked.nextCommandSequence(),
                           locked.version(),
                           T1,
+                          T2));
+                }));
+  }
+
+  @Test
+  void updateThreadRejectsNameRegressionWhenVersionNotBumped() {
+    Baseline baseline = seedThreadBaseline(store);
+    // 名称改变但 version 未 +1 的行直接构造会被共享校验拒绝（必须走 renameThread 转换）。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  ThreadState locked = tx.lockThread(baseline.threadId()).orElseThrow();
+                  tx.updateThread(
+                      StoreTestSupport.threadState(
+                          locked.id(),
+                          locked.sessionId(),
+                          locked.headEntryId(),
+                          "branch 分析",
+                          locked.yoloEnabled(),
+                          locked.nextCommandSequence(),
+                          locked.version(),
+                          locked.createdAt(),
                           T2));
                 }));
   }

@@ -70,7 +70,8 @@ class HarnessRuntimeAcceptInitialTest {
   private static AcceptCommandsCommand entry(
       UUID sessionId, UUID startEntryId, List<NewThreadCommand> commands) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.Entry(sessionId, startEntryId, TestIds.id(203), false), commands);
+        new AcceptCommandsTarget.NewThread(sessionId, startEntryId, TestIds.id(203), false),
+        commands);
   }
 
   private static NewThreadCommand setAgent(UUID idempotencyKey) {
@@ -419,7 +420,7 @@ class HarnessRuntimeAcceptInitialTest {
             tx -> {
               UUID sessionId = tx.nextId();
               UUID rootEntryId = tx.nextId();
-              tx.insertSession(new Session(sessionId, T0));
+              tx.insertSession(new Session(sessionId, "session-" + sessionId, T0));
               tx.insertEntry(
                   new Entry(rootEntryId, sessionId, null, new RootPayload(settings()), T0));
               return rootEntryId;

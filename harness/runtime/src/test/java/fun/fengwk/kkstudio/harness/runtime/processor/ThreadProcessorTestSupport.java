@@ -135,10 +135,10 @@ final class ThreadProcessorTestSupport {
 
   private ThreadProcessorTestSupport() {}
 
-  /** 构造有合法 creationRequestHash 的 ThreadState：version 0 / nextCommandSequence 1。 */
+  /** 构造有合法 creationRequestHash 的 ThreadState：name 固定 root 名、version 0 / nextCommandSequence 1。 */
   static ThreadState threadState(UUID threadId, UUID sessionId, UUID headEntryId, Instant now) {
     return new ThreadState(
-        threadId, sessionId, headEntryId, CREATION_REQUEST_HASH, false, 1L, 0L, now, now);
+        threadId, sessionId, headEntryId, CREATION_REQUEST_HASH, "main", false, 1L, 0L, now, now);
   }
 
   // -----------------------------------------------------------------------------------------------
@@ -175,7 +175,7 @@ final class ThreadProcessorTestSupport {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertThread(threadState(threadId, sessionId, rootEntryId, NOW));
@@ -192,7 +192,7 @@ final class ThreadProcessorTestSupport {
           UUID turnStartEntryId = tx.nextId();
           UUID userEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
@@ -218,7 +218,7 @@ final class ThreadProcessorTestSupport {
           UUID assistantEntryId = tx.nextId();
           UUID turnEndEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
@@ -267,7 +267,7 @@ final class ThreadProcessorTestSupport {
           UUID userEntryId = tx.nextId();
           UUID assistantEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
@@ -886,7 +886,7 @@ final class ThreadProcessorTestSupport {
           UUID secondAssistantEntryId = tx.nextId(); // turn2 ASSISTANT（携带 usage）
           UUID secondTurnEndId = tx.nextId(); // turn2 TURN_END
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           // turn1：可摘要历史显著大于测试摘要 wrapper，避免成功路径被 no-gain 保护拦截。

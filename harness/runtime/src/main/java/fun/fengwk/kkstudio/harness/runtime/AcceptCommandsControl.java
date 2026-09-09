@@ -2,8 +2,11 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -29,8 +32,9 @@ import java.util.UUID;
 /**
  * HarnessRuntime 内部的同步 acceptCommands 控制面。
  *
- * <p>承担命令接受（NEW_SESSION / ENTRY / THREAD 三条路径）、initial creation replay 与 ordered replay、 batch
- * shape 校验、cursor admission 校验以及向 Store 写入 Session / ROOT / Thread / Commands / Work。
+ * <p>承担命令接受（NEW_SESSION / NEW_THREAD / THREAD 三条路径）、initial creation replay 与 ordered replay、 batch
+ * shape 校验、cursor admission 校验以及向 Store 写入 Session / ROOT / Thread / Commands / Work。名称不是
+ * 创建请求的一部分：初始名称在创建事务内由首条 user-like 文本派生（缺省回退到 id 前缀），后期改名走独立的 rename 控制面。
  */
 final class AcceptCommandsControl {
 
@@ -55,7 +59,7 @@ final class AcceptCommandsControl {
     List<NewThreadCommand> commands = command.commands();
     return switch (command.target()) {
       case AcceptCommandsTarget.NewSession target -> acceptNewSession(target, commands, preflight);
-      case AcceptCommandsTarget.Entry target -> acceptEntry(target, commands, preflight);
+      case AcceptCommandsTarget.NewThread target -> acceptNewThread(target, commands, preflight);
       case AcceptCommandsTarget.Thread target -> acceptOnThread(target, commands, preflight);
     };
   }
@@ -81,7 +85,10 @@ final class AcceptCommandsControl {
                 tx, target.sessionId(), target.threadId(), existing, commands, creationRequestHash);
           }
           Instant now = clock.instant();
-          tx.insertSession(new Session(target.sessionId(), now));
+          Session session =
+              new Session(
+                  target.sessionId(), initialSessionName(commands, target.sessionId()), now);
+          tx.insertSession(session);
           UUID rootEntryId = tx.nextId();
           tx.insertEntry(
               new Entry(
@@ -96,6 +103,7 @@ final class AcceptCommandsControl {
                   target.sessionId(),
                   rootEntryId,
                   creationRequestHash,
+                  Names.rootThreadName(),
                   target.yoloEnabled(),
                   1,
                   0,
@@ -106,8 +114,8 @@ final class AcceptCommandsControl {
         });
   }
 
-  private AcceptedCommands acceptEntry(
-      AcceptCommandsTarget.Entry target,
+  private AcceptedCommands acceptNewThread(
+      AcceptCommandsTarget.NewThread target,
       List<NewThreadCommand> commands,
       AcceptancePreflight preflight) {
     validateBatchShape(target, commands);
@@ -116,7 +124,7 @@ final class AcceptCommandsControl {
           ThreadState existing = tx.findThread(target.threadId()).orElse(null);
           if (existing != null) {
             String creationRequestHash =
-                ThreadCreationRequestHash.forEntry(
+                ThreadCreationRequestHash.forNewThread(
                     target.sessionId(),
                     target.startEntryId(),
                     target.threadId(),
@@ -125,7 +133,7 @@ final class AcceptCommandsControl {
             return replayInitial(
                 tx, target.sessionId(), target.threadId(), existing, commands, creationRequestHash);
           }
-          // ENTRY 新建路径用 KEY SHARE：不串行化同 Session 的 sibling 初始创建。
+          // NEW_THREAD 新建路径用 KEY SHARE：不串行化同 Session 的 sibling 初始创建。
           tx.lockSessionForKeyShare(target.sessionId())
               .orElseThrow(
                   () ->
@@ -145,7 +153,7 @@ final class AcceptCommandsControl {
                     + target.sessionId());
           }
           String creationRequestHash =
-              ThreadCreationRequestHash.forEntry(
+              ThreadCreationRequestHash.forNewThread(
                   target.sessionId(),
                   target.startEntryId(),
                   target.threadId(),
@@ -158,6 +166,7 @@ final class AcceptCommandsControl {
                   target.sessionId(),
                   target.startEntryId(),
                   creationRequestHash,
+                  Names.defaultThreadName(target.threadId()),
                   target.yoloEnabled(),
                   1,
                   0,
@@ -260,11 +269,12 @@ final class AcceptCommandsControl {
   }
 
   /**
-   * NEW_SESSION / ENTRY：同 creation request hash + 同 Session 的 client threadId 精确 replay。
+   * NEW_SESSION / NEW_THREAD：同 creation request hash + 同 Session 的 client threadId 精确 replay。
    *
    * <p>{@code immutable} 快照只用于在上锁前定位 Session；随后按规范锁序 KEY SHARE Session -&gt; FOR UPDATE Thread
    * 复核后返回当前 projection（禁止混合 unlocked snapshot）。只按本请求 idempotencyKey 顺序重放原始初始命令，验证 requestHash 相等且
-   * sequence 从 1 连续，绝不返回该 Thread 后续批次的历史命令。
+   * sequence 从 1 连续，绝不返回该 Thread 后续批次的历史命令。replay 读取的是当前 Thread / Session 行，因此即便其后发生过
+   * rename，返回的名称也是当前名称。
    */
   private static AcceptedCommands replayInitial(
       HarnessStore.Transaction tx,
@@ -398,6 +408,32 @@ final class AcceptCommandsControl {
         session, requireRootEntry(tx, thread.sessionId()), thread, List.copyOf(ordered), true);
   }
 
+  /**
+   * 派生初始 Session 名称：只检查 validate 后的末尾 user-like message（初始 batch 恰以一条 user-like 结尾），取该消息第一个非空白
+   * 文本内容（仅 text 内容，不看附件 / resource 名称），规范化折叠为单行并取前 40 个 Unicode 码点（无省略号）；无文本时回退为 {@code session-} +
+   * session UUID 前 8 位。
+   */
+  private static String initialSessionName(List<NewThreadCommand> commands, UUID sessionId) {
+    NewThreadCommand trailing = commands.get(commands.size() - 1);
+    AgentMessage message = userMessage(trailing);
+    for (AgentMessageContent content : message.contents()) {
+      if (content instanceof TextMessageContent text) {
+        String name = Names.sessionNameFromUserText(text.text());
+        if (name != null) {
+          return name;
+        }
+      }
+    }
+    return Names.defaultSessionName(sessionId);
+  }
+
+  private static AgentMessage userMessage(NewThreadCommand command) {
+    if (command.payload() instanceof UserMessageCommandPayload payload) {
+      return payload.message();
+    }
+    return ((CustomMessageCommandPayload) command.payload()).message();
+  }
+
   private static Entry requireRootEntry(HarnessStore.Transaction tx, UUID sessionId) {
     return tx.findRootEntry(sessionId)
         .orElseThrow(
@@ -483,7 +519,7 @@ final class AcceptCommandsControl {
       }
     }
     if (target instanceof AcceptCommandsTarget.NewSession
-        || target instanceof AcceptCommandsTarget.Entry) {
+        || target instanceof AcceptCommandsTarget.NewThread) {
       if (userLikeCount != 1 || !isUserLike(commands.get(commands.size() - 1))) {
         throw invalidBatch(target, "initial batches must end with exactly one user-like message");
       }

@@ -74,8 +74,10 @@ Web 依赖 `spring-boot-starter-flyway`、`flyway-database-postgresql` 以及 ru
 
 - Harness Entry 的 ROOT 唯一、parent shape 和十种 `entry_type` 由数据库 check/
   partial unique index 固定。
-- Thread head 必须属于同一 Session；`next_command_sequence >= 1`，
-  `version >= 0`。
+- Thread head 必须属于同一 Session；`name` 经应用写路径规范化（非空、单行、至多 256 个
+  Unicode 码点），数据库 check 只防御最粗的空白串（`btrim(name) <> ''`）；
+  `next_command_sequence >= 1`，`version >= 0`。
+- `harness_session.name` 同样只做 `btrim(name) <> ''` 的粗防线（完整规范化在应用写路径）；Session 无 version 行，显示名称重命名经应用锁内 `updateSession` 原语完成。
 - `harness_thread_command` 以 `(thread_id, sequence)` 和
   `(thread_id, idempotency_key)` 保证顺序与 exact replay。
 - `harness_work` 以 `(target_type, target_id)` 唯一表示 THREAD/MODEL/TOOL 的

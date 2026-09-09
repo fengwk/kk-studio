@@ -2157,7 +2157,7 @@ class ModelExecutionStreamFlushTest {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, now));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, now));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
           UUID turnStartEntryId = tx.nextId();

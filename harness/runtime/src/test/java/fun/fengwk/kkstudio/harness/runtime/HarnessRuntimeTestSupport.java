@@ -748,7 +748,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   static Session session(UUID id) {
-    return new Session(id, T0);
+    return new Session(id, "session-" + id, T0);
   }
 
   static Entry rootEntry(UUID id, UUID sessionId) {
@@ -818,12 +818,17 @@ final class HarnessRuntimeTestSupport {
   }
 
   static ThreadState thread(UUID id, UUID sessionId, UUID headEntryId) {
-    return thread(id, sessionId, headEntryId, false);
+    return thread(id, sessionId, headEntryId, "main", false);
   }
 
   static ThreadState thread(UUID id, UUID sessionId, UUID headEntryId, boolean yoloEnabled) {
+    return thread(id, sessionId, headEntryId, "main", yoloEnabled);
+  }
+
+  static ThreadState thread(
+      UUID id, UUID sessionId, UUID headEntryId, String name, boolean yoloEnabled) {
     return new ThreadState(
-        id, sessionId, headEntryId, CREATION_REQUEST_HASH, yoloEnabled, 1, 0, T0, T0);
+        id, sessionId, headEntryId, CREATION_REQUEST_HASH, name, yoloEnabled, 1, 0, T0, T0);
   }
 
   static ThreadCommand withConsumedTurnStart(ThreadCommand command, UUID turnStartEntryId) {

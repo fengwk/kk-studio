@@ -301,7 +301,7 @@ class HarnessRuntimeManualCompactionTest {
           UUID secondAssistantId = tx.nextId();
           UUID secondEndId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
           tx.insertEntry(
               new Entry(
                   rootId,
@@ -347,6 +347,7 @@ class HarnessRuntimeManualCompactionTest {
                   sessionId,
                   secondEndId,
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                  "main",
                   false,
                   1,
                   0,

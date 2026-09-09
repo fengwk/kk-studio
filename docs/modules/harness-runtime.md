@@ -116,19 +116,19 @@ TURN_END
 `ThreadState` 维护轻量级的当前游标与控制状态：
 
 ```text
-id / sessionId / headEntryId / creationRequestHash
+id / sessionId / headEntryId / creationRequestHash / name
 yoloEnabled / nextCommandSequence / version
 createdAt / updatedAt
 ```
 
-执行环境（Environment）、分支配置、运行状态、未完回合标识与执行周期等，均由 Entry、Invocation 与 Work 联合动态投影得出。`ThreadState.validateTransition` 守卫 Thread 行的状态单调性：实体标识不可变更，命令序列号、版本号与更新时间不可回退，任何 Thread 行变更都使 `version` 严格递增 1；相同的重放请求保持状态幂等不变。Thread version 是结构与控制状态的 CAS / invalidation cursor，不是完整 Snapshot ETag；ModelInvocation 的流式 checkpoint 按有界批次在相同 version 下推进，并由完整 Snapshot 提供恢复事实。
+执行环境（Environment）、分支配置、运行状态、未完回合标识与执行周期等，均由 Entry、Invocation 与 Work 联合动态投影得出。`ThreadState.validateTransition` 守卫 Thread 行的状态单调性：实体标识不可变更，命令序列号、版本号与更新时间不可回退，任何 Thread 行变更都使 `version` 严格递增 1；相同的重放请求保持状态幂等不变。`name` 是唯一可由控制面独立重命名的字段（`renameThread` 规范化替换名称，version 精确 +1）。Thread version 是结构与控制状态的 CAS / invalidation cursor，不是完整 Snapshot ETag；ModelInvocation 的流式 checkpoint 按有界批次在相同 version 下推进，并由完整 Snapshot 提供恢复事实。
 
 ### Thread command mailbox
 
 `acceptCommands` 支持三种目标模式（sealed target）：
 
 - `NEW_SESSION`：原子创建新的 Session、ROOT 节点、初始 Thread、命令批次以及首个 THREAD Work 调度任务；
-- `ENTRY`：在已有会话的指定 Entry 节点上派生出新 Thread，原分支历史完整保留，无需拷贝 Entry；
+- `NEW_THREAD`：在已有会话的指定 Entry 节点上派生出新 Thread，原分支历史完整保留，无需拷贝 Entry；
 - `THREAD`：依据客户端传入的 `expectedHeadEntryId` 与 `expectedNextCommandSequence`，向现有线程追加命令批次。
 
 命令类型包含 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_ENVIRONMENT`、`SET_AGENT` 和 `SET_MODEL`。配置类命令的前缀顺序固定为：环境变更（SET_ENVIRONMENT）→ 智能体变更（SET_AGENT）→ 模型变更（SET_MODEL）。智能体可用的工具列表直接从外部最新的 Agent 声明 `config.toolIds` 中解析得出。初始化批次以一条末尾的类用户消息结束；日常追加批次允许包含一条用户消息或一条 SYSTEM 引导消息。YOLO 自动放行模式由独立的 `setThreadYolo` 接口直接修改线程状态，不排入命令邮箱。
@@ -192,6 +192,9 @@ findThreadCommand
 stop
 decideToolApproval
 setThreadYolo
+renameThread
+renameSession
+getSession
 manualCompactionAvailability
 compactThread
 getThreadSnapshot
@@ -199,7 +202,7 @@ getSessionEntries
 listThreadsBySession
 ```
 
-`acceptCommands` 支持 `NEW_SESSION`、`ENTRY` 和 `THREAD` 三种模式。会话初始化重放、有序重放、命令批次校验与游标准入，由包私有的 [`AcceptCommandsControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AcceptCommandsControl.java) 在单个 Store 事务内协调完成，对外由 `HarnessRuntime` 统一暴露。手工压缩同样只通过根 Runtime 进入：`manualCompactionAvailability` 返回瞬时 advisory projection，`compactThread` 使用 expectedVersion、source head 与 command snapshot 做最终 CAS。
+`acceptCommands` 支持 `NEW_SESSION`、`NEW_THREAD` 和 `THREAD` 三种模式。会话初始化重放、有序重放、命令批次校验与游标准入，由包私有的 [`AcceptCommandsControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AcceptCommandsControl.java) 在单个 Store 事务内协调完成，对外由 `HarnessRuntime` 统一暴露。Session / Thread 的显示名称由服务端在创建时派生，不属于创建请求：`NEW_SESSION` 的 Session 名取初始批次末尾类用户消息的首个非空文本（折叠为单行、前 40 个 Unicode 码点），缺省回退 `session-` + Session UUID 前 8 位；ROOT Thread 恒为 `main`；`NEW_THREAD` 分支 Thread 恒为 `branch-` + Thread UUID 前 8 位。名称不进入 creation request hash。`renameSession` / `renameThread` 在各自短事务内做 isolated metadata mutation：同名（规范化后）即 no-op，否则仅替换名称（Session 不动 id/createdAt；Thread 以 version 精确 +1、updatedAt 推进的方式复用 `updateThread` 行迁移，绝不产生 Command/Entry/Work 副作用），并发重命名为 last-commit-wins；`getSession` 返回 Session 当前投影，Session 不存在抛 `HarnessRuntimeNotFoundException`。手工压缩同样只通过根 Runtime 进入：`manualCompactionAvailability` 返回瞬时 advisory projection，`compactThread` 使用 expectedVersion、source head 与 command snapshot 做最终 CAS。
 
 `getThreadSnapshot` 在单个事务内获取目标线程锁、读取待处理命令、加载从根到当前 head 的 `EntryPath`，并通过 [`ThreadContextClassifier`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifier.java) 纯函数投影出当前最小适用状态。快照总是携带事务内最新、已批次提交的 Invocation checkpoint；该 checkpoint 可能在 Thread version 未变化时更新：
 

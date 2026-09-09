@@ -130,6 +130,39 @@ class ThreadStateTest {
     assertEquals(durableNow, stored.advanceHead(id(99), CREATED).updatedAt());
     assertEquals(durableNow, stored.touchVersion(CREATED).updatedAt());
     assertEquals(durableNow, stored.setYoloEnabled(true, CREATED).updatedAt());
+    assertEquals(durableNow, stored.renameThread("new name", CREATED).updatedAt());
+  }
+
+  @Test
+  void renameThreadNormalizesNameAndBumpsVersionExactlyOnce() {
+    ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED);
+    ThreadState renamed = stored.renameThread("  新 名字  ", CREATED.plusSeconds(3));
+    // 名称规范化折叠为单行；version 精确 +1；head/sequence/yolo/createdAt 不变。
+    assertEquals("新 名字", renamed.name());
+    assertEquals(6L, renamed.version());
+    assertEquals(stored.headEntryId(), renamed.headEntryId());
+    assertEquals(stored.nextCommandSequence(), renamed.nextCommandSequence());
+    assertEquals(stored.yoloEnabled(), renamed.yoloEnabled());
+    assertEquals(stored.createdAt(), renamed.createdAt());
+    // renamed 是同一 stored 行的合法迁移。
+    ThreadState.validateTransition(stored, renamed);
+    // rename 后对 renamed 行再做一次同名 rename 属于新迁移（由控制面负责 no-op），version 照常严格 +1。
+    ThreadState sameName = renamed.renameThread("新 名字", CREATED.plusSeconds(3));
+    assertEquals(7L, sameName.version());
+    // 控制面的「同名即 no-op」必须在锁内比较（构造器保证同值归一），rename 方法本身只负责迁移。
+    assertEquals("新 名字", sameName.name());
+  }
+
+  @Test
+  void renameThreadRejectsOverlongName() {
+    // Thread 名称手工上限 256 码点：rename 超长直接抛 IllegalArgumentException（绝不截断）。
+    ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> stored.renameThread("x".repeat(257), CREATED.plusSeconds(1)));
+    // 恰好 256 码点可接受。
+    assertEquals(
+        "x".repeat(256), stored.renameThread("x".repeat(256), CREATED.plusSeconds(1)).name());
   }
 
   @Test
@@ -149,6 +182,7 @@ class ThreadStateTest {
                     SESSION_ID,
                     id(42),
                     CREATION_REQUEST_HASH,
+                    "main",
                     false,
                     3L,
                     5L,
@@ -225,6 +259,7 @@ class ThreadStateTest {
         SESSION_ID,
         headEntryId,
         CREATION_REQUEST_HASH,
+        "main",
         yoloEnabled,
         nextCommandSequence,
         version,

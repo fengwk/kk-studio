@@ -392,6 +392,20 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
+    public void updateSession(Session session) {
+      checkOpen();
+      Objects.requireNonNull(session, "session");
+      requireMillisecondPrecision(session.createdAt());
+      requireLocked(LockKey.session(session.id()));
+      Session stored = state.sessions.get(session.id());
+      if (stored == null) {
+        throw new IllegalArgumentException("session " + session.id() + " does not exist");
+      }
+      Session.validateTransition(stored, session);
+      state.sessions.put(session.id(), session);
+    }
+
+    @Override
     public Optional<Session> findSession(UUID id) {
       checkOpen();
       return Optional.ofNullable(state.sessions.get(id));

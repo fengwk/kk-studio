@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
+import fun.fengwk.kkstudio.harness.runtime.Names;
+
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -8,14 +10,15 @@ import java.util.regex.Pattern;
 /**
  * 持久化 Thread 当前状态。
  *
- * <p>持久化 Thread 自身拥有的字段：所属 Session、creation request hash 身份键、head Entry cursor、Thread YOLO runtime
- * policy、下一条 Command sequence 以及对外可见的 snapshot version。{@code sessionId} 与 {@code
- * creationRequestHash} 创建后不可变；environment、status、open turn、runnable flag、execution epoch 与
- * processor lease 刻意省略，settings 事实从 {@code headEntryId} 处的 Entry 分支派生。
+ * <p>持久化 Thread 自身拥有的字段：所属 Session、creation request hash 身份键、head Entry cursor、Thread 显示名称、 Thread
+ * YOLO runtime policy、下一条 Command sequence 以及对外可见的 snapshot version。{@code sessionId}、 {@code
+ * creationRequestHash} 与 {@code createdAt} 创建后不可变；environment、status、open turn、runnable
+ * flag、execution epoch 与 processor lease 刻意省略，settings 事实从 {@code headEntryId} 处的 Entry 分支派生。
  *
- * <p>{@code creationRequestHash} 是 NEW_SESSION / ENTRY 的初始创建请求指纹：64 位小写 SHA-256 身份键，只作持久化身份键，不对产品
- * DTO 暴露；{@code headEntryId} 必须属于 {@code sessionId} 的 Session，该约束由 Store 在 insert/update 时按
- * harness_entry 的 session 归属强制。
+ * <p>{@code creationRequestHash} 是 NEW_SESSION / NEW_THREAD 的初始创建请求指纹：64 位小写 SHA-256
+ * 身份键，只作持久化身份键，不对产品 DTO 暴露；{@code headEntryId} 必须属于 {@code sessionId} 的 Session，该约束由 Store 在
+ * insert/update 时按 harness_entry 的 session 归属强制。{@code name} 是唯一可由控制面独立重命名的字段（见 {@link
+ * #renameThread}）。
  *
  * <p>所有 Thread 行变更都通过下方纯转换方法执行；转换会把回拨的调用方 wall-clock 抬升到当前 {@code updatedAt}，并把 {@code version} 严格
  * +1。该版本是 Thread 结构与控制状态的 CAS / invalidation cursor，不是完整快照的内容版本：ModelInvocation 的高频流式 checkpoint
@@ -27,6 +30,7 @@ public record ThreadState(
     UUID sessionId,
     UUID headEntryId,
     String creationRequestHash,
+    String name,
     boolean yoloEnabled,
     long nextCommandSequence,
     long version,
@@ -44,6 +48,7 @@ public record ThreadState(
       throw new IllegalArgumentException(
           "creationRequestHash must be 64 lowercase hexadecimal characters");
     }
+    name = Names.normalize(name);
     if (nextCommandSequence < 1) {
       throw new IllegalArgumentException("nextCommandSequence must start at 1");
     }
@@ -106,6 +111,7 @@ public record ThreadState(
             sessionId,
             headEntryId,
             creationRequestHash,
+            name,
             yoloEnabled,
             Math.addExact(nextCommandSequence, (long) count),
             Math.addExact(version, 1L),
@@ -126,6 +132,7 @@ public record ThreadState(
             sessionId,
             headEntryId,
             creationRequestHash,
+            name,
             yoloEnabled,
             nextCommandSequence,
             Math.addExact(version, 1L),
@@ -146,7 +153,29 @@ public record ThreadState(
             sessionId,
             headEntryId,
             creationRequestHash,
+            name,
             enabled,
+            nextCommandSequence,
+            Math.addExact(version, 1L),
+            createdAt,
+            effectiveMutationTime(now));
+    validateTransition(this, next);
+    return next;
+  }
+
+  /**
+   * 直接控制面重命名 Thread：head / nextCommandSequence / yoloEnabled 不变，{@code name} 被规范化替换且 {@code
+   * version} 严格 +1。调用方负责在锁内先做「同名即 no-op」判断。
+   */
+  public ThreadState renameThread(String newName, Instant now) {
+    ThreadState next =
+        new ThreadState(
+            id,
+            sessionId,
+            headEntryId,
+            creationRequestHash,
+            newName,
+            yoloEnabled,
             nextCommandSequence,
             Math.addExact(version, 1L),
             createdAt,
@@ -163,6 +192,7 @@ public record ThreadState(
             sessionId,
             headEntryId,
             creationRequestHash,
+            name,
             yoloEnabled,
             nextCommandSequence,
             Math.addExact(version, 1L),

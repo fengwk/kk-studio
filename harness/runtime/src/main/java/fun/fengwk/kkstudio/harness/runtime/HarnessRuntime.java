@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
@@ -45,10 +46,10 @@ import java.util.function.Consumer;
  * instant 让 {@code updatedAt} 回退； Stop 与未决 Approval 还会把 mutation 时间钳制到最新的已锁定 durable
  * fact，以容忍本地时钟回滚与跨节点时钟偏差，而 Work request 始终使用未抬升的本地调度时钟。
  *
- * <p>本类实现 {@link #acceptCommands}（NEW_SESSION / ENTRY / THREAD 单原语）、{@link #stop}、{@link
- * #decideToolApproval}、{@link #setThreadYolo}、{@link #manualCompactionAvailability}、{@link
- * #compactThread}、{@link #getThreadSnapshot}、{@link #listThreadsBySession} 与 {@link
- * #getSessionEntries}。
+ * <p>本类实现 {@link #acceptCommands}（NEW_SESSION / NEW_THREAD / THREAD 单原语）、{@link #stop}、{@link
+ * #decideToolApproval}、{@link #setThreadYolo}、{@link #renameThread}、{@link #renameSession}、{@link
+ * #getSession}、{@link #manualCompactionAvailability}、{@link #compactThread}、{@link
+ * #getThreadSnapshot}、 {@link #listThreadsBySession} 与 {@link #getSessionEntries}。
  */
 @Slf4j
 public final class HarnessRuntime {
@@ -129,22 +130,44 @@ public final class HarnessRuntime {
    * Session 精确重放（返回现有接受事实，不写任何行），不同 hash 冲突为 {@link
    * HarnessRuntimeConflictException.Reason#THREAD_ID_REUSED}。
    *
-   * <p><b>ENTRY</b>：<b>KEY SHARE</b> 锁既有 Session（不串行化同 Session 的 sibling 初始创建）、验证 start Entry 属于该
-   * Session、预分配 {@code threadId}，插入 Thread + preflight + Commands + Work；不复制 Entry（新 Thread head
-   * 直接指向 start Entry）。初始创建 replay 语义与 NEW_SESSION 相同。
+   * <p><b>NEW_THREAD</b>：<b>KEY SHARE</b> 锁既有 Session（不串行化同 Session 的 sibling 初始创建）、验证 start Entry
+   * 属于该 Session、预分配 {@code threadId}，插入 Thread + preflight + Commands + Work；不复制 Entry（新 Thread
+   * head 直接指向 start Entry）。初始创建 replay 语义与 NEW_SESSION 相同。
+   *
+   * <p>初始创建的 Session / Thread 名称由服务端派生（不来自请求）：Session 名称取初始 user-like 消息的首个非空文本内容（前 40 个 Unicode
+   * 码点），无文本时回退为 {@code session-} + Session UUID 前 8 位；ROOT Thread 恒为 {@code main}；从 Entry 分支的新
+   * Thread 名称恒为 {@code branch-} + Thread UUID 前 8 位。名称不参与 creation request hash，后续 rename 不改变该
+   * hash。
    *
    * <p><b>THREAD</b>：先读 immutable {@code thread.sessionId} 并 KEY SHARE Session，再锁 Thread 复核；exact
    * ordered replay 查找必须先于任何 cursor/preflight admission。全新 batch 要求精确的 expected head + next sequence
    * cursor（否则 STALE_COMMAND_CURSOR），同事务调用 {@code preflight}（仅新 batch），预留连续 sequence 并请求 THREAD
    * Work。
    *
-   * <p>初始（NEW_SESSION/ENTRY）batch 必须以恰一条 user-like message 结尾，允许固定顺序 SET_* 前缀，且只有初始 target 可在前缀携带
-   * SYSTEM CUSTOM_MESSAGE；THREAD 允许产品用户 batch（禁止 SYSTEM CUSTOM_MESSAGE，<b>恰一条</b>末尾 user-like）或恰一条
-   * SYSTEM CUSTOM_MESSAGE steering。非法 batch 是请求校验错误，抛 {@link IllegalArgumentException}。
+   * <p>初始（NEW_SESSION/NEW_THREAD）batch 必须以恰一条 user-like message 结尾，允许固定顺序 SET_* 前缀，且只有初始 target
+   * 可在前缀携带 SYSTEM CUSTOM_MESSAGE；THREAD 允许产品用户 batch（禁止 SYSTEM CUSTOM_MESSAGE，<b>恰一条</b>末尾
+   * user-like）或恰一条 SYSTEM CUSTOM_MESSAGE steering。非法 batch 是请求校验错误，抛 {@link
+   * IllegalArgumentException}。
    */
   public AcceptedCommands acceptCommands(
       AcceptCommandsCommand command, AcceptancePreflight preflight) {
     return acceptCommandsControl.acceptCommands(command, preflight);
+  }
+
+  /**
+   * 读取 Session 当前投影；不存在抛 {@link HarnessRuntimeNotFoundException}。
+   *
+   * <p>只读快照，不产生锁；用于读侧展示（名称 / 归属校验），不与后续写操作跨事务组合。
+   */
+  public Session getSession(UUID sessionId) {
+    Objects.requireNonNull(sessionId, "sessionId");
+    return store.transaction(
+        tx ->
+            tx.findSession(sessionId)
+                .orElseThrow(
+                    () ->
+                        new HarnessRuntimeNotFoundException(
+                            "session " + sessionId + " does not exist")));
   }
 
   /** 按 Thread + idempotencyKey 读取 durable command，用于应用层精确重放校验。 */
@@ -157,6 +180,56 @@ public final class HarnessRuntime {
             throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
           }
           return tx.findCommandByIdempotencyKey(threadId, idempotencyKey);
+        });
+  }
+
+  /**
+   * 在单个短 transaction 内重命名 Session：先 FOR UPDATE 锁 Session 行，name 规范化为非空单行后与当前值比较，同名即按原样返回 （网络重试
+   * no-op）；否则仅替换显示名称，id / createdAt 不可变。本操作不触碰任何 Thread / Command / Entry / Work， 并发重命名为
+   * last-commit-wins。
+   */
+  public Session renameSession(RenameSessionCommand command) {
+    Objects.requireNonNull(command, "command");
+    return store.transaction(
+        tx -> {
+          Session session =
+              tx.lockSessionForUpdate(command.sessionId())
+                  .orElseThrow(
+                      () ->
+                          new HarnessRuntimeNotFoundException(
+                              "session " + command.sessionId() + " does not exist"));
+          if (session.name().equals(command.name())) {
+            return session;
+          }
+          Session updated = session.rename(command.name());
+          tx.updateSession(updated);
+          return updated;
+        });
+  }
+
+  /**
+   * 在一个短 transaction 内直接重命名 Thread（isolated metadata mutation）。
+   *
+   * <p>锁 Thread 后先比较当前 name：与规范化后的请求值相同即按原样返回当前 Thread（no-op，不触碰 version、不创建 Command/Entry/Work、不请求
+   * Work、不唤醒 processors）；否则仅替换 name 且 version 精确 +1、updatedAt 推进，复用 {@link
+   * HarnessStore.Transaction#updateThread} 的既有行迁移/校验路径。不接收 expectedVersion：并发重命名为 last-commit-wins。
+   */
+  public ThreadState renameThread(RenameThreadCommand command) {
+    Objects.requireNonNull(command, "command");
+    return store.transaction(
+        tx -> {
+          ThreadState thread =
+              tx.lockThread(command.threadId())
+                  .orElseThrow(
+                      () ->
+                          new HarnessRuntimeNotFoundException(
+                              "thread " + command.threadId() + " does not exist"));
+          if (thread.name().equals(command.name())) {
+            return thread;
+          }
+          ThreadState updated = thread.renameThread(command.name(), clock.instant());
+          tx.updateThread(updated);
+          return updated;
         });
   }
 

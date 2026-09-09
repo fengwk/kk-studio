@@ -644,12 +644,17 @@ create trigger trg_system_setting_version_notify
 
 create table harness_session (
     id uuid primary key,
-    created_at timestamptz(3) not null
+    name varchar(256) not null,
+    created_at timestamptz(3) not null,
+    constraint ck_harness_session_name check (
+        btrim(name) <> ''
+    )
 );
 
-comment on table harness_session is 'Session 聚合边界：组织一份 append-only Entry Tree，不拥有 Thread；只记录自身与创建时间';
-comment on column harness_session.id is 'Session 的全局唯一 UUID';
-comment on column harness_session.created_at is 'Session 创建时间（毫秒精度）';
+comment on table harness_session is 'Session 聚合边界：组织一份 append-only Entry Tree，不拥有 Thread；只记录自身 id、显示名称与创建时间';
+comment on column harness_session.id is 'Session 的全局唯一 UUID（创建后不可变）';
+comment on column harness_session.name is 'Session 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
+comment on column harness_session.created_at is 'Session 创建时间（毫秒精度，创建后不可变）';
 
 create table harness_entry (
     id uuid primary key,
@@ -719,6 +724,7 @@ create table harness_thread (
     session_id uuid not null,
     head_entry_id uuid not null,
     creation_request_hash char(64) not null,
+    name varchar(256) not null,
     yolo_enabled boolean not null,
     next_command_sequence bigint not null check (next_command_sequence >= 1),
     version bigint not null check (version >= 0),
@@ -731,6 +737,9 @@ create table harness_thread (
     constraint ck_harness_thread_creation_request_hash check (
         creation_request_hash ~ '^[0-9a-f]{64}$'
     ),
+    constraint ck_harness_thread_name check (
+        btrim(name) <> ''
+    ),
     constraint ck_harness_thread_time_order check (updated_at >= created_at)
 );
 
@@ -738,7 +747,8 @@ comment on table harness_thread is 'Thread：指向 head Entry 的游标状态�
 comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
 comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
 comment on column harness_thread.head_entry_id is '当前 head Entry（必须存在且属于 thread.session_id 的 Session）';
-comment on column harness_thread.creation_request_hash is 'NEW_SESSION/ENTRY 初始创建请求指纹：服务端 64 位小写 SHA-256 身份键（创建后不可变，不对产品 DTO 暴露）';
+comment on column harness_thread.creation_request_hash is 'NEW_SESSION/NEW_THREAD 初始创建请求指纹：服务端 64 位小写 SHA-256 身份键（创建后不可变，不对产品 DTO 暴露）';
+comment on column harness_thread.name is 'Thread 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
 comment on column harness_thread.yolo_enabled is '当前 yolo 模式开关';
 comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
 comment on column harness_thread.version is '并发控制版本：任何对外字段变化必须 +1';

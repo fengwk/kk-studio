@@ -65,13 +65,13 @@ class HarnessRuntimeApiRecordsTest {
         NullPointerException.class,
         () -> new AcceptCommandsTarget.NewSession(TestIds.id(1), TestIds.id(2), null, null, false));
 
-    // ENTRY 必需字段。
+    // NEW_THREAD 必需字段。
     assertThrows(
         NullPointerException.class,
-        () -> new AcceptCommandsTarget.Entry(null, TestIds.id(3), TestIds.id(4), false));
+        () -> new AcceptCommandsTarget.NewThread(null, TestIds.id(3), TestIds.id(4), false));
     assertThrows(
         NullPointerException.class,
-        () -> new AcceptCommandsTarget.Entry(TestIds.id(1), null, TestIds.id(4), false));
+        () -> new AcceptCommandsTarget.NewThread(TestIds.id(1), null, TestIds.id(4), false));
 
     // THREAD cursor 必须为正。
     assertThrows(
@@ -125,7 +125,7 @@ class HarnessRuntimeApiRecordsTest {
 
   @Test
   void acceptedCommandsValidatesConsistencyAndCopiesCommands() {
-    Session session = new Session(TestIds.id(1), T0);
+    Session session = new Session(TestIds.id(1), "session-00000000000000000000000000000001", T0);
     Entry root = new Entry(TestIds.id(2), TestIds.id(1), null, new RootPayload(settings()), T0);
     ThreadState thread =
         HarnessRuntimeTestSupport.thread(TestIds.id(3), TestIds.id(1), TestIds.id(2));
@@ -177,7 +177,7 @@ class HarnessRuntimeApiRecordsTest {
         IllegalArgumentException.class,
         () -> new AcceptedCommands(session, root, thread, List.of(foreign), false));
     // root 必须属于结果 session。
-    Session other = new Session(TestIds.id(50), T0);
+    Session other = new Session(TestIds.id(50), "session-00000000000000000000000000000050", T0);
     assertThrows(
         IllegalArgumentException.class,
         () -> new AcceptedCommands(other, root, thread, List.of(inserted), false));
@@ -288,6 +288,7 @@ class HarnessRuntimeApiRecordsTest {
                 thread.sessionId(),
                 thread.headEntryId(),
                 "not-a-hash",
+                thread.name(),
                 false,
                 1,
                 0,
@@ -300,6 +301,7 @@ class HarnessRuntimeApiRecordsTest {
             thread.sessionId(),
             thread.headEntryId(),
             thread.creationRequestHash(),
+            thread.name(),
             false,
             1,
             0,
@@ -316,6 +318,7 @@ class HarnessRuntimeApiRecordsTest {
                     TestIds.id(99),
                     thread.headEntryId(),
                     thread.creationRequestHash(),
+                    thread.name(),
                     false,
                     1,
                     0,
@@ -331,6 +334,7 @@ class HarnessRuntimeApiRecordsTest {
                     thread.sessionId(),
                     thread.headEntryId(),
                     "9999999999999999999999999999999999999999999999999999999999999999",
+                    thread.name(),
                     false,
                     1,
                     0,
@@ -351,6 +355,7 @@ class HarnessRuntimeApiRecordsTest {
                     thread.sessionId(),
                     thread.headEntryId(),
                     thread.creationRequestHash(),
+                    thread.name(),
                     true,
                     1,
                     0,
@@ -479,7 +484,8 @@ class HarnessRuntimeApiRecordsTest {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     return store.transaction(
         tx -> {
-          tx.insertSession(new Session(TestIds.id(1), T0));
+          tx.insertSession(
+              new Session(TestIds.id(1), "session-00000000000000000000000000000001", T0));
           tx.insertEntry(
               new Entry(TestIds.id(2), TestIds.id(1), null, new RootPayload(settings()), T0));
           ThreadState thread =

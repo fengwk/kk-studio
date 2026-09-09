@@ -206,7 +206,7 @@ final class ToolProcessorTestSupport {
           // model request/successResponse 严格一致（renderer bash 来自 model request 的 bash binding）。
           ModelRequestSpec modelRequest = modelRequest();
           ProviderResponse response = successResponse("call-1");
-          tx.insertSession(new Session(sessionId, now));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, now));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
           tx.insertEntry(
@@ -238,6 +238,7 @@ final class ToolProcessorTestSupport {
                   sessionId,
                   turnStartEntryId,
                   ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
+                  "main",
                   yoloEnabled,
                   1L,
                   0L,

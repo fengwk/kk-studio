@@ -3,9 +3,10 @@
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.store.HarnessStore} 是唯一的 Store 根，{@link
  * fun.fengwk.kkstudio.harness.runtime.store.HarnessStore.Transaction} 是唯一的 typed transaction
- * handle。这里不是 Repository / Specification / generic save / UnitOfWork 框架：没有业务 use-case 方法；Session 与
- * Entry 是 append-only 不可变记录，更新只允许修改 Thread / Command / Invocation / Work 的 current
- * state。事务、锁定与唯一性约定见 {@link fun.fengwk.kkstudio.harness.runtime.store.HarnessStore} 接口 javadoc。
+ * handle。这里不是 Repository / Specification / generic save / UnitOfWork 框架：没有业务 use-case 方法；Entry 是
+ * append-only 不可变记录，Session 仅 {@code updateSession} 可更新显示名称（id / createdAt 不可变）， Thread / Command /
+ * Invocation / Work 更新只允许修改 current state。事务、锁定与唯一性约定见 {@link
+ * fun.fengwk.kkstudio.harness.runtime.store.HarnessStore} 接口 javadoc。
  *
  * <p>多实体锁顺序（所有多行事务必须遵守，用于收敛已知锁逆序与数据库死锁路径）：Session -&gt; Thread -&gt; Commands -&gt; ModelInvocation
  * -&gt; 同 Assistant Entry 的 ToolInvocation siblings（按 callIndex 升序）-&gt; Work；同一事务锁多行 Work 时，同层
