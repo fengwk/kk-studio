@@ -92,6 +92,8 @@ const model = {
 
 function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
   return {
+    /** Thread 名称（服务端权威必填非空）。 */
+    name: 'thread-name',
     threadId: THREAD_ID,
     sessionId: 'session-1',
     headEntryId: 'head-1',

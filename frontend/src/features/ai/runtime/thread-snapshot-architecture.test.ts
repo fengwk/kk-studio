@@ -17,7 +17,7 @@ describe('Thread snapshot architecture', () => {
     expect(queries).toContain('queryKeys.threads.snapshot(threadId)')
     expect(queries).not.toContain('refetchInterval')
     expect(service).toContain('listSessionEntries:')
-    expect(paneController).toContain("interaction === 'tree' || isEntryTarget(target)")
+    expect(paneController).toContain("interaction === 'tree' || isNewThreadTarget(target)")
     expect(paneController).toContain("['agent-pane', 'entries'")
     expect(paneController).toContain('treeEntriesQuery.data')
     const threadKeys = keys.slice(keys.indexOf('threads:'), keys.indexOf('comfyui:'))

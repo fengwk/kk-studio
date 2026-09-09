@@ -104,6 +104,8 @@ const model = {
 
 function threadFixture(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
   return {
+    /** Thread 名称（服务端权威必填非空）。 */
+    name: 'thread-name',
     threadId: THREAD_ID,
     sessionId: 's1',
     headEntryId: 'h1',

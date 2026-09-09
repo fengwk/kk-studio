@@ -6202,6 +6202,152 @@ select.settings-input option {
   height: 100%;
 }
 
+/* Bound Thread 主列顶部的名称标题（chat/canvas 共用）；name 是主展示文本。 */
+.agent-pane-thread-heading {
+  flex: 0 0 auto;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px 5px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-soft);
+}
+
+.agent-pane-thread-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-pane-thread-rename {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.agent-pane-thread-rename:hover:not(:disabled) {
+  background: var(--stage-dot);
+  color: var(--fg);
+}
+
+.agent-pane-thread-rename:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.agent-pane-thread-rename svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 单输入重命名面板（Session / Thread 名称编辑）。 */
+.name-rename-panel {
+  flex-basis: min(420px, 46vh);
+}
+
+.name-rename-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 12px 6px;
+}
+
+.name-rename-field span {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.name-rename-body input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.name-rename-body input:focus {
+  border-color: var(--green-border);
+  outline: none;
+}
+
+.name-rename-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.name-rename-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 4px 12px 12px;
+}
+
+.name-rename-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Session/Thread 选择行：选中按钮与行内重命名铅笔并排。 */
+.thread-selection-row {
+  position: relative;
+}
+
+.thread-selection-rename {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.thread-selection-rename:hover:not(:disabled) {
+  background: var(--stage-dot);
+  color: var(--fg);
+}
+
+.thread-selection-rename:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thread-selection-rename svg {
+  width: 13px;
+  height: 13px;
+}
+
+.thread-selection-row .thread-selection-item {
+  padding-right: 36px;
+}
+
 /* blank pane 复用 .chat-shell.thread-panel + .thread-panel-main，composer/footer 与有 Thread 时一致 */
 .chat-pane .blank-pane.thread-panel {
   height: 100%;

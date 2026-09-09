@@ -30,6 +30,8 @@ const baseDraft: BranchDraft = {
 
 const thread: HarnessThreadDTO = {
   threadId: '11111111-2222-4333-8444-555555555555',
+  /** Thread 名称（服务端权威必填非空）。 */
+  name: 'thread-name',
   sessionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
   headEntryId: '99999999-8888-4777-8666-555555555555',
   yoloEnabled: false,
@@ -74,11 +76,11 @@ describe('AgentPane acceptance pipeline', () => {
     })
   })
 
-  it('uses the same setting diff for ENTRY and THREAD targets', () => {
+  it('uses the same setting diff for NEW_THREAD and THREAD targets', () => {
     const draft = { ...baseDraft, agentName: 'coder', yoloEnabled: true }
     const entry = buildAcceptanceRequest({
       owner: { type: 'CANVAS', id: 'canvas-1' },
-      target: { kind: 'ENTRY_DRAFT', sessionId: 's1', startEntryId: 'e1' },
+      target: { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' },
       draft,
       base: baseDraft,
       parts: [createTextPart('continue')],
@@ -109,7 +111,7 @@ describe('AgentPane acceptance pipeline', () => {
       'USER_MESSAGE',
     ])
     expect(entry.request.target).toMatchObject({
-      type: 'ENTRY',
+      type: 'NEW_THREAD',
       sessionId: 's1',
       startEntryId: 'e1',
     })
@@ -142,7 +144,7 @@ describe('AgentPane acceptance pipeline', () => {
     ).toBe(true)
     expect(
       acceptanceCompletionApplies(
-        { kind: 'ENTRY_DRAFT', sessionId: 's1', startEntryId: 'e2' },
+        { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e2' },
         { target: plan.target, generation: 2 },
         2,
       ),
@@ -242,13 +244,13 @@ describe('AgentPane acceptance pipeline', () => {
   it('projects one command matrix for Chat and Canvas across all three targets', () => {
     const expected = {
       NEW_SESSION_DRAFT: ['thread', 'agent', 'environment', 'yolo', 'models', 'upload', 'shortcuts'],
-      ENTRY_DRAFT: ['thread', 'agent', 'environment', 'yolo', 'models', 'tree', 'new', 'upload', 'shortcuts'],
+      NEW_THREAD_DRAFT: ['thread', 'agent', 'environment', 'yolo', 'models', 'tree', 'new', 'upload', 'shortcuts', 'rename-session'],
       BOUND_THREAD: THREAD_COMMANDS.map((command) => command.id),
     } as const
     for (const kind of Object.keys(expected) as Array<keyof typeof expected>) {
       const target = kind === 'NEW_SESSION_DRAFT'
         ? { kind }
-        : kind === 'ENTRY_DRAFT'
+        : kind === 'NEW_THREAD_DRAFT'
           ? { kind, sessionId: 's1', startEntryId: 'e1' }
           : { kind, threadId: thread.threadId }
       const commands = threadCommandsForTarget(target)

@@ -11,7 +11,7 @@ import type {
 
 export type PaneTarget =
   | { kind: 'NEW_SESSION_DRAFT' }
-  | { kind: 'ENTRY_DRAFT'; sessionId: string; startEntryId: string }
+  | { kind: 'NEW_THREAD_DRAFT'; sessionId: string; startEntryId: string }
   | { kind: 'BOUND_THREAD'; threadId: string }
 
 export type PaneTargetKind = PaneTarget['kind']
@@ -78,23 +78,31 @@ function isCommandTarget(value: unknown): value is AgentCommandTargetDTO {
   if (!isRecord(value) || typeof value.type !== 'string') {
     return false
   }
-  if (Object.prototype.hasOwnProperty.call(value, 'kind')) {
-    return false
-  }
+  // exact own-key 校验（也覆盖 rootSettings/contents 等嵌套对象）。
+  const keys = Object.keys(value)
   if (value.type === 'NEW_SESSION') {
-    return nonBlank(value.sessionId)
+    return keys.length === 5
+      && keys.every((key) => key === 'type' || key === 'sessionId' || key === 'threadId'
+        || key === 'rootSettings' || key === 'yoloEnabled')
+      && nonBlank(value.sessionId)
       && nonBlank(value.threadId)
       && isBranchSettings(value.rootSettings)
       && typeof value.yoloEnabled === 'boolean'
   }
-  if (value.type === 'ENTRY') {
-    return nonBlank(value.sessionId)
+  if (value.type === 'NEW_THREAD') {
+    return keys.length === 5
+      && keys.every((key) => key === 'type' || key === 'sessionId' || key === 'startEntryId'
+        || key === 'threadId' || key === 'yoloEnabled')
+      && nonBlank(value.sessionId)
       && nonBlank(value.startEntryId)
       && nonBlank(value.threadId)
       && typeof value.yoloEnabled === 'boolean'
   }
   if (value.type === 'THREAD') {
-    return nonBlank(value.threadId)
+    return keys.length === 4
+      && keys.every((key) => key === 'type' || key === 'threadId'
+        || key === 'expectedHeadEntryId' || key === 'expectedNextCommandSequence')
+      && nonBlank(value.threadId)
       && nonBlank(value.expectedHeadEntryId)
       && nonBlank(value.expectedNextCommandSequence)
   }
@@ -205,14 +213,21 @@ export function isPaneTarget(value: unknown): value is PaneTarget {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     return false
   }
+  // exact own-key 校验：持久化形状只接受恰好这些 key；名称字段或未知字段一律拒绝。
+  const keys = Object.keys(value)
   if (value.kind === 'NEW_SESSION_DRAFT') {
-    return true
+    return keys.length === 1 && keys[0] === 'kind'
   }
-  if (value.kind === 'ENTRY_DRAFT') {
-    return nonBlank(value.sessionId) && nonBlank(value.startEntryId)
+  if (value.kind === 'NEW_THREAD_DRAFT') {
+    return keys.length === 3
+      && keys.every((key) => key === 'kind' || key === 'sessionId' || key === 'startEntryId')
+      && nonBlank(value.sessionId)
+      && nonBlank(value.startEntryId)
   }
   if (value.kind === 'BOUND_THREAD') {
-    return nonBlank(value.threadId)
+    return keys.length === 2
+      && keys.every((key) => key === 'kind' || key === 'threadId')
+      && nonBlank(value.threadId)
   }
   return false
 }
@@ -224,7 +239,7 @@ export function normalizePaneTarget(value: unknown): PaneTarget {
   if (value.kind === 'NEW_SESSION_DRAFT') {
     return value
   }
-  if (value.kind === 'ENTRY_DRAFT') {
+  if (value.kind === 'NEW_THREAD_DRAFT') {
     return {
       kind: value.kind,
       sessionId: value.sessionId.trim(),
@@ -241,7 +256,7 @@ export function samePaneTarget(left: PaneTarget, right: PaneTarget): boolean {
   if (left.kind === 'NEW_SESSION_DRAFT' && right.kind === 'NEW_SESSION_DRAFT') {
     return true
   }
-  if (left.kind === 'ENTRY_DRAFT' && right.kind === 'ENTRY_DRAFT') {
+  if (left.kind === 'NEW_THREAD_DRAFT' && right.kind === 'NEW_THREAD_DRAFT') {
     return left.sessionId === right.sessionId && left.startEntryId === right.startEntryId
   }
   if (left.kind === 'BOUND_THREAD' && right.kind === 'BOUND_THREAD') {
@@ -254,10 +269,10 @@ export function isNewSessionTarget(target: PaneTarget): target is { kind: 'NEW_S
   return target.kind === 'NEW_SESSION_DRAFT'
 }
 
-export function isEntryTarget(
+export function isNewThreadTarget(
   target: PaneTarget,
-): target is { kind: 'ENTRY_DRAFT'; sessionId: string; startEntryId: string } {
-  return target.kind === 'ENTRY_DRAFT'
+): target is { kind: 'NEW_THREAD_DRAFT'; sessionId: string; startEntryId: string } {
+  return target.kind === 'NEW_THREAD_DRAFT'
 }
 
 export function isBoundTarget(
@@ -270,8 +285,8 @@ export function targetIdentity(target: PaneTarget): string {
   if (target.kind === 'NEW_SESSION_DRAFT') {
     return 'new-session'
   }
-  if (target.kind === 'ENTRY_DRAFT') {
-    return `entry:${target.sessionId}:${target.startEntryId}`
+  if (target.kind === 'NEW_THREAD_DRAFT') {
+    return `thread-draft:${target.sessionId}:${target.startEntryId}`
   }
   return `thread:${target.threadId}`
 }

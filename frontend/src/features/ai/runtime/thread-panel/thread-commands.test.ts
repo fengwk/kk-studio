@@ -21,6 +21,8 @@ describe('AgentPane command registry', () => {
       'debug',
       'shortcuts',
       'compact',
+      'rename-session',
+      'rename-thread',
     ])
   })
 
@@ -52,7 +54,7 @@ describe('AgentPane command registry', () => {
   })
 
   it('exposes the target command matrix without mutating the shared registry', () => {
-    const target = { kind: 'ENTRY_DRAFT' as const, sessionId: 's1', startEntryId: 'e1' }
+    const target = { kind: 'NEW_THREAD_DRAFT' as const, sessionId: 's1', startEntryId: 'e1' }
     expect(commandIdsForTarget(target)).toEqual([
       'thread',
       'agent',
@@ -63,7 +65,24 @@ describe('AgentPane command registry', () => {
       'new',
       'upload',
       'shortcuts',
+      'rename-session',
     ])
     expect(THREAD_COMMANDS.every((command) => command.disabled === undefined)).toBe(true)
+  })
+
+  it('limits rename commands by the durable target state', () => {
+    // NEW_SESSION_DRAFT：Session 尚未持久化，session/thread 重命名都不可用。
+    expect(commandIdsForTarget({ kind: 'NEW_SESSION_DRAFT' }))
+      .not.toContain('rename-session')
+    expect(commandIdsForTarget({ kind: 'NEW_SESSION_DRAFT' }))
+      .not.toContain('rename-thread')
+    // NEW_THREAD_DRAFT：可重命名父 Session，但没有持久化 Thread 可重命名。
+    const newThread = { kind: 'NEW_THREAD_DRAFT' as const, sessionId: 's1', startEntryId: 'e1' }
+    expect(commandIdsForTarget(newThread)).toContain('rename-session')
+    expect(commandIdsForTarget(newThread)).not.toContain('rename-thread')
+    // BOUND_THREAD：Session 与 Thread 都已持久化，两者可用。
+    const bound = { kind: 'BOUND_THREAD' as const, threadId: 't1' }
+    expect(commandIdsForTarget(bound)).toContain('rename-session')
+    expect(commandIdsForTarget(bound)).toContain('rename-thread')
   })
 })

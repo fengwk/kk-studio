@@ -26,7 +26,7 @@ const ENTRY_KIND_LABEL_KEYS: Record<SessionEntryKind, string> = {
   other: 'ai.chat.history.system',
 }
 
-/** 选择 Entry 只切换本地 ENTRY_DRAFT，绝不调用 durable control API。 */
+/** 选择 Entry 只切换本地 NEW_THREAD_DRAFT，绝不调用 durable control API。 */
 export function HistoryBranchPanel({
   entries,
   currentHeadEntryId,

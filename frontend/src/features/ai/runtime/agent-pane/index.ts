@@ -2,7 +2,7 @@ export {
   clearPaneTarget,
   clearPendingAcceptance,
   isBoundTarget,
-  isEntryTarget,
+  isNewThreadTarget,
   isNewSessionTarget,
   isPaneTarget,
   loadPaneTarget,

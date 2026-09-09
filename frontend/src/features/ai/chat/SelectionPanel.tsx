@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { Search } from 'lucide-react'
+import { Pencil, Search } from 'lucide-react'
 import { ThreadInteractionPanel } from '@/features/ai/runtime/thread-panel/ThreadInteractionPanel'
 import { useI18n } from '@/shared/i18n'
 
@@ -24,9 +24,11 @@ export function SelectionPanel({
   controls,
   loading = false,
   selectionPending = false,
+  renameLabel,
   emptyText,
   onCycleControl,
   cycleControlHint,
+  onRename,
   onSelect,
   onClose,
 }: {
@@ -36,9 +38,12 @@ export function SelectionPanel({
   controls?: ReactNode
   loading?: boolean
   selectionPending?: boolean
+  /** 行内重命名动作的 aria-label；缺省时不渲染该动作。 */
+  renameLabel?: string
   emptyText?: string
   onCycleControl?: () => void
   cycleControlHint?: string
+  onRename?: (id: string) => void
   onSelect: (id: string) => void | Promise<void>
   onClose: () => void
 }) {
@@ -208,7 +213,7 @@ export function SelectionPanel({
           const active = item.id === activeId
           const current = item.id === selectedId
           return (
-            <li key={item.id}>
+            <li key={item.id} className="thread-selection-row">
               <button
                 type="button"
                 role="option"
@@ -233,6 +238,22 @@ export function SelectionPanel({
                   <span className="thread-selection-item-subtitle">{item.subtitle}</span>
                 ) : null}
               </button>
+              {onRename && renameLabel ? (
+                <button
+                  type="button"
+                  className="thread-selection-rename"
+                  aria-label={renameLabel}
+                  title={renameLabel}
+                  disabled={selectionPending}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setActiveId(item.id)
+                    onRename(item.id)
+                  }}
+                >
+                  <Pencil aria-hidden="true" />
+                </button>
+              ) : null}
             </li>
           )
         })}

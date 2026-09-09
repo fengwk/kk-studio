@@ -16,7 +16,7 @@ const branchEntries: HarnessSessionEntryDTO[] = [
 ]
 
 describe('HistoryBranchPanel', () => {
-  it('selects the current head by default and emits an ENTRY_DRAFT selection only on confirmation', async () => {
+  it('selects the current head by default and emits an NEW_THREAD_DRAFT selection only on confirmation', async () => {
     const user = userEvent.setup()
     const onSelectEntry = vi.fn()
     renderPanel({ onSelectEntry, currentHeadEntryId: 'follow-up' })

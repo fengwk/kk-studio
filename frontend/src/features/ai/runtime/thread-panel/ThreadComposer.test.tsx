@@ -45,6 +45,8 @@ describe('ThreadComposer and commands', () => {
       'debug',
       'shortcuts',
       'compact',
+      'rename-session',
+      'rename-thread',
     ])
     // `/session`（全局 Session 重绑定）已彻底移除，不再出现在稳定命令表中。
     expect(THREAD_COMMANDS.some((c) => c.id === 'session')).toBe(false)
@@ -65,6 +67,8 @@ describe('ThreadComposer and commands', () => {
     expect(blank.find((c) => c.id === 'tree')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'debug')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'compact')?.disabled).toBe(true)
+    expect(blank.find((c) => c.id === 'rename-session')?.disabled).toBe(true)
+    expect(blank.find((c) => c.id === 'rename-thread')?.disabled).toBe(true)
     expect(threadCommandsForTarget({ kind: 'BOUND_THREAD' }).every((c) => !c.disabled)).toBe(true)
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
     expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop'])

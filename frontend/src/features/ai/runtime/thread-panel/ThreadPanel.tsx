@@ -91,13 +91,15 @@ interface ThreadPanelProps {
   composer: ThreadPanelComposerInput
   activity: ThreadPanelActivityInput
   slots?: ThreadPanelSlots
+  /** 主列顶部的内容标题（如绑定 Thread 的名称与重命名入口）；不占滚动区。 */
+  heading?: ReactNode
 }
 
 /**
  * 全宽 thread 面板：
  * Conversation/Debug 互斥主滚动区 -> 装饰性 widget/队列 -> slash 命令输入 -> footer
  */
-export function ThreadPanel({ transcript, mainView, composer, activity, slots }: ThreadPanelProps) {
+export function ThreadPanel({ transcript, mainView, composer, activity, slots, heading }: ThreadPanelProps) {
   const interactionOpen = composer.interactionPanel != null
   const historicalUserMessages = useMemo(
     () => transcript.messages.flatMap((message) =>
@@ -115,6 +117,7 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots }:
     <section className="chat-shell thread-panel">
       {slots?.sidebar}
       <main className="chat-main thread-panel-main">
+        {heading}
         {mainView?.debug ?? (
           <ThreadConversationView
             messages={transcript.messages}

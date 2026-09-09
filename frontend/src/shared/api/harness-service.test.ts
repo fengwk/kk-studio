@@ -108,6 +108,32 @@ describe('harnessService', () => {
   })
 
   /**
+   * 测试意图：验证 Session/Thread 名称修改使用 PUT /harness/sessions/{id}/name 与
+   * PUT /harness/threads/{id}/name，且路径参数被安全转义。
+   */
+  it('renames sessions and threads via PUT .../name endpoints', async () => {
+    const http = createClient()
+    const service = createHarnessService(http)
+    const session = await service.renameSession('session /1', { name: '新 Session 名' })
+    const thread = await service.renameThread('thread /1', { name: '新 Thread 名' })
+
+    expect(http.put).toHaveBeenNthCalledWith(
+      1,
+      '/harness/sessions/session%20%2F1/name',
+      { name: '新 Session 名' },
+    )
+    expect(http.put).toHaveBeenNthCalledWith(
+      2,
+      '/harness/threads/thread%20%2F1/name',
+      { name: '新 Thread 名' },
+    )
+    // Session 重命名返回 HarnessSessionDTO（sessionId/name/createdAt），
+    // Thread 重命名返回 HarnessThreadDTO —— 类型区分由编译期契约保证。
+    expect(session).toEqual({})
+    expect(thread).toEqual({})
+  })
+
+  /**
    * 测试意图：验证 Tool approval 提交由 POST 迁移为 PUT /harness/threads/{threadId}/tool-invocations/{invocationId}/approval，
    * 确保 HTTP 方法和路径严格符合最新后端契约。
    */
