@@ -53,11 +53,15 @@ export interface HarnessSessionEntryDTO {
 /**
  * HarnessThread 查询投影；id 均为 canonical UUID string，version 是持久快照游标。
  *
+ * name 是 Thread 的必需非空展示名称（服务端生成默认值，如 root=main、
+ * branch=branch-<uuid 前 8 位>；可经 PUT /harness/threads/{id}/name 修改）；
  * status/processing 是派生的展示字段（只有 IDLE 时 processing 才为 false）；
  * branchSettings 是 head Entry branch 的完整 settings 快照。
  */
 export interface HarnessThreadDTO {
   threadId: string
+  /** Thread 的必需非空名称；主展示文本，绝不回退为 id。 */
+  name: string
   /** 当前 Session 主键（由 head Entry 派生）。 */
   sessionId: string
   /** 当前 head Entry。 */
@@ -266,8 +270,8 @@ export interface NewSessionCommandTargetDTO {
   yoloEnabled: boolean
 }
 
-export interface EntryCommandTargetDTO {
-  type: 'ENTRY'
+export interface NewThreadCommandTargetDTO {
+  type: 'NEW_THREAD'
   sessionId: string
   startEntryId: string
   threadId: string
@@ -283,7 +287,7 @@ export interface ThreadCommandTargetDTO {
 
 export type AgentCommandTargetDTO =
   | NewSessionCommandTargetDTO
-  | EntryCommandTargetDTO
+  | NewThreadCommandTargetDTO
   | ThreadCommandTargetDTO
 
 export interface AgentCommandBatchRequestDTO {
@@ -294,14 +298,19 @@ export interface AgentCommandBatchRequestDTO {
 
 export interface RuntimeSessionSummaryDTO {
   sessionId: string
+  /** Session 的必需非空展示名称（服务端权威值）；主展示文本，绝不回退为 id。 */
+  name: string
   createdAt: BackendDateTime
   lastActivityAt: BackendDateTime
-  firstMessagePreview: string
+  /** 最近一条消息的内容预览；与名称相互独立，可为 null。 */
+  firstMessagePreview: string | null
   threadCount: number
 }
 
 export interface RuntimeThreadSummaryDTO {
   threadId: string
+  /** Thread 的必需非空展示名称（服务端权威值）；主展示文本，绝不回退为 id。 */
+  name: string
   createdAt: BackendDateTime
   updatedAt: BackendDateTime
   status: string
@@ -309,15 +318,28 @@ export interface RuntimeThreadSummaryDTO {
   headMessagePreview: string | null
 }
 
+/** Harness Session 的身份与名称投影（session list / batch 响应共用）。 */
+export interface HarnessSessionDTO {
+  sessionId: string
+  /** Session 的必需非空展示名称（服务端权威值）；主展示文本，绝不回退为 id。 */
+  name: string
+  createdAt: BackendDateTime
+}
+
 export interface AgentCommandBatchResponseDTO {
-  session: {
-    sessionId: string
-    createdAt: BackendDateTime
-  }
+  session: HarnessSessionDTO
   rootEntry: HarnessSessionEntryDTO
   thread: HarnessThreadDTO
   acceptedCommands: HarnessThreadCommandDTO[]
   replayed: boolean
+}
+
+export interface HarnessSessionRenameDTO {
+  name: string
+}
+
+export interface HarnessThreadRenameDTO {
+  name: string
 }
 
 export interface ManualCompactionRequestDTO {

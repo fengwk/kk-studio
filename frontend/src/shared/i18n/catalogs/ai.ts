@@ -1274,6 +1274,66 @@ export const aiCatalog = {
     'en-US': 'shortcuts',
     'zh-CN': 'shortcuts',
   },
+  'ai.runtime.command.rename-session': {
+    'en-US': 'Rename the current Session',
+    'zh-CN': '重命名当前 Session',
+  },
+  'ai.runtime.command.rename-sessionLabel': {
+    'en-US': 'rename-session',
+    'zh-CN': 'rename-session',
+  },
+  'ai.runtime.command.rename-thread': {
+    'en-US': 'Rename the current Thread',
+    'zh-CN': '重命名当前 Thread',
+  },
+  'ai.runtime.command.rename-threadLabel': {
+    'en-US': 'rename-thread',
+    'zh-CN': 'rename-thread',
+  },
+  'ai.runtime.rename.sessionTitle': {
+    'en-US': 'Rename Session',
+    'zh-CN': '重命名 Session',
+  },
+  'ai.runtime.rename.threadTitle': {
+    'en-US': 'Rename Thread',
+    'zh-CN': '重命名 Thread',
+  },
+  'ai.runtime.rename.nameLabel': {
+    'en-US': 'Name',
+    'zh-CN': '名称',
+  },
+  'ai.runtime.rename.namePlaceholder': {
+    'en-US': 'Enter a name',
+    'zh-CN': '输入名称',
+  },
+  'ai.runtime.rename.nameRequired': {
+    'en-US': 'Name must not be empty',
+    'zh-CN': '名称不能为空',
+  },
+  'ai.runtime.rename.save': {
+    'en-US': 'Save',
+    'zh-CN': '保存',
+  },
+  'ai.runtime.rename.failed': {
+    'en-US': 'Rename failed',
+    'zh-CN': '重命名失败',
+  },
+  'ai.runtime.rename.loadingName': {
+    'en-US': 'Loading name…',
+    'zh-CN': '正在加载名称…',
+  },
+  'ai.runtime.rename.sessionUnavailable': {
+    'en-US': 'Session is no longer available',
+    'zh-CN': 'Session 已不可用',
+  },
+  'ai.runtime.rename.threadUnavailable': {
+    'en-US': 'Thread is no longer available',
+    'zh-CN': 'Thread 已不可用',
+  },
+  'ai.runtime.rename.titleAria': {
+    'en-US': 'Rename',
+    'zh-CN': '重命名',
+  },
   'ai.runtime.shortcuts.title': {
     'en-US': 'Keyboard shortcuts',
     'zh-CN': '键盘快捷键',

@@ -3,7 +3,7 @@ import {
   clearPaneTarget,
   clearPendingAcceptance,
   isBoundTarget,
-  isEntryTarget,
+  isNewThreadTarget,
   isNewSessionTarget,
   isPaneTarget,
   loadPaneTarget,
@@ -36,30 +36,49 @@ function memoryStorage(): Storage {
 describe('PaneTarget durable-local FSM', () => {
   it('accepts only the three target states and normalizes malformed storage to NEW_SESSION_DRAFT', () => {
     expect(isPaneTarget({ kind: 'NEW_SESSION_DRAFT' })).toBe(true)
-    expect(isPaneTarget({ kind: 'ENTRY_DRAFT', sessionId: 's1', startEntryId: 'e1' })).toBe(true)
+    expect(isPaneTarget({ kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' })).toBe(true)
     expect(isPaneTarget({ kind: 'BOUND_THREAD', threadId: 't1' })).toBe(true)
     expect(isPaneTarget({ kind: 'unknown' })).toBe(false)
     expect(normalizePaneTarget(null)).toEqual({ kind: 'NEW_SESSION_DRAFT' })
     expect(normalizePaneTarget({
-      kind: 'ENTRY_DRAFT',
+      kind: 'NEW_THREAD_DRAFT',
       sessionId: ' s1 ',
       startEntryId: ' e1 ',
     })).toEqual({
-      kind: 'ENTRY_DRAFT',
+      kind: 'NEW_THREAD_DRAFT',
       sessionId: 's1',
       startEntryId: 'e1',
     })
     expect(normalizePaneTarget({ kind: 'BOUND_THREAD', threadId: '' }))
       .toEqual({ kind: 'NEW_SESSION_DRAFT' })
     expect(isNewSessionTarget({ kind: 'NEW_SESSION_DRAFT' })).toBe(true)
-    expect(isEntryTarget({ kind: 'ENTRY_DRAFT', sessionId: 's1', startEntryId: 'e1' })).toBe(true)
+    expect(isNewThreadTarget({ kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' })).toBe(true)
     expect(isBoundTarget({ kind: 'BOUND_THREAD', threadId: 't1' })).toBe(true)
+  })
+
+  it('rejects hidden creation names and the legacy ENTRY_DRAFT shape via exact own keys', () => {
+    // 本地持久化绝不允许创建前草稿/创建 target 携带名称或任何未知字段。
+    for (const target of [
+      { kind: 'NEW_SESSION_DRAFT', name: 'draft name' },
+      { kind: 'NEW_SESSION_DRAFT', threadName: 'draft name' },
+      { kind: 'NEW_SESSION_DRAFT', extra: true },
+      { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1', threadName: 'hidden' },
+      { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1', name: 'hidden' },
+      { kind: 'BOUND_THREAD', threadId: 't1', name: 'hidden' },
+      { kind: 'BOUND_THREAD', threadId: 't1', sessionName: 'hidden' },
+      { kind: 'ENTRY_DRAFT', sessionId: 's1', startEntryId: 'e1' },
+    ]) {
+      expect(isPaneTarget(target)).toBe(false)
+    }
+    expect(isPaneTarget({ kind: 'NEW_SESSION_DRAFT' })).toBe(true)
+    expect(isPaneTarget({ kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' })).toBe(true)
+    expect(isPaneTarget({ kind: 'BOUND_THREAD', threadId: 't1' })).toBe(true)
   })
 
   it('persists only target, while PendingAcceptance remains a separate sidecar', () => {
     const storage = memoryStorage()
     const owner = { type: 'CHAT' as const, id: 'chat-1' }
-    const target: PaneTarget = { kind: 'ENTRY_DRAFT', sessionId: 's1', startEntryId: 'e1' }
+    const target: PaneTarget = { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' }
     savePaneTarget(owner, 'pane-1', target, storage)
     expect(loadPaneTarget(owner, 'pane-1', storage)).toEqual(target)
     expect(storage.length).toBe(1)
@@ -199,6 +218,23 @@ describe('PaneTarget durable-local FSM', () => {
     }))
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
 
+    // exact own-key 拒绝隐藏创建名称：creation target 绝不携带 name/sessionName/threadName。
+    for (const extra of [
+      { name: 'hidden session name' },
+      { sessionName: 'hidden' },
+      { threadName: 'hidden' },
+      { extra: 'field' },
+    ]) {
+      storage.setItem(key, JSON.stringify({
+        ...valid,
+        request: {
+          ...valid.request,
+          target: { ...valid.request.target, ...extra },
+        },
+      }))
+      expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    }
+
     const setRequest = (request: object) => {
       storage.setItem(key, JSON.stringify({ ...valid, request }))
     }
@@ -208,7 +244,7 @@ describe('PaneTarget durable-local FSM', () => {
     const validRequest = valid.request
     for (const target of [
       {
-        type: 'ENTRY',
+        type: 'NEW_THREAD',
         sessionId: 's1',
         startEntryId: 'e1',
         threadId: 't1',
@@ -293,7 +329,7 @@ describe('PaneTarget durable-local FSM', () => {
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({
       ...validRequest,
-      target: { type: 'ENTRY', sessionId: 's1', startEntryId: '', threadId: 't1', yoloEnabled: false },
+      target: { type: 'NEW_THREAD', sessionId: 's1', startEntryId: '', threadId: 't1', yoloEnabled: false },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({

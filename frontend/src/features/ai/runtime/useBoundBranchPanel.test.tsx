@@ -81,6 +81,8 @@ function threadFixture(
 ): HarnessThreadDTO {
   return {
     threadId,
+    /** Thread 名称（服务端权威必填非空）。 */
+    name: 'thread-name',
     sessionId: 's1',
     headEntryId: 'e-assistant',
     yoloEnabled: false,

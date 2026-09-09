@@ -13,10 +13,12 @@ import {
   useAgentPaneController,
   type AgentPaneDefaults,
 } from '@/features/ai/runtime/useAgentPaneController'
+import { Pencil as PencilIcon } from 'lucide-react'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { useI18n } from '@/shared/i18n'
+import { NameRenamePanel } from '@/features/ai/runtime/thread-panel/NameRenamePanel'
 
 export type { AgentPaneDefaults }
 
@@ -54,9 +56,16 @@ export function AgentPane({
     pane.controller.dismissActionError()
   }
 
+  // Bound Thread 主列顶部的名称标题；名称是主展示文本（绝不回退为 id）。
+  const boundThreadName = pane.target.kind === 'BOUND_THREAD'
+    && pane.controller.thread?.threadId === pane.target.threadId
+    ? pane.controller.thread.name
+    : null
+
   const content = pane.target.kind === 'BOUND_THREAD'
     ? (
       <ChatPanel
+        heading={renderBoundThreadHeading(boundThreadName)}
         labels={pane.boundLabels}
         transcript={pane.buildBoundThreadTranscript({
           controller: pane.controller,
@@ -83,6 +92,7 @@ export function AgentPane({
     )
     : (
       <ThreadPanel
+        heading={null}
         transcript={{
           messages: [],
           queuedMessages: [],
@@ -144,7 +154,52 @@ export function AgentPane({
     </section>
   )
 
+  function renderBoundThreadHeading(name: string | null) {
+    return (
+      <header className="agent-pane-thread-heading">
+        {name != null ? (
+          <h2 className="agent-pane-thread-title" title={name}>{name}</h2>
+        ) : (
+          <h2 className="agent-pane-thread-title">{t('ai.runtime.rename.loadingName')}</h2>
+        )}
+        <button
+          type="button"
+          className="agent-pane-thread-rename"
+          aria-label={t('ai.runtime.rename.titleAria')}
+          title={t('ai.runtime.rename.titleAria')}
+          disabled={name == null || pane.renamePending}
+          onClick={() => {
+            if (name != null && pane.target.kind === 'BOUND_THREAD') {
+              pane.renameThread(pane.target.threadId, name)
+            }
+          }}
+        >
+          <PencilIcon aria-hidden="true" />
+        </button>
+      </header>
+    )
+  }
+
   function renderInteractionPanel() {
+    if (pane.interaction === 'rename-session' || pane.interaction === 'rename-thread') {
+      if (pane.renameTarget == null) {
+        return null
+      }
+      const target = pane.renameTarget
+      const sessionTitle = t('ai.runtime.rename.sessionTitle')
+      const threadTitle = t('ai.runtime.rename.threadTitle')
+      return (
+        <NameRenamePanel
+          title={target.kind === 'session' ? sessionTitle : threadTitle}
+          initialName={target.name}
+          busy={pane.renameBusy}
+          pending={pane.renamePending}
+          error={pane.renameError}
+          onSubmit={(name) => pane.submitRename(name)}
+          onClose={pane.closeRename}
+        />
+      )
+    }
     if (pane.interaction === 'agent') {
       return (
         <AgentSelectionPanel
@@ -177,7 +232,7 @@ export function AgentPane({
           currentHeadEntryId={
             pane.target.kind === 'BOUND_THREAD'
               ? pane.controller.thread?.headEntryId ?? null
-              : pane.target.kind === 'ENTRY_DRAFT'
+              : pane.target.kind === 'NEW_THREAD_DRAFT'
                 ? pane.target.startEntryId
                 : null
           }
@@ -195,7 +250,14 @@ export function AgentPane({
           items={pane.sessions.map((session) => pane.sessionSelectionItem(session))}
           loading={pane.sessionsLoading}
           emptyText={t('ai.chat.noSessions')}
+          renameLabel={t('ai.runtime.rename.titleAria')}
           onClose={pane.closeInteraction}
+          onRename={(id) => {
+            const session = pane.sessions.find((item) => item.sessionId === id)
+            if (session) {
+              pane.openRenameWithBackTo('session', session.sessionId, session.name, 'thread-sessions')
+            }
+          }}
           onSelect={(id) => {
             const session = pane.sessions.find((item) => item.sessionId === id)
             if (session) {
@@ -212,8 +274,15 @@ export function AgentPane({
           items={pane.threads.map((thread) => pane.threadSelectionItem(thread))}
           loading={pane.threadsLoading}
           emptyText={t('ai.chat.noThreads')}
+          renameLabel={t('ai.runtime.rename.titleAria')}
           onClose={() => {
             pane.openInteraction('thread-sessions')
+          }}
+          onRename={(id) => {
+            const thread = pane.threads.find((item) => item.threadId === id)
+            if (thread) {
+              pane.openRenameWithBackTo('thread', thread.threadId, thread.name, 'thread-threads')
+            }
           }}
           onSelect={(id) => {
             const thread = pane.threads.find((item) => item.threadId === id)

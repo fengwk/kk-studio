@@ -134,9 +134,9 @@ function buildTarget(
       yoloEnabled: draft.yoloEnabled,
     }
   }
-  if (target.kind === 'ENTRY_DRAFT') {
+  if (target.kind === 'NEW_THREAD_DRAFT') {
     return {
-      type: 'ENTRY' as const,
+      type: 'NEW_THREAD' as const,
       sessionId: target.sessionId,
       startEntryId: target.startEntryId,
       threadId: createThreadId(),

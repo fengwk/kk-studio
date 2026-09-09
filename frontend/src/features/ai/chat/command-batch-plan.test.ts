@@ -26,6 +26,8 @@ function settings(overrides: Partial<HarnessBranchSettingsDTO> = {}): HarnessBra
 function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
   return {
     threadId: 't1',
+    /** Thread 名称（服务端权威必填非空）。 */
+    name: 'thread-name',
     sessionId: 's1',
     headEntryId: 'root',
     yoloEnabled: false,

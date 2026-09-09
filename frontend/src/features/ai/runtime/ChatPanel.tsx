@@ -85,6 +85,7 @@ export function ChatPanel({
   mainView,
   composer,
   activity,
+  heading,
 }: {
   labels: ChatPanelLabels
   transcript: ChatPanelTranscriptInput
@@ -92,6 +93,8 @@ export function ChatPanel({
   mainView?: ThreadPanelMainView
   composer: ChatPanelComposerInput
   activity: ChatPanelActivityInput
+  /** 主列顶部的内容标题（如绑定 Thread 名称与重命名入口）。 */
+  heading?: ReactNode
 }) {
   // 面板保持 API 无关：RESOURCE blob URL 由本适配层在渲染期解析。
   const resolveBlobUrls = useCallback(async (blobId: string): Promise<ResourceBlobUrls | null> => {
@@ -150,6 +153,7 @@ export function ChatPanel({
         mainView={mainView}
         composer={composer}
         activity={panelActivity}
+        heading={heading}
         slots={{
           footer: (
             <ThreadStatusFooter

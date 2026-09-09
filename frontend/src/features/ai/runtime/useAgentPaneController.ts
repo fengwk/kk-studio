@@ -37,6 +37,7 @@ import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type {
   AgentRuntimeOwnerDTO,
   HarnessSessionEntryDTO,
+  HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
   RuntimeSessionSummaryDTO,
   RuntimeThreadSummaryDTO,
@@ -55,7 +56,7 @@ import {
 import {
   clearPendingAcceptance,
   isBoundTarget,
-  isEntryTarget,
+  isNewThreadTarget,
   loadPaneTarget,
   loadPendingAcceptance,
   savePaneTarget,
@@ -77,7 +78,25 @@ export type PaneInteraction =
   | 'tree'
   | 'thread-sessions'
   | 'thread-threads'
+  | 'rename-session'
+  | 'rename-thread'
   | null
+
+export type RenameKind = 'session' | 'thread'
+
+/**
+ * 单输入重命名面板的目标实体。name 是当前权威名称：thread 目标在 bound 快照
+ * 就绪后直接得到；session 目标先为 null，owner Sessions 摘要 on-demand 到达后
+ * 由 effect 填充。绝不把名称持久化进 PaneTarget。
+ */
+export interface RenameTarget {
+  kind: RenameKind
+  id: string
+  /** 当前权威名称；null 表示仍在解析（panel 进入 busy 状态）。 */
+  name: string | null
+  /** 面板关闭后返回的交互；null 表示回到主面板。 */
+  backTo: 'thread-sessions' | 'thread-threads' | null
+}
 
 export interface AgentPaneDefaults {
   agentName?: string
@@ -122,6 +141,9 @@ export function useAgentPaneController({
     },
   )
   const [interaction, setInteraction] = useState<PaneInteraction>(null)
+  const [renameTarget, setRenameTargetState] = useState<RenameTarget | null>(null)
+  const [renamePending, setRenamePending] = useState(false)
+  const [renameError, setRenameError] = useState<string | null>(null)
   const [threadNavigationSessionId, setThreadNavigationSessionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
@@ -130,6 +152,11 @@ export function useAgentPaneController({
   const localDraftRef = useRef<BranchDraft | null>(localDraft)
   const initializedEntryDraftRef = useRef<string | null>(null)
   const pendingAcceptanceRef = useRef<PendingAcceptance | null>(pendingAcceptance)
+  const renameTargetRef = useRef<RenameTarget | null>(null)
+  // rename PUT 在途栅栏：state commit 前也能让 changeTarget/handleCommand 看到
+  // 重命名正在进行，从而阻塞外部 target 切换与并发命令（与 pendingAcceptance
+  // 同栅栏，不持久化、不改变 pendingAcceptance 渲染语义）。
+  const renamePendingRef = useRef(false)
   const generationRef = useRef(0)
   const previousBoundThreadRef = useRef<string | null>(null)
   const backgroundSubscriptionRef = useRef<{
@@ -257,7 +284,7 @@ export function useAgentPaneController({
 
   const currentSessionId = isBoundTarget(target)
     ? controller.sessionId
-    : isEntryTarget(target)
+    : isNewThreadTarget(target)
       ? target.sessionId
       : null
   const sessionsQuery = useQuery({
@@ -265,7 +292,7 @@ export function useAgentPaneController({
     queryFn: () => owner.type === 'CHAT'
       ? chatService.listChatSessions(owner.id)
       : listCanvasSessions(owner.id),
-    enabled: interaction === 'thread-sessions',
+    enabled: interaction === 'thread-sessions' || interaction === 'rename-session',
   })
   const threadsQuery = useQuery({
     queryKey: ['agent-pane', 'threads', threadNavigationSessionId],
@@ -276,12 +303,12 @@ export function useAgentPaneController({
     queryKey: ['agent-pane', 'entries', threadNavigationSessionId ?? currentSessionId],
     queryFn: () => harnessService.listSessionEntries(threadNavigationSessionId ?? currentSessionId!),
     enabled:
-      (interaction === 'tree' || isEntryTarget(target))
+      (interaction === 'tree' || isNewThreadTarget(target))
       && (threadNavigationSessionId ?? currentSessionId) != null,
   })
 
   const entryBaseDraft = useMemo(() => {
-    if (!isEntryTarget(target)) {
+    if (!isNewThreadTarget(target)) {
       return activeDraft
     }
     if (treeEntriesQuery.data == null) {
@@ -295,7 +322,7 @@ export function useAgentPaneController({
   }, [activeDraft, target, treeEntriesQuery.data])
 
   useEffect(() => {
-    if (!isEntryTarget(target) || treeEntriesQuery.data == null || entryBaseDraft == null) {
+    if (!isNewThreadTarget(target) || treeEntriesQuery.data == null || entryBaseDraft == null) {
       return
     }
     const identity = `${target.sessionId}:${target.startEntryId}`
@@ -306,15 +333,227 @@ export function useAgentPaneController({
     setLocalDraft(cloneDraft(entryBaseDraft))
   }, [entryBaseDraft, target, treeEntriesQuery.data])
 
+  // session 重命名面板的 on-demand 名称解析：打开时可能尚无 owner sessions
+  // 摘要；摘要到达后填充到 renameTarget.name（面板据此预填一次）。摘要加载
+  // 失败或已成功但不含目标（并发删除/权限变化）都会终止 busy 态并提示错误，
+  // 绝不把面板留在永久 busy。
+  const sessionsLoadFailed = sessionsQuery.isError
+    ? errorMessage(sessionsQuery.error, t('ai.runtime.action.requestFailed'))
+    : null
+  useEffect(() => {
+    if (renameTarget == null || renameTarget.kind !== 'session' || renameTarget.name != null) {
+      return
+    }
+    if (sessionsQuery.isError) {
+      setRenameTargetState((current) =>
+        current != null && current.kind === 'session' && current.name == null
+          ? { ...current, name: '' }
+          : current,
+      )
+      setRenameError(sessionsLoadFailed ?? t('ai.runtime.action.requestFailed'))
+      return
+    }
+    if (sessionsQuery.data == null) {
+      return
+    }
+    const summary = sessionsQuery.data.find((item) => item.sessionId === renameTarget.id)
+    if (summary != null) {
+      setRenameTargetState((current) =>
+        current != null && current.id === renameTarget.id ? { ...current, name: summary.name } : current,
+      )
+      return
+    }
+    // 摘要已成功加载但目标不存在：名称无法解析，结束 busy 并提示。
+    setRenameTargetState((current) =>
+      current != null && current.kind === 'session' && current.name == null
+        ? { ...current, name: '' }
+        : current,
+    )
+    setRenameError(t('ai.runtime.rename.sessionUnavailable'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t 是稳定 useCallback。
+  }, [renameTarget, sessionsQuery.data, sessionsQuery.isError, sessionsLoadFailed])
+
   function setParts(next: ComposerPart[]) {
     partsRef.current = next
     storeComposerDraft(composerScope, next)
     setPartsState(next)
   }
 
+  /** 打开指定 kind 的单输入重命名面板。name 为空/未知时为 null（解析态）。 */
+  function openRename(
+    kind: RenameKind,
+    id: string,
+    name: string | null,
+    backTo: RenameTarget['backTo'] = null,
+  ): void {
+    setRenameTargetState({ kind, id, name, backTo })
+    setRenameError(null)
+    setRenamePending(false)
+    setInteraction(kind === 'session' ? 'rename-session' : 'rename-thread')
+  }
+
+  /** 当前 target 可重命名的实体；不可用返回 null（矩阵保证可达才调用）。 */
+  function renameTargetOf(kind: RenameKind): { id: string; name: string | null } | null {
+    if (kind === 'thread') {
+      if (isBoundTarget(target) && controller.thread?.threadId === target.threadId) {
+        return { id: target.threadId, name: controller.thread.name }
+      }
+      return null
+    }
+    if (isNewThreadTarget(target)) {
+      const summary = sessionsQuery.data?.find((item) => item.sessionId === target.sessionId)
+      return { id: target.sessionId, name: summary?.name ?? null }
+    }
+    if (isBoundTarget(target) && controller.sessionId) {
+      const summary = sessionsQuery.data?.find((item) => item.sessionId === controller.sessionId)
+      return { id: controller.sessionId, name: summary?.name ?? null }
+    }
+    return null
+  }
+
+  function openRenameForTarget(kind: RenameKind): void {
+    if (hasPendingOperation()) {
+      setActionError(t('ai.runtime.action.operationPending'))
+      return
+    }
+    const targetEntity = renameTargetOf(kind)
+    if (targetEntity == null) {
+      setActionError(kind === 'thread'
+        ? t('ai.runtime.rename.threadUnavailable')
+        : t('ai.runtime.rename.sessionUnavailable'))
+      return
+    }
+    openRename(kind, targetEntity.id, targetEntity.name)
+  }
+
+  function closeRename(): void {
+    const backTo = renameTarget?.backTo ?? null
+    renameTargetRef.current = null
+    renamePendingRef.current = false
+    setRenameTargetState(null)
+    setRenameError(null)
+    setRenamePending(false)
+    // 从 Session/Thread picker 行内进入时，关闭后返回该 picker。
+    setInteraction(backTo)
+  }
+
+  async function submitRename(name: string): Promise<void> {
+    if (renameTarget == null || renamePendingRef.current || hasPendingOperation()) {
+      return
+    }
+    const trimmed = name.trim()
+    if (!trimmed) {
+      setRenameError(t('ai.runtime.rename.nameRequired'))
+      return
+    }
+    setRenameError(null)
+    setRenamePending(true)
+    renamePendingRef.current = true
+    const current = renameTarget
+    renameTargetRef.current = current
+    try {
+      if (current.kind === 'session') {
+        const renamed = await harnessService.renameSession(current.id, { name: trimmed })
+        if (renameTargetRef.current !== current) {
+          return
+        }
+        patchSessionNameCache(current.id, renamed.name)
+      } else {
+        const renamed = await harnessService.renameThread(current.id, { name: trimmed })
+        if (renameTargetRef.current !== current) {
+          return
+        }
+        patchThreadNameCache(current.id, renamed)
+      }
+      await invalidateAfterRename(current)
+      closeRename()
+    } catch (error) {
+      if (renameTargetRef.current !== current) {
+        return
+      }
+      renamePendingRef.current = false
+      setRenameError(errorMessage(error, t('ai.runtime.rename.failed')))
+      setRenamePending(false)
+    }
+  }
+
+  /**
+   * 更新已加载缓存中的 Session 名称（owner session summaries）。保持简单：
+   * 直接 setQueryData 到已存在的 key，随后 invalidateAfterRename 做必要失效。
+   */
+  function patchSessionNameCache(sessionId: string, name: string): void {
+    for (const [key, data] of queryClient.getQueriesData<RuntimeSessionSummaryDTO[]>({
+      queryKey: ['agent-pane', 'sessions'],
+    })) {
+      if (data == null) {
+        continue
+      }
+      queryClient.setQueryData<RuntimeSessionSummaryDTO[]>(
+        key,
+        data.map((item) => item.sessionId === sessionId ? { ...item, name } : item),
+      )
+    }
+  }
+
+  /** 重命名成功后失效相应查询：Session 名称投影到 Session/Thread 列表与 Chat 列表。 */
+  async function invalidateAfterRename(target: RenameTarget): Promise<void> {
+    const sessionId = target.kind === 'session'
+      ? target.id
+      : (queryClient.getQueryData<HarnessThreadSnapshotDTO>(
+        queryKeys.threads.snapshot(target.id),
+      )?.thread.sessionId ?? '')
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: ['agent-pane', 'sessions', owner.type, owner.id],
+      }),
+      queryClient.invalidateQueries({
+        // thread 列表以父 Session 为主键；重命名 Thread 时前缀失效所有 Session 的
+        // thread 列表（重命名返回 picker 时按需重新拉取）。重命名 Session 不需要
+        // thread 列表失效，因为列表内容不含 Session 名称。
+        queryKey: target.kind === 'thread'
+          ? ['agent-pane', 'threads']
+          : sessionId != null ? ['agent-pane', 'threads', sessionId] : undefined,
+      }),
+      ...(target.kind === 'thread'
+        ? [queryClient.invalidateQueries({
+          queryKey: queryKeys.threads.snapshot(target.id),
+        })]
+        : []),
+      queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
+    ])
+  }
+
+  /**
+   * 把 Thread 重命名成功响应 patch 进已加载的 snapshot/thread summary 缓存：
+   * snapshot cache 的 thread 本体直接采纳权威响应（含规范化的 name）；thread
+   * summary 只更新 name 字段。之后 invalidateAfterRename 会按需重新拉取权威数据。
+   */
+  function patchThreadNameCache(threadId: string, thread: HarnessThreadDTO): void {
+    const snapshotKey = queryKeys.threads.snapshot(threadId)
+    const snapshot = queryClient.getQueryData<HarnessThreadSnapshotDTO>(snapshotKey)
+    if (snapshot != null && snapshot.thread.threadId === threadId) {
+      queryClient.setQueryData<HarnessThreadSnapshotDTO>(
+        snapshotKey,
+        { ...snapshot, thread },
+      )
+    }
+    for (const [key, data] of queryClient.getQueriesData<RuntimeThreadSummaryDTO[]>({
+      queryKey: ['agent-pane', 'threads'],
+    })) {
+      if (data == null) {
+        continue
+      }
+      queryClient.setQueryData<RuntimeThreadSummaryDTO[]>(
+        key,
+        data.map((item) => item.threadId === threadId ? { ...item, name: thread.name } : item),
+      )
+    }
+  }
+
   /** 事件同步栅栏：state commit 前也能看到刚写入 pendingAcceptanceRef。 */
   function hasPendingOperation(): boolean {
-    return pendingAcceptanceRef.current != null
+    return renamePendingRef.current
+      || pendingAcceptanceRef.current != null
       || controller.pending
       || controller.compactPending
       || controller.stopPending
@@ -471,7 +710,7 @@ export function useAgentPaneController({
       !hasMessageContent(payload)
       || slashQueryOf(payload) != null
       || activeDraft == null
-      || (isEntryTarget(target) && treeEntriesQuery.data == null)
+      || (isNewThreadTarget(target) && treeEntriesQuery.data == null)
       || entryBaseDraft == null
     ) {
       return
@@ -545,6 +784,12 @@ export function useAgentPaneController({
       case 'shortcuts':
         setInteraction('shortcuts')
         return
+      case 'rename-session':
+        openRenameForTarget('session')
+        return
+      case 'rename-thread':
+        openRenameForTarget('thread')
+        return
       case 'compact':
       case 'stop':
         controller.runCommand(command)
@@ -594,7 +839,7 @@ export function useAgentPaneController({
     const draft = branchDraftFromEntry(entry, activeDraft)
     setThreadNavigationSessionId(null)
     changeTarget({
-      kind: 'ENTRY_DRAFT',
+      kind: 'NEW_THREAD_DRAFT',
       sessionId: entry.sessionId,
       startEntryId: entry.entryId,
     }, draft)
@@ -644,7 +889,7 @@ export function useAgentPaneController({
       pending
       || (isBoundTarget(target)
         ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
-        : activeDraft == null || (isEntryTarget(target) && treeEntriesQuery.data == null)),
+        : activeDraft == null || (isNewThreadTarget(target) && treeEntriesQuery.data == null)),
     onPartsChange: isBoundTarget(target) ? controller.setDraft : setParts,
     onHistoryPartsChange: isBoundTarget(target)
       ? (next) => controller.setDraft(next, 'history')
@@ -685,7 +930,7 @@ export function useAgentPaneController({
   const { gitBranch } = useEnvironmentWorkspaceMetadata(environmentBinding, environmentReady)
   const error = actionError
     ?? (isBoundTarget(target) ? branchPanel.yoloError ?? controller.actionError : null)
-    ?? (isEntryTarget(target) && treeEntriesQuery.error
+    ?? (isNewThreadTarget(target) && treeEntriesQuery.error
       ? errorMessage(treeEntriesQuery.error, t('ai.chat.history.loadFailed'))
       : null)
   const combinedConflict = conflict ?? controller.conflict ?? branchPanel.conflict
@@ -697,6 +942,23 @@ export function useAgentPaneController({
     interaction,
     openInteraction: (next: Exclude<PaneInteraction, null>) => setInteraction(next),
     closeInteraction: () => setInteraction(null),
+    renameTarget,
+    renamePending,
+    renameError,
+    renameBusy: renameTarget != null
+      && renameTarget.kind === 'session'
+      && renameTarget.name == null
+      && !sessionsQuery.isError,
+    renameSession: (sessionId: string, name: string | null) => openRename('session', sessionId, name),
+    renameThread: (threadId: string, name: string | null) => openRename('thread', threadId, name),
+    openRenameWithBackTo: (
+      kind: RenameKind,
+      id: string,
+      name: string | null,
+      backTo: RenameTarget['backTo'],
+    ) => openRename(kind, id, name, backTo),
+    submitRename,
+    closeRename,
     sessions: sessionsQuery.data ?? [],
     sessionsLoading: sessionsQuery.isLoading,
     threads: threadsQuery.data ?? [],
@@ -840,8 +1102,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function sessionSelectionItem(session: RuntimeSessionSummaryDTO) {
   return {
     id: session.sessionId,
-    title: session.firstMessagePreview || session.sessionId,
-    subtitle: `${formatBackendDate(session.lastActivityAt)} · ${session.threadCount} Threads`,
+    title: session.name,
+    // 预览保持次要（subtitle）；主展示与搜索都以 name 为准，绝不回退为 id。
+    subtitle: [
+      session.firstMessagePreview || null,
+      `${formatBackendDate(session.lastActivityAt)} · ${session.threadCount} Threads`,
+    ].filter(Boolean).join(' · '),
+    // UUID 只作 badge 诊断。
     badge: session.sessionId,
   }
 }
@@ -849,8 +1116,11 @@ export function sessionSelectionItem(session: RuntimeSessionSummaryDTO) {
 export function threadSelectionItem(thread: RuntimeThreadSummaryDTO) {
   return {
     id: thread.threadId,
-    title: thread.headMessagePreview || thread.threadId,
-    subtitle: `${formatBackendDate(thread.updatedAt)} · ${thread.status}`,
+    title: thread.name,
+    subtitle: [
+      thread.headMessagePreview,
+      `${formatBackendDate(thread.updatedAt)} · ${thread.status}`,
+    ].filter(Boolean).join(' · '),
     badge: thread.threadId,
   }
 }

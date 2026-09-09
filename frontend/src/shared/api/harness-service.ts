@@ -3,8 +3,11 @@ import type {
   AgentCommandBatchRequestDTO,
   AgentCommandBatchResponseDTO,
   HarnessSessionEntryDTO,
+  HarnessSessionDTO,
+  HarnessSessionRenameDTO,
   HarnessSystemPromptPreviewDTO,
   HarnessThreadDTO,
+  HarnessThreadRenameDTO,
   HarnessThreadSnapshotDTO,
   HarnessThreadStopDTO,
   HarnessThreadStopResultDTO,
@@ -21,7 +24,9 @@ import type {
  * - POST /harness/command-batches
  * - GET /harness/sessions/{id}/threads
  * - GET /harness/sessions/{id}/entries
+ * - PUT /harness/sessions/{id}/name
  * - GET /harness/threads/{id}（Thread snapshot 查询）
+ * - PUT /harness/threads/{id}/name
  * - POST /harness/threads/{id}/compact
  * - GET /harness/threads/{id}/system-prompt
  * - PUT /harness/threads/{id}/yolo
@@ -41,8 +46,17 @@ export function createHarnessService(client: HttpClient = apiClient) {
     listSessionEntries: (sessionId: string): Promise<HarnessSessionEntryDTO[]> =>
       client.get(`/harness/sessions/${encodeURIComponent(sessionId)}/entries`),
 
+    renameSession: (
+      sessionId: string,
+      data: HarnessSessionRenameDTO,
+    ): Promise<HarnessSessionDTO> =>
+      client.put(`/harness/sessions/${encodeURIComponent(sessionId)}/name`, data),
+
     getThreadSnapshot: (threadId: string): Promise<HarnessThreadSnapshotDTO> =>
       client.get(`/harness/threads/${encodeURIComponent(threadId)}`),
+
+    renameThread: (threadId: string, data: HarnessThreadRenameDTO): Promise<HarnessThreadDTO> =>
+      client.put(`/harness/threads/${encodeURIComponent(threadId)}/name`, data),
 
     compactThread: (
       threadId: string,

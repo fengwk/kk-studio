@@ -83,6 +83,8 @@ function branchSettings(
 
 function threadFixture(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
   return {
+    /** Thread 名称（服务端权威必填非空）。 */
+    name: 'thread-name',
     threadId: THREAD_ID,
     sessionId: 's1',
     headEntryId: 'h1',
@@ -1661,13 +1663,13 @@ describe('useAgentThreadController', () => {
         snapshotOf(threadFixture({ headEntryId: 'h2', nextCommandSequence: '2' })),
       ),
     ).toBe(false)
-    // 非 THREAD target（ENTRY）：必须重建而不是回放。
+    // 非 THREAD target（NEW_THREAD）：必须重建而不是回放。
     const entryPlan: CommandBatchPlan = {
       ...messagePlan,
       request: {
         ...messagePlan.request,
         target: {
-          type: 'ENTRY',
+          type: 'NEW_THREAD',
           sessionId: 's1',
           startEntryId: 'e1',
           threadId: THREAD_ID,

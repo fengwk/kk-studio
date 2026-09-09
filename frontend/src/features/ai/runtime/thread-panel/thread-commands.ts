@@ -21,6 +21,8 @@ export type ThreadCommandId =
   | 'debug'
   | 'shortcuts'
   | 'compact'
+  | 'rename-session'
+  | 'rename-thread'
 
 export interface ThreadCommand {
   id: ThreadCommandId
@@ -51,6 +53,8 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
   command('debug', ['log', 'audit', 'activity', 'entry', 'conversation', 'inspect']),
   command('shortcuts', ['keys', 'keyboard', 'help', 'hotkeys']),
   command('compact', ['context', 'tokens', 'summary', 'reduce']),
+  command('rename-session', ['session', 'name']),
+  command('rename-thread', ['thread', 'name']),
 ]
 
 function command(id: ThreadCommandId, keywords: string[]): ThreadCommand {
@@ -66,7 +70,7 @@ function command(id: ThreadCommandId, keywords: string[]): ThreadCommand {
 
 const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
   NEW_SESSION_DRAFT: ['thread', 'agent', 'environment', 'yolo', 'models', 'upload', 'shortcuts'],
-  ENTRY_DRAFT: [
+  NEW_THREAD_DRAFT: [
     'thread',
     'agent',
     'environment',
@@ -76,6 +80,7 @@ const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
     'new',
     'upload',
     'shortcuts',
+    'rename-session',
   ],
   BOUND_THREAD: THREAD_COMMANDS.map((item) => item.id),
 }
