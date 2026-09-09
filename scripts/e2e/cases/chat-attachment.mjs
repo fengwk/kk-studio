@@ -360,6 +360,8 @@ registerCase({
         firstAccepted.acceptedCommands.length === 1,
         JSON.stringify(firstAccepted.acceptedCommands),
       )
+      // 本 case 后续按既有 Session/Thread 继续，不含 NEW_THREAD 命名语义，只锁 UUID。
+      assert(String(firstAccepted.thread.threadId) === threadId, JSON.stringify(firstAccepted.thread))
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 45_000, intervalMs: 100 })
       const firstSnapshot = await getThreadSnapshot(ctx, threadId)
       assert(mock.requests.length === 1, JSON.stringify(mock.requests))

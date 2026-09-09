@@ -263,8 +263,8 @@ Chat Pane 有两个正交维度：布局状态和 target 状态。布局是
 
 | Pane target | 入口 | 本地事实 | 发送后的结果 |
 | --- | --- | --- | --- |
-| `NEW_SESSION_DRAFT` | 新建 Pane/Chat，尚无 Session | `BranchDraft`、ordered Composer parts、未发送 settings | 原子 `NEW_SESSION` 初始创建，成功后绑定新 Thread |
-| `ENTRY_DRAFT` | `/tree` 选择同一 Session 的历史 Entry | `sessionId + startEntryId`、BranchDraft、Composer parts | 原子 `ENTRY` 初始创建，建立新 Thread 的分支 |
+| `NEW_SESSION_DRAFT` | 新建 Pane/Chat，尚无 Session | `BranchDraft`、ordered Composer parts、未发送 settings | 原子 `NEW_SESSION` 初始创建，成功后绑定新 Thread；服务端派生 Session 默认名、root Thread 名固定 `main` |
+| `NEW_THREAD_DRAFT` | `/tree` 选择同一 Session 的历史 Entry | `sessionId + startEntryId`、BranchDraft、Composer parts | 原子 `NEW_THREAD` 初始创建，建立新 Thread 的分支，Thread 名固定 `branch-<threadId 前 8 位>` |
 | `BOUND_THREAD` | 已加载 Thread snapshot | Thread `branchSettings`、head、version、next command sequence | `THREAD` target 携带精确 cursor，batch 进入 mailbox |
 
 `PendingAcceptance` 按 owner 和 pane id 写入 localStorage，包含 frozen request、
@@ -284,7 +284,7 @@ sequenceDiagram
 
   C->>P: ordered TEXT/ATTACHMENT/RESOURCE parts
   P->>P: freeze target + BranchDraft + ids + local draft
-  P->>A: NEW_SESSION / ENTRY / THREAD command batch
+  P->>A: NEW_SESSION / NEW_THREAD / THREAD command batch
   A-->>P: 202 accepted snapshot + acceptedCommands + replayed
   A->>T: queue commands
   T-->>S: durable version / snapshot
@@ -295,7 +295,7 @@ sequenceDiagram
 
 - `NEW_SESSION` 只发送 `USER_MESSAGE`；完整 BranchDraft 写进
   `rootSettings`，避免再发送一组初始 `SET_*`。
-- `ENTRY_DRAFT` 和 `BOUND_THREAD` 在 `USER_MESSAGE` 前按固定顺序追加
+- `NEW_THREAD_DRAFT` 和 `BOUND_THREAD` 在 `USER_MESSAGE` 前按固定顺序追加
   `SET_ENVIRONMENT`、`SET_AGENT`、`SET_MODEL` 的 diff；Agent 工具选择由最新 Agent definition 的
   `config.toolIds` 决定，不生成 branch tool command。
 - `BOUND_THREAD` 的 target 是 `THREAD`，带

@@ -19,12 +19,14 @@ import {
  * - PUT  /api/harness/threads/{id}/yolo        {expectedVersion,yoloEnabled}（version CAS）
  * - POST /api/harness/threads/{id}/stop        {stopRequestId,expectedVersion}（同 id 幂等 replay）
  * - PUT  /api/harness/threads/{id}/tool-invocations/{toolInvocationId}/approval
+ * - PUT  /api/harness/sessions/{id}/name       {name}（200 权威 HarnessSessionDTO）
+ * - PUT  /api/harness/threads/{id}/name        {name}（200 权威 HarnessThreadDTO）
  * - WS   /api/events/v1                        应用级 Thread/Canvas 事件订阅
  * - GET  /api/harness/environments             只读 Environment 注册表（Card UUID id = canonical 路由身份）
  *
  * 产品 HTTP 写面只接受三种 sealed target：
  * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
- * - ENTRY{sessionId,startEntryId,threadId,yoloEnabled}：在既有 Session 既有 Entry 下开新 Thread
+ * - NEW_THREAD{sessionId,startEntryId,threadId,yoloEnabled}：在既有 Session 既有 Entry 下开新 Thread
  * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：在既有 Thread 上继续
  * commands 必须是固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL 前缀 +
  * 恰一条末尾 USER_MESSAGE；CUSTOM_MESSAGE 在产品 HTTP 面被拒绝。
@@ -78,6 +80,11 @@ export function threadIdOf(thread) {
   const threadId = canonicalUuid(thread?.threadId, 'threadId')
   canonicalUuid(thread.sessionId, 'sessionId')
   canonicalUuid(thread.headEntryId, 'headEntryId')
+  // name 是 Thread 的必需非空展示名称（服务端派生/控制面重命名，绝不回退为 id）。
+  assert(
+    typeof thread.name === 'string' && thread.name.trim().length > 0,
+    `Thread name must be non-blank: ${JSON.stringify(thread)}`,
+  )
   assert(
     thread.nextCommandSequence && /^[1-9]\d*$/.test(String(thread.nextCommandSequence)),
     `nextCommandSequence starts at 1: ${JSON.stringify(thread)}`,
@@ -154,13 +161,13 @@ export function newSessionTarget({ sessionId, threadId, rootSettings, yoloEnable
   return { type: 'NEW_SESSION', sessionId, threadId, rootSettings, yoloEnabled }
 }
 
-/** ENTRY target：在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）。 */
-export function entryTarget({ sessionId, startEntryId, threadId, yoloEnabled = false }) {
+/** NEW_THREAD target：在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）。 */
+export function newThreadTarget({ sessionId, startEntryId, threadId, yoloEnabled = false }) {
   canonicalUuid(sessionId, 'target.sessionId')
   canonicalUuid(startEntryId, 'target.startEntryId')
   canonicalUuid(threadId, 'target.threadId')
   assert(typeof yoloEnabled === 'boolean', 'target.yoloEnabled must be boolean')
-  return { type: 'ENTRY', sessionId, startEntryId, threadId, yoloEnabled }
+  return { type: 'NEW_THREAD', sessionId, startEntryId, threadId, yoloEnabled }
 }
 
 /** THREAD target：在既有 Thread 上继续，携带精确 cursor 期望。 */
@@ -182,6 +189,11 @@ export function threadTarget({ threadId, expectedHeadEntryId, expectedNextComman
 function assertAcceptedCommands(accepted) {
   assert(accepted && typeof accepted === 'object', `expected accepted object: ${JSON.stringify(accepted)}`)
   canonicalUuid(accepted.session?.sessionId, 'accepted.session.sessionId')
+  // Session DTO 的 name 是服务端派生的必填非空展示名。
+  assert(
+    typeof accepted.session?.name === 'string' && accepted.session.name.trim().length > 0,
+    `accepted session name must be non-blank: ${JSON.stringify(accepted.session)}`,
+  )
   canonicalUuid(accepted.rootEntry?.entryId, 'accepted.rootEntry.entryId')
   assert(
     String(accepted.rootEntry?.entryType || '').toUpperCase() === 'ROOT',
@@ -197,7 +209,9 @@ function assertAcceptedCommands(accepted) {
  *
  * 自动基于请求 target/commands 严格校验响应形状（无需调用方传 options）：
  * - 返回 threadId 必须等于 target.threadId；
- * - NEW_SESSION/ENTRY 的 sessionId 必须等于 target.sessionId；
+ * - NEW_SESSION/NEW_THREAD 的 sessionId 必须等于 target.sessionId；
+ * - NEW_SESSION 的 accepted.session.name 是服务端派生名；NEW_THREAD 的 accepted.thread.name
+ *   必须等于 branch-<threadId 前 8 位>；
  * - rootEntry.sessionId/thread.sessionId 必须等于 response session.sessionId；
  * - acceptedCommands 的 count/type/idempotencyKey/order 必须与请求 commands 一致，
  *   且每项 threadId、positive sequence、canonical idempotencyKey 均校验。
@@ -227,10 +241,19 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
     String(accepted.thread?.threadId) === String(target.threadId),
     `accepted threadId ${accepted.thread?.threadId} != target ${target.threadId}: ${JSON.stringify(accepted)}`,
   )
-  if (target.type === 'NEW_SESSION' || target.type === 'ENTRY') {
+  if (target.type === 'NEW_SESSION' || target.type === 'NEW_THREAD') {
     assert(
       String(accepted.session?.sessionId) === String(target.sessionId),
       `accepted sessionId ${accepted.session?.sessionId} != target ${target.sessionId}: ${JSON.stringify(accepted)}`,
+    )
+  }
+  if (target.type === 'NEW_THREAD') {
+    // NEW_THREAD 不接受 name 输入：新 Thread.name 固定 branch-<threadId 前 8 位>。
+    assert(
+      accepted.thread?.name === `branch-${String(target.threadId).slice(0, 8)}`,
+      `NEW_THREAD thread name ${accepted.thread?.name} != branch-<threadId 前 8 位> for ${target.threadId}: ${JSON.stringify(
+        accepted.thread,
+      )}`,
     )
   }
   assert(
@@ -282,23 +305,27 @@ export async function createNewSession(
   })
 }
 
-/** ENTRY 原子创建：在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）。 */
-export async function createEntryThread(
+/** NEW_THREAD 原子创建：在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）。 */
+export async function createNewThread(
   ctx,
   { owner, sessionId, startEntryId, threadId, yoloEnabled = false, commands },
 ) {
   return acceptCommandBatch(ctx, {
     owner,
-    target: entryTarget({ sessionId, startEntryId, threadId, yoloEnabled }),
+    target: newThreadTarget({ sessionId, startEntryId, threadId, yoloEnabled }),
     commands,
   })
 }
 
 // ---------- Session / Thread 查询 ----------
 
-/** 严格校验 Session 摘要 DTO。 */
+/** 严格校验 Session 摘要 DTO（name 是服务端派生的必填非空展示名）。 */
 function assertSessionSummary(item) {
   canonicalUuid(item?.sessionId, 'session.sessionId')
+  assert(
+    typeof item.name === 'string' && item.name.trim().length > 0,
+    `Session summary name must be non-blank: ${JSON.stringify(item)}`,
+  )
   assert(
     typeof item.createdAt === 'string' || typeof item.createdAt === 'number',
     JSON.stringify(item),
@@ -307,7 +334,11 @@ function assertSessionSummary(item) {
     typeof item.lastActivityAt === 'string' || typeof item.lastActivityAt === 'number',
     JSON.stringify(item),
   )
-  assert(typeof item.firstMessagePreview === 'string', JSON.stringify(item))
+  // firstMessagePreview 与名称独立：最近消息预览可为 null，绝不回退为 name/id。
+  assert(
+    item.firstMessagePreview === null || typeof item.firstMessagePreview === 'string',
+    JSON.stringify(item),
+  )
   assert(Number.isSafeInteger(item.threadCount) && item.threadCount >= 0, JSON.stringify(item))
   return item
 }
@@ -340,6 +371,11 @@ export async function listSessionThreads(ctx, sessionId) {
   assert(Array.isArray(threads), `expected Thread summary array: ${JSON.stringify(json)}`)
   for (const item of threads) {
     canonicalUuid(item?.threadId, 'thread.threadId')
+    // name 是 Thread 的必需非空展示名称（主展示文本，绝不回退为 id）。
+    assert(
+      typeof item.name === 'string' && item.name.trim().length > 0,
+      `Thread summary name must be non-blank: ${JSON.stringify(item)}`,
+    )
     assert(
       typeof item.createdAt === 'string' || typeof item.createdAt === 'number',
       JSON.stringify(item),
@@ -492,6 +528,48 @@ export async function setThreadYolo(ctx, threadId, { expectedVersion, yoloEnable
   const updated = envelopeData(json)
   threadIdOf(updated)
   return updated
+}
+
+/**
+ * 重命名 Session（PUT /sessions/{id}/name，body={name}）：返回权威 HarnessSessionDTO
+ * （sessionId/name/createdAt）。name 规范化由服务端权威处理，helper 只保证请求名非空白。
+ */
+export async function renameSession(ctx, sessionId, name) {
+  assert(typeof name === 'string' && name.trim().length > 0, 'rename session name must be non-blank')
+  canonicalUuid(sessionId, 'sessionId')
+  const { status, json } = await ctx.call(
+    'PUT',
+    `/api/harness/sessions/${encodeURIComponent(sessionId)}/name`,
+    { name },
+  )
+  assert(status === 200, `rename session status ${status}: ${JSON.stringify(json)}`)
+  const renamed = envelopeData(json)
+  canonicalUuid(renamed?.sessionId, 'renamed.sessionId')
+  assert(String(renamed.sessionId) === String(sessionId), JSON.stringify(renamed))
+  assert(
+    typeof renamed.name === 'string' && renamed.name.trim().length > 0,
+    `renamed session name must be non-blank: ${JSON.stringify(renamed)}`,
+  )
+  return renamed
+}
+
+/**
+ * 重命名 Thread（PUT /threads/{id}/name，body={name}）：返回权威 HarnessThreadDTO。
+ * 实际名称变化使 version 精确 +1；规范化同名是 no-op（version 零触碰）——具体断言由 case 负责。
+ */
+export async function renameThread(ctx, threadId, name) {
+  assert(typeof name === 'string' && name.trim().length > 0, 'rename thread name must be non-blank')
+  canonicalUuid(threadId, 'threadId')
+  const { status, json } = await ctx.call(
+    'PUT',
+    `/api/harness/threads/${encodeURIComponent(threadId)}/name`,
+    { name },
+  )
+  assert(status === 200, `rename thread status ${status}: ${JSON.stringify(json)}`)
+  const renamed = envelopeData(json)
+  threadIdOf(renamed)
+  assert(String(renamed.threadId) === String(threadId), JSON.stringify(renamed))
+  return renamed
 }
 
 /** 原子 stop（stopRequestId 幂等 replay；version CAS）。 */

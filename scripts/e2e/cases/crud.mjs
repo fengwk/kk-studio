@@ -656,6 +656,8 @@ registerCase({
       const firstThread = first.accepted.thread
       assert(/^\d+$/.test(String(firstThread.version)), JSON.stringify(firstThread))
       assert(firstThread.sessionId && firstThread.headEntryId, JSON.stringify(firstThread))
+      // name 是必填展示名（root Thread 恒为 main；NEW_SESSION 无 name 输入）。
+      assert(firstThread.name === 'main', JSON.stringify(firstThread))
 
       // 精确 preview 断言依赖 USER entry 已持久化：先等三个 Thread 的 turn 收敛。
       for (const threadId of createdThreadIds) {
@@ -708,18 +710,23 @@ registerCase({
       const replayedSummary = sessionsAfterReplay.find(
         (item) => String(item.sessionId) === String(thirdAccepted.session.sessionId),
       )
+      assert(replayedSummary?.name === String(thirdAccepted.session.name), JSON.stringify(replayedSummary))
       assert(
         replayedSummary && replayedSummary.threadCount === 1,
         `replay must not add Thread relation: ${JSON.stringify(sessionsAfterReplay)}`,
       )
 
-      // Session Thread 摘要包含创建的 Thread。
+      // Session Thread 摘要包含创建的 Thread（其 name 必填非空，root 为 main）。
       const sessionThreads = await listSessionThreads(ctx, thirdAccepted.thread.sessionId)
       const threadIds = sessionThreads.map((item) => String(item.threadId))
       assert(
         threadIds.includes(String(thirdAccepted.thread.threadId)),
         `created Thread missing from Session Thread list: ${JSON.stringify(threadIds)}`,
       )
+      const thirdThreadSummary = sessionThreads.find(
+        (item) => String(item.threadId) === String(thirdAccepted.thread.threadId),
+      )
+      assert(thirdThreadSummary?.name === 'main', JSON.stringify(thirdThreadSummary))
 
       // canonical 但未知的 Chat sessions => 404。
       const unknownChatId = '00000000-0000-0000-0000-000000000999'

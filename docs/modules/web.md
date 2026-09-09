@@ -162,8 +162,8 @@ Profile locations 是：
 | MCP Server | `/api/ai/mcp-servers`、`/{id}`、`/{id}/refresh` | CRUD、refresh 工具发现（expectedVersion 在 JSON body） |
 | Chat | `/api/ai/chats` | Chat CRUD、Chat Session summary |
 | Harness command | `POST /api/harness/command-batches` | Chat/Canvas 唯一用户 command write path（202 accepted） |
-| Harness Session | `/api/harness/sessions/{sessionId}/{threads,entries}` | Thread summary 和 Session Entry tree 查询 |
-| Harness Thread | `/api/harness/threads/{threadId}` | snapshot（GET direct）、system-prompt、compact（POST 202）、yolo、stop、Tool approval（PUT） |
+| Harness Session | `/api/harness/sessions/{sessionId}/{threads,entries}`、`PUT /api/harness/sessions/{sessionId}/name` | Thread summary 和 Session Entry tree 查询；Session 重命名（body `{name}`，返回权威 `HarnessSessionDTO`） |
+| Harness Thread | `/api/harness/threads/{threadId}`、`PUT /api/harness/threads/{threadId}/name` | snapshot（GET direct）、system-prompt、compact（POST 202）、yolo、stop、Tool approval（PUT）；Thread 重命名（body `{name}`，返回权威 `HarnessThreadDTO`，实际改名 version +1，规范同名 no-op） |
 | Harness resource | `/api/harness/resources/{sha256}` | content-addressed managed Resource 下载 |
 | Canvas document | `/api/canvases` | document snapshot/list/create/delete、typed command batch |
 | Canvas resource | `/api/canvases/{canvasId}/resources/{resourceId}/{download-url,preview-url}` | Blob original/preview presign |
@@ -186,7 +186,11 @@ Thread progression 由 Work dispatcher 异步完成。Canvas command 返回带 `
 - UUID 要求 `UUID.fromString`往返 canonical；
 - version、cursor、sequence 使用 canonical decimal，分别拒绝符号、前导零和超出 long；
 - owner discriminator 只允许 `CHAT`/`CANVAS`；
-- target 只允许 `NEW_SESSION`、`ENTRY`、`THREAD`，每种 target 的字段集严格互斥；
+- target 只允许 `NEW_SESSION`、`NEW_THREAD`、`THREAD`，每种 target 的字段集严格互斥；
+  `NEW_SESSION` 携带 `{sessionId, threadId, rootSettings, yoloEnabled}`（无 name 输入，
+  Session.name 由服务端从首个非空白用户文本派生，root Thread.name 固定 `main`）；
+  `NEW_THREAD` 携带 `{sessionId, startEntryId, threadId, yoloEnabled}`（无 name 输入，
+  新 Thread.name 固定 `branch-<threadId 前 8 位>`），旧 `ENTRY`/`ENTRY_DRAFT` 不复存在；
 - product HTTP command 只允许 `SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL`前缀和一条最后的
   `USER_MESSAGE`；Agent 工具选择随最新 Agent definition 的 `config.toolIds` 解析，不通过 branch command
   发送；`CUSTOM_MESSAGE`不开放到 product HTTP surface；
@@ -264,7 +268,8 @@ POST /api/harness/command-batches
 ```
 
 Controller 不创建 Thread、Session 或 Work；owner lock、Chat/Canvas relation、attachment materialization 和 Runtime
-command acceptance 都由 Platform application transaction 完成。
+command acceptance 都由 Platform application transaction 完成。Session/Thread `name` 是独立控制面：
+`PUT .../name` 只更新命名元数据（可含规范化同名 no-op），不产生 Command/Entry/Work。
 
 ### PostgresqlNotificationLoop：单连接、多 channel
 
