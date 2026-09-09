@@ -7,7 +7,7 @@ Usage:
 Targets:
     google:            TEST_GOOGLE_BASE_URL / TEST_GOOGLE_API_KEY
     openai:            TEST_OPENAI_BASE_URL / TEST_OPENAI_API_KEY
-    minimax-anthropic: TEST_MINIMAX_ANTHROPIC_BASE_URL / TEST_MINIMAX_ANTHROPIC_API_KEY
+    minimax-anthropic: TEST_ANTHROPIC_BASE_URL / TEST_ANTHROPIC_API_KEY
     deepseek:          TEST_DEEPSEEK_BASE_URL / TEST_DEEPSEEK_API_KEY
 
 When all credential pairs are absent, the script skips without contacting the backend.
@@ -33,8 +33,8 @@ TEST_GOOGLE_BASE_URL = "TEST_GOOGLE_BASE_URL"
 TEST_GOOGLE_API_KEY = "TEST_GOOGLE_API_KEY"
 TEST_OPENAI_BASE_URL = "TEST_OPENAI_BASE_URL"
 TEST_OPENAI_API_KEY = "TEST_OPENAI_API_KEY"
-TEST_MINIMAX_ANTHROPIC_BASE_URL = "TEST_MINIMAX_ANTHROPIC_BASE_URL"
-TEST_MINIMAX_ANTHROPIC_API_KEY = "TEST_MINIMAX_ANTHROPIC_API_KEY"
+TEST_ANTHROPIC_BASE_URL = "TEST_ANTHROPIC_BASE_URL"
+TEST_ANTHROPIC_API_KEY = "TEST_ANTHROPIC_API_KEY"
 TEST_DEEPSEEK_BASE_URL = "TEST_DEEPSEEK_BASE_URL"
 TEST_DEEPSEEK_API_KEY = "TEST_DEEPSEEK_API_KEY"
 
@@ -69,8 +69,8 @@ PROVIDER_SPECS: List[ProviderSpec] = [
     ProviderSpec(
         name="minimax-anthropic",
         provider_type="anthropic",
-        base_url_env=TEST_MINIMAX_ANTHROPIC_BASE_URL,
-        api_key_env=TEST_MINIMAX_ANTHROPIC_API_KEY,
+        base_url_env=TEST_ANTHROPIC_BASE_URL,
+        api_key_env=TEST_ANTHROPIC_API_KEY,
         requires_v1_suffix=False,
         default_description="MiniMax (Anthropic).",
     ),
@@ -228,8 +228,8 @@ def sync_provider_credentials(backend_url: str, env: Optional[dict] = None, urlo
         TEST_GOOGLE_API_KEY: env.get(TEST_GOOGLE_API_KEY),
         TEST_OPENAI_BASE_URL: env.get(TEST_OPENAI_BASE_URL),
         TEST_OPENAI_API_KEY: env.get(TEST_OPENAI_API_KEY),
-        TEST_MINIMAX_ANTHROPIC_BASE_URL: env.get(TEST_MINIMAX_ANTHROPIC_BASE_URL),
-        TEST_MINIMAX_ANTHROPIC_API_KEY: env.get(TEST_MINIMAX_ANTHROPIC_API_KEY),
+        TEST_ANTHROPIC_BASE_URL: env.get(TEST_ANTHROPIC_BASE_URL),
+        TEST_ANTHROPIC_API_KEY: env.get(TEST_ANTHROPIC_API_KEY),
         TEST_DEEPSEEK_BASE_URL: env.get(TEST_DEEPSEEK_BASE_URL),
         TEST_DEEPSEEK_API_KEY: env.get(TEST_DEEPSEEK_API_KEY),
     }

@@ -175,8 +175,8 @@ class TestBuildScripts(unittest.TestCase):
             "TEST_GOOGLE_API_KEY",
             "TEST_OPENAI_BASE_URL",
             "TEST_OPENAI_API_KEY",
-            "TEST_MINIMAX_ANTHROPIC_BASE_URL",
-            "TEST_MINIMAX_ANTHROPIC_API_KEY",
+            "TEST_ANTHROPIC_BASE_URL",
+            "TEST_ANTHROPIC_API_KEY",
             "TEST_DEEPSEEK_BASE_URL",
             "TEST_DEEPSEEK_API_KEY",
         ]

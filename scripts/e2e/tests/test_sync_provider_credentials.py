@@ -11,8 +11,8 @@ from scripts.e2e.sync_provider_credentials import (
     TEST_DEEPSEEK_BASE_URL,
     TEST_GOOGLE_API_KEY,
     TEST_GOOGLE_BASE_URL,
-    TEST_MINIMAX_ANTHROPIC_API_KEY,
-    TEST_MINIMAX_ANTHROPIC_BASE_URL,
+    TEST_ANTHROPIC_API_KEY,
+    TEST_ANTHROPIC_BASE_URL,
     TEST_OPENAI_API_KEY,
     TEST_OPENAI_BASE_URL,
     build_payload,
@@ -130,7 +130,7 @@ class TestNormalizeBaseUrl(unittest.TestCase):
             normalize_base_url(
                 "https://api.minimax.example/anthropic/v1///",
                 requires_v1_suffix=False,
-                env_name=TEST_MINIMAX_ANTHROPIC_BASE_URL,
+                env_name=TEST_ANTHROPIC_BASE_URL,
                 provider_name="minimax-anthropic",
             ),
         )
@@ -270,8 +270,8 @@ class TestSyncProviderCredentials(unittest.TestCase):
             TEST_GOOGLE_API_KEY: "secret-gemini",
             TEST_OPENAI_BASE_URL: "https://api.openai.com///",
             TEST_OPENAI_API_KEY: "secret-openai",
-            TEST_MINIMAX_ANTHROPIC_BASE_URL: "https://api.minimax.example/anthropic/v1///",
-            TEST_MINIMAX_ANTHROPIC_API_KEY: "secret-minimax-anthropic",
+            TEST_ANTHROPIC_BASE_URL: "https://api.minimax.example/anthropic/v1///",
+            TEST_ANTHROPIC_API_KEY: "secret-minimax-anthropic",
             TEST_DEEPSEEK_BASE_URL: "https://api.deepseek.com///",
             TEST_DEEPSEEK_API_KEY: "secret-deepseek",
         }
