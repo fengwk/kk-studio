@@ -24,7 +24,10 @@ import { fileURLToPath } from 'node:url'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { MINIMAX_ANTHROPIC_M3 } from './lib/real-models.mjs'
 import { createDurationTimer } from './lib/time.mjs'
-import { assertReadOnlyZeroFooter } from './ui/assertions.mjs'
+import {
+  assertReadOnlyZeroFooter,
+  waitForSettledAssistantText,
+} from './ui/assertions.mjs'
 import { runComposerMatrix } from './ui/composer-matrix.mjs'
 
 // Playwright 安装在 frontend/node_modules，从仓库根/scripts 直接 import 会找不到包。
@@ -1019,23 +1022,12 @@ async function main(argv) {
           assert(!statusText.includes('notify:'), `Footer leaked Notification: ${statusText}`)
         }
         await shot(caseArt, 'first-send-user')
-        // 等待一轮结束（最长 90s）
-        let assistantText = ''
-        for (let i = 0; i < 90; i++) {
-          const assistantTurns = page.locator('.thread-turn-assistant')
-          const count = await assistantTurns.count()
-          if (count > 0) {
-            assistantText = (await assistantTurns.last().innerText()).trim()
-            if (/\bOK\b/i.test(assistantText)) {
-              break
-            }
-            if (/助手回复失败|FAILED|失败/i.test(assistantText)) {
-              throw new Error(`real assistant response failed: ${assistantText}`)
-            }
-          }
-          await page.waitForTimeout(1000)
-        }
+        // 只读取最终正文；thinking 可能复述提示词中的 OK，不能作为完成证据。
+        const assistantText = await waitForSettledAssistantText(page)
         await shot(caseArt, 'first-send-done')
+        if (/助手回复失败|FAILED|失败/i.test(assistantText)) {
+          throw new Error(`real assistant response failed: ${assistantText}`)
+        }
         assert(/\bOK\b/i.test(assistantText), `expected assistant reply containing OK, got: ${assistantText || '(empty)'}`)
         expectNoFatal(pageErrors, consoleErrors)
       } finally {
