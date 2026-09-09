@@ -1201,7 +1201,7 @@ registerCase({
   id: 'thread.session_thread_rename_persistence',
   level: 'L1',
   title: 'Session/Thread 重命名持久化：UUID 不变、Thread version 精确 +1、规范同名 no-op',
-  docs: 'PUT /api/harness/sessions/{id}/name {name} 与 PUT /api/harness/threads/{id}/name {name} 返回权威 DTO：Session（sessionId/name/createdAt）UUID/createdAt 不变、owner 摘要 fresh 持久；Thread 本体 UUID/head/session 不变、实际改名 version 精确 +1 且不产生 Command/Entry/Work，snapshot/Thread 摘要 fresh 持久；规范化同名（空白变体）no-op：返回 canonical name 且 version 零触碰；不依赖真实 Provider（缺失 Agent 确定性 PLANNING_FAILED）',
+  docs: 'PUT /api/harness/sessions/{id}/name {name} 与 PUT /api/harness/threads/{id}/name {name} 返回权威 DTO：Session（sessionId/name/createdAt）UUID/createdAt 不变、owner 摘要 fresh 持久；Thread 本体 UUID/head/session 不变、实际改名 version 精确 +1，snapshot 可观测的 queuedCommands/modelInvocation/toolInvocations 与 entries 均不变、Thread 摘要 fresh 持久；规范化同名（空白变体）no-op：返回 canonical name 且 version 零触碰；不依赖真实 Provider（缺失 Agent 确定性 PLANNING_FAILED）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1264,9 +1264,11 @@ registerCase({
       const afterSnapshot = await getThreadSnapshot(ctx, threadId)
       assert(afterSnapshot.thread.name === threadName, JSON.stringify(afterSnapshot.thread))
       assert(String(afterSnapshot.thread.version) === String(renamedThread.version), JSON.stringify(afterSnapshot.thread))
-      // 重命名不得产生 Command/Entry/Work：queued 清空、entries 与 rename 前逐项一致。
+      // 重命名不得产生 Command/Entry/Invocation/Work：queued 清空、无模型调用、无 tool invocation、
+      // entries 与 rename 前逐项一致（这些是 snapshot 直接可观测的 Work 指标）。
       assert(afterSnapshot.queuedCommands.length === 0, JSON.stringify(afterSnapshot.queuedCommands))
       assert(afterSnapshot.modelInvocation === null, JSON.stringify(afterSnapshot.modelInvocation))
+      assert(afterSnapshot.toolInvocations.length === 0, JSON.stringify(afterSnapshot.toolInvocations))
       assert(
         JSON.stringify(afterSnapshot.entries) === JSON.stringify(beforeSnapshot.entries),
         'rename must not mutate entries',
