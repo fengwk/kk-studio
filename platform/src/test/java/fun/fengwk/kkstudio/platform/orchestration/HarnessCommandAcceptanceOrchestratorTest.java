@@ -147,7 +147,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     AcceptancePreflight chatPreflight = acceptAndCapturePreflight(CHAT_OWNER, chatCommand);
     List<NewThreadCommand> chatPrepared =
-        chatPreflight.prepare(transaction, new Session(SESSION_ID, NOW), chatCommand.commands());
+        chatPreflight.prepare(
+            transaction, new Session(SESSION_ID, "session", NOW), chatCommand.commands());
 
     assertSame(setAgent, chatPrepared.getFirst());
     assertEquals(user.idempotencyKey(), chatPrepared.get(1).idempotencyKey());
@@ -160,15 +161,17 @@ class HarnessCommandAcceptanceOrchestratorTest {
     AcceptCommandsCommand canvasCommand = newSession(user(new TextMessageContent("canvas")));
     when(canvasSessionRepository.insertIfNotOwnedByOther(SESSION_ID, CANVAS_ID)).thenReturn(1);
     AcceptancePreflight canvasPreflight = acceptAndCapturePreflight(CANVAS_OWNER, canvasCommand);
-    canvasPreflight.prepare(transaction, new Session(SESSION_ID, NOW), canvasCommand.commands());
+    canvasPreflight.prepare(
+        transaction, new Session(SESSION_ID, "session", NOW), canvasCommand.commands());
 
     verify(canvasSessionRepository).insertIfNotOwnedByOther(SESSION_ID, CANVAS_ID);
   }
 
   @Test
   void authorizesExistingNewSessionEntryAndThreadTargetsForTheirOwners() {
-    // 已存在 Session、ENTRY 与 THREAD 都必须先锁 owner，再验证对应 relation。
-    when(transaction.findSession(SESSION_ID)).thenReturn(Optional.of(new Session(SESSION_ID, NOW)));
+    // 已存在 Session、NEW_THREAD 与 THREAD 都必须先锁 owner，再验证对应 relation。
+    when(transaction.findSession(SESSION_ID))
+        .thenReturn(Optional.of(new Session(SESSION_ID, "session", NOW)));
     when(chatSessionRepository.findBySessionId(SESSION_ID))
         .thenReturn(new ChatSession(SESSION_ID, CHAT_ID));
     AcceptCommandsCommand replay = newSession(user(new TextMessageContent("replay")));
@@ -177,7 +180,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     AcceptCommandsCommand entry =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Entry(SESSION_ID, ENTRY_ID, THREAD_ID, false),
+            new AcceptCommandsTarget.NewThread(SESSION_ID, ENTRY_ID, THREAD_ID, false),
             List.of(user(new TextMessageContent("entry"))));
     assertSame(accepted, service.accept(CHAT_OWNER, entry));
 
@@ -220,7 +223,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     // relation 缺失与 owner 不匹配都 fail closed；THREAD 不存在时不能猜测 Session。
     AcceptCommandsCommand chatEntry =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Entry(SESSION_ID, ENTRY_ID, THREAD_ID, false),
+            new AcceptCommandsTarget.NewThread(SESSION_ID, ENTRY_ID, THREAD_ID, false),
             List.of(user(new TextMessageContent("entry"))));
     assertThrows(IllegalArgumentException.class, () -> service.accept(CHAT_OWNER, chatEntry));
 
@@ -230,7 +233,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     AcceptCommandsCommand canvasEntry =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Entry(SESSION_ID, ENTRY_ID, THREAD_ID, false),
+            new AcceptCommandsTarget.NewThread(SESSION_ID, ENTRY_ID, THREAD_ID, false),
             List.of(user(new TextMessageContent("canvas entry"))));
     assertThrows(IllegalArgumentException.class, () -> service.accept(CANVAS_OWNER, canvasEntry));
     when(canvasSessionRepository.findBySessionId(SESSION_ID))
@@ -243,7 +246,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
             List.of(user(new TextMessageContent("thread"))));
     assertThrows(IllegalArgumentException.class, () -> service.accept(CHAT_OWNER, threadCommand));
 
-    when(transaction.findSession(SESSION_ID)).thenReturn(Optional.of(new Session(SESSION_ID, NOW)));
+    when(transaction.findSession(SESSION_ID))
+        .thenReturn(Optional.of(new Session(SESSION_ID, "session", NOW)));
     when(chatSessionRepository.findBySessionId(SESSION_ID)).thenReturn(null);
     assertThrows(
         IllegalArgumentException.class,
@@ -262,12 +266,16 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     assertThrows(
         IllegalStateException.class,
-        () -> preflight.prepare(transaction, new Session(SESSION_ID, NOW), command.commands()));
+        () ->
+            preflight.prepare(
+                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
 
     when(chatSessionRepository.insertIfNotOwnedByOther(SESSION_ID, CHAT_ID)).thenReturn(2);
     assertThrows(
         IllegalStateException.class,
-        () -> preflight.prepare(transaction, new Session(SESSION_ID, NOW), command.commands()));
+        () ->
+            preflight.prepare(
+                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
   }
 
   @Test
@@ -281,7 +289,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
 
     List<NewThreadCommand> prepared =
-        preflight.prepare(transaction, new Session(SESSION_ID, NOW), command.commands());
+        preflight.prepare(transaction, new Session(SESSION_ID, "session", NOW), command.commands());
 
     NewThreadCommand durable = prepared.getFirst();
     assertEquals(raw.idempotencyKey(), durable.idempotencyKey());
@@ -307,13 +315,17 @@ class HarnessCommandAcceptanceOrchestratorTest {
     when(uploadServices.getIfAvailable()).thenReturn(null);
     assertThrows(
         IllegalArgumentException.class,
-        () -> preflight.prepare(transaction, new Session(SESSION_ID, NOW), command.commands()));
+        () ->
+            preflight.prepare(
+                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
 
     when(uploadServices.getIfAvailable()).thenReturn(uploadService);
     when(refManagers.getIfAvailable()).thenReturn(null);
     assertThrows(
         IllegalArgumentException.class,
-        () -> preflight.prepare(transaction, new Session(SESSION_ID, NOW), command.commands()));
+        () ->
+            preflight.prepare(
+                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
     verifyNoInteractions(uploadService);
   }
 
@@ -329,14 +341,18 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> preflight.prepare(transaction, new Session(SESSION_ID, NOW), command.commands()));
+        () ->
+            preflight.prepare(
+                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
 
     doThrow(new StorageVerificationException("upload is pending"))
         .when(uploadService)
         .lockReady(UPLOAD_ID);
     assertThrows(
         IllegalArgumentException.class,
-        () -> preflight.prepare(transaction, new Session(SESSION_ID, NOW), command.commands()));
+        () ->
+            preflight.prepare(
+                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
     verify(refManager, never()).retainRef(any(), any());
     verify(uploadService, never()).delete(any());
   }
@@ -353,17 +369,21 @@ class HarnessCommandAcceptanceOrchestratorTest {
     when(refManagers.getIfAvailable()).thenReturn(null);
     assertThrows(
         IllegalArgumentException.class,
-        () -> preflight.prepare(transaction, new Session(SESSION_ID, NOW), command.commands()));
+        () ->
+            preflight.prepare(
+                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
 
     when(refManagers.getIfAvailable()).thenReturn(refManager);
     when(refManager.contains(SESSION_ID, BLOB_ID)).thenReturn(false);
     assertThrows(
         IllegalArgumentException.class,
-        () -> preflight.prepare(transaction, new Session(SESSION_ID, NOW), command.commands()));
+        () ->
+            preflight.prepare(
+                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
 
     when(refManager.contains(SESSION_ID, BLOB_ID)).thenReturn(true);
     List<NewThreadCommand> prepared =
-        preflight.prepare(transaction, new Session(SESSION_ID, NOW), command.commands());
+        preflight.prepare(transaction, new Session(SESSION_ID, "session", NOW), command.commands());
     UserMessageCommandPayload payload =
         assertInstanceOf(UserMessageCommandPayload.class, prepared.getFirst().payload());
     assertSame(resource, payload.message().contents().getFirst());
@@ -407,7 +427,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
   }
 
   private static ThreadState thread(UUID threadId, UUID sessionId) {
-    return new ThreadState(threadId, sessionId, ENTRY_ID, "0".repeat(64), false, 1, 0, NOW, NOW);
+    return new ThreadState(
+        threadId, sessionId, ENTRY_ID, "0".repeat(64), "thread", false, 1, 0, NOW, NOW);
   }
 
   private static UUID id(long value) {

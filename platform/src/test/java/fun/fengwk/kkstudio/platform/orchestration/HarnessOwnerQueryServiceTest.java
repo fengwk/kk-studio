@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.orchestration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -15,6 +16,7 @@ import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -28,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
@@ -90,15 +93,19 @@ class HarnessOwnerQueryServiceTest {
   }
 
   @Test
-  void chatSessionSummariesPreserveRelationOrderAndProjectTimesAndPreviews() {
-    // 三个 Session 分别覆盖 text 优先、resource fallback 与稳定 Session-id fallback。
+  void chatSessionSummariesProjectDurableNamesCreatedAtAndTextOnlyPreviews() {
+    // 三个 Session 分别覆盖 text 预览、纯资源 USER（无 text）与空历史；名称/createdAt 一律来自 durable Session。
     UUID chatId = id(10);
     UUID textSession = id(11);
     UUID resourceSession = id(12);
-    UUID fallbackSession = id(13);
+    UUID emptySession = id(13);
     when(chatRepository.getById(chatId)).thenReturn(mock(Chat.class));
     when(chatSessionRepository.listSessionIds(chatId))
-        .thenReturn(List.of(textSession, resourceSession, fallbackSession));
+        .thenReturn(List.of(textSession, resourceSession, emptySession));
+    when(runtime.getSession(textSession)).thenReturn(new Session(textSession, "chat text", T0));
+    when(runtime.getSession(resourceSession))
+        .thenReturn(new Session(resourceSession, "chat resource", T1));
+    when(runtime.getSession(emptySession)).thenReturn(new Session(emptySession, "chat empty", T2));
 
     Entry textRoot = root(textSession, id(101), T0, ROOT_SETTINGS);
     Entry earlierText = userText(textSession, id(102), textRoot.id(), T1, "first text");
@@ -126,33 +133,35 @@ class HarnessOwnerQueryServiceTest {
         .thenReturn(List.of(resourceMessage, resourceRoot));
     when(runtime.listThreadsBySession(resourceSession)).thenReturn(List.of());
 
-    Entry fallbackRoot = root(fallbackSession, id(301), T2, ROOT_SETTINGS);
-    when(runtime.getSessionEntries(fallbackSession)).thenReturn(List.of(fallbackRoot));
-    when(runtime.listThreadsBySession(fallbackSession)).thenReturn(List.of());
+    when(runtime.getSessionEntries(emptySession)).thenReturn(List.of());
+    when(runtime.listThreadsBySession(emptySession)).thenReturn(List.of());
 
     List<HarnessSessionSummaryDTO> summaries = service.listChatSessions(chatId);
 
     assertEquals(
-        List.of(textSession.toString(), resourceSession.toString(), fallbackSession.toString()),
+        List.of(textSession.toString(), resourceSession.toString(), emptySession.toString()),
         summaries.stream().map(HarnessSessionSummaryDTO::getSessionId).toList());
     HarnessSessionSummaryDTO text = summaries.get(0);
+    assertEquals("chat text", text.getName());
     assertEquals(T0, text.getCreatedAt());
     assertEquals(T4, text.getLastActivityAt());
     assertEquals("first text", text.getFirstMessagePreview());
     assertEquals(2, text.getThreadCount());
-    assertEquals("resource-only.pdf", summaries.get(1).getFirstMessagePreview());
-    assertEquals(
-        "Session " + fallbackSession.toString().substring(0, 8),
-        summaries.get(2).getFirstMessagePreview());
+    assertEquals("chat resource", summaries.get(1).getName());
+    assertNull(summaries.get(1).getFirstMessagePreview(), "纯资源 USER 无 text 时预览必须为 null");
+    assertEquals("chat empty", summaries.get(2).getName());
+    assertNull(summaries.get(2).getFirstMessagePreview(), "空历史 Session 预览必须为 null，绝不回退名称或 id");
+    assertEquals(0, summaries.get(2).getThreadCount());
   }
 
   @Test
-  void canvasSessionsUseTheSameProjectionAndRejectMalformedSessionHistory() {
-    // Canvas 与 Chat 共用完全相同的 Session projection；缺 ROOT 的 durable history 必须 fail closed。
+  void canvasSessionsUseTheSameProjectionAndPropagateMissingRuntimeSession() {
+    // Canvas 与 Chat 共用完全相同的 Session projection；Session 事实读 Runtime，缺失时抛出 NotFound。
     UUID canvasId = id(20);
     UUID sessionId = id(21);
     when(canvasStore.findDocument(canvasId)).thenReturn(Optional.of(mock(CanvasDocument.class)));
     when(canvasSessionRepository.listSessionIds(canvasId)).thenReturn(List.of(sessionId));
+    when(runtime.getSession(sessionId)).thenReturn(new Session(sessionId, "canvas chat", T1));
     Entry root = root(sessionId, id(401), T1, ROOT_SETTINGS);
     when(runtime.getSessionEntries(sessionId)).thenReturn(List.of(root));
     when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of());
@@ -160,16 +169,18 @@ class HarnessOwnerQueryServiceTest {
     List<HarnessSessionSummaryDTO> summaries = service.listCanvasSessions(canvasId);
 
     assertEquals(1, summaries.size());
+    assertEquals("canvas chat", summaries.getFirst().getName());
     assertEquals(T1, summaries.getFirst().getCreatedAt());
+    assertNull(summaries.getFirst().getFirstMessagePreview());
 
-    when(runtime.getSessionEntries(sessionId))
-        .thenReturn(List.of(userText(sessionId, id(402), root.id(), T2, "orphan")));
-    assertThrows(IllegalStateException.class, () -> service.listCanvasSessions(canvasId));
+    when(runtime.getSession(sessionId))
+        .thenThrow(new HarnessRuntimeNotFoundException("session " + sessionId + " does not exist"));
+    assertThrows(HarnessRuntimeNotFoundException.class, () -> service.listCanvasSessions(canvasId));
   }
 
   @Test
-  void threadSummariesProjectTypedStatusModelAndLatestNonSystemMessage() {
-    // Snapshot 使用真实 classifier 输入：SYSTEM head 被跳过，最近 USER 文本成为预览。
+  void threadSummariesProjectDurableNameTypedStatusModelAndLatestNonSystemMessage() {
+    // 名称来自 durable ThreadState；Snapshot 使用真实 classifier 输入：SYSTEM head 被跳过，最近 USER 文本成为预览。
     UUID sessionId = id(30);
     UUID threadId = id(31);
     BranchSettings turnSettings =
@@ -207,6 +218,7 @@ class HarnessOwnerQueryServiceTest {
 
     HarnessThreadSummaryDTO summary = summaries.getFirst();
     assertEquals(threadId.toString(), summary.getThreadId());
+    assertEquals("thread", summary.getName());
     assertEquals("IDLE", summary.getStatus());
     assertEquals("provider", summary.getModel().getProviderName());
     assertEquals("turn-model", summary.getModel().getModelName());
@@ -272,7 +284,16 @@ class HarnessOwnerQueryServiceTest {
   private static ThreadState thread(
       UUID threadId, UUID sessionId, UUID headEntryId, Instant createdAt, Instant updatedAt) {
     return new ThreadState(
-        threadId, sessionId, headEntryId, "0".repeat(64), false, 1L, 0L, createdAt, updatedAt);
+        threadId,
+        sessionId,
+        headEntryId,
+        "0".repeat(64),
+        "thread",
+        false,
+        1L,
+        0L,
+        createdAt,
+        updatedAt);
   }
 
   private static UUID id(long value) {

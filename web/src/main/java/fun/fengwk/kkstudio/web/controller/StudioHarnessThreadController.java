@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSystemPromptPreviewDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO;
@@ -69,6 +70,21 @@ public class StudioHarnessThreadController {
               ThreadSnapshot snapshot = runtime.getThreadSnapshot(id);
               ManualCompactionAvailability availability = runtime.manualCompactionAvailability(id);
               return HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, availability);
+            }));
+  }
+
+  /** 直接重命名 Thread（name 由 Core 权威规范化；同名 no-op、version 精确 +1 仅在实际改名时发生），返回权威当前 Thread。 */
+  @PutMapping("/{threadId}/name")
+  public Result<HarnessThreadDTO> rename(
+      @PathVariable String threadId, @RequestBody HarnessNameUpdateDTO request) {
+    return Results.ok(
+        withRuntimeTranslation(
+            () -> {
+              ThreadState updated =
+                  runtime.renameThread(
+                      HarnessRuntimeRequestMapper.toRenameThreadCommand(threadId, request));
+              return HarnessRuntimeResponseMapper.toThreadDto(
+                  runtime.getThreadSnapshot(updated.id()));
             }));
   }
 

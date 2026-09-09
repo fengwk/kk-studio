@@ -47,7 +47,9 @@ public abstract class OwnerTestSupport extends PostgresSpringTestSupport {
   /** 插入一个 harness_session 行（最小合法形态）。 */
   protected void sessionRow(UUID sessionId) {
     jdbc.update(
-        "insert into harness_session (id, created_at) values (?, current_timestamp)", sessionId);
+        "insert into harness_session (id, name, created_at) values (?, ?, current_timestamp)",
+        sessionId,
+        "test-session");
   }
 
   protected long count(String sql, Object... args) {

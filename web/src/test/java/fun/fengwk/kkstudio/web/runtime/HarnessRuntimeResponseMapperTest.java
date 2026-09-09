@@ -127,6 +127,7 @@ class HarnessRuntimeResponseMapperTest {
         HarnessRuntimeResponseMapper.toThreadDto(HarnessRuntimeTestFixtures.idleSnapshot());
 
     assertEquals(idText(1), dto.getThreadId());
+    assertEquals("thread", dto.getName());
     assertEquals(idText(1), dto.getSessionId());
     assertEquals(idText(1), dto.getHeadEntryId());
     assertEquals("4", dto.getNextCommandSequence());
@@ -357,9 +358,11 @@ class HarnessRuntimeResponseMapperTest {
             accepted, HarnessRuntimeTestFixtures.idleSnapshot());
 
     assertEquals(idText(1), dto.getSession().getSessionId());
+    assertEquals("session", dto.getSession().getName());
     assertEquals(NOW, dto.getSession().getCreatedAt());
     assertEquals("ROOT", dto.getRootEntry().getEntryType());
     assertEquals(idText(1), dto.getThread().getThreadId());
+    assertEquals("thread", dto.getThread().getName());
     assertEquals(idText(50), dto.getAcceptedCommands().getFirst().getIdempotencyKey());
     assertTrue(dto.getReplayed());
     assertThrows(
@@ -701,6 +704,7 @@ class HarnessRuntimeResponseMapperTest {
             thread.sessionId(),
             thread.headEntryId(),
             thread.creationRequestHash(),
+            thread.name(),
             thread.yoloEnabled(),
             thread.nextCommandSequence(),
             version,

@@ -104,11 +104,12 @@ class StudioChatControllerTest {
     verify(chatService).deleteChat(idText(9), "3");
   }
 
-  /** 测试意图：验证 GET /api/ai/chats/{chatId}/sessions 正确传递 chatId 并返回会话摘要与 200 OK 状态码。 */
+  /** 测试意图：验证 GET /api/ai/chats/{chatId}/sessions 正确传递 chatId 并返回会话摘要（含权威 name）与 200 OK 状态码。 */
   @Test
   void listChatSessionsForwardsChatIdAndReturnsResults() throws Exception {
     HarnessSessionSummaryDTO summary = new HarnessSessionSummaryDTO();
     summary.setSessionId(idText(2));
+    summary.setName("session name");
     summary.setFirstMessagePreview("hello");
     summary.setThreadCount(2);
 
@@ -118,6 +119,7 @@ class StudioChatControllerTest {
         .perform(get("/api/ai/chats/" + idText(7) + "/sessions"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].sessionId").value(idText(2)))
+        .andExpect(jsonPath("$.data[0].name").value("session name"))
         .andExpect(jsonPath("$.data[0].firstMessagePreview").value("hello"))
         .andExpect(jsonPath("$.data[0].threadCount").value(2));
     verify(harnessQueryService).listChatSessions(id(7));

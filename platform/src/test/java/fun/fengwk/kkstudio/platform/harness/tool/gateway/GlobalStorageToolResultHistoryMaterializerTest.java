@@ -80,7 +80,9 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
     tx = new TransactionTemplate(transactionManager);
     // session_blob_ref.session_id 是 RESTRICT FK：先建真实 session 行。
     jdbc.update(
-        "insert into harness_session (id, created_at) values (?, current_timestamp)", SESSION);
+        "insert into harness_session (id, name, created_at) values (?, ?, current_timestamp)",
+        SESSION,
+        "test-session");
   }
 
   @AfterEach

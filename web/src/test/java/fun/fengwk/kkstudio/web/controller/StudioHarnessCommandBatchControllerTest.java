@@ -72,9 +72,9 @@ class StudioHarnessCommandBatchControllerTest {
   }
 
   @Test
-  void acceptsNewSessionEntryAndThreadTargetsAndMapsCurrentSnapshotResponse() throws Exception {
+  void acceptsNewSessionNewThreadAndThreadTargetsAndMapsCurrentSnapshotResponse() throws Exception {
     // 三种 target 都经过同一 owner-aware service。
-    for (String target : List.of(newSessionTarget(), entryTarget(), threadTarget())) {
+    for (String target : List.of(newSessionTarget(), newThreadTarget(), threadTarget())) {
       mockMvc
           .perform(
               post("/api/harness/command-batches")
@@ -83,9 +83,11 @@ class StudioHarnessCommandBatchControllerTest {
           .andExpect(status().isAccepted())
           .andExpect(
               jsonPath("$.data.session.sessionId").value("00000000-0000-0000-0000-000000000001"))
+          .andExpect(jsonPath("$.data.session.name").value("session"))
           .andExpect(jsonPath("$.data.rootEntry.entryType").value("ROOT"))
           .andExpect(
               jsonPath("$.data.thread.threadId").value("00000000-0000-0000-0000-000000000001"))
+          .andExpect(jsonPath("$.data.thread.name").value("thread"))
           .andExpect(jsonPath("$.data.acceptedCommands", hasSize(1)))
           .andExpect(jsonPath("$.data.acceptedCommands[0].type").value("USER_MESSAGE"))
           .andExpect(jsonPath("$.data.replayed").value(false));
@@ -99,7 +101,8 @@ class StudioHarnessCommandBatchControllerTest {
         AcceptCommandsTarget.NewSession.class,
         commandCaptor.getAllValues().get(0).target().getClass());
     assertEquals(
-        AcceptCommandsTarget.Entry.class, commandCaptor.getAllValues().get(1).target().getClass());
+        AcceptCommandsTarget.NewThread.class,
+        commandCaptor.getAllValues().get(1).target().getClass());
     assertEquals(
         AcceptCommandsTarget.Thread.class, commandCaptor.getAllValues().get(2).target().getClass());
 
@@ -142,6 +145,47 @@ class StudioHarnessCommandBatchControllerTest {
                             .replace(
                                 "\"expectedNextCommandSequence\":\"4\"",
                                 "\"unknown\":true,\"expectedNextCommandSequence\":\"4\""))))
+        .andExpect(status().isBadRequest());
+    verify(acceptanceService, never())
+        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+  }
+
+  /** 意图：NEW_THREAD（wire 新 target）必须拒绝携带 NEW_SESSION 专属的 rootSettings，且 400 detail 不回显字段值。 */
+  @Test
+  void newThreadTargetRejectsNewSessionOnlyFieldsAndNeverEchoesValues() throws Exception {
+    String forbidden =
+        batch(
+            """
+            {
+              "type":"NEW_THREAD",
+              "sessionId":"%s",
+              "startEntryId":"%s",
+              "threadId":"%s",
+              "rootSettings":%s,
+              "yoloEnabled":false
+            }
+            """
+                .formatted(SESSION_ID, ENTRY_ID, THREAD_ID, rootSettings()));
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(forbidden))
+        .andExpect(status().isBadRequest())
+        .andExpect(
+            jsonPath("$.errors.detail")
+                .value("field target.rootSettings is forbidden for target type NEW_THREAD"));
+
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    batch(
+                        newThreadTarget()
+                            .replace(
+                                "\"yoloEnabled\":false",
+                                "\"yoloEnabled\":false,\"sessionName\":\"x\""))))
         .andExpect(status().isBadRequest());
     verify(acceptanceService, never())
         .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
@@ -317,10 +361,10 @@ class StudioHarnessCommandBatchControllerTest {
         .formatted(SESSION_ID, THREAD_ID, rootSettings());
   }
 
-  private static String entryTarget() {
+  private static String newThreadTarget() {
     return """
         {
-          "type":"ENTRY",
+          "type":"NEW_THREAD",
           "sessionId":"%s",
           "startEntryId":"%s",
           "threadId":"%s",

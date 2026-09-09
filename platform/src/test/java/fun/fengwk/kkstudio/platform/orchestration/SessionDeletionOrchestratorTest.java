@@ -95,9 +95,9 @@ class SessionDeletionOrchestratorTest {
     // Session 与 Thread 即使由仓库逆序返回，也必须按 UUID 全局排序后锁定并按子事实顺序深删。
     when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_2, SESSION_1));
     when(transaction.lockSessionForUpdate(SESSION_1))
-        .thenReturn(Optional.of(new Session(SESSION_1, NOW)));
+        .thenReturn(Optional.of(new Session(SESSION_1, "session-1", NOW)));
     when(transaction.lockSessionForUpdate(SESSION_2))
-        .thenReturn(Optional.of(new Session(SESSION_2, NOW)));
+        .thenReturn(Optional.of(new Session(SESSION_2, "session-2", NOW)));
     ThreadState thread1 = thread(THREAD_1, SESSION_2);
     ThreadState thread2 = thread(THREAD_2, SESSION_1);
     when(transaction.listThreadsBySession(SESSION_1)).thenReturn(List.of(thread2));
@@ -140,7 +140,7 @@ class SessionDeletionOrchestratorTest {
         .thenReturn(List.of(SESSION_2, SESSION_1));
     when(transaction.lockSessionForUpdate(SESSION_1)).thenReturn(Optional.empty());
     when(transaction.lockSessionForUpdate(SESSION_2))
-        .thenReturn(Optional.of(new Session(SESSION_2, NOW)));
+        .thenReturn(Optional.of(new Session(SESSION_2, "session-2", NOW)));
     when(transaction.listThreadsBySession(SESSION_2)).thenReturn(List.of());
     when(refManagers.getIfAvailable()).thenReturn(null);
 
@@ -194,7 +194,7 @@ class SessionDeletionOrchestratorTest {
     // Session 锁后列出的 Thread 若在 Thread 锁阶段消失，必须抛错并依赖外事务整体回滚。
     when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
     when(transaction.lockSessionForUpdate(SESSION_1))
-        .thenReturn(Optional.of(new Session(SESSION_1, NOW)));
+        .thenReturn(Optional.of(new Session(SESSION_1, "session-1", NOW)));
     ThreadState thread = thread(THREAD_1, SESSION_1);
     when(transaction.listThreadsBySession(SESSION_1)).thenReturn(List.of(thread));
     when(transaction.lockThread(THREAD_1)).thenReturn(Optional.empty());
@@ -214,7 +214,8 @@ class SessionDeletionOrchestratorTest {
   }
 
   private static ThreadState thread(UUID threadId, UUID sessionId) {
-    return new ThreadState(threadId, sessionId, id(100), "0".repeat(64), false, 1, 0, NOW, NOW);
+    return new ThreadState(
+        threadId, sessionId, id(100), "0".repeat(64), "thread", false, 1, 0, NOW, NOW);
   }
 
   private static UUID id(long value) {

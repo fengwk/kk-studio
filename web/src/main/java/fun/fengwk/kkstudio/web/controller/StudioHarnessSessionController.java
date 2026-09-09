@@ -5,14 +5,20 @@ import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
@@ -20,18 +26,36 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-/** Runtime Session 的只读 Thread 摘要与完整 Entry tree 查询。 */
+/** Runtime Session 的 Thread 摘要 / Entry tree 查询与 Session 名称重命名。 */
 @RestController
 @RequestMapping("/api/harness/sessions")
 public class StudioHarnessSessionController {
 
   private final HarnessOwnerQueryService harnessQueryService;
+  private final HarnessRuntime runtime;
 
-  public StudioHarnessSessionController(HarnessOwnerQueryService harnessQueryService) {
-    this.harnessQueryService = harnessQueryService;
+  public StudioHarnessSessionController(
+      HarnessOwnerQueryService harnessQueryService, HarnessRuntime runtime) {
+    this.harnessQueryService = Objects.requireNonNull(harnessQueryService, "harnessQueryService");
+    this.runtime = Objects.requireNonNull(runtime, "runtime");
+  }
+
+  /** 重命名 Session（name 由 Core 权威规范化；同名 no-op），返回最新权威 Session DTO。 */
+  @PutMapping("/{sessionId}/name")
+  public Result<HarnessSessionDTO> rename(
+      @PathVariable String sessionId, @RequestBody HarnessNameUpdateDTO request) {
+    return Results.ok(
+        withRuntimeTranslation(
+            () -> {
+              Session renamed =
+                  runtime.renameSession(
+                      HarnessRuntimeRequestMapper.toRenameSessionCommand(sessionId, request));
+              return HarnessRuntimeResponseMapper.toSessionDto(renamed);
+            }));
   }
 
   /** 返回 Session 下按 Runtime 确定性顺序排列的 Thread 摘要。 */

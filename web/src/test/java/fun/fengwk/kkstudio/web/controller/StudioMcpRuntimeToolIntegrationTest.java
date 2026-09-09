@@ -247,7 +247,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
     UUID sessionId = UUID.randomUUID();
     UUID rootEntryId = UUID.randomUUID();
-    Session session = new Session(sessionId, now);
+    Session session = new Session(sessionId, "session", now);
     BranchSettings branchSettings =
         new BranchSettings(null, agentName, new ModelSelection(providerName, modelName, "default"));
     Entry rootEntry = new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings), now);

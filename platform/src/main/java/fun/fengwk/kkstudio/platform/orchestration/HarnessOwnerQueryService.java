@@ -9,12 +9,12 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
@@ -38,8 +38,9 @@ import java.util.UUID;
 /**
  * Chat/Canvas 共用的 Harness Session 查询用例。
  *
- * <p>owner 关系只负责枚举 Session，Session/Entry/Thread 的事实统一从 {@link HarnessRuntime} 读取；不引入 Session title
- * 或 Thread status 的冗余持久化字段。
+ * <p>owner 关系只负责枚举 Session，Session/Thread 的事实统一从 {@link HarnessRuntime} 读取（Session 名称与创建时间来自
+ * durable {@code Session}，Thread 名称来自 durable {@code ThreadState}）；不引入 Session title 或 Thread
+ * status 的冗余持久化字段。
  */
 @Service
 public class HarnessOwnerQueryService {
@@ -85,14 +86,14 @@ public class HarnessOwnerQueryService {
     return listSessionSummaries(canvasSessionRepository.listSessionIds(canvasId));
   }
 
-  /** 返回一个 Session 的 Thread 摘要，状态与 Model 均从同一 snapshot 派生。 */
+  /** 返回一个 Session 的 Thread 摘要，状态与 Model 均从同一 snapshot 派生，名称来自 durable ThreadState。 */
   public List<HarnessThreadSummaryDTO> listThreadSummaries(UUID sessionId) {
     Objects.requireNonNull(sessionId, "sessionId");
     HarnessRuntime runtime = requireRuntime();
     List<ThreadState> threads = runtime.listThreadsBySession(sessionId);
     List<HarnessThreadSummaryDTO> summaries = new ArrayList<>(threads.size());
-    for (ThreadState ignored : threads) {
-      ThreadSnapshot snapshot = runtime.getThreadSnapshot(ignored.id());
+    for (ThreadState thread : threads) {
+      ThreadSnapshot snapshot = runtime.getThreadSnapshot(thread.id());
       summaries.add(toThreadSummary(snapshot));
     }
     return List.copyOf(summaries);
@@ -110,17 +111,18 @@ public class HarnessOwnerQueryService {
     HarnessRuntime runtime = requireRuntime();
     for (UUID sessionId : sessionIds) {
       Objects.requireNonNull(sessionId, "sessionIds[]");
+      Session session = runtime.getSession(sessionId);
       List<Entry> entries = runtime.getSessionEntries(sessionId);
       List<ThreadState> threads = runtime.listThreadsBySession(sessionId);
-      summaries.add(toSessionSummary(sessionId, entries, threads));
+      summaries.add(toSessionSummary(session, entries, threads));
     }
     return List.copyOf(summaries);
   }
 
   private static HarnessSessionSummaryDTO toSessionSummary(
-      UUID sessionId, List<Entry> entries, List<ThreadState> threads) {
+      Session session, List<Entry> entries, List<ThreadState> threads) {
     List<Entry> orderedEntries = orderedEntries(entries);
-    Instant createdAt = sessionCreatedAt(sessionId, orderedEntries);
+    Instant createdAt = session.createdAt();
     Instant lastActivityAt = createdAt;
     for (Entry entry : orderedEntries) {
       lastActivityAt = max(lastActivityAt, entry.createdAt());
@@ -130,10 +132,11 @@ public class HarnessOwnerQueryService {
     }
 
     HarnessSessionSummaryDTO dto = new HarnessSessionSummaryDTO();
-    dto.setSessionId(sessionId.toString());
+    dto.setSessionId(session.id().toString());
+    dto.setName(session.name());
     dto.setCreatedAt(createdAt);
     dto.setLastActivityAt(lastActivityAt);
-    dto.setFirstMessagePreview(firstMessagePreview(orderedEntries, sessionId));
+    dto.setFirstMessagePreview(firstMessagePreview(orderedEntries));
     dto.setThreadCount(threads.size());
     return dto;
   }
@@ -145,6 +148,7 @@ public class HarnessOwnerQueryService {
             thread, snapshot.entryPath(), snapshot.model(), snapshot.toolSiblings());
     HarnessThreadSummaryDTO dto = new HarnessThreadSummaryDTO();
     dto.setThreadId(thread.id().toString());
+    dto.setName(thread.name());
     dto.setCreatedAt(thread.createdAt());
     dto.setUpdatedAt(thread.updatedAt());
     dto.setStatus(ThreadRuntimeStatus.from(context).name());
@@ -158,7 +162,8 @@ public class HarnessOwnerQueryService {
     return dto;
   }
 
-  private static String firstMessagePreview(List<Entry> entries, UUID sessionId) {
+  /** 只取首个非 blank USER 文本作为摘要预览；无任何 USER 文本（包括纯资源消息）时返回 null，绝不回退为名称或 id 派生值。 */
+  private static String firstMessagePreview(List<Entry> entries) {
     for (Entry entry : entries) {
       AgentMessage message = userMessage(entry);
       if (message == null) {
@@ -169,17 +174,7 @@ public class HarnessOwnerQueryService {
         return text;
       }
     }
-    for (Entry entry : entries) {
-      AgentMessage message = userMessage(entry);
-      if (message == null) {
-        continue;
-      }
-      String resourceName = firstResourceName(message);
-      if (resourceName != null) {
-        return resourceName;
-      }
-    }
-    return "Session " + sessionId.toString().substring(0, 8);
+    return null;
   }
 
   private static String headMessagePreview(ThreadSnapshot snapshot) {
@@ -193,6 +188,7 @@ public class HarnessOwnerQueryService {
     return null;
   }
 
+  /** head 用户可读消息/资源预览：非 SYSTEM 消息 text 优先、其次资源名；无则 null。 */
   private static String messagePreview(Entry entry) {
     AgentMessage message =
         switch (entry.payload()) {
@@ -200,10 +196,7 @@ public class HarnessOwnerQueryService {
           case CustomMessagePayload value -> value.message();
           default -> null;
         };
-    if (message == null) {
-      return null;
-    }
-    if (message.role() == AgentMessageRole.SYSTEM) {
+    if (message == null || message.role() == AgentMessageRole.SYSTEM) {
       return null;
     }
     String text = firstText(message);
@@ -244,15 +237,6 @@ public class HarnessOwnerQueryService {
         .sorted(
             Comparator.comparing(Entry::createdAt).thenComparing(Entry::id, UuidOrder.COMPARATOR))
         .toList();
-  }
-
-  private static Instant sessionCreatedAt(UUID sessionId, List<Entry> entries) {
-    return entries.stream()
-        .filter(entry -> entry.payload().type() == EntryType.ROOT)
-        .map(Entry::createdAt)
-        .findFirst()
-        .orElseThrow(
-            () -> new IllegalStateException("session " + sessionId + " does not contain a ROOT"));
   }
 
   private static Instant max(Instant left, Instant right) {

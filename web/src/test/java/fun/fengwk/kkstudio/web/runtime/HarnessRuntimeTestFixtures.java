@@ -101,15 +101,17 @@ public final class HarnessRuntimeTestFixtures {
   }
 
   public static ThreadState thread(UUID headEntryId) {
-    return new ThreadState(id(1), id(1), headEntryId, CREATION_REQUEST_HASH, true, 4, 3, NOW, NOW);
+    return new ThreadState(
+        id(1), id(1), headEntryId, CREATION_REQUEST_HASH, "thread", true, 4, 3, NOW, NOW);
   }
 
   public static ThreadState thread(UUID id, UUID headEntryId) {
-    return new ThreadState(id, id(1), headEntryId, CREATION_REQUEST_HASH, true, 4, 3, NOW, NOW);
+    return new ThreadState(
+        id, id(1), headEntryId, CREATION_REQUEST_HASH, "thread", true, 4, 3, NOW, NOW);
   }
 
   public static Session session() {
-    return new Session(id(1), NOW);
+    return new Session(id(1), "session", NOW);
   }
 
   /** IDLE 快照：仅 ROOT，无 open Turn、无 Invocation。 */

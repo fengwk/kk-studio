@@ -169,6 +169,7 @@ class StudioCanvasControllerTest {
   void listCanvasSessionsReturnsOwnerSummaries() throws Exception {
     HarnessSessionSummaryDTO summary = new HarnessSessionSummaryDTO();
     summary.setSessionId(new UUID(0L, 10L).toString());
+    summary.setName("canvas session");
     summary.setCreatedAt(NOW);
     summary.setLastActivityAt(NOW.plusSeconds(3));
     summary.setFirstMessagePreview("canvas prompt");
@@ -179,6 +180,7 @@ class StudioCanvasControllerTest {
         .perform(get("/api/canvases/" + CANVAS + "/sessions"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].sessionId").value(summary.getSessionId()))
+        .andExpect(jsonPath("$.data[0].name").value("canvas session"))
         .andExpect(jsonPath("$.data[0].firstMessagePreview").value("canvas prompt"))
         .andExpect(jsonPath("$.data[0].threadCount").value(1));
     verify(harnessQueryService).listCanvasSessions(CANVAS);

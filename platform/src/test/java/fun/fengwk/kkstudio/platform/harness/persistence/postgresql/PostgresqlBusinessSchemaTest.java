@@ -442,7 +442,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       throws SQLException {
     try (PreparedStatement session =
             conn.prepareStatement(
-                "insert into harness_session (id, created_at) values (?, current_timestamp)");
+                "insert into harness_session (id, name, created_at) values (?, ?, current_timestamp)");
         PreparedStatement entry =
             conn.prepareStatement(
                 "insert into harness_entry (id, session_id, entry_type, payload, created_at)"
@@ -450,11 +450,12 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
         PreparedStatement thread =
             conn.prepareStatement(
                 "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-                    + " yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+                    + " name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
                     + " values (?, ?, ?, '"
                     + "0".repeat(64)
-                    + "', false, 1, 0, current_timestamp, current_timestamp)")) {
+                    + "', 'schema-business-test-thread', false, 1, 0, current_timestamp, current_timestamp)")) {
       session.setObject(1, sessionId);
+      session.setObject(2, "schema-business-test-session");
       assertEquals(1, session.executeUpdate());
       entry.setObject(1, entryId);
       entry.setObject(2, sessionId);
