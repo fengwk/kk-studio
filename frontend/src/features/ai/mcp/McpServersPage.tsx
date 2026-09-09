@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Pencil, Plus, RefreshCw, Server, Trash2, ShieldCheck, ShieldAlert } from 'lucide-react'
+import { Plus, RefreshCw } from 'lucide-react'
+import { ResourceCardLayout } from '@/features/ai/catalog/AiResourceCardLayout'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
@@ -82,9 +83,7 @@ export function McpServersPage() {
   const [editModal, setEditModal] = useState<EditModalState | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<McpServerDTO | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
-  const [refreshingId, setRefreshingId] = useState<string | null>(null)
 
   const serversQuery = useQuery({
     queryKey: queryKeys.mcpServers.list(1, 100),
@@ -146,25 +145,21 @@ export function McpServersPage() {
   })
 
   const refreshMutation = useMutation({
-    mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: string }) => {
-      setRefreshingId(id)
-      return mcpServerService.refreshServer(id, expectedVersion)
-    },
-    onSettled: () => {
-      setRefreshingId(null)
-    },
+    mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: string }) =>
+      mcpServerService.refreshServer(id, expectedVersion),
     onSuccess: () => {
-      setActionError(null)
+      setEditModal(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })
       void queryClient.invalidateQueries({ queryKey: queryKeys.tools.all })
     },
     onError: (err: unknown) => {
       if (isConflictError(err)) {
         setConflict(presentConflict(err))
-        setActionError(null)
+        setEditModal(null)
         return
       }
-      setActionError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setEditModal((prev) => (prev ? { ...prev, error: message } : null))
     },
   })
 
@@ -253,7 +248,6 @@ export function McpServersPage() {
             type="button"
             className="btn-primary"
             onClick={() => {
-              setActionError(null)
               setConflict(null)
               setCreateModal({
                 name: '',
@@ -270,19 +264,6 @@ export function McpServersPage() {
         </div>
       </nav>
       <div className="screen-body">
-        {actionError && (
-          <div className="form-error-banner" role="alert" style={{ marginBottom: 16 }}>
-            <span>{actionError}</span>
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => setActionError(null)}
-              aria-label={t('shared.close')}
-            >
-              {t('shared.close')}
-            </button>
-          </div>
-        )}
         {serversQuery.isLoading && <StateBlock title={t('ai.mcp.loading')} />}
         {serversQuery.error && (
           <StateBlock
@@ -302,105 +283,45 @@ export function McpServersPage() {
               servers.map((server: McpServerDTO) => {
                 const updateTime = formatIsoTime(server.updateTime, locale)
                 return (
-                  <article key={server.id} className="info-card">
-                    <div className="head">
-                      <div className="head-content">
-                        <div className="icon-box">
-                          <Server aria-hidden="true" />
-                        </div>
-                        <div className="text-content">
-                          <h3 title={server.name}>{server.name}</h3>
-                          <p title={server.url}>{server.url}</p>
-                        </div>
-                        <span
-                          className={`status-pill${server.bearerTokenConfigured ? ' is-ready' : ' is-offline'}`}
-                          title={
-                            server.bearerTokenConfigured
-                              ? t('ai.mcp.configured')
-                              : t('ai.mcp.anonymous')
-                          }
-                        >
-                          {server.bearerTokenConfigured ? (
-                            <ShieldCheck size={12} style={{ marginRight: 4 }} aria-hidden="true" />
-                          ) : (
-                            <ShieldAlert size={12} style={{ marginRight: 4 }} aria-hidden="true" />
-                          )}
-                          {server.bearerTokenConfigured
-                            ? t('ai.mcp.configured')
-                            : t('ai.mcp.anonymous')}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="meta-block">
-                      <div className="meta-row">
-                        <span className="lbl">{t('ai.mcp.timeout')}</span>
-                        <span className="val">{server.timeoutMillis} ms</span>
-                      </div>
-                      <div className="meta-row">
-                        <span className="lbl">{t('ai.mcp.version')}</span>
-                        <span className="val">{server.version}</span>
-                      </div>
-                      {updateTime ? (
-                        <div className="meta-row">
-                          <span className="lbl">{t('ai.mcp.updated')}</span>
-                          <span className="val">{updateTime}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="chat-card-foot split">
-                      <button
-                        type="button"
-                        className="action-enter-btn"
-                        onClick={() => {
-                          setActionError(null)
-                          setConflict(null)
-                          refreshMutation.mutate({
-                            id: server.id,
-                            expectedVersion: server.version,
-                          })
-                        }}
-                        disabled={refreshingId === server.id}
-                      >
-                        <RefreshCw
-                          className={refreshingId === server.id ? 'spin' : ''}
-                          aria-hidden="true"
-                        />
-                        {t('ai.mcp.refresh')}
-                      </button>
-                      <button
-                        type="button"
-                        className="action-enter-btn"
-                        onClick={() => {
-                          setActionError(null)
-                          setConflict(null)
-                          setEditModal({
-                            server,
-                            url: server.url,
-                            timeoutMillis: String(server.timeoutMillis ?? '30000'),
-                            tokenMode: 'keep',
-                            bearerToken: '',
-                            error: null,
-                          })
-                        }}
-                      >
-                        <Pencil aria-hidden="true" />
-                        {t('ai.mcp.edit')}
-                      </button>
-                      <button
-                        type="button"
-                        className="action-enter-btn danger"
-                        onClick={() => {
-                          setActionError(null)
-                          setConflict(null)
-                          setDeleteError(null)
-                          setDeleteTarget(server)
-                        }}
-                      >
-                        <Trash2 aria-hidden="true" />
-                        {t('ai.mcp.delete')}
-                      </button>
-                    </div>
-                  </article>
+                  <ResourceCardLayout
+                    key={server.id}
+                    icon="server"
+                    title={server.name}
+                    subtitle={server.url}
+                    rows={[
+                      { label: t('ai.catalog.card.url'), value: server.url, wrap: true },
+                      [
+                        t('ai.mcp.bearerToken'),
+                        server.bearerTokenConfigured ? t('ai.mcp.configured') : t('ai.mcp.anonymous'),
+                      ],
+                      {
+                        pairs: [
+                          { label: t('ai.catalog.card.timeout'), value: `${server.timeoutMillis}ms` },
+                          { label: t('ai.mcp.version'), value: String(server.version) },
+                        ],
+                      },
+                      ...(updateTime ? [[t('ai.mcp.updated'), updateTime] as [string, string]] : []),
+                    ]}
+                    editAriaLabel={`${t('ai.mcp.edit')} ${server.name}`}
+                    deleteAriaLabel={`${t('ai.mcp.delete')} ${server.name}`}
+                    onEdit={() => {
+                      setConflict(null)
+                      setEditModal({
+                        server,
+                        url: server.url,
+                        timeoutMillis: String(server.timeoutMillis ?? '30000'),
+                        tokenMode: 'keep',
+                        bearerToken: '',
+                        error: null,
+                      })
+                    }}
+                    onDelete={() => {
+                      setConflict(null)
+                      setDeleteError(null)
+                      setDeleteTarget(server)
+                    }}
+                    deletePending={deleteMutation.isPending && deleteTarget?.id === server.id}
+                  />
                 )
               })
             )}
@@ -501,7 +422,13 @@ export function McpServersPage() {
       )}
 
       {editModal && (
-        <ModalBackdrop onClose={() => setEditModal(null)}>
+        <ModalBackdrop
+          onClose={() => {
+            if (!updateMutation.isPending && !refreshMutation.isPending) {
+              setEditModal(null)
+            }
+          }}
+        >
           <div
             className="modal-card"
             role="dialog"
@@ -512,7 +439,7 @@ export function McpServersPage() {
             <ModalHeader
               title={`${t('ai.mcp.edit')} - ${editModal.server.name}`}
               onClose={() => setEditModal(null)}
-              closeDisabled={updateMutation.isPending}
+              closeDisabled={updateMutation.isPending || refreshMutation.isPending}
             />
             <form onSubmit={handleUpdateSubmit}>
               <div className="modal-body">
@@ -594,21 +521,43 @@ export function McpServersPage() {
                   </label>
                 )}
 
-                {editModal.error && <p className="field-error">{editModal.error}</p>}
+                {editModal.error && (
+                  <p className="field-error" role="alert">
+                    {editModal.error}
+                  </p>
+                )}
               </div>
-              <div className="modal-footer">
+              <div className="modal-footer modal-footer-with-leading-action">
+                <button
+                  type="button"
+                  className="ghost-btn modal-footer-leading-action"
+                  onClick={() => {
+                    setConflict(null)
+                    refreshMutation.mutate({
+                      id: editModal.server.id,
+                      expectedVersion: editModal.server.version,
+                    })
+                  }}
+                  disabled={refreshMutation.isPending || updateMutation.isPending}
+                >
+                  <RefreshCw
+                    className={refreshMutation.isPending ? 'spin' : ''}
+                    aria-hidden="true"
+                  />
+                  {t('ai.mcp.refresh')}
+                </button>
                 <button
                   type="button"
                   className="ghost-btn"
                   onClick={() => setEditModal(null)}
-                  disabled={updateMutation.isPending}
+                  disabled={updateMutation.isPending || refreshMutation.isPending}
                 >
                   {t('shared.cancel')}
                 </button>
                 <button
                   type="submit"
                   className="btn-primary"
-                  disabled={updateMutation.isPending}
+                  disabled={updateMutation.isPending || refreshMutation.isPending}
                 >
                   {t('shared.confirm')}
                 </button>
@@ -649,7 +598,6 @@ export function McpServersPage() {
           setEditModal(null)
           setDeleteTarget(null)
           setDeleteError(null)
-          setActionError(null)
           void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })
           void queryClient.invalidateQueries({ queryKey: queryKeys.tools.all })
         }}

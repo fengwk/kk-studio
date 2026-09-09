@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ResourceCardLayout } from '@/features/ai/catalog/AiResourceCardLayout'
 
 describe('ResourceCardLayout', () => {
-  it.each(['agent', 'model', 'provider'] as const)('renders %s resources and invokes edit/delete actions', async (icon) => {
+  it.each(['agent', 'model', 'provider', 'server'] as const)('renders %s resources and invokes edit/delete actions', async (icon) => {
     const user = userEvent.setup()
     const onEdit = vi.fn()
     const onDelete = vi.fn()

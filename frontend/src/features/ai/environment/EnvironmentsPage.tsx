@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, Pencil, Plus, Trash2, Copy, Check } from 'lucide-react'
+import { Box, Check, Copy, KeyRound, Pencil, Plus, Trash2 } from 'lucide-react'
 import { filterEnvironments } from '@/features/ai/environment/environment-utils'
 import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
@@ -174,6 +174,7 @@ export function EnvironmentsPage() {
     onSuccess: (card) => {
       setRotateTarget(null)
       setRotateError(null)
+      setEditModal(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
       if (card.registrationToken) {
         setTokenModal({
@@ -187,6 +188,7 @@ export function EnvironmentsPage() {
         setConflict(presentConflict(err))
         setRotateTarget(null)
         setRotateError(null)
+        setEditModal(null)
         return
       }
       setRotateError(err instanceof Error ? err.message : String(err))
@@ -297,6 +299,9 @@ export function EnvironmentsPage() {
                   <article key={environment.id} className="info-card environment-card">
                     <div className="head">
                       <div className="head-content">
+                        <div className="icon-box">
+                          <Box aria-hidden="true" />
+                        </div>
                         <div className="text-content">
                           <h3 title={environment.name}>{environment.name}</h3>
                           <p title={environment.id}>
@@ -308,10 +313,10 @@ export function EnvironmentsPage() {
                             </p>
                           ) : null}
                         </div>
-                        <span className={`status-pill${ready ? ' is-ready' : ' is-offline'}`}>
-                          {displayStatus}
-                        </span>
                       </div>
+                      <span className={`status-pill${ready ? ' is-ready' : ' is-offline'}`}>
+                        {displayStatus}
+                      </span>
                     </div>
                     <div className="meta-block">
                       {environment.rootPath ? (
@@ -329,6 +334,7 @@ export function EnvironmentsPage() {
                       <button
                         type="button"
                         className="action-enter-btn"
+                        aria-label={`${t('ai.environment.edit')} ${environment.name}`}
                         onClick={() => {
                           setConflict(null)
                           setEditModal({
@@ -339,31 +345,21 @@ export function EnvironmentsPage() {
                         }}
                       >
                         <Pencil aria-hidden="true" />
-                        {t('ai.environment.edit')}
-                      </button>
-                      <button
-                        type="button"
-                        className="action-enter-btn"
-                        onClick={() => {
-                          setConflict(null)
-                          setRotateError(null)
-                          setRotateTarget(environment)
-                        }}
-                      >
-                        <KeyRound aria-hidden="true" />
-                        {t('ai.environment.rotateToken')}
+                        {t('ai.catalog.action.edit')}
                       </button>
                       <button
                         type="button"
                         className="action-enter-btn danger"
+                        aria-label={`${t('ai.environment.delete')} ${environment.name}`}
                         onClick={() => {
                           setConflict(null)
                           setDeleteError(null)
                           setDeleteTarget(environment)
                         }}
+                        disabled={deleteMutation.isPending && deleteTarget?.id === environment.id}
                       >
                         <Trash2 aria-hidden="true" />
-                        {t('ai.environment.delete')}
+                        {t('ai.catalog.action.delete')}
                       </button>
                     </div>
                   </article>
@@ -426,7 +422,13 @@ export function EnvironmentsPage() {
       )}
 
       {editModal && (
-        <ModalBackdrop onClose={() => setEditModal(null)}>
+        <ModalBackdrop
+          onClose={() => {
+            if (!updateMutation.isPending && !rotateMutation.isPending) {
+              setEditModal(null)
+            }
+          }}
+        >
           <div
             className="modal-card"
             role="dialog"
@@ -437,7 +439,7 @@ export function EnvironmentsPage() {
             <ModalHeader
               title={t('ai.environment.edit')}
               onClose={() => setEditModal(null)}
-              closeDisabled={updateMutation.isPending}
+              closeDisabled={updateMutation.isPending || rotateMutation.isPending}
             />
             <form onSubmit={handleUpdateSubmit}>
               <div className="modal-body">
@@ -454,21 +456,38 @@ export function EnvironmentsPage() {
                     autoFocus
                   />
                 </label>
-                {editModal.error && <p className="field-error">{editModal.error}</p>}
+                {editModal.error && (
+                  <p className="field-error" role="alert">
+                    {editModal.error}
+                  </p>
+                )}
               </div>
-              <div className="modal-footer">
+              <div className="modal-footer modal-footer-with-leading-action">
+                <button
+                  type="button"
+                  className="ghost-btn modal-footer-leading-action"
+                  onClick={() => {
+                    setConflict(null)
+                    setRotateError(null)
+                    setRotateTarget(editModal.environment)
+                  }}
+                  disabled={updateMutation.isPending || rotateMutation.isPending}
+                >
+                  <KeyRound aria-hidden="true" />
+                  {t('ai.environment.rotateToken')}
+                </button>
                 <button
                   type="button"
                   className="ghost-btn"
                   onClick={() => setEditModal(null)}
-                  disabled={updateMutation.isPending}
+                  disabled={updateMutation.isPending || rotateMutation.isPending}
                 >
                   {t('shared.cancel')}
                 </button>
                 <button
                   type="submit"
                   className="btn-primary"
-                  disabled={updateMutation.isPending}
+                  disabled={updateMutation.isPending || rotateMutation.isPending}
                 >
                   {t('shared.confirm')}
                 </button>

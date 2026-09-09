@@ -53,7 +53,8 @@ describe('EnvironmentsPage', () => {
     vi.clearAllMocks()
   })
 
-  it('renders environment cards with status capabilities and skills', async () => {
+  // 验证渲染环境卡片及其状态、能力与技能，且卡片底部仅有通用编辑与删除动作，绝不暴露轮换 Token 动作
+  it('renders environment cards with status capabilities and skills, with only edit and delete actions in footer', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       {
         id: 'env-1',
@@ -105,6 +106,17 @@ describe('EnvironmentsPage', () => {
     expect(screen.getByText('CONNECTING')).toBeInTheDocument()
     expect(screen.getAllByText('Capabilities').length).toBe(3)
     expect(screen.getAllByText('Skills').length).toBe(3)
+
+    // 验证每个环境卡片底部仅有编辑与删除两个操作按钮，绝不暴露重新生成 Token 按钮
+    const cards = screen.getAllByRole('article')
+    expect(cards).toHaveLength(3)
+    for (const card of cards) {
+      const footerButtons = within(card).getAllByRole('button')
+      expect(footerButtons).toHaveLength(2)
+      expect(within(card).getByRole('button', { name: /编辑环境/ })).toBeInTheDocument()
+      expect(within(card).getByRole('button', { name: /删除环境/ })).toBeInTheDocument()
+      expect(within(card).queryByRole('button', { name: /Token/ })).toBeNull()
+    }
   })
 
   it('shows empty state when no environments configured', async () => {
@@ -164,7 +176,7 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    const editBtn = await screen.findByRole('button', { name: '编辑环境' })
+    const editBtn = await screen.findByRole('button', { name: /编辑环境/ })
     await user.click(editBtn)
 
     const input = screen.getByRole('textbox', { name: /环境名称/ })
@@ -175,7 +187,8 @@ describe('EnvironmentsPage', () => {
     expect(environmentService.updateEnvironment).toHaveBeenCalledWith('env-1', { name: 'renamed', expectedVersion: '1' })
   })
 
-  it('rotates registration token and displays the new token', async () => {
+  // 验证从卡片编辑弹窗中调用「重新生成 Token」次级动作，成功后展示新 token 并关闭编辑弹窗
+  it('rotates registration token and displays the new token from edit dialog', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-1', name: 'my-box', version: '1' }),
@@ -185,7 +198,17 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    const rotateBtn = await screen.findByRole('button', { name: '重新生成 Token' })
+    // 验证卡片上不直接暴露轮换 token 按钮
+    const card = await screen.findByRole('article')
+    expect(within(card).queryByRole('button', { name: /Token/ })).toBeNull()
+
+    // 打开编辑弹窗
+    const editBtn = within(card).getByRole('button', { name: /编辑环境/ })
+    await user.click(editBtn)
+
+    // 在编辑弹窗中点击「重新生成 Token」
+    const editDialog = await screen.findByRole('dialog', { name: '编辑环境' })
+    const rotateBtn = within(editDialog).getByRole('button', { name: '重新生成 Token' })
     await user.click(rotateBtn)
 
     // 确认弹窗
@@ -195,6 +218,7 @@ describe('EnvironmentsPage', () => {
 
     expect(environmentService.rotateToken).toHaveBeenCalledWith('env-1', '1')
     expect(await screen.findByText('rotated-tok-999')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '编辑环境' })).toBeNull()
   })
 
   it('deletes an environment card after confirmation', async () => {
@@ -205,7 +229,7 @@ describe('EnvironmentsPage', () => {
     vi.mocked(environmentService.deleteEnvironment).mockResolvedValue(undefined)
     renderPage()
 
-    const deleteBtn = await screen.findByRole('button', { name: '删除环境' })
+    const deleteBtn = await screen.findByRole('button', { name: /删除环境/ })
     await user.click(deleteBtn)
 
     const modal = await screen.findByRole('alertdialog', { name: '删除环境' })
@@ -295,7 +319,7 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    const editBtn = await screen.findByRole('button', { name: '编辑环境' })
+    const editBtn = await screen.findByRole('button', { name: /编辑环境/ })
     await user.click(editBtn)
 
     const input = screen.getByRole('textbox', { name: /环境名称/ })
@@ -332,7 +356,12 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    const rotateBtn = await screen.findByRole('button', { name: '重新生成 Token' })
+    // 打开编辑弹窗
+    const editBtn = await screen.findByRole('button', { name: /编辑环境/ })
+    await user.click(editBtn)
+
+    const editDialog = await screen.findByRole('dialog', { name: '编辑环境' })
+    const rotateBtn = within(editDialog).getByRole('button', { name: '重新生成 Token' })
     await user.click(rotateBtn)
 
     const modal = await screen.findByRole('alertdialog', { name: '重新生成 Token' })
@@ -351,6 +380,7 @@ describe('EnvironmentsPage', () => {
     const conflictModal = await screen.findByRole('alertdialog', { name: '持久状态已变化' })
     expect(within(conflictModal).getByText(/stale_version/)).toBeInTheDocument()
     expect(screen.queryByRole('alertdialog', { name: '重新生成 Token' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: '编辑环境' })).toBeNull()
 
     await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
     await waitFor(() => {
@@ -369,7 +399,7 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    const deleteBtn = await screen.findByRole('button', { name: '删除环境' })
+    const deleteBtn = await screen.findByRole('button', { name: /删除环境/ })
     await user.click(deleteBtn)
 
     const modal = await screen.findByRole('alertdialog', { name: '删除环境' })
