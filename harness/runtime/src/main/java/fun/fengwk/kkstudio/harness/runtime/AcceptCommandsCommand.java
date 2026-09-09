@@ -11,8 +11,8 @@ import java.util.UUID;
 /**
  * 不可变的单次命令接受请求：sealed {@link AcceptCommandsTarget} + 本批 ordered Commands。
  *
- * <p>同一次创建（NEW_SESSION / ENTRY）的幂等键由 target 内的预分配 id 与 {@code creationRequestHash} 派生，不额外携带 request
- * id。
+ * <p>同一次创建（NEW_SESSION / NEW_THREAD）的幂等键由 target 内的预分配 id 与 {@code creationRequestHash} 派生，不额外携带
+ * request id。
  */
 public record AcceptCommandsCommand(AcceptCommandsTarget target, List<NewThreadCommand> commands) {
 

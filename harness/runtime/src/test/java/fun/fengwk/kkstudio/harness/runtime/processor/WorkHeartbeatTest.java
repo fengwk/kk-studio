@@ -217,7 +217,7 @@ class WorkHeartbeatTest {
                 UUID sessionId = tx.nextId();
                 UUID rootEntryId = tx.nextId();
                 UUID threadIdValue = tx.nextId();
-                tx.insertSession(new Session(sessionId, NOW));
+                tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
                 tx.insertEntry(
                     new Entry(
                         rootEntryId,
@@ -233,6 +233,7 @@ class WorkHeartbeatTest {
                         sessionId,
                         rootEntryId,
                         ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
+                        "main",
                         false,
                         1,
                         0,

@@ -31,10 +31,10 @@ class ThreadContextProbeTest {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     ThreadState thread =
         new ThreadState(
-            THREAD_ID, SESSION_ID, ROOT_ID, CREATION_REQUEST_HASH, false, 1, 0, NOW, NOW);
+            THREAD_ID, SESSION_ID, ROOT_ID, CREATION_REQUEST_HASH, "main", false, 1, 0, NOW, NOW);
     store.transaction(
         tx -> {
-          tx.insertSession(new Session(SESSION_ID, NOW));
+          tx.insertSession(new Session(SESSION_ID, "session-" + SESSION_ID, NOW));
           tx.insertEntry(
               new Entry(
                   ROOT_ID,

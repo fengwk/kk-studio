@@ -96,6 +96,7 @@ class PostgresqlAcceptCommandsRootQueryTest {
                   current.sessionId(),
                   turnEndId,
                   current.creationRequestHash(),
+                  current.name(),
                   current.yoloEnabled(),
                   current.nextCommandSequence(),
                   current.version() + 1,

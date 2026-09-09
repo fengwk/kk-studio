@@ -569,7 +569,7 @@ final class DispatcherTestSupport {
   }
 
   private static Session session(UUID id) {
-    return new Session(id, NOW);
+    return new Session(id, "session-" + id, NOW);
   }
 
   private static Entry rootEntry(UUID id, UUID sessionId) {
@@ -614,7 +614,7 @@ final class DispatcherTestSupport {
 
   private static ThreadState thread(UUID id, UUID sessionId, UUID headEntryId) {
     return new ThreadState(
-        id, sessionId, headEntryId, CREATION_REQUEST_HASH, false, 1, 0, NOW, NOW);
+        id, sessionId, headEntryId, CREATION_REQUEST_HASH, "main", false, 1, 0, NOW, NOW);
   }
 
   private static BranchSettings branchSettings() {

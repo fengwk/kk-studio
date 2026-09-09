@@ -22,7 +22,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 服务端 creation request hash：NEW_SESSION / ENTRY 初始创建请求在持久化 Thread 上的 64 位小写 SHA-256 身份键。
+ * 服务端 creation request hash：NEW_SESSION / NEW_THREAD 初始创建请求在持久化 Thread 上的 64 位小写 SHA-256 身份键。
  *
  * <p>哈希覆盖 target 语义、预分配 ID（session/thread/start entry）、NEW_SESSION 的 root settings + subagent +
  * yolo，以及 ordered {@code (idempotencyKey, requestHash)} 对；同一 raw 请求永远得到同一 hash，不同内容（含 id
@@ -52,14 +52,14 @@ public final class ThreadCreationRequestHash {
     return digest(envelope);
   }
 
-  /** 计算 ENTRY target 的 creation request hash。 */
-  public static String forEntry(
+  /** 计算 NEW_THREAD target 的 creation request hash。 */
+  public static String forNewThread(
       UUID sessionId,
       UUID startEntryId,
       UUID threadId,
       boolean yoloEnabled,
       List<NewThreadCommand> commands) {
-    ObjectNode envelope = envelope("ENTRY");
+    ObjectNode envelope = envelope("NEW_THREAD");
     envelope.put("sessionId", requireId(sessionId, "sessionId").toString());
     envelope.put("startEntryId", requireId(startEntryId, "startEntryId").toString());
     envelope.put("threadId", requireId(threadId, "threadId").toString());

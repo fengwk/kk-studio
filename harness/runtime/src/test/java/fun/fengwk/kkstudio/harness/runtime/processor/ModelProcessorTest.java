@@ -3148,7 +3148,7 @@ class ModelProcessorTest {
           UUID turnStartEntryId = tx.nextId();
           UUID userEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
@@ -3211,7 +3211,7 @@ class ModelProcessorTest {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, now));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, now));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
           UUID parentId = rootEntryId;

@@ -66,9 +66,9 @@ Harness 持久化协议由七张核心表组成：
 
 | 表 | 承载内容 |
 | --- | --- |
-| `harness_session` | Session 聚合根标识与创建时间 |
+| `harness_session` | Session 聚合根标识、显示名称与创建时间 |
 | `harness_entry` | append-only Entry Tree 节点数据与 payload |
-| `harness_thread` | Session 归属、当前 head 游标、创建请求指纹（creation request hash）、YOLO 开关、命令序列号与版本号 |
+| `harness_thread` | Session 归属、当前 head 游标、创建请求指纹（creation request hash）、显示名称、YOLO 开关、命令序列号与版本号 |
 | `harness_thread_command` | 有序 Command 邮箱、请求哈希、APPLIED 关联节点或 CANCELLED 取消标记 |
 | `harness_model_invocation` | Model 请求规格、生命周期状态、尝试次数、流式检查点、执行结果与错误信息 |
 | `harness_tool_invocation` | Tool 调用参数、工具绑定、审批记录、执行状态、副作用批次与错误信息 |
@@ -104,7 +104,7 @@ Session (KEY SHARE / FOR UPDATE)
   -> Work（target type + UUID 升序）
 ```
 
-在普通的 Command 写入与会话创建路径中，对 Session 获取 `FOR KEY SHARE` 共享锁，允许多个同级 Thread 并发执行写入；在涉及删除或独占变更时获取 `FOR UPDATE` 排他锁。
+在普通的 Command 写入与会话创建路径中，对 Session 获取 `FOR KEY SHARE` 共享锁，允许多个同级 Thread 并发执行写入；在涉及删除、独占变更或 Session 重命名（`renameSession` 使用 `lockSessionForUpdate`）时获取 `FOR UPDATE` 排他锁。
 
 [`PostgresqlHarnessTransaction`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessTransaction.java) 在事务句柄内记录当前达到的最高锁阶梯等级（LockRank）、Thread UUID、Tool 调用序号以及 WorkTarget 排序。当检测到逆序获取锁的操作时，立即抛出 `IllegalStateException`。事务句柄严格绑定到创建它的单一线程，仅在当前回调作用域内生效。当事务执行期间发生任何底层数据库异常时，句柄会捕获并记录该首个故障（poisoning 防护），并在回调结束前通过 `rethrowDatabaseFailure()` 强制重新抛出，阻断破坏状态的提交。
 

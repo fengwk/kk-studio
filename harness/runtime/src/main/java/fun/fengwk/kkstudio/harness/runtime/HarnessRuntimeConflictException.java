@@ -34,7 +34,9 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
     PARTIAL_COMMAND_REPLAY,
     /** Ordered replay：id 存在且 payload 相等，但 sequence 在请求顺序中不连续。 */
     COMMAND_REPLAY_ORDER_MISMATCH,
-    /** NEW_SESSION / ENTRY：预分配的 threadId 已关联到不同的初始创建请求（不同 creation request hash 或不同 Session）。 */
+    /**
+     * NEW_SESSION / NEW_THREAD：预分配的 threadId 已关联到不同的初始创建请求（不同 creation request hash 或不同 Session）。
+     */
     THREAD_ID_REUSED,
     /** Thread 存在等待原子 apply 的 terminal Model/Tool result。 */
     TERMINAL_APPLY_PENDING,

@@ -29,6 +29,7 @@ class HarnessStoreContractTest {
               "nextId",
               "insertSession",
               "findSession",
+              "updateSession",
               "insertEntry",
               "findEntry",
               "findRootEntry",

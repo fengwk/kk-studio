@@ -63,7 +63,8 @@ final class PostgresqlHarnessRows {
 
   static final RowMapper<Session> SESSION =
       (resultSet, rowNumber) ->
-          new Session(uuid(resultSet, "id"), instant(resultSet, "created_at"));
+          new Session(
+              uuid(resultSet, "id"), resultSet.getString("name"), instant(resultSet, "created_at"));
 
   static final RowMapper<Entry> ENTRY =
       (resultSet, rowNumber) -> {
@@ -85,6 +86,7 @@ final class PostgresqlHarnessRows {
               uuid(resultSet, "session_id"),
               uuid(resultSet, "head_entry_id"),
               resultSet.getString("creation_request_hash"),
+              resultSet.getString("name"),
               resultSet.getBoolean("yolo_enabled"),
               resultSet.getLong("next_command_sequence"),
               resultSet.getLong("version"),

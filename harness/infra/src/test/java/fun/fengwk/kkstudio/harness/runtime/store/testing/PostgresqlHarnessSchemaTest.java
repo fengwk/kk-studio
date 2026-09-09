@@ -71,6 +71,7 @@ class PostgresqlHarnessSchemaTest {
             "session_id",
             "head_entry_id",
             "creation_request_hash",
+            "name",
             "yolo_enabled",
             "next_command_sequence",
             "version",
@@ -173,7 +174,7 @@ class PostgresqlHarnessSchemaTest {
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000002");
 
     jdbc.update(
-        "insert into harness_session (id, created_at) values (?, statement_timestamp())",
+        "insert into harness_session (id, name, created_at) values (?, 'session-demo', statement_timestamp())",
         sessionId);
     jdbc.update(
         "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
@@ -286,7 +287,7 @@ class PostgresqlHarnessSchemaTest {
     UUID threadId = UUID.fromString("00000000-0000-0000-0000-000000000014");
 
     jdbc.update(
-        "insert into harness_session (id, created_at) values (?, statement_timestamp())",
+        "insert into harness_session (id, name, created_at) values (?, 'session-demo', statement_timestamp())",
         sessionId);
     jdbc.update(
         "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
@@ -306,8 +307,8 @@ class PostgresqlHarnessSchemaTest {
         sessionId,
         turnStartEntryId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', false, 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', false, 1, 0, statement_timestamp(), statement_timestamp())",
         threadId,
         sessionId,
         turnStartEntryId);
@@ -414,5 +415,101 @@ class PostgresqlHarnessSchemaTest {
                 validResultJson,
                 validReplayJson),
         "valid SUCCEEDED model invocation with replay state must succeed");
+  }
+
+  @Test
+  void harnessSessionAndThreadNameColumnsEnforceNonBlankNames() {
+    // 测试意图：真实 PostgreSQL 约束 ck_harness_session_name / ck_harness_thread_name 物理门禁验证。
+    // 最小 schema 只防御最粗的空白串：btrim(name) <> ''；null 由 not null 拒绝。
+    // 首尾空格规范化由应用写路径保证，数据库不拒绝带首尾空格的值。
+    UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000020");
+    jdbc.update(
+        "insert into harness_session (id, name, created_at) values (?, 'session-demo', statement_timestamp())",
+        sessionId);
+
+    // 1. session name null（not null 拒绝）
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "insert into harness_session (id, name, created_at) values (?, null, statement_timestamp())",
+                UUID.fromString("00000000-0000-0000-0000-000000000021")),
+        "null session name must be rejected");
+    // 2. session name ''（check 拒绝）
+    DataIntegrityViolationException exBlankSession =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "insert into harness_session (id, name, created_at) values (?, '', statement_timestamp())",
+                    UUID.fromString("00000000-0000-0000-0000-000000000021")),
+            "blank session name must be rejected");
+    assertTrue(exBlankSession.getMessage().contains("ck_harness_session_name"));
+    // 3. session name 全空白串（check 拒绝）
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "insert into harness_session (id, name, created_at) values (?, '   ', statement_timestamp())",
+                UUID.fromString("00000000-0000-0000-0000-000000000021")),
+        "whitespace-only session name must be rejected");
+    // 4. 正向：合法值（含带首尾空格的应用值）可持久化；btrim 语义不拒绝 '  padded  '
+    assertDoesNotThrow(
+        () ->
+            jdbc.update(
+                "insert into harness_session (id, name, created_at) values (?, 'hello world', statement_timestamp())",
+                UUID.fromString("00000000-0000-0000-0000-000000000021")));
+    assertDoesNotThrow(
+        () ->
+            jdbc.update(
+                "insert into harness_session (id, name, created_at) values (?, '  padded  ', statement_timestamp())",
+                UUID.fromString("00000000-0000-0000-0000-000000000025")));
+
+    UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000022");
+    UUID threadId = UUID.fromString("00000000-0000-0000-0000-000000000023");
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, null, 'ROOT', '{\"title\":\"root\"}'::jsonb, statement_timestamp())",
+        rootEntryId,
+        sessionId);
+    jdbc.update(
+        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', false, 1, 0, statement_timestamp(), statement_timestamp())",
+        threadId,
+        sessionId,
+        rootEntryId);
+
+    // 5. thread name null（not null 拒绝）
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', null, false, 1, 0, statement_timestamp(), statement_timestamp())",
+                UUID.fromString("00000000-0000-0000-0000-000000000024"),
+                sessionId,
+                rootEntryId),
+        "null thread name must be rejected");
+    // 6. thread name 全空白串（check 拒绝）
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '   ', false, 1, 0, statement_timestamp(), statement_timestamp())",
+                UUID.fromString("00000000-0000-0000-0000-000000000024"),
+                sessionId,
+                rootEntryId),
+        "whitespace-only thread name must be rejected");
+    // 7. 正向：带首尾空格的应用值可持久化（btrim check 只防御纯空白串）
+    assertDoesNotThrow(
+        () ->
+            jdbc.update(
+                "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '  padded  ', false, 1, 0, statement_timestamp(), statement_timestamp())",
+                UUID.fromString("00000000-0000-0000-0000-000000000024"),
+                sessionId,
+                rootEntryId),
+        "padded thread name must be accepted (trim is app-enforced)");
   }
 }

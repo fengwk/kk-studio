@@ -42,6 +42,7 @@ class StopRecordsTest {
           id(2L),
           id(3L),
           CREATION_REQUEST_HASH,
+          "main",
           false,
           1,
           0,

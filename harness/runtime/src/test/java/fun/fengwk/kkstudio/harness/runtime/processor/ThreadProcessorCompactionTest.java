@@ -1239,7 +1239,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           UUID errorEntryId = tx.nextId();
           UUID secondTurnEndEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
@@ -1342,7 +1342,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           UUID abortedEntryId = tx.nextId();
           UUID turnEndEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
@@ -1406,7 +1406,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           UUID secondTurnEndId = tx.nextId();
           UUID threadId = tx.nextId(); // 被处理的 thread
           UUID otherThreadId = tx.nextId(); // 拥有 turn2 的 thread（仅由 TURN_START ownerThreadId 表达）
-          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
