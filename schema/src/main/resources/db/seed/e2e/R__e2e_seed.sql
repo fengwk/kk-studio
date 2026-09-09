@@ -49,15 +49,15 @@ insert into agent_provider (
      '00000000-0000-0000-0000-000000000007'::uuid,
      current_timestamp, current_timestamp, 0),
     ('minimax-anthropic', 'MiniMax (Anthropic).', 'anthropic', null, null,
-     '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000,"anthropicThinkingMode":"BUDGET"}',
+     '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000,"anthropicThinkingMode":"BUDGET","modelAliases":{"MiniMax-M3":"claude-fable-5-dd-3M-xaMiniM"}}',
      '00000000-0000-0000-0000-000000000008'::uuid,
      current_timestamp, current_timestamp, 0);
 
 -- Effective Pi 0.82.1 model snapshot, with four target paid-real models reconciled
--- to Pi 0.85.1 (gemini-3.8-flash, gpt-5.6-luna, MiniMax-M3, deepseek-v4-flash).
+-- to Pi 0.85.1 built-in catalog/implementation (gemini-3.8-flash, gpt-5.6-luna,
+-- MiniMax-M3, deepseek-v4-flash).
 -- `minimax-responses` is mapped to provider `minimax`; all other provider names match.
--- Variants are Pi's supported thinking levels after applying ~/.pi/agent/models.json
--- and clamping its default `max` level.
+-- Variants are Pi's supported thinking levels with its default `max` level clamped.
 with model_seed (
     provider_name, name, description, context_window, max_output_tokens,
     input_modalities, default_variant, variants,
@@ -77,7 +77,7 @@ with model_seed (
     ('deepseek', 'deepseek-v4-pro', 'DeepSeek V4 Pro', 272000, 128000, '["TEXT"]'::jsonb, 'max', '[{"id":"off"},{"id":"high","reasoningEffort":"high"},{"id":"max","reasoningEffort":"max"}]'::jsonb, 0.435, 0.87, 0.003625, 0, 0.87),
     ('google', 'gemini-3.5-flash', 'Gemini 3.5 Flash', 1048576, 65536, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"minimal","reasoningEffort":"minimal"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 1.5, 9, 0.15, 0, 9),
     ('google', 'gemini-3.6-flash', 'Gemini 3.6 Flash', 1048576, 65536, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"minimal","reasoningEffort":"minimal"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 1.5, 7.5, 0.15, 0, 7.5),
-    ('google', 'gemini-3.8-flash', 'Gemini 3.8 Flash', 1048576, 65536, '["TEXT","IMAGE"]'::jsonb, 'minimal', '[{"id":"minimal","reasoningEffort":"minimal","maxOutputTokens":4096},{"id":"low","reasoningEffort":"low","maxOutputTokens":4096},{"id":"medium","reasoningEffort":"medium","maxOutputTokens":8192},{"id":"high","reasoningEffort":"high","maxOutputTokens":8192}]'::jsonb, 0.75, 3.75, 0.075, 0, 3.75),
+    ('google', 'gemini-3.8-flash', 'Gemini 3.8 Flash', 1048576, 65536, '["TEXT","IMAGE"]'::jsonb, 'minimal', '[{"id":"minimal","reasoningEffort":"low","maxOutputTokens":4096},{"id":"low","reasoningEffort":"low","maxOutputTokens":4096},{"id":"medium","reasoningEffort":"medium","maxOutputTokens":8192},{"id":"high","reasoningEffort":"high","maxOutputTokens":8192}]'::jsonb, 0.75, 3.75, 0.075, 0, 3.75),
     ('google', 'gemini-3.1-pro-preview', 'Gemini 3.1 Pro Preview', 1048576, 65536, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"low","reasoningEffort":"low"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 2, 12, 0.2, 0, 12),
     ('anthropic', 'claude-sonnet-4-6', 'Claude Sonnet 4.6', 1000000, 128000, '["TEXT","IMAGE"]'::jsonb, 'max', '[{"id":"off"},{"id":"minimal","reasoningEffort":"low"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"max","reasoningEffort":"max"}]'::jsonb, 3, 15, 0.3, 3.75, 0),
     ('anthropic', 'claude-opus-4-6', 'Claude Opus 4.6', 1000000, 128000, '["TEXT","IMAGE"]'::jsonb, 'max', '[{"id":"off"},{"id":"minimal","reasoningEffort":"low"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"max","reasoningEffort":"max"}]'::jsonb, 5, 25, 0.5, 6.25, 0),

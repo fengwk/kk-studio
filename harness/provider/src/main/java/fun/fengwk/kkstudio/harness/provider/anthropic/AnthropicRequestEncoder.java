@@ -93,7 +93,7 @@ final class AnthropicRequestEncoder {
     validateCacheControl(request.cacheControl());
 
     ObjectNode root = NODES.objectNode();
-    root.put("model", request.model().modelName());
+    root.put("model", config.resolveModelName(request.model().modelName()));
 
     int maxTokens = DEFAULT_MAX_TOKENS;
     if (request.variant() != null && request.variant().maxOutputTokens() != null) {
@@ -103,7 +103,8 @@ final class AnthropicRequestEncoder {
     root.put("stream", true);
 
     applySamplingParameters(root, request.variant());
-    applyReasoningParameters(root, request, config, maxTokens);
+    boolean requiresInterleavedThinkingBeta =
+        applyReasoningParameters(root, request, config, maxTokens);
 
     ArrayNode toolsArray = encodeTools(request.tools());
 
@@ -183,7 +184,8 @@ final class AnthropicRequestEncoder {
           "request body exceeds " + MAX_REQUEST_BODY_BYTES + " bytes limit");
     }
 
-    return new AnthropicEncodedRequest(utf8Bytes, frozenSourcePrefixHash);
+    return new AnthropicEncodedRequest(
+        utf8Bytes, frozenSourcePrefixHash, requiresInterleavedThinkingBeta);
   }
 
   private static void validatePenalties(ModelVariant variant) {
@@ -229,17 +231,17 @@ final class AnthropicRequestEncoder {
     }
   }
 
-  private static void applyReasoningParameters(
+  private static boolean applyReasoningParameters(
       ObjectNode root, ProviderRequest request, AnthropicConfiguration config, int maxTokens) {
     if (!request.model().reasoning()
         || request.variant() == null
         || request.variant().reasoningEffort() == null) {
-      return;
+      return false;
     }
 
     String effort = request.variant().reasoningEffort();
     if (effort.isBlank() || "none".equals(effort.trim())) {
-      return;
+      return false;
     }
 
     AnthropicThinkingMode mode = config.anthropicThinkingMode();
@@ -247,9 +249,11 @@ final class AnthropicRequestEncoder {
       case ADAPTIVE -> {
         ObjectNode thinking = root.putObject("thinking");
         thinking.put("type", "adaptive");
+        thinking.put("display", "summarized");
 
         ObjectNode outputConfig = root.putObject("output_config");
         outputConfig.put("effort", effort);
+        return false;
       }
       case BUDGET -> {
         int budgetTokens = mapBudgetTokens(effort);
@@ -261,8 +265,11 @@ final class AnthropicRequestEncoder {
         ObjectNode thinking = root.putObject("thinking");
         thinking.put("type", "enabled");
         thinking.put("budget_tokens", budgetTokens);
+        thinking.put("display", "summarized");
+        return true;
       }
     }
+    return false;
   }
 
   private static int mapBudgetTokens(String effort) {

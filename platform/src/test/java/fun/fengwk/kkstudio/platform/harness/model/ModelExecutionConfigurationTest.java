@@ -238,6 +238,19 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
     assertEquals(AnthropicThinkingMode.BUDGET, adapter.configuration().anthropicThinkingMode());
   }
 
+  /** 意图：验证 Anthropic 工厂将配置中的 modelAliases 传递给适配器并能正确解析别名。 */
+  @Test
+  void anthropicFactoryAppliesConfiguredModelAliases() {
+    AnthropicProviderAdapter adapter =
+        (AnthropicProviderAdapter)
+            anthropicProviderFactory.create(
+                "credential",
+                "{\"modelAliases\":{\"MiniMax-M3\":\"claude-fable-5-dd-3M-xaMiniM\"}}");
+    assertEquals(
+        "claude-fable-5-dd-3M-xaMiniM", adapter.configuration().resolveModelName("MiniMax-M3"));
+    assertEquals("other-model", adapter.configuration().resolveModelName("other-model"));
+  }
+
   /** 意图：验证 Anthropic 工厂拒绝非法配置且不回显配置内容与敏感信息，因果链无暴露。 */
   @Test
   void anthropicFactoryRejectsMalformedConfigurationWithoutExposingInput() {
@@ -257,6 +270,33 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
             () -> anthropicProviderFactory.create("credential", malformedJson));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exMalformed.kind());
     assertNull(exMalformed.getCause());
+
+    String sensitiveAliasType = "{\"modelAliases\":\"SUPER_SECRET_PAYLOAD\"}";
+    ProviderException exAliasType =
+        assertThrows(
+            ProviderException.class,
+            () -> anthropicProviderFactory.create("credential", sensitiveAliasType));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exAliasType.kind());
+    assertFalse(exAliasType.getMessage().contains("SUPER_SECRET_PAYLOAD"));
+    assertNull(exAliasType.getCause());
+
+    String sensitiveAliasKey = "{\"modelAliases\":{\" SENSITIVE_KEY \":\"val\"}}";
+    ProviderException exAliasKey =
+        assertThrows(
+            ProviderException.class,
+            () -> anthropicProviderFactory.create("credential", sensitiveAliasKey));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exAliasKey.kind());
+    assertFalse(exAliasKey.getMessage().contains("SENSITIVE_KEY"));
+    assertNull(exAliasKey.getCause());
+
+    String sensitiveAliasVal = "{\"modelAliases\":{\"key\":\" SENSITIVE_VAL \"}}";
+    ProviderException exAliasVal =
+        assertThrows(
+            ProviderException.class,
+            () -> anthropicProviderFactory.create("credential", sensitiveAliasVal));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exAliasVal.kind());
+    assertFalse(exAliasVal.getMessage().contains("SENSITIVE_VAL"));
+    assertNull(exAliasVal.getCause());
   }
 
   private static void assertNativeModelProvider(

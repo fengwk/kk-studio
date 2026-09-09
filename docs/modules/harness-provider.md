@@ -104,10 +104,10 @@ Reactor、JDBC 与外部 HTTP 客户端。
 ### Anthropic Messages
 
 [`AnthropicProviderAdapter`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/anthropic/AnthropicProviderAdapter.java)
-基于 `ProviderDescriptor.endpoint` 解析 `/messages`，移除 base URL 的 user-info、query 与 fragment。
-请求同时发送标准 `x-api-key` 与 `Authorization: Bearer`，不发送 `anthropic-beta`。
-适配器按 `AnthropicConfiguration`（`anthropicThinkingMode`：`ADAPTIVE` / `BUDGET`）解析配置；配置解析严格屏蔽原始输入与底层异常回显。
-在 `reasoningEffort` 为 `none`、空白或 `null` 时，完全抑制 `thinking` 与 `output_config` 字段。
+基于 `ProviderDescriptor.endpoint`（`AnthropicEndpoints.resolveMessagesUri`）幂等解析 `/messages` 端点：已以 `/v1/messages` 或 `/messages` 结尾直接保持，以 `/v1` 结尾追加 `/messages`，其余 base path（含空 path、根路径与自定义 proxy 路径）追加 `/v1/messages`；严格拒绝 user-info、query 与 fragment，保真保留 raw authority（含 IPv6 与端口）及已转义 raw path。
+请求同时发送标准 `x-api-key` 与 `Authorization: Bearer`；当且仅当当前请求实际启用了 BUDGET thinking（`model.reasoning=true`，`reasoningEffort` 非 null/空白/none，配置模式为 `BUDGET`）时发送 `anthropic-beta: interleaved-thinking-2025-05-14`，普通请求、未启用推理以及 `ADAPTIVE` 模式均不发送该 beta 头。
+适配器按 `AnthropicConfiguration` 解析配置：支持 `anthropicThinkingMode`（`ADAPTIVE` / `BUDGET`）与可选的 `modelAliases`（JSON object，将 logical model name 映射为 wire model id，key 与 value 必须为无环绕空白的非空字符串）；`AnthropicRequestEncoder` 仅将 wire 请求根字段 `model` 替换为解析后的别名，所有 durable 存储、replay affinity 与 source consistency 校验严格保持基于 `request.model().modelName()` 逻辑模型标识；配置解析严格屏蔽原始输入与底层异常回显。
+在启用推理时，`thinking` 对象均携带 `display: "summarized"`；`BUDGET` 模式编码 `type: "enabled"` 与 `budget_tokens` 且省略 `output_config`，`ADAPTIVE` 模式编码 `type: "adaptive"` 与 `output_config.effort`。在 `reasoningEffort` 为 `none`、空白或 `null` 时，完全抑制 `thinking` 与 `output_config` 字段。
 `AnthropicStreamAccumulator` 将原生总 token 置为 `0L`（Anthropic Messages 协议不提供原生 `total_tokens`），分类分项明细保留在 `ModelUsage.categorizedTokens()` 中。
 
 `AnthropicRequestEncoder` 对请求体实施 32 MiB 上限，并把 Runtime semantic history 编码为 Anthropic content

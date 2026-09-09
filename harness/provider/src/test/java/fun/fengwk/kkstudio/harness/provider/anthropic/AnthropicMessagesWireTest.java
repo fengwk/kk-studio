@@ -291,6 +291,153 @@ class AnthropicMessagesWireTest {
     assertNull(req.firstHeader("anthropic-beta"), "native wire path does not invent beta headers");
   }
 
+  /**
+   * 验证在 BUDGET 思考模式且启用推理时，线缆请求发送 anthropic-beta: interleaved-thinking-2025-05-14，且 body 中 thinking
+   * 包含 display=summarized。
+   */
+  @Test
+  void should_send_interleaved_thinking_beta_header_when_budget_thinking_enabled()
+      throws Exception {
+    AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
+    CountDownLatch serverLatch = new CountDownLatch(1);
+
+    server.createContext(
+        "/v1/messages",
+        exchange -> {
+          recorded.set(recordExchange(exchange));
+          serverLatch.countDown();
+          respondSseText(exchange, "msg_budget_beta_1", "ok");
+        });
+
+    AnthropicProviderAdapter budgetAdapter =
+        new AnthropicProviderAdapter(
+            transport, TEST_API_KEY, new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
+    ProviderDescriptor descriptor = createDescriptor(null);
+    AnthropicModelProvider provider = (AnthropicModelProvider) budgetAdapter.create(descriptor);
+
+    ModelDescriptor reasoningModel = createReasoningModelDescriptor("MiniMax-M3");
+    ModelVariant variant =
+        new ModelVariant("budget-v", 8192, null, null, null, null, null, List.of(), "low");
+    ProviderRequest request =
+        new ProviderRequest(
+            reasoningModel,
+            variant,
+            List.of(userTextMsg("test")),
+            List.of(),
+            ProviderCacheControl.none());
+
+    RecordingStreamHandler handler = new RecordingStreamHandler();
+    provider.stream(request, handler);
+
+    assertTrue(serverLatch.await(5, TimeUnit.SECONDS), "server should receive request");
+    RecordedRequest req = recorded.get();
+    assertNotNull(req);
+    assertEquals(
+        "interleaved-thinking-2025-05-14",
+        req.firstHeader("anthropic-beta"),
+        "BUDGET mode with reasoning enabled must send interleaved thinking beta header");
+
+    JsonNode bodyJson = mapper.readTree(req.bodyBytes);
+    assertEquals("enabled", bodyJson.path("thinking").path("type").asText());
+    assertEquals(2048, bodyJson.path("thinking").path("budget_tokens").asInt());
+    assertEquals("summarized", bodyJson.path("thinking").path("display").asText());
+    assertFalse(bodyJson.has("output_config"), "BUDGET mode must omit output_config");
+  }
+
+  /**
+   * 验证在 ADAPTIVE 思考模式下即使启用推理，线缆请求也不发送 anthropic-beta，且 body 中 thinking 包含 display=summarized 与
+   * output_config.effort。
+   */
+  @Test
+  void should_not_send_anthropic_beta_header_when_adaptive_thinking_enabled() throws Exception {
+    AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
+    CountDownLatch serverLatch = new CountDownLatch(1);
+
+    server.createContext(
+        "/v1/messages",
+        exchange -> {
+          recorded.set(recordExchange(exchange));
+          serverLatch.countDown();
+          respondSseText(exchange, "msg_adaptive_nobeta_1", "ok");
+        });
+
+    ProviderDescriptor descriptor = createDescriptor(null);
+    AnthropicModelProvider provider = (AnthropicModelProvider) adapter.create(descriptor);
+
+    ModelDescriptor reasoningModel = createReasoningModelDescriptor("claude-3-7-sonnet");
+    ModelVariant variant =
+        new ModelVariant("adaptive-v", 8192, null, null, null, null, null, List.of(), "low");
+    ProviderRequest request =
+        new ProviderRequest(
+            reasoningModel,
+            variant,
+            List.of(userTextMsg("test")),
+            List.of(),
+            ProviderCacheControl.none());
+
+    RecordingStreamHandler handler = new RecordingStreamHandler();
+    provider.stream(request, handler);
+
+    assertTrue(serverLatch.await(5, TimeUnit.SECONDS), "server should receive request");
+    RecordedRequest req = recorded.get();
+    assertNotNull(req);
+    assertNull(
+        req.firstHeader("anthropic-beta"),
+        "ADAPTIVE mode must omit anthropic-beta header even when reasoning is enabled");
+
+    JsonNode bodyJson = mapper.readTree(req.bodyBytes);
+    assertEquals("adaptive", bodyJson.path("thinking").path("type").asText());
+    assertEquals("summarized", bodyJson.path("thinking").path("display").asText());
+    assertEquals("low", bodyJson.path("output_config").path("effort").asText());
+  }
+
+  /** 验证即使配置为 BUDGET 模式，当推理未实际启用（reasoningEffort 为 none）时，线缆请求不发送 anthropic-beta。 */
+  @Test
+  void should_not_send_anthropic_beta_header_when_budget_mode_but_reasoning_disabled()
+      throws Exception {
+    AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
+    CountDownLatch serverLatch = new CountDownLatch(1);
+
+    server.createContext(
+        "/v1/messages",
+        exchange -> {
+          recorded.set(recordExchange(exchange));
+          serverLatch.countDown();
+          respondSseText(exchange, "msg_budget_noreason_1", "ok");
+        });
+
+    AnthropicProviderAdapter budgetAdapter =
+        new AnthropicProviderAdapter(
+            transport, TEST_API_KEY, new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
+    ProviderDescriptor descriptor = createDescriptor(null);
+    AnthropicModelProvider provider = (AnthropicModelProvider) budgetAdapter.create(descriptor);
+
+    ModelDescriptor reasoningModel = createReasoningModelDescriptor("MiniMax-M3");
+    ModelVariant variantNone =
+        new ModelVariant("none-v", 8192, null, null, null, null, null, List.of(), "none");
+    ProviderRequest request =
+        new ProviderRequest(
+            reasoningModel,
+            variantNone,
+            List.of(userTextMsg("test")),
+            List.of(),
+            ProviderCacheControl.none());
+
+    RecordingStreamHandler handler = new RecordingStreamHandler();
+    provider.stream(request, handler);
+
+    assertTrue(serverLatch.await(5, TimeUnit.SECONDS), "server should receive request");
+    RecordedRequest req = recorded.get();
+    assertNotNull(req);
+    assertNull(
+        req.firstHeader("anthropic-beta"),
+        "BUDGET mode with reasoningEffort=none must omit anthropic-beta header");
+
+    JsonNode bodyJson = mapper.readTree(req.bodyBytes);
+    assertFalse(bodyJson.has("thinking"), "reasoningEffort=none must omit thinking object");
+    assertFalse(bodyJson.has("output_config"), "reasoningEffort=none must omit output_config");
+  }
+
   // ==========================================
   // Group 2: Model Name Pass-Through (8 upstream model name parameter cases)
   // ==========================================
@@ -548,7 +695,9 @@ class AnthropicMessagesWireTest {
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
 
     assertEquals("adaptive", root.path("thinking").path("type").asText());
+    assertEquals("summarized", root.path("thinking").path("display").asText());
     assertEquals("low", root.path("output_config").path("effort").asText());
+    assertFalse(encoded.requiresInterleavedThinkingBeta());
   }
 
   /** 验证通用请求参数在 ModelVariant 中配置后能正常透传至线缆。 */
@@ -1761,6 +1910,16 @@ class AnthropicMessagesWireTest {
         Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
         true,
         false,
+        defaultPricing());
+  }
+
+  private ModelDescriptor createReasoningModelDescriptor(String modelName) {
+    return new ModelDescriptor(
+        "anthropic-wire-test",
+        modelName,
+        Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
+        true,
+        true,
         defaultPricing());
   }
 

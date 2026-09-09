@@ -85,6 +85,64 @@ test('真实用例矩阵 capability 声明严格对齐规范（text_cache/reason
   assert.deepEqual([...readTurnCase.requires].sort(), ['canvas-storage', 'real', 'tools'])
 })
 
+test('真实工具 case 文案契约：OpenAI Responses 与 MiniMax Anthropic 明确由确定性单测覆盖 reasoning/replay，其余模型保持首轮推理强证据', () => {
+  // 测试意图：锁定 OpenAI Responses 与 MiniMax Anthropic 真实工具用例文档对齐（不依赖外部机会性/随机 reasoning，由单测覆盖结构），而 Google 与 DeepSeek 保持严格首轮推理断言描述。
+  const deterministicToolCases = [
+    { id: 'real.tool.openai_responses', title: 'OpenAI Responses' },
+    { id: 'real.tool.minimax_anthropic', title: 'MiniMax Anthropic' },
+  ]
+  for (const { id, title } of deterministicToolCases) {
+    const c = ALL_CASES.find((item) => item.id === id)
+    assert.ok(c, `${id} missing`)
+    assert.ok(
+      c.docs.includes(`${title} 的 reasoning/replay 结构由确定性 provider 单测覆盖`),
+      `${id} docs mismatch: ${c.docs}`,
+    )
+    assert.equal(
+      c.docs.includes('首轮推理证据'),
+      false,
+      `${id} docs must not require first-turn reasoning evidence: ${c.docs}`,
+    )
+  }
+
+  const strongReasoningSuffixes = ['google_gemini', 'deepseek_chat']
+  for (const suffix of strongReasoningSuffixes) {
+    const c = ALL_CASES.find((item) => item.id === `real.tool.${suffix}`)
+    assert.ok(c, `real.tool.${suffix} missing`)
+    assert.ok(
+      c.docs.includes('首轮推理证据'),
+      `${suffix} docs must retain first-turn reasoning assertion: ${c.docs}`,
+    )
+  }
+})
+
+test('真实文本缓存 case 文案契约：Google 明确只观测 cache hit 且由单测覆盖映射，其余模型保持强断言', () => {
+  // 测试意图：验证 Google Gemini implicit cache 机会性能力与其余三家强断言在文档描述中的清晰分流。
+  const googleCase = ALL_CASES.find((c) => c.id === 'real.text_cache.google_gemini')
+  assert.ok(googleCase, 'real.text_cache.google_gemini missing')
+  assert.ok(
+    googleCase.docs.includes(
+      'Google Gemini implicit cache 为服务端机会性能力，只观测 cache hit，确定性 cachedContentTokenCount 映射由 provider 单测覆盖',
+    ),
+    `google text cache docs mismatch: ${googleCase.docs}`,
+  )
+  assert.equal(
+    googleCase.docs.includes('最终要求至少一个 follow-up cacheReadTokens > 0'),
+    false,
+    `google text cache docs must not assert cacheReadTokens > 0: ${googleCase.docs}`,
+  )
+
+  const otherCacheSuffixes = ['openai_responses', 'minimax_anthropic', 'deepseek_chat']
+  for (const suffix of otherCacheSuffixes) {
+    const c = ALL_CASES.find((item) => item.id === `real.text_cache.${suffix}`)
+    assert.ok(c, `real.text_cache.${suffix} missing`)
+    assert.ok(
+      c.docs.includes('最终要求至少一个 follow-up cacheReadTokens > 0'),
+      `${suffix} text cache docs must retain cacheReadTokens > 0 assertion: ${c.docs}`,
+    )
+  }
+})
+
 test('四指定模型声明式定义与 seed/credential 公共契约完全一致', () => {
   // 测试意图：验证模型定义与并行切片所实现的 seed 及供应商配置契约完全一致，确保 providerName、modelName、variant 及 providerType 无拼写偏离。
   assert.equal(REAL_MODEL_DEFINITIONS.length, 4)

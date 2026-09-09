@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -71,9 +72,11 @@ class AnthropicSecurityAndArchitectureTest {
     AnthropicEncodedRequest encoded =
         new AnthropicEncodedRequest(
             "{\"secret\":\"payload_content\"}".getBytes(StandardCharsets.UTF_8),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            true);
     assertFalse(encoded.toString().contains("secret"));
     assertFalse(encoded.toString().contains("payload_content"));
+    assertTrue(encoded.toString().contains("requiresInterleavedThinkingBeta=true"));
   }
 
   @Test

@@ -139,7 +139,9 @@ class AnthropicThinkingTest {
 
     assertEquals(modelName, turn1WireRoot.path("model").asText());
     assertEquals("adaptive", turn1WireRoot.path("thinking").path("type").asText());
+    assertEquals("summarized", turn1WireRoot.path("thinking").path("display").asText());
     assertEquals("high", turn1WireRoot.path("output_config").path("effort").asText());
+    assertFalse(encodedTurn1.requiresInterleavedThinkingBeta());
     assertFalse(
         turn1WireRoot.path("thinking").has("budget_tokens"),
         "kk-studio uses adaptive thinking without budget_tokens");
@@ -868,7 +870,9 @@ class AnthropicThinkingTest {
     assertEquals("MiniMax-M3", turn1WireRoot.path("model").asText());
     assertEquals("enabled", turn1WireRoot.path("thinking").path("type").asText());
     assertEquals(8192, turn1WireRoot.path("thinking").path("budget_tokens").asInt());
+    assertEquals("summarized", turn1WireRoot.path("thinking").path("display").asText());
     assertFalse(turn1WireRoot.has("output_config"), "BUDGET mode must omit output_config");
+    assertTrue(encodedTurn1.requiresInterleavedThinkingBeta());
 
     String frozenPrefixHash = encodedTurn1.sourcePrefixHash();
     assertNotNull(frozenPrefixHash);
