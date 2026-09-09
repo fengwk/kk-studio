@@ -1,7 +1,7 @@
-import { Bot, ChevronRight, Cpu, Pencil, ServerCog, Trash2 } from 'lucide-react'
+import { Bot, ChevronRight, Cpu, Pencil, Server, ServerCog, Trash2 } from 'lucide-react'
 import { useI18n } from '@/shared/i18n'
 
-type ResourceIcon = 'agent' | 'model' | 'provider'
+type ResourceIcon = 'agent' | 'model' | 'provider' | 'server'
 
 export type ResourceCardRow =
   | {
@@ -69,6 +69,8 @@ export function ResourceCardLayout({
   onEdit,
   onDelete,
   deletePending,
+  editAriaLabel,
+  deleteAriaLabel,
 }: {
   icon: ResourceIcon
   title: string
@@ -78,9 +80,11 @@ export function ResourceCardLayout({
   onEdit: () => void
   onDelete: () => void
   deletePending: boolean
+  editAriaLabel?: string
+  deleteAriaLabel?: string
 }) {
   const { t } = useI18n()
-  const Icon = icon === 'agent' ? Bot : icon === 'model' ? Cpu : ServerCog
+  const Icon = icon === 'agent' ? Bot : icon === 'model' ? Cpu : icon === 'provider' ? ServerCog : Server
 
   return (
     <article className="info-card">
@@ -140,7 +144,7 @@ export function ResourceCardLayout({
         <button
           className="action-enter-btn"
           type="button"
-          aria-label={`${t('ai.catalog.action.edit')} ${title}`}
+          aria-label={editAriaLabel ?? `${t('ai.catalog.action.edit')} ${title}`}
           onClick={onEdit}
         >
           <Pencil aria-hidden="true" />
@@ -149,7 +153,7 @@ export function ResourceCardLayout({
         <button
           className="action-enter-btn danger"
           type="button"
-          aria-label={`${t('ai.catalog.action.delete')} ${title}`}
+          aria-label={deleteAriaLabel ?? `${t('ai.catalog.action.delete')} ${title}`}
           onClick={onDelete}
           disabled={deletePending}
         >

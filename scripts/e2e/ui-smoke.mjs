@@ -198,6 +198,19 @@ function assertBoxesDoNotOverlap(left, right, label) {
   assert(!overlaps, `${label} bounding boxes overlap`)
 }
 
+async function assertSubbarActionRightAligned(page, action, label) {
+  const [subbarBox, actionBox] = await Promise.all([
+    page.locator('.subbar').boundingBox(),
+    action.boundingBox(),
+  ])
+  assert(subbarBox && actionBox, `${label} bounding box is missing`)
+  const rightGap = subbarBox.x + subbarBox.width - actionBox.x - actionBox.width
+  assert(
+    rightGap >= 16 && rightGap <= 32,
+    `${label} must align to the subbar right edge; gap=${rightGap}`,
+  )
+}
+
 function listArtifacts(caseDir, reportDir) {
   if (!existsSync(caseDir)) return []
   return readdirSync(caseDir)
@@ -539,6 +552,19 @@ async function main(argv) {
       state: 'visible',
       timeout: 15_000,
     })
+    const createButton = page.getByRole('button', { name: /创建环境|Create Environment/ })
+    await createButton.waitFor({ state: 'visible' })
+    await assertSubbarActionRightAligned(page, createButton, 'Create Environment')
+    const environmentCards = page.locator('.environment-card')
+    assert(await environmentCards.count() > 0, 'environments page has no cards')
+    for (const card of await environmentCards.all()) {
+      const actions = card.locator('.chat-card-foot button')
+      assert(await actions.count() === 2, 'environment card must expose only Edit and Delete')
+      assert(
+        await actions.filter({ hasText: /重新生成 Token|Rotate Token/ }).count() === 0,
+        'environment card must not expose Rotate Token',
+      )
+    }
     await shot(caseArt, 'environments')
     expectNoFatal(pageErrors, consoleErrors)
     const body = await page.locator('body').innerText()
@@ -711,8 +737,15 @@ async function main(argv) {
   })
 
   await run('ui.nav.roundtrip', '主导航往返无崩溃', async (caseArt) => {
-    for (const p of ['/chats', '/canvas', '/agents', '/models', '/providers', '/environments', '/chats']) {
+    for (const p of ['/chats', '/canvas', '/agents', '/models', '/providers', '/environments', '/mcp-servers', '/chats']) {
       await goto(p)
+      if (p === '/mcp-servers') {
+        const createButton = page.getByRole('button', {
+          name: /创建 MCP 服务|Create MCP Server/,
+        })
+        await createButton.waitFor({ state: 'visible' })
+        await assertSubbarActionRightAligned(page, createButton, 'Create MCP Server')
+      }
       expectNoFatal(pageErrors, consoleErrors)
     }
     await shot(caseArt, 'nav-end')
