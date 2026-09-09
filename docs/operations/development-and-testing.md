@@ -413,7 +413,7 @@ node scripts/e2e/ui-smoke.mjs \
 - 真实 E2E 要求以下四组完整 pair，任一组缺失或只提供一半都会在同步前失败：
   - `TEST_GOOGLE_BASE_URL` + `TEST_GOOGLE_API_KEY`
   - `TEST_OPENAI_BASE_URL` + `TEST_OPENAI_API_KEY`
-  - `TEST_MINIMAX_ANTHROPIC_BASE_URL` + `TEST_MINIMAX_ANTHROPIC_API_KEY`
+  - `TEST_ANTHROPIC_BASE_URL` + `TEST_ANTHROPIC_API_KEY`
   - `TEST_DEEPSEEK_BASE_URL` + `TEST_DEEPSEEK_API_KEY`
 - 对应模型固定为 `google/gemini-3.8-flash`、`openai/gpt-5.6-luna`、
   `minimax-anthropic/MiniMax-M3` 和 `deepseek/deepseek-v4-flash`，不会静默换
