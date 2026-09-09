@@ -73,6 +73,28 @@ class HarnessNamesTest {
   }
 
   @Test
+  void newSessionNameSkipsBlankTextContents() {
+    // 多段内容按顺序寻找首个非空白文本；前置空白文本不能导致 UUID fallback。
+    UUID sessionId = TestIds.id(109);
+    NewThreadCommand command =
+        new NewThreadCommand(
+            new CustomMessageCommandPayload(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(
+                        new TextMessageContent(" \n "),
+                        new TextMessageContent("  first usable text  "),
+                        new TextMessageContent("later text")))),
+            UUID.randomUUID());
+
+    AcceptedCommands accepted =
+        runtime.acceptCommands(
+            newSession(sessionId, TestIds.id(110), List.of(command)), AcceptancePreflight.IDENTITY);
+
+    assertEquals("first usable text", accepted.session().name());
+  }
+
+  @Test
   void sessionNameTextIsTruncatedToFortyCodePointsWithoutEllipsis() {
     // 超长文本只保留前 40 个 Unicode 码点，不追加省略号；按码点边界切分（emoji 不被劈开）。
     UUID sessionId = TestIds.id(103);

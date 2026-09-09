@@ -495,29 +495,21 @@ export function useAgentPaneController({
     }
   }
 
-  /** 重命名成功后失效相应查询：Session 名称投影到 Session/Thread 列表与 Chat 列表。 */
+  /** 重命名成功后失效相应查询：Session 摘要、Thread 投影与 Chat 列表。 */
   async function invalidateAfterRename(target: RenameTarget): Promise<void> {
-    const sessionId = target.kind === 'session'
-      ? target.id
-      : (queryClient.getQueryData<HarnessThreadSnapshotDTO>(
-        queryKeys.threads.snapshot(target.id),
-      )?.thread.sessionId ?? '')
     await Promise.all([
       queryClient.invalidateQueries({
         queryKey: ['agent-pane', 'sessions', owner.type, owner.id],
       }),
-      queryClient.invalidateQueries({
-        // thread 列表以父 Session 为主键；重命名 Thread 时前缀失效所有 Session 的
-        // thread 列表（重命名返回 picker 时按需重新拉取）。重命名 Session 不需要
-        // thread 列表失效，因为列表内容不含 Session 名称。
-        queryKey: target.kind === 'thread'
-          ? ['agent-pane', 'threads']
-          : sessionId != null ? ['agent-pane', 'threads', sessionId] : undefined,
-      }),
       ...(target.kind === 'thread'
-        ? [queryClient.invalidateQueries({
-          queryKey: queryKeys.threads.snapshot(target.id),
-        })]
+        ? [
+            queryClient.invalidateQueries({
+              queryKey: ['agent-pane', 'threads'],
+            }),
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.threads.snapshot(target.id),
+            }),
+          ]
         : []),
       queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
     ])

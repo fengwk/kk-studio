@@ -275,6 +275,30 @@ describe('SelectionPanel', () => {
     expect(within(option).getByText('已选')).toBeInTheDocument()
   })
 
+  it('activates a row rename button with Enter without selecting the row', async () => {
+    // 行内重命名按钮拥有 Enter；事件不能冒泡成 SelectionPanel 的 active-row 提交。
+    const user = userEvent.setup()
+    const onRename = vi.fn()
+    const onSelect = vi.fn()
+    render(
+      <SelectionPanel
+        title="选择 Session"
+        items={[{ id: 's1', title: 'Alpha' }]}
+        renameLabel="重命名"
+        onRename={onRename}
+        onSelect={onSelect}
+        onClose={vi.fn()}
+      />,
+    )
+    const rename = screen.getByRole('button', { name: '重命名' })
+    rename.focus()
+
+    await user.keyboard('{Enter}')
+
+    expect(onRename).toHaveBeenCalledWith('s1')
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
   it('falls back to the previously selected item when it reappears after filtering', async () => {
     const user = userEvent.setup()
     render(

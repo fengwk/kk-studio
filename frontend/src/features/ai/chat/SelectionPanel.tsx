@@ -245,6 +245,11 @@ export function SelectionPanel({
                   aria-label={renameLabel}
                   title={renameLabel}
                   disabled={selectionPending}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.stopPropagation()
+                    }
+                  }}
                   onClick={(event) => {
                     event.stopPropagation()
                     setActiveId(item.id)

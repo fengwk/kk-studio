@@ -104,7 +104,7 @@ Session (KEY SHARE / FOR UPDATE)
   -> Work（target type + UUID 升序）
 ```
 
-在普通的 Command 写入与会话创建路径中，对 Session 获取 `FOR KEY SHARE` 共享锁，允许多个同级 Thread 并发执行写入；在涉及删除、独占变更或 Session 重命名（`renameSession` 使用 `lockSessionForUpdate`）时获取 `FOR UPDATE` 排他锁。
+在普通的 Command 写入、ThreadProcessor Entry 物化、手工压缩与会话创建路径中，对 Session 获取 `FOR KEY SHARE` 共享锁，允许多个同级 Thread 并发执行写入；在涉及删除、独占变更或 Session 重命名（`renameSession` 使用 `lockSessionForUpdate`）时获取 `FOR UPDATE` 排他锁。任何会在 Thread 行锁之后插入 `harness_entry` 的事务都必须先持有父 Session 的 `KEY SHARE`，避免外键在插入时隐式补取 Session 锁并与深删除形成 `Thread -> Session` 逆序。
 
 [`PostgresqlHarnessTransaction`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessTransaction.java) 在事务句柄内记录当前达到的最高锁阶梯等级（LockRank）、Thread UUID、Tool 调用序号以及 WorkTarget 排序。当检测到逆序获取锁的操作时，立即抛出 `IllegalStateException`。事务句柄严格绑定到创建它的单一线程，仅在当前回调作用域内生效。当事务执行期间发生任何底层数据库异常时，句柄会捕获并记录该首个故障（poisoning 防护），并在回调结束前通过 `rethrowDatabaseFailure()` 强制重新抛出，阻断破坏状态的提交。
 

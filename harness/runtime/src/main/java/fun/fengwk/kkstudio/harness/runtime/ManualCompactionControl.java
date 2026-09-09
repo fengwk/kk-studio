@@ -41,9 +41,9 @@ import java.util.UUID;
 /**
  * Target Thread 手动压缩控制面：处理 availability 查询与 compactThread 提交。
  *
- * <p>执行顺序严格保持：第一短事务 plan（锁定 Thread，校验 version/availability/boundary） -&gt; 事务外 resolve -&gt;
- * 机械一致性校验 -&gt; 第二短事务 commit（带 source head / Command 快照 CAS 原子提交 COMPACTION Turn 与 MODEL Work）。
- * 失败与取消保持与自动压缩一致的单一事实源。
+ * <p>执行顺序严格保持：第一短事务 plan（Session KEY SHARE -&gt; Thread，校验 version/availability/boundary） -&gt; 事务外
+ * resolve -&gt; 机械一致性校验 -&gt; 第二短事务 commit（同锁序，带 source head / Command 快照 CAS 原子提交 COMPACTION Turn
+ * 与 MODEL Work）。失败与取消保持与自动压缩一致的单一事实源。
  */
 final class ManualCompactionControl {
 
@@ -70,12 +70,7 @@ final class ManualCompactionControl {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(
         tx -> {
-          ThreadState thread =
-              tx.lockThread(threadId)
-                  .orElseThrow(
-                      () ->
-                          new HarnessRuntimeNotFoundException(
-                              "thread " + threadId + " does not exist"));
+          ThreadState thread = lockThreadWithSession(tx, threadId);
           EntryPath path = tx.loadEntryPath(thread.headEntryId());
           return manualDecision(tx, thread, path).availability();
         });
@@ -97,14 +92,9 @@ final class ManualCompactionControl {
     return store.transaction(tx -> commitManual(tx, command, manualPlan, result));
   }
 
-  /** 在首个事务中锁定 Thread、校验版本与可用性，并冻结供事务外解析的手动压缩规划。 */
+  /** 在首个事务中按 Session KEY SHARE -> Thread 锁序校验版本与可用性，并冻结供事务外解析的手动压缩规划。 */
   private ManualPlan planManual(HarnessStore.Transaction tx, CompactThreadCommand command) {
-    ThreadState thread =
-        tx.lockThread(command.threadId())
-            .orElseThrow(
-                () ->
-                    new HarnessRuntimeNotFoundException(
-                        "thread " + command.threadId() + " does not exist"));
+    ThreadState thread = lockThreadWithSession(tx, command.threadId());
     if (thread.version() != command.expectedVersion()) {
       throw staleManualVersion(command, thread);
     }
@@ -204,12 +194,7 @@ final class ManualCompactionControl {
       ManualPlan plan,
       TurnResolver.Result result) {
     Instant now = clock.instant();
-    ThreadState thread =
-        tx.lockThread(command.threadId())
-            .orElseThrow(
-                () ->
-                    new HarnessRuntimeNotFoundException(
-                        "thread " + command.threadId() + " does not exist"));
+    ThreadState thread = lockThreadWithSession(tx, command.threadId());
     if (thread.version() != command.expectedVersion()
         || !thread.headEntryId().equals(plan.sourceHeadEntryId())) {
       throw staleManualVersion(command, thread);
@@ -295,6 +280,28 @@ final class ManualCompactionControl {
       tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     }
     return new CompactThreadResult(advanced, plan.turnStartEntryId(), null);
+  }
+
+  /** 按 Session KEY SHARE -&gt; Thread FOR UPDATE 获取一致 Thread，避免后续 Entry 外键锁与 Session 深删除形成逆序。 */
+  private static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
+    ThreadState immutable =
+        tx.findThread(threadId)
+            .orElseThrow(
+                () ->
+                    new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
+    tx.lockSessionForKeyShare(immutable.sessionId())
+        .orElseThrow(
+            () -> new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
+    ThreadState locked =
+        tx.lockThread(threadId)
+            .orElseThrow(
+                () ->
+                    new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
+    if (!locked.sessionId().equals(immutable.sessionId())) {
+      throw new IllegalStateException(
+          "thread " + threadId + " relocated while acquiring its session lock");
+    }
+    return locked;
   }
 
   private static boolean hasUserDemand(List<ThreadCommand> queued) {
