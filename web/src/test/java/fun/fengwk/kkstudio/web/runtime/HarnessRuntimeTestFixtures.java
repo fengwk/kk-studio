@@ -110,6 +110,12 @@ public final class HarnessRuntimeTestFixtures {
         id, id(1), headEntryId, CREATION_REQUEST_HASH, "thread", true, 4, 3, NOW, NOW);
   }
 
+  /** rename 后的 Thread state：name 替换为 "new thread name"、version 由 3 精确递增到 4。 */
+  public static ThreadState renamedThread(UUID id) {
+    return new ThreadState(
+        id, id(1), id(1), CREATION_REQUEST_HASH, "new thread name", true, 4, 4, NOW, NOW);
+  }
+
   public static Session session() {
     return new Session(id(1), "session", NOW);
   }
@@ -118,6 +124,12 @@ public final class HarnessRuntimeTestFixtures {
   public static ThreadSnapshot idleSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(thread(id(1)), path, List.of(), null, List.of(), List.of());
+  }
+
+  /** rename 后的权威 IDLE 快照：Thread name/version 与 {@link #renamedThread} 一致。 */
+  public static ThreadSnapshot renamedIdleSnapshot() {
+    EntryPath path = new EntryPath(List.of(rootEntry()));
+    return new ThreadSnapshot(renamedThread(id(1)), path, List.of(), null, List.of(), List.of());
   }
 
   /** IDLE 快照（指定 thread id）。 */
