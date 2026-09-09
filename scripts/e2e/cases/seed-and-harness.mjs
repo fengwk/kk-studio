@@ -15,12 +15,14 @@ import {
   branchSettingsOf,
   chatOwner,
   createChat,
+  createNewSession,
+  createNewThread,
   getThreadSnapshot,
   listChatSessions,
   listSessionEntries,
   listSessionThreads,
-  createEntryThread,
-  createNewSession,
+  renameSession,
+  renameThread,
   setAgentCommand,
   setEnvironmentCommand,
   setModelCommand,
@@ -251,6 +253,17 @@ registerCase({
       'created Session missing from Chat session list',
     )
     assert(sessions[0]?.sessionId === sessionId, `expected newest-first: ${JSON.stringify(sessions)}`)
+    // Session 默认名派生自首个非空白用户文本（与本 case 文本一致且 < 40 码点）；Thread name=main。
+    assert(
+      sessions[0]?.name === `materialize ${sessionId.slice(0, 8)}`,
+      JSON.stringify(sessions[0]),
+    )
+    assert(thread.name === 'main', JSON.stringify(thread))
+    // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
+    await ctx.call(
+      'DELETE',
+      `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+    )
   },
 })
 
@@ -717,10 +730,10 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.entry_creation_same_session',
+  id: 'thread.new_thread_same_session',
   level: 'L1',
-  title: 'ENTRY 同 Session 分支创建',
-  docs: 'ENTRY target 在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）：sessionId 不变、accepted command sequence=1；quiescent 后分支 Thread snapshot path 必须包含 startEntry 与分支 USER；原 Thread head/version/nextCommandSequence 不变；ENTRY 非法 startEntryId（不存在 404/跨 Session 400）',
+  title: 'NEW_THREAD 同 Session 分支创建并派生 branch 默认名',
+  docs: 'NEW_THREAD target 在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）：sessionId 不变、accepted command sequence=1、branch Thread name 精确等于 branch-<threadId 前 8 位>（服务端派生，不进创建请求）；quiescent 后分支 Thread snapshot path 必须包含 startEntry 与分支 USER；原 Thread head/version/nextCommandSequence/name 不变；NEW_THREAD 非法 startEntryId（不存在 404/跨 Session 400）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -742,18 +755,21 @@ registerCase({
       yoloEnabled: false,
       commands: [userMessageCommand(`rebind materialize ${cid().slice(0, 8)}`, cid())],
     })
+    assert(accepted.thread.name === 'main', JSON.stringify(accepted.thread))
     await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
     const idle = await getThreadSnapshot(ctx, threadId)
     const thread = idle.thread
+    assert(thread.name === 'main', JSON.stringify(thread))
     const startEntryId = String(thread.headEntryId)
     const mainBefore = {
       headEntryId: String(thread.headEntryId),
       version: String(thread.version),
       nextCommandSequence: String(thread.nextCommandSequence),
+      name: String(thread.name),
     }
     const branchThreadId = cid()
     const branchUserText = `branch on head ${cid().slice(0, 8)}`
-    const branched = await createEntryThread(ctx, {
+    const branched = await createNewThread(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       startEntryId,
@@ -761,13 +777,17 @@ registerCase({
       yoloEnabled: thread.yoloEnabled,
       commands: [userMessageCommand(branchUserText, cid())],
     })
-    // ENTRY accepted 后 processor 可能已消费分支命令：不锁定 response head=startEntry；
-    // 只锁定 session/thread 归属与 accepted command sequence=1。
+    // NEW_THREAD accepted 后 processor 可能已消费分支命令：不锁定 response head=startEntry；
+    // 只锁定 session/thread 归属、branch 默认名与 accepted command sequence=1。
     assert(
       String(branched.thread.sessionId) === String(thread.sessionId),
       JSON.stringify(branched.thread),
     )
     assert(String(branched.thread.threadId) === branchThreadId, JSON.stringify(branched.thread))
+    assert(
+      branched.thread.name === `branch-${String(branchThreadId).slice(0, 8)}`,
+      JSON.stringify(branched.thread),
+    )
     assert(
       String(branched.acceptedCommands[0].sequence) === '1'
         && branched.acceptedCommands[0].type === 'USER_MESSAGE'
@@ -775,12 +795,13 @@ registerCase({
       JSON.stringify(branched),
     )
     assert(branched.rootEntry.entryId === accepted.rootEntry.entryId, JSON.stringify(branched.rootEntry))
-    // 原 Thread 不受影响（head/version/nextCommandSequence 逐字段不变）。
+    // 原 Thread 不受影响（head/version/nextCommandSequence/name 逐字段不变）。
     const after = await getThreadSnapshot(ctx, threadId)
     assert(
       String(after.thread.headEntryId) === mainBefore.headEntryId
         && String(after.thread.version) === mainBefore.version
-        && String(after.thread.nextCommandSequence) === mainBefore.nextCommandSequence,
+        && String(after.thread.nextCommandSequence) === mainBefore.nextCommandSequence
+        && String(after.thread.name) === mainBefore.name,
       JSON.stringify({ before: mainBefore, after: after.thread }),
     )
     // quiescent 后分支 Thread snapshot path 必须包含 startEntry 与分支 USER。
@@ -813,7 +834,7 @@ registerCase({
     // 不存在的 startEntryId => 404（Runtime 找不到 Entry）。
     await expectHttpError(
       () =>
-        createEntryThread(ctx, {
+        createNewThread(ctx, {
           owner: chatOwner(chat.id),
           sessionId,
           startEntryId: cid(),
@@ -823,6 +844,11 @@ registerCase({
         }),
       { status: 404 },
     )
+    // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
+    await ctx.call(
+      'DELETE',
+      `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+    )
   },
 })
 
@@ -830,7 +856,7 @@ registerCase({
   id: 'thread.session_entry_tree',
   level: 'L1',
   title: '完整 Session Entry Tree 保留非当前历史分支',
-  docs: 'GET /api/harness/sessions/{sessionId}/entries 返回 Session 全部 immutable Entries；ENTRY 创建新 Thread 形成分叉后，snapshot 仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系；listSessionThreads 反映两条 Thread',
+  docs: 'GET /api/harness/sessions/{sessionId}/entries 返回 Session 全部 immutable Entries；NEW_THREAD 创建新 Thread 形成分叉后，snapshot 仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系；listSessionThreads 反映两条 Thread',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -873,9 +899,9 @@ registerCase({
     await waitForDurableMessages(ctx, threadId, [trunkMessage, originalMessage])
     const original = await getThreadSnapshot(ctx, threadId)
 
-    // 分支：ENTRY 在 branchPoint 下开新 Thread，写 alternate。
+    // 分支：NEW_THREAD 在 branchPoint 下开新 Thread，写 alternate。
     const alternateThreadId = cid()
-    await createEntryThread(ctx, {
+    await createNewThread(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       startEntryId: branchPointEntryId,
@@ -935,14 +961,19 @@ registerCase({
       String(original.thread.threadId) === String(threadId),
       `original Thread unchanged: ${JSON.stringify(original.thread)}`,
     )
+    // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
+    await ctx.call(
+      'DELETE',
+      `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+    )
   },
 })
 
 registerCase({
-  id: 'thread.entry_cross_session_rejected',
+  id: 'thread.new_thread_cross_session_rejected',
   level: 'L1',
-  title: '跨 Session ENTRY 被拒绝',
-  docs: 'ENTRY target 使用另一 Session 的 entry id => 400（start entry 不在目标 Session）；两个原 Thread projection/session entries/thread list 均不变；预分配 rejectedThreadId 的 snapshot 404（未创建）',
+  title: '跨 Session NEW_THREAD 被拒绝',
+  docs: 'NEW_THREAD target 使用另一 Session 的 entry id => 400（start entry 不在目标 Session）；两个原 Thread projection/session entries/thread list 均不变；预分配 rejectedThreadId 的 snapshot 404（未创建）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -996,11 +1027,11 @@ registerCase({
     )?.entryId
     assert(secondRootEntryId, `second Session must have a ROOT entry: ${JSON.stringify(beforeSecondEntries)}`)
 
-    // 预分配 rejectedThreadId：用第二 Session 的 ROOT entry 在第一 Session 下提交错误 ENTRY => 400。
+    // 预分配 rejectedThreadId：用第二 Session 的 ROOT entry 在第一 Session 下提交错误 NEW_THREAD => 400。
     const rejectedThreadId = cid()
     await expectHttpError(
       () =>
-        createEntryThread(ctx, {
+        createNewThread(ctx, {
           owner: chatOwner(chat.id),
           sessionId: firstSessionId,
           startEntryId: secondRootEntryId,
@@ -1045,6 +1076,11 @@ registerCase({
     await expectHttpError(
       () => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`),
       { status: 404 },
+    )
+    // 清理：删除 owner Chat（连带两个 Session/Thread/Entry 资源）。
+    await ctx.call(
+      'DELETE',
+      `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
     )
   },
 })
@@ -1100,6 +1136,159 @@ registerCase({
         }),
       { status: 409, messageIncludes: /version/i },
     )
+  },
+})
+
+registerCase({
+  id: 'thread.new_session_default_names',
+  level: 'L1',
+  title: 'NEW_SESSION 派生 Session 默认名与 root main Thread 名',
+  docs: 'NEW_SESSION 创建请求无 name 输入：Session.name 由服务端从初始批次末尾类用户消息的首个非空白文本派生（Unicode 空白折叠为单空格、截前 40 个 Unicode 码点、无省略号），accepted/owner 摘要/fresh 查询一致；root Thread.name 恒为 main 且在 snapshot/Thread 摘要中必填非空；Session/Thread UUID identity 保持不变；不依赖真实 Provider（缺失 Agent 确定性 PLANNING_FAILED）',
+  async run(ctx) {
+    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
+    if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
+    const chat = await createChat(ctx, {
+      title: `e2e-default-names-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
+    })
+    const sessionId = cid()
+    const threadId = cid()
+    const suffix = cid().slice(0, 8)
+    // 同时覆盖空白折叠与 40 码点截断（无省略号）。
+    const firstUserText = `默认命名探测 ${suffix}  折叠空白\n行内续写 ${'长'.repeat(60)}`
+    const expectedSessionName = deriveSessionName(firstUserText)
+    try {
+      const accepted = await createNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId,
+        threadId,
+        rootSettings: branchSettingsOf(
+          { name: `e2e-default-names-missing-${suffix}` },
+          modelSelectionOf(ctx),
+        ),
+        yoloEnabled: false,
+        commands: [userMessageCommand(firstUserText, cid())],
+      })
+      assert(String(accepted.session.sessionId) === sessionId, JSON.stringify(accepted.session))
+      assert(accepted.session.name === expectedSessionName, JSON.stringify(accepted.session))
+      assert(accepted.thread.name === 'main', JSON.stringify(accepted.thread))
+      assert(String(accepted.thread.threadId) === threadId, JSON.stringify(accepted.thread))
+      // 等 turn 收敛后重新 fresh 查询：owner Session 摘要、Thread 摘要与 snapshot 一致派生。
+      await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+      const sessions = await listChatSessions(ctx, chat.id)
+      const summary = sessions.find((item) => String(item.sessionId) === sessionId)
+      assert(summary, JSON.stringify(sessions))
+      assert(summary.name === expectedSessionName, JSON.stringify(summary))
+      assert(String(summary.sessionId) === sessionId, JSON.stringify(summary))
+      const snapshot = await getThreadSnapshot(ctx, threadId)
+      assert(snapshot.thread.name === 'main', JSON.stringify(snapshot.thread))
+      const threads = await listSessionThreads(ctx, sessionId)
+      const threadSummary = threads.find((item) => String(item.threadId) === threadId)
+      assert(threadSummary, JSON.stringify(threads))
+      assert(threadSummary.name === 'main', JSON.stringify(threadSummary))
+    } finally {
+      await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 }).catch(() => {})
+      await ctx.call(
+        'DELETE',
+        `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      )
+    }
+  },
+})
+
+registerCase({
+  id: 'thread.session_thread_rename_persistence',
+  level: 'L1',
+  title: 'Session/Thread 重命名持久化：UUID 不变、Thread version 精确 +1、规范同名 no-op',
+  docs: 'PUT /api/harness/sessions/{id}/name {name} 与 PUT /api/harness/threads/{id}/name {name} 返回权威 DTO：Session（sessionId/name/createdAt）UUID/createdAt 不变、owner 摘要 fresh 持久；Thread 本体 UUID/head/session 不变、实际改名 version 精确 +1 且不产生 Command/Entry/Work，snapshot/Thread 摘要 fresh 持久；规范化同名（空白变体）no-op：返回 canonical name 且 version 零触碰；不依赖真实 Provider（缺失 Agent 确定性 PLANNING_FAILED）',
+  async run(ctx) {
+    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
+    if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
+    const chat = await createChat(ctx, {
+      title: `e2e-rename-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
+    })
+    const sessionId = cid()
+    const threadId = cid()
+    const suffix = cid().slice(0, 8)
+    try {
+      await createNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId,
+        threadId,
+        rootSettings: branchSettingsOf(
+          { name: `e2e-rename-missing-${suffix}` },
+          modelSelectionOf(ctx),
+        ),
+        yoloEnabled: false,
+        commands: [userMessageCommand(`rename materialize ${suffix}`, cid())],
+      })
+      await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+      const beforeSnapshot = await getThreadSnapshot(ctx, threadId)
+      const beforeThread = beforeSnapshot.thread
+      const beforeSessions = await listChatSessions(ctx, chat.id)
+      const beforeSummary = beforeSessions.find((item) => String(item.sessionId) === sessionId)
+      assert(beforeSummary, JSON.stringify(beforeSessions))
+
+      // Session 重命名：UUID/createdAt 不变，owner 摘要 fresh 持久。
+      const sessionName = `renamed session ${suffix}`
+      const renamedSession = await renameSession(ctx, sessionId, sessionName)
+      assert(renamedSession.name === sessionName, JSON.stringify(renamedSession))
+      assert(String(renamedSession.sessionId) === sessionId, JSON.stringify(renamedSession))
+      assert(
+        String(renamedSession.createdAt) === String(beforeSummary.createdAt),
+        JSON.stringify({ before: beforeSummary.createdAt, after: renamedSession.createdAt }),
+      )
+      const freshSessions = await listChatSessions(ctx, chat.id)
+      const freshSummary = freshSessions.find((item) => String(item.sessionId) === sessionId)
+      assert(freshSummary, JSON.stringify(freshSessions))
+      assert(freshSummary.name === sessionName, JSON.stringify(freshSummary))
+      assert(
+        String(freshSummary.createdAt) === String(beforeSummary.createdAt),
+        JSON.stringify(freshSummary),
+      )
+
+      // Thread 实际改名：version 精确 +1，UUID/head/session 不变；fresh snapshot/summary 持久。
+      const threadName = `renamed thread ${suffix}`
+      const renamedThread = await renameThread(ctx, threadId, threadName)
+      assert(renamedThread.name === threadName, JSON.stringify(renamedThread))
+      assert(String(renamedThread.threadId) === threadId, JSON.stringify(renamedThread))
+      assert(String(renamedThread.sessionId) === String(beforeThread.sessionId), JSON.stringify(renamedThread))
+      assert(String(renamedThread.headEntryId) === String(beforeThread.headEntryId), JSON.stringify(renamedThread))
+      assert(
+        String(Number(renamedThread.version)) === String(Number(beforeThread.version) + 1),
+        JSON.stringify({ before: beforeThread.version, after: renamedThread.version }),
+      )
+      const afterSnapshot = await getThreadSnapshot(ctx, threadId)
+      assert(afterSnapshot.thread.name === threadName, JSON.stringify(afterSnapshot.thread))
+      assert(String(afterSnapshot.thread.version) === String(renamedThread.version), JSON.stringify(afterSnapshot.thread))
+      // 重命名不得产生 Command/Entry/Work：queued 清空、entries 与 rename 前逐项一致。
+      assert(afterSnapshot.queuedCommands.length === 0, JSON.stringify(afterSnapshot.queuedCommands))
+      assert(afterSnapshot.modelInvocation === null, JSON.stringify(afterSnapshot.modelInvocation))
+      assert(
+        JSON.stringify(afterSnapshot.entries) === JSON.stringify(beforeSnapshot.entries),
+        'rename must not mutate entries',
+      )
+      const freshThreads = await listSessionThreads(ctx, sessionId)
+      const threadSummary = freshThreads.find((item) => String(item.threadId) === threadId)
+      assert(threadSummary, JSON.stringify(freshThreads))
+      assert(threadSummary.name === threadName, JSON.stringify(threadSummary))
+
+      // 规范化同名 no-op：空白变体折叠后与当前名相同 => 200 canonical name、version 零触碰。
+      const noop = await renameThread(ctx, threadId, `  ${threadName}  `)
+      assert(noop.name === threadName, JSON.stringify(noop))
+      assert(String(noop.version) === String(renamedThread.version), JSON.stringify(noop))
+      const noopSnapshot = await getThreadSnapshot(ctx, threadId)
+      assert(String(noopSnapshot.thread.version) === String(renamedThread.version), JSON.stringify(noopSnapshot.thread))
+    } finally {
+      await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 }).catch(() => {})
+      await ctx.call(
+        'DELETE',
+        `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      )
+    }
   },
 })
 
@@ -1425,6 +1614,11 @@ registerCase({
         after: afterYoloSnapshot.entries,
       })}`,
     )
+    // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
+    await ctx.call(
+      'DELETE',
+      `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+    )
   },
 })
 
@@ -1466,6 +1660,15 @@ registerCase({
 
 function compareModel(left, right) {
   return `${left.provider}/${left.name}`.localeCompare(`${right.provider}/${right.name}`)
+}
+
+/**
+ * 复刻服务端 Session 自动默认名派生（Names.sessionNameFromUserText）：任意 Unicode 空白折叠为
+ * 单空格并去首尾，截前 40 个 Unicode 码点（无省略号）。仅用于 case 期望值，不做服务端实现。
+ */
+function deriveSessionName(text) {
+  const collapsed = String(text).replace(/\s+/gu, ' ').trim()
+  return [...collapsed].slice(0, 40).join('')
 }
 
 /** 由 seed Agent + seed Model 构造 branchSettings.model 引用（只切第一个 '/'，保留 model name 内 '/'）。 */

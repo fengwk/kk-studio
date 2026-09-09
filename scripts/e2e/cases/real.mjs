@@ -19,7 +19,7 @@ import {
   getThread,
   getThreadSnapshot,
   listEnvironments,
-  createEntryThread,
+  createNewThread,
   createNewSession,
   setAgentCommand,
   setModelCommand,
@@ -1587,11 +1587,11 @@ registerCase({
 })
 
 registerCase({
-  id: 'branch.same_session_entry_thread',
+  id: 'branch.same_session_new_thread',
   level: 'L3',
-  title: 'ENTRY 同 Session 分支创建（真实分支 turn）',
+  title: 'NEW_THREAD 同 Session 分支创建（真实分支 turn）',
   requires: ['real', 'branch'],
-  docs: '使用 minimax-anthropic/MiniMax-M3：在同一 Session 历史 assistant Entry 下用 ENTRY target 开新 Thread（不复制 Entry）：sessionId 不变、新 Thread root-to-head 路径包含 startEntry 与分支 USER、分支 turn 继续产生独立 assistant；原 Thread head/version/nextCommandSequence 不变',
+  docs: '使用 minimax-anthropic/MiniMax-M3：同一 Session 历史 assistant Entry 下 NEW_THREAD target 开新 Thread（不复制 Entry）：sessionId 不变、新 Thread 默认名 branch-<threadId 前 8 位>、root-to-head 路径包含 startEntry 与分支 USER、分支 turn 继续产生独立 assistant；原 Thread head/version/nextCommandSequence 不变；同一 batch 精确重放返回原 branch Thread 且不产生第二个 branch',
   async run(ctx) {
     const minimaxModel = await requireRealMiniMaxM3(ctx)
     const suffix = cid().slice(0, 8)
@@ -1648,15 +1648,21 @@ registerCase({
       }
       const branchThreadId = cid()
       const branchUserText = '在分支上只回复单词 BRANCH，不要调用工具。'
-      const branched = await createEntryThread(ctx, {
+      const branchCommand = userMessageCommand(branchUserText, cid())
+      const branchTarget = {
         owner: chatOwner(chat.id),
         sessionId,
         startEntryId: assistantEntryId,
         threadId: branchThreadId,
         yoloEnabled: current.yoloEnabled,
-        commands: [userMessageCommand(branchUserText, cid())],
-      })
+        commands: [branchCommand],
+      }
+      const branched = await createNewThread(ctx, branchTarget)
       assert(String(branched.thread.sessionId) === String(sessionId), safeDiagnosticJson(branched.thread))
+      assert(
+        branched.thread.name === `branch-${String(branchThreadId).slice(0, 8)}`,
+        safeDiagnosticJson(branched.thread),
+      )
       assert(
         String(branched.thread.threadId) === branchThreadId,
         safeDiagnosticJson(branched.thread),
@@ -1666,6 +1672,15 @@ registerCase({
           && branched.acceptedCommands[0].type === 'USER_MESSAGE'
           && branched.replayed === false,
         safeDiagnosticJson(branched),
+      )
+      // 同一 batch 精确重放（同 id/payload/threadId）：返回既有 branch Thread，不新增 Session/Thread。
+      const replay = await createNewThread(ctx, branchTarget)
+      assert(replay.replayed === true, safeDiagnosticJson(replay))
+      assert(
+        String(replay.thread.threadId) === branchThreadId
+          && String(replay.session?.sessionId) === String(sessionId)
+          && replay.acceptedCommands[0].type === 'USER_MESSAGE',
+        safeDiagnosticJson(replay),
       )
       const mainAfter = await getThread(ctx, mainTid)
       assert(

@@ -17,7 +17,7 @@ import {
   chatOwner,
   createChat,
   getThreadSnapshot,
-  createEntryThread,
+  createNewThread,
   createNewSession,
   setAgentCommand,
   setModelCommand,
@@ -1267,9 +1267,9 @@ async function createBranchedHistoryFixture(
       [trunkMessage, ...originalMessages],
     )
 
-    // 分支：ENTRY 在同 Session branchPoint 下开新 Thread，写 alternateMessage。
+    // 分支：NEW_THREAD 在同 Session branchPoint 下开新 Thread，写 alternateMessage。
     const alternateThreadId = cid()
-    const branched = await createEntryThread(apiCtx, {
+    const branched = await createNewThread(apiCtx, {
       owner,
       sessionId,
       startEntryId: branchPointEntryId,
