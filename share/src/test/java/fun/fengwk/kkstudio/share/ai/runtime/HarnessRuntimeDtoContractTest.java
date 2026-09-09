@@ -2,13 +2,16 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
 import java.util.List;
 
 /** Harness Runtime HTTP DTO 契约：严格字段、严格字符串 cursor 与 compact/snapshot 投影。 */
@@ -157,6 +160,16 @@ class HarnessRuntimeDtoContractTest {
             """,
             HarnessNameUpdateDTO.class);
     assertEquals("  display name  ", dto.getName());
+  }
+
+  @Test
+  void sessionSummaryPreviewAlwaysEmitsNull() throws Exception {
+    // 意图：Session 尚无 USER Entry 时，required-nullable 预览仍必须出现在全局 NON_NULL 的 HTTP wire 中。
+    Field preview = HarnessSessionSummaryDTO.class.getDeclaredField("firstMessagePreview");
+    JsonInclude include = preview.getAnnotation(JsonInclude.class);
+
+    assertNotNull(include);
+    assertEquals(JsonInclude.Include.ALWAYS, include.value());
   }
 
   @Test

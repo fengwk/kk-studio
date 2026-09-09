@@ -30,7 +30,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.SessionFirstThreadLockStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -113,6 +115,20 @@ class HarnessRuntimeManualCompactionTest {
     assertNotNull(
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, result.modelInvocationId())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+  }
+
+  @Test
+  void compactThreadLocksSessionBeforeThread() {
+    // availability、plan 与 commit 均经过守卫，防止 Entry 外键锁与 Session 深删除形成 Thread -> Session 逆序。
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    Fixture fixture = fixture(store, SessionFirstThreadLockStore.wrap(store));
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store);
+    fixture.resolver.autoConsistent = true;
+
+    CompactThreadResult result =
+        fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), 0));
+
+    assertNotNull(result.modelInvocationId());
   }
 
   @Test
@@ -244,10 +260,17 @@ class HarnessRuntimeManualCompactionTest {
 
   private static Fixture fixture() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
+    return fixture(store, store);
+  }
+
+  private static Fixture fixture(InMemoryHarnessStore store, HarnessStore runtimeStore) {
     FakeTurnResolver resolver = new FakeTurnResolver();
     HarnessRuntime runtime =
         new HarnessRuntime(
-            store, Clock.fixed(NOW, ZoneOffset.UTC), resolver, () -> CompactionConfig.DEFAULT);
+            runtimeStore,
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            resolver,
+            () -> CompactionConfig.DEFAULT);
     return new Fixture(store, resolver, runtime);
   }
 

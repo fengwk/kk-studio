@@ -79,23 +79,23 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。旧 / 历史 open Turn 只在启动新 INPUT Turn 时被
  * normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
  *
- * <p>Turn 启动采用 speculative plan：短事务锁 Thread、读取 queued Command 快照与 cutoff、校验 claim（并对近过期 lease 做
- * {@link ProcessorLeaseSupport#ensureLeaseMargin} 保证首次 Resolver heartbeat 前不会过期）、分配 candidate Entry
- * ID 并构造完整合法 candidate EntryPath（不写任何持久化状态）；事务外调用 {@link TurnResolver}（期间由本地 {@link WorkHeartbeat}
- * 维持 lease）；第二短事务以 source head / cutoff 内 Command 精确快照 / claim ownership 做 CAS，一次性原子提交 TURN_START +
- * Message + Command markers + Thread 更新 + ModelInvocation/MODEL Work（resolved）或 AssistantError +
- * FAILED TURN_END（rejected）。Resolved 请求在提交前先经 {@link ResolvedRequestValidator} 按 candidate branch
- * 事实（route / model / variant / tools / compaction）做机械一致性校验，不一致即抛错且零持久化状态写入（绝不转 typed rejection）。任何
- * CAS / claim 损失一律抛内部 {@link ClaimLostSignal} 使事务完整回滚（零部分写入），由 {@link #process} 映射为
- * LOST_OWNERSHIP；Resolver 异常 / null / heartbeat 调度失败按单一正失败延迟 reschedule，绝不静默丢弃 Work。duplicate /
- * stale THREAD claim 是 no-op。
+ * <p>Turn 启动采用 speculative plan：短事务按 Session KEY SHARE -&gt; Thread 顺序加锁、读取 queued Command 快照与
+ * cutoff、校验 claim（并对近过期 lease 做 {@link ProcessorLeaseSupport#ensureLeaseMargin} 保证首次 Resolver
+ * heartbeat 前不会过期）、分配 candidate Entry ID 并构造完整合法 candidate EntryPath（不写任何持久化状态）；事务外调用 {@link
+ * TurnResolver}（期间由本地 {@link WorkHeartbeat} 维持 lease）；第二短事务以 source head / cutoff 内 Command 精确快照 /
+ * claim ownership 做 CAS，一次性原子提交 TURN_START + Message + Command markers + Thread 更新 +
+ * ModelInvocation/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。Resolved
+ * 请求在提交前先经 {@link ResolvedRequestValidator} 按 candidate branch 事实（route / model / variant / tools /
+ * compaction）做机械一致性校验，不一致即抛错且零持久化状态写入（绝不转 typed rejection）。任何 CAS / claim 损失一律抛内部 {@link
+ * ClaimLostSignal} 使事务完整回滚（零部分写入），由 {@link #process} 映射为 LOST_OWNERSHIP；Resolver 异常 / null /
+ * heartbeat 调度失败按单一正失败延迟 reschedule，绝不静默丢弃 Work。duplicate / stale THREAD claim 是 no-op。
  *
  * <p>锁序与最终所有权围栏（final fence）：Model terminal apply / Tool sibling batch / resolve commit
- * 都在同一事务内先完成全部低序 写入（Thread -&gt; Commands -&gt; ModelInvocation -&gt; ToolInvocation
- * siblings），claimed THREAD Work 的最终所有权围栏最后执行；围栏失败抛出内部 {@link ClaimLostSignal} 使事务完整回滚，再由 {@link
- * #process} 映射为 LOST_OWNERSHIP，绝不存在带持久化变更的 LOST 提交。commit 与 applyModel 在同层 Work 中按 (type, id)
- * 升序请求（先 THREAD wake 再 MODEL / TOOL Work）。历史 / 非 applicable open Turn（head 不在 applicable
- * 位置）在分类阶段只使用 unlocked 读，绝不先锁 Model/Tool 再落到 Commands / INPUT normalization。
+ * 都在同一事务内先完成全部低序写入（Session KEY SHARE -&gt; Thread -&gt; Commands -&gt; ModelInvocation -&gt;
+ * ToolInvocation siblings），claimed THREAD Work 的最终所有权围栏最后执行；围栏失败抛出内部 {@link ClaimLostSignal}
+ * 使事务完整回滚，再由 {@link #process} 映射为 LOST_OWNERSHIP，绝不存在带持久化变更的 LOST 提交。commit 与 applyModel 在同层 Work
+ * 中按 (type, id) 升序请求（先 THREAD wake 再 MODEL / TOOL Work）。历史 / 非 applicable open Turn（head 不在
+ * applicable 位置）在分类阶段只使用 unlocked 读，绝不先锁 Model/Tool 再落到 Commands / INPUT normalization。
  *
  * <p>每次成功 action 都在同一事务 complete 当前 THREAD claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
  * complete，依赖 wakeVersion 保留新 wake。Model terminal apply 按 planner 决策落地：active Tool phase 仅为 READY
@@ -192,9 +192,9 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 单 action 短事务：锁 Thread -&gt;（Commands -&gt; Model -&gt; Tool）-&gt; Work，按固定优先级分类并恰执行一个 durable
-   * action。返回 null 表示 action 已在该事务完成 claim；非 null 表示构造了 speculative plan，由调用方在事务外 resolve 后第二事务
-   * 提交（第二事务同样完成 claim）。
+   * 单 action 短事务：锁 Session KEY SHARE -&gt; Thread -&gt;（Commands -&gt; Model -&gt; Tool）-&gt;
+   * Work，按固定优先级分类并恰执行一个 durable action。返回 null 表示 action 已在该事务完成 claim；非 null 表示构造了 speculative
+   * plan，由调用方在事务外 resolve 后第二事务提交（第二事务同样完成 claim）。
    */
   private TurnPlan step(ClaimedWork claim) {
     return store.transaction(tx -> stepTx(tx, claim));
@@ -202,7 +202,7 @@ public final class ThreadProcessor {
 
   private TurnPlan stepTx(HarnessStore.Transaction tx, ClaimedWork claim) {
     Instant now = clock.instant();
-    ThreadState thread = tx.lockThread(claim.target().id()).orElse(null);
+    ThreadState thread = lockThreadWithSession(tx, claim.target().id());
     if (thread == null) {
       throw new ClaimLostSignal();
     }
@@ -744,8 +744,8 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 在第二事务中基于重新锁定的 Thread 重验 head、命令快照与 Claim，按 Thread -&gt; Commands -&gt; Model -&gt; Work
-   * 锁序原子提交；最终 Claim 围栏失败会回滚全部变更。
+   * 在第二事务中基于重新锁定的 Thread 重验 head、命令快照与 Claim，按 Session KEY SHARE -&gt; Thread -&gt; Commands -&gt;
+   * Model -&gt; Work 锁序原子提交；最终 Claim 围栏失败会回滚全部变更。
    */
   private void commit(ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
     store.transaction(
@@ -758,7 +758,7 @@ public final class ThreadProcessor {
   private void commitTx(
       HarnessStore.Transaction tx, ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
     Instant now = clock.instant();
-    ThreadState thread = tx.lockThread(plan.threadId()).orElse(null);
+    ThreadState thread = lockThreadWithSession(tx, plan.threadId());
     if (thread == null) {
       throw new ClaimLostSignal();
     }
@@ -861,6 +861,25 @@ public final class ThreadProcessor {
     }
     tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId), now);
     tx.completeWork(claim, now);
+  }
+
+  /**
+   * 先以不可变 Thread 快照定位父 Session，再按 Session KEY SHARE -&gt; Thread FOR UPDATE 复核。
+   *
+   * <p>Entry 插入会因外键隐式获取 Session KEY SHARE；若先锁 Thread，再遇到深删除持有 Session FOR UPDATE 并等待 Thread，
+   * PostgreSQL 会形成锁环。Session 或 Thread 被并发删除时返回 null，由 claim 路径按 LOST 处理。
+   */
+  private static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
+    ThreadState immutable = tx.findThread(threadId).orElse(null);
+    if (immutable == null || tx.lockSessionForKeyShare(immutable.sessionId()).isEmpty()) {
+      return null;
+    }
+    ThreadState locked = tx.lockThread(threadId).orElse(null);
+    if (locked != null && !locked.sessionId().equals(immutable.sessionId())) {
+      throw new IllegalStateException(
+          "thread " + threadId + " relocated while acquiring its session lock");
+    }
+    return locked;
   }
 
   /** cutoff 内 queued Command 与 planned 快照逐字段相等（id/thread/sequence/payload/client ID/state）。 */

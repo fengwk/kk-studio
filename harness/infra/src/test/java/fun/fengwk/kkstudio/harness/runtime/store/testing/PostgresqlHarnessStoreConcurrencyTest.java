@@ -219,10 +219,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
     }
   }
 
-  /** 同 Session 两个 ENTRY 初始创建：KEY SHARE 锁彼此兼容，新 Thread 各自插入、互不串行化。 */
+  /** 同 Session 两个 NEW_THREAD 初始创建：KEY SHARE 锁彼此兼容，新 Thread 各自插入、互不串行化。 */
   @Test
-  void concurrentEntryInitialCreationsKeyShareTheSameSessionWithoutSerialization()
-      throws Exception {
+  void concurrentNewThreadCreationsKeyShareTheSameSessionWithoutSerialization() throws Exception {
     Baseline baseline = seedThreadBaseline(store);
     CountDownLatch bothAcquired = new CountDownLatch(2);
     CountDownLatch releaseBoth = new CountDownLatch(1);
@@ -230,12 +229,12 @@ class PostgresqlHarnessStoreConcurrencyTest {
       Future<UUID> first =
           executor.submit(
               () ->
-                  createEntryThread(
+                  createNewThread(
                       baseline.sessionId(), baseline.rootEntryId(), bothAcquired, releaseBoth));
       Future<UUID> second =
           executor.submit(
               () ->
-                  createEntryThread(
+                  createNewThread(
                       baseline.sessionId(), baseline.rootEntryId(), bothAcquired, releaseBoth));
       // 双方都拿到同一 Session 的 KEY SHARE 并各自插入新 Thread：若误用 FOR UPDATE 锁 Session，第二个事务会在此处死等。
       assertTrue(bothAcquired.await(10, TimeUnit.SECONDS));
@@ -247,11 +246,11 @@ class PostgresqlHarnessStoreConcurrencyTest {
     assertEquals(3, store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size());
   }
 
-  private UUID createEntryThread(
+  private UUID createNewThread(
       UUID sessionId, UUID rootEntryId, CountDownLatch bothAcquired, CountDownLatch releaseBoth) {
     return store.transaction(
         tx -> {
-          // ENTRY 新建路径：KEY SHARE Session（不 FOR UPDATE），新 Thread 直接指向既有 Entry（不复制 Entry）。
+          // NEW_THREAD 路径：KEY SHARE Session（不 FOR UPDATE），新 Thread 直接指向既有 Entry（不复制 Entry）。
           tx.lockSessionForKeyShare(sessionId).orElseThrow();
           UUID threadId = tx.nextId();
           tx.insertThread(thread(threadId, sessionId, rootEntryId));

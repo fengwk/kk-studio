@@ -17,6 +17,7 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchThreadTimestamp;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionModel;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.SessionFirstThreadLockStore.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -41,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
@@ -66,6 +68,21 @@ import java.util.concurrent.TimeUnit;
  */
 class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
+
+  @Test
+  void entryMutationsLockSessionBeforeThread() {
+    // INPUT 的 plan 与 commit 两个事务都经过守卫；任一事务先锁 Thread 都会确定性失败，而不是等待偶发数据库死锁。
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    Fixture fixture = fixture(wrap(store));
+    var baseline = seedBaseline(store);
+    seedCommand(
+        store, baseline.threadId(), new UserMessageCommandPayload(userMessage("session-first")));
+    requestThreadWork(store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+
+    ClaimedWork claim = claimThreadWork(store, baseline.threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
+  }
 
   @Test
   void inputConsumesExactlyOnePreexistingUserMessage() {
