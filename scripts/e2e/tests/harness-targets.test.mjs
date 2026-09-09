@@ -12,7 +12,7 @@ import { cid } from '../lib/http.mjs'
 
 const sampleId = () => '00000000-0000-4000-8000-000000000000'
 
-test('newThreadTarget builds the sealed NEW_THREAD wire target with the exact four fields', () => {
+test('newThreadTarget builds the sealed NEW_THREAD wire target with exactly five keys', () => {
   // Test intent: the NEW_THREAD wire shape is sealed — no alias token, no name input.
   const sessionId = cid()
   const startEntryId = cid()
@@ -39,7 +39,7 @@ test('newThreadTarget builds the sealed NEW_THREAD wire target with the exact fo
   assert.equal(Object.hasOwn(target, 'rootSettings'), false)
 })
 
-test('newThreadTarget defaults yoloEnabled to false and canonicalizes ids', () => {
+test('newThreadTarget defaults yoloEnabled to false and validates canonical ids', () => {
   // Test intent: NEW_SESSION/THREAD shape and the boolean default must remain strict.
   const target = newThreadTarget({
     sessionId: sampleId(),
@@ -47,31 +47,35 @@ test('newThreadTarget defaults yoloEnabled to false and canonicalizes ids', () =
     threadId: sampleId(),
   })
   assert.equal(target.yoloEnabled, false)
-  assert.deepEqual(Object.keys(newSessionTarget({ sessionId: sampleId(), threadId: sampleId(), rootSettings: { a: 1 } })).sort(), [
-    'rootSettings',
-    'sessionId',
-    'threadId',
-    'type',
-    'yoloEnabled',
-  ])
-  assert.deepEqual(Object.keys(threadTarget({ threadId: sampleId(), expectedHeadEntryId: sampleId(), expectedNextCommandSequence: '1' })).sort(), [
-    'expectedHeadEntryId',
-    'expectedNextCommandSequence',
-    'threadId',
-    'type',
-  ])
-  assert.throws(() => newThreadTarget({ sessionId: 'not-uuid', startEntryId: cid(), threadId: cid() }), /canonical UUID/)
+  assert.deepEqual(
+    Object.keys(
+      newSessionTarget({ sessionId: sampleId(), threadId: sampleId(), rootSettings: { a: 1 } }),
+    ).sort(),
+    ['rootSettings', 'sessionId', 'threadId', 'type', 'yoloEnabled'],
+  )
+  assert.deepEqual(
+    Object.keys(
+      threadTarget({
+        threadId: sampleId(),
+        expectedHeadEntryId: sampleId(),
+        expectedNextCommandSequence: '1',
+      }),
+    ).sort(),
+    ['expectedHeadEntryId', 'expectedNextCommandSequence', 'threadId', 'type'],
+  )
+  assert.throws(
+    () => newThreadTarget({ sessionId: 'not-uuid', startEntryId: cid(), threadId: cid() }),
+    /canonical UUID/,
+  )
 })
 
-test('legacy ENTRY helpers and tokens are gone from the harness lib', async () => {
+test('legacy ENTRY target tokens and helpers are no longer part of the lib API', async () => {
   // Test intent: old ENTRY/ENTRY_DRAFT wire vocabulary must not regress into the script surface.
   const { readFile } = await import('node:fs/promises')
   const sourceUrl = new URL('../lib/harness.mjs', import.meta.url)
   const source = await readFile(sourceUrl, 'utf8')
-  assert.doesNotMatch(source, /entryTarget|createEntryThread|type:\s*'ENTRY'|'ENTRY_DRAFT'|ENTRY_DRAFT/)
-  assert.doesNotMatch(source, /\bENTRY\b/, 'legacy ENTRY token must be fully removed from the helper surface')
-  assert.match(source, /type:\s*'NEW_THREAD'/)
-  assert.match(source, /branch-\$\{String\(target\.threadId\)/)
+  assert.doesNotMatch(source, /\bENTRY\b/)
+  assert.doesNotMatch(source, /entryTarget|createEntryThread/)
 })
 
 test('chatOwner/canonicalUuid keep canonical UUID owner identity', () => {

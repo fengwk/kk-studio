@@ -210,8 +210,9 @@ function assertAcceptedCommands(accepted) {
  * 自动基于请求 target/commands 严格校验响应形状（无需调用方传 options）：
  * - 返回 threadId 必须等于 target.threadId；
  * - NEW_SESSION/NEW_THREAD 的 sessionId 必须等于 target.sessionId；
- * - NEW_SESSION 的 accepted.session.name 是服务端派生名；NEW_THREAD 的 accepted.thread.name
- *   必须等于 branch-<threadId 前 8 位>；
+ * - NEW_THREAD 且 accepted.replayed=false 时（真正首次创建）：accepted.thread.name 必须等于
+ *   服务端派生的默认名 branch-<threadId 前 8 位>；replayed=true 的 exact replay 可能发生在该
+ *   Thread 已被控制面重命名之后，服务端返回当前权威 name，helper 不做默认名断言；
  * - rootEntry.sessionId/thread.sessionId 必须等于 response session.sessionId；
  * - acceptedCommands 的 count/type/idempotencyKey/order 必须与请求 commands 一致，
  *   且每项 threadId、positive sequence、canonical idempotencyKey 均校验。
@@ -247,11 +248,12 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
       `accepted sessionId ${accepted.session?.sessionId} != target ${target.sessionId}: ${JSON.stringify(accepted)}`,
     )
   }
-  if (target.type === 'NEW_THREAD') {
-    // NEW_THREAD 不接受 name 输入：新 Thread.name 固定 branch-<threadId 前 8 位>。
+  if (target.type === 'NEW_THREAD' && accepted.replayed === false) {
+    // 真正首次创建：NEW_THREAD 不接受 name 输入，服务端派生默认名 branch-<threadId 前 8 位>。
+    // （replayed=true 的 exact replay 可能命中已重命名的 Thread，返回当前权威 name，不在此断言。）
     assert(
       accepted.thread?.name === `branch-${String(target.threadId).slice(0, 8)}`,
-      `NEW_THREAD thread name ${accepted.thread?.name} != branch-<threadId 前 8 位> for ${target.threadId}: ${JSON.stringify(
+      `NEW_THREAD first-creation thread name ${accepted.thread?.name} != branch-<threadId 前 8 位> for ${target.threadId}: ${JSON.stringify(
         accepted.thread,
       )}`,
     )
