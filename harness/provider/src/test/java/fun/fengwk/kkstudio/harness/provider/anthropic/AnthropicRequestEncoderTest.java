@@ -59,6 +59,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -570,7 +571,9 @@ class AnthropicRequestEncoderTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     assertEquals("adaptive", root.path("thinking").path("type").asText());
+    assertEquals("summarized", root.path("thinking").path("display").asText());
     assertEquals("high", root.path("output_config").path("effort").asText());
+    assertFalse(encoded.requiresInterleavedThinkingBeta());
   }
 
   @Test
@@ -610,9 +613,11 @@ class AnthropicRequestEncoderTest {
 
       assertEquals("enabled", root.path("thinking").path("type").asText());
       assertEquals(expectedBudget, root.path("thinking").path("budget_tokens").asInt());
+      assertEquals("summarized", root.path("thinking").path("display").asText());
       assertFalse(
           root.has("output_config"),
           "BUDGET mode must omit output_config, but was: " + root.path("output_config"));
+      assertTrue(encoded.requiresInterleavedThinkingBeta());
     }
   }
 
@@ -729,9 +734,11 @@ class AnthropicRequestEncoderTest {
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode root1 = MAPPER.readTree(budgetEncoder.encode(req1, descriptor).bodyUtf8Bytes());
+    AnthropicEncodedRequest enc1 = budgetEncoder.encode(req1, descriptor);
+    JsonNode root1 = MAPPER.readTree(enc1.bodyUtf8Bytes());
     assertFalse(root1.has("thinking"));
     assertFalse(root1.has("output_config"));
+    assertFalse(enc1.requiresInterleavedThinkingBeta());
 
     // 2. model.reasoning = true 但 variant.reasoningEffort = null
     ModelDescriptor reasoningModel =
@@ -751,9 +758,11 @@ class AnthropicRequestEncoderTest {
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode root2 = MAPPER.readTree(budgetEncoder.encode(req2, descriptor).bodyUtf8Bytes());
+    AnthropicEncodedRequest enc2 = budgetEncoder.encode(req2, descriptor);
+    JsonNode root2 = MAPPER.readTree(enc2.bodyUtf8Bytes());
     assertFalse(root2.has("thinking"));
     assertFalse(root2.has("output_config"));
+    assertFalse(enc2.requiresInterleavedThinkingBeta());
 
     // 3. model.reasoning = false 且 variant.reasoningEffort = null
     ProviderRequest req3 =
@@ -763,9 +772,11 @@ class AnthropicRequestEncoderTest {
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode root3 = MAPPER.readTree(budgetEncoder.encode(req3, descriptor).bodyUtf8Bytes());
+    AnthropicEncodedRequest enc3 = budgetEncoder.encode(req3, descriptor);
+    JsonNode root3 = MAPPER.readTree(enc3.bodyUtf8Bytes());
     assertFalse(root3.has("thinking"));
     assertFalse(root3.has("output_config"));
+    assertFalse(enc3.requiresInterleavedThinkingBeta());
 
     // 4. model.reasoning = true 且 variant.reasoningEffort = "none"
     ModelVariant variantNoneEffort =
@@ -777,10 +788,12 @@ class AnthropicRequestEncoderTest {
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode root4 = MAPPER.readTree(budgetEncoder.encode(req4, descriptor).bodyUtf8Bytes());
+    AnthropicEncodedRequest enc4 = budgetEncoder.encode(req4, descriptor);
+    JsonNode root4 = MAPPER.readTree(enc4.bodyUtf8Bytes());
     assertFalse(root4.has("thinking"), "BUDGET mode with effort='none' must omit thinking");
     assertFalse(
         root4.has("output_config"), "BUDGET mode with effort='none' must omit output_config");
+    assertFalse(enc4.requiresInterleavedThinkingBeta());
 
     // 5. model.reasoning = true 且 variant.reasoningEffort 为纯空白
     ModelVariant variantBlankEffort =
@@ -792,10 +805,12 @@ class AnthropicRequestEncoderTest {
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode root5 = MAPPER.readTree(budgetEncoder.encode(req5, descriptor).bodyUtf8Bytes());
+    AnthropicEncodedRequest enc5 = budgetEncoder.encode(req5, descriptor);
+    JsonNode root5 = MAPPER.readTree(enc5.bodyUtf8Bytes());
     assertFalse(root5.has("thinking"), "BUDGET mode with blank effort must omit thinking");
     assertFalse(
         root5.has("output_config"), "BUDGET mode with blank effort must omit output_config");
+    assertFalse(enc5.requiresInterleavedThinkingBeta());
   }
 
   @Test
@@ -822,11 +837,12 @@ class AnthropicRequestEncoderTest {
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode rootNone =
-        MAPPER.readTree(adaptiveEncoder.encode(reqNone, descriptor).bodyUtf8Bytes());
+    AnthropicEncodedRequest encNone = adaptiveEncoder.encode(reqNone, descriptor);
+    JsonNode rootNone = MAPPER.readTree(encNone.bodyUtf8Bytes());
     assertFalse(rootNone.has("thinking"), "ADAPTIVE mode with effort='none' must omit thinking");
     assertFalse(
         rootNone.has("output_config"), "ADAPTIVE mode with effort='none' must omit output_config");
+    assertFalse(encNone.requiresInterleavedThinkingBeta());
 
     // 2. variant.reasoningEffort = "  "
     ModelVariant variantBlank =
@@ -838,11 +854,12 @@ class AnthropicRequestEncoderTest {
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode rootBlank =
-        MAPPER.readTree(adaptiveEncoder.encode(reqBlank, descriptor).bodyUtf8Bytes());
+    AnthropicEncodedRequest encBlank = adaptiveEncoder.encode(reqBlank, descriptor);
+    JsonNode rootBlank = MAPPER.readTree(encBlank.bodyUtf8Bytes());
     assertFalse(rootBlank.has("thinking"), "ADAPTIVE mode with blank effort must omit thinking");
     assertFalse(
         rootBlank.has("output_config"), "ADAPTIVE mode with blank effort must omit output_config");
+    assertFalse(encBlank.requiresInterleavedThinkingBeta());
   }
 
   @Test
@@ -869,10 +886,13 @@ class AnthropicRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    JsonNode root = MAPPER.readTree(adaptiveEncoder.encode(req, descriptor).bodyUtf8Bytes());
+    AnthropicEncodedRequest encoded = adaptiveEncoder.encode(req, descriptor);
+    JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
     assertEquals("adaptive", root.path("thinking").path("type").asText());
+    assertEquals("summarized", root.path("thinking").path("display").asText());
     assertEquals("high", root.path("output_config").path("effort").asText());
     assertFalse(root.path("thinking").has("budget_tokens"));
+    assertFalse(encoded.requiresInterleavedThinkingBeta());
 
     // 验证 ADAPTIVE 模式透传 xhigh 不被拒绝
     ModelVariant variantXhigh =
@@ -884,10 +904,12 @@ class AnthropicRequestEncoderTest {
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode rootXhigh =
-        MAPPER.readTree(adaptiveEncoder.encode(reqXhigh, descriptor).bodyUtf8Bytes());
+    AnthropicEncodedRequest encodedXhigh = adaptiveEncoder.encode(reqXhigh, descriptor);
+    JsonNode rootXhigh = MAPPER.readTree(encodedXhigh.bodyUtf8Bytes());
     assertEquals("adaptive", rootXhigh.path("thinking").path("type").asText());
+    assertEquals("summarized", rootXhigh.path("thinking").path("display").asText());
     assertEquals("xhigh", rootXhigh.path("output_config").path("effort").asText());
+    assertFalse(encodedXhigh.requiresInterleavedThinkingBeta());
   }
 
   @Test
@@ -1729,5 +1751,165 @@ class AnthropicRequestEncoderTest {
     assertEquals("tool_use", asstWire.path("content").get(1).path("type").asText());
     assertEquals("call_1", asstWire.path("content").get(1).path("id").asText());
     assertEquals(1, asstWire.path("content").get(1).path("input").path("a").asInt());
+  }
+
+  /** 意图：验证配置 modelAliases 时 wire 根字段 model 替换为别名，而未配置别名的模型保留逻辑名。 */
+  @Test
+  void encodesWireModelAliasWhenConfigured() throws IOException {
+    AnthropicConfiguration config =
+        new AnthropicConfiguration(
+            AnthropicThinkingMode.BUDGET, Map.of("MiniMax-M3", "claude-fable-5-dd-3M-xaMiniM"));
+    AnthropicRequestEncoder aliasEncoder = new AnthropicRequestEncoder(config);
+
+    // 1. 命中 alias 的模型
+    ProviderRequest reqMapped =
+        requestWithModel(
+            "MiniMax-M3",
+            defaultVariant(),
+            List.of(userMsg(new ProviderTextBlock("test"))),
+            List.of(),
+            ProviderCacheControl.none());
+    AnthropicEncodedRequest encMapped = aliasEncoder.encode(reqMapped, descriptor);
+    JsonNode rootMapped = MAPPER.readTree(encMapped.bodyUtf8Bytes());
+    assertEquals("claude-fable-5-dd-3M-xaMiniM", rootMapped.path("model").asText());
+
+    // 2. 未命中 alias 的模型保持原逻辑名
+    ProviderRequest reqUnmapped =
+        requestWithModel(
+            "claude-3-5-sonnet",
+            defaultVariant(),
+            List.of(userMsg(new ProviderTextBlock("test"))),
+            List.of(),
+            ProviderCacheControl.none());
+    AnthropicEncodedRequest encUnmapped = aliasEncoder.encode(reqUnmapped, descriptor);
+    JsonNode rootUnmapped = MAPPER.readTree(encUnmapped.bodyUtf8Bytes());
+    assertEquals("claude-3-5-sonnet", rootUnmapped.path("model").asText());
+  }
+
+  /** 意图：验证即便配置了 wire model 别名，历史消息的回放亲和性（replay affinity）仍严格基于逻辑模型名。 */
+  @Test
+  void preservesLogicalReplayAffinityWhenModelAliasIsConfigured() throws IOException {
+    AnthropicConfiguration config =
+        new AnthropicConfiguration(
+            AnthropicThinkingMode.BUDGET, Map.of("MiniMax-M3", "claude-fable-5-dd-3M-xaMiniM"));
+    AnthropicRequestEncoder aliasEncoder = new AnthropicRequestEncoder(config);
+
+    // 构建前缀并计算 canonical prefix hash
+    ProviderMessage user1 = userMsg(new ProviderTextBlock("question 1"));
+    ArrayNode priorMessages = NODES.arrayNode();
+    ObjectNode userWire = NODES.objectNode();
+    userWire.put("role", "user");
+    userWire.putArray("content").addObject().put("type", "text").put("text", "question 1");
+    priorMessages.add(userWire);
+    String prefixHash = AnthropicPrefixHasher.calculateHash(null, null, priorMessages);
+
+    // Assistant 携带针对逻辑模型名 MiniMax-M3 的亲和性与有效 payload（包含 thinking 块与签名）
+    ObjectNode anthropicPayload = NODES.objectNode();
+    anthropicPayload.put("role", "assistant");
+    ArrayNode content = anthropicPayload.putArray("content");
+    content
+        .addObject()
+        .put("type", "thinking")
+        .put("thinking", "deep reasoning")
+        .put("signature", "sig_valid");
+    content.addObject().put("type", "text").put("text", "replayed answer");
+    content
+        .addObject()
+        .put("type", "tool_use")
+        .put("id", "call_goal")
+        .put("name", "get_goal")
+        .set("input", NODES.objectNode());
+
+    ProviderReplayState logicalReplayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            descriptor.affinity("MiniMax-M3"),
+            prefixHash,
+            anthropicPayload);
+
+    List<ProviderContentBlock> durableBlocks =
+        List.of(
+            new ProviderThinkingBlock("deep reasoning"),
+            new ProviderTextBlock("replayed answer"),
+            new ProviderToolCallBlock(new ProviderToolCall("call_goal", "get_goal", "{}")));
+
+    ProviderMessage asst = asstMsg(durableBlocks, logicalReplayState);
+
+    ProviderMessage toolResult =
+        new ProviderMessage(
+            ProviderMessageRole.TOOL,
+            List.of(
+                new ProviderToolResultBlock(
+                    "call_goal",
+                    "get_goal",
+                    List.<ProviderContentBlock>of(new ProviderTextBlock("ok")),
+                    false,
+                    "{}")));
+
+    ProviderRequest request =
+        requestWithModel(
+            "MiniMax-M3",
+            defaultVariant(),
+            List.of(user1, asst, toolResult),
+            List.of(),
+            ProviderCacheControl.none());
+
+    // 编码请求
+    AnthropicEncodedRequest encoded = aliasEncoder.encode(request, descriptor);
+    JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
+
+    // 1. Wire 根字段 model 发出别名
+    assertEquals("claude-fable-5-dd-3M-xaMiniM", root.path("model").asText());
+
+    // 2. 历史 Assistant 消息由于逻辑亲和性完全吻合，成功采用 payload 原生回放（保留 thinking 块与 signature）
+    JsonNode wireAsst = root.path("messages").get(1);
+    assertEquals("assistant", wireAsst.path("role").asText());
+    assertEquals("thinking", wireAsst.path("content").get(0).path("type").asText());
+    assertEquals("deep reasoning", wireAsst.path("content").get(0).path("thinking").asText());
+    assertEquals("sig_valid", wireAsst.path("content").get(0).path("signature").asText());
+    assertEquals("text", wireAsst.path("content").get(1).path("type").asText());
+    assertEquals("replayed answer", wireAsst.path("content").get(1).path("text").asText());
+    assertEquals("tool_use", wireAsst.path("content").get(2).path("type").asText());
+    assertEquals("call_goal", wireAsst.path("content").get(2).path("id").asText());
+
+    // 3. 对比：如果 replayState 亲和性错误绑定到了 wire 别名，则亲和性校验失败并降级为 semantic fallback（thinking 降级为 text，丢失
+    // signature）
+    ProviderReplayState wireAffinityState =
+        new ProviderReplayState(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            descriptor.affinity("claude-fable-5-dd-3M-xaMiniM"),
+            prefixHash,
+            anthropicPayload);
+    ProviderMessage asstMismatch = asstMsg(durableBlocks, wireAffinityState);
+    ProviderRequest requestMismatch =
+        requestWithModel(
+            "MiniMax-M3",
+            defaultVariant(),
+            List.of(user1, asstMismatch, toolResult),
+            List.of(),
+            ProviderCacheControl.none());
+    AnthropicEncodedRequest encodedMismatch = aliasEncoder.encode(requestMismatch, descriptor);
+    JsonNode wireAsstMismatch =
+        MAPPER.readTree(encodedMismatch.bodyUtf8Bytes()).path("messages").get(1);
+    assertEquals("text", wireAsstMismatch.path("content").get(0).path("type").asText());
+    assertEquals("deep reasoning", wireAsstMismatch.path("content").get(0).path("text").asText());
+    assertFalse(wireAsstMismatch.path("content").get(0).has("signature"));
+  }
+
+  private static ProviderRequest requestWithModel(
+      String modelName,
+      ModelVariant variant,
+      List<ProviderMessage> messages,
+      List<ProviderToolDefinition> tools,
+      ProviderCacheControl cacheControl) {
+    ModelDescriptor model =
+        new ModelDescriptor(
+            "test-anthropic",
+            modelName,
+            Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
+            true,
+            false,
+            pricing());
+    return new ProviderRequest(model, variant, messages, tools, cacheControl);
   }
 }

@@ -154,6 +154,17 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 .asText(),
             "the minimax-anthropic provider config must declare BUDGET thinking mode");
         assertEquals(
+            "claude-fable-5-dd-3M-xaMiniM",
+            OBJECT_MAPPER
+                .readTree(
+                    singleString(
+                        st,
+                        "select config::text from agent_provider where name = 'minimax-anthropic'"))
+                .path("modelAliases")
+                .path("MiniMax-M3")
+                .asText(),
+            "the minimax-anthropic provider config must map MiniMax-M3 to wire alias");
+        assertEquals(
             "DEEPSEEK",
             OBJECT_MAPPER
                 .readTree(
@@ -162,6 +173,24 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 .path("openAiChatThinkingFormat")
                 .asText(),
             "the deepseek provider config must declare DEEPSEEK thinking format");
+
+        JsonNode geminiVariants =
+            OBJECT_MAPPER.readTree(
+                singleString(
+                    st,
+                    "select (config->'variants')::text from agent_model where provider_name = 'google' and name = 'gemini-3.8-flash'"));
+        JsonNode minimalVariant = null;
+        for (JsonNode v : geminiVariants) {
+          if ("minimal".equals(v.path("id").asText())) {
+            minimalVariant = v;
+            break;
+          }
+        }
+        assertNotNull(minimalVariant, "gemini-3.8-flash must carry minimal variant");
+        assertEquals(
+            "low",
+            minimalVariant.path("reasoningEffort").asText(),
+            "gemini-3.8-flash logical minimal variant must emit wire low");
       }
     }
   }

@@ -16,7 +16,7 @@ final class AnthropicEndpoints {
    *   <li>必须包含合法 host 与 raw authority；
    *   <li>严格禁止 user-info、query、fragment；
    *   <li>保留 raw authority（包括 IPv6 方括号与端口）以及已编码的 base path；
-   *   <li>去除 baseUrl 尾部多余斜杠后追加 /messages；
+   *   <li>按 SDK/baseUrl 语义幂等解析 /messages 端点；
    *   <li>最终 URI 构造异常严格脱敏，不回显输入内容并不保留底层的异常原因。
    * </ul>
    */
@@ -58,7 +58,16 @@ final class AnthropicEndpoints {
     while (rawPath.endsWith("/")) {
       rawPath = rawPath.substring(0, rawPath.length() - 1);
     }
-    String messagesPath = rawPath + "/messages";
+    String messagesPath;
+    if (rawPath.endsWith("/v1/messages")) {
+      messagesPath = rawPath;
+    } else if (rawPath.endsWith("/messages")) {
+      messagesPath = rawPath;
+    } else if (rawPath.endsWith("/v1")) {
+      messagesPath = rawPath + "/messages";
+    } else {
+      messagesPath = rawPath + "/v1/messages";
+    }
     String targetUri =
         scheme.toLowerCase(Locale.ROOT) + "://" + uri.getRawAuthority() + messagesPath;
     try {

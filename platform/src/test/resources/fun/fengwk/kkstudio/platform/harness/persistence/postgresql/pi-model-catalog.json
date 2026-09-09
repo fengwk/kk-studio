@@ -717,7 +717,7 @@
       "variants": [
         {
           "id": "minimal",
-          "reasoningEffort": "minimal",
+          "reasoningEffort": "low",
           "maxOutputTokens": 4096
         },
         {

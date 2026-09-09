@@ -30,7 +30,7 @@ class AnthropicEndpointsTest {
   @Test
   void resolvesHttpEndpointWithCustomPort() {
     URI uri = AnthropicEndpoints.resolveMessagesUri("http://127.0.0.1:8080");
-    assertEquals("http://127.0.0.1:8080/messages", uri.toString());
+    assertEquals("http://127.0.0.1:8080/v1/messages", uri.toString());
 
     URI httpsUri = AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com:9443/v1");
     assertEquals("https://api.anthropic.com:9443/v1/messages", httpsUri.toString());
@@ -141,10 +141,80 @@ class AnthropicEndpointsTest {
     assertNull(ex2.getCause());
   }
 
-  /** 意图：验证无 path 的域名能正确追加 /messages。 */
+  /** 意图：验证无 path 的域名能正确追加 /v1/messages。 */
   @Test
   void resolvesHostWithoutPath() {
     URI uri = AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com");
+    assertEquals("https://api.anthropic.com/v1/messages", uri.toString());
+
+    URI uriTrailingSlash = AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com/");
+    assertEquals("https://api.anthropic.com/v1/messages", uriTrailingSlash.toString());
+  }
+
+  /** 意图：验证已以 /v1/messages 结尾的完整 endpoint 保持不变且支持尾部斜杠规范化。 */
+  @Test
+  void resolvesFullV1MessagesEndpoint() {
+    URI uri = AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com/v1/messages");
+    assertEquals("https://api.anthropic.com/v1/messages", uri.toString());
+
+    URI uriTrailing =
+        AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com/v1/messages/");
+    assertEquals("https://api.anthropic.com/v1/messages", uriTrailing.toString());
+  }
+
+  /** 意图：验证已以 /messages 结尾的显式完整 endpoint 保持不变且支持尾部斜杠规范化。 */
+  @Test
+  void resolvesExplicitMessagesEndpoint() {
+    URI uri = AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com/messages");
     assertEquals("https://api.anthropic.com/messages", uri.toString());
+
+    URI uriTrailing = AnthropicEndpoints.resolveMessagesUri("https://api.anthropic.com/messages/");
+    assertEquals("https://api.anthropic.com/messages", uriTrailing.toString());
+  }
+
+  /** 意图：验证自定义 proxy base 路径在各种结尾情况下的正确解析。 */
+  @Test
+  void resolvesCustomProxyBasePaths() {
+    URI proxyBase = AnthropicEndpoints.resolveMessagesUri("https://proxy.example.com/anthropic");
+    assertEquals("https://proxy.example.com/anthropic/v1/messages", proxyBase.toString());
+
+    URI proxyBaseTrailing =
+        AnthropicEndpoints.resolveMessagesUri("https://proxy.example.com/anthropic/");
+    assertEquals("https://proxy.example.com/anthropic/v1/messages", proxyBaseTrailing.toString());
+
+    URI proxyV1 = AnthropicEndpoints.resolveMessagesUri("https://proxy.example.com/anthropic/v1");
+    assertEquals("https://proxy.example.com/anthropic/v1/messages", proxyV1.toString());
+
+    URI proxyV1Messages =
+        AnthropicEndpoints.resolveMessagesUri("https://proxy.example.com/anthropic/v1/messages");
+    assertEquals("https://proxy.example.com/anthropic/v1/messages", proxyV1Messages.toString());
+
+    URI proxyMessages =
+        AnthropicEndpoints.resolveMessagesUri("https://proxy.example.com/anthropic/messages");
+    assertEquals("https://proxy.example.com/anthropic/messages", proxyMessages.toString());
+  }
+
+  /** 意图：验证端点解析对所有合法形态均具备幂等性（二次解析结果完全相同）。 */
+  @Test
+  void resolvesIdempotentlyAcrossAllShapes() {
+    String[] testCases = {
+      "https://api.anthropic.com",
+      "https://api.anthropic.com/",
+      "https://api.anthropic.com/v1",
+      "https://api.anthropic.com/v1/",
+      "https://api.anthropic.com/v1/messages",
+      "https://api.anthropic.com/v1/messages/",
+      "https://api.anthropic.com/messages",
+      "https://api.anthropic.com/messages/",
+      "http://127.0.0.1:8080",
+      "http://[::1]:8443/custom",
+      "https://proxy.example.com/gateway/v1"
+    };
+
+    for (String testCase : testCases) {
+      URI firstPass = AnthropicEndpoints.resolveMessagesUri(testCase);
+      URI secondPass = AnthropicEndpoints.resolveMessagesUri(firstPass.toString());
+      assertEquals(firstPass, secondPass, "resolveMessagesUri must be idempotent for: " + testCase);
+    }
   }
 }
