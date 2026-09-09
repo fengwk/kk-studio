@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -109,6 +110,26 @@ class StudioHarnessSessionControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"   \"}"))
         .andExpect(status().isBadRequest());
+    verify(runtime, never()).renameSession(any(RenameSessionCommand.class));
+  }
+
+  @Test
+  void renameRejectsOverlongNameWithoutEchoingTheSubmittedValue() throws Exception {
+    // 意图：超长 name 由 Core 命令构造器拒绝为 400，且错误响应绝不回显用户提交的名称值（敏感数据不外泄）。
+    String overlongName = "OVERLONG-SECRET-" + "x".repeat(257);
+    String body = "{\"name\":\"" + overlongName + "\"}";
+    String response =
+        mockMvc
+            .perform(
+                put("/api/harness/sessions/" + SESSION_ID + "/name")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(body))
+            .andExpect(status().isBadRequest())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    assertFalse(response.contains(overlongName), "400 响应不得回显非法名称值");
+    assertFalse(response.contains("OVERLONG-SECRET"), "400 响应不得回显敏感 marker");
     verify(runtime, never()).renameSession(any(RenameSessionCommand.class));
   }
 
