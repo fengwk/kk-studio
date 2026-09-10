@@ -109,6 +109,122 @@ npm `11.9.0`，对 `frontend/` 执行 `npm ci` 和 `npm run build`，再把 Vite
 `package` 阶段把它们打入 `BOOT-INF/classes/static`。普通 `mvn test` 或
 普通 `mvn package` 不激活该 profile。
 
+### 4.4 NAS main/dev 自迭代运行规范
+
+NAS 自迭代使用共享数据面的两个 App 节点。它们属于同一个 KK Studio 集群，
+不是数据隔离的测试环境：
+
+| 节点 | Git branch | Human 入口 | 运行形态 |
+| --- | --- | --- | --- |
+| `vps-kk-studio` | `main` | `https://studio.kk1.fun` | 不含源码和构建工具的不可变 Fat JAR 镜像 |
+| `vps-kk-studio-dev` | `dev` | `https://studio-dev.kk1.fun` | 持久源码工作区、JDK/Maven、Node/Vite、Backend 和 Environment Daemon |
+
+两个节点连接同一 PostgreSQL database 和 S3 bucket，均启动 Harness Worker。
+PostgreSQL claim/lease/fencing 保证单项 Work 只被一个节点拥有，但不按入口域名、
+branch 或版本分配 Work：
+
+| Work | 节点选择 |
+| --- | --- |
+| Thread、Model、无 Environment affinity 的 Tool | 任一活跃 Worker 均可 claim |
+| 绑定 Dev Daemon Environment 的 Tool | 仅持有该 Environment route 的 Dev 节点可 claim |
+
+因此一个 Turn 可以跨 Main/Dev 两个版本执行。异版本混跑只允许保持
+Harness 持久状态、Entry JSON、Provider/Tool wire、Storage 生命周期和数据库约束
+向后兼容的变更。Human 可以在两个入口查看同一份 durable 状态、发送命令并验收
+Dev 行为；入口节点不代表实际执行该 Work 的节点。
+
+运行职责固定为：
+
+```text
+vps-kk-studio
+  main immutable image
+  workers enabled
+  Flyway enabled
+  bundled frontend + API
+
+vps-kk-studio-dev
+  dev persistent workspace
+  workers enabled
+  Flyway disabled
+  Vite + API + Environment Daemon
+```
+
+Main 是共享 schema 的唯一 Flyway owner。Dev 使用与 Main 相同的生产 profile，
+但必须设置 `SPRING_FLYWAY_ENABLED=false`，且不得加载 dev/e2e seed。Dev 分支中的
+未合并 migration 不得应用到共享 database；涉及 schema 的变更必须先由 Human
+完成 Review 和 Main 集成，再由 Main 节点执行 migration。已经投入使用的 V1
+保持冻结，后续只新增 V2+ migration；任何自迭代都不得重置整个 database 或
+删除共享 bucket。
+
+Dev Daemon 只连接 Dev Backend 的内部 WebSocket，不通过公共 Gateway：
+
+```text
+ws://127.0.0.1:8080/api/harness/environment-daemon/v1
+```
+
+它的 `environment-root` 指向持久源码工作区。Frontend 由 Vite 监听容器网络，
+`/api` 和应用事件 WebSocket 代理到同容器 Backend。Gateway 将
+`studio-dev.kk1.fun` 的 HTTP、应用事件 WebSocket 和 Vite HMR WebSocket 统一
+转发到 Vite；Main 域名直接转发到 Fat JAR App。
+
+Agent 在 Dev 节点遵循以下闭环：
+
+1. 只修改、提交和 push `dev`；不得直接修改或 push `main`。
+2. 开始前检查 Git 状态并保留 Human 的并行修改，不覆盖未提交工作。
+3. 对实际变更执行定向测试；Java 关键路径同时遵守覆盖率门禁。
+4. 普通 Frontend 变更由 Vite HMR 生效；Java 变更先增量构建，再重启 Dev
+   Backend/Vite 受管进程，不重启 Main 或 Daemon。
+5. 重启前提交源码和必要的 durable 进度；Backend 重启作为当前 Agent 回合的最后
+   一个 Tool 操作。重启可能使当前 Model/Tool invocation 收敛为 `UNKNOWN`，
+   Daemon 重连不等于 invocation 无损迁移。
+6. 验证 Dev health、Frontend、应用事件 WebSocket 和 Daemon `READY` 后继续下一轮。
+7. 功能达到可验收状态后 push `dev` 并向 Human 报告变更、验证和已知风险；只有
+   Human 决定何时合入 `main` 和更新稳定节点。
+
+当前仓库脚本可用于 Backend/Vite 重启；容器环境必须显式覆盖监听地址、端口和
+profile：
+
+```bash
+env JAVA_HOME="$JAVA_HOME_21" \
+  mvn -B -ntp -pl web -am -DskipTests package
+
+SPRING_PROFILES_ACTIVE=prod \
+SPRING_FLYWAY_ENABLED=false \
+BACKEND_HOST=127.0.0.1 \
+BACKEND_PORT=8080 \
+FRONTEND_HOST=0.0.0.0 \
+FRONTEND_PORT=5173 \
+DEV_SKIP_PACKAGE=true \
+  ./scripts/dev.sh restart
+```
+
+Agent 必须停止自动重启并交给 Human 决策的变更包括：
+
+- 未合入 Main 的 Flyway migration 或破坏性 schema 变更；
+- 删除或重命名持久 JSON 字段、数据库枚举值或 wire 字段；
+- 改变 Work/Invocation 状态机、claim/lease/fencing 语义；
+- 改变 S3 object key、Blob 引用计数或 cleanup 生命周期；
+- 需要重建 Dev 镜像、重启 Daemon 或可能同时使两个 App 版本不可读的数据变更。
+
+源码仓库、Dockerfile 和 image layer 只保存环境变量名与无敏感默认值。数据库、
+S3、Provider、Gateway、Git 和 Daemon registration credential 由 NAS 私密环境
+文件在运行时注入；Dev 镜像中的源码快照、构建日志、测试报告和 Git 历史不得包含
+真实值。Dev Agent 只获得完成职责所需的 database、bucket 和 repository 权限。
+
+完整协作顺序是：
+
+```text
+Agent modifies dev
+  -> targeted tests
+  -> commit and push dev
+  -> reload vps-kk-studio-dev
+  -> Human observes and validates studio-dev
+  -> Human merges dev into main
+  -> main workflow builds immutable image
+  -> Human updates vps-kk-studio
+  -> Dev synchronizes the new main baseline
+```
+
 ## 5. Java 质量检查
 
 ### 5.1 Spotless

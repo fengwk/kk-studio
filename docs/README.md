@@ -41,8 +41,8 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [development-and-testing.md](operations/development-and-testing.md) | 开发、质量、E2E、可靠性、性能和供应链入口 |
-| [deployment.md](operations/deployment.md) | Fat JAR、Compose stacks、运行配置和清理 |
+| [development-and-testing.md](operations/development-and-testing.md) | 开发、质量、NAS 自迭代、E2E、可靠性、性能和供应链入口 |
+| [deployment.md](operations/deployment.md) | Fat JAR、Compose stacks、NAS 外部部署边界、运行配置和清理 |
 
 ## 仓库策略
 
