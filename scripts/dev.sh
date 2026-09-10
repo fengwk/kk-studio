@@ -86,6 +86,19 @@ profile_enabled() {
   esac
 }
 
+# Build `env -u` arguments from the live environment so every current and future TEST_*
+# input is excluded from long-lived processes without maintaining a provider-name allowlist.
+test_env_unset_args() {
+  local name
+  while IFS= read -r name; do
+    case "$name" in
+      TEST_*)
+        printf '%s\0' -u "$name"
+        ;;
+    esac
+  done < <(compgen -e)
+}
+
 # Synchronize complete real-provider credential pairs after backend readiness.
 sync_e2e_provider_credentials() {
   require_cmd python3
@@ -227,12 +240,10 @@ start_all() {
   cd "$APP_HOME"
   step "Starting backend on $BACKEND_URL"
   read -r -a java_opts <<< "${JAVA_OPTS:-}"
+  local -a test_env_unsets=()
+  mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
   run_detached "$BACKEND_LOG" env \
-    -u TEST_GOOGLE_BASE_URL -u TEST_GOOGLE_API_KEY \
-    -u TEST_OPENAI_BASE_URL -u TEST_OPENAI_API_KEY \
-    -u TEST_ANTHROPIC_BASE_URL -u TEST_ANTHROPIC_API_KEY \
-    -u TEST_DEEPSEEK_BASE_URL -u TEST_DEEPSEEK_API_KEY \
-    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+    "${test_env_unsets[@]}" \
     "$java_home/bin/java" "${java_opts[@]}" -jar "$BACKEND_JAR" \
     --spring.profiles.active="$SPRING_PROFILE" \
     --server.address="$BACKEND_HOST" \
@@ -247,11 +258,7 @@ start_all() {
   step "Starting frontend on $FRONTEND_URL"
   cd "$APP_HOME/frontend"
   run_detached "$FRONTEND_LOG" env \
-    -u TEST_GOOGLE_BASE_URL -u TEST_GOOGLE_API_KEY \
-    -u TEST_OPENAI_BASE_URL -u TEST_OPENAI_API_KEY \
-    -u TEST_ANTHROPIC_BASE_URL -u TEST_ANTHROPIC_API_KEY \
-    -u TEST_DEEPSEEK_BASE_URL -u TEST_DEEPSEEK_API_KEY \
-    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+    "${test_env_unsets[@]}" \
     API_PROXY_TARGET="$BACKEND_URL" npm run dev -- \
     --host "$FRONTEND_HOST" \
     --port "$FRONTEND_PORT"
