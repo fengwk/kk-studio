@@ -246,7 +246,13 @@ start_all() {
 
   step "Starting frontend on $FRONTEND_URL"
   cd "$APP_HOME/frontend"
-  run_detached "$FRONTEND_LOG" env API_PROXY_TARGET="$BACKEND_URL" npm run dev -- \
+  run_detached "$FRONTEND_LOG" env \
+    -u TEST_GOOGLE_BASE_URL -u TEST_GOOGLE_API_KEY \
+    -u TEST_OPENAI_BASE_URL -u TEST_OPENAI_API_KEY \
+    -u TEST_ANTHROPIC_BASE_URL -u TEST_ANTHROPIC_API_KEY \
+    -u TEST_DEEPSEEK_BASE_URL -u TEST_DEEPSEEK_API_KEY \
+    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+    API_PROXY_TARGET="$BACKEND_URL" npm run dev -- \
     --host "$FRONTEND_HOST" \
     --port "$FRONTEND_PORT"
   echo "$DETACHED_PID" > "$FRONTEND_PID_FILE"

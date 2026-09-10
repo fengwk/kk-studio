@@ -164,12 +164,15 @@ class TestBuildScripts(unittest.TestCase):
         )
         self.assertNotIn("sync_e2e_provider_credentials", ensure_stack)
 
-    def test_dev_scrubs_backend_credentials_and_syncs_only_the_four_e2e_pairs(self):
-        """Dev may sync host pairs after readiness, but backend Java must never inherit them."""
+    def test_long_lived_runtime_processes_scrub_credentials_and_sync_uses_four_pairs(self):
+        """Long-lived runtime processes must not inherit provider credentials."""
         script_path = REPOSITORY_ROOT / "scripts/dev.sh"
         script = script_path.read_text()
         start_all = function_body(script_path, "start_all")
         sync = function_body(script_path, "sync_e2e_provider_credentials")
+        e2e_lib_path = REPOSITORY_ROOT / "scripts/e2e/lib.sh"
+        start_frontend = function_body(e2e_lib_path, "start_frontend")
+        start_daemon = function_body(e2e_lib_path, "start_daemon")
         e2e_names = [
             "TEST_GOOGLE_BASE_URL",
             "TEST_GOOGLE_API_KEY",
@@ -182,10 +185,18 @@ class TestBuildScripts(unittest.TestCase):
         ]
 
         for name in e2e_names:
-            self.assertIn(f"-u {name}", start_all)
+            self.assertGreaterEqual(
+                start_all.count(f"-u {name}"),
+                2,
+                f"dev backend and frontend must both scrub {name}",
+            )
+            self.assertIn(f"-u {name}", start_frontend)
+            self.assertIn(f"-u {name}", start_daemon)
             self.assertIn(f'{name}="${{{name}-}}"', sync)
-        self.assertIn("-u TEST_MINIMAX_BASE_URL", start_all)
-        self.assertIn("-u TEST_MINIMAX_API_KEY", start_all)
+        for legacy_name in ("TEST_MINIMAX_BASE_URL", "TEST_MINIMAX_API_KEY"):
+            self.assertGreaterEqual(start_all.count(f"-u {legacy_name}"), 2)
+            self.assertIn(f"-u {legacy_name}", start_frontend)
+            self.assertIn(f"-u {legacy_name}", start_daemon)
         self.assertNotIn("TEST_MINIMAX_BASE_URL=", sync)
         self.assertNotIn("TEST_MINIMAX_API_KEY=", sync)
         self.assertIn(

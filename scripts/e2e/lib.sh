@@ -217,7 +217,13 @@ start_frontend() {
   step "Starting frontend $FRONTEND_URL proxy->$BACKEND_URL"
   (
     cd "$REPO_ROOT/frontend"
-    nohup env API_PROXY_TARGET="$BACKEND_URL" npm run dev -- \
+    nohup env \
+      -u TEST_GOOGLE_BASE_URL -u TEST_GOOGLE_API_KEY \
+      -u TEST_OPENAI_BASE_URL -u TEST_OPENAI_API_KEY \
+      -u TEST_ANTHROPIC_BASE_URL -u TEST_ANTHROPIC_API_KEY \
+      -u TEST_DEEPSEEK_BASE_URL -u TEST_DEEPSEEK_API_KEY \
+      -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+      API_PROXY_TARGET="$BACKEND_URL" npm run dev -- \
       --host "$FRONTEND_HOST" \
       --port "$FRONTEND_PORT" \
       >"$WORK_DIR/frontend.log" 2>&1 &
@@ -243,7 +249,13 @@ start_daemon() {
   # put the reactor-built jar first so clean-slate daemon/tool protocol changes are exercised.
   cp="$DAEMON_JAR:$DAEMON_TOOL_JAR:$(cat "$DAEMON_CP_FILE")"
   step "Starting daemon env=$DAEMON_ENV_NAME"
-  nohup env JAVA_HOME="$java_home" "$java_home/bin/java" \
+  nohup env \
+    -u TEST_GOOGLE_BASE_URL -u TEST_GOOGLE_API_KEY \
+    -u TEST_OPENAI_BASE_URL -u TEST_OPENAI_API_KEY \
+    -u TEST_ANTHROPIC_BASE_URL -u TEST_ANTHROPIC_API_KEY \
+    -u TEST_DEEPSEEK_BASE_URL -u TEST_DEEPSEEK_API_KEY \
+    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+    JAVA_HOME="$java_home" "$java_home/bin/java" \
     -cp "$cp" fun.fengwk.kkstudio.harness.daemon.DaemonMain \
     --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/harness/environment-daemon/v1" \
     --registration-token "$DAEMON_REGISTRATION_TOKEN" \

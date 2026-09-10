@@ -72,8 +72,9 @@ flowchart TD
 `npm install`，等待 backend API ready 后启动 Vite。`e2e` profile 启用时，
 宿主同步器按需读取 Google、OpenAI Responses、MiniMax Anthropic 和 DeepSeek
 四组完整 credential pair，经 backend API 写入 E2E database 中对应的 seed
-Provider row；backend Java 进程会显式移除这些宿主变量，credential 不进入 seed
-SQL/resource，密钥与 endpoint 不打印。
+Provider row；Backend、Vite 和 Daemon 长驻进程都会显式移除这些宿主变量，这些
+变量仅向短生命周期同步器显式透传。credential 不进入 seed SQL/resource，密钥与
+endpoint 不打印。
 
 Vite 配置默认只监听 `127.0.0.1`，并使用 Vite 自带的 Host allowlist。需要容器
 或远程开发时由调用方通过命令行 `--host` 显式覆盖，仓库默认不向全部网卡开放。
