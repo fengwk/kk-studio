@@ -9,12 +9,14 @@
 #
 # builder：Maven 3.9.11 + Temurin 21 构建 Environment Daemon 及其 runtime 依赖。
 # runtime：Temurin 21 JDK（含 javap）、Maven 3.9.11、Node 24.14.0/npm 11.9.0、
-#          git、curl、jq、lsof、python3、ffmpeg/ffprobe、CA certificates；
-#          以 uid/gid 10001 的非 root 用户运行。
+#          git、openssh-client、GitHub CLI 2.100.0（linux/amd64）、curl、jq、lsof、
+#          python3、ffmpeg/ffprobe、CA certificates；以 uid/gid 10001 的非 root 用户运行。
 #
-# 该镜像不包含 Docker socket、真实 credential 或 Git 历史；BuildKit cache mount 只
-# 承载 Maven 依赖，`.dockerignore` 排除 `.git`、`.env*`、key/credential 文件、
-# 构建报告、`target/`、`node_modules/` 和本地工作区。
+# 该镜像不包含 Docker socket、真实 credential 或 Git 历史。git 与 gh 的 Git 操作都通过
+# SSH 访问 github.com：host key 由镜像内的 `/etc/ssh/ssh_known_hosts` 提供，私钥在容器
+# 启动时由外部只读挂载注入 `$HOME/.ssh`。BuildKit cache mount 只承载 Maven 依赖，
+# `.dockerignore` 排除 `.git`、`.env*`、key/credential 文件、构建报告、`target/`、
+# `node_modules/` 和本地工作区。
 
 # ---------- daemon builder ----------
 FROM maven:3.9.11-eclipse-temurin-21 AS builder
@@ -47,11 +49,11 @@ ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     HOME=/home/kkdaemon \
     PATH="/opt/maven/bin:${PATH}" \
-    GIT_ASKPASS=/usr/local/bin/kk-studio-git-askpass \
     GIT_TERMINAL_PROMPT=0 \
     KK_STUDIO_WORKSPACE_ROOT=/workspace \
     KK_STUDIO_REPOSITORY_DIR=/workspace/kk-studio \
     KK_STUDIO_SOURCE_SEED=/opt/kk-studio/source \
+    KK_STUDIO_SSH_CREDENTIALS_DIR=/run/kk-studio/ssh \
     SPRING_PROFILES_ACTIVE=prod \
     SPRING_FLYWAY_ENABLED=false \
     BACKEND_HOST=127.0.0.1 \
@@ -68,12 +70,13 @@ RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes; \
     apt-get install -y --no-install-recommends \
-        bash ca-certificates curl ffmpeg git jq lsof python3; \
+        bash ca-certificates curl ffmpeg git jq lsof openssh-client python3; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*; \
     command -v ffmpeg; \
     command -v ffprobe; \
     command -v javap; \
+    command -v ssh; \
     groupadd --gid 10001 kkdaemon; \
     useradd --uid 10001 \
             --gid kkdaemon \
@@ -83,12 +86,30 @@ RUN set -eux; \
             --comment "kk-studio dev node" \
             kkdaemon; \
     mkdir -p /opt/kk-studio/lib /opt/kk-studio/source /workspace /var/kk-studio/dev \
-             /home/kkdaemon/.m2 /home/kkdaemon/.npm; \
+             /home/kkdaemon/.m2 /home/kkdaemon/.npm /home/kkdaemon/.ssh \
+             /home/kkdaemon/.config/gh; \
+    chmod 0700 /home/kkdaemon/.ssh /home/kkdaemon/.config/gh; \
     chown -R kkdaemon:kkdaemon /opt/kk-studio /workspace /var/kk-studio /home/kkdaemon; \
-    git config --system credential.helper /usr/local/bin/kk-studio-git-askpass; \
-    git config --system core.askpass /usr/local/bin/kk-studio-git-askpass; \
     git config --system user.name "kk-studio dev"; \
     git config --system user.email "dev@kk-studio.invalid"
+
+# GitHub CLI 固定为官方 linux/amd64 release，只在校验发布方 SHA-256 后才安装；
+# Dev image 与 publish workflow 都只构建 linux/amd64。
+RUN set -eux; \
+    test "$(dpkg --print-architecture)" = "amd64"; \
+    curl -fsSL -o /tmp/gh.deb \
+        "https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_amd64.deb"; \
+    echo "698c8d88cc19cc92bfe96bad58d10b2a5b274c52433d6dc57799c81f6139d5fc  /tmp/gh.deb" \
+        | sha256sum -c -; \
+    dpkg -i /tmp/gh.deb; \
+    rm -f /tmp/gh.deb; \
+    command -v gh; \
+    gh --version
+
+# GitHub 官方 github.com host key 与非交互客户端策略：未知 host、加密/不可用 key
+# 都直接失败，不让长期运行的 Agent 卡在认证提示；内容均为公开配置。
+COPY --chmod=0644 deploy/dev/ssh_known_hosts /etc/ssh/ssh_known_hosts
+COPY --chmod=0644 deploy/dev/ssh_config /etc/ssh/ssh_config.d/kk-studio-github.conf
 
 # Maven and Node come from their pinned build images instead of a runtime package
 # repository, so the toolchain versions match the build that produced this image.
@@ -103,12 +124,10 @@ COPY --from=builder --chown=kkdaemon:kkdaemon /build/daemon-lib/ /opt/kk-studio/
 # checkout in the persistent workspace.
 COPY --chown=kkdaemon:kkdaemon . /opt/kk-studio/source
 
-COPY deploy/dev/git-askpass.sh /usr/local/bin/kk-studio-git-askpass
 COPY deploy/dev/entrypoint.sh /usr/local/bin/kk-studio-dev-entrypoint
 COPY deploy/dev/reload.sh /usr/local/bin/kk-studio-dev-reload
 COPY deploy/dev/healthcheck.sh /usr/local/bin/kk-studio-dev-healthcheck
 RUN chmod 0755 \
-        /usr/local/bin/kk-studio-git-askpass \
         /usr/local/bin/kk-studio-dev-entrypoint \
         /usr/local/bin/kk-studio-dev-reload \
         /usr/local/bin/kk-studio-dev-healthcheck

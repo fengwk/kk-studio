@@ -3,16 +3,18 @@
 # kk-studio Dev 节点 entrypoint。
 #
 # 职责顺序（每一步失败都 fail closed，不留下半启动状态）：
-#   1. 准备持久 Git 工作区：已存在的 checkout 永不覆盖；首次启动只能从配置的
-#      clean remote 克隆，或显式允许时使用镜像内的源码快照。
-#   2. 用仓库既有 lifecycle `scripts/dev.sh start` 启动 Backend（prod profile、
+#   1. 把外部只读挂载的 SSH 凭据装进 `$HOME/.ssh`：只复制 `id_*`，私钥 0600、`.pub`
+#      0644；github.com 的 host key 由镜像内的 `/etc/ssh/ssh_known_hosts` 提供。
+#   2. 准备持久 Git 工作区：已存在的 checkout 永不覆盖；首次启动只能从配置的 clean
+#      remote 克隆，或显式允许时使用镜像内的源码快照。
+#   3. 用仓库既有 lifecycle `scripts/dev.sh start` 启动 Backend（prod profile、
 #      Flyway disabled、loopback 8080）和 Vite（0.0.0.0:5173、代理 Backend）。
-#   3. 以前台 Environment Daemon 作为容器主进程，连接同容器 Backend 的内部
+#   4. 以前台 Environment Daemon 作为容器主进程，连接同容器 Backend 的内部
 #      WebSocket，`environment-root` 指向持久工作区根。
 #
-# 凭据边界：Git secret 在启动前从自身环境摘除，只显式交给 clone 子进程和最终
-# Daemon 进程；Backend/Vite 不继承它。Daemon registration token 只作为 Daemon
-# 参数传递。两者都不会写入 image layer 或日志。
+# 凭据边界：SSH 私钥只在容器启动时从挂载目录复制进 `$HOME/.ssh`，镜像、命令行和日志
+# 都不保存 key 内容，源目录的 `config`/`known_hosts`/`authorized_keys` 也不继承；
+# Daemon registration token 只作为 Daemon 参数传递。
 set -euo pipefail
 
 WORKSPACE_ROOT=${KK_STUDIO_WORKSPACE_ROOT:-/workspace}
@@ -21,6 +23,8 @@ SOURCE_SEED=${KK_STUDIO_SOURCE_SEED:-/opt/kk-studio/source}
 ALLOW_SOURCE_SEED=${KK_STUDIO_DEV_ALLOW_SOURCE_SEED:-false}
 GIT_REMOTE_URL=${KK_STUDIO_GIT_REMOTE_URL:-}
 GIT_BRANCH=${KK_STUDIO_GIT_BRANCH:-dev}
+SSH_CREDENTIALS_DIR=${KK_STUDIO_SSH_CREDENTIALS_DIR:-/run/kk-studio/ssh}
+SSH_DIR=$HOME/.ssh
 
 SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-prod}
 SPRING_FLYWAY_ENABLED=${SPRING_FLYWAY_ENABLED:-false}
@@ -43,9 +47,6 @@ step() {
 }
 
 # 立即摘除自身环境中的 secret：后续只能显式交给真正需要它的子进程。
-git_username=${KK_STUDIO_GIT_USERNAME:-}
-git_token=${KK_STUDIO_GIT_TOKEN:-}
-unset KK_STUDIO_GIT_USERNAME KK_STUDIO_GIT_TOKEN
 registration_token=${KK_STUDIO_DAEMON_REGISTRATION_TOKEN:-}
 unset KK_STUDIO_DAEMON_REGISTRATION_TOKEN
 
@@ -69,6 +70,43 @@ validate_runtime_contract() {
     echo "ERROR: KK_STUDIO_DAEMON_REGISTRATION_TOKEN is required to register the Daemon." >&2
     exit 1
   fi
+}
+
+# SSH key 是运行时挂载的：挂载目录缺失/不可读或没有私钥时直接失败，容器不会以无法
+# push 的状态继续启动。只复制 `id_*`，源目录的 config/known_hosts/authorized_keys
+# 不进入容器，避免继承宿主或旧代理配置。
+install_ssh_credentials() {
+  if [ ! -d "$SSH_CREDENTIALS_DIR" ] || [ ! -r "$SSH_CREDENTIALS_DIR" ]; then
+    echo "ERROR: $SSH_CREDENTIALS_DIR must be a readable directory holding the mounted SSH keys." >&2
+    echo "       Mount the SSH credentials read-only for uid $(id -u) and restart." >&2
+    exit 1
+  fi
+  local key name private_keys=0
+  mkdir -p "$SSH_DIR"
+  chmod 0700 "$SSH_DIR"
+  # 容器 restart 会保留 writable layer；先移除上次注入的 identity，避免 key 轮换后
+  # 继续携带已从挂载源删除的旧私钥。
+  rm -f "$SSH_DIR"/id_*
+  for key in "$SSH_CREDENTIALS_DIR"/id_*; do
+    if [ ! -f "$key" ]; then
+      continue
+    fi
+    name=$(basename "$key")
+    case "$name" in
+      *.pub)
+        install -m 0644 "$key" "$SSH_DIR/$name"
+        ;;
+      *)
+        install -m 0600 "$key" "$SSH_DIR/$name"
+        private_keys=$((private_keys + 1))
+        ;;
+    esac
+  done
+  if [ "$private_keys" -eq 0 ]; then
+    echo "ERROR: $SSH_CREDENTIALS_DIR must contain at least one private id_* key." >&2
+    exit 1
+  fi
+  step "Installed $private_keys private SSH key(s) into $SSH_DIR"
 }
 
 assert_expected_git_branch() {
@@ -108,13 +146,9 @@ prepare_workspace() {
     exit 1
   fi
   if [ -n "$GIT_REMOTE_URL" ]; then
+    # 固定的 SSH remote 配合已注入的 key 完成认证，`.git/config` 保持无凭据。
     step "Initializing $REPOSITORY_DIR from the configured remote on branch $GIT_BRANCH"
-    (
-      # 只在 clone 子进程中出现凭据；remote URL 保持 clean，token 不进入 .git/config。
-      export KK_STUDIO_GIT_USERNAME="$git_username"
-      export KK_STUDIO_GIT_TOKEN="$git_token"
-      git clone --branch "$GIT_BRANCH" "$GIT_REMOTE_URL" "$REPOSITORY_DIR"
-    )
+    git clone --branch "$GIT_BRANCH" "$GIT_REMOTE_URL" "$REPOSITORY_DIR"
     assert_expected_git_branch
     git -C "$REPOSITORY_DIR" rev-parse --short HEAD
     return
@@ -147,8 +181,6 @@ start_managed_servers() {
 
 run_daemon() {
   step "Starting Environment Daemon against $DAEMON_GATEWAY_URI with environment-root $WORKSPACE_ROOT"
-  export KK_STUDIO_GIT_USERNAME="$git_username"
-  export KK_STUDIO_GIT_TOKEN="$git_token"
   exec java -XX:MaxRAMPercentage=75.0 \
     -cp "$DAEMON_JAR:$DAEMON_LIB/*" \
     fun.fengwk.kkstudio.harness.daemon.DaemonMain \
@@ -158,12 +190,15 @@ run_daemon() {
     --environment-root "$WORKSPACE_ROOT"
 }
 
+require_cmd gh
 require_cmd git
 require_cmd java
 require_cmd mvn
 require_cmd npm
+require_cmd ssh
 
 validate_runtime_contract
+install_ssh_credentials
 prepare_workspace
 start_managed_servers
 run_daemon
