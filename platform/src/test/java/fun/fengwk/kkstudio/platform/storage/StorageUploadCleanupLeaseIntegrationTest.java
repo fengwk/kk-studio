@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -58,6 +59,9 @@ class StorageUploadCleanupLeaseIntegrationTest extends S3PostgresSpringTestSuppo
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactionManager;
+
+  // 本类直接验证 claim/lease SQL，禁用会异步 claim 同一批 upload 的后台 maintenance。
+  @MockitoBean private StorageMaintenance storageMaintenance;
 
   private StorageIntegrationSupport storage;
   private TransactionTemplate tx;

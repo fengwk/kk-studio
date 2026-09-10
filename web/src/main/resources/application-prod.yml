@@ -1,0 +1,19 @@
+spring:
+
+  flyway:
+    # 生产库只应用 schema module 的唯一 baseline 与后续增量 migration；
+    # dev/e2e/canvas-test 的 profile seed 都不属于生产 bootstrap 路径。
+    locations: classpath:db/migration
+    validate-migration-naming: true
+
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    # 生产数据源只来自环境变量：没有默认值，缺失时启动失败而不是回退到开发数据库。
+    url: ${KK_STUDIO_DB_URL}
+    username: ${KK_STUDIO_DB_USER}
+    password: ${KK_STUDIO_DB_PASSWORD}
+
+server:
+  # Main/Dev 节点都位于外部 Gateway 之后，需要按 X-Forwarded-* 还原外部
+  # scheme/host；端口与压缩仍由 application.yml 提供。
+  forward-headers-strategy: framework

@@ -1575,7 +1575,16 @@ class JdkHttpSseTransportTest {
     assertNull(cb2.error);
 
     // 窗口 3：收到事件后在流读取中由回调发起 cancel（验证重入不死锁）
+    //
+    // 该窗口需要两个显式握手，否则断言与 cancel() 之间没有 happens-before，
+    // 会在慢机器上偶发失败：
+    //   1）streamHandlePublished：服务端发出首个事件前先等主线程发布句柄，
+    //      保证回调里读到的引用一定非空（重入路径确定性被执行）；
+    //   2）reentrantCancelReturned：回调内 cancel() 返回后再放行主线程断言，
+    //      保证断言读取的是 cancel() 已生效后的状态。
+    CountDownLatch streamHandlePublished = new CountDownLatch(1);
     CountDownLatch firstEventDelivered = new CountDownLatch(1);
+    CountDownLatch reentrantCancelReturned = new CountDownLatch(1);
     AtomicReference<ProviderStream> s3Ref = new AtomicReference<>();
     httpServer.createContext(
         "/stream-mid-cancel",
@@ -1583,6 +1592,7 @@ class JdkHttpSseTransportTest {
           exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
           exchange.sendResponseHeaders(200, 0);
           try (OutputStream os = exchange.getResponseBody()) {
+            assertTrue(streamHandlePublished.await(5, TimeUnit.SECONDS));
             os.write("data: 1\n\n".getBytes(StandardCharsets.UTF_8));
             os.flush();
             firstEventDelivered.await(5, TimeUnit.SECONDS);
@@ -1607,14 +1617,17 @@ class JdkHttpSseTransportTest {
             ProviderStream st = s3Ref.get();
             if (st != null) {
               st.cancel(); // 回调内部重入 cancel
+              reentrantCancelReturned.countDown();
             }
           }
         };
     ProviderStream s3 =
         transport.stream(request3, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, cb3);
     s3Ref.set(s3);
+    streamHandlePublished.countDown();
 
     assertTrue(firstEventDelivered.await(5, TimeUnit.SECONDS));
+    assertTrue(reentrantCancelReturned.await(5, TimeUnit.SECONDS));
     assertTrue(s3.isCancelled());
     assertFalse(cb3.completed);
     assertNull(cb3.error);

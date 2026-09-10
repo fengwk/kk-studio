@@ -29,6 +29,8 @@
 flowchart TD
   Dev["./scripts/dev.sh start"] --> DevBackend["JDK 21 + Maven web package"]
   Dev --> DevFrontend["npm run dev + Vite proxy"]
+  DevNode["dev image: kk-studio-dev-reload"] --> DevBackend
+  DevNode --> DevFrontend
   Unit["env JAVA_HOME=$JAVA_HOME_21 mvn test / mvn verify"] --> JavaChecks["Spotless + Checkstyle + JaCoCo report; critical-class gate on verify"]
   Front["npm --prefix frontend run test/lint/build/coverage"] --> FrontChecks["Vitest + ESLint + tsc/Vite + v8"]
   E2E["./scripts/e2e.sh"] --> Matrix["Node API matrix: L1-L4"]
@@ -162,6 +164,19 @@ Dev Daemon 只连接 Dev Backend 的内部 WebSocket，不通过公共 Gateway�
 ws://127.0.0.1:8080/api/harness/environment-daemon/v1
 ```
 
+两个容器内的服务端访问不得绕到公网域名：
+
+```text
+PostgreSQL -> vps-postgres:5432
+S3 API     -> http://vps-s3:9000
+OpenCLI    -> 同一 vps 网络的 Hub 容器 HTTP origin
+```
+
+OpenCLI 的 `baseUrl` 由 System Settings 配置；上传、执行轮询和产物下载都从该
+origin 构造，并拒绝跨源产物 URL，因此 NAS 配置必须填写 Hub 的容器内地址而不是
+公网域名。S3 的 public endpoint 只用于返回给浏览器的预签名直传/直下 URL，服务端 `PUT`/`GET`/
+`HEAD`/`COPY`/`DELETE` 始终使用 `vps-s3:9000`。
+
 它的 `environment-root` 指向持久源码工作区。Frontend 由 Vite 监听容器网络，
 `/api` 和应用事件 WebSocket 代理到同容器 Backend。Gateway 将
 `studio-dev.kk1.fun` 的 HTTP、应用事件 WebSocket 和 Vite HMR WebSocket 统一
@@ -181,22 +196,78 @@ Agent 在 Dev 节点遵循以下闭环：
 7. 功能达到可验收状态后 push `dev` 并向 Human 报告变更、验证和已知风险；只有
    Human 决定何时合入 `main` 和更新稳定节点。
 
-当前仓库脚本可用于 Backend/Vite 重启；容器环境必须显式覆盖监听地址、端口和
-profile：
+当前仓库脚本可用于 Backend/Vite 重启。Dev 节点镜像由
+[deploy/dev/Dockerfile](../../deploy/dev/Dockerfile) 提供：Maven 3.9.11/JDK 21 与
+Node 24.14.0/npm 11.9.0 工具链、`git`/`curl`/`jq`/`lsof`/`python3`/`ffmpeg`/`ffprobe`、
+来自同一源码构建的 Environment Daemon runtime。容器以 uid/gid `10001` 运行，
+`/workspace` 是持久 Git 工作区根（checkout 位于 `/workspace/kk-studio`），
+`/home/kkdaemon/.m2` 与 `/home/kkdaemon/.npm` 是持久 cache；这三处 volume 必须由
+外部 Compose 以 `10001:10001` 属主挂载。
+
+首次启动只在工作区不存在或为空时初始化它：
+
+- 配置 `KK_STUDIO_GIT_REMOTE_URL`（clean URL，不含凭据）时执行 Git clone，
+  分支由 `KK_STUDIO_GIT_BRANCH` 指定（默认 `dev`）；
+- 只有显式设置 `KK_STUDIO_DEV_ALLOW_SOURCE_SEED=true` 时才回退到镜像内源码快照；
+- 已存在的 checkout、未提交工作和未 push 的提交永不被覆盖；checkout 不在
+  `KK_STUDIO_GIT_BRANCH` 时启动失败，entrypoint 不会自动 checkout/reset。
+
+凭据只在运行时注入：`KK_STUDIO_GIT_USERNAME` 与 `KK_STUDIO_GIT_TOKEN` 只进入 clone
+子进程和最终的 Daemon 进程，Backend/Vite 不继承。镜像提供的 askpass helper 让 Daemon
+的 Bash capability 可以直接 `git push`，而 token 不写入 `.git/config`。
+
+entrypoint 用仓库既有 lifecycle 启动 Backend/Vite（prod profile、Flyway disabled、
+Backend `127.0.0.1:8080`、Vite `0.0.0.0:5173` 并代理 Backend），随后以前台
+Environment Daemon 作为容器主进程，连接
+`ws://127.0.0.1:8080/api/harness/environment-daemon/v1`，environment-root 为
+`/workspace`。entrypoint 对 `prod` profile、`SPRING_FLYWAY_ENABLED=false` 和
+Daemon registration token fail closed，避免错误配置触碰共享 schema。healthcheck
+同时探测 Backend `/actuator/health` 与 Vite `/threads`。
+
+空 cache volume 的首次启动要完整构建 Backend 并安装前端依赖（实测 ~29 分钟，其中
+Maven 25:44、npm 2:00），因此 entrypoint 把 readiness 预算
+`DEV_READY_TIMEOUT_SECONDS` 提升到 `600s`：超过预算仍不就绪时直接以非零状态退出，
+而不是留下一个半启动的容器。同一镜像 healthcheck 的 start period 为 `2700s`，覆盖冷
+cache 首次启动；已有 workspace 的重启（`DEV_SKIP_PACKAGE=true` 且 `node_modules`
+存在）实测 41 秒内恢复健康。
+
+普通迭代只运行稳定命令 `kk-studio-dev-reload`（增量 package 后重启受管进程，
+Daemon 与容器保持存活，并等待两端 readiness）。容器内等价手写路径为：
 
 ```bash
-env JAVA_HOME="$JAVA_HOME_21" \
-  mvn -B -ntp -pl web -am -DskipTests package
+cd /workspace/kk-studio
+env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl web -am -DskipTests package
 
-SPRING_PROFILES_ACTIVE=prod \
-SPRING_FLYWAY_ENABLED=false \
-BACKEND_HOST=127.0.0.1 \
-BACKEND_PORT=8080 \
-FRONTEND_HOST=0.0.0.0 \
-FRONTEND_PORT=5173 \
-DEV_SKIP_PACKAGE=true \
+env SPRING_PROFILES_ACTIVE=prod \
+  SPRING_FLYWAY_ENABLED=false \
+  BACKEND_HOST=127.0.0.1 \
+  BACKEND_PORT=8080 \
+  FRONTEND_HOST=0.0.0.0 \
+  FRONTEND_PORT=5173 \
+  DEV_SKIP_PACKAGE=true \
   ./scripts/dev.sh restart
 ```
+
+Dev 容器运行环境变量（外部 Compose 只引用名称，真实值由 NAS 私密环境文件注入）：
+
+| 变量 | 职责 |
+| --- | --- |
+| `KK_STUDIO_WORKSPACE_ROOT` | Daemon environment-root 与持久工作区根，默认 `/workspace` |
+| `KK_STUDIO_REPOSITORY_DIR` | 源码 checkout，默认 `/workspace/kk-studio` |
+| `KK_STUDIO_GIT_REMOTE_URL` / `KK_STUDIO_GIT_BRANCH` | 首次 clone 的 clean remote 与分支，默认不带 remote / `dev` |
+| `KK_STUDIO_GIT_USERNAME` / `KK_STUDIO_GIT_TOKEN` | Git 凭据；只对 clone/pull 子进程和 Daemon 可见 |
+| `KK_STUDIO_DEV_ALLOW_SOURCE_SEED` | 是否允许用镜像内源码快照初始化非 Git 工作区，默认 `false` |
+| `KK_STUDIO_SOURCE_SEED` | 源码快照路径，默认 `/opt/kk-studio/source` |
+| `SPRING_PROFILES_ACTIVE` / `SPRING_FLYWAY_ENABLED` | Backend profile 与 Flyway 开关，默认 `prod` / `false`（Main 独占 migration） |
+| `BACKEND_HOST` / `BACKEND_PORT` / `FRONTEND_HOST` / `FRONTEND_PORT` / `DEV_WORK_DIR` | `scripts/dev.sh` 的监听地址、端口与 log/PID 目录 |
+| `DEV_READY_TIMEOUT_SECONDS` | Backend/Vite readiness 预算，容器内默认 `600`（仓库默认 `90`） |
+| `KK_STUDIO_DAEMON_REGISTRATION_TOKEN` | Daemon 注册 token |
+| `KK_STUDIO_DAEMON_GATEWAY_URI` / `KK_STUDIO_DAEMON_NOTE` | Daemon WebSocket 地址与 Environment note |
+
+`main` 与 `dev` 分支的镜像发布由 `.github/workflows/docker-publish.yml` 承担：先跑
+Java/frontend/docs/security 门禁，再以 Buildx 构建 linux/amd64 并推送
+`<namespace>/kk-studio:main` 或 `<namespace>/kk-studio-dev:dev` 以及对应的 commit SHA tag。
+同一分支有更新提交时取消旧 workflow，防止较旧构建后完成并覆盖可变分支 tag。
 
 Agent 必须停止自动重启并交给 Human 决策的变更包括：
 
