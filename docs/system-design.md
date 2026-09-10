@@ -102,6 +102,9 @@ flowchart LR
   Tool 和 subagent 使用有界的进程内 admission，不以隐式线程队列代替容量控制。
 - **无 App-to-App 网络协调。** 多个 App 节点只共享 PostgreSQL 与 Blob Storage；
   PostgreSQL route lease、mailbox、Work 和 NOTIFY 覆盖跨节点接管与唤醒。
+- **共享 Work 池。** 连接同一 PostgreSQL 的 Worker 节点竞争同一组
+  `harness_work`；节点身份只用于 claim/lease fencing 和 Environment route，
+  不是 branch、版本或部署隔离。只有绑定 Environment 的 Tool Work 具有节点亲和性。
 - **明确的字节边界。** PostgreSQL 保存 Blob 的 hash、媒体事实、引用和生命周期；
   S3 保存 original/preview 字节，浏览器只获得短期签名 URL。
 - **单一组合根。** 每个 App 节点由 `web` 负责 Spring Bean、Notification loop、
@@ -112,6 +115,8 @@ flowchart LR
 - PostgreSQL `NOTIFY` 不承担持久化、重放或审计职责；丢失通知必须可以由 poll 或
   Snapshot 收敛。
 - App 节点不通过 HTTP、RPC、DNS 或共享内存彼此协调。
+- 系统不提供 branch/version Worker 分组；异版本节点混跑必须保持共享持久协议向后
+  兼容，或在不兼容变更生效前完成节点收敛。
 - `canvas-core` 不连接 PostgreSQL、S3、HTTP、Spring 或 Harness；Canvas Link 也
   不是自动 DAG 调度器。
 - Realtime overlay 不替代 durable Snapshot；浏览器本地 Pane、布局和 draft 不写入

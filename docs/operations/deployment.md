@@ -4,7 +4,8 @@
 `deploy/distributed` 和 `deploy/reliability` 运行方式。开发与测试入口见
 [开发与测试](development-and-testing.md)；Frontend 代码和发布资源的关系见
 [Frontend 模块](../modules/frontend.md)；跨模块边界见
-[系统设计](../system-design.md)。
+[系统设计](../system-design.md)。NAS Main/Dev 节点的 Agent 与 Human 协作规则见
+[自迭代运行规范](development-and-testing.md#44-nas-maindev-自迭代运行规范)。
 
 ## 1. Goals
 
@@ -497,6 +498,30 @@ ss -ltnp | grep -E ':8080|:5432|:15432|:15433|:18082|:18083|:18088|:18089|:18090
 Healthcheck 通过后才能把服务交给上层脚本；任何 app、database、MinIO、
 mock、Daemon READY 或 smoke 失败都保留诊断并进入失败路径。清理命令只作用
 于对应 Compose project，不删除其它 project 的容器、network 或 volume。
+
+## 13. NAS 外部部署边界
+
+NAS Main/Dev 自迭代拓扑横跨三个职责边界：
+
+| 边界 | 职责 |
+| --- | --- |
+| 本仓库 | Main Fat JAR image、Dev toolchain/source image、运行 profile、Daemon 与自迭代脚本 |
+| NAS Compose 仓库 | `vps-kk-studio`、`vps-kk-studio-dev`、共享 PostgreSQL/S3 连接、持久 workspace/cache、私密环境变量注入 |
+| Gateway 仓库 | `studio.kk1.fun`、`studio-dev.kk1.fun` 的 HTTP/WebSocket 路由和访问控制 |
+
+Main runtime image 不包含源码、Maven、Node 或 credential。Dev image 可以包含
+`dev` commit 的源码快照作为初始化基线，但实际可写源码、Maven/npm cache 和
+Daemon workspace 必须位于持久 volume；容器重建不得覆盖尚未 push 的工作区。
+普通源码更新只重启 Dev Backend/Vite 受管进程，只有 JDK、Node、系统工具或
+Dev image 入口变化才重建 Dev image。
+
+外部 Compose 和 Gateway 配置只引用环境变量名。真实 database、S3、Provider、
+Git、Gateway 和 registration credential 不进入本仓库、Docker build context、
+image layer、container command、日志或报告。Main 与 Dev 可以共享逻辑 database
+和 bucket；Main 独占 Flyway，两个节点均可运行 Worker，Dev Daemon 只连接 Dev
+Backend。精确的异版本 Work 路由和 Agent 停止边界由
+[自迭代运行规范](development-and-testing.md#44-nas-maindev-自迭代运行规范)
+定义。
 
 ---
 
