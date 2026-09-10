@@ -16,6 +16,12 @@ frontend/coverage/
 # Local reports and artifacts (never required for build)
 reports/
 
+# Local runtime state: PID files, logs, generated classpaths, agent metadata
+runtime/
+logs/
+pids/
+.kkstudio/
+
 # IDE / editor
 .idea/
 .vscode/

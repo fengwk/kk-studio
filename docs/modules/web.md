@@ -433,8 +433,9 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 | --- | --- |
 | `spring.application.name` / `spring.profiles.active` | 应用名 `kk-studio`，默认 `dev` |
 | `spring.datasource` | PostgreSQL 唯一 durable database；配置 Hikari `connection-timeout: 5000`、driver `connectTimeout: "5"` 与 `socketTimeout: "5"` 三个 5 秒边界，保证网络分区与连接耗尽时在默认请求预算内 fail-closed 并映射 `ENVIRONMENT_UNAVAILABLE` |
-| `spring.flyway.locations` | dev/e2e/canvas-test 的 migration + seed 组合 |
+| `spring.flyway.locations` | `prod` 只用 `classpath:db/migration`；dev/e2e/canvas-test 在该基础上追加各自 seed |
 | `server.port` / `server.compression.enabled` | 默认 `8080`与 gzip |
+| `server.forward-headers-strategy` | `prod` 使用 `framework`，按 Gateway 的 `X-Forwarded-*` 还原外部 scheme/host |
 | `management.endpoints.web.exposure.include` | `health,prometheus,offline,online` |
 | `kk-studio.harness.runtime.workers-enabled` | 是否启动 Work dispatcher；测试默认 false |
 | `kk-studio.harness.dispatcher.*` | Work claim/handoff 租约、轮询、拒绝退避及 bounded worker 容量 |
@@ -443,7 +444,10 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 
 `application-dev.yml`默认数据库为 `127.0.0.1:5432/kk_studio`并加载 dev seed；
 `application-e2e.yml`使用 `kk_studio_e2e`和 e2e seed；
-`application-canvas-test.yml`在 dev seed 上追加 canvas-test SystemSettings。
+`application-canvas-test.yml`在 dev seed 上追加 canvas-test SystemSettings；
+`application-prod.yml`只加载 `classpath:db/migration`，数据源三项全部来自
+`KK_STUDIO_DB_URL`/`KK_STUDIO_DB_USER`/`KK_STUDIO_DB_PASSWORD` 且没有默认值，
+缺失时启动失败而不是回退到开发数据库。
 
 ### 安全与第三方边界
 

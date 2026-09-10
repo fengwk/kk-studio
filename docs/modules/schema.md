@@ -31,7 +31,8 @@ flowchart LR
   默认 `system_setting` 行。
 - 以 profile seed 分离 dev、e2e、canvas-test 的可重复数据和运行开关。
 - 让生产 Web、Platform/Harness/Canvas 集成测试使用同一 PostgreSQL 形状。
-- 由架构测试保证 baseline 唯一、Flyway scope 正确且不存在竞争初始化路径。
+- 由架构测试保证 V1 冻结、增量 migration 命名规范、profile seed 清单受限、
+  Flyway scope 正确且不存在竞争初始化路径。
 
 ## Non-goals
 
@@ -47,10 +48,15 @@ flowchart LR
 
 ```text
 schema/src/main/resources/db/migration/V1__schema.sql
+schema/src/main/resources/db/migration/V2__<description>.sql   # 增量 migration，按需新增
 schema/src/main/resources/db/seed/dev/R__dev_seed.sql
 schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql
 schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql
 ```
+
+已经应用到共享 database 的 V1 保持冻结：架构测试以 SHA-256 固定它的内容，任何
+schema 变更只能新增名字规范（`V<version>__<description>.sql`）、版本唯一且不早于
+V2 的增量 migration。profile seed 只允许上表三份 repeatable 资源。
 
 Web 依赖 `spring-boot-starter-flyway`、`flyway-database-postgresql` 以及 runtime scope 的
 `kk-studio-schema`；Platform、Harness Infra、Canvas Infra 在测试中
@@ -107,6 +113,7 @@ baseline 直接插入 `system_setting` 默认聚合；profile seed 只覆盖其 
 Flyway locations
   -> classpath:db/migration
   -> V1__schema.sql 建表、约束、索引、trigger、默认 system_setting
+  -> V2+ 增量 migration（如有）
   -> classpath:db/seed/{dev|e2e|canvas-test}
   -> profile seed 写入可选 Provider/Agent/Settings
   -> Web / Platform / Infra 使用同一 PostgreSQL
@@ -114,7 +121,9 @@ Flyway locations
 
 本地 Web 运行加载 baseline 与 dev seed。E2E 入口
 `scripts/e2e.sh` 设置 `SPRING_FLYWAY_LOCATIONS`，加载 e2e 与 canvas-test
-seed。Testcontainers 测试在每个测试隔离数据库后重新执行 Flyway。
+seed。NAS `prod` profile 只加载 `classpath:db/migration`：Main 节点是共享 schema
+的唯一 Flyway owner，Dev 节点以 `SPRING_FLYWAY_ENABLED=false` 复用同一 profile。
+Testcontainers 测试在每个测试隔离数据库后重新执行 Flyway。
 
 ## 不变量与失败恢复
 
@@ -134,7 +143,9 @@ seed。Testcontainers 测试在每个测试隔离数据库后重新执行 Flyway
 
 Flyway 位置由 Web runtime、测试 application 配置和
 `scripts/e2e.sh` 选择；业务模块不自行复制 baseline。当前可用资源路径只有
-`db/migration`、`db/seed/dev`、`db/seed/e2e`、`db/seed/canvas-test`。
+`db/migration`、`db/seed/dev`、`db/seed/e2e`、`db/seed/canvas-test`，其中
+`application-prod.yml` 只启用 `classpath:db/migration`，因此生产启动不会加载任何
+profile seed，也没有生产凭据默认值。
 
 ## 测试与源码入口
 

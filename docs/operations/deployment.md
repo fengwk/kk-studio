@@ -41,10 +41,14 @@ flowchart LR
   AppImage --> Reliability["deploy/reliability"]
   DaemonImage --> Reliability
   DaemonImage --> Distributed
+  Publish["main branch publish"] --> AppImage
+  DevBuild["deploy/dev/Dockerfile (dev branch)"] --> DevImage["kk-studio-dev image"]
+  DevImage --> DevNode["NAS vps-kk-studio-dev<br/>Vite + Backend + Daemon + persistent git workspace"]
   Reliability --> App["app :8080"]
   Reliability --> Daemon["daemon -> ws://app:8080/api/harness/environment-daemon/v1"]
   App --> PG["PostgreSQL"]
   Test --> S3["MinIO S3-compatible"]
+  DevNode --> PG
 ```
 
 | Stack | 服务 | 宿主暴露 | 用途 |
@@ -116,6 +120,61 @@ performance 和 supply-chain App scan 的共同 Dockerfile：
 builder 接收 `KK_STUDIO_BUILD_HTTP_PROXY`、`KK_STUDIO_BUILD_HTTPS_PROXY`、
 `KK_STUDIO_BUILD_NO_PROXY` 和 `KK_STUDIO_MAVEN_BUILD_OPTS`；这些值只用于
 build，不复制进 runtime image。App runtime 不含 Maven、Node 或 source。
+
+### 5.1 Dev node image
+
+[deploy/dev/Dockerfile](../../deploy/dev/Dockerfile) 是 NAS `vps-kk-studio-dev` 的
+运行基座：它不是不可变产物，而是"持久源码工作区 + 完整开发工具链"的容器入口。
+
+| Stage | 当前内容 |
+| --- | --- |
+| builder | `maven:3.9.11-eclipse-temurin-21`，BuildKit Maven cache，构建 `harness/daemon` 并复制 runtime classpath |
+| node-runtime | `node:24.14.0-bookworm-slim` + `npm@11.9.0`，只用于提供与 `distribution` profile 一致的 Node 分发 |
+| runtime | `eclipse-temurin:21.0.8_9-jdk-jammy`，apt 安装 `bash`/`ca-certificates`/`curl`/`ffmpeg`/`git`/`jq`/`lsof`/`python3`，并从上面两个 stage 复制 Maven 与 Node |
+| user | `kkdaemon:kkdaemon`，uid/gid `10001`，`HOME=/home/kkdaemon`，`USER 10001:10001` |
+| process | `/usr/local/bin/kk-studio-dev-entrypoint`：准备持久 Git 工作区，用 `scripts/dev.sh start` 启动 Backend/Vite，最后前台运行 Daemon |
+| health | `kk-studio-dev-healthcheck` 同时探测 Backend `/actuator/health` 与 Vite `/threads`；`30s` interval、`10s` timeout、`2700s` start period、`20` retries |
+
+镜像内含 `/opt/kk-studio/daemon.jar` 与 `/opt/kk-studio/lib/`（Daemon runtime）以及
+`/opt/kk-studio/source`（构建时的源码快照，不含 `.git`、`.env*`、key/credential 文件、
+`target/`、`node_modules/`、`reports/` 和本地 `runtime/`）。工作区、cache 和源码是
+持久 volume，容器重建不覆盖：
+
+```text
+/workspace                     # Daemon environment-root 与 Git checkout 根
+/workspace/kk-studio           # 实际源码 checkout（KK_STUDIO_REPOSITORY_DIR）
+/home/kkdaemon/.m2             # Maven local repository
+/home/kkdaemon/.npm            # npm cache
+/var/kk-studio/dev             # backend/frontend log 与 PID
+```
+
+`/workspace`、`/home/kkdaemon/.m2` 与 `/home/kkdaemon/.npm` 是三个必须持久化的
+volume，外部 Compose 必须以 `10001:10001` 属主挂载；entrypoint 在启动时校验
+`/workspace` 可写性，属主错误会直接失败而不是退化为不可写容器。镜像不含 Docker
+socket、真实 credential 或 Git 历史，Git 凭据只在运行时注入（askpass helper 让
+Daemon 能直接 push，token 不进入 `.git/config`）。稳定的重启命令是
+`kk-studio-dev-reload`，
+运行规范见
+[自迭代运行规范](development-and-testing.md#44-nas-maindev-自迭代运行规范)。
+
+首次启动耗时由 cache volume 决定，实测边界如下（20 核 x86_64 主机）：
+
+| 场景 | 耗时 | 内容 |
+| --- | --- | --- |
+| 冷 cache 首启 | ~29 分钟 | 空 workspace + 空 `~/.m2`/`~/.npm`，Maven 25:44、npm 2:00、Backend/Vite 就绪约 1 分钟 |
+| 已有 workspace 重启 | 秒级 | `DEV_SKIP_PACKAGE=true` 且 `frontend/node_modules` 已存在，只重启受管进程 |
+
+`--start-period=2700s` 按冷 cache 路径取值（实测 ~29 分钟 + 约 50% 余量），因此首次
+启动期间不会因为尚未就绪而被判为 unhealthy。真正的引导失败不会因此被掩盖：entrypoint
+等待 Backend/Vite readiness 的预算是 `DEV_READY_TIMEOUT_SECONDS`（容器内默认 `600s`），
+超时会直接以非零状态退出并结束容器。外部 Compose 应继承镜像 healthcheck，避免用较短
+的 `start_period` 覆盖这条冷启动边界。
+
+`.github/workflows/docker-publish.yml` 在推送 `main` 时构建并发布
+`<namespace>/kk-studio:main`，在推送 `dev` 时构建并发布
+`<namespace>/kk-studio-dev:dev`，两者都附带 immutable commit SHA tag、
+`linux/amd64` 平台和 Buildx GHA cache；Docker Hub 凭据只来自 Actions secrets，
+不作为 build arg 或 image 内容。
 
 ## 6. `deploy/local`：App + PostgreSQL
 
@@ -509,11 +568,12 @@ NAS Main/Dev 自迭代拓扑横跨三个职责边界：
 | NAS Compose 仓库 | `vps-kk-studio`、`vps-kk-studio-dev`、共享 PostgreSQL/S3 连接、持久 workspace/cache、私密环境变量注入 |
 | Gateway 仓库 | `studio.kk1.fun`、`studio-dev.kk1.fun` 的 HTTP/WebSocket 路由和访问控制 |
 
-Main runtime image 不包含源码、Maven、Node 或 credential。Dev image 可以包含
-`dev` commit 的源码快照作为初始化基线，但实际可写源码、Maven/npm cache 和
-Daemon workspace 必须位于持久 volume；容器重建不得覆盖尚未 push 的工作区。
-普通源码更新只重启 Dev Backend/Vite 受管进程，只有 JDK、Node、系统工具或
-Dev image 入口变化才重建 Dev image。
+Main runtime image 不包含源码、Maven、Node 或 credential。Dev image
+（[Dev node image](#51-dev-node-image)）可以包含 `dev` commit 的源码快照作为初始化
+基线，但实际可写源码、Maven/npm cache 和 Daemon workspace 必须位于持久 volume；
+容器重建不得覆盖尚未 push 的工作区。普通源码更新只重启 Dev Backend/Vite 受管进程
+（`kk-studio-dev-reload`），只有 JDK、Node、系统工具或 Dev image 入口变化才重建
+Dev image。
 
 外部 Compose 和 Gateway 配置只引用环境变量名。真实 database、S3、Provider、
 Git、Gateway 和 registration credential 不进入本仓库、Docker build context、

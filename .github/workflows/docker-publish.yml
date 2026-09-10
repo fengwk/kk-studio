@@ -1,0 +1,124 @@
+# kk-studio Docker publish.
+#
+# `main` 发布不可变生产镜像 `deploy/local/Dockerfile`（Fat JAR + 内嵌前端），`dev`
+# 发布带有持久源码工作区与开发工具链的 `deploy/dev/Dockerfile`。两个分支都先跑
+# 仓库质量门禁，再以 linux/amd64 推送 `:<branch>` 与 `:<commit-sha>` 两个 tag；
+# 真实模型 E2E、UI E2E 等付费/长耗时检查不在本文工作流内。
+#
+# Registry credential 只来自 Actions secrets，不作为 build arg、不进入 image layer
+# 或 build log。
+name: docker-publish
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  # 频繁 push dev 时只允许最新提交发布可变 `:dev` tag，避免较老 workflow 后完成并回退镜像。
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: '21'
+  NODE_VERSION: '24.14.0'
+
+jobs:
+  validate:
+    name: validate repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Verify Java sources, tests and coverage
+        run: mvn -B -ntp verify
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+      - name: Lint frontend
+        run: npm --prefix frontend run lint
+      - name: Test frontend
+        run: npm --prefix frontend run test
+      - name: Build frontend
+        run: npm --prefix frontend run build
+      - name: Check documentation layout
+        run: node scripts/docs/check.mjs
+      - name: Run repository script contracts
+        run: |
+          python3 -m unittest discover -s scripts/e2e/tests
+          node --test scripts/e2e/tests/*.test.mjs
+          node --test scripts/supply-chain/tests/*.test.mjs
+      - name: Scan for sensitive data
+        run: python3 scripts/security/check-sensitive-data.py
+
+  publish:
+    name: build and push image
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Require the publish namespace secret
+        env:
+          DOCKERHUB_NAMESPACE: ${{ secrets.DOCKERHUB_NAMESPACE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKERHUB_NAMESPACE}" ]; then
+            echo "DOCKERHUB_NAMESPACE secret must be configured" >&2
+            exit 1
+          fi
+      # Branch -> immutable target map. `main` is the production app image, `dev`
+      # is the self-iteration image; anything else fails instead of guessing.
+      - name: Select image target from the pushed branch
+        id: target
+        run: |
+          set -euo pipefail
+          case "${GITHUB_REF_NAME}" in
+            main)
+              echo "dockerfile=deploy/local/Dockerfile" >> "${GITHUB_OUTPUT}"
+              echo "image=kk-studio" >> "${GITHUB_OUTPUT}"
+              echo "tag=main" >> "${GITHUB_OUTPUT}"
+              ;;
+            dev)
+              echo "dockerfile=deploy/dev/Dockerfile" >> "${GITHUB_OUTPUT}"
+              echo "image=kk-studio-dev" >> "${GITHUB_OUTPUT}"
+              echo "tag=dev" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "unsupported publish branch: ${GITHUB_REF_NAME}" >&2
+              exit 1
+              ;;
+          esac
+      - name: Build and push linux/amd64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.target.outputs.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_NAMESPACE }}/${{ steps.target.outputs.image }}:${{ steps.target.outputs.tag }}
+            ${{ secrets.DOCKERHUB_NAMESPACE }}/${{ steps.target.outputs.image }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

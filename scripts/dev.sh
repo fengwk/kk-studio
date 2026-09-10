@@ -22,6 +22,7 @@ BACKEND_JAR="$APP_HOME/web/target/kk-studio-web-1.0.0.jar"
 KILL_PORTS=${DEV_KILL_PORTS:-true}
 SKIP_PACKAGE=${DEV_SKIP_PACKAGE:-false}
 SKIP_NPM_INSTALL=${DEV_SKIP_NPM_INSTALL:-false}
+READY_TIMEOUT_SECONDS=${DEV_READY_TIMEOUT_SECONDS:-90}
 LOG_LINES=${LOG_LINES:-120}
 
 step() {
@@ -52,6 +53,7 @@ Environment:
   DEV_KILL_PORTS=true
   DEV_SKIP_PACKAGE=false
   DEV_SKIP_NPM_INSTALL=false
+  DEV_READY_TIMEOUT_SECONDS=90   # seconds to wait for backend/frontend readiness before failing
   DEV_WORK_DIR=$APP_HOME/runtime/dev
 EOF
 }
@@ -160,13 +162,13 @@ run_detached() {
 wait_http() {
   local url=$1
   local name=$2
-  for _ in $(seq 1 90); do
+  for _ in $(seq 1 "$READY_TIMEOUT_SECONDS"); do
     if curl -fsS "$url" >/dev/null 2>&1; then
       return
     fi
     sleep 1
   done
-  echo "Timed out waiting for $name: $url" >&2
+  echo "Timed out after ${READY_TIMEOUT_SECONDS}s waiting for $name: $url" >&2
   print_logs all >&2
   exit 1
 }
@@ -220,6 +222,9 @@ start_all() {
   package_backend "$java_home"
   ensure_frontend_deps
 
+  # Backend 的日志文件按 CWD 解析：前面的步骤可能已经把 CWD 切到 frontend，所以启动
+  # 之前显式回到仓库根目录，日志才落在 $APP_HOME/logs。
+  cd "$APP_HOME"
   step "Starting backend on $BACKEND_URL"
   read -r -a java_opts <<< "${JAVA_OPTS:-}"
   run_detached "$BACKEND_LOG" env \
