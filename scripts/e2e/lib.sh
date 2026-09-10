@@ -41,6 +41,19 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
 }
 
+# Emit NUL-delimited `env -u` arguments for every live TEST_* input. Runtime process
+# isolation must not depend on a manually maintained list of provider credential names.
+test_env_unset_args() {
+  local name
+  while IFS= read -r name; do
+    case "$name" in
+      TEST_*)
+        printf '%s\0' -u "$name"
+        ;;
+    esac
+  done < <(compgen -e)
+}
+
 run_maven() {
   local java_home=$1
   shift
@@ -167,13 +180,11 @@ start_backend() {
   : >"$WORK_DIR/backend.log"
   step "Starting backend $BACKEND_URL profile=$SPRING_PROFILE"
   # Pass PostgreSQL connection overrides when set; e2e profile defaults are only for local loops.
-  # Explicitly scrub all real TEST_* credential environment variables from backend Java process
+  # Explicitly scrub every TEST_* input from the backend Java process.
+  local -a test_env_unsets=()
+  mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
   nohup env \
-    -u TEST_GOOGLE_BASE_URL -u TEST_GOOGLE_API_KEY \
-    -u TEST_OPENAI_BASE_URL -u TEST_OPENAI_API_KEY \
-    -u TEST_ANTHROPIC_BASE_URL -u TEST_ANTHROPIC_API_KEY \
-    -u TEST_DEEPSEEK_BASE_URL -u TEST_DEEPSEEK_API_KEY \
-    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+    "${test_env_unsets[@]}" \
     JAVA_HOME="$java_home" \
     ${KK_STUDIO_DB_URL:+KK_STUDIO_DB_URL="$KK_STUDIO_DB_URL"} \
     ${KK_STUDIO_DB_USER:+KK_STUDIO_DB_USER="$KK_STUDIO_DB_USER"} \
@@ -217,12 +228,10 @@ start_frontend() {
   step "Starting frontend $FRONTEND_URL proxy->$BACKEND_URL"
   (
     cd "$REPO_ROOT/frontend"
+    local -a test_env_unsets=()
+    mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
     nohup env \
-      -u TEST_GOOGLE_BASE_URL -u TEST_GOOGLE_API_KEY \
-      -u TEST_OPENAI_BASE_URL -u TEST_OPENAI_API_KEY \
-      -u TEST_ANTHROPIC_BASE_URL -u TEST_ANTHROPIC_API_KEY \
-      -u TEST_DEEPSEEK_BASE_URL -u TEST_DEEPSEEK_API_KEY \
-      -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+      "${test_env_unsets[@]}" \
       API_PROXY_TARGET="$BACKEND_URL" npm run dev -- \
       --host "$FRONTEND_HOST" \
       --port "$FRONTEND_PORT" \
@@ -249,12 +258,10 @@ start_daemon() {
   # put the reactor-built jar first so clean-slate daemon/tool protocol changes are exercised.
   cp="$DAEMON_JAR:$DAEMON_TOOL_JAR:$(cat "$DAEMON_CP_FILE")"
   step "Starting daemon env=$DAEMON_ENV_NAME"
+  local -a test_env_unsets=()
+  mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
   nohup env \
-    -u TEST_GOOGLE_BASE_URL -u TEST_GOOGLE_API_KEY \
-    -u TEST_OPENAI_BASE_URL -u TEST_OPENAI_API_KEY \
-    -u TEST_ANTHROPIC_BASE_URL -u TEST_ANTHROPIC_API_KEY \
-    -u TEST_DEEPSEEK_BASE_URL -u TEST_DEEPSEEK_API_KEY \
-    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+    "${test_env_unsets[@]}" \
     JAVA_HOME="$java_home" "$java_home/bin/java" \
     -cp "$cp" fun.fengwk.kkstudio.harness.daemon.DaemonMain \
     --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/harness/environment-daemon/v1" \

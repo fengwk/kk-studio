@@ -164,13 +164,14 @@ class TestBuildScripts(unittest.TestCase):
         )
         self.assertNotIn("sync_e2e_provider_credentials", ensure_stack)
 
-    def test_long_lived_runtime_processes_scrub_credentials_and_sync_uses_four_pairs(self):
-        """Long-lived runtime processes must not inherit provider credentials."""
+    def test_long_lived_runtime_processes_scrub_all_test_inputs_and_sync_uses_four_pairs(self):
+        """Runtime isolation must cover unknown future TEST_* names, not only four providers."""
         script_path = REPOSITORY_ROOT / "scripts/dev.sh"
         script = script_path.read_text()
         start_all = function_body(script_path, "start_all")
         sync = function_body(script_path, "sync_e2e_provider_credentials")
         e2e_lib_path = REPOSITORY_ROOT / "scripts/e2e/lib.sh"
+        start_backend = function_body(e2e_lib_path, "start_backend")
         start_frontend = function_body(e2e_lib_path, "start_frontend")
         start_daemon = function_body(e2e_lib_path, "start_daemon")
         e2e_names = [
@@ -185,24 +186,61 @@ class TestBuildScripts(unittest.TestCase):
         ]
 
         for name in e2e_names:
-            self.assertGreaterEqual(
-                start_all.count(f"-u {name}"),
-                2,
-                f"dev backend and frontend must both scrub {name}",
-            )
-            self.assertIn(f"-u {name}", start_frontend)
-            self.assertIn(f"-u {name}", start_daemon)
             self.assertIn(f'{name}="${{{name}-}}"', sync)
-        for legacy_name in ("TEST_MINIMAX_BASE_URL", "TEST_MINIMAX_API_KEY"):
-            self.assertGreaterEqual(start_all.count(f"-u {legacy_name}"), 2)
-            self.assertIn(f"-u {legacy_name}", start_frontend)
-            self.assertIn(f"-u {legacy_name}", start_daemon)
         self.assertNotIn("TEST_MINIMAX_BASE_URL=", sync)
         self.assertNotIn("TEST_MINIMAX_API_KEY=", sync)
+        for runtime_body in (start_all, start_backend, start_frontend, start_daemon):
+            self.assertIn('"${test_env_unsets[@]}"', runtime_body)
+        for lib in (script_path, e2e_lib_path):
+            scrubber = function_body(lib, "test_env_unset_args")
+            self.assertIn("TEST_*)", scrubber)
+            self.assertIn("printf '%s\\0' -u", scrubber)
+            self.assertIn("compgen -e", scrubber)
+            self.assertNotIn("< <(env)", scrubber)
+            self.assertNotIn("TEST_GOOGLE", scrubber)
         self.assertIn(
             "scripts/reliability/sync_minimax_credentials.py",
             (REPOSITORY_ROOT / "scripts/reliability/stack.sh").read_text(),
         )
+
+    def test_test_environment_unset_args_covers_unknown_names(self):
+        """The live scrubber must emit every TEST_* name and leave unrelated inputs alone."""
+        for script in ("scripts/dev.sh", "scripts/e2e/lib.sh"):
+            source_command = (
+                f"source {script} status >/dev/null"
+                if script == "scripts/dev.sh"
+                else f"source {script}"
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "TEST_FUTURE_PROVIDER_API_KEY": "future-secret",
+                    "TEST_API_KEY": "generic-secret",
+                    "UNRELATED_API_KEY": "keep",
+                }
+            )
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    (
+                        f"{source_command}\n"
+                        "mapfile -d '' -t args < <(test_env_unset_args)\n"
+                        "printf '%s\\n' \"${args[@]}\""
+                    ),
+                ],
+                cwd=REPOSITORY_ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            args = result.stdout.splitlines()
+            pairs = set(zip(args[0::2], args[1::2]))
+            self.assertIn(("-u", "TEST_FUTURE_PROVIDER_API_KEY"), pairs)
+            self.assertIn(("-u", "TEST_API_KEY"), pairs)
+            self.assertNotIn(("-u", "UNRELATED_API_KEY"), pairs)
 
     def test_container_canvas_smoke_requires_current_dto_without_thread_id(self):
         """The Docker smoke must enforce the current Canvas DTO, which omits threadId."""

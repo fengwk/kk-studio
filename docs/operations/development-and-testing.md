@@ -553,7 +553,10 @@ requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局
 `http://127.0.0.1:5173`；`scripts/e2e.sh` 会把两者传给 runner。
 
 只有 `--real` 会读取并同步四组宿主 Provider credential。免费、`--rebuild`、
-`--with-tools`、`--ui` 与 `--with-canvas-function` 都忽略这些宿主凭据。
+`--with-tools`、`--ui` 与 `--with-canvas-function` 都忽略这些宿主凭据。Backend、
+Vite 与 Daemon 启动时按前缀动态剥离全部 `TEST_*` 环境变量；只有短生命周期的
+credential synchronizer 会显式接收四组允许的变量，新增宿主测试变量也不会静默进入
+长期运行进程。
 未带 `--real` 时，API 与 UI runner 会在首个 case 前检查 catalog 中每个 Provider
 都必须明确为 `configured=false` 且无 `baseUrl`；复用曾执行真实 E2E 的 database
 会 fail-closed，需改用全新未配置的 E2E database。
