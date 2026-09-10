@@ -200,22 +200,41 @@ Agent 在 Dev 节点遵循以下闭环：
 当前仓库脚本可用于 Backend/Vite 重启。Dev 节点镜像由
 [deploy/dev/Dockerfile](../../deploy/dev/Dockerfile) 提供：Maven 3.9.11/JDK 21 与
 Node 24.14.0/npm 11.9.0 工具链、`git`/`curl`/`jq`/`lsof`/`python3`/`ffmpeg`/`ffprobe`、
-来自同一源码构建的 Environment Daemon runtime。容器以 uid/gid `10001` 运行，
-`/workspace` 是持久 Git 工作区根（checkout 位于 `/workspace/kk-studio`），
-`/home/kkdaemon/.m2` 与 `/home/kkdaemon/.npm` 是持久 cache；这三处 volume 必须由
-外部 Compose 以 `10001:10001` 属主挂载。
+`openssh-client` 与 GitHub CLI `2.100.0`、来自同一源码构建的 Environment Daemon
+runtime。容器以 uid/gid `10001` 运行，`/workspace` 是持久 Git 工作区根（checkout
+位于 `/workspace/kk-studio`），`/home/kkdaemon/.m2`、`/home/kkdaemon/.npm` 与
+`/home/kkdaemon/.config/gh` 是持久 cache/凭据目录；这四处 volume 必须由外部 Compose
+以 `10001:10001` 属主挂载。
 
 首次启动只在工作区不存在或为空时初始化它：
 
-- 配置 `KK_STUDIO_GIT_REMOTE_URL`（clean URL，不含凭据）时执行 Git clone，
-  分支由 `KK_STUDIO_GIT_BRANCH` 指定（默认 `dev`）；
+- 配置 `KK_STUDIO_GIT_REMOTE_URL`（SSH remote，例如
+  `git@github.com:<owner>/kk-studio.git`）时执行 Git clone，分支由
+  `KK_STUDIO_GIT_BRANCH` 指定（默认 `dev`）；
 - 只有显式设置 `KK_STUDIO_DEV_ALLOW_SOURCE_SEED=true` 时才回退到镜像内源码快照；
 - 已存在的 checkout、未提交工作和未 push 的提交永不被覆盖；checkout 不在
   `KK_STUDIO_GIT_BRANCH` 时启动失败，entrypoint 不会自动 checkout/reset。
 
-凭据只在运行时注入：`KK_STUDIO_GIT_USERNAME` 与 `KK_STUDIO_GIT_TOKEN` 只进入 clone
-子进程和最终的 Daemon 进程，Backend/Vite 不继承。镜像提供的 askpass helper 让 Daemon
-的 Bash capability 可以直接 `git push`，而 token 不写入 `.git/config`。
+SSH 凭据只在运行时注入：外部 Compose 把宿主 SSH key 以只读 volume 挂到
+`KK_STUDIO_SSH_CREDENTIALS_DIR`（默认 `/run/kk-studio/ssh`），entrypoint 在 clone
+之前把其中的 `id_*` 私钥/公钥复制到 `/home/kkdaemon/.ssh`（私钥 `0600`、`.pub`
+`0644`）。私钥要使用 `id_ed25519`/`id_rsa` 等 ssh 默认身份名，因为源目录的 `config`、
+`known_hosts` 和 `authorized_keys` 都不复制；挂载目录缺失、不可读或没有私钥时容器直接
+启动失败。github.com 的官方 host key 固化在镜像内的 `/etc/ssh/ssh_known_hosts`，因此
+clone/fetch/push 不需要交互确认；镜像级 SSH 配置同时启用 `BatchMode`、
+`IdentitiesOnly` 与严格 host key 校验，认证异常直接失败而不会挂起等待输入。
+
+`gh` 使用默认配置目录 `/home/kkdaemon/.config/gh`（由外部 Compose 持久化）。首次在
+NAS 上执行一次交互式登录即可：SSH key 只让 Git 能读写仓库，`gh` 的 API 权限继承登录
+账号自身的权限和下面请求的 scope：
+
+```bash
+docker exec -it vps-kk-studio-dev gh auth login --hostname github.com --git-protocol ssh --web --skip-ssh-key --scopes repo,workflow,read:org,gist
+docker exec vps-kk-studio-dev gh auth status
+```
+
+token 只保存在容器的 `/home/kkdaemon/.config/gh/hosts.yml`，不进入本仓库、镜像、
+环境变量或日志。
 
 entrypoint 用仓库既有 lifecycle 启动 Backend/Vite（prod profile、Flyway disabled、
 Backend `127.0.0.1:8080`、Vite `0.0.0.0:5173` 并代理 Backend），随后以前台
@@ -255,8 +274,8 @@ Dev 容器运行环境变量（外部 Compose 只引用名称，真实值由 NAS
 | --- | --- |
 | `KK_STUDIO_WORKSPACE_ROOT` | Daemon environment-root 与持久工作区根，默认 `/workspace` |
 | `KK_STUDIO_REPOSITORY_DIR` | 源码 checkout，默认 `/workspace/kk-studio` |
-| `KK_STUDIO_GIT_REMOTE_URL` / `KK_STUDIO_GIT_BRANCH` | 首次 clone 的 clean remote 与分支，默认不带 remote / `dev` |
-| `KK_STUDIO_GIT_USERNAME` / `KK_STUDIO_GIT_TOKEN` | Git 凭据；只对 clone/pull 子进程和 Daemon 可见 |
+| `KK_STUDIO_GIT_REMOTE_URL` / `KK_STUDIO_GIT_BRANCH` | 首次 clone 的 SSH remote 与分支，默认不带 remote / `dev` |
+| `KK_STUDIO_SSH_CREDENTIALS_DIR` | 只读 SSH key 挂载目录，默认 `/run/kk-studio/ssh`；`id_*` 在启动时复制到 `/home/kkdaemon/.ssh` |
 | `KK_STUDIO_DEV_ALLOW_SOURCE_SEED` | 是否允许用镜像内源码快照初始化非 Git 工作区，默认 `false` |
 | `KK_STUDIO_SOURCE_SEED` | 源码快照路径，默认 `/opt/kk-studio/source` |
 | `SPRING_PROFILES_ACTIVE` / `SPRING_FLYWAY_ENABLED` | Backend profile 与 Flyway 开关，默认 `prod` / `false`（Main 独占 migration） |
@@ -279,9 +298,10 @@ Agent 必须停止自动重启并交给 Human 决策的变更包括：
 - 需要重建 Dev 镜像、重启 Daemon 或可能同时使两个 App 版本不可读的数据变更。
 
 源码仓库、Dockerfile 和 image layer 只保存环境变量名与无敏感默认值。数据库、
-S3、Provider、Gateway、Git 和 Daemon registration credential 由 NAS 私密环境
-文件在运行时注入；Dev 镜像中的源码快照、构建日志、测试报告和 Git 历史不得包含
-真实值。Dev Agent 只获得完成职责所需的 database、bucket 和 repository 权限。
+S3、Provider、Gateway 和 Daemon registration credential 由 NAS 私密环境文件在运行时
+注入，Git key 由只读挂载提供，`gh` OAuth credential 位于持久配置 volume；Dev 镜像中的
+源码快照、构建日志、测试报告和 Git 历史不得包含真实值。database 与 bucket 仍使用应用
+专用权限；Git/`gh` 则有意继承所挂载 SSH key 与登录账号可访问的仓库和 API 权限。
 
 完整协作顺序是：
 

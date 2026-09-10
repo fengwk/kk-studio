@@ -1,5 +1,7 @@
 """Permanent guards for the NAS dev node image, its reload command and the publish workflow."""
 
+import base64
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -15,10 +17,14 @@ DEV_DOCKERFILE = DEV_ROOT / "Dockerfile"
 DEV_ENTRYPOINT = DEV_ROOT / "entrypoint.sh"
 DEV_RELOAD = DEV_ROOT / "reload.sh"
 DEV_HEALTHCHECK = DEV_ROOT / "healthcheck.sh"
+DEV_KNOWN_HOSTS = DEV_ROOT / "ssh_known_hosts"
+DEV_SSH_CONFIG = DEV_ROOT / "ssh_config"
 DEV_ASKPASS = DEV_ROOT / "git-askpass.sh"
 DOCKERIGNORE = REPOSITORY_ROOT / ".dockerignore"
 PUBLISH_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "docker-publish.yml"
-DEV_SHELL_SCRIPTS = (DEV_ENTRYPOINT, DEV_RELOAD, DEV_HEALTHCHECK, DEV_ASKPASS)
+DEPLOYMENT_DOC = REPOSITORY_ROOT / "docs" / "operations" / "deployment.md"
+DEVELOPMENT_DOC = REPOSITORY_ROOT / "docs" / "operations" / "development-and-testing.md"
+DEV_SHELL_SCRIPTS = (DEV_ENTRYPOINT, DEV_RELOAD, DEV_HEALTHCHECK)
 
 REQUIRED_APT_PACKAGES = {
     "bash",
@@ -28,7 +34,18 @@ REQUIRED_APT_PACKAGES = {
     "git",
     "jq",
     "lsof",
+    "openssh-client",
     "python3",
+}
+
+GITHUB_CLI_DEB_URL = "github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_amd64.deb"
+GITHUB_CLI_DEB_SHA256 = "698c8d88cc19cc92bfe96bad58d10b2a5b274c52433d6dc57799c81f6139d5fc"
+# GitHub's published github.com host key fingerprints; the image must carry exactly the
+# matching key material, which this test re-derives from the pinned key blobs.
+GITHUB_SSH_KEY_FINGERPRINTS = {
+    "ssh-ed25519": "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU",
+    "ecdsa-sha2-nistp256": "SHA256:p2QAMXNIC1TJYWeIOttrVc98/R1BUFWu3/LiyKgUfQM",
+    "ssh-rsa": "SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s",
 }
 
 
@@ -65,6 +82,55 @@ class TestNasDevImageContracts(unittest.TestCase):
         # javap must exist so the Daemon's Java toolchain probing works in this image.
         self.assertIn("command -v javap", dockerfile)
 
+    def test_image_installs_pinned_github_cli_with_verified_checksum(self):
+        # Intent: the Agent toolchain needs `gh`, and the only auditable way to add it is
+        # the official linux/amd64 release artifact after its published SHA-256 matches;
+        # an unverified download or a distro-provided version would drift silently.
+        dockerfile = DEV_DOCKERFILE.read_text()
+        self.assertIn(GITHUB_CLI_DEB_URL, dockerfile)
+        self.assertIn(GITHUB_CLI_DEB_SHA256, dockerfile)
+        self.assertIn("sha256sum -c -", dockerfile)
+        self.assertIn("dpkg -i /tmp/gh.deb", dockerfile)
+        self.assertIn('test "$(dpkg --print-architecture)" = "amd64"', dockerfile)
+        # The toolchain is proven usable at build time instead of at NAS boot.
+        self.assertIn("command -v ssh", dockerfile)
+        self.assertIn("command -v gh", dockerfile)
+        self.assertIn("gh --version", dockerfile)
+
+    def test_image_trusts_the_official_github_host_keys(self):
+        # Intent: Git authenticates over SSH now, so an unknown host key would stall or
+        # fail every clone/fetch/push; the image must ship GitHub's published keys, and the
+        # pinned key material must still hash to the published SHA256 fingerprints.
+        entries = {}
+        for line in DEV_KNOWN_HOSTS.read_text().splitlines():
+            if not line.strip() or line.startswith("#"):
+                continue
+            host, key_type, key_blob = line.split()
+            self.assertEqual("github.com", host)
+            entries[key_type] = key_blob
+        self.assertEqual(set(GITHUB_SSH_KEY_FINGERPRINTS), set(entries))
+        for key_type, key_blob in entries.items():
+            digest = hashlib.sha256(base64.b64decode(key_blob)).digest()
+            fingerprint = "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
+            self.assertEqual(GITHUB_SSH_KEY_FINGERPRINTS[key_type], fingerprint)
+        self.assertIn(
+            "COPY --chmod=0644 deploy/dev/ssh_known_hosts /etc/ssh/ssh_known_hosts",
+            DEV_DOCKERFILE.read_text(),
+        )
+        self.assertIn(
+            "COPY --chmod=0644 deploy/dev/ssh_config"
+            " /etc/ssh/ssh_config.d/kk-studio-github.conf",
+            DEV_DOCKERFILE.read_text(),
+        )
+        ssh_config = DEV_SSH_CONFIG.read_text()
+        for directive in (
+            "Host github.com",
+            "BatchMode yes",
+            "IdentitiesOnly yes",
+            "StrictHostKeyChecking yes",
+        ):
+            self.assertIn(directive, ssh_config)
+
     def test_image_runs_as_fixed_non_root_identity_with_writable_paths(self):
         # Intent: the Dev node must never run as root and must own its home, workspace
         # and cache directories, which are mounted as persistent volumes.
@@ -80,8 +146,17 @@ class TestNasDevImageContracts(unittest.TestCase):
             "/var/kk-studio/dev",
             "/home/kkdaemon/.m2",
             "/home/kkdaemon/.npm",
+            "/home/kkdaemon/.ssh",
+            "/home/kkdaemon/.config/gh",
         ):
             self.assertIn(writable, dockerfile, writable)
+        # ssh rejects keys stored in a group/world-readable directory, and gh keeps its auth
+        # token under the same home, so both directories are pre-created for uid 10001.
+        self.assertIn("chmod 0700 /home/kkdaemon/.ssh /home/kkdaemon/.config/gh", dockerfile)
+        self.assertIn(
+            "chown -R kkdaemon:kkdaemon /opt/kk-studio /workspace /var/kk-studio /home/kkdaemon",
+            dockerfile,
+        )
         # No container escape hatch: the self-iteration flow must not require Docker.
         self.assertNotIn("docker.sock", dockerfile)
         self.assertNotIn("privileged", dockerfile)
@@ -145,28 +220,116 @@ class TestNasDevImageContracts(unittest.TestCase):
         self.assertIn("ALLOW_SOURCE_SEED=${KK_STUDIO_DEV_ALLOW_SOURCE_SEED:-false}", entrypoint)
         self.assertIn('if [ "$ALLOW_SOURCE_SEED" = "true" ]; then', entrypoint)
 
-    def test_entrypoint_scopes_git_secret_to_clone_and_daemon_only(self):
-        # Intent: backend/Vite must never inherit the Git token, while the Daemon keeps it
-        # so the Agent's Bash capability can push without writing it into .git/config.
+    def test_entrypoint_installs_mounted_ssh_credentials_before_workspace_init(self):
+        # Intent: the Agent's Git/gh access comes from the runtime-mounted private key, and a
+        # missing or keyless mount must stop the container instead of degrading into a
+        # checkout that can never push. Only `id_*` is copied, so the host's ssh config,
+        # known_hosts and authorized_keys never leak into the container. The image-owned
+        # SSH config makes authentication non-interactive and fail-closed.
         entrypoint = DEV_ENTRYPOINT.read_text()
-        self.assertIn("unset KK_STUDIO_GIT_USERNAME KK_STUDIO_GIT_TOKEN", entrypoint)
-        self.assertRegex(
+        self.assertIn(
+            "SSH_CREDENTIALS_DIR=${KK_STUDIO_SSH_CREDENTIALS_DIR:-/run/kk-studio/ssh}",
             entrypoint,
-            r"\(\n"
-            r"\s+#[^\n]*\n"
-            r"\s+export KK_STUDIO_GIT_USERNAME=\"\$git_username\"\n"
-            r"\s+export KK_STUDIO_GIT_TOKEN=\"\$git_token\"\n"
-            r"\s+git clone",
         )
-        self.assertNotIn("KK_STUDIO_GIT_TOKEN", function_body(DEV_ENTRYPOINT, "start_managed_servers"))
-        socket_export = function_body(DEV_ENTRYPOINT, "run_daemon")
-        self.assertIn('export KK_STUDIO_GIT_USERNAME="$git_username"', socket_export)
-        self.assertIn('export KK_STUDIO_GIT_TOKEN="$git_token"', socket_export)
-        # The clean remote URL is what lands in .git/config; credentials stay in the helper.
-        self.assertNotIn("git config", entrypoint)
-        askpass = DEV_ASKPASS.read_text()
-        self.assertIn("KK_STUDIO_GIT_TOKEN:-", askpass)
-        self.assertNotIn("echo", askpass)
+        self.assertIn("SSH_DIR=$HOME/.ssh", entrypoint)
+        body = function_body(DEV_ENTRYPOINT, "install_ssh_credentials")
+        self.assertIn(
+            'if [ ! -d "$SSH_CREDENTIALS_DIR" ] || [ ! -r "$SSH_CREDENTIALS_DIR" ]; then',
+            body,
+        )
+        self.assertIn('for key in "$SSH_CREDENTIALS_DIR"/id_*; do', body)
+        self.assertIn('chmod 0700 "$SSH_DIR"', body)
+        self.assertIn('rm -f "$SSH_DIR"/id_*', body)
+        self.assertLess(
+            body.index('rm -f "$SSH_DIR"/id_*'),
+            body.index('for key in "$SSH_CREDENTIALS_DIR"/id_*; do'),
+            "stale identities must be removed before the mounted key set is installed",
+        )
+        self.assertIn('install -m 0600 "$key" "$SSH_DIR/$name"', body)
+        self.assertIn('install -m 0644 "$key" "$SSH_DIR/$name"', body)
+        self.assertIn("must contain at least one private id_* key", body)
+        # Neither the source config/known_hosts/authorized_keys nor the key contents may be
+        # read back out by this step.
+        for excluded in ("config", "known_hosts", "authorized_keys", "cat "):
+            self.assertNotIn(excluded, body, excluded)
+        for command in ("gh", "git", "ssh"):
+            self.assertIn(f"require_cmd {command}", entrypoint)
+        self.assertEqual(
+            [
+                "validate_runtime_contract",
+                "install_ssh_credentials",
+                "prepare_workspace",
+                "start_managed_servers",
+                "run_daemon",
+            ],
+            entrypoint.rstrip().splitlines()[-5:],
+            "credentials must be installed before the first clone and the Daemon start",
+        )
+
+    def test_dev_image_has_no_git_token_or_askpass_flow(self):
+        # Intent: SSH is the only Git credential path; a surviving token/askpass identifier
+        # would mean a second, undocumented way to authenticate that the mount contract no
+        # longer covers.
+        for surface in (
+            DEV_DOCKERFILE,
+            DEV_ENTRYPOINT,
+            DEV_RELOAD,
+            DEV_HEALTHCHECK,
+            DEPLOYMENT_DOC,
+            DEVELOPMENT_DOC,
+        ):
+            body = surface.read_text()
+            for identifier in (
+                "KK_STUDIO_GIT_USERNAME",
+                "KK_STUDIO_GIT_TOKEN",
+                "GIT_ASKPASS",
+                "askpass",
+            ):
+                self.assertNotIn(identifier, body, f"{surface.name} must not reference {identifier}")
+        self.assertFalse(DEV_ASKPASS.exists(), "the Git askpass helper must be deleted")
+        # The clean remote URL is what lands in .git/config; no credential is configured.
+        self.assertNotIn("git config", DEV_ENTRYPOINT.read_text())
+
+    def test_dev_image_does_not_configure_a_network_proxy(self):
+        # Intent: this application connects directly; adding standard proxy variables to
+        # its image or lifecycle would also risk routing NAS-internal traffic externally.
+        for surface in DEV_SHELL_SCRIPTS + (DEV_DOCKERFILE,):
+            body = surface.read_text()
+            for identifier in (
+                "HTTP_PROXY",
+                "HTTPS_PROXY",
+                "NO_PROXY",
+                "http_proxy",
+                "https_proxy",
+                "no_proxy",
+            ):
+                self.assertNotIn(identifier, body, f"{surface.name} must not configure {identifier}")
+
+    def test_docs_describe_the_mount_and_gh_login_contract(self):
+        # Intent: the NAS Compose file lives outside this repository, so the committed docs
+        # are the only place where the four persistent mounts and the one-time
+        # `gh auth login` step can be verified.
+        deployment = DEPLOYMENT_DOC.read_text()
+        development = DEVELOPMENT_DOC.read_text()
+        for mount in (
+            "/workspace",
+            "/home/kkdaemon/.m2",
+            "/home/kkdaemon/.npm",
+            "/home/kkdaemon/.config/gh",
+        ):
+            self.assertIn(mount, deployment, mount)
+            self.assertIn(mount, development, mount)
+        for doc in (deployment, development):
+            self.assertIn("KK_STUDIO_SSH_CREDENTIALS_DIR", doc)
+            self.assertIn("/etc/ssh/ssh_known_hosts", doc)
+        # SSH only grants Git access; gh keeps its own API scopes from an interactive login.
+        self.assertIn("SSH key 只让 Git 能读写仓库", development)
+        for login in (
+            "docker exec -it vps-kk-studio-dev gh auth login --hostname github.com"
+            " --git-protocol ssh --web --skip-ssh-key --scopes repo,workflow,read:org,gist",
+            "docker exec vps-kk-studio-dev gh auth status",
+        ):
+            self.assertIn(login, development, login)
 
     def test_entrypoint_starts_managed_servers_then_runs_daemon_in_foreground(self):
         # Intent: the container's main process is the Daemon, and Backend/Vite are started
@@ -189,8 +352,10 @@ class TestNasDevImageContracts(unittest.TestCase):
         # The Daemon binary always comes from the image, never from the mutable workspace.
         self.assertNotIn("$REPOSITORY_DIR/harness/daemon", entrypoint)
         self.assertTrue(
-            entrypoint.rstrip().endswith("prepare_workspace\nstart_managed_servers\nrun_daemon"),
-            "the entrypoint must prepare the workspace, start managed servers, then run the Daemon",
+            entrypoint.rstrip().endswith(
+                "install_ssh_credentials\nprepare_workspace\nstart_managed_servers\nrun_daemon"
+            ),
+            "the entrypoint must inject SSH keys, prepare the workspace, then run the Daemon",
         )
 
     def test_reload_command_restarts_only_managed_processes(self):
@@ -223,7 +388,7 @@ class TestNasDevImageContracts(unittest.TestCase):
         self.assertIn('SPRING_FLYWAY_ENABLED" != "false"', runtime_contract)
         self.assertIn("Main is the only Flyway owner", runtime_contract)
         self.assertLess(
-            entrypoint.index("validate_runtime_contract\nprepare_workspace"),
+            entrypoint.index("validate_runtime_contract\ninstall_ssh_credentials\nprepare_workspace"),
             entrypoint.index("start_managed_servers\nrun_daemon"),
         )
 

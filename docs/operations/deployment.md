@@ -130,14 +130,14 @@ build，不复制进 runtime image。App runtime 不含 Maven、Node 或 source�
 | --- | --- |
 | builder | `maven:3.9.11-eclipse-temurin-21`，BuildKit Maven cache，构建 `harness/daemon` 并复制 runtime classpath |
 | node-runtime | `node:24.14.0-bookworm-slim` + `npm@11.9.0`，只用于提供与 `distribution` profile 一致的 Node 分发 |
-| runtime | `eclipse-temurin:21.0.8_9-jdk-jammy`，apt 安装 `bash`/`ca-certificates`/`curl`/`ffmpeg`/`git`/`jq`/`lsof`/`python3`，并从上面两个 stage 复制 Maven 与 Node |
-| user | `kkdaemon:kkdaemon`，uid/gid `10001`，`HOME=/home/kkdaemon`，`USER 10001:10001` |
-| process | `/usr/local/bin/kk-studio-dev-entrypoint`：准备持久 Git 工作区，用 `scripts/dev.sh start` 启动 Backend/Vite，最后前台运行 Daemon |
+| runtime | `eclipse-temurin:21.0.8_9-jdk-jammy`，apt 安装 `bash`/`ca-certificates`/`curl`/`ffmpeg`/`git`/`jq`/`lsof`/`openssh-client`/`python3`，从官方 release 安装经 SHA-256 校验的 GitHub CLI `2.100.0`（linux/amd64），并从上面两个 stage 复制 Maven 与 Node |
+| user | `kkdaemon:kkdaemon`，uid/gid `10001`，`HOME=/home/kkdaemon`，`USER 10001:10001`，预建 `.ssh`（`0700`）与 `.config/gh` |
+| process | `/usr/local/bin/kk-studio-dev-entrypoint`：注入挂载的 SSH key，准备持久 Git 工作区，用 `scripts/dev.sh start` 启动 Backend/Vite，最后前台运行 Daemon |
 | health | `kk-studio-dev-healthcheck` 同时探测 Backend `/actuator/health` 与 Vite `/threads`；`30s` interval、`10s` timeout、`2700s` start period、`20` retries |
 
 镜像内含 `/opt/kk-studio/daemon.jar` 与 `/opt/kk-studio/lib/`（Daemon runtime）以及
 `/opt/kk-studio/source`（构建时的源码快照，不含 `.git`、`.env*`、key/credential 文件、
-`target/`、`node_modules/`、`reports/` 和本地 `runtime/`）。工作区、cache 和源码是
+`target/`、`node_modules/`、`reports/` 和本地 `runtime/`）。工作区、cache 和配置是
 持久 volume，容器重建不覆盖：
 
 ```text
@@ -145,14 +145,18 @@ build，不复制进 runtime image。App runtime 不含 Maven、Node 或 source�
 /workspace/kk-studio           # 实际源码 checkout（KK_STUDIO_REPOSITORY_DIR）
 /home/kkdaemon/.m2             # Maven local repository
 /home/kkdaemon/.npm            # npm cache
+/home/kkdaemon/.config/gh      # gh auth（gh hosts.yml）
 /var/kk-studio/dev             # backend/frontend log 与 PID
 ```
 
-`/workspace`、`/home/kkdaemon/.m2` 与 `/home/kkdaemon/.npm` 是三个必须持久化的
-volume，外部 Compose 必须以 `10001:10001` 属主挂载；entrypoint 在启动时校验
-`/workspace` 可写性，属主错误会直接失败而不是退化为不可写容器。镜像不含 Docker
-socket、真实 credential 或 Git 历史，Git 凭据只在运行时注入（askpass helper 让
-Daemon 能直接 push，token 不进入 `.git/config`）。稳定的重启命令是
+`/workspace`、`/home/kkdaemon/.m2`、`/home/kkdaemon/.npm` 与
+`/home/kkdaemon/.config/gh` 是四个必须持久化的 volume，外部 Compose 必须以
+`10001:10001` 属主挂载；entrypoint 在启动时校验 `/workspace` 可写性，属主错误会直接
+失败而不是退化为不可写容器。镜像不含 Docker socket、真实 credential 或 Git 历史：
+git 与 `gh` 的 Git 操作都走 SSH，host key 来自镜像内的 `/etc/ssh/ssh_known_hosts`，
+私钥由外部以只读 volume 挂载到 `/run/kk-studio/ssh`（`KK_STUDIO_SSH_CREDENTIALS_DIR`），
+entrypoint 启动时才复制进 `/home/kkdaemon/.ssh`；镜像 SSH 配置使用 non-interactive
+`BatchMode`、`IdentitiesOnly` 和严格 host key 校验。稳定的重启命令是
 `kk-studio-dev-reload`，
 运行规范见
 [自迭代运行规范](development-and-testing.md#44-nas-maindev-自迭代运行规范)。
@@ -565,7 +569,7 @@ NAS Main/Dev 自迭代拓扑横跨三个职责边界：
 | 边界 | 职责 |
 | --- | --- |
 | 本仓库 | Main Fat JAR image、Dev toolchain/source image、运行 profile、Daemon 与自迭代脚本 |
-| NAS Compose 仓库 | `vps-kk-studio`、`vps-kk-studio-dev`、共享 PostgreSQL/S3 连接、持久 workspace/cache、私密环境变量注入 |
+| NAS Compose 仓库 | `vps-kk-studio`、`vps-kk-studio-dev`、共享 PostgreSQL/S3 连接、持久 workspace/cache/`gh` 配置、SSH key 只读挂载、私密环境变量注入 |
 | Gateway 仓库 | `studio.kk1.fun`、`studio-dev.kk1.fun` 的 HTTP/WebSocket 路由和访问控制 |
 
 Main runtime image 不包含源码、Maven、Node 或 credential。Dev image
@@ -576,8 +580,9 @@ Main runtime image 不包含源码、Maven、Node 或 credential。Dev image
 Dev image。
 
 外部 Compose 和 Gateway 配置只引用环境变量名。真实 database、S3、Provider、
-Git、Gateway 和 registration credential 不进入本仓库、Docker build context、
-image layer、container command、日志或报告。Main 与 Dev 可以共享逻辑 database
+Gateway、registration credential 和 SSH 私钥不进入本仓库、Docker build context、
+image layer、日志或报告；registration token 当前作为 Daemon 启动参数传递。Main 与
+Dev 可以共享逻辑 database
 和 bucket；Main 独占 Flyway，两个节点均可运行 Worker，Dev Daemon 只连接 Dev
 Backend。精确的异版本 Work 路由和 Agent 停止边界由
 [自迭代运行规范](development-and-testing.md#44-nas-maindev-自迭代运行规范)
