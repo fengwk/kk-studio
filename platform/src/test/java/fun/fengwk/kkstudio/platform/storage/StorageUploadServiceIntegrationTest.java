@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -71,6 +72,9 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private ObjectMapper objectMapper;
+
+  // 本类显式驱动 expireOnce，禁用会异步消费相同 cleanup rows 的后台 maintenance。
+  @MockitoBean private StorageMaintenance storageMaintenance;
 
   private TransactionTemplate tx;
 
