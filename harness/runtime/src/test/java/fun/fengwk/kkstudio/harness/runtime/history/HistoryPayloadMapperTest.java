@@ -267,7 +267,7 @@ class HistoryPayloadMapperTest {
   }
 
   @Test
-  void toolResultPayloadSucceededRejectsResourceContentWithoutMaterializer() {
+  void toolResultPayloadSucceededDegradesResourceWithoutMaterializer() {
     ResourceRef resource =
         new ResourceRef(
             "file:///report.txt",
@@ -282,8 +282,15 @@ class HistoryPayloadMapperTest {
                 List.of(new ResourceResultContent(resource, "complete preview")),
                 false,
                 "{}"));
-    // 无物化端口时 Resource 引用 fail-closed：瞬时 URI / ResourceStore 引用绝不进入持久化 message。
-    assertThrows(IllegalArgumentException.class, () -> MAPPER.toolResultPayload(invocation));
+    // 测试意图：无物化端口时仍必须完成 history 写入，但只能保留稳定 metadata 与 preview，绝不能持久化瞬时 URI。
+    MessagePayload payload = MAPPER.toolResultPayload(invocation);
+    ToolResultMessageContent result =
+        (ToolResultMessageContent) payload.message().contents().getFirst();
+    String text = ((TextMessageContent) result.contents().getFirst()).text();
+    assertEquals(
+        "[Resource result available as metadata only: report.txt (text/plain)]\ncomplete preview",
+        text);
+    assertFalse(text.contains("file:///report.txt"));
   }
 
   @Test

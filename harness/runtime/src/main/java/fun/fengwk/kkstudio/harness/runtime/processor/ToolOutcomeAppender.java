@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import lombok.extern.slf4j.Slf4j;
+
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
@@ -25,13 +28,14 @@ import java.util.UUID;
  * 时（可为 null），SUCCEEDED 结果在 Entry 插入前、同一事务内物化为 blob-backed durable 内容：持久化 message 绝不携带 瞬时 Resource
  * URI / ResourceStore 引用。
  */
+@Slf4j
 public final class ToolOutcomeAppender {
 
   private static final HistoryPayloadMapper PAYLOAD_MAPPER = new HistoryPayloadMapper();
 
   private ToolOutcomeAppender() {}
 
-  /** 无物化端口的 append：SUCCEEDED 结果含 Resource 引用时 fail-closed（不可表示即拒绝）。 */
+  /** 无物化端口的 append：SUCCEEDED Resource 结果安全降级为 metadata-only durable 文本。 */
   public static Applied append(
       HarnessStore.Transaction tx,
       UUID sessionId,
@@ -72,7 +76,17 @@ public final class ToolOutcomeAppender {
       }
       payload = PAYLOAD_MAPPER.toolResultPayload(invocation, contents);
     } else {
-      // 非 SUCCEEDED（FAILED/CANCELLED/UNKNOWN）与无物化端口一律走普通失败/成功 payload 路径，
+      if (invocation.status() == ToolInvocationStatus.SUCCEEDED
+          && invocation.result().contents().stream()
+              .anyMatch(ResourceResultContent.class::isInstance)) {
+        log.warn(
+            "ToolResultHistoryMaterializer is unavailable; persisting resource result as"
+                + " metadata-only text: sessionId={}, toolCallId={}, toolName={}",
+            sessionId,
+            invocation.call().id(),
+            invocation.call().toolName());
+      }
+      // 非 SUCCEEDED（FAILED/CANCELLED/UNKNOWN）与无物化端口一律走普通 payload 路径；
       // materializer 只在 SUCCEEDED 且注入时被调用。
       payload = PAYLOAD_MAPPER.toolResultPayload(invocation);
     }

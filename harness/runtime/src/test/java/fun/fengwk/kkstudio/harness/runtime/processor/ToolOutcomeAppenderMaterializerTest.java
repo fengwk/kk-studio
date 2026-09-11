@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -109,6 +111,54 @@ class ToolOutcomeAppenderMaterializerTest {
     MessagePayload actual =
         assertInstanceOf(MessagePayload.class, entry(store, applied.headEntryId()).payload());
     assertEquals(PAYLOAD_MAPPER.toolResultPayload(invocation, contents), actual);
+  }
+
+  @Test
+  void succeededResourceWithoutMaterializerPersistsMetadataOnlyFallback() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    var chain =
+        seedToolChain(
+            store,
+            List.of("call-1"),
+            ModelInvocationStatus.SUCCEEDED,
+            List.of(ToolInvocationStatus.READY));
+    ResourceRef resource =
+        new ResourceRef(
+            "file:///report.txt",
+            "text/plain",
+            "report.txt",
+            3L,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    succeedToolWith(
+        store,
+        chain.toolInvocationIds().getFirst(),
+        new ToolResult(
+            "call-1",
+            List.of(new ResourceResultContent(resource, "complete preview")),
+            false,
+            "{}"));
+    ToolInvocation invocation = tool(store, chain.toolInvocationIds().getFirst());
+    var before = path(store, chain.turn().threadId());
+
+    // 测试意图：缺少资源物化端口不能让 tool outcome 事务反复回滚；fallback 必须原子落为普通 durable 文本。
+    ToolOutcomeAppender.Applied applied =
+        store.transaction(
+            tx ->
+                ToolOutcomeAppender.append(
+                    tx, before.root().sessionId(), chain.assistantEntryId(), invocation, NOW));
+
+    ToolResultMessageContent result =
+        assertInstanceOf(
+            ToolResultMessageContent.class,
+            ((MessagePayload) entry(store, applied.headEntryId()).payload())
+                .message()
+                .contents()
+                .getFirst());
+    String text = assertInstanceOf(TextMessageContent.class, result.contents().getFirst()).text();
+    assertEquals(
+        "[Resource result available as metadata only: report.txt (text/plain)]\ncomplete preview",
+        text);
+    assertFalse(text.contains("file:///report.txt"));
   }
 
   /** append 只接受 terminal Tool：READY 行被拒绝（不进入任何 Entry 追加）。 */

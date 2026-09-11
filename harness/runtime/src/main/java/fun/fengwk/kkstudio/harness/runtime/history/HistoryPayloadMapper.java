@@ -110,9 +110,9 @@ public final class HistoryPayloadMapper {
   }
 
   /**
-   * terminal ToolInvocation 的 TOOL MESSAGE payload：SUCCEEDED 映射 Text/JSON/Resource content 并回退空
-   * text；FAILED / CANCELLED / UNKNOWN 使用 error message + codec 详情且 error=true。metadata 精确映射
-   * invocation terminal status。
+   * terminal ToolInvocation 的 TOOL MESSAGE payload：SUCCEEDED 映射 Text/JSON content；无资源物化端口时 Resource
+   * 安全降级为不含瞬时 URI 的 metadata-only 文本；空结果回退空 text。FAILED / CANCELLED / UNKNOWN 使用 error message +
+   * codec 详情且 error=true。metadata 精确映射 invocation terminal status。
    */
   public MessagePayload toolResultPayload(ToolInvocation invocation) {
     Objects.requireNonNull(invocation, "invocation");
@@ -216,11 +216,8 @@ public final class HistoryPayloadMapper {
         contents.add(new TextMessageContent(text.text()));
       } else if (toolContent instanceof JsonResultContent json) {
         contents.add(new JsonMessageContent(json.json()));
-      } else if (toolContent instanceof ResourceResultContent) {
-        // Resource 引用无法在没有 ToolResultHistoryMaterializer 的情况下表示为 durable blob 内容：
-        // fail-closed（与 BinaryResultContent 一致），绝不让瞬时 URI / ResourceStore 引用进入持久化 message。
-        throw new IllegalArgumentException(
-            "resource tool result content requires a ToolResultHistoryMaterializer");
+      } else if (toolContent instanceof ResourceResultContent resource) {
+        contents.add(new TextMessageContent(resourceFallbackText(resource)));
       } else {
         // BinaryResultContent 不能进入 Session 语义消息；未知 content 也不得静默丢失字节——显式失败让调用方事务回滚。
         throw new IllegalArgumentException(
@@ -237,6 +234,23 @@ public final class HistoryPayloadMapper {
         contents,
         result.error(),
         result.detailsJson());
+  }
+
+  /** 无 blob 物化端口时只保留稳定名称、媒体类型与有界 preview；不自动序列化 ResourceRef URI、size 或 hash。 */
+  private static String resourceFallbackText(ResourceResultContent content) {
+    var resource = content.resource();
+    String name = resource.name() == null ? "unnamed" : resource.name();
+    StringBuilder text =
+        new StringBuilder()
+            .append("[Resource result available as metadata only: ")
+            .append(name)
+            .append(" (")
+            .append(resource.mediaType())
+            .append(")]");
+    if (content.preview() != null && !content.preview().isBlank()) {
+      text.append('\n').append(content.preview());
+    }
+    return text.toString();
   }
 
   private ToolResultMessageContent failedContent(ToolInvocation invocation) {

@@ -192,7 +192,8 @@ Blob 行。
 
 Tool terminal 结果由 `ToolResultExternalizer`先做无副作用 plan，再按引用逐个写入 `ResourceStore`，返回引用必须与
 plan 完全一致；`GlobalStorageToolResultHistoryMaterializer`在调用方 mandatory transaction 中把
-Text/Json/Binary/Resource 物化为 Harness history，任一步失败使调用方事务回滚。
+Text/Json/Binary/Resource 物化为 blob-backed Harness history，任一步失败使调用方事务回滚。该端口未装配时，
+Runtime 只保留资源名称、媒体类型与有界 preview，不自动序列化 `ResourceRef` 的瞬时 URI，也不阻塞 Thread 后续推进。
 
 ### Environment
 

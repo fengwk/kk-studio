@@ -223,7 +223,7 @@ ToolTerminalPending
 - [`ModelGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ModelGateway.java)：准入结果分为 `Started`、`Busy`、`Rejected` 与 `Indeterminate`。对于 `Started`，采用严格的两阶段激活机制：先调用 `start` 获取句柄，待本地事务将 `RUNNING` 状态成功持久化后，再调用 `Handle.activate` 正式打开回调门控；过早到达的监听器回调由门控暂存，陈旧或重复的回调由运行时所有权围栏拦截。
 - [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java)：执行分两阶段进行：先调用 `preflight` 获取权限预检结果（Allow、Ask、Deny），再调用 `start` 获取启动准入结果（Started、RetryLater、Rejected、Indeterminate）。YOLO 判定在 Thread 锁内完成并跳过 `preflight`，后续 `start` 流程保持一致。
 - 供应商适配契约：外部模型适配器仅使用运行时定义的通用数据传输对象（[`ProviderRequest`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderRequest.java)、[`ProviderResponse`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderResponse.java) 与 `ProviderStreamEvent`），具体供应商 SDK 类型完全隔离在外部平台层。
-- [`ToolResultHistoryMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolResultHistoryMaterializer.java)：在将工具执行结果写入 Entry 节点前，负责将工具输出中的临时资源引用外部化，并转换为 blob-backed 的持久化消息内容；运行时缺少该端口时，包含资源引用的结果按 fail-closed 语义拒绝写入历史。
+- [`ToolResultHistoryMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolResultHistoryMaterializer.java)：在将工具执行结果写入 Entry 节点前，负责将工具输出中的临时资源引用外部化，并转换为 blob-backed 的持久化消息内容；运行时缺少该端口时，资源结果安全降级为只含名称、媒体类型与有界 preview 的文本，不自动序列化 `ResourceRef` 的瞬时 URI。
 - [`RealtimeEventSink`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/RealtimeEventSink.java)：向外发布实时的有损增量事件（`MODEL_DELTA`、`TOOL_PARTIAL`）。Model delta 仅在对应批次完成持久化提交后，由单 drain owner 在事务与状态 monitor 外按 sequence 发布；推送失败不回滚 checkpoint 或终态，客户端通过 Snapshot/resync 恢复。
 
 ### usage、cost、cache 与 admission
@@ -336,7 +336,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 - **模型流聚合策略**：`ModelProcessorConfig` 持有 `StreamFlushConfig`，默认最大等待 `200ms`、最多 `256` 个事件、最多 `64KiB` 增量载荷；composition root 提供独立受管 executor 执行 DB flush 与通知发布，heartbeat scheduler 只负责续租与 timer 唤醒。
 - **调用重试策略**：`InvocationRetryPolicyProvider` 在重试决策时提供最大重试次数、退避策略与延迟时长参数，时间参数严格使用毫秒精度的正数值。
 - **外部执行接入**：模型与工具的具体执行能力通过 `ModelGateway`、`ToolGateway` 与 `ConcurrencyAdmission` 抽象端口注入，使运行时领域模型与外部执行实现保持独立。
-- **局部能力端口**：`ToolResultHistoryMaterializer`、`RealtimeEventSink` 与 `HarnessThreadChangeSource` 作为按需装配的扩展端口；当缺少资源物化器时，涉及资源操作的工具结果执行严格的失败关闭保护。
+- **局部能力端口**：`ToolResultHistoryMaterializer`、`RealtimeEventSink` 与 `HarnessThreadChangeSource` 作为按需装配的扩展端口；缺少资源物化器时，资源结果以 metadata-only 文本降级，Thread 仍可继续推进。
 - **子智能体策略**：通过 `SubagentConfigProvider` 实时获取 `maxDepth`、单父级 `maxConcurrency`、全局 `maxTotalConcurrency`、`idleTimeout` 与 `maxTurns`；注册表中的内存预留用于本地准入，持久化执行状态仍以数据库事实为准。
 
 ## 测试与源码入口
