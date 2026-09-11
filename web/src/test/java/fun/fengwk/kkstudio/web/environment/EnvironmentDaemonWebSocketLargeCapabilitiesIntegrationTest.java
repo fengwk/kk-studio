@@ -24,8 +24,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -72,7 +72,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   @MockitoBean private ResourceStore resourceStore;
   // 该 WebSocket 测试只验证握手边界，因此隔离 READY 后的 durable dispatcher 唤醒。
-  @MockitoBean private EnvironmentReadyListener environmentReadyListener;
+  @MockitoBean private EnvironmentSessionListener environmentSessionListener;
 
   /** 远大于 8 KiB 的 {@code READY} skills 帧被内嵌容器接受，握手进入 READY；绝不能观察到 close code 1009。 */
   @Test

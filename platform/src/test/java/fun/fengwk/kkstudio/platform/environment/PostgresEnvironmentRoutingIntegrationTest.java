@@ -32,14 +32,17 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryEntry;
 import fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryListing;
-import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonConnection;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonChannel;
+import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
+import fun.fengwk.kkstudio.platform.environment.directory.LocalDirectoryExecutor;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway;
-import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.platform.environment.query.EnvironmentQueryCoordinator;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.server.EnvironmentServerConfiguration;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -50,7 +53,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryDTO;
 
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -89,6 +91,10 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   private EnvironmentQueryCoordinator coordinatorNode2;
   private EnvironmentDaemonGateway gatewayNode1;
   private EnvironmentDaemonGateway gatewayNode2;
+  private EnvironmentDaemonServer serverNode1;
+  private EnvironmentDaemonServer serverNode2;
+  private LocalDirectoryExecutor localDirectoryNode1;
+  private LocalDirectoryExecutor localDirectoryNode2;
   private EnvironmentRepository environmentRepository;
 
   @BeforeEach
@@ -197,39 +203,37 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     this.registryNode1 = new EnvironmentRegistry(jdbcTemplate, node1);
     this.registryNode2 = new EnvironmentRegistry(jdbcTemplate, node2);
 
-    this.coordinatorNode1 = new EnvironmentQueryCoordinator(jdbcTemplate, OBJECT_MAPPER, node1);
-    this.coordinatorNode2 = new EnvironmentQueryCoordinator(jdbcTemplate, OBJECT_MAPPER, node2);
-
-    EnvironmentGatewayProperties properties = new EnvironmentGatewayProperties();
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
+    EnvironmentSessionListener sessionListener = env -> {};
+    EnvironmentServerConfiguration serverConfiguration = new EnvironmentServerConfiguration();
+    this.serverNode1 =
+        serverConfiguration.environmentDaemonServer(
+            registryNode1, environmentRepository, sessionListener, snapshot);
+    this.serverNode2 =
+        serverConfiguration.environmentDaemonServer(
+            registryNode2, environmentRepository, sessionListener, snapshot);
+    this.localDirectoryNode1 = new LocalDirectoryExecutor(serverNode1);
+    this.localDirectoryNode2 = new LocalDirectoryExecutor(serverNode2);
+
+    this.coordinatorNode1 =
+        new EnvironmentQueryCoordinator(jdbcTemplate, OBJECT_MAPPER, node1, localDirectoryNode1);
+    this.coordinatorNode2 =
+        new EnvironmentQueryCoordinator(jdbcTemplate, OBJECT_MAPPER, node2, localDirectoryNode2);
 
     this.gatewayNode1 =
         new EnvironmentDaemonGateway(
-            registryNode1,
-            environmentRepository,
-            properties,
-            snapshot,
-            Clock.systemUTC(),
-            env -> {},
-            coordinatorNode1);
-
+            serverNode1, registryNode1, localDirectoryNode1, coordinatorNode1);
     this.gatewayNode2 =
         new EnvironmentDaemonGateway(
-            registryNode2,
-            environmentRepository,
-            properties,
-            snapshot,
-            Clock.systemUTC(),
-            env -> {},
-            coordinatorNode2);
+            serverNode2, registryNode2, localDirectoryNode2, coordinatorNode2);
   }
 
   @Test
   void localHelloAcquiresRouteAndAllowsReady() {
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
+    serverNode1.open(conn1);
 
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
 
     EnvironmentConnection env = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
@@ -243,7 +247,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     assertEquals(DEV, envelopes.get(0).environmentId());
 
     // 发送 READY
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
@@ -253,8 +257,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   @Test
   void invalidRegistrationTokenFailsTerminal() {
     FakeConnection conn1 = new FakeConnection("conn-invalid");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, "wrong-token"));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, "wrong-token"));
 
     List<DaemonEnvelope> envelopes = conn1.envelopes();
     assertEquals(1, envelopes.size());
@@ -268,14 +272,14 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void retryLaterWhenActiveRouteExists() {
     // 1. Node 1 成功绑定 DEV
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     // 2. 另一个连接（如 Node 2）尝试绑定 DEV -> RETRY_LATER
     FakeConnection conn2 = new FakeConnection("conn-2");
-    gatewayNode2.open(conn2);
-    gatewayNode2.receive(conn2.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode2.open(conn2);
+    serverNode2.receive(conn2.connectionId(), hello(0, REGISTRATION_TOKEN));
 
     List<DaemonEnvelope> envelopes2 = conn2.envelopes();
     assertEquals(1, envelopes2.size());
@@ -292,9 +296,9 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void expiredLeaseCanBeTakenOver() {
     // 1. Node 1 绑定 DEV
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     // 2. 模拟租约在数据库中过期
     jdbcTemplate.update(
@@ -303,8 +307,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     // 3. Node 2 尝试绑定 DEV -> 成功接管
     FakeConnection conn2 = new FakeConnection("conn-2");
-    gatewayNode2.open(conn2);
-    gatewayNode2.receive(conn2.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode2.open(conn2);
+    serverNode2.receive(conn2.connectionId(), hello(0, REGISTRATION_TOKEN));
 
     EnvironmentConnection env = registryNode2.find(DEV).orElseThrow();
     assertEquals(node2, env.ownerNodeId());
@@ -318,8 +322,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   @Test
   void routeFenceRejectsStaleTokenUpdates() {
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
 
     // 在数据库中篡改 lease_token
     jdbcTemplate.update(
@@ -328,7 +332,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         DEV.value());
 
     // 发送 READY -> 应当因为 fence 失败而被关闭
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     assertTrue(conn1.closed);
   }
@@ -336,15 +340,15 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   @Test
   void disconnectPreservesConnectingWithGracePeriod() {
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
 
     // 断开连接
-    gatewayNode1.close(conn1.connectionId());
+    serverNode1.close(conn1.connectionId());
 
     EnvironmentConnection disconnectedEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.CONNECTING, disconnectedEnv.status());
@@ -360,15 +364,15 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   @Test
   void gracePeriodAllowsSameNodeReconnectWithoutManualLeaseRewindWhileBlockingOtherNode() {
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
 
     // 断开连接，进入宽限期
-    gatewayNode1.close(conn1.connectionId());
+    serverNode1.close(conn1.connectionId());
 
     EnvironmentConnection disconnectedEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.CONNECTING, disconnectedEnv.status());
@@ -377,8 +381,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     // 异节点 Node 2 在宽限期内尝试连接 -> 必须被拒绝（收到 RETRY_LATER 并关闭）
     FakeConnection conn2 = new FakeConnection("conn-2");
-    gatewayNode2.open(conn2);
-    gatewayNode2.receive(conn2.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode2.open(conn2);
+    serverNode2.receive(conn2.connectionId(), hello(0, REGISTRATION_TOKEN));
     assertTrue(conn2.closed);
     assertEquals(DaemonMessageType.ERROR, conn2.envelopes().get(0).messageType());
     assertTrue(
@@ -386,8 +390,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     // 同节点 Node 1 在宽限期内重新连接（不手工回拨 lease_until）-> 必须成功收到 WELCOME
     FakeConnection conn1b = new FakeConnection("conn-1b");
-    gatewayNode1.open(conn1b);
-    gatewayNode1.receive(conn1b.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.open(conn1b);
+    serverNode1.receive(conn1b.connectionId(), hello(0, REGISTRATION_TOKEN));
     assertFalse(conn1b.closed);
     assertEquals(1, conn1b.envelopes().size());
     assertEquals(DaemonMessageType.WELCOME, conn1b.envelopes().get(0).messageType());
@@ -402,9 +406,9 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   @Test
   void queryLocalRouteDirectly() throws Exception {
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     CompletableFuture<EnvironmentDirectoryListResult> future =
         gatewayNode1.listDirectory(DEV, ".", Duration.ofSeconds(5));
@@ -427,7 +431,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     EnvironmentCapabilityResult capResult =
         EnvironmentCapabilityResult.json(invokeEnvelope.invocationId(), listingJson);
     String completedJson = RESULT_CODEC.encodeCompleted(capResult, DUMMY_STORE);
-    gatewayNode1.receive(
+    serverNode1.receive(
         conn1.connectionId(),
         ENVELOPE_CODEC.encode(
             new DaemonEnvelope(
@@ -452,9 +456,9 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void queryCrossNodeRouteViaMailboxAndNotify() throws Exception {
     // 1. Node 1 拥有 DEV 环境
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     // 2. Node 2 发起对 DEV 的目录查询
     CompletableFuture<EnvironmentDirectoryListResult> future =
@@ -488,7 +492,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     EnvironmentCapabilityResult capResult =
         EnvironmentCapabilityResult.json(invokeEnvelope.invocationId(), listingJson);
     String completedJson = RESULT_CODEC.encodeCompleted(capResult, DUMMY_STORE);
-    gatewayNode1.receive(
+    serverNode1.receive(
         conn1.connectionId(),
         ENVELOPE_CODEC.encode(
             new DaemonEnvelope(
@@ -529,9 +533,9 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   @Test
   void staleOwnerCannotClaimCrossNodeQuery() {
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     // Node 2 发起查询
     CompletableFuture<EnvironmentDirectoryListResult> future =
@@ -554,9 +558,9 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   @Test
   void queryTimeoutAndCleanup() throws Exception {
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     // 发起超短超时查询
     CompletableFuture<EnvironmentDirectoryListResult> future =
@@ -585,8 +589,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void listDirectoryOnConnectingEnvironmentFailsImmediatelyAsUnavailableWithoutMailboxFallback()
       throws Exception {
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
 
     // 确认数据库连接行为 CONNECTING
     EnvironmentConnection env = registryNode1.find(DEV).orElseThrow();
@@ -623,9 +627,9 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void listDirectoryOnExpiredLeaseEnvironmentFailsImmediatelyAsUnavailableWithoutMailboxFallback()
       throws Exception {
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     // 模拟数据库租约过期
     jdbcTemplate.update(
@@ -662,9 +666,9 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   @Test
   void runningMailboxQueryWithExpiredDeadlineRejectsLateCompletion() throws Exception {
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     // 提交一个查询，设置较长的 30s 初始超时
     CompletableFuture<EnvironmentDirectoryListResult> future =
@@ -719,9 +723,9 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   @Test
   void runningMailboxQueryWithExpiredDeadlineRejectsLateFailure() throws Exception {
     FakeConnection conn1 = new FakeConnection("conn-1");
-    gatewayNode1.open(conn1);
-    gatewayNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    gatewayNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.open(conn1);
+    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
 
     // 提交一个查询，设置较长的 30s 初始超时
     CompletableFuture<EnvironmentDirectoryListResult> future =
@@ -827,7 +831,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         RESULT_CODEC.encodeCompleted(
             EnvironmentCapabilityResult.json(invokeEnvelope.invocationId(), listingJson),
             DUMMY_STORE);
-    gatewayNode1.receive(
+    serverNode1.receive(
         connection.connectionId(),
         ENVELOPE_CODEC.encode(
             new DaemonEnvelope(
@@ -846,7 +850,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         RESULT_CODEC.encodeCompleted(
             EnvironmentCapabilityResult.error(invokeEnvelope.invocationId(), errorMessage),
             DUMMY_STORE);
-    gatewayNode1.receive(
+    serverNode1.receive(
         connection.connectionId(),
         ENVELOPE_CODEC.encode(
             new DaemonEnvelope(
@@ -858,7 +862,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
                 failedJson)));
   }
 
-  private static final class FakeConnection implements EnvironmentDaemonConnection {
+  private static final class FakeConnection implements DaemonChannel {
     private final String connectionId;
     private final List<DaemonEnvelope> envelopes = new ArrayList<>();
     private final AtomicBoolean open = new AtomicBoolean(true);

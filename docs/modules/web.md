@@ -342,14 +342,16 @@ version source。建立上游时先注册 consumer 再读取 cursor；fan-out �
 
 1. 在 Spring WebSocket 和 native JSR-356 session 两侧设置 `max-message-bytes`；
 2. 创建 `SpringWebSocketConnection`和每连接 `DaemonOutboundSender`；
-3. 把 open/receive/close 委托给 Platform `EnvironmentDaemonEndpoint`；
-4. Gateway 只接受 protocol v1 HELLO 及严格的 `capabilityCatalogVersion`，并负责校验通用 capability INVOKE payload；
-5. Gateway 先解绑 registry、active invocation 和 pending request，再关闭 sender。
+3. 把 open/receive/close 委托给会话核心的 `DaemonEndpoint`（`harness/environment-server` 的 `EnvironmentDaemonServer`）；
+4. 会话核心只接受 protocol v1 HELLO 及严格的 `capabilityCatalogVersion`，并负责校验通用 capability INVOKE payload；
+5. 会话核心先解绑 registry、在途 invocation 和 pending request，再关闭 sender。
+
+`SpringWebSocketConnection`只实现核心的 `DaemonChannel`；web 层不解释协议，也不保存任何会话状态。
 
 `DaemonOutboundSender`使用 `ConcurrentWebSocketSessionDecorator`和每连接一个 virtual-thread sender。入队是非阻塞的，
 同时受 frame count 与 UTF-8 bytes 限制（均含 in-flight frame）；sender 按入队顺序调用 `sendMessage`。每帧有
-send timeout，超时/异常会关闭入队围栏、通知 Gateway 进行 uncertain/unavailable cleanup，再关闭 transport。慢连接
-不会占住 receive、Gateway monitor 或其它连接。
+send timeout，超时/异常会关闭入队围栏、通知会话核心进行 uncertain/unavailable cleanup，再关闭 transport。慢连接
+不会占住 receive、会话核心锁或其它连接。
 
 非 servlet Spring context（MockMvc、`WebEnvironment.MOCK`）中
 `EnvironmentDaemonWebSocketContainerFactoryBean`检测不到 `ServerContainer`时 no-op，因此测试 context 不需要
@@ -358,8 +360,8 @@ send timeout，超时/异常会关闭入队围栏、通知 Gateway 进行 uncert
 ### HTTP async boundary：Environment directory
 
 `GET /api/harness/environments/{id}/directories?path=.`是 control-plane read-only 查询，不经过 Tool permission、不会
-创建 ToolInvocation，也不把绝对路径返回给浏览器。它通过 `fs.list-directory` generic capability 执行，与 Tool/Skill
-共享该 Environment 的单一 active invocation slot；本节点不是 route owner 时经 PostgreSQL `environment_directory_query` mailbox
+创建 ToolInvocation，也不把绝对路径返回给浏览器。它通过 `fs.list-directory` generic capability 执行，同一 Environment
+可并发承载多次查询；本节点不是 route owner 时经 PostgreSQL `environment_directory_query` mailbox
 转发到 owner 节点。
 
 Controller 直接返回 `CompletionStage<ResponseEntity<Result<?>>>`：

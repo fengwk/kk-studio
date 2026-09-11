@@ -9,6 +9,8 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonLeaseStore;
+import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -21,16 +23,17 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 基于 PostgreSQL 路由租约表 {@code environment_connection} 的多节点 Environment 连接注册表。
+ * 基于 PostgreSQL 路由租约表 {@code environment_connection} 的多节点 Environment 连接注册表：Environment server core
+ * 的 lease-store 适配实现。
  *
- * <p>以 canonical {@link EnvironmentId} 为键。HELLO 认证时通过单条 PostgreSQL upsert 语句原子抢占租约： 缺少或过期路由以新
- * {@code leaseToken} 接管；活跃路由返回 {@link BindResult.RetryLater}。断开连接时保留重连宽限期，允许原连接重新认领。
+ * <p>以 canonical {@link EnvironmentId} 为键。HELLO 认证时通过单条 PostgreSQL upsert 语句原子抢占租约：缺少或过期路由以新 {@code
+ * leaseToken} 接管；活跃路由返回 {@link LeaseBindResult.RetryLater}。断开连接时保留重连宽限期，允许原连接重新认领。
  *
  * <p>READY、HEARTBEAT 与断开连接均以 {@code (environment_id, owner_node_id, lease_token)} 为围栏更新，
- * 保证只有当前持有该路由租约的本地连接能推进状态。
+ * 保证只有当前持有该路由租约的本地连接能推进状态；所有围栏更新在租约失效时返回 false（fail-closed）。
  */
 @Component
-public class EnvironmentRegistry {
+public class EnvironmentRegistry implements DaemonLeaseStore {
 
   private static final String TRY_ACQUIRE_SQL =
       """
@@ -191,7 +194,8 @@ public class EnvironmentRegistry {
    * @param leaseDuration 租约时长
    * @return 类型化绑定结果（Acquired / RetryLater / Rejected）
    */
-  public BindResult tryAcquire(
+  @Override
+  public LeaseBindResult tryAcquire(
       EnvironmentId environmentId, String registrationToken, Duration leaseDuration) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(registrationToken, "registrationToken");
@@ -214,19 +218,19 @@ public class EnvironmentRegistry {
             millis);
 
     if (rows.isEmpty()) {
-      return BindResult.retryLater("route acquisition returned no row: " + environmentId);
+      return new LeaseBindResult.RetryLater("route acquisition returned no row: " + environmentId);
     }
     AcquireRow row = rows.get(0);
     if (row.acquired && row.leaseToken != null) {
-      return BindResult.acquired(row.leaseToken);
+      return new LeaseBindResult.Acquired(row.leaseToken);
     }
     return switch (row.resultType) {
-      case "NOT_FOUND" -> BindResult.rejected("environment not found: " + environmentId);
-      case "INVALID_TOKEN" -> BindResult.rejected(
+      case "NOT_FOUND" -> new LeaseBindResult.Rejected("environment not found: " + environmentId);
+      case "INVALID_TOKEN" -> new LeaseBindResult.Rejected(
           "invalid registration token for environment: " + environmentId);
-      case "ACTIVE_ROUTE" -> BindResult.retryLater(
+      case "ACTIVE_ROUTE" -> new LeaseBindResult.RetryLater(
           "environment " + environmentId + " is actively held by another connection");
-      default -> BindResult.retryLater(
+      default -> new LeaseBindResult.RetryLater(
           "route acquisition failed for environment: " + environmentId);
     };
   }
@@ -236,6 +240,7 @@ public class EnvironmentRegistry {
    *
    * @return 围栏校验成功且更新 1 行返回 true；若租约已被夺取（0 行）返回 false
    */
+  @Override
   public boolean markReady(
       EnvironmentId environmentId,
       UUID leaseToken,
@@ -262,6 +267,7 @@ public class EnvironmentRegistry {
    *
    * @return 围栏校验成功且更新 1 行返回 true；若租约已被夺取（0 行）返回 false
    */
+  @Override
   public boolean heartbeat(EnvironmentId environmentId, UUID leaseToken, Duration leaseDuration) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(leaseToken, "leaseToken");
@@ -281,6 +287,7 @@ public class EnvironmentRegistry {
    *
    * @return 围栏校验成功返回 true
    */
+  @Override
   public boolean disconnect(EnvironmentId environmentId, UUID leaseToken, Duration graceDuration) {
     if (environmentId == null || leaseToken == null) {
       return false;
@@ -344,6 +351,7 @@ public class EnvironmentRegistry {
   }
 
   /** 数据库现在时判定当前节点是否持有有效的 READY 路由租约（用于本地 capability INVOKE 准入）。 */
+  @Override
   public boolean holdsReadyLease(EnvironmentId environmentId, UUID leaseToken) {
     if (environmentId == null || leaseToken == null) {
       return false;
@@ -355,6 +363,7 @@ public class EnvironmentRegistry {
   }
 
   /** 数据库现在时判定当前节点是否持有活跃的连接代币（用于 HELLO 同节点活跃连接防冲突保护）。 */
+  @Override
   public boolean hasActiveLeaseToken(EnvironmentId environmentId, UUID leaseToken) {
     if (environmentId == null || leaseToken == null) {
       return false;
