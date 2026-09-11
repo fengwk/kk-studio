@@ -3,6 +3,7 @@ import { ChatCardsPanel } from '@/features/ai/chat/ChatCardsPanel'
 import { ChatRuntime } from '@/features/ai/chat/ChatRuntime'
 import { useChatRuntime } from '@/features/ai/chat/ChatRuntimeContext'
 import { AiConsoleFrame } from '@/features/ai/extensions/AiConsoleFrame'
+import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
 
 /** Chat 列表路由的完整运行时；整个模块只在进入 `/chats` 时加载。 */
 export default function ChatsRoute({ children }: ExtensionComponentProps) {
@@ -16,15 +17,18 @@ export default function ChatsRoute({ children }: ExtensionComponentProps) {
 function ChatsFrame({ children }: ExtensionComponentProps) {
   const controller = useChatRuntime()
   return (
-    <AiConsoleFrame
-      search={controller.search}
-      onSearchChange={controller.setSearch}
-      busy={controller.busy}
-      error={controller.error}
-      mutationError={controller.mutationError}
-      content={<ChatCardsPanel {...controller.chatPanelProps} />}
-    >
-      {children}
-    </AiConsoleFrame>
+    <>
+      <AiConsoleFrame
+        search={controller.search}
+        onSearchChange={controller.setSearch}
+        busy={controller.busy}
+        error={controller.error}
+        mutationError={controller.mutationError}
+        content={<ChatCardsPanel {...controller.chatPanelProps} />}
+      >
+        {children}
+      </AiConsoleFrame>
+      <ConfirmActionModal {...controller.deleteConfirmModal} />
+    </>
   )
 }

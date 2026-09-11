@@ -8,10 +8,16 @@ export function ChatCardsPanel({
   chats,
   agents,
   onCreate,
+  onEdit,
+  onDelete,
+  deletePending = false,
 }: {
   chats: ChatDTO[]
   agents: AgentDefinitionDTO[]
   onCreate: () => void
+  onEdit?: (chat: ChatDTO) => void
+  onDelete?: (chat: ChatDTO) => void
+  deletePending?: boolean
 }) {
   const { t } = useI18n()
   return (
@@ -22,7 +28,14 @@ export function ChatCardsPanel({
         onClick={onCreate}
       />
       {chats.map((chat) => (
-        <ChatCard key={chat.id} chat={chat} agents={agents} />
+        <ChatCard
+          key={chat.id}
+          chat={chat}
+          agents={agents}
+          onEdit={onEdit ? () => onEdit(chat) : undefined}
+          onDelete={onDelete ? () => onDelete(chat) : undefined}
+          deletePending={deletePending}
+        />
       ))}
     </div>
   )
