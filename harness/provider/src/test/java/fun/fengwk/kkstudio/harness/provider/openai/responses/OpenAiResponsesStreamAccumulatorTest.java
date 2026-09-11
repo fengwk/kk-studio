@@ -1394,4 +1394,156 @@ class OpenAiResponsesStreamAccumulatorTest {
         "Condensed reasoning", replayOutput.get(0).path("summary").get(0).path("text").asText());
     assertEquals("Final answer", replayOutput.get(1).path("content").get(0).path("text").asText());
   }
+
+  /**
+   * 意图：前序 reasoning item 占据 output_index=0 时，其后的 function_call（output_index=1）仍必须以连续工具序号 0 发布
+   * ToolCallDelta；若直接透出 output_index，Runtime 会因稀疏序号误判 "final response omits a streamed tool
+   * call"，因此这里同时断言最终响应确实产出该工具调用。
+   */
+  @Test
+  void test_nonToolOutputPrecedingFunctionCallKeepsContiguousToolOrdinal() throws Exception {
+    List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            emittedEvents::add);
+
+    accumulator.processEvent(
+        MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_ordinal\"}}"));
+    // reasoning item 占用 output_index=0，本身不产生任何工具调用
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"summary_index\":0,\"delta\":\"Need a tool\"}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,"
+                + "\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\","
+                + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"Need a tool\"}]}}"));
+    // function_call 位于 output_index=1，但工具序号必须是 0
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"output_index\":1,"
+                + "\"item\":{\"id\":\"item_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"item_1\",\"delta\":\"{\\\"query\\\": \\\"paris\\\"}\"}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.function_call_arguments.done\",\"item_id\":\"item_1\",\"arguments\":\"{\\\"query\\\": \\\"paris\\\"}\"}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":1,"
+                + "\"item\":{\"id\":\"item_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search\","
+                + "\"arguments\":\"{\\\"query\\\": \\\"paris\\\"}\"}}"));
+
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ordinal\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30},"
+                + "\"output\":["
+                + "{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Need a tool\"}]},"
+                + "{\"type\":\"function_call\",\"id\":\"item_1\",\"call_id\":\"call_1\",\"name\":\"search\","
+                + "\"arguments\":\"{\\\"query\\\": \\\"paris\\\"}\"}"
+                + "]}}"));
+
+    // 首条 added 增量与后续 arguments 增量必须共用连续序号 0，绝不透出 output_index=1
+    List<ProviderStreamEvent.ToolCallDelta> toolDeltas = toolDeltas(emittedEvents);
+    assertEquals(
+        List.of(0, 0),
+        toolDeltas.stream().map(ProviderStreamEvent.ToolCallDelta::index).toList(),
+        "tool call deltas must use the contiguous tool ordinal rather than the Responses output_index");
+    assertEquals("call_1", toolDeltas.get(0).id());
+    assertEquals("search", toolDeltas.get(0).name());
+    assertEquals("{\"query\": \"paris\"}", toolDeltas.get(1).argumentsJson());
+
+    ProviderResponse resp = accumulator.response();
+    assertEquals(GenerationStopReason.COMPLETE, resp.stopReason());
+    assertEquals(1, resp.toolCalls().size(), "final response must contain the streamed tool call");
+    assertEquals("call_1", resp.toolCalls().get(0).id());
+    assertEquals("search", resp.toolCalls().get(0).name());
+    assertEquals("{\"query\": \"paris\"}", resp.toolCalls().get(0).argumentsJson());
+  }
+
+  /**
+   * 意图：前序 reasoning / message item 抬高 output_index 后，多个 function_call 的工具序号仍必须是连续的 0..N-1，
+   * 且顺序与最终响应一致，避免任何空洞导致 Runtime reconcile 失败。
+   */
+  @Test
+  void test_multipleFunctionCallsKeepContiguousOrdinalsAfterNonToolOutputs() throws Exception {
+    List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            emittedEvents::add);
+
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.created\",\"response\":{\"id\":\"resp_multi_ordinal\"}}"));
+    // reasoning 与 message 分别占据 output_index=0 / 1
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"summary_index\":0,\"delta\":\"Plan\"}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_text.delta\",\"output_index\":1,\"content_index\":0,\"delta\":\"Calling tools\"}"));
+    // 两个 function_call 位于 output_index=2 / 3，工具序号必须是 0 / 1
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"output_index\":2,"
+                + "\"item\":{\"id\":\"item_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.function_call_arguments.done\",\"item_id\":\"item_1\",\"arguments\":\"{\\\"q\\\":\\\"abc\\\"}\"}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"output_index\":3,"
+                + "\"item\":{\"id\":\"item_2\",\"type\":\"function_call\",\"call_id\":\"call_2\",\"name\":\"calc\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.function_call_arguments.done\",\"item_id\":\"item_2\",\"arguments\":\"{\\\"expr\\\":\\\"1+1\\\"}\"}"));
+
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_multi_ordinal\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30},"
+                + "\"output\":["
+                + "{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Plan\"}]},"
+                + "{\"type\":\"message\",\"role\":\"assistant\","
+                + "\"content\":[{\"type\":\"output_text\",\"text\":\"Calling tools\"}]},"
+                + "{\"type\":\"function_call\",\"id\":\"item_1\",\"call_id\":\"call_1\",\"name\":\"search\","
+                + "\"arguments\":\"{\\\"q\\\":\\\"abc\\\"}\"},"
+                + "{\"type\":\"function_call\",\"id\":\"item_2\",\"call_id\":\"call_2\",\"name\":\"calc\","
+                + "\"arguments\":\"{\\\"expr\\\":\\\"1+1\\\"}\"}"
+                + "]}}"));
+
+    List<ProviderStreamEvent.ToolCallDelta> toolDeltas = toolDeltas(emittedEvents);
+    assertEquals(
+        List.of(0, 1),
+        toolDeltas.stream().map(ProviderStreamEvent.ToolCallDelta::index).toList(),
+        "tool call deltas must stay contiguous even when non-tool outputs occupy output_index slots");
+    assertEquals("call_1", toolDeltas.get(0).id());
+    assertEquals("call_2", toolDeltas.get(1).id());
+
+    ProviderResponse resp = accumulator.response();
+    assertEquals(GenerationStopReason.COMPLETE, resp.stopReason());
+    assertEquals(2, resp.toolCalls().size());
+    assertEquals("call_1", resp.toolCalls().get(0).id());
+    assertEquals("call_2", resp.toolCalls().get(1).id());
+  }
+
+  /** 提取流式阶段发布的工具调用增量，用于断言工具序号连续性。 */
+  private static List<ProviderStreamEvent.ToolCallDelta> toolDeltas(
+      List<ProviderStreamEvent> events) {
+    List<ProviderStreamEvent.ToolCallDelta> deltas = new ArrayList<>();
+    for (ProviderStreamEvent event : events) {
+      if (event instanceof ProviderStreamEvent.ToolCallDelta delta) {
+        deltas.add(delta);
+      }
+    }
+    return deltas;
+  }
 }

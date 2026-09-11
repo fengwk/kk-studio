@@ -23,7 +23,7 @@ public sealed interface ProviderStreamEvent
   }
 
   /**
-   * 以源顺序索引标识的工具调用增量。
+   * 以工具调用之间的连续源顺序序号（{@code 0..N-1}）标识的工具调用增量；文本、思考等非工具输出不占用该序号。
    *
    * <p>id、name、argumentsJson 都是可选的增量片段，至少一个必须存在；完整调用只由 {@link ProviderResponse} 提供。
    */
