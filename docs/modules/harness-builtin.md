@@ -2,10 +2,10 @@
 
 ## 定位
 
-`harness-builtin` 是系统第一方内置能力模块，提供全局唯一的 `BuiltinHarnessContributor`（标识为 `builtin`）。模块集中向 `HarnessCatalog` 注册系统内置的 15 个统一工具、`goal.state` 自定义条目所有权以及 Goal 上下文投影器。
+`harness-builtin` 是系统第一方内置能力模块，提供全局唯一的 `BuiltinHarnessContributor`（标识为 `builtin`）。模块集中向 `HarnessCatalog` 注册系统内置的 14 个统一工具、`goal.state` 自定义条目所有权以及 Goal 上下文投影器。
 
-15 个内置工具分为三类：
-- 10 个面向模型可见、声明 `environmentRequired=true` 的环境能力工具；
+14 个内置工具分为三类：
+- 9 个面向模型可见、声明 `environmentRequired=true` 的环境能力工具；
 - 2 个内部工具：`load_skill` 与 `task`；
 - 3 个面向模型可见、通过 `AppendCustomEntry` 副作用维护分支目标的 Goal 管理工具。
 
@@ -15,7 +15,7 @@
 
 ### 核心职责
 
-- 通过单一 `BuiltinHarnessContributor` 和统一 Tool SPI 注册全部 15 个内置工具。
+- 通过单一 `BuiltinHarnessContributor` 和统一 Tool SPI 注册全部 14 个内置工具。
 - 将 Goal 表达为分支作用域的 `builtin/goal.state` 全量快照，通过 `AppendCustomEntry` 副作用由 Core 原子追加至会话树。
 - 提供 `goal.context` 纯上下文投影器，仅将当前分支活跃的 Goal 投影至下一次模型规划的 SYSTEM 上下文中。
 - 将内部工具 `load_skill` 与 `task` 作为标准 `INTERNAL` 工具注册，为 Skill 加载与 Subagent 任务执行提供标准化契约。
@@ -48,7 +48,7 @@ POM 见 [`pom.xml`](../../harness/builtin/pom.xml)，包级职责见 [`package-i
 
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
-| `fun.fengwk.kkstudio.harness.builtin` | 系统第一方内置能力根包，提供唯一的 `BuiltinHarnessContributor`、`BuiltinToolIds` 全局常量与完成态句柄 | 集中注册 15 个统一内置工具、Goal 自定义类型与投影器；底层网络传输与持久化调度由外层模块负责 |
+| `fun.fengwk.kkstudio.harness.builtin` | 系统第一方内置能力根包，提供唯一的 `BuiltinHarnessContributor`、`BuiltinToolIds` 全局常量与完成态句柄 | 集中注册 14 个统一内置工具、Goal 自定义类型与投影器；底层网络传输与持久化调度由外层模块负责 |
 | `fun.fengwk.kkstudio.harness.builtin.environment` | 内置 Environment capability 工具实现（`EnvironmentCapabilityTool`）与 prompt 模板加载 | 委托执行期注入的 `BoundEnvironment` 执行环境能力；传输协议解析与宿主进程管理由环境守护进程承接 |
 | `fun.fengwk.kkstudio.harness.builtin.goal` | 内置 Goal 状态管理工具（`create_goal`、`get_goal`、`update_goal`）、纯上下文投影器（`GoalContextProjector`）、快照模型（`GoalState`）与严格确定性 JSON 编解码器（`GoalStateCodec`） | 依托通用 `harness_entry` 的 CUSTOM 载荷存储，通过 `AppendCustomEntry` 由 Core 原子追加 |
 | `fun.fengwk.kkstudio.harness.builtin.skill` | 内部 Skill 加载工具（`LoadSkillTool`）及正文加载契约 | 仅供当前 Thread Agent 选中的 Skill 按需加载，通过环境绑定安全读取而隐藏宿主绝对路径 |
@@ -58,14 +58,13 @@ POM 见 [`pom.xml`](../../harness/builtin/pom.xml)，包级职责见 [`package-i
 
 ### BuiltinHarnessContributor 注册清单
 
-[`BuiltinHarnessContributor`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor.java) 接收 `loadSkillTool` 与 `taskTool`（由 Platform 装配注入），其描述符为 `ContributorId("builtin")`、version `"1"`、无 `requires` 依赖。它统一注册 15 个 Tool、1 个 Custom Entry Type 和 1 个 Context Projector：
+[`BuiltinHarnessContributor`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor.java) 接收 `loadSkillTool` 与 `taskTool`（由 Platform 装配注入），其描述符为 `ContributorId("builtin")`、version `"1"`、无 `requires` 依赖。它统一注册 14 个 Tool、1 个 Custom Entry Type 和 1 个 Context Projector：
 
 | localName | AgentToolId | model name | requirements | visibility | priority | 说明 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `environment.read` | `base.read` | `read` | Environment | SELECTABLE | 0 | `fs.read`，READ_ONLY |
 | `environment.write` | `base.write` | `write` | Environment | SELECTABLE | 0 | `fs.write`，IDEMPOTENT |
 | `environment.edit` | `base.edit` | `edit` | Environment | SELECTABLE | 0 | `fs.apply-edit`，NON_IDEMPOTENT |
-| `environment.apply-patch` | `base.apply-patch` | `apply_patch` | Environment | SELECTABLE | 0 | `fs.apply-patch`，NON_IDEMPOTENT |
 | `environment.bash` | `base.bash` | `bash` | Environment | SELECTABLE | 0 | `process.exec`，NON_IDEMPOTENT |
 | `environment.grep` | `base.grep` | `grep` | Environment | SELECTABLE | 0 | `fs.search`，READ_ONLY |
 | `environment.find` | `base.find` | `find` | Environment | SELECTABLE | 0 | `fs.find`，READ_ONLY |
@@ -177,7 +176,7 @@ sequenceDiagram
 
 ### 关键测试守卫
 
-- [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java)：完整 15 工具清单、Tool descriptor/version/schema、ownership 与 Catalog 注册测试。
+- [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java)：完整 14 工具清单、Tool descriptor/version/schema、ownership 与 Catalog 注册测试。
 - [`BuiltinModuleArchitectureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinModuleArchitectureTest.java)：单向依赖方向与模块契约边界守卫。
 - [`BuiltinToolIdsTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinToolIdsTest.java)：全局 `base.*` 稳定标识校验。
 - [`GoalFeatureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalFeatureTest.java)：branch latest snapshot、fork/sibling 隔离、replacement 时间戳、active projector 静默。

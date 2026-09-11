@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.junit.jupiter.api.Test;
 
-/** 验证 15 个稳定 AgentToolId 的常量值。 */
+/** 验证 14 个稳定 AgentToolId 的常量值。 */
 class BuiltinToolIdsTest {
 
   @Test
@@ -12,7 +12,6 @@ class BuiltinToolIdsTest {
     assertEquals("base.read", BuiltinToolIds.READ.value());
     assertEquals("base.write", BuiltinToolIds.WRITE.value());
     assertEquals("base.edit", BuiltinToolIds.EDIT.value());
-    assertEquals("base.apply-patch", BuiltinToolIds.APPLY_PATCH.value());
     assertEquals("base.bash", BuiltinToolIds.BASH.value());
     assertEquals("base.grep", BuiltinToolIds.GREP.value());
     assertEquals("base.find", BuiltinToolIds.FIND.value());

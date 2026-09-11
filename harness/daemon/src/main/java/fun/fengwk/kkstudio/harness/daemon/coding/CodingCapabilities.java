@@ -23,7 +23,6 @@ public final class CodingCapabilities {
     registry.register(new ReadCapability(config, executor));
     registry.register(new WriteCapability(config, executor));
     registry.register(new EditCapability(config, executor));
-    registry.register(new ApplyPatchCapability(config, executor));
     registry.register(new BashCapability(config, executor, scheduler));
     registry.register(new GrepCapability(config, executor));
     registry.register(new FindCapability(config, executor));

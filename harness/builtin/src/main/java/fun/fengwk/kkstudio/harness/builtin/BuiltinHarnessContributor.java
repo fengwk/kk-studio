@@ -26,8 +26,8 @@ import java.util.Set;
 /**
  * 第一方内置功能包 Contributor。
  *
- * <p>注册 10 个模型可见 Environment capability 工具、{@code load_skill} 与 {@code task} internal 工具、Goal
- * 工具、{@code goal.state} 自定义 Entry 类型与上下文投影器（共 15 个内置工具）。
+ * <p>注册 9 个模型可见 Environment capability 工具、{@code load_skill} 与 {@code task} internal 工具、Goal
+ * 工具、{@code goal.state} 自定义 Entry 类型与上下文投影器（共 14 个内置工具）。
  */
 public final class BuiltinHarnessContributor implements HarnessContributor {
 
@@ -68,7 +68,7 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
   public void contribute(HarnessRegistrar registrar) {
     Objects.requireNonNull(registrar, "registrar");
 
-    // 12 Environment capability tools
+    // 9 Environment capability tools
     registerEnvironment(
         registrar,
         "environment.read",
@@ -89,13 +89,6 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
         BuiltinToolIds.EDIT,
         "edit",
         EnvironmentCapabilityIds.FS_APPLY_EDIT,
-        ToolSideEffect.NON_IDEMPOTENT);
-    registerEnvironment(
-        registrar,
-        "environment.apply-patch",
-        BuiltinToolIds.APPLY_PATCH,
-        "apply_patch",
-        EnvironmentCapabilityIds.FS_APPLY_PATCH,
         ToolSideEffect.NON_IDEMPOTENT);
     registerEnvironment(
         registrar,

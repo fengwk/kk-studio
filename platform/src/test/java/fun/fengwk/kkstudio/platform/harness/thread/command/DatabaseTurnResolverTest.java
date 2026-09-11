@@ -1403,7 +1403,6 @@ class DatabaseTurnResolverTest {
       case "read" -> BuiltinToolIds.READ;
       case "write" -> BuiltinToolIds.WRITE;
       case "edit" -> BuiltinToolIds.EDIT;
-      case "apply_patch" -> BuiltinToolIds.APPLY_PATCH;
       case "bash" -> BuiltinToolIds.BASH;
       case "grep" -> BuiltinToolIds.GREP;
       case "find" -> BuiltinToolIds.FIND;
@@ -2061,7 +2060,6 @@ class DatabaseTurnResolverTest {
                           || descriptor.name().equals("read")
                           || descriptor.name().equals("write")
                           || descriptor.name().equals("edit")
-                          || descriptor.name().equals("apply_patch")
                           || descriptor.name().equals("grep")
                           || descriptor.name().equals("find")
                           || descriptor.name().startsWith("lsp_")

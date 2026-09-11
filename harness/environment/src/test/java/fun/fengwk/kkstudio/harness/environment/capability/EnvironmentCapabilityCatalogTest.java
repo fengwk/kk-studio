@@ -12,7 +12,7 @@ import java.util.List;
 /** 固定 atomic capability ID、descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
 
-  /** 12 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
+  /** 11 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
   @Test
   void exposesStableIdsInFixedOrder() {
     List<EnvironmentCapabilityId> expected =
@@ -20,7 +20,6 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_READ,
             EnvironmentCapabilityIds.FS_WRITE,
             EnvironmentCapabilityIds.FS_APPLY_EDIT,
-            EnvironmentCapabilityIds.FS_APPLY_PATCH,
             EnvironmentCapabilityIds.PROCESS_EXEC,
             EnvironmentCapabilityIds.FS_SEARCH,
             EnvironmentCapabilityIds.FS_FIND,
@@ -36,7 +35,6 @@ class EnvironmentCapabilityCatalogTest {
             "fs.read",
             "fs.write",
             "fs.apply-edit",
-            "fs.apply-patch",
             "process.exec",
             "fs.search",
             "fs.find",

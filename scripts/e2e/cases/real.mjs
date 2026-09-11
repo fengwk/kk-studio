@@ -1732,7 +1732,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影固定 12 个原子 capabilities（version=1）+ skills + rootPath（daemon canonical Environment Root），且不公开旧 tools 或 READY environment metadata',
+  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影固定 11 个原子 capabilities（version=1）+ skills + rootPath（daemon canonical Environment Root），且不公开旧 tools 或 READY environment metadata',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -1746,7 +1746,6 @@ registerCase({
       'fs.read',
       'fs.write',
       'fs.apply-edit',
-      'fs.apply-patch',
       'process.exec',
       'fs.search',
       'fs.find',

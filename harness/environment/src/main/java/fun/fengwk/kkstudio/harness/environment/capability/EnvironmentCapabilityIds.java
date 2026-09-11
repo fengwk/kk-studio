@@ -7,8 +7,6 @@ public final class EnvironmentCapabilityIds {
   public static final EnvironmentCapabilityId FS_WRITE = new EnvironmentCapabilityId("fs.write");
   public static final EnvironmentCapabilityId FS_APPLY_EDIT =
       new EnvironmentCapabilityId("fs.apply-edit");
-  public static final EnvironmentCapabilityId FS_APPLY_PATCH =
-      new EnvironmentCapabilityId("fs.apply-patch");
   public static final EnvironmentCapabilityId PROCESS_EXEC =
       new EnvironmentCapabilityId("process.exec");
   public static final EnvironmentCapabilityId FS_SEARCH = new EnvironmentCapabilityId("fs.search");

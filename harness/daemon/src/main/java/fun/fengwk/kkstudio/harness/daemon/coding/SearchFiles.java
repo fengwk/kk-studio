@@ -19,17 +19,22 @@ final class SearchFiles {
 
   private SearchFiles() {}
 
-  static List<Path> collect(Path environmentRoot, Path searchDirectory, SearchControl control)
+  /**
+   * 收集 {@code searchDirectory} 下的文件，规则基线取 {@code ignoreBase}；检索目标位于基线之外时以自身为基线。
+   *
+   * <p>遍历不跟随符号链接；{@code .git} 元数据目录在逐节点评估时被剪枝。
+   */
+  static List<Path> collect(Path ignoreBase, Path searchDirectory, SearchControl control)
       throws IOException, InterruptedException {
     requireReadableDirectory(searchDirectory);
-    GitIgnoreRules.Prepared prepared =
-        GitIgnoreRules.prepare(environmentRoot, searchDirectory, control);
+    Path ruleBase = searchDirectory.startsWith(ignoreBase) ? ignoreBase : searchDirectory;
+    GitIgnoreRules.Prepared prepared = GitIgnoreRules.prepare(ruleBase, searchDirectory, control);
     if (prepared.searchDirectoryIgnored()) {
       return List.of();
     }
     List<Path> files = new ArrayList<>();
     collectDirectory(searchDirectory, prepared.rules(), control, files);
-    files.sort(Comparator.comparing(path -> toPosix(environmentRoot.relativize(path))));
+    files.sort(Comparator.comparing(path -> toPosix(searchDirectory.relativize(path))));
     return List.copyOf(files);
   }
 
@@ -62,8 +67,8 @@ final class SearchFiles {
     return result.toString();
   }
 
-  static boolean isGitMetadata(Path environmentRoot, Path path) {
-    for (Path segment : environmentRoot.relativize(path)) {
+  static boolean isGitMetadata(Path path) {
+    for (Path segment : path) {
       if (segment.toString().equals(".git")) {
         return true;
       }

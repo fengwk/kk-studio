@@ -40,8 +40,8 @@ public final class GrepCapability extends AbstractCodingCapability {
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String sourcePattern = string(args, "pattern");
-    Path workdir = boundary.workdir(optionalString(args, "workdir"), request.workdir());
-    Path path = boundary.existingWithoutSymlinks(string(args, "path"), workdir);
+    Path workdir = EnvironmentPaths.workdir(optionalString(args, "workdir"), request.workdir());
+    Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
     int limit = optionalPositiveInt(args, "limit", 100, 100_000);
     Duration timeout =
         effectiveSearchTimeout(request.effectiveTimeout(), requestedTimeoutSeconds(args));
@@ -129,7 +129,7 @@ public final class GrepCapability extends AbstractCodingCapability {
         throw new IllegalArgumentException("path is not readable: " + path);
       }
       control.check();
-      return SearchFiles.isGitMetadata(config.environmentRoot(), path) ? List.of() : List.of(path);
+      return SearchFiles.isGitMetadata(path) ? List.of() : List.of(path);
     }
     if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
       throw new IllegalArgumentException("path must be a regular file or directory");
