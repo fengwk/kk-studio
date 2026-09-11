@@ -77,10 +77,9 @@ final class OpenAiResponsesStreamAccumulator {
   private final StringBuilder textBuffer = new StringBuilder();
   private final StringBuilder thinkingBuffer = new StringBuilder();
 
-  // 记录流中维护的工具调用构建状态
+  // 记录流中维护的工具调用构建状态；ordinal 只在首次观察到 function_call 时分配并保持稳定
   private final Map<String, WireToolCall> toolsById = new LinkedHashMap<>();
-  private final Map<String, Integer> toolIndices = new LinkedHashMap<>();
-  private int nextToolIndex = 0;
+  private int nextToolOrdinal = 0;
 
   // 终态回放用有序 output items
   private final List<JsonNode> rawOutputItems = new ArrayList<>();
@@ -97,8 +96,14 @@ final class OpenAiResponsesStreamAccumulator {
   private long reasoningTokens = 0L;
   private ProviderCompletion finishedCompletion = null;
 
+  /**
+   * 流中维护的工具调用构建状态。
+   *
+   * <p>{@code ordinal} 是工具调用之间的连续序号（0..N-1），用于 {@link ProviderStreamEvent.ToolCallDelta}；它必须区别于
+   * Responses 协议的 output_index——后者同时计入 reasoning / message 等非工具 item，直接透出会造成序号空洞。
+   */
   private static final class WireToolCall {
-    int index;
+    final int ordinal;
     String id;
     String callId;
     String name;
@@ -108,8 +113,8 @@ final class OpenAiResponsesStreamAccumulator {
     boolean argumentsDone = false;
     boolean itemDone = false;
 
-    WireToolCall(int index, String id, String callId, String name) {
-      this.index = index;
+    WireToolCall(int ordinal, String id, String callId, String name) {
+      this.ordinal = ordinal;
       this.id = id;
       this.callId = callId;
       this.name = name;
@@ -235,21 +240,21 @@ final class OpenAiResponsesStreamAccumulator {
     String itemType = item.path("type").asText();
     if ("function_call".equals(itemType)) {
       String id = item.path("id").asText(null);
+      if (id == null || id.isBlank()) {
+        return;
+      }
       String callId = item.path("call_id").asText(null);
       if (callId == null || callId.isBlank()) {
         callId = id;
       }
       String name = item.path("name").asText(null);
-      int outputIndex = node.path("output_index").asInt(nextToolIndex);
-      if (id != null && !id.isBlank()) {
-        WireToolCall tool = new WireToolCall(outputIndex, id, callId, name);
-        toolsById.put(id, tool);
-        toolIndices.putIfAbsent(id, outputIndex);
-        if (callId != null || name != null) {
-          bridge.emitEvent(new ProviderStreamEvent.ToolCallDelta(outputIndex, callId, name, null));
-        }
+      // 首次观察到的 function_call 分配下一个连续 ordinal；重复 added 复用既有 ordinal 以避免序号空洞
+      WireToolCall previous = toolsById.get(id);
+      int ordinal = previous != null ? previous.ordinal : nextToolOrdinal++;
+      toolsById.put(id, new WireToolCall(ordinal, id, callId, name));
+      if (callId != null || name != null) {
+        bridge.emitEvent(new ProviderStreamEvent.ToolCallDelta(ordinal, callId, name, null));
       }
-      nextToolIndex = Math.max(nextToolIndex, outputIndex + 1);
     }
   }
 
@@ -262,8 +267,7 @@ final class OpenAiResponsesStreamAccumulator {
       tool.argumentsPresent = true;
       tool.argumentsTextual = true;
       if (!delta.isEmpty()) {
-        int index = toolIndices.getOrDefault(itemId, tool.index);
-        bridge.emitEvent(new ProviderStreamEvent.ToolCallDelta(index, null, null, delta));
+        bridge.emitEvent(new ProviderStreamEvent.ToolCallDelta(tool.ordinal, null, null, delta));
       }
     }
   }
@@ -307,17 +311,18 @@ final class OpenAiResponsesStreamAccumulator {
     return null;
   }
 
-  private void syncToolFromItem(JsonNode item, int defaultIndex) {
+  private void syncToolFromItem(JsonNode item) {
     String itemId = item.path("id").asText(null);
     String callId = item.path("call_id").asText(null);
     WireToolCall tool = findToolCall(itemId, callId);
     if (tool == null) {
-      int idx = defaultIndex >= 0 ? defaultIndex : nextToolIndex++;
+      // 未在流中登记过的 function_call（例如只出现在 output_item.done 或 terminal output）在此分配连续 ordinal
+      int ordinal = nextToolOrdinal++;
       String key =
           (itemId != null && !itemId.isBlank())
               ? itemId
-              : ((callId != null && !callId.isBlank()) ? callId : ("tool_" + idx));
-      tool = new WireToolCall(idx, itemId, callId, null);
+              : ((callId != null && !callId.isBlank()) ? callId : ("tool_" + ordinal));
+      tool = new WireToolCall(ordinal, itemId, callId, null);
       toolsById.put(key, tool);
     }
     if (itemId != null && !itemId.isBlank()) {
@@ -358,8 +363,7 @@ final class OpenAiResponsesStreamAccumulator {
     }
     String itemType = item.path("type").asText();
     if ("function_call".equals(itemType)) {
-      int outputIndex = node.path("output_index").asInt(nextToolIndex);
-      syncToolFromItem(item, outputIndex);
+      syncToolFromItem(item);
     }
 
     rawOutputItems.add(item.deepCopy());
@@ -482,17 +486,15 @@ final class OpenAiResponsesStreamAccumulator {
         explicitTerminalOutputProcessed = true;
         rawOutputItems.clear();
         toolsById.clear();
-        toolIndices.clear();
-        nextToolIndex = 0;
+        nextToolOrdinal = 0;
         textBuffer.setLength(0);
         thinkingBuffer.setLength(0);
-        int outIdx = 0;
         for (JsonNode item : outputNode) {
           rawOutputItems.add(item.deepCopy());
           if (item.isObject()) {
             String itemType = item.path("type").asText();
             if ("function_call".equals(itemType)) {
-              syncToolFromItem(item, outIdx);
+              syncToolFromItem(item);
             } else if ("message".equals(itemType)) {
               JsonNode content = item.get("content");
               if (content != null) {
@@ -521,7 +523,6 @@ final class OpenAiResponsesStreamAccumulator {
               }
             }
           }
-          outIdx++;
         }
       }
     }
