@@ -1,13 +1,16 @@
 package fun.fengwk.kkstudio.platform.environment.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -26,10 +29,12 @@ import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
+import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -152,8 +157,65 @@ class EnvironmentServiceImplTest {
     assertEquals("READY", list.get(0).getStatus());
   }
 
+  /** 测试意图：registrationToken 只读端点幂等——连续读取返回同一 token，且不推进 version / updateTime（不轮换、不写库）。 */
   @Test
-  void rotateTokenOnlyAllowedWhenOffline() {
+  void getRegistrationTokenReturnsStableValueWithoutRotating() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
+    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+
+    Environment env = new Environment();
+    env.setId(ENV_ID);
+    env.setName("local-env");
+    env.setRegistrationToken("stable-token");
+    env.setVersion(3L);
+    env.setCreateTime(NOW);
+    env.setUpdateTime(NOW);
+    when(repo.getById(ENV_ID)).thenReturn(env);
+
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(repo, registry, agents, jdbc, snapshot, CLOCK);
+
+    EnvironmentRegistrationTokenDTO first = service.getRegistrationToken(EnvironmentId.of(ENV_ID));
+    EnvironmentRegistrationTokenDTO second = service.getRegistrationToken(EnvironmentId.of(ENV_ID));
+
+    assertEquals("stable-token", first.getRegistrationToken());
+    assertEquals("stable-token", second.getRegistrationToken());
+    assertEquals("3", first.getVersion());
+    assertEquals("3", second.getVersion());
+    // 只读路径不得写库，也不得触碰租约
+    verify(repo, never()).updateById(any(), anyLong());
+    verify(registry, never()).hasActiveLease(any());
+    assertEquals("stable-token", env.getRegistrationToken());
+    assertEquals(3L, env.getVersion());
+    assertEquals(NOW, env.getUpdateTime());
+  }
+
+  /** 测试意图：读取不存在的 Environment 时抛出稳定的 404 语义错误，而不是返回空 token。 */
+  @Test
+  void getRegistrationTokenRejectsMissingEnvironment() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
+    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(repo.getById(ENV_ID)).thenReturn(null);
+
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(repo, registry, agents, jdbc, snapshot, CLOCK);
+
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> service.getRegistrationToken(EnvironmentId.of(ENV_ID)));
+  }
+
+  /** 测试意图：在线轮换必须被允许——不再查询/拒绝活跃 lease，既有连接不被主动断开；轮换只改变 token 并推进版本。 */
+  @Test
+  void rotateTokenAllowedWhileLeaseIsActive() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
@@ -172,18 +234,18 @@ class EnvironmentServiceImplTest {
     when(repo.lockById(ENV_ID)).thenReturn(env);
     when(repo.getById(ENV_ID)).thenReturn(env);
     when(repo.updateById(any(), eq(0L))).thenReturn(true);
+    // 数据库中存在活跃租约：轮换成功且不得查询租约（在线轮换不要求离线）
+    when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(repo, registry, agents, jdbc, snapshot, CLOCK);
 
-    // Active lease in DB -> rejects
-    when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
-    assertThrows(AiInUseException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
-
-    // No active lease -> succeeds and returns new token
-    when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(false);
     EnvironmentCardDTO rotated = service.rotateToken(EnvironmentId.of(ENV_ID), "0");
+
     assertNotNull(rotated.getRegistrationToken());
+    assertNotEquals("old-token", rotated.getRegistrationToken());
+    verify(registry, never()).hasActiveLease(any());
+    verify(registry, never()).disconnect(any(), any(), any());
   }
 
   @Test

@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, Check, Copy, KeyRound, Pencil, Plus, Trash2 } from 'lucide-react'
 import { filterEnvironments } from '@/features/ai/environment/environment-utils'
+import { copyTextToClipboard } from '@/features/ai/environment/clipboard'
 import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
@@ -100,6 +101,18 @@ export function EnvironmentsPage() {
   const [editModal, setEditModal] = useState<EditModalState | null>(null)
   const [tokenModal, setTokenModal] = useState<TokenModalState | null>(null)
   const [copied, setCopied] = useState(false)
+  const [copiedEnvironmentId, setCopiedEnvironmentId] = useState<string | null>(null)
+  const [copyError, setCopyError] = useState<string | null>(null)
+  const copiedResetTimerRef = useRef<number | null>(null)
+
+  useEffect(
+    () => () => {
+      if (copiedResetTimerRef.current !== null) {
+        window.clearTimeout(copiedResetTimerRef.current)
+      }
+    },
+    [],
+  )
 
   const [deleteTarget, setDeleteTarget] = useState<EnvironmentCardDTO | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -181,6 +194,7 @@ export function EnvironmentsPage() {
           environmentName: card.name,
           token: card.registrationToken,
         })
+        finishCopyFeedback(false)
       }
     },
     onError: (err: unknown) => {
@@ -192,6 +206,31 @@ export function EnvironmentsPage() {
         return
       }
       setRotateError(err instanceof Error ? err.message : String(err))
+    },
+  })
+
+  /**
+   * 「复制 Token」：用户点击时才读取当前 token，读取成功即写入剪贴板。
+   *
+   * 读取是幂等只读动作（不轮换、不断开连接），且不写入任何持久化存储。
+   */
+  const copyTokenMutation = useMutation({
+    mutationFn: (environment: EnvironmentCardDTO) =>
+      environmentService.getRegistrationToken(environment.id).then((token) => ({
+        environment,
+        token,
+      })),
+    onSuccess: async ({ environment, token }) => {
+      setCopyError(null)
+      const ok = await copyTextToClipboard(token.registrationToken)
+      if (!ok) {
+        setCopyError(t('ai.environment.copyTokenFailed'))
+        return
+      }
+      finishCopyFeedback(true, environment.id)
+    },
+    onError: (err: unknown) => {
+      setCopyError(err instanceof Error ? err.message : String(err))
     },
   })
 
@@ -240,12 +279,36 @@ export function EnvironmentsPage() {
     })
   }
 
-  function handleCopyToken() {
+  /** 复制反馈：成功时标记 2 秒后自动复位，并清理上一个计时器。 */
+  function finishCopyFeedback(success: boolean, environmentId?: string) {
+    setCopied(success)
+    setCopiedEnvironmentId(success ? (environmentId ?? null) : null)
+    if (copiedResetTimerRef.current !== null) {
+      window.clearTimeout(copiedResetTimerRef.current)
+      copiedResetTimerRef.current = null
+    }
+    if (success) {
+      copiedResetTimerRef.current = window.setTimeout(() => {
+        copiedResetTimerRef.current = null
+        setCopied(false)
+        setCopiedEnvironmentId(null)
+      }, 2000)
+    }
+  }
+
+  /** 弹窗内复制：token 已在内存中，直接写剪贴板，不再发起请求。 */
+  async function handleCopyToken() {
     if (!tokenModal?.token) return
-    navigator.clipboard.writeText(tokenModal.token).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+    const ok = await copyTextToClipboard(tokenModal.token)
+    if (ok) {
+      finishCopyFeedback(true)
+    }
+  }
+
+  /** 按需复制当前 token：读取请求只在点击时发出，绝不预取。 */
+  function handleRequestCopyToken(environment: EnvironmentCardDTO) {
+    setCopyError(null)
+    copyTokenMutation.mutate(environment)
   }
 
   return (
@@ -334,6 +397,25 @@ export function EnvironmentsPage() {
                       <button
                         type="button"
                         className="action-enter-btn"
+                        aria-label={`${t('ai.environment.copyToken')} ${environment.name}`}
+                        onClick={() => handleRequestCopyToken(environment)}
+                        disabled={
+                          copyTokenMutation.isPending
+                          && copyTokenMutation.variables?.id === environment.id
+                        }
+                      >
+                        {copied && copiedEnvironmentId === environment.id ? (
+                          <Check aria-hidden="true" />
+                        ) : (
+                          <Copy aria-hidden="true" />
+                        )}
+                        {copied && copiedEnvironmentId === environment.id
+                          ? t('ai.environment.tokenCopied')
+                          : t('ai.environment.copyToken')}
+                      </button>
+                      <button
+                        type="button"
+                        className="action-enter-btn"
                         aria-label={`${t('ai.environment.edit')} ${environment.name}`}
                         onClick={() => {
                           setConflict(null)
@@ -362,6 +444,11 @@ export function EnvironmentsPage() {
                         {t('ai.catalog.action.delete')}
                       </button>
                     </div>
+                    {copyError && copyTokenMutation.variables?.id === environment.id ? (
+                      <p className="field-error" role="alert">
+                        {copyError}
+                      </p>
+                    ) : null}
                   </article>
                 )
               })

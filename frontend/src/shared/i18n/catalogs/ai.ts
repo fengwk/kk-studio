@@ -2035,8 +2035,8 @@ export const aiCatalog = {
     'zh-CN': '重新生成 Token',
   },
   'ai.environment.rotateTokenConfirm': {
-    'en-US': 'Rotate registration token for "{name}"? The previous token will be invalidated immediately.',
-    'zh-CN': '确认重新生成环境「{name}」的 Registration Token？旧 Token 将立即失效。',
+    'en-US': 'Rotate the registration token for "{name}"? Existing connections stay online; the next connection must use the new token.',
+    'zh-CN': '确认为环境「{name}」重新生成 Token？已有连接保持在线，下一次连接必须使用新 Token。',
   },
   'ai.environment.delete': {
     'en-US': 'Delete Environment',
@@ -2051,12 +2051,16 @@ export const aiCatalog = {
     'zh-CN': 'Registration Token',
   },
   'ai.environment.tokenNotice': {
-    'en-US': 'This registration token is only displayed once. It cannot be retrieved again. Please copy and store it securely.',
-    'zh-CN': '此 Registration Token 仅在本次创建或轮换时展示一次，后续无法再次查看。请立即复制并妥善保管。',
+    'en-US': 'This is the newly rotated token. Existing connections keep running; the next connection must use it. You can copy the current token later from the Environment card.',
+    'zh-CN': '这是刚刚重新生成的 Token。已有连接继续运行，下一次连接必须使用它；之后可随时从环境卡片复制当前 Token。',
   },
   'ai.environment.copyToken': {
     'en-US': 'Copy Token',
     'zh-CN': '复制 Token',
+  },
+  'ai.environment.copyTokenFailed': {
+    'en-US': 'Failed to copy the token. Check clipboard permissions and try again.',
+    'zh-CN': '复制 Token 失败，请检查剪贴板权限后重试。',
   },
   'ai.environment.tokenCopied': {
     'en-US': 'Copied!',

@@ -687,7 +687,8 @@ public class EnvironmentDaemonGateway
 
     Environment environment = environmentRepository.getByRegistrationToken(registrationToken);
     if (environment == null) {
-      throw new RegistrationRejectedException("invalid registration token: " + registrationToken);
+      // 注册失败只报告通用原因：绝不回显提交的 token 原值。
+      throw new RegistrationRejectedException("invalid registration token");
     }
     EnvironmentId environmentId = EnvironmentId.of(environment.getId());
 
