@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { ChevronRight, MessageSquare } from 'lucide-react'
+import { ChevronRight, MessageSquare, Pencil, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { formatBackendDate } from '@/features/ai/chat/chat-utils'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
@@ -9,9 +9,15 @@ import { useI18n } from '@/shared/i18n'
 export function ChatCard({
   chat,
   agents,
+  onEdit,
+  onDelete,
+  deletePending = false,
 }: {
   chat: ChatDTO
   agents: AgentDefinitionDTO[]
+  onEdit?: () => void
+  onDelete?: () => void
+  deletePending?: boolean
 }) {
   const navigate = useNavigate()
   const { t } = useI18n()
@@ -66,6 +72,29 @@ export function ChatCard({
           <ChevronRight aria-hidden="true" />
           {t('ai.catalog.action.enterConversation')}
         </button>
+        {onEdit && (
+          <button
+            className="action-enter-btn"
+            type="button"
+            aria-label={`${t('ai.catalog.action.edit')} ${label}`}
+            onClick={onEdit}
+          >
+            <Pencil aria-hidden="true" />
+            {t('ai.catalog.action.edit')}
+          </button>
+        )}
+        {onDelete && (
+          <button
+            className="action-enter-btn danger"
+            type="button"
+            aria-label={`${t('ai.catalog.action.delete')} ${label}`}
+            onClick={onDelete}
+            disabled={deletePending}
+          >
+            <Trash2 aria-hidden="true" />
+            {t('ai.catalog.action.delete')}
+          </button>
+        )}
       </div>
     </article>
   )

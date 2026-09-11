@@ -9,6 +9,7 @@ import { useI18n } from '@/shared/i18n'
 
 export function CreateChatModal({
   open,
+  mode = 'create',
   agents,
   environments = [],
   selectedAgentName,
@@ -24,6 +25,7 @@ export function CreateChatModal({
   onSubmit,
 }: {
   open: boolean
+  mode?: 'create' | 'edit'
   agents: AgentDefinitionDTO[]
   environments?: EnvironmentCardDTO[]
   selectedAgentName: string
@@ -62,16 +64,20 @@ export function CreateChatModal({
       : `${boundEnvironment.name} · ${t('ai.chat.noneEnvironment')}`
     : t('ai.chat.noneEnvironment')
 
+  const modalTitle = mode === 'edit' ? t('ai.chat.edit') : t('ai.chat.create')
+  const submitLabel =
+    mode === 'edit' ? t('ai.catalog.action.saveChanges') : t('ai.catalog.action.confirmCreate')
+
   return (
     <ModalBackdrop onClose={onClose}>
       <form
         className="modal-card create-chat-modal-card"
-        aria-label={t('ai.chat.create')}
+        aria-label={modalTitle}
         onSubmit={onSubmit}
         onMouseDown={(event) => event.stopPropagation()}
         noValidate
       >
-        <ModalHeader title={t('ai.chat.create')} onClose={onClose} />
+        <ModalHeader title={modalTitle} onClose={onClose} />
         <div className="modal-body">
           {formError ? (
             <div className="form-error-banner" role="alert">
@@ -127,14 +133,19 @@ export function CreateChatModal({
           ) : null}
         </div>
         <div className="modal-footer">
+          <button type="button" className="ghost-btn" onClick={onClose} disabled={pending}>
+            {t('shared.cancel')}
+          </button>
           <button type="submit" className="btn-primary" disabled={pending}>
-            {t('ai.catalog.action.confirmCreate')}
+            {submitLabel}
           </button>
         </div>
       </form>
     </ModalBackdrop>
   )
 }
+
+export { CreateChatModal as ChatFormModal }
 
 function workspaceDisplayPath(path: string): string {
   return path === '.' ? '@/' : `@/${path}`
