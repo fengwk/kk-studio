@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
@@ -56,6 +57,9 @@ final class OpenAiResponsesRequestEncoder {
     OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
   }
 
+  /** OpenAI Responses 拒绝低于 16 的 max_output_tokens；该下限只属于本 Provider。 */
+  private static final int MIN_OUTPUT_TOKENS = 16;
+
   private static final Set<String> ALLOWED_IMAGE_TYPES =
       Set.of("image/jpeg", "image/png", "image/gif", "image/webp");
   private static final String ALLOWED_DOCUMENT_TYPE = "application/pdf";
@@ -100,7 +104,7 @@ final class OpenAiResponsesRequestEncoder {
       encodeMessage(
           msg,
           descriptor,
-          request.model().modelName(),
+          request.model(),
           toolsArray,
           inputItems,
           systemContentBlocks,
@@ -166,7 +170,7 @@ final class OpenAiResponsesRequestEncoder {
       root.put("top_p", variant.topP());
     }
     if (variant.maxOutputTokens() != null) {
-      root.put("max_output_tokens", variant.maxOutputTokens());
+      root.put("max_output_tokens", Math.max(variant.maxOutputTokens(), MIN_OUTPUT_TOKENS));
     }
   }
 
@@ -202,27 +206,32 @@ final class OpenAiResponsesRequestEncoder {
       if (tool.description() != null && !tool.description().isBlank()) {
         node.put("description", tool.description());
       }
-      JsonNode schemaNode;
-      try {
-        schemaNode = OBJECT_MAPPER.readTree(tool.inputSchemaJson());
-      } catch (JsonProcessingException exception) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "tool inputSchemaJson is not valid JSON");
-      }
-      if (!schemaNode.isObject()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "tool parameters must be a JSON object");
-      }
-      node.set("parameters", schemaNode);
-      node.put("strict", false);
+      node.set("parameters", encodeStrictParameters(tool));
+      node.put("strict", true);
     }
     return array;
+  }
+
+  /** 解析工具参数 schema 并归一化为 strict 形态；共享的 inputSchemaJson 绝不被修改。 */
+  private static ObjectNode encodeStrictParameters(ProviderToolDefinition tool) {
+    JsonNode schemaNode;
+    try {
+      schemaNode = OBJECT_MAPPER.readTree(tool.inputSchemaJson());
+    } catch (JsonProcessingException exception) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "tool inputSchemaJson is not valid JSON");
+    }
+    if (schemaNode == null || !schemaNode.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "tool parameters must be a JSON object");
+    }
+    return OpenAiResponsesStrictSchema.normalize((ObjectNode) schemaNode);
   }
 
   private static void encodeMessage(
       ProviderMessage msg,
       ProviderDescriptor descriptor,
-      String requestedModel,
+      ModelDescriptor model,
       ArrayNode toolsArray,
       ArrayNode inputItems,
       List<ObjectNode> systemContentBlocks,
@@ -234,7 +243,8 @@ final class OpenAiResponsesRequestEncoder {
       case SYSTEM -> {
         ObjectNode sysMsg = inputItems.addObject();
         sysMsg.put("type", "message");
-        sysMsg.put("role", "system");
+        // 推理模型把系统指令编码为 developer message；非推理模型保持既有 system 行为。
+        sysMsg.put("role", model.reasoning() ? "developer" : "system");
         ArrayNode contents = sysMsg.putArray("content");
         for (ProviderContentBlock block : msg.contents()) {
           ObjectNode blockNode = encodeSystemContentBlock(block);
@@ -259,7 +269,7 @@ final class OpenAiResponsesRequestEncoder {
           String currentPrefixHash =
               OpenAiResponsesPrefixHasher.calculateHash(toolsArray, inputItems);
           if (canReplay(
-              replayState, descriptor, requestedModel, currentPrefixHash, msg.contents())) {
+              replayState, descriptor, model.modelName(), currentPrefixHash, msg.contents())) {
             ArrayNode outputArray = extractOutputArray(replayState.payload());
             for (JsonNode item : outputArray) {
               inputItems.add(item.deepCopy());
