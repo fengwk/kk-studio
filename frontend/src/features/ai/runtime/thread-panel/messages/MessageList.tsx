@@ -19,7 +19,10 @@ export function MessageList({
   approvalPending = false,
 }: {
   messages: DialogueMessage[]
-  onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
+  onDecideApproval?: (
+    message: ToolDialogueMessage,
+    decision: 'ALLOW' | 'DENY',
+  ) => void | Promise<void>
   /** 进行中的全局审批请求：所有未决的审批条都会禁用其按钮。 */
   approvalPending?: boolean
 }) {
@@ -55,7 +58,9 @@ export function MessageList({
 function renderSingleMessage(
   message: DialogueMessage,
   extensionHost: ReturnType<typeof useOptionalExtensionHostSnapshot>,
-  onDecideApproval: ((message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void) | undefined,
+  onDecideApproval:
+    | ((message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void | Promise<void>)
+    | undefined,
   approvalPending: boolean,
 ): ReactNode {
   switch (message.role) {

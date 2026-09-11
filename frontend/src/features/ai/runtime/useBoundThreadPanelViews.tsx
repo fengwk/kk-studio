@@ -145,7 +145,8 @@ export function buildBoundThreadTranscript(options: {
       if (decision === 'DENY') {
         options.onDenyApproval?.()
       }
-      void controller.decideApproval(message.invocationId, decision)
+      // 返回精确的决策请求：审批条据此在本地 pending 与 settle 之间同步反馈。
+      return controller.decideApproval(message.invocationId, decision)
     },
   }
 }

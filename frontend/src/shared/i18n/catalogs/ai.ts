@@ -85,6 +85,10 @@ export const aiCatalog = {
     'en-US': 'Deny',
     'zh-CN': '拒绝',
   },
+  'ai.runtime.approval.deciding': {
+    'en-US': 'Applying decision…',
+    'zh-CN': '正在提交审批…',
+  },
   'ai.runtime.approval.allowed': {
     'en-US': 'Allowed',
     'zh-CN': '已允许',
