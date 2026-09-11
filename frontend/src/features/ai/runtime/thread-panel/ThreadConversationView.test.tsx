@@ -6,9 +6,10 @@ import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-type
 
 /**
  * Conversation 视图的自动贴底生命周期（挂载即生效，卸载即消失）：
- * 首次进入贴底；重新进入恢复保存位置并按 210px 阈值决定 stick；Thread 重绑
- * （resetKey 变化）重置 stick 重新贴底。Event 视图的 stick 独立由
- * ThreadEventView.test 覆盖，互斥切换的集成行为由 ChatWorkspacePane.commands.test 覆盖。
+ * 首次进入贴底；向历史方向滚动时立即脱离，滚回 210px 阈值内时恢复；重新进入
+ * 恢复保存位置并按同一阈值决定 stick；Thread 重绑（resetKey 变化）重置 stick
+ * 重新贴底。Event 视图的 stick 独立由 ThreadEventView.test 覆盖，互斥切换的
+ * 集成行为由 ChatWorkspacePane.commands.test 覆盖。
  */
 
 function assistantMessage(id: string, text: string): DialogueMessage {
@@ -84,7 +85,7 @@ describe('ThreadConversationView', () => {
     }
   })
 
-  it('restores a saved position on re-entry and keeps the 210px stick threshold', () => {
+  it('restores a saved position and derives initial stick state from the 210px threshold', () => {
     const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
     const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
     try {
@@ -113,6 +114,85 @@ describe('ThreadConversationView', () => {
     }
   })
 
+  it('detaches on the first scroll toward history even inside the restick threshold', () => {
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    try {
+      scrollHeightSpy.mockReturnValue(600)
+      clientHeightSpy.mockReturnValue(200)
+      const bodyRef = createRef<HTMLDivElement>()
+      const view = renderView(bodyRef, { messageCount: 2 })
+
+      // jsdom 不会像浏览器一样把 scrollHeight 赋值钳制到最大 scrollTop，先模拟钳制。
+      dialogue().scrollTop = 400
+      fireEvent.scroll(dialogue())
+
+      // 只离开底部 10px 也代表明确的历史回看意图，内容增长不能把手势拉回底部。
+      dialogue().scrollTop = 390
+      fireEvent.scroll(dialogue())
+      view.rerender({ messageCount: 3 })
+      expect(dialogue().scrollTop).toBe(390)
+
+      // 用户主动向底部滚回阈值内后恢复跟随。
+      dialogue().scrollTop = 395
+      fireEvent.scroll(dialogue())
+      view.rerender({ messageCount: 4 })
+      expect(dialogue().scrollTop).toBe(600)
+    } finally {
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
+
+  it('does not let a resize callback override a small scroll toward history', () => {
+    const originalResizeObserver = globalThis.ResizeObserver
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    let triggerResize: (target: Element) => void = () => {
+      throw new Error('ResizeObserver was not created')
+    }
+    class ControllableResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        triggerResize = (target) => {
+          callback(
+            [{ target } as ResizeObserverEntry],
+            this as unknown as ResizeObserver,
+          )
+        }
+      }
+
+      observe(target: Element) {
+        // 浏览器首次 observe 会报告当前尺寸，hook 会把这一轮识别为初始回调。
+        triggerResize(target)
+      }
+
+      unobserve() {}
+      disconnect() {}
+    }
+
+    try {
+      globalThis.ResizeObserver =
+        ControllableResizeObserver as unknown as typeof ResizeObserver
+      scrollHeightSpy.mockReturnValue(600)
+      clientHeightSpy.mockReturnValue(200)
+      const bodyRef = createRef<HTMLDivElement>()
+      renderView(bodyRef)
+
+      dialogue().scrollTop = 400
+      fireEvent.scroll(dialogue())
+      dialogue().scrollTop = 390
+      fireEvent.scroll(dialogue())
+
+      // 模拟移动手势期间并发的容器尺寸回调，不能重新拉到底部。
+      triggerResize(dialogue())
+      expect(dialogue().scrollTop).toBe(390)
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
+
   it('remounts with a fresh stick lifecycle (previous stick=false never leaks)', () => {
     const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
     const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
@@ -122,7 +202,7 @@ describe('ThreadConversationView', () => {
       const bodyRef = createRef<HTMLDivElement>()
       const first = renderView(bodyRef)
       expect(dialogue().scrollTop).toBe(600)
-      // 用户上滑超过阈值：stick=false。
+      // 用户向历史方向滚动：stick=false。
       dialogue().scrollTop = 100
       fireEvent.scroll(dialogue())
       first.unmount()
@@ -145,7 +225,7 @@ describe('ThreadConversationView', () => {
       const bodyRef = createRef<HTMLDivElement>()
       const view = renderView(bodyRef, { resetKey: 't1' })
       expect(dialogue().scrollTop).toBe(600)
-      // 用户上滑超过阈值：stick=false。
+      // 用户向历史方向滚动：stick=false。
       dialogue().scrollTop = 100
       fireEvent.scroll(dialogue())
 

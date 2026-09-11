@@ -1,16 +1,17 @@
 import { useEffect, useRef, type RefObject } from 'react'
 
 /**
- * 贴底自动滚动阈值：约 2 次常见桌面滚轮行程（deltaY≈100）。
- * 用户上滑超过该距离后停止跟随；回到阈值内再恢复。
+ * 重新贴底阈值：约 2 次常见桌面滚轮行程（deltaY≈100）。
+ * 用户向历史方向滚动时立即停止跟随；主动滚回该阈值内再恢复。
  */
-const CHAT_STICK_TO_BOTTOM_THRESHOLD_PX = 210
+const CHAT_RESTICK_TO_BOTTOM_THRESHOLD_PX = 210
+const CHAT_BOTTOM_EPSILON_PX = 1
 
 function distanceFromBottom(element: HTMLElement): number {
   return element.scrollHeight - element.scrollTop - element.clientHeight
 }
 
-function isNearBottom(element: HTMLElement, thresholdPx = CHAT_STICK_TO_BOTTOM_THRESHOLD_PX): boolean {
+function isNearBottom(element: HTMLElement, thresholdPx = CHAT_RESTICK_TO_BOTTOM_THRESHOLD_PX): boolean {
   return distanceFromBottom(element) <= thresholdPx
 }
 
@@ -23,7 +24,8 @@ function growthSignature(messageCount: number, eventCount?: number): string {
 }
 
 /**
- * 对话流增长时自动贴底；仅当当前已接近底部（阈值内）才滚动，避免打断回看历史。
+ * 对话流增长时自动贴底；用户向历史方向滚动后停止跟随，主动滚回底部阈值内
+ * 才恢复跟随，避免打断回看历史。
  *
  * `initialScrollTop`：非空时挂载即恢复该位置（不再贴底），并让 stick 状态跟随
  * 恢复后的位置——恢复位置仍在 210px 阈值内时，后续内容增长继续贴底；
@@ -41,6 +43,7 @@ export function useChatTranscriptAutoScroll(
   resetKey?: string | number | null,
 ) {
   const stickToBottomRef = useRef(true)
+  const lastScrollTopRef = useRef(0)
   // 已处理的增长签名：挂载/重绑时由初始定位 effect 记录，增长 effect 只对
   // 之后的计数变化生效，绝不把挂载时恢复的历史位置拉回底部。
   const lastGrowthSignatureRef = useRef<string | null>(null)
@@ -55,7 +58,19 @@ export function useChatTranscriptAutoScroll(
     }
 
     const onScroll = () => {
-      stickToBottomRef.current = isNearBottom(chatBody)
+      const scrollTop = chatBody.scrollTop
+      const movedTowardHistory =
+        scrollTop < lastScrollTopRef.current
+      const movedTowardBottom =
+        scrollTop > lastScrollTopRef.current
+      const reachedBottom =
+        distanceFromBottom(chatBody) <= CHAT_BOTTOM_EPSILON_PX
+      if (movedTowardHistory && !reachedBottom) {
+        stickToBottomRef.current = false
+      } else if (reachedBottom || (movedTowardBottom && isNearBottom(chatBody))) {
+        stickToBottomRef.current = true
+      }
+      lastScrollTopRef.current = scrollTop
     }
 
     // 首次进入（无保存位置）贴底；恢复历史位置时 stick 状态跟随该位置。
@@ -65,6 +80,7 @@ export function useChatTranscriptAutoScroll(
     } else {
       scrollToBottom(chatBody)
     }
+    lastScrollTopRef.current = chatBody.scrollTop
     chatBody.addEventListener('scroll', onScroll, { passive: true })
     // 初始定位由本 effect 完成；增长 effect 从下次计数变化开始生效。
     lastGrowthSignatureRef.current = growthSignature(messageCount, eventCount)
@@ -85,6 +101,7 @@ export function useChatTranscriptAutoScroll(
     }
     lastGrowthSignatureRef.current = signature
     scrollToBottom(chatBody)
+    lastScrollTopRef.current = chatBody.scrollTop
   }, [bodyRef, eventCount, messageCount])
 
   // 流式内容高度变化时，若仍 stick 则继续贴底（不依赖 message/event 计数）。
@@ -109,6 +126,7 @@ export function useChatTranscriptAutoScroll(
       })
       if (changed) {
         scrollToBottom(chatBody)
+        lastScrollTopRef.current = chatBody.scrollTop
       }
     })
     observer.observe(chatBody)
