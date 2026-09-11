@@ -1075,6 +1075,26 @@ final class ThreadProcessorTestSupport {
         toolDefinition(name), new ContributorBinding("core", name, List.of()), false, null);
   }
 
+  /** 构造带自定义输入 schema 的 host binding，用于验证 terminal Model apply 的参数边界。 */
+  static ToolBinding hostBindingWithSchema(String name, InputSchema inputSchema) {
+    ToolDescriptor descriptor =
+        new ToolDescriptor(
+            name,
+            "1.0",
+            "description of " + name,
+            name,
+            inputSchema,
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(30));
+    AgentToolDefinition definition =
+        new AgentToolDefinition(
+            new AgentToolId("test." + name.replace('_', '-').toLowerCase(Locale.ROOT)),
+            descriptor,
+            ToolVisibility.SELECTABLE);
+    return new ToolBinding(
+        definition, new ContributorBinding("core", name, List.of()), false, null);
+  }
+
   static ToolBinding declarativeBinding(
       String name, String contributorId, String localName, List<ContributorStateAccess> accesses) {
     return new ToolBinding(

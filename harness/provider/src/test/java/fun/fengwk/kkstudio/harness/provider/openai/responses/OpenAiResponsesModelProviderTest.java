@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -183,7 +184,9 @@ class OpenAiResponsesModelProviderTest {
         new OpenAiResponsesProviderAdapter(
             stubTransport((req, cb) -> capturedRequest.set(req)), "sk-valid-key");
     assertEquals(ProviderType.OPENAI_RESPONSES, adapter.providerType());
-    assertEquals(PromptCacheMode.AUTOMATIC, adapter.promptCacheCapability().mode());
+    // 缺省即 Pi-like AUTOMATIC：能力层声明 AFFINITY/SHORT，才能在 wire 上带出稳定 prompt_cache_key。
+    assertEquals(PromptCacheMode.AFFINITY, adapter.promptCacheCapability().mode());
+    assertTrue(adapter.promptCacheCapability().supports(PromptCacheRetention.SHORT));
 
     ModelProvider provider = adapter.create(createDescriptor());
     ProviderStream stream = provider.stream(createRequest(), new RecordingHandler());
@@ -315,7 +318,7 @@ class OpenAiResponsesModelProviderTest {
     // 3. 构造器传入 null OpenAiResponsesConfig 自动回退为默认配置
     OpenAiResponsesProviderAdapter adapterWithNullConfig =
         new OpenAiResponsesProviderAdapter(transport, "key", (OpenAiResponsesConfig) null);
-    assertEquals(PromptCacheMode.AUTOMATIC, adapterWithNullConfig.promptCacheCapability().mode());
+    assertEquals(PromptCacheMode.AFFINITY, adapterWithNullConfig.promptCacheCapability().mode());
 
     // 4. descriptor 为空或 ProviderType 不匹配时抛出异常
     assertThrows(NullPointerException.class, () -> adapterWithJson.create(null));

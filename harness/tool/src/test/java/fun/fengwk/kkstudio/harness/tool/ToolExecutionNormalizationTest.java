@@ -15,7 +15,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 
-/** ToolCall 在 schema 校验前静默数字归一化参数的契约测试。 */
+/** ToolCall 在 schema 校验前静默归一化模型参数的契约测试。 */
 class ToolExecutionNormalizationTest {
 
   private static final ToolDescriptor DESCRIPTOR =
@@ -62,6 +62,26 @@ class ToolExecutionNormalizationTest {
   void validateForReturnsSameInstanceWhenUnchanged() {
     ToolCall original = new ToolCall("call-1", "read", "{\"path\":\"a.txt\"}");
     assertSame(original, original.validateFor(DESCRIPTOR));
+  }
+
+  /** strict Provider 为原可选 offset 回传显式 null 时，应等价为缺省并返回不含该字段的执行调用。 */
+  @Test
+  void validateForRemovesOptionalNull() {
+    ToolCall original = new ToolCall("call-1", "read", "{\"offset\":null,\"path\":\"a.txt\"}");
+
+    ToolCall normalized = original.validateFor(DESCRIPTOR);
+
+    assertEquals("{\"path\":\"a.txt\"}", normalized.argumentsJson());
+    assertEquals("{\"offset\":null,\"path\":\"a.txt\"}", original.argumentsJson());
+    assertNotSame(original, normalized);
+  }
+
+  /** required path 的 null 不是缺省值，必须继续由严格 schema 校验拒绝。 */
+  @Test
+  void validateForRejectsRequiredNull() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolCall("call-1", "read", "{\"path\":null}").validateFor(DESCRIPTOR));
   }
 
   /** 未知附加字段即使伴随有效参数，校验仍因 additionalProperties 严格失败。 */

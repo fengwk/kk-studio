@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
-import fun.fengwk.kkstudio.harness.common.schema.InputValidator;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -487,8 +486,9 @@ public record ToolInvocation(
   /**
    * binding/call durable 不变量：binding 只在 immediate FAILED（attempt=0）槽位可空（unknown tool / 输出截断）； 非空
    * binding 必须匹配 call 的 toolName；除 immediate FAILED 外的所有状态（READY / WAITING_APPROVAL / DISPATCHING /
-   * RUNNING / SUCCEEDED / CANCELLED / UNKNOWN 与 attempt&gt;0 的 FAILED）必须通过 binding schema 校验 —— 只有
-   * immediate FAILED 可以表示 INVALID_TOOL_ARGUMENTS / MODEL_OUTPUT_TRUNCATED 而绕过 schema。
+   * RUNNING / SUCCEEDED / CANCELLED / UNKNOWN 与 attempt&gt;0 的 FAILED）必须可通过 binding schema
+   * 确定性归一化并校验。 durable call 仍保持与 assistant history 精确一致，只有 transient execution request
+   * 持有归一化副本；immediate FAILED 可以表示 INVALID_TOOL_ARGUMENTS / MODEL_OUTPUT_TRUNCATED 而绕过 schema。
    */
   private static void validateBindingConstraint(
       ToolInvocationStatus status, int attempt, ToolCall call, ToolBinding binding) {
@@ -504,7 +504,7 @@ public record ToolInvocation(
     }
     if (status != ToolInvocationStatus.FAILED || attempt != 0) {
       try {
-        InputValidator.validate(call.argumentsJson(), binding.descriptor().inputSchema());
+        call.validateFor(binding.descriptor());
       } catch (IllegalArgumentException schemaFailure) {
         throw new IllegalArgumentException(
             "call arguments must conform to the binding tool schema", schemaFailure);

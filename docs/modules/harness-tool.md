@@ -86,7 +86,7 @@ AgentToolId + ToolDescriptor + ToolVisibility
 ToolCall normalized = call.validateFor(descriptor);
 ```
 
-该操作依次校验 Tool name，经 `InputNormalizer` 执行约定归一化，再按 `InputValidator` 校验参数；若参数被归一化则返回新的 `ToolCall`。后续执行路径直接使用返回的归一化对象，避免沿用原始参数。
+该操作依次校验 Tool name，经 `InputNormalizer` 把数字字符串转为目标数值，并把 schema 已声明的可缺省属性上的显式 `null` 等价为缺省，再按 `InputValidator` 严格校验；required null 与未知属性不会被吞掉。若参数被归一化则返回新的 `ToolCall`。Provider 原始 function call 在模型结果、assistant history 与 durable invocation 中保持精确一致，用于审计和 wire replay；transient `ToolInvocationRequest` 在权限 preflight、审批预览和执行之前固化归一化副本。
 
 ### 结果组合与 ToolResult
 

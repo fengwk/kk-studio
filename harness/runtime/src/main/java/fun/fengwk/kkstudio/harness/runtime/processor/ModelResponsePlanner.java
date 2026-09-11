@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
-import fun.fengwk.kkstudio.harness.common.schema.InputValidator;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -8,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,10 +17,11 @@ import java.util.Objects;
  * 纯函数：把已经通过 {@link ModelResponseValidator} canonical 校验的 {@link ProviderResponse} 规划为 Thread 可执行
  * 的模型结果。
  *
- * <p>决策顺序固定为 generation stop reason -&gt; frozen binding lookup -&gt; tool schema validation，与
- * {@code ProviderResponse.toolCalls()} 正交。每个 observed tool call 恰好产生一个 {@link
- * ModelResponsePlan.ToolSlot}（保持 mixed batch 的完整 callIndex）：COMPLETE 下 valid 为 READY、
- * schema-invalid 为 FAILED(INVALID_TOOL_ARGUMENTS)、unknown 为 FAILED(UNKNOWN_TOOL)；LENGTH 下全部为
+ * <p>决策顺序固定为 generation stop reason -&gt; frozen binding lookup -&gt; {@link
+ * ToolCall#validateFor(ToolDescriptor)} 归一化兼容校验，与 {@code ProviderResponse.toolCalls()} 正交。每个
+ * observed tool call 恰好产生一个 {@link ModelResponsePlan.ToolSlot}（保持 mixed batch 的完整
+ * callIndex）：COMPLETE 下 valid 为 READY（仍保留 raw canonical call，执行边界再确定性归一化）、schema-invalid 为
+ * FAILED(INVALID_TOOL_ARGUMENTS)、unknown 为 FAILED(UNKNOWN_TOOL)；LENGTH 下全部为
  * FAILED(MODEL_OUTPUT_TRUNCATED)，binding 尽力查找（可空）。invalid canonical response 不会到达这里—— {@link
  * ModelExecution} 在 SUCCEEDED 前已把它转为 {@code INVALID_RESPONSE} retry。
  */
@@ -47,26 +48,27 @@ public final class ModelResponsePlanner {
     }
     List<ModelResponsePlan.ToolSlot> slots = new ArrayList<>(response.toolCalls().size());
     for (ProviderToolCall call : response.toolCalls()) {
+      ToolCall rawCall = toToolCall(call);
       ToolBinding binding = findBinding(frozenBindings, call.name());
       if (binding == null) {
         slots.add(
             new ModelResponsePlan.ToolSlot(
-                toToolCall(call),
+                rawCall,
                 null,
                 ToolInvocationStatus.FAILED,
                 new ToolInvocationError(UNKNOWN_TOOL, "unknown tool: " + call.name())));
         continue;
       }
-      ToolInvocationError schemaFailure = validateArguments(call, binding);
-      if (schemaFailure != null) {
+      try {
+        // 只验证该 raw call 可按 schema 确定性归一化；durable call 必须与 assistant history 精确一致。
+        rawCall.validateFor(binding.descriptor());
+      } catch (IllegalArgumentException failure) {
         slots.add(
             new ModelResponsePlan.ToolSlot(
-                toToolCall(call), binding, ToolInvocationStatus.FAILED, schemaFailure));
+                rawCall, binding, ToolInvocationStatus.FAILED, invalidArguments(failure)));
         continue;
       }
-      slots.add(
-          new ModelResponsePlan.ToolSlot(
-              toToolCall(call), binding, ToolInvocationStatus.READY, null));
+      slots.add(new ModelResponsePlan.ToolSlot(rawCall, binding, ToolInvocationStatus.READY, null));
     }
     return new ModelResponsePlan.ToolBatch(List.copyOf(slots));
   }
@@ -105,19 +107,14 @@ public final class ModelResponsePlanner {
     return null;
   }
 
-  /** 参数不符合 binding schema 时返回 INVALID_TOOL_ARGUMENTS 错误；合法返回 null。 */
-  private static ToolInvocationError validateArguments(ProviderToolCall call, ToolBinding binding) {
-    try {
-      InputValidator.validate(call.argumentsJson(), binding.descriptor().inputSchema());
-      return null;
-    } catch (IllegalArgumentException failure) {
-      // ToolInvocationError 拒绝 blank message：schema 校验失败 message 可能为空，回退为稳定描述。
-      String message = failure.getMessage();
-      return new ToolInvocationError(
-          INVALID_TOOL_ARGUMENTS,
-          message == null || message.isBlank()
-              ? "tool arguments do not conform to the tool schema"
-              : message);
-    }
+  /** 参数不符合 binding schema 时返回 INVALID_TOOL_ARGUMENTS 错误；非法 message 回退为稳定描述。 */
+  private static ToolInvocationError invalidArguments(IllegalArgumentException failure) {
+    // ToolInvocationError 拒绝 blank message：schema 校验失败 message 可能为空。
+    String message = failure.getMessage();
+    return new ToolInvocationError(
+        INVALID_TOOL_ARGUMENTS,
+        message == null || message.isBlank()
+            ? "tool arguments do not conform to the tool schema"
+            : message);
   }
 }

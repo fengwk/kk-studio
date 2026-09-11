@@ -9,14 +9,18 @@ import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 输入参数 JSON 的静默归一化：在 schema 校验前将数字字符串容错改写为目标数值类型。
+ * 输入参数 JSON 的静默归一化：在 schema 校验前将数字字符串容错改写为目标数值类型，并移除 schema 声明的可缺省属性上的显式 {@code null}。
  *
  * <p>{@link IntegerSchema} 字段接受匹配 {@code -?\d+} 的十进制数字字符串并改写为 JSON integer；{@link NumberSchema}
  * 字段接受十进制数字字符串（含小数与指数）并改写为 JSON number。非数字文本、超出 long / double
  * 可表示范围的值不改写，仍由校验器严格拒绝。boolean/string/enum 字段不转换。
+ *
+ * <p>显式 {@code null} 只对 schema 声明的可缺省属性（未列入 {@code required}）静默删除，使其语义等同于缺省；{@code required} 属性的
+ * {@code null} 与 schema 未声明字段的 {@code null} 保持原样，交由 {@link InputValidator} 严格拒绝。
  *
  * <p>递归遍历对象与数组元素；归一化输出为紧凑 JSON 文本。
  */
@@ -33,16 +37,25 @@ public final class InputNormalizer {
     Objects.requireNonNull(schema, "schema");
     JsonNode root =
         JsonValues.readTree(JsonValues.requireJsonObject(argumentsJson, "argumentsJson"));
-    normalizeObject((ObjectNode) root, schema.properties());
+    normalizeObject((ObjectNode) root, schema.properties(), schema.required());
     return JsonValues.write(root);
   }
 
-  private static void normalizeObject(ObjectNode node, Map<String, SchemaElement> properties) {
+  private static void normalizeObject(
+      ObjectNode node, Map<String, SchemaElement> properties, Set<String> required) {
     for (Map.Entry<String, SchemaElement> entry : properties.entrySet()) {
-      JsonNode value = node.get(entry.getKey());
-      if (value != null) {
-        node.set(entry.getKey(), normalized(value, entry.getValue()));
+      String name = entry.getKey();
+      JsonNode value = node.get(name);
+      if (value == null) {
+        continue;
       }
+      if (value.isNull()) {
+        if (!required.contains(name)) {
+          node.remove(name);
+        }
+        continue;
+      }
+      node.set(name, normalized(value, entry.getValue()));
     }
   }
 
@@ -67,7 +80,7 @@ public final class InputNormalizer {
       }
     } else if (schema instanceof ObjectSchema objectSchema) {
       if (node.isObject()) {
-        normalizeObject((ObjectNode) node, objectSchema.properties());
+        normalizeObject((ObjectNode) node, objectSchema.properties(), objectSchema.required());
       }
     }
     return node;

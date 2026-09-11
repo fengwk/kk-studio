@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
 import java.net.http.HttpClient;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -181,15 +182,15 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
   /** 意图：验证 OpenAI Responses 工厂基于 configJson 正确解析 AUTOMATIC、LEGACY 与 GPT_5_6_EXPLICIT 三种模式。 */
   @Test
   void openAiResponsesFactoryResolvesDynamicPromptCacheCapabilities() {
-    // 默认空配置 -> AUTOMATIC
-    assertEquals(
-        PromptCacheMode.AUTOMATIC, openaiResponsesProviderFactory.promptCacheCapability().mode());
-    assertEquals(
-        PromptCacheMode.AUTOMATIC,
-        openaiResponsesProviderFactory.promptCacheCapability(null).mode());
-    assertEquals(
-        PromptCacheMode.AUTOMATIC,
-        openaiResponsesProviderFactory.promptCacheCapability("{}").mode());
+    // Pi-like 默认空配置 -> AFFINITY (SHORT)，用于发送稳定 prompt_cache_key。
+    for (PromptCacheCapability automatic :
+        List.of(
+            openaiResponsesProviderFactory.promptCacheCapability(),
+            openaiResponsesProviderFactory.promptCacheCapability(null),
+            openaiResponsesProviderFactory.promptCacheCapability("{}"))) {
+      assertEquals(PromptCacheMode.AFFINITY, automatic.mode());
+      assertEquals(Set.of(PromptCacheRetention.SHORT), automatic.supportedRetentions());
+    }
 
     // LEGACY -> AFFINITY (SHORT, LONG)
     PromptCacheCapability legacy =

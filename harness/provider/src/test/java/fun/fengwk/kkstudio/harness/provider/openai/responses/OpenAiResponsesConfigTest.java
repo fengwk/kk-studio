@@ -17,12 +17,18 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 /** 验证 OpenAI Responses 配置解析与 PromptCacheCapability 映射规则。 */
 class OpenAiResponsesConfigTest {
 
-  /** 验证缺省或空白配置解析为 AUTOMATIC 模式，且能力映射为 automatic。 */
+  /** 验证缺省或空白配置解析为 AUTOMATIC 模式，且能力映射为 affinity（仅 SHORT）。 */
   @Test
   void test_defaultAndBlankConfig() {
     OpenAiResponsesConfig defaultConfig = OpenAiResponsesConfig.defaultConfig();
     assertEquals(OpenAiPromptCacheMode.AUTOMATIC, defaultConfig.openAiPromptCacheMode());
-    assertEquals(PromptCacheMode.AUTOMATIC, defaultConfig.promptCacheCapability().mode());
+
+    // Pi-like 缺省：声明 AFFINITY 能力以保留 runtime 派生的 prompt_cache_key，但不宣称 LONG retention。
+    PromptCacheCapability defaultCap = defaultConfig.promptCacheCapability();
+    assertEquals(PromptCacheMode.AFFINITY, defaultCap.mode());
+    assertTrue(defaultCap.supports(PromptCacheRetention.SHORT));
+    assertFalse(defaultCap.supports(PromptCacheRetention.LONG));
+    assertTrue(defaultCap.supportedBreakpoints().isEmpty());
 
     OpenAiResponsesConfig nullConfig = OpenAiResponsesConfig.parse(null);
     assertEquals(OpenAiPromptCacheMode.AUTOMATIC, nullConfig.openAiPromptCacheMode());
@@ -45,9 +51,8 @@ class OpenAiResponsesConfigTest {
     assertEquals(PromptCacheMode.AFFINITY, cap.mode());
     assertTrue(cap.supports(PromptCacheRetention.SHORT));
     assertTrue(cap.supports(PromptCacheRetention.LONG));
-    assertFalse(
-        cap.supports(null != null ? PromptCacheRetention.NONE : PromptCacheRetention.NONE)
-            && cap.supportedBreakpoints().contains(PromptCacheBreakpoint.SYSTEM));
+    assertTrue(cap.supports(PromptCacheRetention.NONE));
+    assertTrue(cap.supportedBreakpoints().isEmpty());
   }
 
   /** 验证显式 GPT_5_6_EXPLICIT 模式配置解析及其 breakpoints 能力映射。 */
