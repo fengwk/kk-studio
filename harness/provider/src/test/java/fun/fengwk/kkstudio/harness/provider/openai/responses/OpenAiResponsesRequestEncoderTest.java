@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -13,11 +14,14 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -68,21 +72,29 @@ class OpenAiResponsesRequestEncoderTest {
   }
 
   private ModelDescriptor createModel() {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ONE,
-            BigDecimal.ONE,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ONE);
     return new ModelDescriptor(
-        "openai_test", "gpt-5.4-mini", Set.of(ModelInputModality.TEXT), true, true, pricing);
+        "openai_test", "gpt-5.4-mini", Set.of(ModelInputModality.TEXT), true, true, pricing());
+  }
+
+  /** 非推理模型：保留既有 system message 行为。 */
+  private ModelDescriptor nonReasoningModel() {
+    return new ModelDescriptor(
+        "openai_test", "gpt-4.1", Set.of(ModelInputModality.TEXT), true, false, pricing());
+  }
+
+  private static ModelPricing pricing() {
+    return new ModelPricing(
+        "USD",
+        "tier-1",
+        "default",
+        BigDecimal.ONE,
+        "v1",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ONE);
   }
 
   private ProviderRequest request(
@@ -90,8 +102,17 @@ class OpenAiResponsesRequestEncoderTest {
       List<ProviderMessage> messages,
       List<ProviderToolDefinition> tools,
       ProviderCacheControl cacheControl) {
+    return request(createModel(), variant, messages, tools, cacheControl);
+  }
+
+  private static ProviderRequest request(
+      ModelDescriptor model,
+      ModelVariant variant,
+      List<ProviderMessage> messages,
+      List<ProviderToolDefinition> tools,
+      ProviderCacheControl cacheControl) {
     return new ProviderRequest(
-        createModel(),
+        model,
         variant != null ? variant : DEFAULT_VARIANT,
         messages != null ? messages : List.of(),
         tools != null ? tools : List.of(),
@@ -235,7 +256,7 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex4.kind());
   }
 
-  /** 验证工具声明映射，包含 strict: false 与参数 JSON 解析。 */
+  /** 验证工具声明映射：strict 工具携带归一化参数与解析后的 JSON schema。 */
   @Test
   void test_toolDefinitionEncoding() throws Exception {
     ProviderToolDefinition tool =
@@ -262,7 +283,210 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("lookupWeather", t.path("name").asText());
     assertEquals("Lookup weather by city", t.path("description").asText());
     assertEquals("object", t.path("parameters").path("type").asText());
-    assertFalse(t.path("strict").asBoolean());
+    assertTrue(t.path("strict").asBoolean());
+    assertEquals(List.of("city"), requiredOf(t.path("parameters")));
+    assertFalse(t.path("parameters").path("additionalProperties").asBoolean());
+  }
+
+  /** 验证系统指令角色：推理模型编码为 developer，非推理模型保持 system。 */
+  @Test
+  void test_systemMessageRoleFollowsModelReasoning() throws Exception {
+    List<ProviderMessage> messages =
+        List.of(
+            new ProviderMessage(
+                ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system rules"))),
+            new ProviderMessage(
+                ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt"))));
+
+    JsonNode reasoningRoot = encodedRoot(request(messages));
+    assertEquals("developer", reasoningRoot.get("input").get(0).path("role").asText());
+    assertEquals(
+        "input_text",
+        reasoningRoot.get("input").get(0).path("content").get(0).path("type").asText());
+    assertEquals(
+        "system rules",
+        reasoningRoot.get("input").get(0).path("content").get(0).path("text").asText());
+
+    JsonNode plainRoot =
+        encodedRoot(request(nonReasoningModel(), DEFAULT_VARIANT, messages, List.of(), null));
+    assertEquals("system", plainRoot.get("input").get(0).path("role").asText());
+  }
+
+  /** 验证 max_output_tokens 下限：显式更小值被提升到 16，显式更大值原样保留，未声明时不发送该字段。 */
+  @Test
+  void test_maxOutputTokensMinimumClamp() throws Exception {
+    assertEquals(16, encodedMaxOutputTokens(1));
+    assertEquals(16, encodedMaxOutputTokens(15));
+    assertEquals(16, encodedMaxOutputTokens(16));
+    assertEquals(1000, encodedMaxOutputTokens(1000));
+
+    // 编码器保留 null 语义；运行时的 null limit 由 TurnResolver 在冻结前解析，这里绝不合成默认值。
+    JsonNode rootNull =
+        encodedRoot(
+            request(new ModelVariant("v1", null, null, null, null, null, null, List.of(), null)));
+    assertFalse(rootNull.has("max_output_tokens"));
+  }
+
+  /**
+   * 验证 strict 工具 schema 归一化：object 节点显式全量 required 与 additionalProperties=false；只有源 schema 确实把属性
+   * 排除在 required 之外（属性本身允许缺省）时才用 anyOf+null 保留可缺省语义；本来就必填或本来就允许 null 的属性保持原 schema；嵌套 object 与
+   * array items 同样收敛，且绝不改写共享 schema。
+   */
+  @Test
+  void test_strictToolSchemaNormalization() throws Exception {
+    String schema =
+        """
+        {"type":"object",
+         "properties":{
+           "query":{"type":"string"},
+           "limit":{"type":"integer"},
+           "nullable":{"type":["string","null"]},
+           "filter":{"type":"object","additionalProperties":true,
+                     "properties":{"tag":{"type":"string"},"exact":{"type":"boolean"}},
+                     "required":["exact"]},
+           "meta":{"type":"object","properties":{"note":{"type":"string"}}},
+           "tags":{"type":"array",
+                   "items":{"type":"object","additionalProperties":false,
+                            "properties":{"name":{"type":"string"}},"required":["name"]}}},
+         "required":["query","filter","tags"],
+         "additionalProperties":true}
+        """;
+    ProviderToolDefinition tool = new ProviderToolDefinition("search", "search", schema);
+
+    JsonNode parameters = encodedTools(tool).get(0).path("parameters");
+
+    assertTrue(encodedTools(tool).get(0).path("strict").asBoolean());
+    assertEquals("object", parameters.path("type").asText());
+    assertEquals(
+        List.of("query", "limit", "nullable", "filter", "meta", "tags"), requiredOf(parameters));
+    assertFalse(parameters.path("additionalProperties").asBoolean());
+
+    JsonNode properties = parameters.path("properties");
+    // 已声明必填的属性保持原 schema。
+    assertEquals("string", properties.path("query").path("type").asText());
+    assertFalse(properties.path("query").has("anyOf"));
+    // 未声明必填的标量属性改写为任何非 null 值或 null。
+    assertEquals("integer", properties.path("limit").path("anyOf").get(0).path("type").asText());
+    assertEquals("null", properties.path("limit").path("anyOf").get(1).path("type").asText());
+    // 已经允许 null 的属性不再重复包装。
+    assertEquals("string", properties.path("nullable").path("type").get(0).asText());
+    assertFalse(properties.path("nullable").has("anyOf"));
+    // 已声明必填的嵌套 object：全量 required + additionalProperties=false，可缺省属性用 anyOf+null 保留语义。
+    JsonNode filter = properties.path("filter");
+    assertEquals(List.of("tag", "exact"), requiredOf(filter));
+    assertFalse(filter.path("additionalProperties").asBoolean());
+    assertEquals(
+        "string", filter.path("properties").path("tag").path("anyOf").get(0).path("type").asText());
+    assertEquals(
+        "null", filter.path("properties").path("tag").path("anyOf").get(1).path("type").asText());
+    assertEquals("boolean", filter.path("properties").path("exact").path("type").asText());
+    // 可选 object 属性整体被 anyOf+null 包装，其内部 schema 同样完成归一化。
+    JsonNode meta = properties.path("meta").path("anyOf").get(0);
+    assertEquals("object", meta.path("type").asText());
+    assertEquals(List.of("note"), requiredOf(meta));
+    assertFalse(meta.path("additionalProperties").asBoolean());
+    assertEquals(
+        "string", meta.path("properties").path("note").path("anyOf").get(0).path("type").asText());
+    assertEquals("null", properties.path("meta").path("anyOf").get(1).path("type").asText());
+    // array items 内的 object schema 同样归一化。
+    JsonNode items = properties.path("tags").path("items");
+    assertEquals(List.of("name"), requiredOf(items));
+    assertFalse(items.path("additionalProperties").asBoolean());
+
+    // 共享输入模型不被改写，重复编码结果稳定。
+    assertEquals(MAPPER.readTree(schema), MAPPER.readTree(tool.inputSchemaJson()));
+    assertEquals(encodedTools(tool), encodedTools(tool));
+  }
+
+  /** 验证 prompt_cache_key 直接取自 runtime 派生的 cache affinity identity：稳定、可复现、不同 session 不同。 */
+  @Test
+  void test_promptCacheKeyComesFromRuntimeAffinityIdentity() throws Exception {
+    UUID sessionId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+    List<ProviderMessage> messages =
+        List.of(
+            new ProviderMessage(
+                ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system rules"))),
+            new ProviderMessage(
+                ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt"))));
+    ProviderCacheControl cacheControl = runtimeAffinityCacheControl(sessionId, request(messages));
+    assertTrue(cacheControl.affinityKey().startsWith("pc1-"));
+
+    ProviderRequest cachedRequest =
+        new ProviderRequest(createModel(), DEFAULT_VARIANT, messages, List.of(), cacheControl);
+    JsonNode first =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    cachedRequest,
+                    createDescriptor(),
+                    new OpenAiResponsesConfig(OpenAiPromptCacheMode.LEGACY))
+                .bodyUtf8Bytes());
+    JsonNode second =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    cachedRequest,
+                    createDescriptor(),
+                    new OpenAiResponsesConfig(OpenAiPromptCacheMode.LEGACY))
+                .bodyUtf8Bytes());
+
+    // 编码器只透出 runtime identity，绝不自造 per-attempt key。
+    assertEquals(cacheControl.affinityKey(), first.path("prompt_cache_key").asText());
+    assertEquals(first.path("prompt_cache_key").asText(), second.path("prompt_cache_key").asText());
+
+    ProviderCacheControl otherSession =
+        runtimeAffinityCacheControl(
+            UUID.fromString("44444444-4444-4444-4444-444444444444"), request(messages));
+    assertNotEquals(otherSession.affinityKey(), first.path("prompt_cache_key").asText());
+
+    // runtime 未启用缓存时不得凭空发送 key。
+    JsonNode none =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    request(messages),
+                    createDescriptor(),
+                    new OpenAiResponsesConfig(OpenAiPromptCacheMode.LEGACY))
+                .bodyUtf8Bytes());
+    assertFalse(none.has("prompt_cache_key"));
+  }
+
+  /** 经 runtime 的 finalizer 派生 affinity cacheControl，模拟真实请求物化路径。 */
+  private static ProviderCacheControl runtimeAffinityCacheControl(
+      UUID sessionId, ProviderRequest base) {
+    PromptCacheCapability capability =
+        PromptCacheCapability.affinity(
+            Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG));
+    return new PromptCacheRequestFinalizer(sessionId)
+        .apply(base, PromptCachePolicy.affinityShort(capability))
+        .cacheControl();
+  }
+
+  private JsonNode encodedRoot(ProviderRequest request) throws Exception {
+    return MAPPER.readTree(
+        encoder
+            .encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
+            .bodyUtf8Bytes());
+  }
+
+  private int encodedMaxOutputTokens(Integer maxOutputTokens) throws Exception {
+    JsonNode root =
+        encodedRoot(
+            request(
+                new ModelVariant(
+                    "v1", maxOutputTokens, null, null, null, null, null, List.of(), null)));
+    return root.path("max_output_tokens").asInt();
+  }
+
+  private ArrayNode encodedTools(ProviderToolDefinition tool) throws Exception {
+    JsonNode root = encodedRoot(request(List.of(), List.of(tool)));
+    return (ArrayNode) root.get("tools");
+  }
+
+  private static List<String> requiredOf(JsonNode objectSchema) {
+    List<String> required = new ArrayList<>();
+    objectSchema.path("required").forEach(node -> required.add(node.asText()));
+    return required;
   }
 
   /** 验证多模态输入（图片 URL、图片 data URI、PDF URL、PDF data URI）正确映射。 */

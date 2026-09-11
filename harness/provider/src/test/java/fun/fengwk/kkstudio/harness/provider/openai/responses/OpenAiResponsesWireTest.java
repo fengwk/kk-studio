@@ -9,10 +9,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -204,7 +208,7 @@ class OpenAiResponsesWireTest {
 
     JsonNode input = root.get("input");
     assertEquals(2, input.size());
-    assertEquals("system", input.get(0).path("role").asText());
+    assertEquals("developer", input.get(0).path("role").asText());
     assertEquals("You are helpful.", input.get(0).path("content").get(0).path("text").asText());
     assertEquals("user", input.get(1).path("role").asText());
     assertEquals("Tell me a story.", input.get(1).path("content").get(0).path("text").asText());
@@ -333,5 +337,70 @@ class OpenAiResponsesWireTest {
     assertEquals("reasoning.encrypted_content", root.path("include").get(0).asText());
     assertTrue(root.has("tools"));
     assertEquals("get_time", root.path("tools").get(0).path("name").asText());
+    assertTrue(root.path("tools").get(0).path("strict").asBoolean());
+  }
+
+  /**
+   * 验证推理请求的完整 wire parity：developer 角色、runtime 派生且稳定的 prompt_cache_key、max_output_tokens 下限与 strict
+   * 工具 schema 同时出现在实际编码 JSON 中。
+   */
+  @Test
+  void test_reasoningWireParityPayload() throws Exception {
+    ProviderToolDefinition tool =
+        new ProviderToolDefinition(
+            "get_weather",
+            "get weather",
+            """
+            {"type":"object","properties":{"city":{"type":"string"},"unit":{"type":"string"}},
+             "required":["city"],"additionalProperties":false}
+            """);
+    List<ProviderMessage> messages =
+        List.of(
+            new ProviderMessage(
+                ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("You are helpful."))),
+            new ProviderMessage(
+                ProviderMessageRole.USER, List.of(new ProviderTextBlock("Weather in Paris?"))));
+    ProviderRequest base =
+        request(
+            new ModelVariant("v1", 8, null, null, null, null, null, List.of(), "medium"),
+            messages,
+            List.of(tool),
+            ProviderCacheControl.none());
+    ProviderCacheControl cacheControl =
+        new PromptCacheRequestFinalizer(UUID.fromString("55555555-5555-5555-5555-555555555555"))
+            .apply(
+                base,
+                PromptCachePolicy.affinityShort(
+                    PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT))))
+            .cacheControl();
+    ProviderRequest req =
+        new ProviderRequest(
+            base.model(), base.variant(), base.messages(), base.tools(), cacheControl);
+
+    OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
+    JsonNode root =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    req,
+                    createDescriptor(),
+                    new OpenAiResponsesConfig(OpenAiPromptCacheMode.LEGACY))
+                .bodyUtf8Bytes());
+
+    // 8 < 16：OpenAI Responses 只接受 >= 16 的输出上限。
+    assertEquals(16, root.path("max_output_tokens").asInt());
+    assertEquals("developer", root.get("input").get(0).path("role").asText());
+    assertEquals(cacheControl.affinityKey(), root.path("prompt_cache_key").asText());
+    assertEquals("in_memory", root.path("prompt_cache_retention").asText());
+    assertEquals("medium", root.path("reasoning").path("effort").asText());
+
+    JsonNode parameters = root.get("tools").get(0).path("parameters");
+    assertEquals("string", parameters.path("properties").path("city").path("type").asText());
+    assertEquals(
+        "string",
+        parameters.path("properties").path("unit").path("anyOf").get(0).path("type").asText());
+    assertEquals(
+        "null",
+        parameters.path("properties").path("unit").path("anyOf").get(1).path("type").asText());
   }
 }
