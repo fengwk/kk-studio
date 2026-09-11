@@ -304,6 +304,13 @@ class HarnessContractTest {
 
     // 校验 call 已被归一化：整数字符串转为 integer
     assertEquals("{\"offset\":20,\"path\":\"README.md\"}", request.call().argumentsJson());
+    // strict Provider 为原可选字段填入 null 时，执行请求把它等价为缺省。
+    ToolExecutionRequest nullOptionalRequest =
+        new ToolExecutionRequest(
+            DESCRIPTOR,
+            new ToolCall("call-2", "test_tool", "{\"offset\":null,\"path\":\"README.md\"}"),
+            Duration.ZERO);
+    assertEquals("{\"path\":\"README.md\"}", nullOptionalRequest.call().argumentsJson());
     // 请求超时为 ZERO 时使用 descriptor 的默认超时
     assertEquals(Duration.ofSeconds(30), request.effectiveTimeout());
 

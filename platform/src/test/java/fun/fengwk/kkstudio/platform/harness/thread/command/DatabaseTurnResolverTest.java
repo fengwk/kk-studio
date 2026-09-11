@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
@@ -993,6 +994,46 @@ class DatabaseTurnResolverTest {
     assertEquals(
         Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS),
         breakpoints.cacheControl().breakpoints());
+  }
+
+  /**
+   * 意图：Responses 缺省的 AUTOMATIC（Pi-like）配置下，planner 必须冻结稳定 affinity key（同 session 同前缀稳定、跨 session
+   * 不同），防止 Provider 编码前已经静默退化为无缓存。
+   */
+  @Test
+  void defaultResponsesConfigFreezesStableAffinityCacheKey() {
+    Fixture fixture =
+        new Fixture(
+            List.of(),
+            List.of(),
+            List.of(),
+            Set.of(),
+            ProviderType.OPENAI_RESPONSES,
+            ProviderType.OPENAI_RESPONSES,
+            // 与生产 OpenAiResponsesProviderFactory 完全一致的能力解析（configJson 为 null 即缺省配置）
+            OpenAiResponsesProviderAdapter.resolvePromptCacheCapability(null),
+            true);
+    EntryPath path = fixture.path(settings(null, "default"));
+
+    ModelRequestSpec first = fixture.resolved(path);
+    ModelRequestSpec sameSessionAgain = fixture.resolved(fixture.path(settings(null, "default")));
+    assertEquals(PromptCacheRetention.SHORT, first.cacheControl().retention());
+    assertTrue(first.cacheControl().affinityKey().startsWith("pc1-"));
+    assertEquals(first.cacheControl().affinityKey(), sameSessionAgain.cacheControl().affinityKey());
+
+    // 同前缀但不同 session 必须派生出不同 key，避免跨会话缓存串扰
+    EntryPath otherSessionPath =
+        new EntryPath(
+            List.of(
+                new Entry(
+                    id(996),
+                    new UUID(0L, 995L),
+                    null,
+                    new RootPayload(settings(null, "default")),
+                    NOW)));
+    ModelRequestSpec otherSession = fixture.resolved(otherSessionPath);
+    assertEquals(PromptCacheRetention.SHORT, otherSession.cacheControl().retention());
+    assertNotEquals(first.cacheControl().affinityKey(), otherSession.cacheControl().affinityKey());
   }
 
   /** 意图：验证 live turn 规划会正确传递当前 provider 的 configJson 解析动态 promptCacheCapability。 */

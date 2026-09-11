@@ -85,6 +85,72 @@ class InputNormalizerTest {
     assertEquals(5, items.get(1).get("limit").asInt());
   }
 
+  /** strict Provider 把原可选字段回传为 null 时，根对象、嵌套对象与数组元素都应把它等价为缺省。 */
+  @Test
+  void removesOptionalNullRecursively() {
+    ObjectSchema itemSchema =
+        new ObjectSchema(
+            null,
+            Map.of("name", new StringSchema(null), "note", new StringSchema(null)),
+            Set.of("name"),
+            false);
+    ObjectSchema nestedSchema =
+        new ObjectSchema(
+            null,
+            Map.of("enabled", new BooleanSchema(null), "label", new StringSchema(null)),
+            Set.of("enabled"),
+            false);
+    InputSchema schema =
+        new InputSchema(
+            null,
+            Map.of(
+                "path", new StringSchema(null),
+                "nested", nestedSchema,
+                "items", new ArraySchema(null, itemSchema)),
+            Set.of("nested", "items"),
+            false);
+    String raw =
+        """
+        {
+          "path": null,
+          "nested": {"enabled": true, "label": null},
+          "items": [
+            {"name": "first", "note": null},
+            {"name": "second", "note": "kept"}
+          ]
+        }
+        """;
+
+    String normalized = InputNormalizer.normalize(raw, schema);
+
+    assertEquals(
+        "{\"nested\":{\"enabled\":true},\"items\":[{\"name\":\"first\"},{\"name\":\"second\",\"note\":\"kept\"}]}",
+        normalized);
+    InputValidator.validate(normalized, schema);
+  }
+
+  /** required null 与未声明字段 null 不是缺省值，归一化必须保留并交给严格校验器拒绝。 */
+  @Test
+  void preservesRequiredAndUnknownNullForValidation() {
+    InputSchema schema =
+        new InputSchema(
+            null,
+            Map.of("required", new StringSchema(null), "optional", new StringSchema(null)),
+            Set.of("required"),
+            false);
+    String requiredNull = "{\"required\":null,\"optional\":null}";
+    String unknownNull = "{\"required\":\"ok\",\"unknown\":null}";
+
+    assertEquals("{\"required\":null}", InputNormalizer.normalize(requiredNull, schema));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> InputValidator.validate(InputNormalizer.normalize(requiredNull, schema), schema));
+    assertEquals(unknownNull, InputNormalizer.normalize(unknownNull, schema));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> InputValidator.validate(InputNormalizer.normalize(unknownNull, schema), schema));
+  }
+
   /** 整数溢出或超 double 范围的文本不改写，仍由校验器拒绝；这是归一化不吞掉非法输入的关键。 */
   @Test
   void leavesOutOfRangeNumericTextUntouched() {

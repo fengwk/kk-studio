@@ -87,7 +87,9 @@ public record OpenAiResponsesConfig(OpenAiPromptCacheMode openAiPromptCacheMode)
   /** 返回当前配置对应的 {@link PromptCacheCapability}。 */
   public PromptCacheCapability promptCacheCapability() {
     return switch (openAiPromptCacheMode) {
-      case AUTOMATIC -> PromptCacheCapability.automatic();
+        // 缺省（Pi-like）模式只发送 runtime 派生的 prompt_cache_key；因此声明 AFFINITY，
+        // 否则 resolver 会冻结 none 而丢失稳定缓存亲和性。
+      case AUTOMATIC -> PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT));
       case LEGACY -> PromptCacheCapability.affinity(
           Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG));
       case GPT_5_6_EXPLICIT -> PromptCacheCapability.breakpoints(

@@ -58,7 +58,7 @@ final class OpenAiResponsesRequestEncoder {
   }
 
   /** OpenAI Responses 拒绝低于 16 的 max_output_tokens；该下限只属于本 Provider。 */
-  private static final int MIN_OUTPUT_TOKENS = 16;
+  private static final int OPENAI_RESPONSES_MIN_OUTPUT_TOKENS = 16;
 
   private static final Set<String> ALLOWED_IMAGE_TYPES =
       Set.of("image/jpeg", "image/png", "image/gif", "image/webp");
@@ -170,7 +170,9 @@ final class OpenAiResponsesRequestEncoder {
       root.put("top_p", variant.topP());
     }
     if (variant.maxOutputTokens() != null) {
-      root.put("max_output_tokens", Math.max(variant.maxOutputTokens(), MIN_OUTPUT_TOKENS));
+      root.put(
+          "max_output_tokens",
+          Math.max(variant.maxOutputTokens(), OPENAI_RESPONSES_MIN_OUTPUT_TOKENS));
     }
   }
 
@@ -738,6 +740,10 @@ final class OpenAiResponsesRequestEncoder {
       List<ObjectNode> systemContentBlocks,
       List<ObjectNode> conversationContentBlocks) {
     if (cacheMode == OpenAiPromptCacheMode.AUTOMATIC) {
+      // Pi-like 缺省：只在 runtime 决定启用缓存时发送稳定亲和键，不带 retention/options/breakpoint。
+      if (cacheControl.retention() != PromptCacheRetention.NONE) {
+        root.put("prompt_cache_key", cacheControl.affinityKey());
+      }
       return;
     }
 

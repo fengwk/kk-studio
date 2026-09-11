@@ -123,7 +123,14 @@ class ToolExecutionGatewayPreflightTest {
     ToolGateway.Deny deny =
         assertInstanceOf(
             ToolGateway.Deny.class,
-            gateway.preflight(ToolGatewayTestSupport.hostRequest("call-1", PREFLIGHT_DESCRIPTOR)));
+            gateway.preflight(
+                new ToolInvocationRequest(
+                    new ToolCall("call-1", "demo", "{\"path\":\"/tmp/x\"}"),
+                    new ToolBinding(
+                        hostDefinition(PREFLIGHT_DESCRIPTOR),
+                        new ContributorBinding("test", "host-tool", List.of()),
+                        false,
+                        null))));
 
     assertEquals(ToolExecutionGateway.PERMISSION_DENIED_KIND, deny.error().kind());
     assertEquals("Tool permission was denied.", deny.error().message());

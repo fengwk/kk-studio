@@ -128,9 +128,9 @@ blocks。`AnthropicStreamAccumulator` 按原生 block index 独立维护交错�
 支持 OpenAI Responses 协议，通过 `OpenAiResponsesConfig` 提供配置支持（异常消息消毒，不回显输入与 cause）：
 - 系统指令角色：`model.reasoning = true` 时 SYSTEM 消息编码为 `role: "developer"`，非推理模型保持 `role: "system"`。
 - 推理编码：当 `reasoningEffort` 为 `none` 时仅生成 `reasoning: {"effort": "none"}`，省略 `summary` 且不包含 `reasoning.encrypted_content`；启用思考时生成 `reasoning: {"effort": ..., "summary": "auto"}` 并注入顶层 `include: ["reasoning.encrypted_content"]`。
-- 工具：函数工具一律以 `strict: true` 发送，参数 schema 深拷贝后递归归一化为 strict 子集——每个 object 节点（含 `items` 与嵌套 object）显式写出全量 `required` 与 `additionalProperties: false`；源 schema 确实把属性排除在 `required` 之外（即该属性可缺省）且其类型不允许 null 时，才改写为 `anyOf: [原 schema, {"type": "null"}]` 以保留可缺省语义；共享的 `inputSchemaJson` 绝不被改写。
+- 工具：函数工具一律以 `strict: true` 发送，参数 schema 深拷贝后递归归一化为 strict 子集——每个 object 节点（含 `items` 与嵌套 object）显式写出全量 `required` 与 `additionalProperties: false`；源 schema 确实把属性排除在 `required` 之外（即该属性可缺省）且其类型不允许 null 时，才改写为 `anyOf: [原 schema, {"type": "null"}]` 以保留可缺省语义；共享的 `inputSchemaJson` 绝不被改写。模型按 strict schema 为这类原可选属性回传显式 `null` 时，runtime 在原 schema 校验前只把该 null 等价为缺省；required/unknown null 仍严格拒绝。
 - 输出上限：`max_output_tokens` 取 variant 上限与本 Provider 下限 `16` 的较大者——低于 16 的值提升到 16，显式更大值原样保留，未声明时不发送该字段。
-- 提示缓存：`prompt_cache_key` 只透出 runtime 派生的 cache affinity identity（`PromptCacheControl.affinityKey()`），Provider 侧不生成任何自造或 per-attempt key。
+- 提示缓存：缺省 `AUTOMATIC` 模式按 Pi 语义发送 runtime 派生的稳定 `prompt_cache_key`，但不发送 retention/options/breakpoint；显式模式继续映射对应控制字段。该 key 只取自 `PromptCacheControl.affinityKey()`，Provider 侧不生成自造或 per-attempt key。
 - Replay：`COMPLETE` / `LENGTH` 且无工具诊断时把白名单 native output（`reasoning` 的 `encrypted_content` 与 `summary`、`message`、`function_call`）冻结为 durable replay state；下一轮仅在 affinity 与 `sourcePrefixHash` 匹配、且回放项与 durable 消息内容一致时原位回放，否则回退语义编码；私有推理文本只作为 `summary`/durable thinking 暴露，`encrypted_content` 不作为文本外泄。
 - Token 审计：当服务端事件流 usage 缺失 `total_tokens` 时，原生总 token 置为 `0L`，且 `rawUsageJson` 白名单中不输出 `total_tokens` 键。
 

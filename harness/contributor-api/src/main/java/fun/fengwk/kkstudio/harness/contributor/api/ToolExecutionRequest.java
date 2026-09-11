@@ -10,8 +10,8 @@ import java.util.Objects;
 /**
  * 提交给 Tool SPI 的单次执行请求。
  *
- * <p>构造时先对 {@code call} 做 schema 驱动的静默数字归一化（如整数字符串→integer）再做严格校验，请求持有的 {@code call} 是归一化后的 {@link
- * ToolCall}；执行路径读到的 {@code argumentsJson} 保证满足目标数值类型。
+ * <p>构造时先对 {@code call} 做 schema 驱动的静默归一化（数字字符串→目标数值、可缺省属性的显式 null→缺省）再做严格校验，请求持有的 {@code call}
+ * 是归一化后的 {@link ToolCall}；执行路径读到的 {@code argumentsJson} 保证满足目标 schema。
  *
  * <p>{@code workdir} 是已 canonicalize 的 invocation workspace（可空；非空时必须为 absolute path）。
  */

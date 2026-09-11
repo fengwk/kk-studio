@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimLosingStore;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.declarativeBinding;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.hostBindingWithSchema;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.insertAssistantWithCalls;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.model;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
@@ -29,6 +30,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
@@ -44,6 +48,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAcces
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -64,6 +69,8 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -206,6 +213,58 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(assistant.id(), thread(fixture.store, baseline.threadId()).headEntryId());
     assertEquals(1L, thread(fixture.store, baseline.threadId()).version());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+  }
+
+  /**
+   * Provider 原始 function_call 必须在 Model、assistant history 与 durable ToolInvocation
+   * 三处精确一致；执行边界再生成归一化 副本，避免 strict schema 为原可选字段填入 null 后阻断执行。
+   */
+  @Test
+  void modelSuccessPreservesRawCallAndDefersNormalizationToExecutionBoundary() {
+    Fixture fixture = fixture();
+    var baseline = seedOpenInputTurn(fixture.store);
+    InputSchema schema =
+        new InputSchema(
+            "arguments",
+            Map.of("path", new StringSchema(null), "offset", new IntegerSchema(null)),
+            Set.of(),
+            false);
+    ToolBinding binding = hostBindingWithSchema("read", schema);
+    String rawArguments = "{\"path\":null,\"offset\":\"10\"}";
+    UUID modelId =
+        seedModelInvocation(
+            fixture.store,
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            baseline.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            requestWithBindings(List.of(binding)),
+            successResponse(List.of(new ProviderToolCall("call-1", "read", rawArguments))),
+            null);
+    requestThreadWork(fixture.store, baseline.threadId());
+
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    Entry assistant = path(fixture.store, baseline.threadId()).head();
+    ToolCallMessageContent historyCall =
+        (ToolCallMessageContent)
+            ((MessagePayload) assistant.payload())
+                .message().contents().stream()
+                    .filter(ToolCallMessageContent.class::isInstance)
+                    .findFirst()
+                    .orElseThrow();
+    assertEquals(rawArguments, historyCall.argumentsJson());
+    assertEquals(
+        rawArguments,
+        model(fixture.store, modelId).result().toolCalls().getFirst().argumentsJson());
+
+    ToolInvocation invocation = toolsByAssistant(fixture.store, assistant.id()).getFirst();
+    assertEquals(ToolInvocationStatus.READY, invocation.status());
+    assertEquals(rawArguments, invocation.call().argumentsJson());
+    assertEquals(
+        "{\"offset\":10}",
+        new ToolInvocationRequest(invocation.call(), invocation.binding()).call().argumentsJson());
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, invocation.id())));
   }
 
   /**

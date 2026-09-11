@@ -94,6 +94,18 @@ class EnvironmentCapabilityContractTest {
     assertNotSame(original, normalized);
   }
 
+  /** strict Provider 对原可选 offset 回传 null 时，Environment 执行边界同样把它等价为缺省。 */
+  @Test
+  void removesOptionalNullFromCapabilityCall() {
+    EnvironmentCapabilityCall original =
+        new EnvironmentCapabilityCall("call-1", "{\"offset\":null,\"path\":\"README.md\"}");
+
+    EnvironmentCapabilityCall normalized = original.validateFor(DESCRIPTOR);
+
+    assertEquals("{\"path\":\"README.md\"}", normalized.argumentsJson());
+    assertEquals("{\"offset\":null,\"path\":\"README.md\"}", original.argumentsJson());
+  }
+
   /** 数字字符串经过现有归一化器改为 JSON integer，归一化后仍需通过 schema 校验。 */
   @Test
   void normalizesAndValidatesNumericArguments() {

@@ -44,8 +44,9 @@ public sealed interface ModelResponsePlan {
   /**
    * 单个 observed call 的规划槽位。
    *
-   * <p>READY：binding 必须非空、无 error；FAILED：必须携带 error，binding 仅对 unknown tool 可空。LENGTH 截断的 FAILED 槽位
-   * binding 尽力查找（已知工具非空、unknown 为 null）。
+   * <p>READY：binding 必须非空、无 error，且 raw canonical call 已通过 {@link ToolCall#validateFor}
+   * 的归一化兼容校验；执行边界再次确定性归一化。FAILED：必须携带 error；所有槽位都保留与 assistant history 精确一致的 raw call，binding 仅对
+   * unknown tool 可空。LENGTH 截断的 FAILED 槽位 binding 尽力查找（已知工具非空、unknown 为 null）。
    */
   record ToolSlot(
       ToolCall call, ToolBinding binding, ToolInvocationStatus status, ToolInvocationError error) {

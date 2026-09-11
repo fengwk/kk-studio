@@ -125,7 +125,7 @@ uri / mediaType / name? / size? / sha256?
 配套工具：
 
 - [`InputValidator`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputValidator.java)：严格校验顶层 JSON object 参数是否满足 `InputSchema`；
-- [`InputNormalizer`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizer.java)：在 schema 校验前执行模型输入容错的静默归一化（数字字符串转为 JSON 整数/数字）；
+- [`InputNormalizer`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizer.java)：在 schema 校验前执行模型输入容错的静默归一化（数字字符串转为 JSON 整数/数字；schema 已声明但未列入 `required` 的属性若显式为 `null`，则等价为缺省）；required null 与未知属性仍保留给严格校验器拒绝；
 - [`SchemaJsonCodec`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodec.java)：严格且确定性的 `InputSchema` JSON 编解码器，编码时属性按字典序排序，解码时拒绝未知字段与语法错误。
 
 ## 不变量、failure / recovery

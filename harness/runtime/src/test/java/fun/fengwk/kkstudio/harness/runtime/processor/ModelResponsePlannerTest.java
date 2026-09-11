@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -133,6 +135,70 @@ class ModelResponsePlannerTest {
     assertEquals("call-3", batch.tools().get(2).call().id());
   }
 
+  /** 可选 null 与数字字符串只要可确定性归一化就进入 READY；durable 槽位仍保留 raw call 与 assistant history 对齐。 */
+  @Test
+  void readySlotAcceptsNormalizableArgumentsWithoutMutatingDurableCall() {
+    InputSchema schema =
+        new InputSchema(
+            "arguments",
+            Map.of("path", new StringSchema(null), "limit", new IntegerSchema(null)),
+            Set.of(),
+            false);
+    ModelResponsePlan plan =
+        PLANNER.plan(
+            response(
+                GenerationStopReason.COMPLETE,
+                List.of(
+                    new ProviderToolCall("call-1", "bash", "{\"path\":null,\"limit\":\"10\"}"))),
+            bindings(toolBinding("bash", schema)));
+
+    ModelResponsePlan.ToolBatch batch = (ModelResponsePlan.ToolBatch) plan;
+    ModelResponsePlan.ToolSlot slot = batch.tools().getFirst();
+    assertEquals(ToolInvocationStatus.READY, slot.status());
+    assertEquals("{\"path\":null,\"limit\":\"10\"}", slot.call().argumentsJson());
+  }
+
+  /** schema-invalid 的 FAILED 槽位保留 raw canonical call（不携带归一化结果）供审计。 */
+  @Test
+  void invalidSlotKeepsRawCanonicalCall() {
+    InputSchema schema =
+        new InputSchema(
+            "arguments",
+            Map.of("path", new StringSchema(null), "limit", new IntegerSchema(null)),
+            Set.of("path"),
+            false);
+    String rawArguments = "{\"path\":null,\"limit\":\"10\"}";
+    ModelResponsePlan plan =
+        PLANNER.plan(
+            response(
+                GenerationStopReason.COMPLETE,
+                List.of(new ProviderToolCall("call-1", "bash", rawArguments))),
+            bindings(toolBinding("bash", schema)));
+
+    ModelResponsePlan.ToolBatch batch = (ModelResponsePlan.ToolBatch) plan;
+    ModelResponsePlan.ToolSlot slot = batch.tools().getFirst();
+    assertEquals(ToolInvocationStatus.FAILED, slot.status());
+    assertEquals("INVALID_TOOL_ARGUMENTS", slot.error().kind());
+    assertEquals(rawArguments, slot.call().argumentsJson());
+  }
+
+  /** unknown tool 的 FAILED 槽位同样保留 raw canonical call，便于 audit 未声明工具的实际入参。 */
+  @Test
+  void unknownToolSlotKeepsRawCanonicalCall() {
+    String rawArguments = "{\"anything\":\"10\"}";
+    ModelResponsePlan plan =
+        PLANNER.plan(
+            response(
+                GenerationStopReason.COMPLETE,
+                List.of(new ProviderToolCall("call-1", "undeclared", rawArguments))),
+            bindings(toolBinding("bash")));
+
+    ModelResponsePlan.ToolSlot slot = ((ModelResponsePlan.ToolBatch) plan).tools().getFirst();
+    assertEquals(ToolInvocationStatus.FAILED, slot.status());
+    assertEquals("UNKNOWN_TOOL", slot.error().kind());
+    assertEquals(rawArguments, slot.call().argumentsJson());
+  }
+
   @Test
   void lengthWithoutCallsFailsWithOutputTruncated() {
     ModelResponsePlan plan =
@@ -225,6 +291,10 @@ class ModelResponsePlannerTest {
   }
 
   private static ToolBinding toolBinding(String name) {
+    return toolBinding(name, new InputSchema("arguments", Map.of(), Set.of(), false));
+  }
+
+  private static ToolBinding toolBinding(String name, InputSchema schema) {
     return new ToolBinding(
         new AgentToolDefinition(
             new AgentToolId("test." + name.replace('_', '-')),
@@ -233,7 +303,7 @@ class ModelResponsePlannerTest {
                 "1.0",
                 "description of " + name,
                 name,
-                new InputSchema("arguments", Map.of(), Set.of(), false),
+                schema,
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),
