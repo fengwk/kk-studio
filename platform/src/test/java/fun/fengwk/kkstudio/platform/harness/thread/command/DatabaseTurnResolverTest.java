@@ -1437,6 +1437,29 @@ class DatabaseTurnResolverTest {
     // FULL 预算为 min(1024, floor(0.8 * 1024) = 819, removedPrefixTokens=123) = 123。
   }
 
+  /** variant 未声明输出上限时，冻结的 spec 必须已经带上 model 全局 limit.output；显式声明时原样保留，绝不回退到其他数值。 */
+  @Test
+  void frozenSpecResolvesNullVariantOutputLimitFromModelLimit() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.modelGlobalOutputLimit(600);
+
+    TurnResolver.Resolved resolved =
+        fixture.resolvedResult(fixture.path(settings(null, "default")), null);
+
+    // variant 的 maxOutputTokens 在冻结前已被 model limit.output 补齐，请求侧不再是 null。
+    assertEquals(600, resolved.spec().variant().maxOutputTokens());
+    assertEquals(600, resolved.maxOutputTokens());
+
+    // 显式声明 variant 上限的模型继续使用自己的值（1024），不被 model 全局值改写。
+    Fixture explicit = new Fixture(List.of(), List.of(), List.of());
+    assertEquals(
+        1024,
+        explicit.resolved(explicit.path(settings(null, "default"))).variant().maxOutputTokens());
+    assertEquals(
+        2048,
+        explicit.resolved(explicit.path(settings(null, "custom"))).variant().maxOutputTokens());
+  }
+
   @Test
   void compactionOutputBudgetUsesActualModelLimitAndRemovedPrefixTokens() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());

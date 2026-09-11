@@ -305,7 +305,7 @@ Tool 的 `AppendCustomEntry` intent 必须属于自身 Contributor、命中已�
 
 `DatabaseTurnResolver` 只以 candidate `EntryPath` 的最新 `BranchSettings` 为输入，并在每个 live turn 解析：
 
-1. 当前 Agent、Model、Provider、Variant 和 ProviderFactory；
+1. 当前 Agent、Model、Provider、Variant 和 ProviderFactory，并把 Variant 未显式声明的输出上限补齐为 Model 全局 `limit.output`（冻结的 `ModelRequestSpec` 中不再保留 null 上限）；
 2. 当前 Environment context；
 3. Agent config 中的每个工具 ID 均通过 `RuntimeToolCatalog.findTool(id)` 查找并校验 `tool.definition().visibility() == ToolVisibility.SELECTABLE`；若 `tool.requirements().environmentRequired()` 为 true 但当前 branch 无 `EnvironmentBinding`，则在 planning 阶段被确定性拒绝并返回 `AssistantError.code=PLANNING_FAILED`；
 4. skills、subagents 和内部 `load_skill` / `task`；
