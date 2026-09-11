@@ -30,6 +30,7 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,7 +38,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -147,6 +150,57 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertNotNull(
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, continuationModel.id())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, chain.turn().threadId())));
+  }
+
+  @Test
+  void resourceToolResultWithoutMaterializerCompletesBatchInsteadOfRetryingForever() {
+    Fixture fixture = fixture();
+    var chain =
+        seedToolChain(
+            fixture.store,
+            List.of("call-1"),
+            ModelInvocationStatus.SUCCEEDED,
+            List.of(ToolInvocationStatus.READY));
+    ResourceRef resource =
+        new ResourceRef(
+            "file:///report.txt",
+            "text/plain",
+            "report.txt",
+            3L,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    succeedToolWith(
+        fixture.store,
+        chain.toolInvocationIds().getFirst(),
+        new ToolResult(
+            "call-1",
+            List.of(new ResourceResultContent(resource, "complete preview")),
+            false,
+            "{}"));
+    requestThreadWork(fixture.store, chain.turn().threadId());
+
+    // 测试意图：复现生产卡死路径；单次 THREAD claim 必须落 ToolResult/TURN_END、删除 invocation rows 并保留 continuation
+    // wake。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
+
+    List<Entry> entries = path(fixture.store, chain.turn().threadId()).entries();
+    assertEquals(6, entries.size());
+    MessagePayload payload = (MessagePayload) entries.get(4).payload();
+    ToolResultMessageContent result =
+        (ToolResultMessageContent) payload.message().contents().getFirst();
+    String text = ((TextMessageContent) result.contents().getFirst()).text();
+    assertEquals(
+        "[Resource result available as metadata only: report.txt (text/plain)]\ncomplete preview",
+        text);
+    assertFalse(text.contains("file:///report.txt"));
+    assertInstanceOf(TurnEndPayload.class, entries.get(5).payload());
+    assertTrue(toolsByAssistant(fixture.store, chain.assistantEntryId()).isEmpty());
+    assertNull(
+        fixture
+            .store
+            .transaction(tx -> tx.findModelInvocation(chain.modelInvocationId()))
+            .orElse(null));
+    assertNotNull(
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, chain.turn().threadId())));
   }
 
   /**
