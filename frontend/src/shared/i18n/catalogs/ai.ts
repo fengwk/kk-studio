@@ -1730,6 +1730,30 @@ export const aiCatalog = {
     'en-US': 'Status',
     'zh-CN': '状态',
   },
+  'ai.runtime.event.detail.rawStatus': {
+    'en-US': 'Raw status',
+    'zh-CN': '原始状态',
+  },
+  'ai.runtime.event.detail.invocationId': {
+    'en-US': 'Invocation ID',
+    'zh-CN': '调用 ID',
+  },
+  'ai.runtime.event.detail.modelInvocationId': {
+    'en-US': 'Model invocation ID',
+    'zh-CN': '模型调用 ID',
+  },
+  'ai.runtime.event.detail.assistantEntryId': {
+    'en-US': 'Assistant entry ID',
+    'zh-CN': '助手 Entry ID',
+  },
+  'ai.runtime.event.detail.turnStartEntryId': {
+    'en-US': 'Turn start entry ID',
+    'zh-CN': '回合起始 Entry ID',
+  },
+  'ai.runtime.event.detail.requestHeadEntryId': {
+    'en-US': 'Request head entry ID',
+    'zh-CN': '请求头 Entry ID',
+  },
   'ai.runtime.event.detail.attempt': {
     'en-US': 'Attempt',
     'zh-CN': '尝试次数',
@@ -1745,6 +1769,58 @@ export const aiCatalog = {
   'ai.runtime.event.detail.toolCallId': {
     'en-US': 'Tool call ID',
     'zh-CN': '工具调用 ID',
+  },
+  'ai.runtime.event.detail.toolId': {
+    'en-US': 'Tool ID',
+    'zh-CN': '工具 ID',
+  },
+  'ai.runtime.event.detail.toolVersion': {
+    'en-US': 'Tool version',
+    'zh-CN': '工具版本',
+  },
+  'ai.runtime.event.detail.rendererKey': {
+    'en-US': 'Renderer',
+    'zh-CN': '渲染器',
+  },
+  'ai.runtime.event.detail.callIndex': {
+    'en-US': 'Call index',
+    'zh-CN': '调用索引',
+  },
+  'ai.runtime.event.detail.environment': {
+    'en-US': 'Environment',
+    'zh-CN': '运行环境',
+  },
+  'ai.runtime.event.detail.arguments': {
+    'en-US': 'Arguments',
+    'zh-CN': '参数',
+  },
+  'ai.runtime.event.detail.approval': {
+    'en-US': 'Approval',
+    'zh-CN': '审批',
+  },
+  'ai.runtime.event.detail.result': {
+    'en-US': 'Result',
+    'zh-CN': '结果',
+  },
+  'ai.runtime.event.detail.error': {
+    'en-US': 'Error',
+    'zh-CN': '错误',
+  },
+  'ai.runtime.event.detail.realtime': {
+    'en-US': 'Realtime stream',
+    'zh-CN': '实时流',
+  },
+  'ai.runtime.event.detail.checkpoint': {
+    'en-US': 'Checkpoint',
+    'zh-CN': '检查点',
+  },
+  'ai.runtime.event.detail.partialText': {
+    'en-US': 'Partial output',
+    'zh-CN': '部分输出',
+  },
+  'ai.runtime.event.detail.partialThinking': {
+    'en-US': 'Partial thinking',
+    'zh-CN': '部分思考',
   },
   'ai.runtime.event.detail.errorCode': {
     'en-US': 'Error code',
