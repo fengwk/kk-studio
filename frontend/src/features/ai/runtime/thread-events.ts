@@ -73,7 +73,7 @@ export interface ThreadEventRecord {
   createdAt: DialogueTimestamp
   /** 结构化详情行（detail widget 渲染为 label/value）。 */
   details: ThreadEventDetailRow[]
-  /** durable Entry 的原始 payload JSON；synthetic 记录为 null（只供详情展示）。 */
+  /** 事件的完整原始 JSON（durable Entry 为 payload JSON，synthetic 活跃记录为其 DTO / realtime stream 的 pretty JSON）。 */
   rawJson: string | null
 }
 
@@ -128,6 +128,24 @@ function prettyJson(raw: string): string {
     return JSON.stringify(JSON.parse(raw), null, 2)
   } catch {
     return raw
+  }
+}
+
+function formatDisplayJson(value: unknown): string {
+  if (value == null) {
+    return ''
+  }
+  if (typeof value === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2)
+    } catch {
+      return value
+    }
+  }
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
   }
 }
 
@@ -573,6 +591,29 @@ function projectAttemptFailureRecord(
   failure: ModelAttemptFailureDTO,
   turn: { turnStartEntryId: string | null; turnNumber: number },
 ): ThreadEventRecord {
+  const details: ThreadEventDetailRow[] = [
+    { label: translate('ai.runtime.event.detail.modelInvocationId'), value: failure.modelInvocationId },
+    { label: translate('ai.runtime.event.detail.turnStartEntryId'), value: failure.turnStartEntryId },
+    { label: translate('ai.runtime.event.detail.requestHeadEntryId'), value: failure.requestHeadEntryId },
+    { label: translate('ai.runtime.event.detail.attempt'), value: String(failure.attempt) },
+    { label: translate('ai.runtime.event.detail.sequence'), value: failure.sequence },
+    { label: translate('ai.runtime.event.detail.errorCode'), value: failure.errorCode },
+    { label: translate('ai.runtime.event.detail.errorMessage'), value: failure.errorMessage },
+    { label: translate('ai.runtime.event.detail.failedAt'), value: String(failure.failedAt) },
+    { label: translate('ai.runtime.event.detail.retryAt'), value: String(failure.retryAt) },
+  ]
+  if (failure.text) {
+    details.push({
+      label: translate('ai.runtime.event.detail.partialText'),
+      value: failure.text,
+    })
+  }
+  if (failure.thinking) {
+    details.push({
+      label: translate('ai.runtime.event.detail.partialThinking'),
+      value: failure.thinking,
+    })
+  }
   return {
     id: `active:attempt-failure:${failure.modelInvocationId}:${failure.attempt}`,
     source: 'attempt-failure',
@@ -584,15 +625,8 @@ function projectAttemptFailureRecord(
     title: kindTitle('MODEL_ATTEMPT_FAILURE'),
     summary: `${failure.errorCode} · ${summarizeField(failure.errorMessage, translate('ai.runtime.event.emptyText'))}`,
     createdAt: failure.failedAt,
-    details: [
-      { label: translate('ai.runtime.event.detail.attempt'), value: String(failure.attempt) },
-      { label: translate('ai.runtime.event.detail.sequence'), value: failure.sequence },
-      { label: translate('ai.runtime.event.detail.errorCode'), value: failure.errorCode },
-      { label: translate('ai.runtime.event.detail.errorMessage'), value: failure.errorMessage },
-      { label: translate('ai.runtime.event.detail.failedAt'), value: String(failure.failedAt) },
-      { label: translate('ai.runtime.event.detail.retryAt'), value: String(failure.retryAt) },
-    ],
-    rawJson: null,
+    details,
+    rawJson: formatDisplayJson(failure),
   }
 }
 
@@ -608,11 +642,45 @@ function projectActiveModelRecord(
   const chars = (stream?.text.length ?? 0) + (stream?.thinking.length ?? 0)
   const details: ThreadEventDetailRow[] = [
     { label: translate('ai.runtime.event.detail.status'), value: eventStatusText(status) },
+    ...(invocation.status
+      ? [{ label: translate('ai.runtime.event.detail.rawStatus'), value: invocation.status }]
+      : []),
+    { label: translate('ai.runtime.event.detail.invocationId'), value: invocation.id },
+    { label: translate('ai.runtime.event.detail.turnStartEntryId'), value: invocation.turnStartEntryId },
+    { label: translate('ai.runtime.event.detail.requestHeadEntryId'), value: invocation.requestHeadEntryId },
     { label: translate('ai.runtime.event.detail.attempt'), value: String(invocation.attempt) },
   ]
+  if (invocation.streamCheckpointJson != null) {
+    details.push({
+      label: translate('ai.runtime.event.detail.checkpoint'),
+      value: formatDisplayJson(invocation.streamCheckpointJson),
+    })
+  }
+  if (invocation.resultJson != null) {
+    details.push({
+      label: translate('ai.runtime.event.detail.result'),
+      value: formatDisplayJson(invocation.resultJson),
+    })
+  }
+  if (invocation.errorJson != null) {
+    details.push({
+      label: translate('ai.runtime.event.detail.error'),
+      value: formatDisplayJson(invocation.errorJson),
+    })
+  }
   if (chars > 0) {
     details.push({ label: translate('ai.runtime.event.detail.chars'), value: String(chars) })
   }
+  if (stream != null) {
+    details.push({
+      label: translate('ai.runtime.event.detail.realtime'),
+      value: formatDisplayJson(stream),
+    })
+  }
+  const rawPayload = stream != null
+    ? { ...invocation, realtimeStream: stream }
+    : invocation
+
   return {
     id: `active:model:${invocation.id}`,
     source: 'active-model',
@@ -624,8 +692,8 @@ function projectActiveModelRecord(
     title: kindTitle('ACTIVE_MODEL_INVOCATION'),
     summary: `${eventStatusText(status)} · ${translate('ai.runtime.event.detail.attempt')} ${invocation.attempt}`,
     createdAt: invocation.createTime,
-    details,
-    rawJson: null,
+    details: withTime(details, invocation.createTime),
+    rawJson: formatDisplayJson(rawPayload),
   }
 }
 
@@ -635,6 +703,55 @@ function projectActiveToolRecord(
   turn: { turnStartEntryId: string | null; turnNumber: number },
 ): ThreadEventRecord {
   const status = activeToolStatus(invocation, stream)
+  const details: ThreadEventDetailRow[] = [
+    { label: translate('ai.runtime.event.detail.status'), value: eventStatusText(status) },
+    ...(invocation.status
+      ? [{ label: translate('ai.runtime.event.detail.rawStatus'), value: invocation.status }]
+      : []),
+    { label: translate('ai.runtime.event.detail.invocationId'), value: invocation.id },
+    { label: translate('ai.runtime.event.detail.modelInvocationId'), value: invocation.modelInvocationId },
+    { label: translate('ai.runtime.event.detail.assistantEntryId'), value: invocation.assistantEntryId },
+    { label: translate('ai.runtime.event.detail.toolName'), value: invocation.toolName || '' },
+    { label: translate('ai.runtime.event.detail.toolCallId'), value: invocation.toolCallId || '' },
+    { label: translate('ai.runtime.event.detail.toolId'), value: invocation.toolId ?? '' },
+    { label: translate('ai.runtime.event.detail.toolVersion'), value: invocation.toolVersion ?? '' },
+    { label: translate('ai.runtime.event.detail.rendererKey'), value: invocation.rendererKey || '' },
+    { label: translate('ai.runtime.event.detail.callIndex'), value: String(invocation.callIndex) },
+    { label: translate('ai.runtime.event.detail.attempt'), value: String(invocation.attempt) },
+    {
+      label: translate('ai.runtime.event.detail.environment'),
+      value: invocation.environment != null ? formatDisplayJson(invocation.environment) : '',
+    },
+    { label: translate('ai.runtime.event.detail.arguments'), value: formatDisplayJson(invocation.argumentsJson) },
+  ]
+  if (invocation.approvalJson != null) {
+    details.push({
+      label: translate('ai.runtime.event.detail.approval'),
+      value: formatDisplayJson(invocation.approvalJson),
+    })
+  }
+  if (invocation.resultJson != null) {
+    details.push({
+      label: translate('ai.runtime.event.detail.result'),
+      value: formatDisplayJson(invocation.resultJson),
+    })
+  }
+  if (invocation.errorJson != null) {
+    details.push({
+      label: translate('ai.runtime.event.detail.error'),
+      value: formatDisplayJson(invocation.errorJson),
+    })
+  }
+  if (stream != null) {
+    details.push({
+      label: translate('ai.runtime.event.detail.realtime'),
+      value: formatDisplayJson(stream),
+    })
+  }
+  const rawPayload = stream != null
+    ? { ...invocation, realtimeStream: stream }
+    : invocation
+
   return {
     id: `active:tool:${invocation.id}`,
     source: 'active-tool',
@@ -646,13 +763,8 @@ function projectActiveToolRecord(
     title: kindTitle('ACTIVE_TOOL_INVOCATION'),
     summary: `${invocation.toolName || translate('ai.runtime.event.unknownTool')} · ${eventStatusText(status)}`,
     createdAt: invocation.createTime,
-    details: [
-      { label: translate('ai.runtime.event.detail.status'), value: eventStatusText(status) },
-      { label: translate('ai.runtime.event.detail.toolName'), value: invocation.toolName || '' },
-      { label: translate('ai.runtime.event.detail.toolCallId'), value: invocation.toolCallId || '' },
-      { label: translate('ai.runtime.event.detail.attempt'), value: String(invocation.attempt) },
-    ],
-    rawJson: null,
+    details: withTime(details, invocation.createTime),
+    rawJson: formatDisplayJson(rawPayload),
   }
 }
 

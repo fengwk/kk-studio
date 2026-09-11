@@ -364,12 +364,17 @@ describe('buildThreadEventTimeline', () => {
     expect(modelEvent.source).toBe('active-model')
     expect(modelEvent.kind).toBe('ACTIVE_MODEL_INVOCATION')
     expect(modelEvent.status).toBe('running')
-    expect(modelEvent.rawJson).toBeNull()
+    const modelPayload = JSON.parse(modelEvent.rawJson ?? '{}')
+    expect(modelPayload.id).toBe('model-1')
+    expect(modelPayload.status).toBe('RUNNING')
+    expect(modelPayload.realtimeStream?.text).toBe('ok')
     expect(modelEvent.entryId).toBeNull()
     expect(modelEvent.turnNumber).toBe(1)
     expect(modelEvent.details).toEqual(
       expect.arrayContaining([
         { label: '状态', value: '运行中' },
+        { label: '原始状态', value: 'RUNNING' },
+        { label: '调用 ID', value: 'model-1' },
         { label: '尝试次数', value: '2' },
         { label: '已流式字符数', value: '2' },
       ]),
@@ -798,6 +803,183 @@ describe('buildThreadEventTimeline', () => {
     expect(activeTool).toBeDefined()
     expect(activeTool?.title).toBe('ACTIVE_TOOL_INVOCATION')
     expect(activeTool?.summary).toBe('create_goal · 运行中')
+  })
+
+  it('projects active tool invocation with full raw payload and structured details for arguments, approval, result, error, and realtime stream', () => {
+    // 意图：验证活跃 Tool invocation 的 details 结构化展示所有关键字段（状态、原始状态、ID、参数、审批、结果、错误、环境、实时流），
+    // 且 rawJson 完整包含全部 DTO 字段与 realtimeStream 数据，不遗漏任何细节。
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [
+        { type: 'tool_call', toolCallId: 'call-full', toolName: 'bash' },
+      ])),
+    ]
+    const fullInvocation = toolInvocation({
+      id: 'inv-full',
+      modelInvocationId: 'model-123',
+      assistantEntryId: 'assistant-1',
+      callIndex: 2,
+      status: 'COMPLETED',
+      attempt: 1,
+      toolCallId: 'call-full',
+      toolName: 'bash',
+      toolVersion: '2.0',
+      rendererKey: 'bash-renderer',
+      toolId: 'tools.bash',
+      environment: { type: 'local', workdir: '/workspace' } as unknown as ToolInvocationDTO['environment'],
+      argumentsJson: '{"command":"echo hello","timeout":30}',
+      approvalJson: '{"approved":true,"approver":"admin"}',
+      resultJson: '{"exitCode":0,"stdout":"hello\\n"}',
+      errorJson: null,
+    })
+    const toolStreamMap = new Map([
+      [
+        'inv-full',
+        {
+          threadId: 'thread-1',
+          invocationId: 'inv-full',
+          attempt: 1,
+          toolCallId: 'call-full',
+          text: 'hello\n',
+          error: false,
+          createdAt: '2026-07-28T10:00:02Z',
+        },
+      ],
+    ])
+
+    const events = buildThreadEventTimeline({
+      entries,
+      modelInvocation: null,
+      toolInvocations: [fullInvocation],
+      toolStreams: toolStreamMap,
+    })
+
+    const toolEvent = events.find((e) => e.id === 'active:tool:inv-full')
+    expect(toolEvent).toBeDefined()
+    expect(toolEvent!.kind).toBe('ACTIVE_TOOL_INVOCATION')
+    expect(toolEvent!.status).toBe('completed')
+
+    // details 验证结构化展示
+    const detailMap = new Map(toolEvent!.details.map((d) => [d.label, d.value]))
+    expect(detailMap.get('状态')).toBe('已完成')
+    expect(detailMap.get('原始状态')).toBe('COMPLETED')
+    expect(detailMap.get('调用 ID')).toBe('inv-full')
+    expect(detailMap.get('模型调用 ID')).toBe('model-123')
+    expect(detailMap.get('助手 Entry ID')).toBe('assistant-1')
+    expect(detailMap.get('工具')).toBe('bash')
+    expect(detailMap.get('工具调用 ID')).toBe('call-full')
+    expect(detailMap.get('工具 ID')).toBe('tools.bash')
+    expect(detailMap.get('工具版本')).toBe('2.0')
+    expect(detailMap.get('渲染器')).toBe('bash-renderer')
+    expect(detailMap.get('调用索引')).toBe('2')
+    expect(detailMap.get('尝试次数')).toBe('1')
+
+    // 格式化后的 JSON 字符串断言
+    expect(detailMap.get('参数')).toBe(JSON.stringify(JSON.parse(fullInvocation.argumentsJson), null, 2))
+    expect(detailMap.get('审批')).toBe(JSON.stringify(JSON.parse(fullInvocation.approvalJson!), null, 2))
+    expect(detailMap.get('结果')).toBe(JSON.stringify(JSON.parse(fullInvocation.resultJson!), null, 2))
+    expect(detailMap.has('错误')).toBe(false)
+    expect(detailMap.get('运行环境')).toContain('/workspace')
+    expect(detailMap.get('实时流')).toContain('hello\\n')
+
+    // rawJson 验证完整性
+    expect(toolEvent!.rawJson).not.toBeNull()
+    const rawParsed = JSON.parse(toolEvent!.rawJson!)
+    expect(rawParsed.id).toBe('inv-full')
+    expect(rawParsed.modelInvocationId).toBe('model-123')
+    expect(rawParsed.argumentsJson).toBe(fullInvocation.argumentsJson)
+    expect(rawParsed.resultJson).toBe(fullInvocation.resultJson)
+    expect(rawParsed.approvalJson).toBe(fullInvocation.approvalJson)
+    expect(rawParsed.errorJson).toBeNull()
+    expect(rawParsed.realtimeStream?.text).toBe('hello\n')
+
+    // 验证失败工具调用时包含 errorJson 且 status 为 failed
+    const failedInvocation = toolInvocation({
+      id: 'inv-failed',
+      assistantEntryId: 'assistant-1',
+      status: 'FAILED',
+      resultJson: null,
+      errorJson: '{"code":"IO_ERROR","message":"disk full"}',
+    })
+    const failedEvents = buildThreadEventTimeline({
+      entries,
+      modelInvocation: null,
+      toolInvocations: [failedInvocation],
+    })
+    const failedEvent = failedEvents.find((e) => e.id === 'active:tool:inv-failed')!
+    expect(failedEvent.status).toBe('failed')
+    const failedDetailMap = new Map(failedEvent.details.map((d) => [d.label, d.value]))
+    expect(failedDetailMap.get('错误')).toBe(JSON.stringify(JSON.parse(failedInvocation.errorJson!), null, 2))
+    expect(JSON.parse(failedEvent.rawJson!).errorJson).toBe(failedInvocation.errorJson)
+  })
+
+  it('handles malformed embedded JSON gracefully without throwing', () => {
+    // 意图：验证当 embedded JSON（如 argumentsJson, resultJson 等）格式错误时，投影不会抛出异常，而是安全地原样保留。
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+    ]
+    const malformedInvocation = toolInvocation({
+      id: 'inv-malformed',
+      argumentsJson: '{ malformed json: not valid }',
+      approvalJson: 'invalid approval [[[',
+      resultJson: '{ unclosed string: "abc }',
+      errorJson: 'some plain text error',
+    })
+
+    const events = build(entries, { toolInvocations: [malformedInvocation] })
+    const toolEvent = events.find((e) => e.id === 'active:tool:inv-malformed')
+    expect(toolEvent).toBeDefined()
+
+    const detailMap = new Map(toolEvent!.details.map((d) => [d.label, d.value]))
+    expect(detailMap.get('参数')).toBe('{ malformed json: not valid }')
+    expect(detailMap.get('审批')).toBe('invalid approval [[[')
+    expect(detailMap.get('结果')).toBe('{ unclosed string: "abc }')
+    expect(detailMap.get('错误')).toBe('some plain text error')
+    expect(toolEvent!.rawJson).not.toBeNull()
+  })
+
+  it('projects active model attempt failure with full failure DTO in rawJson and complete failure details', () => {
+    // 意图：验证 synthetic MODEL_ATTEMPT_FAILURE 的 rawJson 不再为 null，且包含完整的 failure DTO 与 partial text/thinking。
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+    ]
+    const failure = attemptFailure({
+      modelInvocationId: 'model-fail-1',
+      turnStartEntryId: 'turn-1',
+      requestHeadEntryId: 'head-fail-1',
+      attempt: 3,
+      sequence: '10',
+      text: 'partial stream output text',
+      thinking: 'thinking trace details',
+      errorCode: 'CONTEXT_LENGTH_EXCEEDED',
+      errorMessage: 'Prompt too long',
+    })
+
+    const events = build(entries, {
+      modelInvocation: modelInvocation('FAILED', 3),
+      modelAttemptFailures: [failure],
+    })
+
+    const failureEvent = events.find((e) => e.source === 'attempt-failure')
+    expect(failureEvent).toBeDefined()
+    expect(failureEvent!.status).toBe('failed')
+
+    const detailMap = new Map(failureEvent!.details.map((d) => [d.label, d.value]))
+    expect(detailMap.get('模型调用 ID')).toBe('model-fail-1')
+    expect(detailMap.get('回合起始 Entry ID')).toBe('turn-1')
+    expect(detailMap.get('请求头 Entry ID')).toBe('head-fail-1')
+    expect(detailMap.get('尝试次数')).toBe('3')
+    expect(detailMap.get('序号')).toBe('10')
+    expect(detailMap.get('错误码')).toBe('CONTEXT_LENGTH_EXCEEDED')
+    expect(detailMap.get('错误信息')).toBe('Prompt too long')
+    expect(detailMap.get('部分输出')).toBe('partial stream output text')
+    expect(detailMap.get('部分思考')).toBe('thinking trace details')
+
+    expect(failureEvent!.rawJson).not.toBeNull()
+    const rawParsed = JSON.parse(failureEvent!.rawJson!)
+    expect(rawParsed.modelInvocationId).toBe('model-fail-1')
+    expect(rawParsed.errorCode).toBe('CONTEXT_LENGTH_EXCEEDED')
+    expect(rawParsed.text).toBe('partial stream output text')
   })
 })
 
