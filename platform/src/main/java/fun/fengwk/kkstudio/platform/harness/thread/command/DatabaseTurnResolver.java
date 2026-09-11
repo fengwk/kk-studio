@@ -192,6 +192,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
               + " variant="
               + selection.variant());
     }
+    // 冻结前把“未显式声明的 variant 输出上限”解析为模型全局 limit.output，request spec 里不再存 null。
+    variant = withResolvedOutputLimit(parsedModel, variant);
     ProviderFactory providerFactory =
         require(
             providerFactories.lookup(providerType).orElse(null),
@@ -365,6 +367,24 @@ public final class DatabaseTurnResolver implements TurnResolver {
       throw rejection("model limit.output must be a positive int, got " + maxOutputTokens);
     }
     return (int) maxOutputTokens;
+  }
+
+  /** 冻结前补齐 variant 的输出上限：未显式声明时解析为 model 全局 limit.output，其他字段原样保留。 */
+  private static ModelVariant withResolvedOutputLimit(
+      ParsedAgentModelConfig parsedModel, ModelVariant variant) {
+    if (variant.maxOutputTokens() != null) {
+      return variant;
+    }
+    return new ModelVariant(
+        variant.id(),
+        maxOutputTokens(parsedModel, variant),
+        variant.temperature(),
+        variant.topP(),
+        variant.topK(),
+        variant.frequencyPenalty(),
+        variant.presencePenalty(),
+        variant.stopSequences(),
+        variant.reasoningEffort());
   }
 
   private AgentDefinitionConfigDTO decodeAgentConfig(AgentDefinition agent) {
