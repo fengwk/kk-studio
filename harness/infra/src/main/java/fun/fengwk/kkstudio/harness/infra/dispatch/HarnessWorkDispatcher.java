@@ -51,10 +51,11 @@ import java.util.function.Consumer;
  * poll 用 fixed-delay 调度，{@link #stop} 取消 future。
  *
  * <p>Processor handoff task 语义：task finally 总是释放本地 capacity 并再次 wake；Processor {@code process} 抛
- * RuntimeException 只 log，绝不猜测 complete / reschedule / delete（保留 lease 待过期恢复）；Error 不吞但 finally
- * 必须执行。{@link #stop} 不 shutdown 注入的 drain / worker / poll executor，不 interrupt 已接受 task，不等待
- * Processor task 完成；stop 后不启动新的 drain iteration，已进入数据库的 claim 若在 handoff 前观察到 stop，则会被
- * ownership-fenced 所有权围栏归还。
+ * RuntimeException 时只在 dispatcher 边界记录一条 ERROR（target type/id、lease token/deadline、claimed wake
+ * version、required environment、原始异常栈），既不重复记录，也绝不猜测 complete / reschedule / delete（保留 lease
+ * 待过期恢复）；Error 不吞但 finally 必须执行。{@link #stop} 不 shutdown 注入的 drain / worker / poll executor，不
+ * interrupt 已接受 task，不等待 Processor task 完成；stop 后不启动新的 drain iteration，已进入数据库的 claim 若在 handoff
+ * 前观察到 stop，则会被 ownership-fenced 所有权围栏归还。
  *
  * <p>三个注入 executor 全部由调用方持有生命周期；drainExecutor 必须串行执行任务（例如单线程池），workerExecutor 的队列 + 运行中 handoff
  * task 总数由 {@code maxDispatchTasks} 约束。两个 {@link Executor} 必须使用 fail-fast submission contract：成功
@@ -410,8 +411,15 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       } catch (RuntimeException error) {
         // 绝不猜测 complete / reschedule / delete：保留 lease 待过期后由后续 claim 恢复。
         log.error(
-            "processor failed for {}; its lease is left to expire so the work can be recovered",
-            claim.target(),
+            "processor failed for target type={} id={}; leaseToken={} leaseUntil={} "
+                + "claimedWakeVersion={} requiredEnvironmentId={}; its lease is left to expire so "
+                + "the work can be recovered",
+            claim.target().type(),
+            claim.target().id(),
+            claim.leaseToken(),
+            claim.leaseUntil(),
+            claim.claimedWakeVersion(),
+            claim.requiredEnvironmentId(),
             error);
       }
     } finally {

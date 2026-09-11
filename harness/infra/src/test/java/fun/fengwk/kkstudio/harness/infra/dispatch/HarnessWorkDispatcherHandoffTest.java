@@ -17,8 +17,15 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.StackTraceElementProxy;
+import ch.qos.logback.classic.spi.ThrowableProxy;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.ModelSeed;
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.MutableClock;
@@ -55,6 +62,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -250,17 +258,27 @@ class HarnessWorkDispatcherHandoffTest {
         claims.get(1).target());
   }
 
+  /**
+   * Processor RuntimeException 语义：dispatcher 边界恰好记录一条 ERROR，消息含 target type/id、lease
+   * token/deadline、claimed wake version、required environment 与 lease-expiry recovery
+   * action，并保留原始异常与栈；同时不 complete / reschedule / delete（lease 原样保留），且本地 capacity 仍被释放。
+   */
   @Test
   void runtimeExceptionFromTheProcessorKeepsTheLeaseButReleasesTheSlot() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     ThreadSeed threadSeed = seedThread(store);
     ModelSeed modelSeed = seedModel(store);
     CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
+    AtomicReference<Throwable> processorFailure = new AtomicReference<>();
     Consumer<ClaimedWork> failingHandler =
         claim -> {
           claims.add(claim);
-          throw new IllegalStateException("processor boom");
+          // 异常在 processor 调用点创建：日志必须原样保留该对象的完整栈（含 handoff 帧）。
+          IllegalStateException boom = new IllegalStateException("processor boom");
+          processorFailure.set(boom);
+          throw boom;
         };
+    ListAppender<ILoggingEvent> logs = attachListAppender(HarnessWorkDispatcher.class);
     HarnessWorkDispatcher dispatcher =
         newDispatcher(
             store,
@@ -273,19 +291,51 @@ class HarnessWorkDispatcherHandoffTest {
             claims::add,
             claims::add);
 
-    dispatcher.start();
-    awaitTrue(() -> claims.size() >= 1);
-    Work work = work(store, new WorkTarget(WorkTargetType.THREAD, threadSeed.threadId()));
-    // 保留 lease 待过期恢复：不 complete / reschedule / delete。
-    assertEquals(claims.get(0).leaseToken(), work.leaseToken());
-    assertEquals(claims.get(0).leaseUntil(), work.leaseUntil());
-    assertEquals(NOW, work.availableAt());
+    try {
+      dispatcher.start();
+      awaitTrue(() -> claims.size() >= 1);
+      Work work = work(store, new WorkTarget(WorkTargetType.THREAD, threadSeed.threadId()));
+      // 保留 lease 待过期恢复：不 complete / reschedule / delete。
+      assertEquals(claims.get(0).leaseToken(), work.leaseToken());
+      assertEquals(claims.get(0).leaseUntil(), work.leaseUntil());
+      assertEquals(NOW, work.availableAt());
 
-    // 本地 capacity 已释放：下一个 due 目标仍可被 claim。
-    awaitTrue(() -> claims.size() == 2);
-    assertEquals(
-        new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()),
-        claims.get(1).target());
+      // 本地 capacity 已释放：下一个 due 目标仍可被 claim（该 claim 晚于失败 handoff 的 ERROR）。
+      awaitTrue(() -> claims.size() == 2);
+      assertEquals(
+          new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()),
+          claims.get(1).target());
+    } finally {
+      detachListAppender(HarnessWorkDispatcher.class, logs);
+    }
+
+    // 恰好一条日志：dispatcher 边界不重复记录 Thread/Model/Tool 级别的失败日志。
+    assertEquals(1, logs.list.size());
+    ILoggingEvent event = logs.list.get(0);
+    assertEquals(Level.ERROR, event.getLevel());
+    ClaimedWork claim = claims.get(0);
+    String message = event.getFormattedMessage();
+    assertTrue(message.contains("target type=THREAD"), message);
+    assertTrue(message.contains("id=" + threadSeed.threadId()), message);
+    assertTrue(message.contains("leaseToken=" + claim.leaseToken()), message);
+    assertTrue(message.contains("leaseUntil=" + claim.leaseUntil()), message);
+    assertTrue(message.contains("claimedWakeVersion=" + claim.claimedWakeVersion()), message);
+    assertTrue(message.contains("requiredEnvironmentId=null"), message);
+    assertTrue(
+        message.contains("its lease is left to expire so the work can be recovered"), message);
+
+    // Throwable 必须作为最后一个参数传入：日志事件保留异常身份与完整栈，而不是只剩格式化消息。
+    Throwable boom = processorFailure.get();
+    assertSame(boom, ((ThrowableProxy) event.getThrowableProxy()).getThrowable());
+    assertEquals(IllegalStateException.class.getName(), event.getThrowableProxy().getClassName());
+    assertEquals("processor boom", event.getThrowableProxy().getMessage());
+    StackTraceElementProxy[] frames = event.getThrowableProxy().getStackTraceElementProxyArray();
+    // 完整栈：logback 未截断帧数，且保留异常创建处的 processor / dispatcher 边界帧。
+    assertEquals(boom.getStackTrace().length, frames.length);
+    assertTrue(
+        Arrays.stream(frames)
+            .anyMatch(frame -> "runHandoff".equals(frame.getStackTraceElement().getMethodName())),
+        () -> "stack trace must retain the dispatcher frame: " + Arrays.toString(frames));
   }
 
   @Test
@@ -634,6 +684,19 @@ class HarnessWorkDispatcherHandoffTest {
                 handler,
                 handler,
                 handler));
+  }
+
+  /** 给指定 logger 临时挂一个 logback ListAppender，用于断言日志的 level、格式化消息与 throwable。 */
+  private static ListAppender<ILoggingEvent> attachListAppender(Class<?> type) {
+    ListAppender<ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    ((Logger) LoggerFactory.getLogger(type)).addAppender(appender);
+    return appender;
+  }
+
+  private static void detachListAppender(Class<?> type, ListAppender<ILoggingEvent> appender) {
+    ((Logger) LoggerFactory.getLogger(type)).detachAppender(appender);
+    appender.stop();
   }
 
   private static boolean isUuidToken(String token) {
