@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
@@ -158,6 +159,20 @@ class WorkdirPathSemanticsTest {
 
     assertFalse(read.error());
     assertTrue(text(read).contains("redirected"));
+  }
+
+  /** invocation workdir 仍必须可作为 cwd：不存在的路径与普通文件都应在执行前确定性拒绝。 */
+  @Test
+  void rejectsUnusableInvocationWorkdir() throws Exception {
+    Path missing = workdir.resolve("missing");
+    IllegalArgumentException missingError =
+        assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.workdir(null, missing));
+    assertTrue(missingError.getMessage().contains("workdir must exist"));
+
+    Path file = Files.writeString(workdir.resolve("not-a-directory.txt"), "content");
+    IllegalArgumentException fileError =
+        assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.workdir(null, file));
+    assertTrue(fileError.getMessage().contains("workdir must be an existing directory"));
   }
 
   private static String parentTraversal(String traversalPath) {
