@@ -43,11 +43,14 @@ flowchart LR
   DaemonImage --> Distributed
   Publish["main branch publish"] --> AppImage
   DevBuild["deploy/dev/Dockerfile (dev branch)"] --> DevImage["kk-studio-dev image"]
-  DevImage --> DevNode["NAS vps-kk-studio-dev<br/>Vite + Backend + Daemon + persistent git workspace"]
+  DevImage --> DevNode["NAS vps-kk-studio-dev<br/>Vite + Backend (Harness worker/Flyway disabled) + Daemon + persistent git workspace"]
+  AppImage --> MainNode["NAS vps-kk-studio<br/>immutable Main app, sole Harness worker + Flyway owner"]
+  DevNode -- "Daemon gateway ws://vps-kk-studio:8080/api/harness/environment-daemon/v1" --> MainNode
   Reliability --> App["app :8080"]
   Reliability --> Daemon["daemon -> ws://app:8080/api/harness/environment-daemon/v1"]
   App --> PG["PostgreSQL"]
   Test --> S3["MinIO S3-compatible"]
+  MainNode --> PG
   DevNode --> PG
 ```
 
@@ -132,8 +135,29 @@ build，不复制进 runtime image。App runtime 不含 Maven、Node 或 source�
 | node-runtime | `node:24.14.0-bookworm-slim` + `npm@11.9.0`，只用于提供与 `distribution` profile 一致的 Node 分发 |
 | runtime | `eclipse-temurin:21.0.8_9-jdk-jammy`，apt 安装 `bash`/`ca-certificates`/`curl`/`ffmpeg`/`git`/`jq`/`lsof`/`openssh-client`/`python3`，从官方 release 安装经 SHA-256 校验的 GitHub CLI `2.100.0`（linux/amd64），并从上面两个 stage 复制 Maven 与 Node |
 | user | `kkdaemon:kkdaemon`，uid/gid `10001`，`HOME=/home/kkdaemon`，`USER 10001:10001`，预建 `.ssh`（`0700`）与 `.config/gh` |
-| process | `/usr/local/bin/kk-studio-dev-entrypoint`：注入挂载的 SSH key，准备持久 Git 工作区，用 `scripts/dev.sh start` 启动 Backend/Vite，最后前台运行 Daemon |
+| process | `/usr/local/bin/kk-studio-dev-entrypoint`：注入挂载的 SSH key，准备持久 Git 工作区，用 `scripts/dev.sh start` 以 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false` 启动 Backend/Vite，最后前台运行 Daemon |
 | health | `kk-studio-dev-healthcheck` 同时探测 Backend `/actuator/health` 与 Vite `/threads`；`30s` interval、`10s` timeout、`2700s` start period、`20` retries |
+
+Dev Backend 的 Flyway 和进程内 Harness dispatcher 都关闭，Harness Thread/Model/Tool
+Work 只由 Main 执行；Daemon 经内部 Docker 网络连接
+`KK_STUDIO_CONTROL_PLANE_BASE_URL` 指向的 Main origin，而不是本容器的 Backend。
+NAS Compose 必须为两个容器接入同一内部 Docker network。Main origin 的值统一保存
+在外部 Compose 项目的 `.env`，`docker-compose.yml` 只把同名变量显式传入 Dev：
+
+```dotenv
+# .env
+KK_STUDIO_CONTROL_PLANE_BASE_URL=http://vps-kk-studio:8080
+```
+
+```yaml
+# docker-compose.yml
+environment:
+  KK_STUDIO_CONTROL_PLANE_BASE_URL: ${KK_STUDIO_CONTROL_PLANE_BASE_URL}
+```
+
+entrypoint 将其派生为
+`ws://vps-kk-studio:8080/api/harness/environment-daemon/v1`；不得填写公共 Gateway
+域名或附带路径的 URL。
 
 镜像内含 `/opt/kk-studio/daemon.jar` 与 `/opt/kk-studio/lib/`（Daemon runtime）以及
 `/opt/kk-studio/source`（构建时的源码快照，不含 `.git`、`.env*`、key/credential 文件、
@@ -166,7 +190,7 @@ entrypoint 启动时才复制进 `/home/kkdaemon/.ssh`；镜像 SSH 配置使用
 | 场景 | 耗时 | 内容 |
 | --- | --- | --- |
 | 冷 cache 首启 | ~29 分钟 | 空 workspace + 空 `~/.m2`/`~/.npm`，Maven 25:44、npm 2:00、Backend/Vite 就绪约 1 分钟 |
-| 已有 workspace 重启 | 秒级 | `DEV_SKIP_PACKAGE=true` 且 `frontend/node_modules` 已存在，只重启受管进程 |
+| 已有 workspace 重启 | 秒级 | `DEV_SKIP_PACKAGE=true` 且前端依赖已安装，只重启受管进程 |
 
 `--start-period=2700s` 按冷 cache 路径取值（实测 ~29 分钟 + 约 50% 余量），因此首次
 启动期间不会因为尚未就绪而被判为 unhealthy。真正的引导失败不会因此被掩盖：entrypoint
@@ -576,15 +600,18 @@ Main runtime image 不包含源码、Maven、Node 或 credential。Dev image
 （[Dev node image](#51-dev-node-image)）可以包含 `dev` commit 的源码快照作为初始化
 基线，但实际可写源码、Maven/npm cache 和 Daemon workspace 必须位于持久 volume；
 容器重建不得覆盖尚未 push 的工作区。普通源码更新只重启 Dev Backend/Vite 受管进程
-（`kk-studio-dev-reload`），只有 JDK、Node、系统工具或 Dev image 入口变化才重建
-Dev image。
+（`kk-studio-dev-reload`），不打断 Main 与 Dev Daemon 的连接；只有 JDK、Node、系统
+工具、Dev image 入口或 Daemon 代码变化才重建并重启 Dev 容器。
 
 外部 Compose 和 Gateway 配置只引用环境变量名。真实 database、S3、Provider、
 Gateway、registration credential 和 SSH 私钥不进入本仓库、Docker build context、
 image layer、日志或报告；registration token 当前作为 Daemon 启动参数传递。Main 与
-Dev 可以共享逻辑 database
-和 bucket；Main 独占 Flyway，两个节点均可运行 Worker，Dev Daemon 只连接 Dev
-Backend。精确的异版本 Work 路由和 Agent 停止边界由
+Dev 可以共享逻辑 database 和 bucket；Main 是唯一 Flyway owner 与唯一 Harness
+worker；Dev 关闭这两者，Harness 层只提供 control/query preview，其 Daemon 经内部
+Docker 网络连接 Main 的 `KK_STUDIO_CONTROL_PLANE_BASE_URL` origin（公共 Gateway
+不参与 Daemon 连接）。因此 Dev 中改动 processor/runtime 等异步执行路径必须依靠
+自动化测试或显式隔离环境验证，不能以 Dev preview 的行为作为验收依据。Agent 停止
+边界和其它自迭代约束由
 [自迭代运行规范](development-and-testing.md#44-nas-maindev-自迭代运行规范)
 定义。
 

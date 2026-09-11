@@ -3,14 +3,17 @@
 # kk-studio Dev 节点 entrypoint。
 #
 # 职责顺序（每一步失败都 fail closed，不留下半启动状态）：
-#   1. 把外部只读挂载的 SSH 凭据装进 `$HOME/.ssh`：只复制 `id_*`，私钥 0600、`.pub`
+#   1. 校验运行契约：prod profile、Flyway disabled、Harness worker disabled、
+#      registration token 与 control-plane origin 齐备且合法。
+#   2. 把外部只读挂载的 SSH 凭据装进 `$HOME/.ssh`：只复制 `id_*`，私钥 0600、`.pub`
 #      0644；github.com 的 host key 由镜像内的 `/etc/ssh/ssh_known_hosts` 提供。
-#   2. 准备持久 Git 工作区：已存在的 checkout 永不覆盖；首次启动只能从配置的 clean
+#   3. 准备持久 Git 工作区：已存在的 checkout 永不覆盖；首次启动只能从配置的 clean
 #      remote 克隆，或显式允许时使用镜像内的源码快照。
-#   3. 用仓库既有 lifecycle `scripts/dev.sh start` 启动 Backend（prod profile、
-#      Flyway disabled、loopback 8080）和 Vite（0.0.0.0:5173、代理 Backend）。
-#   4. 以前台 Environment Daemon 作为容器主进程，连接同容器 Backend 的内部
-#      WebSocket，`environment-root` 指向持久工作区根。
+#   4. 用仓库既有 lifecycle `scripts/dev.sh start` 启动 Backend（prod profile、
+#      Flyway/worker disabled、loopback 8080）和 Vite（0.0.0.0:5173、代理 Backend）。
+#   5. 以前台 Environment Daemon 作为容器主进程，经内部 Docker 网络连接稳定 Main
+#      App（唯一 Harness worker 与 Flyway owner）的 WebSocket，`environment-root`
+#      指向持久工作区根。
 #
 # 凭据边界：SSH 私钥只在容器启动时从挂载目录复制进 `$HOME/.ssh`，镜像、命令行和日志
 # 都不保存 key 内容，源目录的 `config`/`known_hosts`/`authorized_keys` 也不继承；
@@ -28,6 +31,9 @@ SSH_DIR=$HOME/.ssh
 
 SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-prod}
 SPRING_FLYWAY_ENABLED=${SPRING_FLYWAY_ENABLED:-false}
+# Dev Backend 的 Harness 层只提供 control/query preview：进程内 dispatcher 必须保持
+# 关闭，否则 Dev 会与 Main 竞争同一 durable database 上的 Harness Work。
+HARNESS_RUNTIME_WORKERS_ENABLED=${KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED:-false}
 BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}
 BACKEND_PORT=${BACKEND_PORT:-8080}
 FRONTEND_HOST=${FRONTEND_HOST:-0.0.0.0}
@@ -37,7 +43,11 @@ DEV_WORK_DIR=${DEV_WORK_DIR:-/var/kk-studio/dev}
 # 预算在冷 cache/弱 CPU 下不够用；这里给出一个有界的容器预算。
 DEV_READY_TIMEOUT_SECONDS=${DEV_READY_TIMEOUT_SECONDS:-600}
 
-DAEMON_GATEWAY_URI=${KK_STUDIO_DAEMON_GATEWAY_URI:-ws://127.0.0.1:8080/api/harness/environment-daemon/v1}
+# Daemon 的 gateway URI 由外部 Compose 提供的 HTTP(S) control-plane origin 派生：Dev 节点
+# 不连接本容器 Backend，而是连接稳定 Main（唯一 Harness worker 与 Flyway owner）。
+CONTROL_PLANE_BASE_URL=${KK_STUDIO_CONTROL_PLANE_BASE_URL:-}
+DAEMON_GATEWAY_PATH=/api/harness/environment-daemon/v1
+DAEMON_GATEWAY_URI=
 DAEMON_NOTE=${KK_STUDIO_DAEMON_NOTE:-kk-studio dev node}
 DAEMON_JAR=/opt/kk-studio/daemon.jar
 DAEMON_LIB=/opt/kk-studio/lib
@@ -66,10 +76,46 @@ validate_runtime_contract() {
     echo "ERROR: Dev node must keep SPRING_FLYWAY_ENABLED=false; Main is the only Flyway owner." >&2
     exit 1
   fi
+  if [ "$HARNESS_RUNTIME_WORKERS_ENABLED" != "false" ]; then
+    echo "ERROR: Dev node must keep KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false;" >&2
+    echo "       Main is the only Harness worker." >&2
+    exit 1
+  fi
+  if [ -z "$CONTROL_PLANE_BASE_URL" ]; then
+    echo "ERROR: KK_STUDIO_CONTROL_PLANE_BASE_URL is required: the Daemon registers with Main." >&2
+    echo "       Set it to a bare http(s) origin such as http://vps-kk-studio:8080." >&2
+    exit 1
+  fi
   if [ -z "$registration_token" ]; then
     echo "ERROR: KK_STUDIO_DAEMON_REGISTRATION_TOKEN is required to register the Daemon." >&2
     exit 1
   fi
+}
+
+# 把外部 Compose 提供的 HTTP(S) control-plane origin 归一化为 Daemon 的 WebSocket gateway
+# URI：只接受由 DNS/IPv4 host 与可选端口组成的裸 origin（允许一个结尾 `/`），ws/wss
+# 等其它 scheme、路径、query、fragment、userinfo 和空白都拒绝；错误信息不回显输入值，
+# 避免把私密环境文件的配置写进日志。
+resolve_daemon_gateway_uri() {
+  local base_url=${1:-}
+  local port scheme
+  if [[ ! "$base_url" =~ ^(https?)://(([[:alnum:]]|[[:alnum:]][[:alnum:]_.-]*[[:alnum:]_])(:([[:digit:]]{1,5}))?)/?$ ]]; then
+    echo "ERROR: KK_STUDIO_CONTROL_PLANE_BASE_URL must be a bare http:// or https:// origin." >&2
+    echo "       Point it at the internal Main App origin, for example http://vps-kk-studio:8080." >&2
+    return 1
+  fi
+  scheme=${BASH_REMATCH[1]}
+  port=${BASH_REMATCH[5]}
+  if [ -n "$port" ] && ((10#$port == 0 || 10#$port > 65535)); then
+    echo "ERROR: KK_STUDIO_CONTROL_PLANE_BASE_URL contains an invalid port." >&2
+    return 1
+  fi
+  if [ "$scheme" = "https" ]; then
+    scheme=wss
+  else
+    scheme=ws
+  fi
+  printf '%s://%s%s\n' "$scheme" "${BASH_REMATCH[2]}" "$DAEMON_GATEWAY_PATH"
 }
 
 # SSH key 是运行时挂载的：挂载目录缺失/不可读或没有私钥时直接失败，容器不会以无法
@@ -166,10 +212,11 @@ prepare_workspace() {
 }
 
 start_managed_servers() {
-  step "Starting backend and Vite via scripts/dev.sh (${SPRING_PROFILES_ACTIVE}, flyway=${SPRING_FLYWAY_ENABLED})"
+  step "Starting backend and Vite via scripts/dev.sh (${SPRING_PROFILES_ACTIVE}, flyway=${SPRING_FLYWAY_ENABLED}, workers=${HARNESS_RUNTIME_WORKERS_ENABLED})"
   env \
     SPRING_PROFILES_ACTIVE="$SPRING_PROFILES_ACTIVE" \
     SPRING_FLYWAY_ENABLED="$SPRING_FLYWAY_ENABLED" \
+    KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED="$HARNESS_RUNTIME_WORKERS_ENABLED" \
     BACKEND_HOST="$BACKEND_HOST" \
     BACKEND_PORT="$BACKEND_PORT" \
     FRONTEND_HOST="$FRONTEND_HOST" \
@@ -190,15 +237,25 @@ run_daemon() {
     --environment-root "$WORKSPACE_ROOT"
 }
 
-require_cmd gh
-require_cmd git
-require_cmd java
-require_cmd mvn
-require_cmd npm
-require_cmd ssh
+main() {
+  require_cmd gh
+  require_cmd git
+  require_cmd java
+  require_cmd mvn
+  require_cmd npm
+  require_cmd ssh
 
-validate_runtime_contract
-install_ssh_credentials
-prepare_workspace
-start_managed_servers
-run_daemon
+  validate_runtime_contract
+  # 解析在校验之后、任何工作区准备与进程启动之前完成：非法 origin 直接失败。
+  DAEMON_GATEWAY_URI=$(resolve_daemon_gateway_uri "$CONTROL_PLANE_BASE_URL")
+  install_ssh_credentials
+  prepare_workspace
+  start_managed_servers
+  run_daemon
+}
+
+# 同一个文件既作为容器主进程执行，也被契约测试 `source` 后逐函数行为化验证；只有直接
+# 执行时才运行启动序列。
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main
+fi

@@ -437,7 +437,7 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 | `server.port` / `server.compression.enabled` | 默认 `8080`与 gzip |
 | `server.forward-headers-strategy` | `prod` 使用 `framework`，按 Gateway 的 `X-Forwarded-*` 还原外部 scheme/host |
 | `management.endpoints.web.exposure.include` | `health,prometheus,offline,online` |
-| `kk-studio.harness.runtime.workers-enabled` | 是否启动 Work dispatcher；测试默认 false |
+| `kk-studio.harness.runtime.workers-enabled` | 是否启动 Work dispatcher；可由 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED` 配置，默认 true，测试与 NAS Dev 显式关闭 |
 | `kk-studio.harness.dispatcher.*` | Work claim/handoff 租约、轮询、拒绝退避及 bounded worker 容量 |
 | `kk-studio.harness.contributors.directory` | trusted JAR 目录；空值不加载外部贡献者 |
 | `kk-studio.harness.environment-gateway.*` | 入站 frame 和出站 queue/bytes/send timeout |

@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import unittest
 
@@ -24,6 +25,7 @@ DOCKERIGNORE = REPOSITORY_ROOT / ".dockerignore"
 PUBLISH_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "docker-publish.yml"
 DEPLOYMENT_DOC = REPOSITORY_ROOT / "docs" / "operations" / "deployment.md"
 DEVELOPMENT_DOC = REPOSITORY_ROOT / "docs" / "operations" / "development-and-testing.md"
+WEB_APPLICATION_CONFIG = REPOSITORY_ROOT / "web" / "src" / "main" / "resources" / "application.yml"
 DEV_SHELL_SCRIPTS = (DEV_ENTRYPOINT, DEV_RELOAD, DEV_HEALTHCHECK)
 
 REQUIRED_APT_PACKAGES = {
@@ -47,6 +49,67 @@ GITHUB_SSH_KEY_FINGERPRINTS = {
     "ecdsa-sha2-nistp256": "SHA256:p2QAMXNIC1TJYWeIOttrVc98/R1BUFWu3/LiyKgUfQM",
     "ssh-rsa": "SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s",
 }
+
+# The Dev node only receives the HTTP(S) Main origin; the Daemon gateway URI (ws/wss plus
+# this fixed path) is derived inside the container.
+DAEMON_GATEWAY_PATH = "/api/harness/environment-daemon/v1"
+CONTROL_PLANE_BASE_URL = "http://vps-kk-studio:8080"
+DAEMON_GATEWAY_URI = f"ws://vps-kk-studio:8080{DAEMON_GATEWAY_PATH}"
+# One host is shared by every rejected origin so "the entrypoint must not echo the supplied
+# value" can be asserted with a single marker.
+REJECTED_ORIGIN_MARKER = "daemon.invalid"
+REJECTED_ORIGINS = (
+    "",
+    f"{REJECTED_ORIGIN_MARKER}:8080",
+    f"ws://{REJECTED_ORIGIN_MARKER}:8080",
+    f"wss://{REJECTED_ORIGIN_MARKER}:8080",
+    f"ftp://{REJECTED_ORIGIN_MARKER}:8080",
+    f"http://{REJECTED_ORIGIN_MARKER}:8080{DAEMON_GATEWAY_PATH}",
+    f"http://{REJECTED_ORIGIN_MARKER}:8080/?probe=1",
+    f"http://{REJECTED_ORIGIN_MARKER}:8080#fragment",
+    f"http://user:secret@{REJECTED_ORIGIN_MARKER}:8080",
+    f"http://{REJECTED_ORIGIN_MARKER}:8080 ",
+    f"http://:{REJECTED_ORIGIN_MARKER}",
+    f"http://-{REJECTED_ORIGIN_MARKER}",
+    f"http://{REJECTED_ORIGIN_MARKER}:invalid",
+    f"http://{REJECTED_ORIGIN_MARKER}:0",
+    f"http://{REJECTED_ORIGIN_MARKER}:65536",
+    "http://",
+)
+# Environment variables the entrypoint reads; a sourced entrypoint must observe only what a
+# test sets explicitly instead of the developer's own shell.
+ENTRYPOINT_ENV_NAMES = (
+    "KK_STUDIO_CONTROL_PLANE_BASE_URL",
+    "KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED",
+    "KK_STUDIO_DAEMON_REGISTRATION_TOKEN",
+    "SPRING_PROFILES_ACTIVE",
+    "SPRING_FLYWAY_ENABLED",
+)
+
+
+def entrypoint_environment(overrides=None):
+    """Build a clean environment for sourcing the entrypoint with explicit values."""
+    environment = dict(os.environ)
+    for name in ENTRYPOINT_ENV_NAMES:
+        environment.pop(name, None)
+    environment.update(overrides or {})
+    return environment
+
+
+def source_entrypoint(script, env=None):
+    """Source the entrypoint in a fresh Bash and run one ad hoc `script` snippet.
+
+    Sourcing is what turns the entrypoint into a behavioral contract: the same functions the
+    container runs can be exercised directly without preparing a workspace or starting servers.
+    """
+    return subprocess.run(
+        ["bash", "-c", 'source "$1"\n' + script, "bash", str(DEV_ENTRYPOINT)],
+        cwd=REPOSITORY_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=entrypoint_environment(env),
+    )
 
 
 class TestNasDevImageContracts(unittest.TestCase):
@@ -254,16 +317,16 @@ class TestNasDevImageContracts(unittest.TestCase):
             self.assertNotIn(excluded, body, excluded)
         for command in ("gh", "git", "ssh"):
             self.assertIn(f"require_cmd {command}", entrypoint)
-        self.assertEqual(
-            [
-                "validate_runtime_contract",
-                "install_ssh_credentials",
-                "prepare_workspace",
-                "start_managed_servers",
-                "run_daemon",
-            ],
-            entrypoint.rstrip().splitlines()[-5:],
-            "credentials must be installed before the first clone and the Daemon start",
+        main_body = function_body(DEV_ENTRYPOINT, "main")
+        self.assertLess(
+            main_body.index("install_ssh_credentials"),
+            main_body.index("prepare_workspace"),
+            "credentials must be installed before the first clone",
+        )
+        self.assertLess(
+            main_body.index("prepare_workspace"),
+            main_body.index("run_daemon"),
+            "the workspace must exist before the Daemon starts",
         )
 
     def test_dev_image_has_no_git_token_or_askpass_flow(self):
@@ -333,12 +396,13 @@ class TestNasDevImageContracts(unittest.TestCase):
 
     def test_entrypoint_starts_managed_servers_then_runs_daemon_in_foreground(self):
         # Intent: the container's main process is the Daemon, and Backend/Vite are started
-        # through the existing repository lifecycle with the Dev node's fixed contract.
+        # through the existing repository lifecycle with the Dev node's fixed contract. The
+        # Daemon registers with Main, so no loopback Dev Backend target may be compiled in.
         entrypoint = DEV_ENTRYPOINT.read_text()
         self.assertIn('DAEMON_JAR=/opt/kk-studio/daemon.jar', entrypoint)
-        self.assertIn(
-            "ws://127.0.0.1:8080/api/harness/environment-daemon/v1", entrypoint
-        )
+        self.assertIn(f"DAEMON_GATEWAY_PATH={DAEMON_GATEWAY_PATH}", entrypoint)
+        self.assertIn("CONTROL_PLANE_BASE_URL=${KK_STUDIO_CONTROL_PLANE_BASE_URL:-}", entrypoint)
+        self.assertIn('--gateway-uri "$DAEMON_GATEWAY_URI"', entrypoint)
         self.assertIn("SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-prod}", entrypoint)
         self.assertIn("SPRING_FLYWAY_ENABLED=${SPRING_FLYWAY_ENABLED:-false}", entrypoint)
         self.assertIn("BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}", entrypoint)
@@ -351,11 +415,18 @@ class TestNasDevImageContracts(unittest.TestCase):
         self.assertIn("exec java", entrypoint)
         # The Daemon binary always comes from the image, never from the mutable workspace.
         self.assertNotIn("$REPOSITORY_DIR/harness/daemon", entrypoint)
+        # Top-level execution is wrapped in `main` so the file stays sourceable for the
+        # behavioral unit tests, while a direct container start still runs the same sequence.
+        main_body = function_body(DEV_ENTRYPOINT, "main")
+        self.assertLess(
+            main_body.index("start_managed_servers"),
+            main_body.index("run_daemon"),
+            "the Daemon must start after the managed servers it precedes as container PID 1",
+        )
+        self.assertIn('if [ "${BASH_SOURCE[0]}" = "$0" ]; then', entrypoint)
         self.assertTrue(
-            entrypoint.rstrip().endswith(
-                "install_ssh_credentials\nprepare_workspace\nstart_managed_servers\nrun_daemon"
-            ),
-            "the entrypoint must inject SSH keys, prepare the workspace, then run the Daemon",
+            entrypoint.rstrip().endswith("main\nfi"),
+            "only a direct execution may start the container sequence",
         )
 
     def test_reload_command_restarts_only_managed_processes(self):
@@ -374,6 +445,121 @@ class TestNasDevImageContracts(unittest.TestCase):
             self.assertNotIn(forbidden, reload_script, forbidden)
         self.assertIn("kk-studio-dev-reload", DEV_DOCKERFILE.read_text())
 
+    def test_entrypoint_derives_the_daemon_gateway_uri_from_the_main_origin(self):
+        # Intent: external Compose only knows Main's internal HTTP origin, so the container
+        # must derive the ws(s) gateway URI (including the fixed protocol path) itself; a
+        # committed URI would let the env contract drift from the Server endpoint or point
+        # the Daemon back at the Dev container.
+        for origin, expected in (
+            (CONTROL_PLANE_BASE_URL, DAEMON_GATEWAY_URI),
+            ("https://vps-kk-studio:8080", DAEMON_GATEWAY_URI.replace("ws://", "wss://")),
+            (f"{CONTROL_PLANE_BASE_URL}/", DAEMON_GATEWAY_URI),
+            ("https://vps-kk-studio", f"wss://vps-kk-studio{DAEMON_GATEWAY_PATH}"),
+            ("http://vps-kk-studio:8080/", DAEMON_GATEWAY_URI),
+        ):
+            result = source_entrypoint(f"resolve_daemon_gateway_uri {shlex.quote(origin)}")
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(expected, result.stdout.strip())
+        main_body = function_body(DEV_ENTRYPOINT, "main")
+        self.assertLess(
+            main_body.index("DAEMON_GATEWAY_URI=$(resolve_daemon_gateway_uri"),
+            main_body.index("install_ssh_credentials"),
+            "an invalid origin must fail before the workspace is touched or servers start",
+        )
+
+    def test_entrypoint_rejects_every_non_origin_control_plane_value(self):
+        # Intent: only a bare HTTP(S) origin may reach the Daemon; ws/wss, paths, query,
+        # fragment, userinfo, whitespace and empty values would silently produce a wrong or
+        # credential-carrying endpoint, so they must fail without echoing the value into
+        # container logs.
+        for invalid in REJECTED_ORIGINS:
+            result = source_entrypoint(f"resolve_daemon_gateway_uri {shlex.quote(invalid)}")
+            self.assertNotEqual(0, result.returncode, f"{invalid!r} must be rejected")
+            self.assertIn("KK_STUDIO_CONTROL_PLANE_BASE_URL", result.stderr)
+            self.assertNotIn(REJECTED_ORIGIN_MARKER, result.stderr + result.stdout)
+            self.assertEqual("", result.stdout)
+
+    def test_dev_harness_dispatcher_is_disabled_by_default_and_fail_closed(self):
+        # Intent: Main is the only Harness worker; the image default, the entrypoint default,
+        # Spring mapping and both managed-server paths must all agree, otherwise the Dev node
+        # would start competing for the same durable Work.
+        dockerfile = DEV_DOCKERFILE.read_text()
+        self.assertIn("KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false", dockerfile)
+        entrypoint = DEV_ENTRYPOINT.read_text()
+        self.assertIn(
+            "HARNESS_RUNTIME_WORKERS_ENABLED=${KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED:-false}",
+            entrypoint,
+        )
+        runtime_contract = function_body(DEV_ENTRYPOINT, "validate_runtime_contract")
+        self.assertIn('HARNESS_RUNTIME_WORKERS_ENABLED" != "false"', runtime_contract)
+        self.assertIn("Main is the only Harness worker", runtime_contract)
+        self.assertIn(
+            "workers-enabled: ${KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED:true}",
+            WEB_APPLICATION_CONFIG.read_text(),
+        )
+        for script in (entrypoint, DEV_RELOAD.read_text()):
+            self.assertIn(
+                'KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED="$HARNESS_RUNTIME_WORKERS_ENABLED"',
+                script,
+            )
+        reload_script = DEV_RELOAD.read_text()
+        self.assertIn(
+            "HARNESS_RUNTIME_WORKERS_ENABLED=${KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED:-false}",
+            reload_script,
+        )
+        self.assertIn('HARNESS_RUNTIME_WORKERS_ENABLED" != "false"', reload_script)
+        defaulted = source_entrypoint('printf "%s\\n" "$HARNESS_RUNTIME_WORKERS_ENABLED"')
+        self.assertEqual(0, defaulted.returncode, defaulted.stderr)
+        self.assertEqual("false", defaulted.stdout.strip())
+        overridden = source_entrypoint(
+            "validate_runtime_contract",
+            {
+                "SPRING_PROFILES_ACTIVE": "prod",
+                "SPRING_FLYWAY_ENABLED": "false",
+                "KK_STUDIO_DAEMON_REGISTRATION_TOKEN": "test-token",
+                "KK_STUDIO_CONTROL_PLANE_BASE_URL": CONTROL_PLANE_BASE_URL,
+                "KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED": "true",
+            },
+        )
+        self.assertNotEqual(0, overridden.returncode, "an explicit override must fail closed")
+
+    def test_dev_surfaces_drop_the_removed_gateway_uri_variable(self):
+        # Intent: the old Daemon gateway URI contract is what allowed the Dev Daemon to
+        # target its own Backend; the image, its scripts and the authoritative docs must not
+        # keep a compatibility alias that would silently restore that topology.
+        for surface in (
+            DEV_DOCKERFILE,
+            DEV_ENTRYPOINT,
+            DEV_RELOAD,
+            DEV_HEALTHCHECK,
+            DEPLOYMENT_DOC,
+            DEVELOPMENT_DOC,
+        ):
+            self.assertNotIn(
+                "KK_STUDIO_DAEMON_GATEWAY_URI",
+                surface.read_text(),
+                f"{surface.name} must not reference the removed gateway URI variable",
+            )
+
+    def test_docs_state_main_owned_execution_and_dev_synchronous_preview(self):
+        # Intent: the NAS Compose file and Gateway config live outside this repository, so
+        # the committed docs are the only place defining who executes Work and who owns
+        # Flyway; stale claims would mislead operators into re-enabling Dev workers or
+        # pointing the Dev Daemon back at its own container.
+        deployment = DEPLOYMENT_DOC.read_text()
+        development = DEVELOPMENT_DOC.read_text()
+        for doc in (deployment, development):
+            self.assertIn("KK_STUDIO_CONTROL_PLANE_BASE_URL", doc)
+            self.assertIn("KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED", doc)
+            self.assertIn("`.env`", doc)
+            self.assertIn(
+                "KK_STUDIO_CONTROL_PLANE_BASE_URL: ${KK_STUDIO_CONTROL_PLANE_BASE_URL}",
+                doc,
+            )
+            self.assertNotIn("ws://127.0.0.1:8080/api/harness/environment-daemon/v1", doc)
+        self.assertIn(f"KK_STUDIO_CONTROL_PLANE_BASE_URL={CONTROL_PLANE_BASE_URL}", development)
+        self.assertIn(f"ws://vps-kk-studio:8080{DAEMON_GATEWAY_PATH}", development)
+
     def test_image_defaults_to_prod_profile_with_flyway_disabled(self):
         # Intent: only Main owns Flyway; the Dev node reuses the prod profile but must never
         # apply migrations to the shared database, so the image default has to be explicit.
@@ -387,14 +573,21 @@ class TestNasDevImageContracts(unittest.TestCase):
         self.assertIn('SPRING_PROFILES_ACTIVE" != "prod"', runtime_contract)
         self.assertIn('SPRING_FLYWAY_ENABLED" != "false"', runtime_contract)
         self.assertIn("Main is the only Flyway owner", runtime_contract)
+        main_body = function_body(DEV_ENTRYPOINT, "main")
         self.assertLess(
-            entrypoint.index("validate_runtime_contract\ninstall_ssh_credentials\nprepare_workspace"),
-            entrypoint.index("start_managed_servers\nrun_daemon"),
+            main_body.index("validate_runtime_contract"),
+            main_body.index("start_managed_servers"),
+            "the runtime contract must be validated before any process starts",
+        )
+        self.assertLess(
+            main_body.index("validate_runtime_contract"),
+            main_body.index("install_ssh_credentials"),
+            "the runtime contract must be validated before the workspace is touched",
         )
 
     def test_healthcheck_covers_backend_and_vite(self):
-        # Intent: a healthy Dev node serves both the API the Daemon registers against and
-        # the Vite entry Human/Agent use, so the image healthcheck must probe both.
+        # Intent: a healthy Dev node serves the synchronous API/query preview and the Vite
+        # entry Human/Agent use, so the image healthcheck must probe both.
         healthcheck = DEV_HEALTHCHECK.read_text()
         self.assertIn("http://127.0.0.1:${backend_port}/actuator/health", healthcheck)
         self.assertIn("http://127.0.0.1:${frontend_port}/threads", healthcheck)

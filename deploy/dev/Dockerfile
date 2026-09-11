@@ -7,6 +7,9 @@
 # 持久 Git checkout，容器重建不覆盖它；镜像内的源码快照只在显式允许时作为首次
 # 初始化 fallback，Daemon 始终从镜像内的 Jar 运行。
 #
+# 节点契约：Main 独占 Harness worker 与 Flyway；本镜像内的 Backend 关闭两者，Harness
+# 层只保留 control/query preview，Daemon 经内部 Docker 网络连接 Main 的 control-plane origin。
+#
 # builder：Maven 3.9.11 + Temurin 21 构建 Environment Daemon 及其 runtime 依赖。
 # runtime：Temurin 21 JDK（含 javap）、Maven 3.9.11、Node 24.14.0/npm 11.9.0、
 #          git、openssh-client、GitHub CLI 2.100.0（linux/amd64）、curl、jq、lsof、
@@ -56,6 +59,7 @@ ENV LANG=C.UTF-8 \
     KK_STUDIO_SSH_CREDENTIALS_DIR=/run/kk-studio/ssh \
     SPRING_PROFILES_ACTIVE=prod \
     SPRING_FLYWAY_ENABLED=false \
+    KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false \
     BACKEND_HOST=127.0.0.1 \
     BACKEND_PORT=8080 \
     FRONTEND_HOST=0.0.0.0 \
@@ -137,7 +141,8 @@ WORKDIR /workspace
 USER 10001:10001
 
 # 5173 is the Vite dev server behind the Gateway; 8080 stays loopback-only for the
-# Daemon WebSocket and Vite proxy, but is exposed here for optional internal probes.
+# Vite API proxy and operator probes, but is exposed here for optional internal
+# probes. The Daemon connects outbound to the Main App origin, not to this port.
 EXPOSE 5173 8080
 
 # Backend and Vite are built/started by the entrypoint on first start. On a cold
