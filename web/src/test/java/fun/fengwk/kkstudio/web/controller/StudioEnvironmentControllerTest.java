@@ -4,12 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -17,6 +19,7 @@ import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyA
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -26,6 +29,7 @@ import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
@@ -102,7 +106,7 @@ class StudioEnvironmentControllerTest {
         .andExpect(jsonPath("$.errors.detail").value("environment not found: " + ENV_ID));
   }
 
-  /** 意图：验证 POST /api/harness/environments 创建环境成功返回 HTTP 201 Created。 */
+  /** 意图：验证 POST /api/harness/environments 创建环境成功返回 HTTP 201 Created，且携带凭据的响应禁止缓存。 */
   @Test
   void createEnvironmentReturnsCreated() throws Exception {
     EnvironmentCardDTO card = new EnvironmentCardDTO();
@@ -117,8 +121,51 @@ class StudioEnvironmentControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"new-env\"}"))
         .andExpect(status().isCreated())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
         .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
         .andExpect(jsonPath("$.data.registrationToken").value("secret-token"));
+  }
+
+  /**
+   * 意图：验证 GET /api/harness/environments/{id}/token 是幂等只读端点，返回当前 token 与版本，并通过 Cache-Control:
+   * no-store 明确禁止任何缓存；它不得调用 rotateToken。
+   */
+  @Test
+  void getRegistrationTokenReturnsCurrentTokenWithNoStore() throws Exception {
+    EnvironmentRegistrationTokenDTO token = new EnvironmentRegistrationTokenDTO();
+    token.setId(ENV_ID.toString());
+    token.setRegistrationToken("current-token");
+    token.setVersion("4");
+    when(environmentService.getRegistrationToken(eq(EnvironmentId.of(ENV_ID)))).thenReturn(token);
+
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/token"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+        .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
+        .andExpect(jsonPath("$.data.registrationToken").value("current-token"))
+        .andExpect(jsonPath("$.data.version").value("4"));
+
+    verify(environmentService).getRegistrationToken(EnvironmentId.of(ENV_ID));
+    verify(environmentService, never()).rotateToken(any(), any());
+  }
+
+  /**
+   * 意图：验证 GET /api/harness/environments/{id} 普通详情只返回 Card 投影，绝不返回 registrationToken（凭据不进入列表/详情
+   * 缓存路径）。
+   */
+  @Test
+  void getEnvironmentNeverReturnsRegistrationToken() throws Exception {
+    EnvironmentCardDTO card = new EnvironmentCardDTO();
+    card.setId(ENV_ID.toString());
+    card.setName("dev");
+    when(environmentService.get(eq(EnvironmentId.of(ENV_ID)))).thenReturn(card);
+
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
+        .andExpect(jsonPath("$.data.registrationToken").doesNotExist());
   }
 
   /**
@@ -151,7 +198,7 @@ class StudioEnvironmentControllerTest {
 
   /**
    * 意图：验证 POST /api/harness/environments/{environmentId}/registration-token 从请求体读取
-   * {expectedVersion} 并轮换 token，返回 200。
+   * {expectedVersion} 并轮换 token，返回 200 且禁止缓存。
    */
   @Test
   void rotateTokenReturnsOk() throws Exception {
@@ -166,6 +213,7 @@ class StudioEnvironmentControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"0\"}"))
         .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
         .andExpect(jsonPath("$.data.registrationToken").value("new-secret-token"));
 
     verify(environmentService).rotateToken(EnvironmentId.of(ENV_ID), "0");

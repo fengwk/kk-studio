@@ -12,6 +12,7 @@ vi.mock('@/shared/api/environment-service', () => ({
     listEnvironments: vi.fn(),
     createEnvironment: vi.fn(),
     updateEnvironment: vi.fn(),
+    getRegistrationToken: vi.fn(),
     rotateToken: vi.fn(),
     deleteEnvironment: vi.fn(),
   },
@@ -46,6 +47,20 @@ function environment(overrides: Partial<EnvironmentCardDTO>): EnvironmentCardDTO
     updateTime: '2026-07-20T00:00:00.000Z',
     ...overrides,
   }
+}
+
+/**
+ * jsdom 不提供 Clipboard API；测试显式注入 stub，使复制成功/失败都可断言。
+ *
+ * 每个用例安装独立 stub，避免共享可变状态导致断言互相污染。
+ */
+function installClipboard(): { writeText: ReturnType<typeof vi.fn> } {
+  const writeText = vi.fn(async () => undefined)
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText },
+  })
+  return { writeText }
 }
 
 describe('EnvironmentsPage', () => {
@@ -107,16 +122,19 @@ describe('EnvironmentsPage', () => {
     expect(screen.getAllByText('Capabilities').length).toBe(3)
     expect(screen.getAllByText('Skills').length).toBe(3)
 
-    // 验证每个环境卡片底部仅有编辑与删除两个操作按钮，绝不暴露重新生成 Token 按钮
+    // 验证每个环境卡片底部仅有「复制 Token / 编辑 / 删除」三个动作，绝不暴露轮换 Token 动作；
+    // 且加载列表后不得预取 token（点击才请求）。
     const cards = screen.getAllByRole('article')
     expect(cards).toHaveLength(3)
     for (const card of cards) {
       const footerButtons = within(card).getAllByRole('button')
-      expect(footerButtons).toHaveLength(2)
+      expect(footerButtons).toHaveLength(3)
+      expect(within(card).getByRole('button', { name: /复制 Token/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /编辑环境/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /删除环境/ })).toBeInTheDocument()
-      expect(within(card).queryByRole('button', { name: /Token/ })).toBeNull()
+      expect(within(card).queryByRole('button', { name: /重新生成 Token/ })).toBeNull()
     }
+    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
   })
 
   it('shows empty state when no environments configured', async () => {
@@ -125,7 +143,7 @@ describe('EnvironmentsPage', () => {
     await waitFor(() => expect(screen.getByText('当前没有 Environment')).toBeInTheDocument())
   })
 
-  it('creates an environment and shows one-time registration token dialog', async () => {
+  it('creates an environment and shows the new registration token dialog', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
     vi.mocked(environmentService.createEnvironment).mockResolvedValue({
@@ -142,6 +160,7 @@ describe('EnvironmentsPage', () => {
       createTime: '2026-07-20T00:00:00.000Z',
       updateTime: '2026-07-20T00:00:00.000Z',
     })
+    const clipboard = installClipboard()
     renderPage()
 
     const createBtn = await screen.findByRole('button', { name: '创建环境' })
@@ -152,18 +171,73 @@ describe('EnvironmentsPage', () => {
     await user.click(screen.getByRole('button', { name: '确认' }))
 
     expect(environmentService.createEnvironment).toHaveBeenCalledWith({ name: 'new-env' })
-    // 一次性 token 展示弹窗
+    // create 响应中的 token 展示弹窗；文案说明之后仍可从卡片复制当前 Token
     expect(await screen.findByText('secret-token-12345')).toBeInTheDocument()
-    expect(screen.getByText(/此 Registration Token 仅在本次创建或轮换时展示一次/)).toBeInTheDocument()
+    expect(screen.getByText(/之后可随时从环境卡片复制当前 Token/)).toBeInTheDocument()
 
-    // 复制 Token 并关闭弹窗
+    // 复制 Token 并关闭弹窗（弹窗内复制直接使用内存值，不发起额外请求）
     const copyBtn = screen.getByRole('button', { name: '复制 Token' })
     await user.click(copyBtn)
     expect(await screen.findByText('已复制！')).toBeInTheDocument()
+    expect(clipboard.writeText).toHaveBeenCalledWith('secret-token-12345')
+    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
 
     const closeBtn = screen.getAllByRole('button', { name: '关闭' })[0]!
     await user.click(closeBtn)
     expect(screen.queryByText('secret-token-12345')).not.toBeInTheDocument()
+  })
+
+  /**
+   * 验证「复制 Token」是按需读取：列表渲染与轮换都不预取，只有点击卡片动作时才调用
+   * getRegistrationToken，且该动作绝不触发 rotateToken（不轮换、不断开已有连接）。
+   */
+  it('copies the current token only on demand without rotating', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'my-box', version: '1' }),
+    ])
+    vi.mocked(environmentService.getRegistrationToken).mockResolvedValue({
+      id: 'env-1',
+      registrationToken: 'current-tok-777',
+      version: '1',
+    })
+    const clipboard = installClipboard()
+    renderPage()
+
+    const card = await screen.findByRole('article')
+    // 渲染列表时绝不预取 token
+    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
+
+    await user.click(within(card).getByRole('button', { name: /复制 Token/ }))
+
+    await waitFor(() => {
+      expect(environmentService.getRegistrationToken).toHaveBeenCalledWith('env-1')
+    })
+    expect(clipboard.writeText).toHaveBeenCalledWith('current-tok-777')
+    // 读取是只读动作：绝不轮换
+    expect(environmentService.rotateToken).not.toHaveBeenCalled()
+    expect(await within(card).findByText('已复制！')).toBeInTheDocument()
+    // 复制反馈不得写入 LocalStorage（凭据不落盘）
+    expect(JSON.stringify(localStorage)).not.toContain('current-tok-777')
+  })
+
+  /** 验证按需复制失败时在卡片上可见报错，且不伪称已复制。 */
+  it('shows a visible error when the on-demand token copy fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'my-box', version: '1' }),
+    ])
+    vi.mocked(environmentService.getRegistrationToken).mockRejectedValue(
+      new Error('environment not found'),
+    )
+    installClipboard()
+    renderPage()
+
+    const card = await screen.findByRole('article')
+    await user.click(within(card).getByRole('button', { name: /复制 Token/ }))
+
+    expect(await within(card).findByRole('alert')).toHaveTextContent('environment not found')
+    expect(within(card).queryByText('已复制！')).toBeNull()
   })
 
   it('edits and renames an environment card', async () => {
@@ -187,7 +261,7 @@ describe('EnvironmentsPage', () => {
     expect(environmentService.updateEnvironment).toHaveBeenCalledWith('env-1', { name: 'renamed', expectedVersion: '1' })
   })
 
-  // 验证从卡片编辑弹窗中调用「重新生成 Token」次级动作，成功后展示新 token 并关闭编辑弹窗
+  // 验证从卡片编辑弹窗中调用「重新生成 Token」次级动作：卡片仅暴露按需复制，成功轮换后展示新 token 并关闭编辑弹窗
   it('rotates registration token and displays the new token from edit dialog', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
@@ -196,11 +270,12 @@ describe('EnvironmentsPage', () => {
     vi.mocked(environmentService.rotateToken).mockResolvedValue(
       environment({ id: 'env-1', name: 'my-box', registrationToken: 'rotated-tok-999', version: '2' }),
     )
+    installClipboard()
     renderPage()
 
-    // 验证卡片上不直接暴露轮换 token 按钮
+    // 卡片上只有按需「复制 Token」，绝不暴露轮换 token 按钮
     const card = await screen.findByRole('article')
-    expect(within(card).queryByRole('button', { name: /Token/ })).toBeNull()
+    expect(within(card).queryByRole('button', { name: /重新生成 Token/ })).toBeNull()
 
     // 打开编辑弹窗
     const editBtn = within(card).getByRole('button', { name: /编辑环境/ })
@@ -219,6 +294,8 @@ describe('EnvironmentsPage', () => {
     expect(environmentService.rotateToken).toHaveBeenCalledWith('env-1', '1')
     expect(await screen.findByText('rotated-tok-999')).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: '编辑环境' })).toBeNull()
+    // 轮换不应顺带读取 token
+    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
   })
 
   it('deletes an environment card after confirmation', async () => {
@@ -354,6 +431,7 @@ describe('EnvironmentsPage', () => {
     vi.mocked(environmentService.rotateToken).mockRejectedValueOnce(
       new Error('token rotation internal failure'),
     )
+    installClipboard()
     renderPage()
 
     // 打开编辑弹窗

@@ -68,6 +68,25 @@ describe('environmentService', () => {
   })
 
   /**
+   * 测试意图：验证按需读取当前 registration token 使用 GET /harness/environments/{id}/token，
+   * 且该调用是普通只读 GET（不携带 expectedVersion、不触发轮换）。
+   */
+  it('reads the current registration token via GET /harness/environments/{id}/token', async () => {
+    const client = {
+      get: vi.fn(async () => ({ id: 'env-1', registrationToken: 'tok-current', version: '3' })),
+      post: vi.fn(async () => ({})),
+      put: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    }
+    const service = createEnvironmentService(client)
+    const result = await service.getRegistrationToken('env-1')
+    expect(client.get).toHaveBeenCalledWith('/harness/environments/env-1/token')
+    expect(client.post).not.toHaveBeenCalled()
+    expect(result.registrationToken).toBe('tok-current')
+    expect(result.version).toBe('3')
+  })
+
+  /**
    * 测试意图：验证轮换 registration token 端点使用 POST /harness/environments/{id}/registration-token，
    * 且 expectedVersion 放在 POST body { expectedVersion } 中。
    */

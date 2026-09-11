@@ -12,7 +12,7 @@ public class EnvironmentCardDTO {
   private String id;
   private String name;
 
-  /** 仅在 create 或 rotate-token 响应中一次性返回，正常列表和详情查询始终为 null。 */
+  /** 仅在 create 响应与 rotate-token 响应中返回刚生成的新值；正常列表和详情查询始终为 null， 按需读取当前值走只读 token 端点。 */
   @JsonInclude(JsonInclude.Include.NON_NULL)
   private String registrationToken;
 
