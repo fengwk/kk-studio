@@ -26,17 +26,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 在强制校验显式 environment workdir 后执行 Platform 授权的 shell 命令。
+ * 在显式校验的缺省 cwd 中执行 Platform 授权的 shell 命令。
  *
- * <p>静态解析无法沙箱化 shell 内部行为；命令授权属于 Platform permission。但 Daemon 仍会校验 workdir，并使用运行时注入的共享 scheduler
- * 在超时或取消时终止完整 process tree。
+ * <p>静态解析无法沙箱化 shell 内部行为；命令授权属于 Platform permission。Daemon 只解析本次调用的缺省 cwd（未提供 {@code workdir} 时使用
+ * invocation workspace），并使用运行时注入的共享 scheduler 在超时或取消时终止完整 process tree。
  */
 public final class BashCapability implements EnvironmentCapability {
 
   static final int DEFAULT_TIMEOUT_SECONDS = 120;
   static final int MAX_TIMEOUT_SECONDS = 3600;
   private final CodingToolsConfig config;
-  private final EnvironmentPathBoundary boundary;
   private final ExecutorService executor;
   private final ScheduledExecutorService scheduler;
   private final EnvironmentCapabilityDescriptor descriptor;
@@ -44,7 +43,6 @@ public final class BashCapability implements EnvironmentCapability {
   public BashCapability(
       CodingToolsConfig config, ExecutorService executor, ScheduledExecutorService scheduler) {
     this.config = Objects.requireNonNull(config, "config");
-    boundary = new EnvironmentPathBoundary(config);
     this.executor = Objects.requireNonNull(executor, "executor");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     descriptor = EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC);
@@ -76,7 +74,7 @@ public final class BashCapability implements EnvironmentCapability {
       JsonNode args = AbstractCodingCapability.arguments(request);
       String command = AbstractCodingCapability.string(args, "command");
       Path workdir =
-          boundary.workdir(
+          EnvironmentPaths.workdir(
               AbstractCodingCapability.optionalString(args, "workdir"), request.workdir());
       int timeoutSeconds = requestedTimeoutSeconds(args);
       Duration processTimeout =

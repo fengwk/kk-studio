@@ -47,7 +47,7 @@ harness-environment
 | 包路径 | 职责与边界 |
 | --- | --- |
 | `fun.fengwk.kkstudio.harness.environment` | 环境身份标识与绑定模型。定义跨 Runtime、Platform Gateway 与 Daemon 共享的规范 UUID 路由身份（`EnvironmentId`）、已冻结的环境与工作区相对路径绑定（`EnvironmentBinding`）以及跨平台相对路径语法规则（`EnvironmentWorkspacePath`）。本包聚焦纯内存值对象与格式校验，物理文件与网络 I/O 交由各端具体实现承载。 |
-| `fun.fengwk.kkstudio.harness.environment.capability` | 跨环境共享的原子能力契约与执行 SPI。定义版本固定的 12 项原子能力描述符（catalog version 1）、底层异步执行接口（`EnvironmentCapability`）以及传输层窄端口（`EnvironmentCapabilityTransport`），严格约束发送异常确定性以及流式事件序列（`PARTIAL* -> exactly one terminal`）。底层能力由 Daemon 注册执行，模型工具映射由上层 Contributor 承接。 |
+| `fun.fengwk.kkstudio.harness.environment.capability` | 跨环境共享的原子能力契约与执行 SPI。定义版本固定的 11 项原子能力描述符（catalog version 1）、底层异步执行接口（`EnvironmentCapability`）以及传输层窄端口（`EnvironmentCapabilityTransport`），严格约束发送异常确定性以及流式事件序列（`PARTIAL* -> exactly one terminal`）。底层能力由 Daemon 注册执行，模型工具映射由上层 Contributor 承接。 |
 | `fun.fengwk.kkstudio.harness.environment.daemon` | Platform Gateway 与 Environment Daemon 之间的 WebSocket JSON 通信协议（v1）。包含协议封包（`DaemonEnvelope`）、握手能力载荷（READY）、通用调用与流式结果编解码器，以及目录浏览（`EnvironmentDirectoryListing`）与资源引用模型。本包聚焦报文的序列化与严格校验，连接代际、路由租约与执行日志分别由网关和 Daemon 状态机管理。 |
 
 ## 核心模型 / API
@@ -69,7 +69,7 @@ environmentId + workspacePath
 - 单独使用 `.` 表示环境根目录（Environment root）；
 - 其余路径均使用正斜杠 `/` 分隔，最大长度限制为 2048 字符；
 - 路径必须为规范相对路径，遇到绝对路径、Windows 盘符、反斜杠、空路径段、相对导航段（`.` 或 `..`）以及控制字符时均判定非法并直接拒绝；
-- 规则在协议层验证网络传输格式（wire shape），实际物理路径解析、符号链接防护与根目录范围约束由 Daemon 进程在执行前执行安全检查。
+- 规则在协议层验证网络传输格式（wire shape）；Daemon 以此解析本次调用的缺省 cwd，capability 参数路径不限制在环境根目录内。
 
 ### Atomic Capability catalog
 
@@ -79,13 +79,12 @@ environmentId + workspacePath
 capabilityId / capabilityVersion / inputSchema / timeout
 ```
 
-[`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 的目录版本固定为 `1`，按确定性顺序维护 12 项标准原子能力：
+[`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 的目录版本固定为 `1`，按确定性顺序维护 11 项标准原子能力：
 
 ```text
 fs.read
 fs.write
 fs.apply-edit
-fs.apply-patch
 process.exec
 fs.search
 fs.find
@@ -185,7 +184,7 @@ arguments
 timeoutMillis
 ```
 
-所有字段均为必填项；arguments 必须是 JSON 对象；timeoutMillis 必须为非负整数毫秒。工作区的物理真实路径解析与边界校验由执行方在入口处完成。
+所有字段均为必填项；arguments 必须是 JSON 对象；timeoutMillis 必须为非负整数毫秒。工作区的物理真实路径解析由执行方在入口处完成，并作为该次调用的缺省 cwd。
 
 [`DaemonCapabilityResultCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodec.java) 负责通用流式（`PARTIAL`）与完成态（`COMPLETED`）结果编解码。所有能力（包括技能正文加载 `skill.load` 与目录浏览 `fs.list-directory`）均统一通过通用 `INVOKE` 模型与流式结果协议交互，保持编解码管道的一致性。
 

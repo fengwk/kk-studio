@@ -40,7 +40,7 @@ import java.util.Set;
 /**
  * BuiltinHarnessContributor 的全面目录冻结与完整能力清单测试。
  *
- * <p>验证 exact inventory (15 tools: 10 environment + 2 internal + 3 goal),
+ * <p>验证 exact inventory (14 tools: 9 environment + 2 internal + 3 goal),
  * visibility/requirements/capability 映射, stable IDs, goal state ownership/projector, 和全局唯一性。
  */
 class BuiltinHarnessContributorTest {
@@ -99,7 +99,7 @@ class BuiltinHarnessContributorTest {
   }
 
   @Test
-  void catalogFreezesExactInventoryOf15ToolsAndAssociatedCapabilities() {
+  void catalogFreezesExactInventoryOf14ToolsAndAssociatedCapabilities() {
     Tool loadSkill = stubTool("load_skill", ToolRequirements.environment());
     Tool task = stubTool("task", ToolRequirements.none());
     BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(loadSkill, task);
@@ -111,15 +111,15 @@ class BuiltinHarnessContributorTest {
     assertEquals(contributor.descriptor(), catalog.descriptors().get(0));
     assertTrue(catalog.findDescriptor(new ContributorId("builtin")).isPresent());
 
-    // Tools inventory: exactly 15 tools
+    // Tools inventory: exactly 14 tools
     List<ToolContribution> tools = catalog.tools();
-    assertEquals(15, tools.size(), "exact total 15 tools expected");
+    assertEquals(14, tools.size(), "exact total 14 tools expected");
 
-    // Selectable tools: 10 environment + 3 goal = 13 tools (load_skill and task are INTERNAL)
+    // Selectable tools: 9 environment + 3 goal = 12 tools (load_skill and task are INTERNAL)
     List<ToolContribution> selectables = catalog.selectableTools();
-    assertEquals(13, selectables.size(), "exact 13 selectable tools expected");
+    assertEquals(12, selectables.size(), "exact 12 selectable tools expected");
 
-    // 10 Environment Capability tools
+    // 9 Environment Capability tools
     assertEnvironmentTool(
         catalog,
         "read",
@@ -142,14 +142,6 @@ class BuiltinHarnessContributorTest {
         BuiltinToolIds.EDIT,
         "environment.edit",
         EnvironmentCapabilityIds.FS_APPLY_EDIT,
-        ToolSideEffect.NON_IDEMPOTENT,
-        Duration.ofMinutes(1));
-    assertEnvironmentTool(
-        catalog,
-        "apply_patch",
-        BuiltinToolIds.APPLY_PATCH,
-        "environment.apply-patch",
-        EnvironmentCapabilityIds.FS_APPLY_PATCH,
         ToolSideEffect.NON_IDEMPOTENT,
         Duration.ofMinutes(1));
     assertEnvironmentTool(

@@ -104,12 +104,9 @@ test('report artifacts never repeat the 12KiB payload', () => {
     const report = readFileSync(path.join(runDir, 'report.md'), 'utf8')
     assert.match(
       report,
-      /Agent tool IDs: `base\.read, base\.write, base\.edit, base\.apply-patch, base\.bash, base\.grep, base\.find`/,
+      /Agent tool IDs: `base\.read, base\.write, base\.edit, base\.bash, base\.grep, base\.find`/,
     )
-    assert.match(
-      report,
-      /Model-visible tool names: `read, write, edit, apply_patch, bash, grep, find`/,
-    )
+    assert.match(report, /Model-visible tool names: `read, write, edit, bash, grep, find`/)
     for (const file of [
       path.join(runDir, 'artifacts/m27-pi-repair/trace.json'),
       path.join(runDir, 'summary.json'),

@@ -58,7 +58,6 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.FS_READ, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.FS_WRITE, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.FS_APPLY_EDIT, Duration.ofMinutes(1)),
-        descriptor(EnvironmentCapabilityIds.FS_APPLY_PATCH, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofHours(1)),
         descriptor(EnvironmentCapabilityIds.FS_SEARCH, Duration.ofHours(1)),
         descriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofHours(1)),

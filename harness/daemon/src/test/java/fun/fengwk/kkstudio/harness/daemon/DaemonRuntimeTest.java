@@ -26,11 +26,11 @@ import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.daemon.coding.ApplyPatchCapability;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingCapabilities;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
+import fun.fengwk.kkstudio.harness.daemon.coding.WriteCapability;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
@@ -942,10 +942,10 @@ class DaemonRuntimeTest {
     assertEquals(1, tool.handle.cancelCalls.get());
   }
 
-  /** Daemon timeout 必须取消排队中的 apply_patch，并在工具尚未开始时保持 workspace 不变。 */
+  /** Daemon timeout 必须取消排队中的写能力，并在工具尚未开始时保持 workspace 不变。 */
   @Test
-  void timeoutCancelsQueuedApplyPatchBeforeMutation() throws Exception {
-    Path root = Files.createTempDirectory("daemon-apply-patch-timeout");
+  void timeoutCancelsQueuedWriteBeforeMutation() throws Exception {
+    Path root = Files.createTempDirectory("daemon-write-timeout");
     ExecutorService taskExecutor = Executors.newSingleThreadExecutor();
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     CountDownLatch blockerStarted = new CountDownLatch(1);
@@ -964,7 +964,7 @@ class DaemonRuntimeTest {
       FakeTransport transport = new FakeTransport();
       DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
       registry.register(
-          new ApplyPatchCapability(
+          new WriteCapability(
               new CodingToolsConfig(root, 2000, 50 * 1024, "bash", new InMemoryResourceStore()),
               taskExecutor));
       runtime =
@@ -991,20 +991,15 @@ class DaemonRuntimeTest {
       transport.awaitConnections(1);
       completeHandshake(0);
       transport.takeMessages(2);
-      String patch =
-          "*** Begin Patch\n"
-              + "*** Add File: timeout.txt\n"
-              + "+must not be written\n"
-              + "*** End Patch";
       transport.receive(
           invokeWithArguments(
-              "apply-patch-timeout",
+              "write-timeout",
               1,
-              "fs.apply-patch",
+              "fs.write",
               "1",
               100,
               ".",
-              "{\"patchText\":\"" + jsonEscape(patch) + "\"}"));
+              "{\"path\":\"timeout.txt\",\"content\":\"must not be written\"}"));
 
       assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
       List<DaemonEnvelope> terminal = transport.takeMessages(1);

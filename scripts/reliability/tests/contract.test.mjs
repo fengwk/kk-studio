@@ -20,12 +20,11 @@ test('reliability contract keeps selectable AgentToolIds separate from model too
     'base.read',
     'base.write',
     'base.edit',
-    'base.apply-patch',
     'base.bash',
     'base.grep',
     'base.find',
   ])
-  assert.deepEqual(MODEL_TOOL_NAMES, ['read', 'write', 'edit', 'apply_patch', 'bash', 'grep', 'find'])
+  assert.deepEqual(MODEL_TOOL_NAMES, ['read', 'write', 'edit', 'bash', 'grep', 'find'])
   assert.equal(AGENT_TOOL_IDS.includes('base.load-skill'), false)
   assert.equal(AGENT_TOOL_IDS.includes('base.task'), false)
 })

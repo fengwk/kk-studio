@@ -12,7 +12,7 @@ class AgentToolIdTest {
   @Test
   void acceptsCanonicalExamples() {
     assertEquals("base.read", new AgentToolId("base.read").value());
-    assertEquals("base.apply-patch", new AgentToolId("base.apply-patch").value());
+    assertEquals("base.lsp-goto-definition", new AgentToolId("base.lsp-goto-definition").value());
     assertEquals("custom.goal.create", new AgentToolId("custom.goal.create").value());
     assertEquals("mcp.github.create-issue", new AgentToolId("mcp.github.create-issue").value());
 

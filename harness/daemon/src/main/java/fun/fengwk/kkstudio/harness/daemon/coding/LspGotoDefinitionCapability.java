@@ -29,9 +29,9 @@ public final class LspGotoDefinitionCapability extends AbstractCodingCapability 
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     Path path =
-        boundary.existing(
+        EnvironmentPaths.existing(
             string(args, "path"),
-            boundary.workdir(optionalString(args, "workdir"), request.workdir()));
+            EnvironmentPaths.workdir(optionalString(args, "workdir"), request.workdir()));
     if (Files.isDirectory(path)) {
       throw new IllegalArgumentException("path must be a file: " + path);
     }

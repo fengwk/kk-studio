@@ -802,9 +802,9 @@ node scripts/reliability/reassess-agent-run.mjs <runId>
 | `minimax/MiniMax-M3` | `high` | `m3-pi-investigate`、`m3-pi-repair` | `m3-pi-base-investigate`、`m3-pi-base-repair` |
 
 Runner 固定 Agent config 为
-`toolIds=[base.read,base.write,base.edit,base.apply-patch,base.bash,base.grep,base.find]`、
+`toolIds=[base.read,base.write,base.edit,base.bash,base.grep,base.find]`、
 `skills=[]`、`subagents=[]`，Provider 请求中的 model-visible tool names
-对应为 `read,write,edit,apply_patch,bash,grep,find`。每个 case 独立 Chat/Thread；
+对应为 `read,write,edit,bash,grep,find`。每个 case 独立 Chat/Thread；
 真实执行前要求 provider、model、variant、Tool catalog 和 Environment READY
 全部匹配。未知 cost、超过 USD 5、测试/工作区/凭证隔离证据缺失都 fail closed。
 

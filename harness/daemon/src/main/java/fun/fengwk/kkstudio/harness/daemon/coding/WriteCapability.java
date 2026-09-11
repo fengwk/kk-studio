@@ -29,8 +29,8 @@ public final class WriteCapability extends AbstractCodingCapability {
     String rawPath = string(args, "path");
     String content = string(args, "content");
     Path path =
-        boundary.writable(
-            rawPath, boundary.workdir(optionalString(args, "workdir"), request.workdir()));
+        EnvironmentPaths.writable(
+            rawPath, EnvironmentPaths.workdir(optionalString(args, "workdir"), request.workdir()));
     ReentrantLock lock = FileMutations.lock(path);
     try {
       if (execution.isCancelled()) {

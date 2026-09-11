@@ -12,33 +12,32 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * environment root 内的分层 {@code .gitignore} 规则。
+ * 检索目标祖先链上的分层 {@code .gitignore} 规则。
  *
  * <p>规则按祖先到后代、文件内从上到下的顺序求值并采用 last-match-wins。被忽略的目录在加载其内部规则前就会被剪枝，因此后代规则不能错误地重新包含已忽略父目录。
  *
  * <p>单条 pattern 的解析与匹配由 {@link FastIgnoreRule} 承担（JGit gitignore 语义）。真实目录遍历逐节点评估，使用 {@code
  * isMatch(relativePath, directory, true)}：basename 只用末段匹配，避免 {@code !foo} 错误重包含 {@code
  * foo/bar.log}；目录的忽略判定在父遍历中先于其后代完成。
+ *
+ * <p>{@code .git} 元数据目录始终被硬排除；规则基线由调用方给定（检索目标位于 Environment root 内时使用 root，否则使用检索目标自身）。
  */
 final class GitIgnoreRules {
 
-  private final Path environmentRoot;
   private final List<Rule> rules;
 
-  private GitIgnoreRules(Path environmentRoot, List<Rule> rules) {
-    this.environmentRoot = environmentRoot;
+  private GitIgnoreRules(List<Rule> rules) {
     this.rules = rules;
   }
 
-  static Prepared prepare(Path environmentRoot, Path searchDirectory, SearchControl control)
+  static Prepared prepare(Path ruleBase, Path searchDirectory, SearchControl control)
       throws InterruptedException {
-    GitIgnoreRules context =
-        new GitIgnoreRules(environmentRoot, List.of()).withDirectoryRules(environmentRoot, control);
-    Path current = environmentRoot;
-    for (Path segment : environmentRoot.relativize(searchDirectory)) {
+    GitIgnoreRules context = new GitIgnoreRules(List.of()).withDirectoryRules(ruleBase, control);
+    Path current = ruleBase;
+    for (Path segment : ruleBase.relativize(searchDirectory)) {
       control.check();
       current = current.resolve(segment);
-      if (isHardExcluded(environmentRoot, current) || context.isIgnored(current, true, control)) {
+      if (SearchFiles.isGitMetadata(current) || context.isIgnored(current, true, control)) {
         return new Prepared(context, true);
       }
       context = context.withDirectoryRules(current, control);
@@ -75,12 +74,12 @@ final class GitIgnoreRules {
     List<Rule> combined = new ArrayList<>(rules.size() + additions.size());
     combined.addAll(rules);
     combined.addAll(additions);
-    return new GitIgnoreRules(environmentRoot, List.copyOf(combined));
+    return new GitIgnoreRules(List.copyOf(combined));
   }
 
   boolean isIgnored(Path path, boolean directory, SearchControl control)
       throws InterruptedException {
-    if (isHardExcluded(environmentRoot, path)) {
+    if (SearchFiles.isGitMetadata(path)) {
       return true;
     }
     boolean ignored = false;
@@ -91,18 +90,6 @@ final class GitIgnoreRules {
       }
     }
     return ignored;
-  }
-
-  private static boolean isHardExcluded(Path environmentRoot, Path path) {
-    if (!path.startsWith(environmentRoot)) {
-      return true;
-    }
-    for (Path segment : environmentRoot.relativize(path)) {
-      if (segment.toString().equals(".git")) {
-        return true;
-      }
-    }
-    return false;
   }
 
   record Prepared(GitIgnoreRules rules, boolean searchDirectoryIgnored) {}

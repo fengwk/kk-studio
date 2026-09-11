@@ -41,6 +41,7 @@ import java.util.concurrent.TimeUnit;
 class CodingCapabilitiesEdgeTest {
 
   @TempDir Path environmentRoot;
+  @TempDir Path externalRoot;
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
@@ -163,35 +164,54 @@ class CodingCapabilitiesEdgeTest {
     assertThrows(IllegalArgumentException.class, () -> blocking.execute(wrong, listener));
   }
 
+  /** 缺省 cwd 只校验可用性；绝对路径与越出 workdir 的相对路径不再受任何 root 范围限制。 */
   @Test
-  void pathBoundaryAcceptsCanonicalChildrenAndRejectsInvalidWorkdirs() throws Exception {
+  void environmentPathsResolveDefaultCwdAndAcceptExternalPaths() throws Exception {
     Path nested = Files.createDirectories(environmentRoot.resolve("nested"));
     Files.writeString(nested.resolve("file.txt"), "x");
-    EnvironmentPathBoundary boundary = new EnvironmentPathBoundary(config());
+    Files.writeString(externalRoot.resolve("external.txt"), "x");
+    Path externalFile = externalRoot.resolve("external.txt");
+    String traversal = environmentRoot.relativize(externalFile).toString();
 
-    assertEquals(nested.toRealPath(), boundary.workdir("@nested", environmentRoot));
-    assertEquals(nested.resolve("file.txt").toRealPath(), boundary.existing("@file.txt", nested));
-    assertEquals(nested.resolve("future/file.txt"), boundary.writable("future/file.txt", nested));
-    assertEquals(environmentRoot.toRealPath(), boundary.workdir(null, environmentRoot));
-    assertThrows(
-        IllegalArgumentException.class, () -> boundary.workdir("missing", environmentRoot));
-    assertThrows(
-        IllegalArgumentException.class, () -> boundary.workdir("file.txt", environmentRoot));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> boundary.workdir(environmentRoot.getParent().toString(), environmentRoot));
-    assertThrows(IllegalArgumentException.class, () -> boundary.existing("", nested));
-    assertThrows(IllegalArgumentException.class, () -> boundary.existing("missing", nested));
+    assertEquals(nested.toRealPath(), EnvironmentPaths.workdir("@nested", environmentRoot));
+    assertEquals(
+        nested.resolve("file.txt").toRealPath(), EnvironmentPaths.existing("@file.txt", nested));
+    assertEquals(
+        nested.resolve("future/file.txt"), EnvironmentPaths.writable("future/file.txt", nested));
+    assertEquals(environmentRoot.toRealPath(), EnvironmentPaths.workdir(null, environmentRoot));
+    assertEquals(
+        nested.resolve("file.txt").toRealPath(), EnvironmentPaths.writable("file.txt", nested));
     assertEquals(
         nested.resolve("file.txt").toRealPath(),
-        boundary.existing(nested.resolve("file.txt").toString(), environmentRoot));
-    assertEquals(nested.resolve("file.txt").toRealPath(), boundary.writable("file.txt", nested));
-    assertThrows(NullPointerException.class, () -> boundary.existing("file.txt", null));
-    assertThrows(IllegalArgumentException.class, () -> boundary.existing("\u0000", nested));
+        EnvironmentPaths.existing(nested.resolve("file.txt").toString(), environmentRoot));
+
+    // 绝对路径与 ../ 遍历都是普通路径：workdir 只提供缺省解析基准。
+    assertEquals(
+        externalRoot.toRealPath(),
+        EnvironmentPaths.workdir(externalRoot.toString(), environmentRoot));
+    assertEquals(externalFile.toRealPath(), EnvironmentPaths.existing(traversal, environmentRoot));
+    assertEquals(
+        externalFile.toRealPath(),
+        EnvironmentPaths.existing(externalFile.toRealPath().toString(), nested));
+    assertEquals(
+        externalRoot.toRealPath().resolve("external.txt.new"),
+        EnvironmentPaths.writable(traversal + ".new", environmentRoot));
+
+    assertThrows(
+        IllegalArgumentException.class, () -> EnvironmentPaths.workdir("missing", environmentRoot));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> EnvironmentPaths.workdir("file.txt", environmentRoot));
+    assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.existing("", nested));
+    assertThrows(
+        IllegalArgumentException.class, () -> EnvironmentPaths.existing("missing", nested));
+    assertThrows(NullPointerException.class, () -> EnvironmentPaths.existing("file.txt", null));
+    assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.existing("\u0000", nested));
     Path dangling = environmentRoot.resolve("dangling");
     Files.createSymbolicLink(dangling, environmentRoot.resolve("not-created"));
     assertThrows(
-        IllegalArgumentException.class, () -> boundary.existing("dangling", environmentRoot));
+        IllegalArgumentException.class,
+        () -> EnvironmentPaths.existing("dangling", environmentRoot));
   }
 
   @Test

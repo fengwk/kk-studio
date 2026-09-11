@@ -8,7 +8,6 @@ public final class BuiltinToolIds {
   public static final AgentToolId READ = new AgentToolId("base.read");
   public static final AgentToolId WRITE = new AgentToolId("base.write");
   public static final AgentToolId EDIT = new AgentToolId("base.edit");
-  public static final AgentToolId APPLY_PATCH = new AgentToolId("base.apply-patch");
   public static final AgentToolId BASH = new AgentToolId("base.bash");
   public static final AgentToolId GREP = new AgentToolId("base.grep");
   public static final AgentToolId FIND = new AgentToolId("base.find");

@@ -161,12 +161,13 @@ class NativeSearchCapabilitiesTest {
     assertTrue(
         text(invoke(find(config()), "{\"pattern\":\"*\",\"path\":\"search/a.ts\"}"))
             .contains("path must be a directory"));
-    assertTrue(
-        text(invoke(find(config()), "{\"pattern\":\"*\",\"path\":\"search-link\"}"))
-            .contains("must not traverse symbolic links"));
-    assertTrue(
-        text(invoke(grep(config()), "{\"pattern\":\"a\",\"path\":\"search/link.ts\"}"))
-            .contains("must not traverse symbolic links"));
+    // 参数路径上的符号链接不再被拒绝：解析为真实路径后照常检索，遍历仍不跟随内部符号链接。
+    assertEquals(
+        "search/.hidden.ts\nsearch/a.ts\nsearch/nested/b.ts\nsearch/z.ts",
+        text(invoke(find(config()), "{\"pattern\":\"*.ts\",\"path\":\"search-link\"}")));
+    assertEquals(
+        "search/a.ts:1:a",
+        text(invoke(grep(config()), "{\"pattern\":\"a\",\"path\":\"search/link.ts\"}")));
   }
 
   /** grep 的 literal/regex/ignore-case/include 组合必须保持逐行去重。 */

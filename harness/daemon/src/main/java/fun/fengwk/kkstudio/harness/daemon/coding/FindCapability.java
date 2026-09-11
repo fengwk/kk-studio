@@ -30,8 +30,8 @@ public final class FindCapability extends AbstractCodingCapability {
   EnvironmentCapabilityResult run(
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    Path workdir = boundary.workdir(optionalString(args, "workdir"), request.workdir());
-    Path path = boundary.existingWithoutSymlinks(string(args, "path"), workdir);
+    Path workdir = EnvironmentPaths.workdir(optionalString(args, "workdir"), request.workdir());
+    Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
     int limit = optionalPositiveInt(args, "limit", 1000, 100_000);
     Duration timeout = effectiveSearchTimeout(request.effectiveTimeout(), args);
     SearchControl control = SearchControl.start(timeout, execution, "find");

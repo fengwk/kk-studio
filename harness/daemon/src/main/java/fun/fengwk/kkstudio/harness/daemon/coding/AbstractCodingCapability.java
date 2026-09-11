@@ -21,7 +21,6 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
   static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   final CodingToolsConfig config;
-  final EnvironmentPathBoundary boundary;
   private final ExecutorService executor;
   private final EnvironmentCapabilityDescriptor descriptor;
 
@@ -30,7 +29,6 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
       ExecutorService executor,
       EnvironmentCapabilityDescriptor descriptor) {
     this.config = Objects.requireNonNull(config, "config");
-    this.boundary = new EnvironmentPathBoundary(config);
     this.executor = Objects.requireNonNull(executor, "executor");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
   }

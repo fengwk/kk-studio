@@ -43,8 +43,8 @@ public final class EditCapability extends AbstractCodingCapability {
       throw new IllegalArgumentException("old_string must not be empty");
     }
     Path path =
-        boundary.existing(
-            rawPath, boundary.workdir(optionalString(args, "workdir"), request.workdir()));
+        EnvironmentPaths.existing(
+            rawPath, EnvironmentPaths.workdir(optionalString(args, "workdir"), request.workdir()));
     if (Files.isDirectory(path)) {
       throw new IllegalArgumentException("path must be a file: " + rawPath);
     }

@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 class CodingCapabilitiesTest {
 
   @TempDir Path environmentRoot;
+  @TempDir Path externalRoot;
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
@@ -58,7 +59,6 @@ class CodingCapabilitiesTest {
             "fs.read",
             "fs.write",
             "fs.apply-edit",
-            "fs.apply-patch",
             "process.exec",
             "fs.search",
             "fs.find",
@@ -73,23 +73,27 @@ class CodingCapabilitiesTest {
         IllegalArgumentException.class, () -> request(read, "{\"path\":\"x\",\"unknown\":true}"));
   }
 
+  /** 越出 workdir 的相对遍历与符号链接目标都是普通路径：读取照常解析，写入落到符号链接指向的真实目录。 */
   @Test
-  void rejectsTraversalSymlinksAndUnsafeWriteAncestors() throws Exception {
-    Path outside = Files.createTempDirectory("coding-outside");
-    Files.writeString(outside.resolve("secret.txt"), "secret");
-    Files.createSymbolicLink(environmentRoot.resolve("escape"), outside);
+  void resolvesTraversalAndSymlinkTargetsOutsideWorkdir() throws Exception {
+    Files.writeString(externalRoot.resolve("secret.txt"), "secret");
+    Files.createSymbolicLink(environmentRoot.resolve("escape"), externalRoot);
     ReadCapability read = read(config());
     WriteCapability write = write(config());
+    String traversalPath =
+        environmentRoot.relativize(externalRoot.resolve("secret.txt")).toString();
 
-    EnvironmentCapabilityResult traversal = invoke(read, "{\"path\":\"../secret.txt\"}");
+    EnvironmentCapabilityResult traversal = invoke(read, "{\"path\":" + json(traversalPath) + "}");
     EnvironmentCapabilityResult symlink = invoke(read, "{\"path\":\"escape/secret.txt\"}");
-    EnvironmentCapabilityResult unsafeWrite =
+    EnvironmentCapabilityResult writeThroughSymlink =
         invoke(write, "{\"path\":\"escape/new.txt\",\"content\":\"x\"}");
 
-    assertTrue(text(traversal).contains("escapes environment root"));
-    assertTrue(text(symlink).contains("outside environment root"));
-    assertTrue(text(unsafeWrite).contains("outside environment root"));
-    assertFalse(Files.exists(outside.resolve("new.txt")));
+    assertFalse(traversal.error());
+    assertTrue(text(traversal).contains("secret"));
+    assertFalse(symlink.error());
+    assertTrue(text(symlink).contains("secret"));
+    assertFalse(writeThroughSymlink.error());
+    assertEquals("x", Files.readString(externalRoot.resolve("new.txt")));
   }
 
   @Test
@@ -425,6 +429,11 @@ class CodingCapabilitiesTest {
   private CodingToolsConfig config(int lines, int bytes) {
     return new CodingToolsConfig(
         environmentRoot, lines, bytes, "bash", new InMemoryResourceStore());
+  }
+
+  /** 以 JSON 字符串字面量表示任意本地路径，避免手工拼接转义。 */
+  private static String json(String value) throws Exception {
+    return AbstractCodingCapability.OBJECT_MAPPER.writeValueAsString(value);
   }
 
   private EnvironmentCapabilityExecutionRequest request(
