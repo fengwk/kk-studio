@@ -119,22 +119,24 @@ NAS 自迭代使用共享数据面的两个 App 节点。它们属于同一个 K
 
 | 节点 | Git branch | Human 入口 | 运行形态 |
 | --- | --- | --- | --- |
-| `vps-kk-studio` | `main` | `https://studio.kk1.fun` | 不含源码和构建工具的不可变 Fat JAR 镜像 |
-| `vps-kk-studio-dev` | `dev` | `https://studio-dev.kk1.fun` | 持久源码工作区、JDK/Maven、Node/Vite、Backend 和 Environment Daemon |
+| `vps-kk-studio` | `main` | `https://studio.kk1.fun` | 不含源码和构建工具的不可变 Fat JAR 镜像；唯一 Harness worker 与 Flyway owner |
+| `vps-kk-studio-dev` | `dev` | `https://studio-dev.kk1.fun` | 持久源码工作区、JDK/Maven、Node/Vite、关闭 Harness worker/Flyway 的 Backend 和 Environment Daemon |
 
-两个节点连接同一 PostgreSQL database 和 S3 bucket，均启动 Harness Worker。
-PostgreSQL claim/lease/fencing 保证单项 Work 只被一个节点拥有，但不按入口域名、
-branch 或版本分配 Work：
+两个节点连接同一 PostgreSQL database 和 S3 bucket。异步 Harness 执行只有 Main
+一个执行者：Dev Backend 的进程内 dispatcher 关闭后不再 claim Work，但仍提供
+Vite、HTTP API、查询投影和应用事件 WebSocket，因此 Dev 入口是同步 preview 面：
 
-| Work | 节点选择 |
+| 面 | 节点 |
 | --- | --- |
-| Thread、Model、无 Environment affinity 的 Tool | 任一活跃 Worker 均可 claim |
-| 绑定 Dev Daemon Environment 的 Tool | 仅持有该 Environment route 的 Dev 节点可 claim |
+| 异步 Work（Thread/Model/Tool processor、含 Dev Daemon Environment 的 Tool） | 仅 `vps-kk-studio` 的 worker |
+| Dev 入口的 Vite/HMR、HTTP API、查询投影、应用事件 WebSocket | `vps-kk-studio-dev` 的 Backend |
 
-因此一个 Turn 可以跨 Main/Dev 两个版本执行。异版本混跑只允许保持
-Harness 持久状态、Entry JSON、Provider/Tool wire、Storage 生命周期和数据库约束
-向后兼容的变更。Human 可以在两个入口查看同一份 durable 状态、发送命令并验收
-Dev 行为；入口节点不代表实际执行该 Work 的节点。
+Human 在 Dev 入口提交命令时，同步 HTTP 处理使用 Dev 代码，随后产生的异步 Harness
+Work 使用 Main 代码，因此同一用户流程仍可能跨两个版本边界。Harness 持久状态、
+Entry JSON、Provider/Tool wire、Storage 生命周期和数据库约束必须保持向后兼容。
+Dev 中修改 processor/runtime 等异步执行路径不会在普通 Dev preview 中生效，这些
+改动必须由自动化测试（定向单测/E2E）或显式隔离环境验证后才能验收；普通 Dev
+preview 只覆盖前端、同步 API 和查询行为。
 
 运行职责固定为：
 
@@ -147,23 +149,40 @@ vps-kk-studio
 
 vps-kk-studio-dev
   dev persistent workspace
-  workers enabled
+  workers disabled
   Flyway disabled
-  Vite + API + Environment Daemon
+  Vite + API/query preview + Environment Daemon
 ```
 
 Main 是共享 schema 的唯一 Flyway owner。Dev 使用与 Main 相同的生产 profile，
-但必须设置 `SPRING_FLYWAY_ENABLED=false`，且不得加载 dev/e2e seed。Dev 分支中的
-未合并 migration 不得应用到共享 database；涉及 schema 的变更必须先由 Human
-完成 Review 和 Main 集成，再由 Main 节点执行 migration。已经投入使用的 V1
-保持冻结，后续只新增 V2+ migration；任何自迭代都不得重置整个 database 或
+但必须设置 `SPRING_FLYWAY_ENABLED=false` 与
+`KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false`，且不得加载 dev/e2e seed。
+Dev 分支中的未合并 migration 不得应用到共享 database；涉及 schema 的变更必须
+先由 Human 完成 Review 和 Main 集成，再由 Main 节点执行 migration。已经投入使用
+的 V1 保持冻结，后续只新增 V2+ migration；任何自迭代都不得重置整个 database 或
 删除共享 bucket。
 
-Dev Daemon 只连接 Dev Backend 的内部 WebSocket，不通过公共 Gateway：
+Dev 容器内的 Environment Daemon 经内部 Docker 网络连接 Main App，既不连接
+Dev Backend，也不经过公共 Gateway。Main 的 HTTP(S) origin 统一保存在外部 Compose
+项目的 `.env`，`docker-compose.yml` 只做同名变量映射；entrypoint 再派生出 Daemon
+的 WebSocket 地址：
 
-```text
-ws://127.0.0.1:8080/api/harness/environment-daemon/v1
+```dotenv
+# .env
+KK_STUDIO_CONTROL_PLANE_BASE_URL=http://vps-kk-studio:8080
 ```
+
+```yaml
+# docker-compose.yml
+environment:
+  KK_STUDIO_CONTROL_PLANE_BASE_URL: ${KK_STUDIO_CONTROL_PLANE_BASE_URL}
+```
+
+origin 必须是使用 DNS/IPv4 host 与可选端口的裸 HTTP(S) origin，可选一个结尾 `/`；
+`https` 派生 `wss`。entrypoint 拒绝空值、`ws`/`wss` 等其它 scheme、路径、query、
+fragment、userinfo、空白和非法端口，错误信息不回显输入值。非法值在准备 workspace
+和启动服务之前就让容器启动失败。上面的 `.env` 值最终派生为
+`ws://vps-kk-studio:8080/api/harness/environment-daemon/v1`。
 
 两个容器内的服务端访问不得绕到公网域名：
 
@@ -171,6 +190,7 @@ ws://127.0.0.1:8080/api/harness/environment-daemon/v1
 PostgreSQL -> vps-postgres:5432
 S3 API     -> http://vps-s3:9000
 OpenCLI    -> 同一 vps 网络的 Hub 容器 HTTP origin
+Daemon     -> http://vps-kk-studio:8080（entrypoint 派生出 ws://vps-kk-studio:8080/api/harness/environment-daemon/v1）
 ```
 
 OpenCLI 的 `baseUrl` 由 System Settings 配置；上传、执行轮询和产物下载都从该
@@ -189,13 +209,18 @@ Agent 在 Dev 节点遵循以下闭环：
 2. 开始前检查 Git 状态并保留 Human 的并行修改，不覆盖未提交工作。
 3. 对实际变更执行定向测试；Java 关键路径同时遵守覆盖率门禁。
 4. 普通 Frontend 变更由 Vite HMR 生效；Java 变更先增量构建，再重启 Dev
-   Backend/Vite 受管进程，不重启 Main 或 Daemon。
-5. 重启前提交源码和必要的 durable 进度；Backend 重启作为当前 Agent 回合的最后
-   一个 Tool 操作。重启可能使当前 Model/Tool invocation 收敛为 `UNKNOWN`，
-   Daemon 重连不等于 invocation 无损迁移。
+   Backend/Vite 受管进程，不重启 Main 或 Daemon。只有 Dev 容器、镜像入口或
+   Daemon 代码变化才需要重建并重启 Dev 容器，那会重建 Main 与 Daemon 的连接。
+5. 重启前提交源码和必要的 durable 进度。`kk-studio-dev-reload` 通过 Main
+   控制面执行时不会中断当前 Environment Tool，等待 Dev Backend/Vite readiness
+   后可正常返回；Dev 浏览器的 HTTP、应用事件与 HMR 连接会在 reload 期间短暂断开并
+   自动重连。只有重启 Dev 容器或 Daemon 本身时，当前 Tool outcome 才可能不确定，
+   这类操作必须作为当前 Agent 回合最后一个 Tool 操作。
 6. 验证 Dev health、Frontend、应用事件 WebSocket 和 Daemon `READY` 后继续下一轮。
 7. 功能达到可验收状态后 push `dev` 并向 Human 报告变更、验证和已知风险；只有
-   Human 决定何时合入 `main` 和更新稳定节点。
+   Human 决定何时合入 `main` 和更新稳定节点。涉及 processor/runtime 等异步执行
+   路径的改动必须附带自动化测试证据或显式隔离环境验证，因为 Dev preview 由 Main
+   的 worker 执行。
 
 当前仓库脚本可用于 Backend/Vite 重启。Dev 节点镜像由
 [deploy/dev/Dockerfile](../../deploy/dev/Dockerfile) 提供：Maven 3.9.11/JDK 21 与
@@ -237,12 +262,14 @@ token 只保存在容器的 `/home/kkdaemon/.config/gh/hosts.yml`，不进入本
 环境变量或日志。
 
 entrypoint 用仓库既有 lifecycle 启动 Backend/Vite（prod profile、Flyway disabled、
-Backend `127.0.0.1:8080`、Vite `0.0.0.0:5173` 并代理 Backend），随后以前台
-Environment Daemon 作为容器主进程，连接
-`ws://127.0.0.1:8080/api/harness/environment-daemon/v1`，environment-root 为
-`/workspace`。entrypoint 对 `prod` profile、`SPRING_FLYWAY_ENABLED=false` 和
-Daemon registration token fail closed，避免错误配置触碰共享 schema。healthcheck
-同时探测 Backend `/actuator/health` 与 Vite `/threads`。
+Harness worker disabled、Backend `127.0.0.1:8080`、Vite `0.0.0.0:5173` 并代理
+Backend），随后以前台 Environment Daemon 作为容器主进程，按
+`KK_STUDIO_CONTROL_PLANE_BASE_URL` 派生的 WebSocket 地址连接 Main，
+environment-root 为 `/workspace`。entrypoint 对 `prod` profile、
+`SPRING_FLYWAY_ENABLED=false`、`KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false`、
+control-plane origin 和 Daemon registration token fail closed，避免错误配置触碰
+共享 schema 或复制出第二个 Harness dispatcher。healthcheck 同时探测 Backend
+`/actuator/health` 与 Vite `/threads`。
 
 空 cache volume 的首次启动要完整构建 Backend 并安装前端依赖（实测 ~29 分钟，其中
 Maven 25:44、npm 2:00），因此 entrypoint 把 readiness 预算
@@ -252,7 +279,8 @@ cache 首次启动；已有 workspace 的重启（`DEV_SKIP_PACKAGE=true` 且 `n
 存在）实测 41 秒内恢复健康。
 
 普通迭代只运行稳定命令 `kk-studio-dev-reload`（增量 package 后重启受管进程，
-Daemon 与容器保持存活，并等待两端 readiness）。容器内等价手写路径为：
+Daemon 与容器保持存活，Main 与 Daemon 的连接不中断，并等待两端 readiness）。
+容器内等价手写路径为：
 
 ```bash
 cd /workspace/kk-studio
@@ -260,6 +288,7 @@ env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl web -am -DskipTests package
 
 env SPRING_PROFILES_ACTIVE=prod \
   SPRING_FLYWAY_ENABLED=false \
+  KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false \
   BACKEND_HOST=127.0.0.1 \
   BACKEND_PORT=8080 \
   FRONTEND_HOST=0.0.0.0 \
@@ -267,6 +296,10 @@ env SPRING_PROFILES_ACTIVE=prod \
   DEV_SKIP_PACKAGE=true \
   ./scripts/dev.sh restart
 ```
+
+`kk-studio-dev-reload` 与 entrypoint 使用同一组默认值和 fail-closed 校验：即使
+ad hoc 覆盖 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED`，reload 也会拒绝执行，
+不会让 Dev Backend 变成第二个 Harness worker。
 
 Dev 容器运行环境变量（外部 Compose 只引用名称，真实值由 NAS 私密环境文件注入）：
 
@@ -279,10 +312,11 @@ Dev 容器运行环境变量（外部 Compose 只引用名称，真实值由 NAS
 | `KK_STUDIO_DEV_ALLOW_SOURCE_SEED` | 是否允许用镜像内源码快照初始化非 Git 工作区，默认 `false` |
 | `KK_STUDIO_SOURCE_SEED` | 源码快照路径，默认 `/opt/kk-studio/source` |
 | `SPRING_PROFILES_ACTIVE` / `SPRING_FLYWAY_ENABLED` | Backend profile 与 Flyway 开关，默认 `prod` / `false`（Main 独占 migration） |
+| `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED` | Dev Backend 的 Harness worker 开关，必须为 `false`（Main 独占 Harness 异步执行） |
+| `KK_STUDIO_CONTROL_PLANE_BASE_URL` | Main App 的 HTTP(S) origin，必填；值保存在外部 Compose 项目的 `.env` 并同名映射，entrypoint 派生出 Daemon 的 ws(s) gateway 地址 |
 | `BACKEND_HOST` / `BACKEND_PORT` / `FRONTEND_HOST` / `FRONTEND_PORT` / `DEV_WORK_DIR` | `scripts/dev.sh` 的监听地址、端口与 log/PID 目录 |
 | `DEV_READY_TIMEOUT_SECONDS` | Backend/Vite readiness 预算，容器内默认 `600`（仓库默认 `90`） |
-| `KK_STUDIO_DAEMON_REGISTRATION_TOKEN` | Daemon 注册 token |
-| `KK_STUDIO_DAEMON_GATEWAY_URI` / `KK_STUDIO_DAEMON_NOTE` | Daemon WebSocket 地址与 Environment note |
+| `KK_STUDIO_DAEMON_REGISTRATION_TOKEN` / `KK_STUDIO_DAEMON_NOTE` | Daemon 注册 token 与 Environment note |
 
 `main` 与 `dev` 分支的镜像发布由 `.github/workflows/docker-publish.yml` 承担：先跑
 Java/frontend/docs/security 门禁，再以 Buildx 构建 linux/amd64 并推送
@@ -295,7 +329,8 @@ Agent 必须停止自动重启并交给 Human 决策的变更包括：
 - 删除或重命名持久 JSON 字段、数据库枚举值或 wire 字段；
 - 改变 Work/Invocation 状态机、claim/lease/fencing 语义；
 - 改变 S3 object key、Blob 引用计数或 cleanup 生命周期；
-- 需要重建 Dev 镜像、重启 Daemon 或可能同时使两个 App 版本不可读的数据变更。
+- 需要重建 Dev 镜像、重启 Daemon，或使 Main 与 Dev 中任一节点无法读取共享 durable
+  状态的数据变更。
 
 源码仓库、Dockerfile 和 image layer 只保存环境变量名与无敏感默认值。数据库、
 S3、Provider、Gateway 和 Daemon registration credential 由 NAS 私密环境文件在运行时
