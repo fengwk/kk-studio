@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 
 import java.sql.Connection;
@@ -75,8 +76,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   /** 测试意图：验证正确 token 的新环境首次路由认领成功并生成有效 leaseToken 与 CONNECTING 状态。 */
   @Test
   void tryAcquireNewEnvironmentRoute() {
-    BindResult result = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    BindResult.Acquired acquired = assertInstanceOf(BindResult.Acquired.class, result);
+    LeaseBindResult result = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    LeaseBindResult.Acquired acquired = assertInstanceOf(LeaseBindResult.Acquired.class, result);
     assertNotNull(acquired.leaseToken());
 
     EnvironmentConnection env = registry1.find(DEV).orElseThrow();
@@ -91,12 +92,12 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   /** 测试意图：验证其他节点在活跃租约期内抢占返回 RETRY_LATER，且现有路由不被改变。 */
   @Test
   void activeRouteReturnsRetryLater() {
-    BindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    BindResult.Acquired acquired = assertInstanceOf(BindResult.Acquired.class, r1);
+    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    LeaseBindResult.Acquired acquired = assertInstanceOf(LeaseBindResult.Acquired.class, r1);
 
     // 活跃租约期内再次尝试抢占 -> RETRY_LATER，且现有路由不变
-    BindResult r2 = registry2.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    assertInstanceOf(BindResult.RetryLater.class, r2);
+    LeaseBindResult r2 = registry2.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    assertInstanceOf(LeaseBindResult.RetryLater.class, r2);
 
     EnvironmentConnection env = registry1.find(DEV).orElseThrow();
     assertEquals(acquired.leaseToken(), env.leaseToken());
@@ -106,8 +107,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   /** 测试意图：验证租约过期后，其他节点能通过原子 upsert 接管该路由。 */
   @Test
   void expiredRouteAtomicallyTakenOver() {
-    BindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    assertInstanceOf(BindResult.Acquired.class, r1);
+    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    assertInstanceOf(LeaseBindResult.Acquired.class, r1);
 
     // 将数据库中该行的租约到期时间手动调整为过去（模拟租约超时）
     jdbcTemplate.update(
@@ -115,8 +116,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
         DEV.value());
 
     // 另一个节点再次尝试绑定 -> 成功接管
-    BindResult r2 = registry2.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    BindResult.Acquired acquired2 = assertInstanceOf(BindResult.Acquired.class, r2);
+    LeaseBindResult r2 = registry2.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    LeaseBindResult.Acquired acquired2 = assertInstanceOf(LeaseBindResult.Acquired.class, r2);
 
     EnvironmentConnection env = registry2.find(DEV).orElseThrow();
     assertEquals(node2, env.ownerNodeId());
@@ -127,8 +128,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   /** 测试意图：验证 markReady 受到 (environmentId, ownerNodeId, leaseToken) 围栏保护。 */
   @Test
   void markReadyFencedUpdate() {
-    BindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    UUID token1 = ((BindResult.Acquired) r1).leaseToken();
+    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    UUID token1 = ((LeaseBindResult.Acquired) r1).leaseToken();
 
     // 错误的 leaseToken 无法标记 READY
     assertFalse(registry1.markReady(DEV, UUID.randomUUID(), CAPABILITIES, LEASE_DURATION));
@@ -146,8 +147,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   /** 测试意图：验证心跳刷新仅允许当前租约持有者在有效期内推进。 */
   @Test
   void heartbeatFencedUpdate() {
-    BindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    UUID token1 = ((BindResult.Acquired) r1).leaseToken();
+    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    UUID token1 = ((LeaseBindResult.Acquired) r1).leaseToken();
     assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
 
     // 非持有节点无法刷新心跳
@@ -162,8 +163,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   /** 测试意图：验证 disconnect 保留重连宽限期，将状态回退为 CONNECTING。 */
   @Test
   void disconnectFencedUpdatePreservesGraceLease() {
-    BindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    UUID token1 = ((BindResult.Acquired) r1).leaseToken();
+    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    UUID token1 = ((LeaseBindResult.Acquired) r1).leaseToken();
     assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
 
     // 错误 token 的断开不会影响现有行
@@ -181,8 +182,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   /** 测试意图：证明租约过期的持有者无法通过 markReady/heartbeat/disconnect 续期或恢复。 */
   @Test
   void oldExpiredHolderWithSameTokenCannotMarkReadyHeartbeatOrDisconnectRevive() {
-    BindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    UUID token1 = ((BindResult.Acquired) r1).leaseToken();
+    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    UUID token1 = ((LeaseBindResult.Acquired) r1).leaseToken();
     assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
 
     // 手动调整租约到期时间为过去（同时保证 lease_until > last_seen_at 满足表约束）
@@ -201,20 +202,20 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   /** 测试意图：证明 close 后同节点在宽限期内能直接重连并换发新 token，而其他节点不能抢占该宽限。 */
   @Test
   void gracePeriodAllowsSameNodeReconnectWithNewTokenWhileBlockingOtherNodes() {
-    BindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    UUID token1 = ((BindResult.Acquired) r1).leaseToken();
+    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    UUID token1 = ((LeaseBindResult.Acquired) r1).leaseToken();
     assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
 
     // 断开连接，进入宽限期（status='CONNECTING' 且 lease_until > now）
     assertTrue(registry1.disconnect(DEV, token1, Duration.ofSeconds(30)));
 
     // 其他节点在宽限期内尝试抢占 -> 必须返回 RETRY_LATER
-    BindResult r2 = registry2.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    assertInstanceOf(BindResult.RetryLater.class, r2);
+    LeaseBindResult r2 = registry2.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    assertInstanceOf(LeaseBindResult.RetryLater.class, r2);
 
     // 同一节点在宽限期内重连 -> 允许接管并换发新 token
-    BindResult rSame = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    BindResult.Acquired acquiredSame = assertInstanceOf(BindResult.Acquired.class, rSame);
+    LeaseBindResult rSame = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    LeaseBindResult.Acquired acquiredSame = assertInstanceOf(LeaseBindResult.Acquired.class, rSame);
     assertNotNull(acquiredSame.leaseToken());
 
     EnvironmentConnection env = registry1.find(DEV).orElseThrow();
@@ -226,31 +227,31 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   /** 测试意图：证明活跃 READY 路由阻断包括原持有者在内的所有重复抢占，防止活动连接被意外重置。 */
   @Test
   void activeReadyRouteBlocksBothSameNodeAndOtherNode() {
-    BindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    UUID token1 = ((BindResult.Acquired) r1).leaseToken();
+    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    UUID token1 = ((LeaseBindResult.Acquired) r1).leaseToken();
     assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
 
     // 同节点重复 acquire -> RETRY_LATER（READY 状态不准抢占）
-    BindResult rSame = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    assertInstanceOf(BindResult.RetryLater.class, rSame);
+    LeaseBindResult rSame = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    assertInstanceOf(LeaseBindResult.RetryLater.class, rSame);
 
     // 异节点 acquire -> RETRY_LATER
-    BindResult rOther = registry2.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    assertInstanceOf(BindResult.RetryLater.class, rOther);
+    LeaseBindResult rOther = registry2.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    assertInstanceOf(LeaseBindResult.RetryLater.class, rOther);
   }
 
   /** 测试意图：证明无效或已轮换的 registration token 会直接被拒绝，不会占用或创建连接。 */
   @Test
   void invalidOrRotatedTokenIsRejected() {
     // 错误 token -> REJECTED
-    BindResult wrong = registry1.tryAcquire(DEV, "wrong-token", LEASE_DURATION);
-    assertInstanceOf(BindResult.Rejected.class, wrong);
+    LeaseBindResult wrong = registry1.tryAcquire(DEV, "wrong-token", LEASE_DURATION);
+    assertInstanceOf(LeaseBindResult.Rejected.class, wrong);
 
     // 不存在的环境 -> REJECTED
-    BindResult missing =
+    LeaseBindResult missing =
         registry1.tryAcquire(
             EnvironmentId.parse("99999999-9999-9999-9999-999999999999"), DEV_TOKEN, LEASE_DURATION);
-    assertInstanceOf(BindResult.Rejected.class, missing);
+    assertInstanceOf(LeaseBindResult.Rejected.class, missing);
 
     // 没有 connection 行被创建
     assertTrue(registry1.find(DEV).isEmpty());
@@ -262,8 +263,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
    */
   @Test
   void dbAuthoritativePredicatesReflectExpiredLeaseRegardlessOfAppClock() {
-    BindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    UUID token1 = ((BindResult.Acquired) r1).leaseToken();
+    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    UUID token1 = ((LeaseBindResult.Acquired) r1).leaseToken();
 
     // CONNECTING 阶段：activeLease 为 true，但 readyLease 均为 false
     assertTrue(registry1.hasActiveLease(DEV));
@@ -300,10 +301,10 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   /** 测试意图：验证 list 查询能列出不同环境的独立路由行。 */
   @Test
   void listAndDistinctEnvironments() {
-    BindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    BindResult r2 = registry2.tryAcquire(PROD, PROD_TOKEN, LEASE_DURATION);
-    assertInstanceOf(BindResult.Acquired.class, r1);
-    assertInstanceOf(BindResult.Acquired.class, r2);
+    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    LeaseBindResult r2 = registry2.tryAcquire(PROD, PROD_TOKEN, LEASE_DURATION);
+    assertInstanceOf(LeaseBindResult.Acquired.class, r1);
+    assertInstanceOf(LeaseBindResult.Acquired.class, r2);
 
     List<EnvironmentConnection> list = registry1.list();
     assertEquals(2, list.size());

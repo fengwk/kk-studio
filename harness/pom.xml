@@ -17,6 +17,7 @@
         <module>common</module>
         <module>tool</module>
         <module>environment</module>
+        <module>environment-server</module>
         <module>runtime</module>
         <module>provider</module>
         <module>contributor-api</module>

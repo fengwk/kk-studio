@@ -30,6 +30,7 @@
 | harness-contributor-api | [modules/harness-contributor-api.md](modules/harness-contributor-api.md) | Trusted Java Contributor SPI 与 catalog |
 | harness-daemon | [modules/harness-daemon.md](modules/harness-daemon.md) | Environment Daemon 与本地工具执行 |
 | harness-environment | [modules/harness-environment.md](modules/harness-environment.md) | Environment binding、Capability 与 Daemon v1 wire |
+| harness-environment-server | [modules/harness-environment-server.md](modules/harness-environment-server.md) | Environment daemon 会话、租约与调用协调核心 |
 | harness-infra | [modules/harness-infra.md](modules/harness-infra.md) | Harness Store、Work、通知和 ResourceStore |
 | harness-provider | [modules/harness-provider.md](modules/harness-provider.md) | JDK 21 HttpClient + SSE 传输与增量解析基础设施 |
 | harness-runtime | [modules/harness-runtime.md](modules/harness-runtime.md) | Agent Runtime 状态机与 processors |

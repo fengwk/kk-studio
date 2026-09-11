@@ -12,8 +12,8 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonConnection;
-import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonChannel;
+import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;
@@ -30,13 +30,10 @@ class EnvironmentDaemonWebSocketEndpointTest extends WebPostgresTestSupport {
 
   @LocalServerPort private int port;
 
-  /**
-   * 用 mock 替换具体的 Gateway（实现了 {@code EnvironmentDaemonEndpoint}），使 web 切片内共享同一 bean 的其他 Core
-   * 端口仍能满足装配。
-   */
-  @MockitoBean private EnvironmentDaemonGateway endpoint;
+  /** 用 mock 替换会话核心端点：本测试只验证 WebSocket 适配器的字节桥接，不启动真实协议状态机； 同一 DaemonEndpoint 类型在组合根内唯一。 */
+  @MockitoBean private EnvironmentDaemonServer endpoint;
 
-  /** 端点在两个方向上桥接完整文本帧，并在连接关闭时通知持久化 Gateway。 */
+  /** 端点在两个方向上桥接完整文本帧，并在连接关闭时通知会话核心。 */
   @Test
   void bridgesDaemonConnectionFramesAndClose() throws Exception {
     BlockingQueue<String> received = new LinkedBlockingQueue<>();
@@ -47,10 +44,9 @@ class EnvironmentDaemonWebSocketEndpointTest extends WebPostgresTestSupport {
             .buildAsync(endpointUri(), listener)
             .get(10, TimeUnit.SECONDS);
 
-    ArgumentCaptor<EnvironmentDaemonConnection> connectionCaptor =
-        ArgumentCaptor.forClass(EnvironmentDaemonConnection.class);
+    ArgumentCaptor<DaemonChannel> connectionCaptor = ArgumentCaptor.forClass(DaemonChannel.class);
     verify(endpoint, timeout(15_000)).open(connectionCaptor.capture());
-    EnvironmentDaemonConnection connection = connectionCaptor.getValue();
+    DaemonChannel connection = connectionCaptor.getValue();
     assertNotNull(connection);
     assertTrue(connection.isOpen());
 

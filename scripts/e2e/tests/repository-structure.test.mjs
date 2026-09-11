@@ -83,6 +83,7 @@ test('repository structure guard verifies root and harness POM module lists', ()
     'common',
     'tool',
     'environment',
+    'environment-server',
     'runtime',
     'provider',
     'contributor-api',
@@ -690,8 +691,8 @@ const CORE_STATE_ENUMS = [
     constants: ['PARTIAL', 'COMPLETE', 'ERROR'],
   },
   {
-    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/environment/gateway/EnvironmentDaemonGateway.java',
-    enumName: 'SendOutcome',
+    path: 'harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonSendOutcome.java',
+    enumName: 'DaemonSendOutcome',
     constants: ['SENT', 'NOT_SENT', 'UNCERTAIN'],
   },
 ]

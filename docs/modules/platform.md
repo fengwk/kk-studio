@@ -200,30 +200,34 @@ Runtime 只保留资源名称、媒体类型与有界 preview，不自动序列�
 Environment 的持久化 Card 保存于 `environment` 表（UUID `id` 为路由主键，`name` 为展示名）；
 跨节点 route ownership 由 PostgreSQL `environment_connection` 租约保存。每个 JVM
 共享一个 `nodeInstanceId`，`EnvironmentRegistry` 以
-`(environmentId, ownerNodeId, leaseToken)` 围栏读写数据库权威路由；
-`EnvironmentDaemonGateway` 只持有本节点连接、invocation 与 READY/心跳投影。
+`(environmentId, ownerNodeId, leaseToken)` 围栏读写数据库权威路由，并实现会话核心的 `DaemonLeaseStore`。
 
-`EnvironmentDaemonGateway`同时实现：
+`harness/environment-server` 的 `EnvironmentDaemonServer` 唯一拥有本节点 daemon 会话状态：连接代际、HELLO/WELCOME/READY/
+HEARTBEAT 握手推进、sequence、在途 invocation 与终态所有权。Platform 通过 `EnvironmentServerConfiguration` 装配它，并提供
+三个窄端口实现：`EnvironmentRegistry`（租约围栏）、`EnvironmentRepository` 解析的注册凭据（`DaemonRegistrationDirectory`）与
+`SystemSettingsSnapshot`（每次判定现读的心跳超时与资源上限）。
 
-- `EnvironmentDaemonEndpoint`：HELLO/WELCOME/READY/HEARTBEAT/close 协议；
-- `EnvironmentSkillLoader`：按冻结 skill binding 读取正文；
-- `EnvironmentCapabilityTransport`：按固定 capability catalog 向 READY Daemon 发送原子 capability；
-- `EnvironmentDirectoryLister`：本地直接执行或经 `environment_directory_query` mailbox 路由的目录查询。
+Platform 侧的产品适配器只做映射，不持有会话状态：
 
-同名连接的 bind 是原子三态：新连接 `Accepted`、新鲜持有者存在时 `Rejected`、持有者关闭或心跳过期时
-`Replaced`。每个 Environment 只有一个 active capability invocation；并发 sibling 在 INVOKE 发送前返回
-`EnvironmentCapabilityBusyException`，不同 Environment 可以并行。Tool、`skill.load` 与
-`fs.list-directory` 共享该 slot；control-plane timeout 会发送 `CANCEL`、立即释放 slot，并以有界
-invocation tombstone 吸收迟到 callback。
+- `EnvironmentDaemonGateway`：实现 `EnvironmentSkillLoader` 与 `EnvironmentDirectoryLister`，把 skill 与目录调用桥接到
+  会话核心并映射为平台 DTO；
+- `LocalDirectoryExecutor`：实现本节点目录查询窄端口 `LocalDirectoryQueryPort`，把 `FS_LIST_DIRECTORY` 结果映射为产品读模型；
+- 跨节点目录查询由 `EnvironmentQueryCoordinator` 以 PostgreSQL `environment_directory_query` mailbox 协调，经端口注入而非运行期
+  可变注册。
 
-Gateway 只接受 protocol v1 HELLO 和严格的 `capabilityCatalogVersion`。INVOKE payload 使用
+每个 Environment 的调用只按 `invocationId` 关联：同一 Environment 允许任意数量的 capability 并发在途，Tool、`skill.load` 与
+`fs.list-directory` 之间没有共享槽位，也不存在环境级容量或排队。唯一拒绝重复的规则是同一 Environment 内重用相同的活动
+`invocationId`（调用方错误）。control-plane timeout 会发送 `CANCEL`、终结该 invocation，并以有界 invocation tombstone 吸收
+迟到 callback。
+
+会话核心只接受 protocol v1 HELLO 和严格的 `capabilityCatalogVersion`。INVOKE payload 使用
 `capabilityId`、`capabilityVersion`、`workspacePath`、`arguments`、`timeoutMillis`，不携带 model
 Tool name；所有结果通过通用 `STARTED/PARTIAL/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
-`invocationId` 关联。发送不确定时关闭连接并把 active invocation 收敛为 uncertain，不重发可能已经产生副作用的请求。
+`invocationId` 关联。发送不确定时关闭连接并把在途 invocation 收敛为 uncertain，不重发可能已经产生副作用的请求。
 
 非 route owner 节点的目录查询写入 `environment_directory_query` 并发 NOTIFY；owner 节点按 lease token claim。
-`EnvironmentDirectoryQueryCoordinator` 对每个 Environment 使用单一 drain，前一查询 terminal 并完成回填后才 claim 下一条，
-避免一个 Daemon slot 同时承载多个 mailbox 查询；通知只负责唤醒，定期 resync 负责丢通知恢复。
+`EnvironmentQueryCoordinator` 对每个 Environment 使用单一 drain，前一查询 terminal 并完成回填后才 claim 下一条，
+避免同一 Query 在 mailbox 上被并发重复执行；通知只负责唤醒，定期 resync 负责丢通知恢复。
 
 ### Provider adapters 与 PlatformModelGateway
 
@@ -459,8 +463,8 @@ Function dispatcher claim + RUNNING lease
    Provider/Tool，等待线程可被唤醒且不泄漏。
 10. Tool terminal 成功先完成 descriptor、toolCallId、canonical size 和 externalization plan 校验，再写 ResourceStore；
     partial 不允许 Binary/Resource，外部化失败不会伪造 durable success。
-11. Environment active capability invocation 每个 Environment 至多一个；发送 outcome 不确定时保守收敛 `UNKNOWN`，不自动重发
-    非幂等副作用。
+11. Environment capability invocation 只按 `invocationId` 关联，同一 Environment 允许并发在途；发送 outcome 不确定时保守收敛
+    `UNKNOWN`，不自动重发非幂等副作用。
 12. Canvas pin 不增加 Blob ref_count；Resource row、Session ref、upload owner 各自只维护一条明确引用边，任何 owner 删除
     都必须经过对应 manager。
 
@@ -549,7 +553,6 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 - MCP：`McpServerServiceTest`、`McpToolCatalogTest`、`McpExecutableToolTest`、
   `LangChainMcpToolClientFactoryTest`。
 - Environment：`EnvironmentRegistryTest`、`PostgresEnvironmentRoutingIntegrationTest`、
-  `EnvironmentDaemonGatewayFinalTest`、`EnvironmentDaemonGatewaySettingsLiveTest`、
   `EnvironmentServiceImplTest`。
 - Storage：`StorageBlobIngestServiceIntegrationTest`、`SessionBlobRefManagerIntegrationTest`、
   `StorageUploadServiceIntegrationTest`、`StorageUploadCleanupLeaseIntegrationTest`、
