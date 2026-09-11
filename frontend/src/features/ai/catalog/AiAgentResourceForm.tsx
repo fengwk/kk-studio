@@ -128,10 +128,12 @@ export function AgentForm({
       </label>
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.description')}</FieldLabel>
-        <input
+        {/* 多行描述：内部换行必须原样保留在 draft 与提交 payload 中。 */}
+        <textarea
           value={draft.description}
           onChange={(event) => onChange({ ...draft, description: event.target.value })}
           placeholder={t('ai.catalog.form.descriptionPlaceholder')}
+          rows={2}
         />
       </label>
       <label className={`form-group${fieldErrors.model ? ' is-error' : ''}`}>

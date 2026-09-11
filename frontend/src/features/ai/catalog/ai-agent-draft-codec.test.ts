@@ -158,6 +158,15 @@ describe('ai-agent-draft-codec', () => {
     expect(toEditableAgent(draft({ variant: ' ' })).variant).toBeNull()
   })
 
+  it('preserves embedded newlines in multiline description payloads', () => {
+    const multiline = '执行环境内的 shell 命令\n并返回捕获的输出'
+    // trimToNull 只裁剪首尾空白，绝不折叠内部换行。
+    expect(toEditableAgent(draft({ description: multiline })).description).toBe(multiline)
+    expect(
+      toEditableAgentUpdate(draft({ description: ` ${multiline}\n ` })).description,
+    ).toBe(multiline)
+  })
+
   it.each([
     [{ name: ' ' }, /name/],
     [{ model: ' ' }, /model/],

@@ -363,7 +363,9 @@ sequenceDiagram
   snapshot 已前进时会退役旧 basis，下一次 stop 生成新 id。
 - Tool approval 使用 `{decision, decisionId, actor: "web", reason: null}`；
   同一个 Thread、invocation、decision 的重试复用 decision id，ALLOW/DENY
-  切换生成新 id；子 task 的 approval 显式带子 Thread id。
+  切换生成新 id；子 task 的 approval 显式带子 Thread id。审批条在点击处理器内
+  同步进入本地 pending：两个决策同时禁用并显示 `role="status"` 指示，请求
+  settle 或权威 snapshot 替换该审批时释放，失败仍走既有错误通道。
 - `task.status` 是完整 heartbeat，不是 delta。Task state 为 `queued`、
   `running_model`、`running_tool`、`waiting_approval`；TaskStatusWidget 按
   `parentTaskLevel + depth` 聚合 status 和 descendants，同一子 Thread 的

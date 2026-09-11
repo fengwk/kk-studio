@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentForm } from '@/features/ai/catalog/AiAgentResourceForm'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
-import { emptyAgentDraft } from '@/features/ai/catalog/ai-agent-draft-codec'
+import { emptyAgentDraft, toEditableAgent } from '@/features/ai/catalog/ai-agent-draft-codec'
 import type {
   AgentDefinitionDTO,
   AgentModelConfigDTO,
@@ -245,5 +245,39 @@ describe('AgentForm current contracts', () => {
     expect(screen.queryByLabelText(/^my-agent/)).not.toBeInTheDocument()
     expect(screen.getByLabelText(/helper-agent/)).toBeInTheDocument()
     expect(screen.getByLabelText(/orphan-agent/)).toBeChecked()
+  })
+
+  it('keeps embedded newlines from the description textarea in the draft', async () => {
+    const user = userEvent.setup()
+    const drafts: AgentDraft[] = []
+    function Harness() {
+      const [draft, setDraft] = useState<AgentDraft>({
+        ...emptyAgentDraft(modelWithVariants()),
+        name: 'multiline-agent',
+      })
+      return (
+        <AgentForm
+          draft={draft}
+          models={[modelWithVariants()]}
+          onChange={(next) => {
+            drafts.push(next)
+            setDraft(next)
+          }}
+        />
+      )
+    }
+    render(<Harness />)
+
+    const description = screen.getByLabelText('Description')
+    expect(description.tagName).toBe('TEXTAREA')
+
+    await user.type(description, '执行环境内的 shell 命令{enter}并返回捕获的输出')
+
+    // 多行描述是合法内容：draft 与提交 payload 都不得折叠内部换行。
+    expect(description).toHaveValue('执行环境内的 shell 命令\n并返回捕获的输出')
+    expect(drafts.at(-1)?.description).toBe('执行环境内的 shell 命令\n并返回捕获的输出')
+    expect(toEditableAgent(drafts.at(-1)!).description).toBe(
+      '执行环境内的 shell 命令\n并返回捕获的输出',
+    )
   })
 })

@@ -29,7 +29,10 @@ export interface ThreadPanelTranscriptInput {
   /** 非消息内容的变化计数（控制 Entry/queued 等），用于贴底再评估。 */
   eventCount?: number
   /** 处理待决 ToolInvocation 的审批；当面板没有 Thread 上下文时为空。 */
-  onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
+  onDecideApproval?: (
+    message: ToolDialogueMessage,
+    decision: 'ALLOW' | 'DENY',
+  ) => void | Promise<void>
   /** 进行中的全局审批请求：所有未决的审批条都会禁用其按钮。 */
   approvalPending?: boolean
 }

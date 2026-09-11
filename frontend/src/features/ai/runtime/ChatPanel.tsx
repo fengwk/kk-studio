@@ -52,7 +52,10 @@ export interface ChatPanelTranscriptInput {
   eventCount?: number
   loading: boolean
   error: unknown
-  onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
+  onDecideApproval?: (
+    message: ToolDialogueMessage,
+    decision: 'ALLOW' | 'DENY',
+  ) => void | Promise<void>
   /** 进行中的全局审批请求：所有未决的审批条都会禁用其按钮。 */
   approvalPending?: boolean
 }

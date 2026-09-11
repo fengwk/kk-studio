@@ -33,7 +33,7 @@ export function ToolMessageBlock({
   onDecideApproval?: (
     message: ToolDialogueMessage,
     decision: ToolApprovalDecision,
-  ) => void
+  ) => void | Promise<void>
   approvalPending?: boolean
 }) {
   const { t } = useI18n()
