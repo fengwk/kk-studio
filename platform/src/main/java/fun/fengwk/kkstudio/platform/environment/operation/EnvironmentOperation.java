@@ -17,7 +17,7 @@ import java.util.UUID;
  * {@link #toSafeProjection()} 或 {@link SafeEnvironmentOperation}。
  */
 @EqualsAndHashCode
-public final class EnvironmentOperation {
+final class EnvironmentOperation {
 
   private final UUID id;
   private final UUID environmentId;
@@ -41,7 +41,7 @@ public final class EnvironmentOperation {
   private final Instant createdAt;
   private final Instant updatedAt;
 
-  public EnvironmentOperation(
+  EnvironmentOperation(
       UUID id,
       UUID environmentId,
       UUID sourceId,

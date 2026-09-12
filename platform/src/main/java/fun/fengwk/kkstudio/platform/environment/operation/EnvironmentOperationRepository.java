@@ -9,7 +9,7 @@ import java.util.UUID;
  *
  * <p>所有状态推进与截止时间比较均在 PostgreSQL 服务端以 {@code statement_timestamp()} 执行，避免应用节点与数据库时钟偏差。
  */
-public interface EnvironmentOperationRepository {
+interface EnvironmentOperationRepository {
 
   /** 稳定通知通道：每当成功插入 PENDING 操作时由 PostgreSQL 事务耦合发出通知。 */
   String NOTIFY_CHANNEL = "environment_operation_pending";

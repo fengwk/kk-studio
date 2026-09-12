@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentOperationCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentOperationDTO;
 
+import java.util.List;
 import java.util.UUID;
 
 /** Platform 侧异步 Environment Skill 来源管理操作服务接口。 */
@@ -32,6 +33,15 @@ public interface EnvironmentOperationService {
    * @return 操作安全视图 DTO
    */
   EnvironmentOperationDTO get(EnvironmentId environmentId, UUID operationId);
+
+  /**
+   * 按 Environment 倒序列出操作历史（安全视图，包含 limit 约束）。
+   *
+   * @param environmentId 目标环境 ID
+   * @param limit 最大返回行数
+   * @return 操作安全视图列表
+   */
+  List<EnvironmentOperationDTO> list(EnvironmentId environmentId, int limit);
 
   /**
    * 取消未认领的 PENDING 操作。

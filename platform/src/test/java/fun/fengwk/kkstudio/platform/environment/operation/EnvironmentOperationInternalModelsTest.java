@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.environment.operation;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -12,7 +13,7 @@ import java.util.UUID;
 /** 验证内部领域模型与命令对象的安全边界： 绝不在 toString()、日志或异常中泄露 arguments、leaseToken 等敏感数据。 */
 class EnvironmentOperationInternalModelsTest {
 
-  /** 测试意图：验证 SweptOperationInfo 在 toString() 中脱敏 leaseToken，防止日志泄露。 */
+  /** 测试意图：验证 SweptOperationInfo 在 toString() 中完全省略 leaseToken 字段名与值。 */
   @Test
   void sweptOperationInfoDoesNotLeakLeaseTokenInToString() {
     UUID id = UUID.randomUUID();
@@ -25,7 +26,38 @@ class EnvironmentOperationInternalModelsTest {
     assertTrue(str.contains(id.toString()));
     assertTrue(str.contains(ownerNodeId.toString()));
     assertFalse(str.contains(leaseToken.toString()), "leaseToken 绝不能泄露在 toString 中");
-    assertTrue(str.contains("leaseToken=***"));
+    assertFalse(str.contains("leaseToken"), "leaseToken 字段名必须在 toString 中彻底省略");
+  }
+
+  /** 测试意图：验证 ClaimedOperation 构造时对非正数剩余超时 fail closed。 */
+  @Test
+  void claimedOperationFailsClosedOnNonPositiveTimeout() {
+    UUID opId = UUID.randomUUID();
+    EnvironmentOperation op =
+        new EnvironmentOperation(
+            opId,
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationStatus.RUNNING,
+            1L,
+            2L,
+            "{}",
+            "{}",
+            Instant.now().plusSeconds(60),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            Instant.now(),
+            null,
+            null,
+            null,
+            null,
+            Instant.now(),
+            Instant.now());
+
+    assertThrows(IllegalArgumentException.class, () -> new ClaimedOperation(op, Duration.ZERO));
+    assertThrows(
+        IllegalArgumentException.class, () -> new ClaimedOperation(op, Duration.ofMillis(-100)));
   }
 
   /** 测试意图：验证 ClaimedOperation 在 toString() 中脱敏 arguments 和 leaseToken。 */

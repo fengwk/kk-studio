@@ -9,9 +9,9 @@ import java.util.Objects;
  * <p>{@code remainingTimeout} 是在 PostgreSQL 认领原子语句中通过 {@code deadline_at - statement_timestamp()}
  * 计算所得， 避免 JVM 与数据库时钟偏差。
  */
-public record ClaimedOperation(EnvironmentOperation operation, Duration remainingTimeout) {
+record ClaimedOperation(EnvironmentOperation operation, Duration remainingTimeout) {
 
-  public ClaimedOperation {
+  ClaimedOperation {
     Objects.requireNonNull(operation, "operation");
     Objects.requireNonNull(remainingTimeout, "remainingTimeout");
     if (remainingTimeout.isNegative() || remainingTimeout.isZero()) {

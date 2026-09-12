@@ -19,8 +19,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDiagnostic;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshot;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshotCodec;
-import fun.fengwk.kkstudio.platform.environment.skill.OperationPublishOutcome;
-import fun.fengwk.kkstudio.platform.environment.skill.SkillInventoryPublisher;
 
 import java.util.List;
 import java.util.UUID;
@@ -28,7 +26,7 @@ import java.util.UUID;
 /** 验证 {@link EnvironmentOperationCompletionCoordinatorImpl} 对结果的解析、安全过滤与终结编排。 */
 class EnvironmentOperationCompletionCoordinatorTest {
 
-  private SkillInventoryPublisher publisher;
+  private EnvironmentOperationResultPublisher publisher;
   private EnvironmentOperationRepository repository;
   private ObjectMapper objectMapper;
   private EnvironmentOperationCompletionCoordinator coordinator;
@@ -41,19 +39,19 @@ class EnvironmentOperationCompletionCoordinatorTest {
 
   @BeforeEach
   void setUp() {
-    publisher = mock(SkillInventoryPublisher.class);
+    publisher = mock(EnvironmentOperationResultPublisher.class);
     repository = mock(EnvironmentOperationRepository.class);
     objectMapper = new ObjectMapper().findAndRegisterModules();
     coordinator =
         new EnvironmentOperationCompletionCoordinatorImpl(publisher, repository, objectMapper);
   }
 
-  /** 测试意图：验证当 capability 返回业务错误时，协调器提取错误码，固定使用安全常量消息，终结为 FAILED。 */
+  /** 测试意图：验证当 daemon 报告 error=true 时，始终固化使用安全常量 OPERATION_FAILED，严禁透传 daemon 控制的 details.code。 */
   @Test
-  void coordinateResultWithErrorCallsPublisherFailureWithConstantMessage() {
+  void coordinateResultWithErrorPersistsConstantOperationFailed() {
     EnvironmentCapabilityResult errorResult =
         EnvironmentCapabilityResult.codedError(
-            "call-1", "INVALID_INPUT", "Sensitive daemon path /secret");
+            opId.toString(), "DAEMON_CONTROLLED_CODE", "Sensitive daemon path /secret");
 
     when(publisher.publishOperationFailure(
             eq(envId),
@@ -63,9 +61,8 @@ class EnvironmentOperationCompletionCoordinatorTest {
             eq(1L),
             eq(sourceId),
             eq(2L),
-            eq("INVALID_INPUT"),
-            eq(EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE),
-            eq("{}")))
+            eq(EnvironmentOperationFailureCodes.OPERATION_FAILED),
+            eq(EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE)))
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
@@ -82,12 +79,45 @@ class EnvironmentOperationCompletionCoordinatorTest {
             1L,
             sourceId,
             2L,
-            "INVALID_INPUT",
-            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE,
-            "{}");
+            EnvironmentOperationFailureCodes.OPERATION_FAILED,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
   }
 
-  /** 测试意图：验证成功结果必须是且仅是单个 JsonResultContent 且解码为 Snapshot，提取安全计数摘要后调用 publishOperationSuccess。 */
+  /** 测试意图：验证返回结果的 callId 与 operation UUID 不匹配时，按 INVALID_RESULT 安全失败终结。 */
+  @Test
+  void coordinateResultWithCallIdMismatchCallsPublisherFailureWithInvalidResult() {
+    EnvironmentCapabilityResult result = EnvironmentCapabilityResult.json("wrong-call-id", "{}");
+
+    when(publisher.publishOperationFailure(
+            eq(envId),
+            eq(opId),
+            eq(nodeId),
+            eq(leaseToken),
+            eq(1L),
+            eq(sourceId),
+            eq(2L),
+            eq(EnvironmentOperationFailureCodes.INVALID_RESULT),
+            eq(EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE)))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(publisher)
+        .publishOperationFailure(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            1L,
+            sourceId,
+            2L,
+            EnvironmentOperationFailureCodes.INVALID_RESULT,
+            EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
+  }
+
+  /** 测试意图：验证成功结果是单个 JsonResultContent 且解码为 Snapshot 时，提取安全计数摘要后调用 publishOperationSuccess。 */
   @Test
   void coordinateResultWithValidSnapshotCallsPublisherSuccess() {
     DaemonSkillDescriptor skill =
@@ -105,7 +135,7 @@ class EnvironmentOperationCompletionCoordinatorTest {
     DaemonSkillSourceSnapshotCodec codec = new DaemonSkillSourceSnapshotCodec();
     String json = codec.encodeNode(snapshot).toString();
 
-    EnvironmentCapabilityResult result = EnvironmentCapabilityResult.json("call-1", json);
+    EnvironmentCapabilityResult result = EnvironmentCapabilityResult.json(opId.toString(), json);
 
     when(publisher.publishOperationSuccess(
             eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(snapshot), anyString()))
@@ -138,7 +168,7 @@ class EnvironmentOperationCompletionCoordinatorTest {
   void coordinateResultWithInvalidContentFormatCallsPublisherFailureWithInvalidResult() {
     EnvironmentCapabilityResult textResult =
         new EnvironmentCapabilityResult(
-            "call-1", List.of(new TextResultContent("not-json")), false, "{}");
+            opId.toString(), List.of(new TextResultContent("not-json")), false, "{}");
 
     when(publisher.publishOperationFailure(
             eq(envId),
@@ -149,8 +179,7 @@ class EnvironmentOperationCompletionCoordinatorTest {
             eq(sourceId),
             eq(2L),
             eq(EnvironmentOperationFailureCodes.INVALID_RESULT),
-            eq(EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE),
-            eq("{}")))
+            eq(EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE)))
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
@@ -167,13 +196,44 @@ class EnvironmentOperationCompletionCoordinatorTest {
             sourceId,
             2L,
             EnvironmentOperationFailureCodes.INVALID_RESULT,
-            EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE,
-            "{}");
+            EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
   }
 
-  /** 测试意图：验证 coordinateUnknown 正确收敛至 UNKNOWN 状态。 */
+  /** 测试意图：验证 coordinateExecutionFailure 调用发布器终结为常量 OPERATION_FAILED。 */
   @Test
-  void coordinateUnknownCallsRepositoryMarkUnknown() {
+  void coordinateExecutionFailureCallsPublisherWithConstantFailed() {
+    when(publisher.publishOperationFailure(
+            eq(envId),
+            eq(opId),
+            eq(nodeId),
+            eq(leaseToken),
+            eq(1L),
+            eq(sourceId),
+            eq(2L),
+            eq(EnvironmentOperationFailureCodes.OPERATION_FAILED),
+            eq(EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE)))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateExecutionFailure(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(publisher)
+        .publishOperationFailure(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            1L,
+            sourceId,
+            2L,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
+  }
+
+  /** 测试意图：验证 coordinateTransportUnknown 将未决操作收敛至 UNKNOWN (TRANSPORT_ERROR)。 */
+  @Test
+  void coordinateTransportUnknownCallsRepositoryMarkUnknown() {
     when(repository.markUnknown(
             opId,
             nodeId,
@@ -182,13 +242,7 @@ class EnvironmentOperationCompletionCoordinatorTest {
             EnvironmentOperationFailureCodes.TRANSPORT_ERROR_MESSAGE))
         .thenReturn(true);
 
-    boolean ok =
-        coordinator.coordinateUnknown(
-            opId,
-            nodeId,
-            leaseToken,
-            EnvironmentOperationFailureCodes.TRANSPORT_ERROR,
-            EnvironmentOperationFailureCodes.TRANSPORT_ERROR_MESSAGE);
+    boolean ok = coordinator.coordinateTransportUnknown(opId, nodeId, leaseToken);
 
     assertTrue(ok);
     verify(repository)
