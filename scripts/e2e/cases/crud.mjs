@@ -490,7 +490,7 @@ registerCase({
   id: 'crud.chat.thread_branch_settings_independent',
   level: 'L1',
   title: 'Chat 默认值与 Thread branchSettings 相互独立',
-  docs: 'Chat 仅保存 agentName/yoloEnabled/可选默认 workspacePath；NEW_SESSION rootSettings 携带 workspacePath/agentName/model branch draft；更新 Chat 默认值不改变既有 Thread',
+  docs: 'Chat 仅保存 agentName/yoloEnabled；NEW_SESSION rootSettings 携带 agentName/model branch draft；更新 Chat 默认值不改变既有 Thread',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -504,14 +504,13 @@ registerCase({
       assert(
         chat.agentName === agent.name
           && chat.yoloEnabled === false
-          && chat.workspacePath === null
+          && !Object.hasOwn(chat, 'workspacePath')
           && !Object.hasOwn(chat, 'environment'),
         JSON.stringify(chat),
       )
       // 先创建 Thread（NEW_SESSION 初始创建），再更新 Chat 默认值，最后 reread 同一 Thread：
       // 更新 Chat 不影响既有 Thread 的 branchSettings（Thread 快照是运行时事实）。
       const requested = {
-        workspacePath: null,
         agentName: agent.name,
         model: modelSelectionFor(agent),
       }
@@ -542,7 +541,7 @@ registerCase({
       assert(
         updated.agentName === agent.name
           && updated.yoloEnabled === true
-          && updated.workspacePath === null
+          && !Object.hasOwn(updated, 'workspacePath')
           && !Object.hasOwn(updated, 'environment'),
         JSON.stringify(updated),
       )
@@ -646,7 +645,7 @@ registerCase({
         owner: chatOwner(chat.id),
         sessionId: cid(),
         threadId,
-        rootSettings: branchSettingsOf({ name: agent.name }, modelSelection, { workspacePath: null }),
+        rootSettings: branchSettingsOf({ name: agent.name }, modelSelection),
         yoloEnabled: true,
         commands,
       })
@@ -702,7 +701,7 @@ registerCase({
         owner: chatOwner(chat.id),
         sessionId: String(thirdAccepted.session.sessionId),
         threadId: String(thirdAccepted.thread.threadId),
-        rootSettings: branchSettingsOf({ name: agent.name }, modelSelection, { workspacePath: null }),
+        rootSettings: branchSettingsOf({ name: agent.name }, modelSelection),
         yoloEnabled: true,
         commands: thirdCommands,
       })

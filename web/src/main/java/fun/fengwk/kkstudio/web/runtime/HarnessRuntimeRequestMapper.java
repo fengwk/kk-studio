@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -237,7 +236,6 @@ public final class HarnessRuntimeRequestMapper {
   private static BranchSettings toBranchSettings(HarnessBranchSettingsDTO dto) {
     requireNonNull(dto, "branchSettings");
     return new BranchSettings(
-        dto.getWorkspacePath(),
         requireText(dto.getAgentName(), "branchSettings.agentName"),
         toModelSelection(dto.getModel()));
   }
@@ -265,31 +263,18 @@ public final class HarnessRuntimeRequestMapper {
       case "USER_MESSAGE" -> {
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
         requireForbidden(dto.hasModelField(), "model", "command type " + type);
-        requireForbidden(dto.hasWorkspacePathField(), "workspacePath", "command type " + type);
         yield new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, toUserMessageContents(dto)));
       }
       case "SET_AGENT" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
         requireForbidden(dto.hasModelField(), "model", "command type " + type);
-        requireForbidden(dto.hasWorkspacePathField(), "workspacePath", "command type " + type);
         yield new SetAgentCommandPayload(requireText(dto.getAgentName(), "agentName"));
       }
       case "SET_MODEL" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
-        requireForbidden(dto.hasWorkspacePathField(), "workspacePath", "command type " + type);
         yield new SetModelCommandPayload(toModelSelection(requireNonNull(dto.getModel(), "model")));
-      }
-      case "SET_ENVIRONMENT" -> {
-        requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
-        requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
-        requireForbidden(dto.hasModelField(), "model", "command type " + type);
-        if (!dto.hasWorkspacePathField()) {
-          throw new IllegalArgumentException(
-              "SET_ENVIRONMENT must contain workspacePath (a relative string selects, null unbinds)");
-        }
-        yield new SetEnvironmentCommandPayload(dto.getWorkspacePath());
       }
       case "CUSTOM_MESSAGE" -> throw new IllegalArgumentException(
           "CUSTOM_MESSAGE is not allowed on the product HTTP surface");
@@ -299,10 +284,7 @@ public final class HarnessRuntimeRequestMapper {
 
   private static void validateHttpCommandShape(List<NewThreadCommand> commands) {
     List<ThreadCommandType> prefixOrder =
-        List.of(
-            ThreadCommandType.SET_ENVIRONMENT,
-            ThreadCommandType.SET_AGENT,
-            ThreadCommandType.SET_MODEL);
+        List.of(ThreadCommandType.SET_AGENT, ThreadCommandType.SET_MODEL);
     int lastSetOrder = -1;
     int userMessageCount = 0;
     for (int i = 0; i < commands.size(); i++) {
@@ -316,8 +298,7 @@ public final class HarnessRuntimeRequestMapper {
       }
       int order = prefixOrder.indexOf(type);
       if (order <= lastSetOrder) {
-        throw new IllegalArgumentException(
-            "HTTP commands must use SET_ENVIRONMENT, SET_AGENT, SET_MODEL order");
+        throw new IllegalArgumentException("HTTP commands must use SET_AGENT, SET_MODEL order");
       }
       lastSetOrder = order;
     }

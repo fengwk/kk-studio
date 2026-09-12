@@ -281,18 +281,16 @@ async function executeCase({ ctx, docker, runDir, testCase, agent, daemonEnv }) 
       title: `reliability-${testCase.id}`,
       agentName: agent.name,
       yoloEnabled: true,
-      workspacePath: '.',
     })
     const request = buildNewSessionRequest({
       chat,
       agent,
       testCase,
-      workspacePath: '.',
       prompt: buildUserPrompt(testCase),
     })
     const accepted = await createNewSession(ctx, request)
     threadId = accepted.thread.threadId
-    assertThreadSettings(accepted, testCase, '.', agent.name)
+    assertThreadSettings(accepted, testCase, agent.name)
     result.turnStarted = true
 
     try {
@@ -566,27 +564,23 @@ async function postcheckCase(docker, testCase, precheck) {
   }
 }
 
-/** 构造原子 NEW_SESSION 提交：预分配 sessionId/threadId，rootSettings 绑定环境，yolo true，首条 USER command。 */
-export function buildNewSessionRequest({ chat, agent, testCase, workspacePath = '.', prompt }) {
+/** 构造原子 NEW_SESSION 提交：预分配 sessionId/threadId，rootSettings 冻结 Agent/Model，yolo true，首条 USER command。 */
+export function buildNewSessionRequest({ chat, agent, testCase, prompt }) {
   return {
     owner: chatOwner(chat.id),
     sessionId: cid(),
     threadId: cid(),
-    rootSettings: branchSettingsOf(
-      agent,
-      {
-        providerName: testCase.model.providerName,
-        modelName: testCase.model.modelName,
-        variant: VARIANT,
-      },
-      { workspacePath },
-    ),
+    rootSettings: branchSettingsOf(agent, {
+      providerName: testCase.model.providerName,
+      modelName: testCase.model.modelName,
+      variant: VARIANT,
+    }),
     yoloEnabled: true,
     commands: [userMessageCommand(prompt, cid())],
   }
 }
 
-export function assertThreadSettings(accepted, testCase, expectedWorkspacePath, agentName) {
+export function assertThreadSettings(accepted, testCase, agentName) {
   const thread = accepted.thread
   const firstAccepted = accepted.acceptedCommands?.[0]
   assert(
@@ -604,10 +598,6 @@ export function assertThreadSettings(accepted, testCase, expectedWorkspacePath, 
     `Thread version must be at least 1: ${JSON.stringify(thread)}`,
   )
   assert(thread.yoloEnabled === true, 'Thread yoloEnabled must be true')
-  assert(
-    thread.branchSettings?.workspacePath === expectedWorkspacePath,
-    'Thread workspacePath mismatch',
-  )
   assert(thread.branchSettings?.agentName === agentName, 'Thread Agent mismatch')
   assert(
     JSON.stringify(thread.branchSettings?.model)
@@ -620,7 +610,7 @@ export function assertThreadSettings(accepted, testCase, expectedWorkspacePath, 
   )
   assert(
     Object.keys(thread.branchSettings ?? {}).sort().join(',')
-      === 'agentName,model,workspacePath',
+      === 'agentName,model',
     `Thread branch settings shape mismatch: ${JSON.stringify(thread.branchSettings)}`,
   )
 }

@@ -5,7 +5,6 @@ import { mergeChatList } from '@/features/ai/chat/chat-utils'
 import { chatService } from '@/shared/api/chat-service'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
@@ -29,7 +28,6 @@ function resolveChatAgentName(
 export function useChatListController(
   agents: AgentDefinitionDTO[],
   enabled: boolean,
-  environments: EnvironmentCardDTO[] = [],
 ) {
   const navigate = useNavigate()
   const { t } = useI18n()
@@ -39,7 +37,6 @@ export function useChatListController(
   const [editingChat, setEditingChat] = useState<ChatDTO | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
   const [selectedAgentName, setSelectedAgentName] = useState('')
-  const [selectedWorkspacePath, setSelectedWorkspacePath] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [formError, setFormError] = useState('')
   const [nameError, setNameError] = useState('')
@@ -59,7 +56,6 @@ export function useChatListController(
       chatService.createChat({
         title: title.trim(),
         agentName: selectedAgentName,
-        workspacePath: selectedWorkspacePath,
       }),
     invalidateQueryKeys: [queryKeys.chats.list],
     onSuccess: async (chat: ChatDTO) => {
@@ -79,7 +75,6 @@ export function useChatListController(
       return chatService.updateChat(editingChat.id, {
         title: title.trim(),
         agentName: selectedAgentName,
-        workspacePath: selectedWorkspacePath,
         expectedVersion: editingChat.version,
       })
     },
@@ -109,7 +104,6 @@ export function useChatListController(
     setEditingChat(null)
     const nextAgentName = resolveChatAgentName(agentName, selectedAgentName, agents)
     setSelectedAgentName(nextAgentName)
-    setSelectedWorkspacePath(null)
     setTitle('')
     setFormError('')
     setNameError('')
@@ -122,7 +116,6 @@ export function useChatListController(
     setMode('edit')
     setEditingChat(chat)
     setSelectedAgentName(chat.agentName || resolveChatAgentName(undefined, '', agents))
-    setSelectedWorkspacePath(chat.workspacePath ?? null)
     setTitle(chat.title ?? '')
     setFormError('')
     setNameError('')
@@ -155,18 +148,7 @@ export function useChatListController(
   }
 
   function handleSelectAgent(agentName: string) {
-    const prevAgent = agents.find((a) => a.name === selectedAgentName)
-    const nextAgent = agents.find((a) => a.name === agentName)
-    if (prevAgent?.environmentId !== nextAgent?.environmentId) {
-      setSelectedWorkspacePath(null)
-    }
     setSelectedAgentName(agentName)
-    if (createChatMutation.error) createChatMutation.reset()
-    if (updateChatMutation.error) updateChatMutation.reset()
-  }
-
-  function handleSelectWorkspacePath(workspacePath: string | null) {
-    setSelectedWorkspacePath(workspacePath)
     if (createChatMutation.error) createChatMutation.reset()
     if (updateChatMutation.error) updateChatMutation.reset()
   }
@@ -220,16 +202,13 @@ export function useChatListController(
       open: modalOpen,
       mode,
       agents,
-      environments,
       selectedAgentName,
-      selectedWorkspacePath,
       title,
       pending: activeMutation.isPending,
       formError: effectiveFormError,
       nameError,
       onClose: closeModal,
       onSelectAgent: handleSelectAgent,
-      onSelectWorkspacePath: handleSelectWorkspacePath,
       onTitleChange: handleTitleChange,
       onSubmit: submitChat,
     },

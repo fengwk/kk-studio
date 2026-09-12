@@ -4,7 +4,8 @@ Shell: ${shell}
 
 Usage:
 - Use `bash` for commands, not as the default way to read, search, or edit repository files.
-- `workdir` defaults to the agent's current working directory. If `workdir` is provided, the command runs from that directory. Prefer `workdir` over embedding `cd ... &&` inside `command` when you need a different directory.
+- Every call must include `workdir`. It must be an expanded absolute directory on the target daemon's file system; no call inherits a previous directory, session default, environment root, cwd, or home directory.
+- Use Unix paths such as `/srv/project` on Unix targets and drive-rooted or UNC paths such as `C:/src/project` or `//server/share/project` on Windows targets.
 - Commands run in a shell environment intended to be close to the user's terminal.
 - Long-running commands (e.g. builds, tests, large migrations, `mvn`, `gradle`, `docker build`) must explicitly pass a larger `timeout_seconds` if they may exceed the default.
 - Before a command creates repository files or directories, confirm the target parent location with the file tools.
@@ -13,9 +14,9 @@ Usage:
 - Use a temporary directory outside the repository for downloads, generated artifacts, temporary clones, and other non-target side effects unless the user explicitly wants files created in the project.
 
 Examples:
-- `bash({ command: "npm test", workdir: "packages/web" })`
-- `bash({ command: "mvn -q test", workdir: "services/java", timeout_seconds: 120 })`
-- `bash({ command: "git status --short" })`
-- `bash({ command: "mkdir -p build && cp \"source file.txt\" build/", workdir: "packages/app" })`
-- `bash({ command: "mv src/old.ts src/archive/old.ts", workdir: "services/api" })`
+- `bash({ command: "npm test", workdir: "/srv/project/packages/web" })`
+- `bash({ command: "mvn -q test", workdir: "/srv/project/services/java", timeout_seconds: 120 })`
+- `bash({ command: "git status --short", workdir: "/srv/project" })`
+- `bash({ command: "mkdir -p build && cp \"source file.txt\" build/", workdir: "/srv/project/packages/app" })`
+- `bash({ command: "mv src/old.ts src/archive/old.ts", workdir: "C:/src/project/services/api" })`
 - `bash({ command: "cp \"source file.txt\" \"target file.txt\"", workdir: "/tmp/anydir" })`

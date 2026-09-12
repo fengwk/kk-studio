@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.CancelledUserMessage;
@@ -22,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -121,7 +119,7 @@ class HarnessRuntimeResponseMapperTest {
   }
 
   @Test
-  void projectsThreadIdentitySettingsAndNullableEnvironment() {
+  void projectsThreadIdentityAndSettings() {
     // Thread cursor、version、时间与 branch settings 必须来自同一 snapshot。
     HarnessThreadDTO dto =
         HarnessRuntimeResponseMapper.toThreadDto(HarnessRuntimeTestFixtures.idleSnapshot());
@@ -133,7 +131,6 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals("4", dto.getNextCommandSequence());
     assertEquals("3", dto.getVersion());
     assertTrue(dto.getYoloEnabled());
-    assertEquals(".", dto.getBranchSettings().getWorkspacePath());
     assertEquals("default-assistant", dto.getBranchSettings().getAgentName());
     assertEquals("openai", dto.getBranchSettings().getModel().getProviderName());
     assertEquals("gpt-5", dto.getBranchSettings().getModel().getModelName());
@@ -141,12 +138,6 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(NOW, dto.getCreateTime());
     assertEquals(NOW, dto.getUpdateTime());
     assertFalse(dto.getProcessing());
-
-    ThreadSnapshot withoutEnvironment = idleSnapshot(settingsWithoutEnvironment());
-    assertNull(
-        HarnessRuntimeResponseMapper.toThreadDto(withoutEnvironment)
-            .getBranchSettings()
-            .getWorkspacePath());
   }
 
   @Test
@@ -241,9 +232,7 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals("1.0", boundDto.getToolVersion());
     assertEquals("bash", boundDto.getRendererKey());
     assertEquals("test.bash", boundDto.getToolId());
-    assertEquals(
-        "11111111-1111-1111-1111-111111111111", boundDto.getEnvironment().getEnvironmentId());
-    assertEquals("workspace", boundDto.getEnvironment().getWorkspacePath());
+    assertEquals("11111111-1111-1111-1111-111111111111", boundDto.getEnvironmentId());
     assertEquals(approval, new ToolApprovalJsonCodec().decode(boundDto.getApprovalJson()));
     assertEquals(result, ToolResultJsonCodec.decode(boundDto.getResultJson()));
     assertNull(boundDto.getErrorJson());
@@ -256,7 +245,7 @@ class HarnessRuntimeResponseMapperTest {
     assertNull(unboundDto.getToolVersion());
     assertEquals("tool", unboundDto.getRendererKey());
     assertNull(unboundDto.getToolId());
-    assertNull(unboundDto.getEnvironment());
+    assertNull(unboundDto.getEnvironmentId());
     assertNull(unboundDto.getApprovalJson());
     assertNull(unboundDto.getResultJson());
     assertEquals(error, new ToolInvocationErrorJsonCodec().decode(unboundDto.getErrorJson()));
@@ -511,11 +500,6 @@ class HarnessRuntimeResponseMapperTest {
         HarnessRuntimeTestFixtures.thread(id(5)), path, List.of(), null, List.of(), List.of());
   }
 
-  private static BranchSettings settingsWithoutEnvironment() {
-    return new BranchSettings(
-        null, "default-assistant", new ModelSelection("openai", "gpt-5", "default"));
-  }
-
   private static ThreadSnapshot modelSnapshot(
       ModelInvocationStatus status, List<ModelAttemptFailureProjection> failures) {
     return modelSnapshot(
@@ -634,8 +618,7 @@ class HarnessRuntimeResponseMapperTest {
             new AgentToolId("test.bash"), descriptor(), ToolVisibility.SELECTABLE),
         new ContributorBinding("test", "bash", List.of()),
         true,
-        new EnvironmentBinding(
-            EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), "workspace"));
+        EnvironmentId.parse("11111111-1111-1111-1111-111111111111"));
   }
 
   private static ToolBinding hostToolBinding() {

@@ -9,33 +9,25 @@ import java.nio.file.Path;
 
 class HarnessRuntimePropertiesTest {
 
-  /** 纯 bootstrap 默认值只包含 worker 开关与有界的沙箱根目录/工作目录。 */
+  /** 纯 bootstrap 默认值只包含 worker 开关与 resourceRoot：Backend 不再持有默认 cwd 或 Environment 根。 */
   @Test
   void providesBootstrapDeploymentDefaults() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
 
     assertEquals(true, properties.isWorkersEnabled());
     assertEquals(
-        Path.of(System.getProperty("user.dir", ".")).toAbsolutePath(),
-        properties.resolvedEnvironmentRoot());
-    assertEquals(
-        Path.of(System.getProperty("user.dir", ".")).toAbsolutePath(),
-        properties.resolvedWorkdir());
+        Path.of(System.getProperty("user.dir", "."), ".kkstudio", "resources")
+            .toAbsolutePath()
+            .normalize(),
+        properties.resolvedResourceRoot());
   }
 
-  /** 相对 workdir 在 environmentRoot 下解析，越界与绝对路径逃逸必须失败。 */
+  /** resourceRoot 显式缺失是部署错误，必须确定性拒绝。 */
   @Test
-  void enforcesEnvironmentRootBoundary() {
+  void rejectsNullResourceRoot() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
-    properties.setEnvironmentRoot(Path.of("/tmp/harness-environment"));
-    properties.setWorkdir(Path.of("repository/module"));
+    properties.setResourceRoot(null);
 
-    assertEquals(
-        Path.of("/tmp/harness-environment/repository/module"), properties.resolvedWorkdir());
-
-    properties.setWorkdir(Path.of("../escape"));
-    assertThrows(IllegalArgumentException.class, properties::resolvedWorkdir);
-    properties.setWorkdir(Path.of("/tmp/other"));
-    assertThrows(IllegalArgumentException.class, properties::resolvedWorkdir);
+    assertThrows(IllegalArgumentException.class, properties::resolvedResourceRoot);
   }
 }

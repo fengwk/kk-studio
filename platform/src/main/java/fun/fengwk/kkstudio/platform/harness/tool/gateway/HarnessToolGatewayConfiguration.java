@@ -15,14 +15,12 @@ import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
-import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -49,10 +47,9 @@ public class HarnessToolGatewayConfiguration {
   }
 
   /**
-   * 生产 {@link ToolExecutionGateway}：与测试共用唯一构造器，本方法解析 {@link HarnessRuntimeProperties} 的
-   * workdir/environmentRoot 与 SystemSettings 的 resourceMaxBytes，并直接传 live supplier——每次 RetryLater
-   * 判定从 SystemSettingsSnapshot 现读 {@code tool.toolGatewayOverloadRetryMillis}。任何自定义 {@link
-   * ToolGateway} bean 都会抑制该默认实现。
+   * 生产 {@link ToolExecutionGateway}：与测试共用唯一构造器，本方法解析 SystemSettings 的 resourceMaxBytes，并直接传 live
+   * supplier——每次 RetryLater 判定从 SystemSettingsSnapshot 现读 {@code
+   * tool.toolGatewayOverloadRetryMillis}。任何自定义 {@link ToolGateway} bean 都会抑制该默认实现。
    */
   @Bean
   @ConditionalOnBean(ResourceStore.class)
@@ -65,13 +62,10 @@ public class HarnessToolGatewayConfiguration {
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       ResourceStore resourceStore,
-      HarnessRuntimeProperties runtimeProperties,
       SystemSettingsSnapshot systemSettingsSnapshot,
       @Qualifier("toolGatewayExecutor") ExecutorService toolGatewayExecutor,
       @Qualifier("toolExecutionAdmission") ConcurrencyAdmission admission,
       Clock clock) {
-    HarnessRuntimeProperties properties =
-        Objects.requireNonNull(runtimeProperties, "runtimeProperties");
     int resourceMaxBytes =
         Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
     return new ToolExecutionGateway(
@@ -82,8 +76,6 @@ public class HarnessToolGatewayConfiguration {
         permissionEvaluator,
         toolSettingsProvider,
         resourceStore,
-        properties.resolvedWorkdir(),
-        properties.resolvedEnvironmentRoot(),
         resourceMaxBytes,
         toolGatewayExecutor,
         () ->

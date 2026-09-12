@@ -94,20 +94,6 @@ describe('ChatCard', () => {
     expect(screen.queryByText('（已删除/缺失）')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('assistant （已删除/缺失）')).not.toBeInTheDocument()
   })
-
-  // 验证 ChatCard 明确展示 Workspace Path 标签与路径，不使用模糊的 Environment 标签误导用户。
-  it('renders explicit workspace path label instead of independent environment label', () => {
-    render(
-      <MemoryRouter>
-        <ChatCard
-          chat={{ ...chat(), workspacePath: 'projects/frontend-app' }}
-          agents={[{ ...agent(), name: 'assistant' }]}
-        />
-      </MemoryRouter>,
-    )
-    expect(screen.getByText('工作区路径')).toBeInTheDocument()
-    expect(screen.getByText('projects/frontend-app')).toBeInTheDocument()
-  })
 })
 
 function Location() {

@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
@@ -43,7 +42,6 @@ import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -66,7 +64,10 @@ class ToolExecutionGatewayPreflightTest {
         "description of demo",
         "demo",
         new InputSchema(
-            "arguments", Map.of("path", new StringSchema("Target path")), Set.of("path"), false),
+            "arguments",
+            Map.of("path", new StringSchema("Target path"), "workdir", new StringSchema("Workdir")),
+            Set.of("path", "workdir"),
+            false),
         ToolSideEffect.READ_ONLY,
         Duration.ofMinutes(1));
   }
@@ -125,7 +126,7 @@ class ToolExecutionGatewayPreflightTest {
             ToolGateway.Deny.class,
             gateway.preflight(
                 new ToolInvocationRequest(
-                    new ToolCall("call-1", "demo", "{\"path\":\"/tmp/x\"}"),
+                    new ToolCall("call-1", "demo", "{\"path\":\"/tmp/x\",\"workdir\":\"/tmp\"}"),
                     new ToolBinding(
                         hostDefinition(PREFLIGHT_DESCRIPTOR),
                         new ContributorBinding("test", "host-tool", List.of()),
@@ -152,8 +153,6 @@ class ToolExecutionGatewayPreflightTest {
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             new ToolGatewayTestSupport.FakeResourceStore(),
-            ToolGatewayTestSupport.WORKDIR,
-            ToolGatewayTestSupport.ENVIRONMENT_ROOT,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
@@ -198,9 +197,11 @@ class ToolExecutionGatewayPreflightTest {
 
   @Test
   void askReasonLongerThan1024IsTruncatedAtCodePointBoundary() {
-    Path hugeWorkdir = Path.of("/w/" + "\uD83D\uDE00".repeat(520) + "/deep");
+    // preview 的 workdir 只来自该次 arguments；超长 workdir 用于压出截断路径。
+    String hugeWorkdir = "/w/" + "\uD83D\uDE00".repeat(520) + "/deep";
     ToolGateway.PreflightResult result =
-        preflightTruncation(PermissionAction.ASK, hugeWorkdir, Path.of("/env-root"));
+        preflightTruncation(
+            PermissionAction.ASK, "{\"path\":\"/tmp/x\",\"workdir\":\"" + hugeWorkdir + "\"}");
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
     assertTrue(ask.reason().length() <= 1024, ask.reason());
     assertTrue(ask.reason().endsWith("..."), ask.reason());
@@ -239,22 +240,42 @@ class ToolExecutionGatewayPreflightTest {
     }
   }
 
+  /** 环境工具只绑定 canonical EnvironmentId；permission 坐标只来自该次 arguments 的 workdir。 */
   @Test
-  void environmentWorkspaceBecomesDefaultWorkdirForAskPreview() {
-    EnvironmentBinding binding =
-        new EnvironmentBinding(
-            EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), "repo/sub");
+  void environmentToolAskPreviewShowsCallWorkdirInsteadOfAnyDefault() {
+    EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
     ToolGateway.PreflightResult result =
-        environmentPreflight(binding, "{\"path\":\"src/Main.java\"}", PermissionAction.ASK);
+        environmentPreflight(
+            environmentId,
+            "{\"path\":\"src/Main.java\",\"workdir\":\"/repo/sub\"}",
+            PermissionAction.ASK);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
-    assertTrue(ask.reason().contains("/environment-root/repo/sub (default)"), ask.reason());
+    assertTrue(ask.reason().contains(" in /repo/sub"), ask.reason());
+    assertFalse(ask.reason().contains("(default)"), ask.reason());
   }
 
+  /** 没有 workdir 语义的调用不显示任何虚构默认目录。 */
   @Test
-  void environmentWorkspaceIsTheOnlyPathRuleBase() {
-    EnvironmentBinding binding =
-        new EnvironmentBinding(
-            EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), "repo/sub");
+  void toolWithoutWorkdirDoesNotRenderFabricatedDefaultDirectory() {
+    ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(tool),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.DirectQueueExecutor(),
+            ToolGatewayTestSupport.settings(PermissionAction.ASK));
+    ToolGateway.PreflightResult result =
+        gateway.preflight(ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR));
+    ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
+    assertFalse(ask.reason().contains("(default)"), ask.reason());
+    assertFalse(ask.reason().contains(" in "), ask.reason());
+  }
+
+  /** path 规则坐标系是该次调用 explicit workdir：绝对 target 词法 relativize，与 Environment root 无关。 */
+  @Test
+  void pathRulesAreGradedAgainstCallWorkdirOnly() {
+    EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
     ToolSettings settings =
         new ToolSettings(
             Map.of(
@@ -264,43 +285,30 @@ class ToolExecutionGatewayPreflightTest {
                     new PermissionRule("src/**", PermissionAction.DENY))),
             false);
     ToolGateway.PreflightResult result =
-        environmentPreflight(binding, "{\"path\":\"src/Main.java\"}", settings);
+        environmentPreflight(
+            environmentId,
+            "{\"path\":\"/repo/sub/src/Main.java\",\"workdir\":\"/repo/sub\"}",
+            settings);
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("PERMISSION_DENIED", deny.error().kind());
 
-    ToolSettings rootRelativeRule =
-        new ToolSettings(
-            Map.of(
-                "*",
-                List.of(
-                    new PermissionRule("*", PermissionAction.ASK),
-                    new PermissionRule("repo/sub/**", PermissionAction.DENY))),
-            false);
-    ToolGateway.PreflightResult rootRelativeResult =
-        environmentPreflight(binding, "{\"path\":\"src/Main.java\"}", rootRelativeRule);
-    assertInstanceOf(ToolGateway.Ask.class, rootRelativeResult);
-  }
-
-  @Test
-  void platformPreflightKeepsServerDefaultWorkdir() {
-    ToolGateway.PreflightResult result = preflight(PermissionAction.ASK);
-    ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
-    assertTrue(ask.reason().contains("/workspace (default)"), ask.reason());
-  }
-
-  private static ToolGateway.PreflightResult preflight(PermissionAction action) {
-    return preflight(
-        action, ToolGatewayTestSupport.WORKDIR, ToolGatewayTestSupport.ENVIRONMENT_ROOT);
+    // 同一 workdir 之外的绝对路径不会命中 workdir 相对规则。
+    ToolGateway.PreflightResult outside =
+        environmentPreflight(
+            environmentId,
+            "{\"path\":\"/elsewhere/src/Main.java\",\"workdir\":\"/repo/sub\"}",
+            settings);
+    assertInstanceOf(ToolGateway.Ask.class, outside);
   }
 
   private static ToolGateway.PreflightResult environmentPreflight(
-      EnvironmentBinding environment, String argumentsJson, PermissionAction action) {
+      EnvironmentId environmentId, String argumentsJson, PermissionAction action) {
     return environmentPreflight(
-        environment, argumentsJson, ToolGatewayTestSupport.settings(action));
+        environmentId, argumentsJson, ToolGatewayTestSupport.settings(action));
   }
 
   private static ToolGateway.PreflightResult environmentPreflight(
-      EnvironmentBinding environment, String argumentsJson, ToolSettings settings) {
+      EnvironmentId environmentId, String argumentsJson, ToolSettings settings) {
     ToolContribution contribution =
         ToolGatewayTestSupport.defaultCatalog().findTool(BuiltinToolIds.READ).orElseThrow();
     ToolExecutionGateway gateway =
@@ -309,21 +317,18 @@ class ToolExecutionGatewayPreflightTest {
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
-            settings,
-            ToolGatewayTestSupport.WORKDIR,
-            ToolGatewayTestSupport.ENVIRONMENT_ROOT);
+            settings);
     ContributorBinding contributor =
         new ContributorBinding(
             contribution.id().contributorId().value(), contribution.id().localName(), List.of());
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "read", argumentsJson),
-            new ToolBinding(contribution.definition(), contributor, true, environment));
+            new ToolBinding(contribution.definition(), contributor, true, environmentId));
     return gateway.preflight(request);
   }
 
-  private static ToolGateway.PreflightResult preflight(
-      PermissionAction action, Path workdir, Path environmentRoot) {
+  private static ToolGateway.PreflightResult preflight(PermissionAction action) {
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(
@@ -331,12 +336,10 @@ class ToolExecutionGatewayPreflightTest {
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
-            ToolGatewayTestSupport.settings(action),
-            workdir,
-            environmentRoot);
+            ToolGatewayTestSupport.settings(action));
     ToolInvocationRequest request =
         new ToolInvocationRequest(
-            new ToolCall("call-1", "demo", "{\"path\":\"/tmp/x\"}"),
+            new ToolCall("call-1", "demo", "{\"path\":\"/tmp/x\",\"workdir\":\"/tmp\"}"),
             new ToolBinding(
                 hostDefinition(PREFLIGHT_DESCRIPTOR),
                 new ContributorBinding("test", "host-tool", List.of()),
@@ -352,13 +355,16 @@ class ToolExecutionGatewayPreflightTest {
         "description of x",
         "x",
         new InputSchema(
-            "arguments", Map.of("path", new StringSchema("Target path")), Set.of("path"), false),
+            "arguments",
+            Map.of("path", new StringSchema("Target path"), "workdir", new StringSchema("Workdir")),
+            Set.of("path", "workdir"),
+            false),
         ToolSideEffect.READ_ONLY,
         Duration.ofMinutes(1));
   }
 
   private static ToolGateway.PreflightResult preflightTruncation(
-      PermissionAction action, Path workdir, Path environmentRoot) {
+      PermissionAction action, String argumentsJson) {
     ToolDescriptor descriptor = truncationDescriptor();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
@@ -366,12 +372,10 @@ class ToolExecutionGatewayPreflightTest {
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
-            ToolGatewayTestSupport.settings(action),
-            workdir,
-            environmentRoot);
+            ToolGatewayTestSupport.settings(action));
     ToolInvocationRequest request =
         new ToolInvocationRequest(
-            new ToolCall("call-1", "x", "{\"path\":\"/tmp/x\"}"),
+            new ToolCall("call-1", "x", argumentsJson),
             new ToolBinding(
                 hostDefinition(descriptor),
                 new ContributorBinding("test", "host-tool", List.of()),

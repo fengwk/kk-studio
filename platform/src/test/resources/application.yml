@@ -24,4 +24,4 @@ kk-studio:
   harness:
     runtime:
       workers-enabled: false
-      environment-root: target/harness-environment
+      resource-root: target/harness-resources

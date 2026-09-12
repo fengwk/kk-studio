@@ -139,7 +139,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
 
   private static final String ROOT_PAYLOAD_JSON =
       """
-      {"settings": {"workspacePath": null, "agentName": "lifecycle-test", "model": \
+      {"settings": {"agentName": "lifecycle-test", "model": \
       {"providerName": "openai", "modelName": "gpt-test", "variant": "default"}}, \
       "subagentContext": null}
       """;

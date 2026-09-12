@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.contributor.api;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Objects;
 
@@ -13,24 +12,14 @@ import java.util.Objects;
  * <p>构造时先对 {@code call} 做 schema 驱动的静默归一化（数字字符串→目标数值、可缺省属性的显式 null→缺省）再做严格校验，请求持有的 {@code call}
  * 是归一化后的 {@link ToolCall}；执行路径读到的 {@code argumentsJson} 保证满足目标 schema。
  *
- * <p>{@code workdir} 是已 canonicalize 的 invocation workspace（可空；非空时必须为 absolute path）。
+ * <p>请求不携带 workdir：目录只存在于具体工具 arguments 中，框架不把它提升为通用执行状态，也不提供隐藏默认目录。
  */
 public record ToolExecutionRequest(
-    ToolDescriptor descriptor,
-    ToolCall call,
-    Duration timeout,
-    ToolExecutionContext context,
-    Path workdir) {
+    ToolDescriptor descriptor, ToolCall call, Duration timeout, ToolExecutionContext context) {
 
-  /** 无 invocation context / workspace 的直调请求。 */
+  /** 无 invocation context 的直调请求。 */
   public ToolExecutionRequest(ToolDescriptor descriptor, ToolCall call, Duration timeout) {
-    this(descriptor, call, timeout, null, null);
-  }
-
-  /** 带 execution context 的请求；不携带 invocation workspace。 */
-  public ToolExecutionRequest(
-      ToolDescriptor descriptor, ToolCall call, Duration timeout, ToolExecutionContext context) {
-    this(descriptor, call, timeout, context, null);
+    this(descriptor, call, timeout, null);
   }
 
   public ToolExecutionRequest {
@@ -40,9 +29,6 @@ public record ToolExecutionRequest(
     timeout = Objects.requireNonNull(timeout, "timeout");
     if (timeout.isNegative()) {
       throw new IllegalArgumentException("timeout must not be negative");
-    }
-    if (workdir != null && !workdir.isAbsolute()) {
-      throw new IllegalArgumentException("workdir must be an absolute path");
     }
   }
 

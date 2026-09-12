@@ -42,7 +42,7 @@ class ThreadContextProbeTest {
                   null,
                   new RootPayload(
                       new BranchSettings(
-                          null, "agent", new ModelSelection("provider", "model", "variant"))),
+                          "agent", new ModelSelection("provider", "model", "variant"))),
                   NOW));
           tx.insertThread(thread);
           return null;

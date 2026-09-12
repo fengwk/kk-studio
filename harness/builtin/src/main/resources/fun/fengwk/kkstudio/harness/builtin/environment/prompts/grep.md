@@ -10,9 +10,10 @@ Usage:
 - `pattern` is a regular expression by default; use `literal=true` for exact text.
 - `multiline=true` enables matching across line breaks. Use it when the pattern contains an actual newline or the regex newline escape `\n`; in JSON/tool-call payloads that regex escape is written as `\\n`.
 - Do not search from broad roots such as `/`, `~`, or `$HOME`.
+- Every call must include `workdir`. It must be an expanded absolute directory on the target daemon's file system; no call inherits a previous directory, session default, environment root, cwd, or home directory.
 
 Examples:
-- `grep({ pattern: "createDemoDirectory", path: "src", workdir: "packages/web", literal: true })`
-- `grep({ pattern: "create.*Directory", path: "src", workdir: "services/api", ignore_case: true })`
-- `grep({ pattern: "TODO", path: "src", include: "**/*.ts", timeout_seconds: 30 })`
-- `grep({ pattern: "start\\nend", path: "src", multiline: true })`
+- `grep({ pattern: "createDemoDirectory", path: "src", workdir: "/srv/project/packages/web", literal: true })`
+- `grep({ pattern: "create.*Directory", path: "src", workdir: "/srv/project/services/api", ignore_case: true })`
+- `grep({ pattern: "TODO", path: "src", workdir: "/srv/project", include: "**/*.ts", timeout_seconds: 30 })`
+- `grep({ pattern: "start\\nend", path: "src", workdir: "C:/src/project", multiline: true })`

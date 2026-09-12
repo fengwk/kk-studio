@@ -26,10 +26,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 在显式校验的缺省 cwd 中执行 Platform 授权的 shell 命令。
+ * 在本次调用显式提供的 workdir 中执行 Platform 授权的 shell 命令。
  *
- * <p>静态解析无法沙箱化 shell 内部行为；命令授权属于 Platform permission。Daemon 只解析本次调用的缺省 cwd（未提供 {@code workdir} 时使用
- * invocation workspace），并使用运行时注入的共享 scheduler 在超时或取消时终止完整 process tree。
+ * <p>静态解析无法沙箱化 shell 内部行为；命令授权属于 Platform permission。Daemon 只按本次 arguments 的 {@code workdir}
+ * 解析执行目录（必须显式提供、绝对、现存且为目录），并使用运行时注入的共享 scheduler 在超时或取消时终止完整 process tree。
  */
 public final class BashCapability implements EnvironmentCapability {
 
@@ -73,9 +73,7 @@ public final class BashCapability implements EnvironmentCapability {
     try {
       JsonNode args = AbstractCodingCapability.arguments(request);
       String command = AbstractCodingCapability.string(args, "command");
-      Path workdir =
-          EnvironmentPaths.workdir(
-              AbstractCodingCapability.optionalString(args, "workdir"), request.workdir());
+      Path workdir = EnvironmentPaths.workdir(AbstractCodingCapability.string(args, "workdir"));
       int timeoutSeconds = requestedTimeoutSeconds(args);
       Duration processTimeout =
           effectiveProcessTimeout(request.effectiveTimeout(), Duration.ofSeconds(timeoutSeconds));

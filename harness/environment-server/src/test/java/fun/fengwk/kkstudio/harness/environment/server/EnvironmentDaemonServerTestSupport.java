@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.environment.server;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
@@ -40,7 +39,6 @@ final class EnvironmentDaemonServerTestSupport {
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   static final EnvironmentId OTHER_ENVIRONMENT_ID =
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
-  static final EnvironmentBinding ENVIRONMENT = new EnvironmentBinding(ENVIRONMENT_ID, ".");
   static final UUID CALL_ONE = new UUID(0L, 9101L);
   static final UUID CALL_TWO = new UUID(0L, 9102L);
   static final String TOKEN = "registration-token";
@@ -92,14 +90,15 @@ final class EnvironmentDaemonServerTestSupport {
         new DaemonEnvelope(DaemonProtocol.VERSION, type, scope, invocationId, sequence, payload));
   }
 
+  /** 一个通过 READY OS（LINUX）发送前 workdir 校验的 fs.read 请求：frame send 前必须携带显式绝对 workdir。 */
   static EnvironmentCapabilityExecutionRequest capabilityRequest(UUID callId) {
     EnvironmentCapabilityDescriptor descriptor =
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ);
     return new EnvironmentCapabilityExecutionRequest(
         descriptor,
-        new EnvironmentCapabilityCall(callId.toString(), "{\"path\":\"README.md\"}"),
-        Duration.ofSeconds(5),
-        null);
+        new EnvironmentCapabilityCall(
+            callId.toString(), "{\"workdir\":\"/srv/repo\",\"path\":\"README.md\"}"),
+        Duration.ofSeconds(5));
   }
 
   private static DaemonResourceStore inlineStore() {

@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatListController } from '@/features/ai/chat/useChatListController'
 import { chatService } from '@/shared/api/chat-service'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 
 vi.mock('@/shared/api/chat-service', () => ({
   chatService: {
@@ -15,17 +14,15 @@ vi.mock('@/shared/api/chat-service', () => ({
       id: 'c1',
       title: 'T',
       agentName: 'assistant',
-      workspacePath: null,
       yoloEnabled: false,
       version: '1',
       createTime: null,
       updateTime: null,
     })),
-    updateChat: vi.fn(async (chatId: string, data: { title?: string | null; agentName?: string | null; workspacePath?: string | null; expectedVersion: string }) => ({
+    updateChat: vi.fn(async (chatId: string, data: { title?: string | null; agentName?: string | null; expectedVersion: string }) => ({
       id: chatId,
       title: data.title ?? null,
       agentName: data.agentName ?? 'assistant',
-      workspacePath: data.workspacePath ?? null,
       yoloEnabled: false,
       version: '2',
       createTime: null,
@@ -70,22 +67,6 @@ const agents: AgentDefinitionDTO[] = [
   },
 ]
 
-const environments: EnvironmentCardDTO[] = [
-  {
-    id: 'env-dev-1',
-    name: 'dev',
-    rootPath: null,
-    ready: true,
-    status: 'READY',
-    lastSeen: null,
-    capabilities: [],
-    skills: [],
-    version: '1',
-    createTime: '2026-07-20T00:00:00.000Z',
-    updateTime: '2026-07-20T00:00:00.000Z',
-  },
-]
-
 describe('useChatListController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -98,7 +79,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true, environments), { wrapper })
+    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
     act(() => result.current.openCreateChat('assistant'))
     expect(result.current.createChatModal.open).toBe(true)
@@ -124,36 +105,24 @@ describe('useChatListController', () => {
       expect(chatService.createChat).toHaveBeenCalledWith({
         title: 'Hello',
         agentName: 'assistant',
-        workspacePath: null,
       }),
     )
   })
 
-  it('creates a Chat with selected workspacePath and resets workspacePath when switching to an agent with a different environment', async () => {
+  // 验证切换 Agent 后提交：Chat 只持久化 title/agentName，不再有任何目录状态
+  it('creates a Chat after switching Agent without any workspace state', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true, environments), { wrapper })
+    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
     act(() => result.current.openCreateChat('assistant'))
     act(() => {
       result.current.createChatModal.onTitleChange('Chat')
-      result.current.createChatModal.onSelectWorkspacePath('projects/kk-studio')
-    })
-    expect(result.current.createChatModal.selectedWorkspacePath).toBe('projects/kk-studio')
-
-    // 切换到不同 environmentId 的 agent -> workspacePath 自动重置为 null
-    act(() => {
       result.current.createChatModal.onSelectAgent('coder')
-    })
-    expect(result.current.createChatModal.selectedWorkspacePath).toBeNull()
-
-    // 重新设置 workspacePath 并提交
-    act(() => {
-      result.current.createChatModal.onSelectWorkspacePath('projects/coder-app')
     })
     await act(async () => {
       result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
@@ -163,7 +132,6 @@ describe('useChatListController', () => {
       expect(lastCall[0]).toEqual({
         title: 'Chat',
         agentName: 'coder',
-        workspacePath: 'projects/coder-app',
       })
     })
   })
@@ -176,14 +144,13 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true, environments), { wrapper })
+    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
 
     const existingChat = {
       id: 'chat-42',
       title: 'Original Title',
       agentName: 'assistant',
-      workspacePath: 'projects/old-path',
       yoloEnabled: false,
       version: '5',
       createTime: null,
@@ -195,12 +162,10 @@ describe('useChatListController', () => {
     expect(result.current.createChatModal.mode).toBe('edit')
     expect(result.current.createChatModal.title).toBe('Original Title')
     expect(result.current.createChatModal.selectedAgentName).toBe('assistant')
-    expect(result.current.createChatModal.selectedWorkspacePath).toBe('projects/old-path')
 
     act(() => {
       result.current.createChatModal.onTitleChange('Renamed Chat')
       result.current.createChatModal.onSelectAgent('coder')
-      result.current.createChatModal.onSelectWorkspacePath('projects/coder-app')
     })
 
     await act(async () => {
@@ -211,7 +176,6 @@ describe('useChatListController', () => {
       expect(chatService.updateChat).toHaveBeenCalledWith('chat-42', {
         title: 'Renamed Chat',
         agentName: 'coder',
-        workspacePath: 'projects/coder-app',
         expectedVersion: '5',
       })
       expect(result.current.createChatModal.open).toBe(false)
@@ -228,14 +192,13 @@ describe('useChatListController', () => {
     )
     vi.mocked(chatService.updateChat).mockRejectedValueOnce(new Error('409 Conflict: version conflict'))
 
-    const { result } = renderHook(() => useChatListController(agents, true, environments), { wrapper })
+    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
 
     const existingChat = {
       id: 'chat-cas',
       title: 'Stable Chat',
       agentName: 'assistant',
-      workspacePath: null,
       yoloEnabled: false,
       version: '3',
       createTime: null,
@@ -277,7 +240,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true, environments), { wrapper })
+    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
 
     vi.mocked(chatService.createChat).mockClear()
@@ -306,14 +269,13 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true, environments), { wrapper })
+    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
 
     const targetChat = {
       id: 'chat-to-delete',
       title: 'Target Chat',
       agentName: 'assistant',
-      workspacePath: null,
       yoloEnabled: false,
       version: '9',
       createTime: null,

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -62,15 +64,20 @@ class CodingCapabilitiesTest {
             "process.exec",
             "fs.search",
             "fs.find",
-            "fs.list-directory",
             "lsp.goto-definition",
             "lsp.workspace-symbols",
             "lsp.java-decompile"),
         registry.descriptors().stream().map(d -> d.id().value()).toList());
     EnvironmentCapability read = registry.find(EnvironmentCapabilityIds.FS_READ).orElseThrow();
-    assertThrows(IllegalArgumentException.class, () -> request(read, "{\"path\":1}"));
     assertThrows(
-        IllegalArgumentException.class, () -> request(read, "{\"path\":\"x\",\"unknown\":true}"));
+        IllegalArgumentException.class,
+        () -> request(read, "{\"path\":1,\"workdir\":\"" + environmentRoot + "\"}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            request(
+                read, "{\"path\":\"x\",\"workdir\":\"" + environmentRoot + "\",\"unknown\":true}"));
+    assertThrows(IllegalArgumentException.class, () -> request(read, "{\"path\":\"x\"}"));
   }
 
   /** 越出 workdir 的相对遍历与符号链接目标都是普通路径：读取照常解析，写入落到符号链接指向的真实目录。 */
@@ -83,10 +90,26 @@ class CodingCapabilitiesTest {
     String traversalPath =
         environmentRoot.relativize(externalRoot.resolve("secret.txt")).toString();
 
-    EnvironmentCapabilityResult traversal = invoke(read, "{\"path\":" + json(traversalPath) + "}");
-    EnvironmentCapabilityResult symlink = invoke(read, "{\"path\":\"escape/secret.txt\"}");
+    EnvironmentCapabilityResult traversal =
+        invoke(
+            read,
+            "{\"path\":"
+                + json(traversalPath)
+                + ",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
+    EnvironmentCapabilityResult symlink =
+        invoke(
+            read,
+            "{\"path\":\"escape/secret.txt\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     EnvironmentCapabilityResult writeThroughSymlink =
-        invoke(write, "{\"path\":\"escape/new.txt\",\"content\":\"x\"}");
+        invoke(
+            write,
+            "{\"path\":\"escape/new.txt\",\"content\":\"x\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
 
     assertFalse(traversal.error());
     assertTrue(text(traversal).contains("secret"));
@@ -104,13 +127,19 @@ class CodingCapabilitiesTest {
     EditCapability edit = edit(config());
 
     EnvironmentCapabilityResult duplicate =
-        invoke(edit, "{\"path\":\"sample.txt\",\"old_string\":\"a\\n\",\"new_string\":\"b\\n\"}");
+        invoke(
+            edit,
+            "{\"path\":\"sample.txt\",\"old_string\":\"a\\n\",\"new_string\":\"b\\n\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     EnvironmentCapabilityResult replaced =
         invoke(
             edit,
             "{\"path\":\"sample.txt\",\"old_string\":\"a\\n"
                 + "\",\"new_string\":\"b\\n"
-                + "\",\"replace_all\":true}");
+                + "\",\"replace_all\":true,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
 
     assertTrue(text(duplicate).contains("Found 2 exact matches"));
     assertFalse(replaced.error());
@@ -126,11 +155,53 @@ class CodingCapabilitiesTest {
         new CodingToolsConfig(
             environmentRoot, 2000, 50 * 1024, "bash", new InMemoryResourceStore(), "echo", "javap");
 
-    EnvironmentCapabilityResult disabled = invoke(read(config()), "{\"path\":\"lsp-status.txt\"}");
-    EnvironmentCapabilityResult enabled = invoke(read(bridged), "{\"path\":\"lsp-status.txt\"}");
+    EnvironmentCapabilityResult disabled =
+        invoke(
+            read(config()),
+            "{\"path\":\"lsp-status.txt\",\"workdir\":" + json(environmentRoot.toString()) + "}");
+    EnvironmentCapabilityResult enabled =
+        invoke(
+            read(bridged),
+            "{\"path\":\"lsp-status.txt\",\"workdir\":" + json(environmentRoot.toString()) + "}");
 
     assertTrue(text(disabled).contains("lsp: unsupported"));
     assertTrue(text(enabled).contains("lsp: supported"));
+  }
+
+  /** LSP bridge 子进程必须使用本次调用的显式 workdir，不能继承 Daemon/JVM 进程目录。 */
+  @Test
+  void lspBridgeRunsInExplicitWorkdir() throws Exception {
+    assumeFalse(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
+    Path source = environmentRoot.resolve("Main.java");
+    Files.writeString(source, "class Main {}\n");
+    Path bridge = environmentRoot.resolve("bridge.sh");
+    Files.writeString(
+        bridge,
+        """
+        #!/bin/sh
+        cat >/dev/null
+        printf '{"ok":true,"text":"%s"}' "$PWD"
+        """);
+    assertTrue(bridge.toFile().setExecutable(true));
+    CodingToolsConfig config =
+        new CodingToolsConfig(
+            environmentRoot,
+            2000,
+            50 * 1024,
+            "bash",
+            new InMemoryResourceStore(),
+            bridge.toString(),
+            "javap");
+
+    EnvironmentCapabilityResult result =
+        invoke(
+            new LspGotoDefinitionCapability(config, executor),
+            "{\"path\":\"Main.java\",\"line\":1,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
+
+    assertFalse(result.error());
+    assertEquals(environmentRoot.toRealPath().toString(), text(result));
   }
 
   @Test
@@ -142,15 +213,23 @@ class CodingCapabilitiesTest {
     EditCapability edit = edit(config());
 
     EnvironmentCapabilityResult overlapping =
-        invoke(edit, "{\"path\":\"overlap.txt\",\"old_string\":\"aa\",\"new_string\":\"b\"}");
+        invoke(
+            edit,
+            "{\"path\":\"overlap.txt\",\"old_string\":\"aa\",\"new_string\":\"b\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     EnvironmentCapabilityResult overlappingAll =
         invoke(
             edit,
-            "{\"path\":\"overlap.txt\",\"old_string\":\"aa\",\"new_string\":\"b\",\"replace_all\":true}");
+            "{\"path\":\"overlap.txt\",\"old_string\":\"aa\",\"new_string\":\"b\",\"replace_all\":true,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     EnvironmentCapabilityResult replacedResult =
         invoke(
             edit,
-            "{\"path\":\"replace-all.txt\",\"old_string\":\"ab\",\"new_string\":\"x\",\"replace_all\":true}");
+            "{\"path\":\"replace-all.txt\",\"old_string\":\"ab\",\"new_string\":\"x\",\"replace_all\":true,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
 
     assertTrue(text(overlapping).contains("Found 2 exact matches"));
     assertTrue(text(overlappingAll).contains("overlapping exact matches"));
@@ -172,11 +251,15 @@ class CodingCapabilitiesTest {
     EnvironmentCapabilityResult crlfSpelled =
         invoke(
             edit,
-            "{\"path\":\"crlf-noop.txt\",\"old_string\":\"alpha\\r\\n\",\"new_string\":\"alpha\\n\"}");
+            "{\"path\":\"crlf-noop.txt\",\"old_string\":\"alpha\\r\\n\",\"new_string\":\"alpha\\n\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     EnvironmentCapabilityResult lfSpelled =
         invoke(
             edit,
-            "{\"path\":\"lf-noop.txt\",\"old_string\":\"alpha\\n\",\"new_string\":\"alpha\\r\\n\"}");
+            "{\"path\":\"lf-noop.txt\",\"old_string\":\"alpha\\n\",\"new_string\":\"alpha\\r\\n\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
 
     assertTrue(text(crlfSpelled).contains("No changes to apply"));
     assertTrue(text(crlfSpelled).contains("must differ"));
@@ -200,11 +283,15 @@ class CodingCapabilitiesTest {
     EnvironmentCapabilityResult crResult =
         invoke(
             edit,
-            "{\"path\":\"cr-only.txt\",\"old_string\":\"alpha\\nbeta\",\"new_string\":\"left\\nright\"}");
+            "{\"path\":\"cr-only.txt\",\"old_string\":\"alpha\\nbeta\",\"new_string\":\"left\\nright\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     EnvironmentCapabilityResult mixedResult =
         invoke(
             edit,
-            "{\"path\":\"mixed.txt\",\"old_string\":\"alpha\\nbeta\",\"new_string\":\"left\\nright\"}");
+            "{\"path\":\"mixed.txt\",\"old_string\":\"alpha\\nbeta\",\"new_string\":\"left\\nright\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
 
     // mixed 文件中被替换段内部无行尾（歧义）时，新增换行回退 LF，未修改区域仍原样保留。
     Path ambiguous = environmentRoot.resolve("mixed-ambiguous.txt");
@@ -212,7 +299,9 @@ class CodingCapabilitiesTest {
     EnvironmentCapabilityResult ambiguousResult =
         invoke(
             edit,
-            "{\"path\":\"mixed-ambiguous.txt\",\"old_string\":\"middle\",\"new_string\":\"left\\nright\"}");
+            "{\"path\":\"mixed-ambiguous.txt\",\"old_string\":\"middle\",\"new_string\":\"left\\nright\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
 
     assertFalse(crResult.error());
     assertFalse(mixedResult.error());
@@ -235,9 +324,19 @@ class CodingCapabilitiesTest {
     ReadCapability read = read(config());
     ReadCapability constrainedRead = read(config(1, 16));
 
-    EnvironmentCapabilityResult window = invoke(read, "{\"path\":\"many.txt\",\"limit\":1}");
-    EnvironmentCapabilityResult directory = invoke(read, "{\"path\":\"directory\"}");
-    EnvironmentCapabilityResult binary = invoke(constrainedRead, "{\"path\":\"binary.bin\"}");
+    EnvironmentCapabilityResult window =
+        invoke(
+            read,
+            "{\"path\":\"many.txt\",\"limit\":1,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
+    EnvironmentCapabilityResult directory =
+        invoke(
+            read, "{\"path\":\"directory\",\"workdir\":" + json(environmentRoot.toString()) + "}");
+    EnvironmentCapabilityResult binary =
+        invoke(
+            constrainedRead,
+            "{\"path\":\"binary.bin\",\"workdir\":" + json(environmentRoot.toString()) + "}");
 
     assertTrue(text(window).contains("Showing lines 1-1 of 3"));
     assertTrue(directory.contents().stream().anyMatch(content -> text(content).contains("a.txt")));
@@ -249,9 +348,19 @@ class CodingCapabilitiesTest {
     WriteCapability write = write(config());
 
     RecordingListener first =
-        invokeAsync(write, "{\"path\":\"shared.txt\",\"content\":\"first\"}", Duration.ZERO);
+        invokeAsync(
+            write,
+            "{\"path\":\"shared.txt\",\"content\":\"first\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
+            Duration.ZERO);
     RecordingListener second =
-        invokeAsync(write, "{\"path\":\"shared.txt\",\"content\":\"second\"}", Duration.ZERO);
+        invokeAsync(
+            write,
+            "{\"path\":\"shared.txt\",\"content\":\"second\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
+            Duration.ZERO);
 
     assertTrue(first.await());
     assertTrue(second.await());
@@ -270,9 +379,17 @@ class CodingCapabilitiesTest {
     FindCapability find = find(config());
 
     EnvironmentCapabilityResult grepResult =
-        invoke(grep, "{\"pattern\":\"needle\",\"path\":\".\",\"limit\":1}");
+        invoke(
+            grep,
+            "{\"pattern\":\"needle\",\"path\":\".\",\"limit\":1,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     EnvironmentCapabilityResult findResult =
-        invoke(find, "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":10}");
+        invoke(
+            find,
+            "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":10,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
 
     assertTrue(text(grepResult).contains("results limit reached"));
     assertTrue(text(findResult).contains("visible.txt"));
@@ -285,7 +402,9 @@ class CodingCapabilitiesTest {
     RecordingListener streaming =
         invokeAsync(
             bash,
-            "{\"command\":\"printf first; sleep 0.05; printf second\"}",
+            "{\"command\":\"printf first; sleep 0.05; printf second\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
             Duration.ofSeconds(2));
     assertTrue(streaming.await());
     assertTrue(streaming.partials.size() >= 1);
@@ -294,19 +413,27 @@ class CodingCapabilitiesTest {
     RecordingListener ansi =
         invokeAsync(
             bash,
-            "{\"command\":\"printf '\\\\033[31mpassed\\\\033[0m\\\\n'\"}",
+            "{\"command\":\"printf '\\\\033[31mpassed\\\\033[0m\\\\n'\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
             Duration.ofSeconds(2));
     assertTrue(ansi.await());
     assertTrue(text(ansi.result).contains("passed"));
     assertFalse(ansi.result.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
 
     RecordingListener timeout =
-        invokeAsync(bash, "{\"command\":\"sleep 2\"}", Duration.ofMillis(50));
+        invokeAsync(
+            bash,
+            "{\"command\":\"sleep 2\",\"workdir\":" + json(environmentRoot.toString()) + "}",
+            Duration.ofMillis(50));
     assertTrue(timeout.await());
     assertTrue(text(timeout.result).contains("Command timed out"));
 
     RecordingListener cancelled =
-        invokeAsync(bash, "{\"command\":\"sleep 2\"}", Duration.ofSeconds(2));
+        invokeAsync(
+            bash,
+            "{\"command\":\"sleep 2\",\"workdir\":" + json(environmentRoot.toString()) + "}",
+            Duration.ofSeconds(2));
     cancelled.handle.cancel();
     cancelled.handle.cancel();
     assertTrue(cancelled.await());
@@ -346,7 +473,9 @@ class CodingCapabilitiesTest {
     RecordingListener timed =
         invokeAsync(
             bash(config()),
-            "{\"command\":\"sleep 2\",\"timeout_seconds\":1}",
+            "{\"command\":\"sleep 2\",\"timeout_seconds\":1,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
             Duration.ofSeconds(5));
     assertTrue(timed.await());
     assertTrue(text(timed.result).contains("Command timed out"));
@@ -439,10 +568,7 @@ class CodingCapabilitiesTest {
   private EnvironmentCapabilityExecutionRequest request(
       EnvironmentCapability capability, String arguments) {
     return new EnvironmentCapabilityExecutionRequest(
-        capability.descriptor(),
-        new EnvironmentCapabilityCall("call", arguments),
-        Duration.ZERO,
-        environmentRoot);
+        capability.descriptor(), new EnvironmentCapabilityCall("call", arguments), Duration.ZERO);
   }
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String arguments)
@@ -459,10 +585,7 @@ class CodingCapabilitiesTest {
     listener.handle =
         capability.execute(
             new EnvironmentCapabilityExecutionRequest(
-                capability.descriptor(),
-                new EnvironmentCapabilityCall("call", arguments),
-                timeout,
-                environmentRoot),
+                capability.descriptor(), new EnvironmentCapabilityCall("call", arguments), timeout),
             listener);
     return listener;
   }

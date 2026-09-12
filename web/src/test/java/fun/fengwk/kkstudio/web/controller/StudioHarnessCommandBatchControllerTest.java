@@ -341,7 +341,6 @@ class StudioHarnessCommandBatchControllerTest {
   private static String rootSettings() {
     return """
         {
-          "workspacePath":null,
           "agentName":"default-assistant",
           "model":{"providerName":"openai","modelName":"gpt-5","variant":"default"}
         }

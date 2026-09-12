@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.chat.service.impl;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentWorkspacePath;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
@@ -46,7 +45,6 @@ public class ChatMutationFactory {
     editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
     chat.setTitle(title);
     chat.setAgentName(parseRequiredAgentName(createDTO.getAgentName()));
-    chat.setWorkspacePath(parseNullableWorkspacePath(createDTO.getWorkspacePath()));
     chat.setYoloEnabled(
         createDTO.getYoloEnabled() == null
             ? toolSettingsProvider.get().defaultYolo()
@@ -72,26 +70,11 @@ public class ChatMutationFactory {
     if (updateDTO.getAgentName() != null) {
       chat.setAgentName(parseRequiredAgentName(updateDTO.getAgentName()));
     }
-    if (updateDTO.isWorkspacePathProvided()) {
-      chat.setWorkspacePath(parseNullableWorkspacePath(updateDTO.getWorkspacePath()));
-    }
     if (updateDTO.isYoloEnabledProvided()) {
       if (updateDTO.getYoloEnabled() == null) {
         throw new AiValidationException(RESOURCE, "yoloEnabled must not be null");
       }
       chat.setYoloEnabled(updateDTO.getYoloEnabled());
-    }
-  }
-
-  private String parseNullableWorkspacePath(String raw) {
-    if (raw == null) {
-      return null;
-    }
-    try {
-      return EnvironmentWorkspacePath.requireCanonicalRelativePath(raw);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
-          RESOURCE, "invalid workspacePath: " + error.getMessage(), error);
     }
   }
 

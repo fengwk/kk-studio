@@ -13,7 +13,7 @@ import {
   type ResourceBlobUrls,
 } from '@/features/ai/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import { storageService } from '@/shared/api/storage-service'
-import type { EnvironmentBindingShape } from '@/features/ai/runtime/thread-panel/thread-status-format'
+import type { EnvironmentStatusIdentity } from '@/features/ai/runtime/thread-panel/thread-status-format'
 import type {
   DialogueMessage,
   QueuedThreadMessage,
@@ -27,10 +27,9 @@ import {
 
 /** Bound ChatPanel 的只读 Footer facts；缺失字段整段省略。 */
 export interface ChatPanelLabels {
-  /** 完整 Environment binding；null 表示未绑定。 */
-  environment?: EnvironmentBindingShape | null
+  /** Environment 身份；null 表示 Agent 未选择 Environment。 */
+  environment?: EnvironmentStatusIdentity | null
   environmentReady?: boolean
-  gitBranch?: string | null
   /** 当前 root-to-head branch 的已关闭 Turn 累计 usage。 */
   branchUsage?: TurnUsage | null
   contextWindow?: number
@@ -162,7 +161,6 @@ export function ChatPanel({
             <ThreadStatusFooter
               environment={labels.environment}
               environmentReady={labels.environmentReady}
-              gitBranch={labels.gitBranch}
               branchUsage={labels.branchUsage}
               contextWindow={labels.contextWindow}
             />

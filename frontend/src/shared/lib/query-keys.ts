@@ -19,7 +19,6 @@ export const queryKeys = {
     all: ['environments'] as const,
     list: ['environments', 'list'] as const,
     detail: (id: string) => ['environments', 'detail', id] as const,
-    directory: (id: string, path: string) => ['environments', 'directory', id, path] as const,
   },
   mcpServers: {
     all: ['mcp-servers'] as const,

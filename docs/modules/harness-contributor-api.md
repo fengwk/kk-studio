@@ -32,7 +32,7 @@ trusted contributor implementation
           ▼
  harness-contributor-api
    ├─ harness-tool values
-   └─ harness-environment binding/capability values
+   └─ harness-environment identity/capability values
 
 依赖约束：仅允许依赖 harness-tool 与 harness-environment 的纯值契约；
           运行时存储与处理器、基础设施、守护进程、平台装配、Spring 及 JDBC 均置于外层模块。
@@ -113,7 +113,7 @@ ToolExecutionHandle execute(
 
 `execute` 是启动式、快速返回的异步执行方法。方法内部允许发起同步回调，Platform 会在调用状态持久化为 `RUNNING` 之前关闭初始回调门禁，确保执行状态有序转换。返回的句柄支持幂等取消（cancel）。
 
-[`ToolExecutionRequest`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java) 持有工具描述符、已归一化与强类型校验的 `ToolCall`、覆盖超时时间、可选的执行上下文以及可选的绝对工作目录。当请求超时时间未指定或为零时，自动采用描述符声明的默认值。
+[`ToolExecutionRequest`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java) 持有工具描述符、已归一化与强类型校验的 `ToolCall`、覆盖超时时间以及可选的执行上下文。当请求超时时间未指定或为零时，自动采用描述符声明的默认值。请求不携带 workdir：目录只存在于具体工具 arguments 中，框架不把它提升为通用执行状态，也不提供隐藏默认目录。
 
 [`ToolExecutionListener`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionListener.java) 接收增量与终态事件：
 
@@ -133,7 +133,7 @@ environmentRequired
 stateAccesses[]
 ```
 
-当工具声明 `environmentRequired=true` 时，Runtime planning 阶段冻结 `EnvironmentBinding`，Platform 在执行期通过 [`ToolExecutionContext`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionContext.java) 注入 [`BoundEnvironment`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java)。Tool 仅通过该窄接口执行 `EnvironmentCapabilityDescriptor` 即可调用环境能力；连接注册中心与环境网关路由由 Platform 统一管理。环境能力作为工具声明的执行依赖存在，与工具的定义模型解耦。
+当工具声明 `environmentRequired=true` 时，Runtime planning 阶段在 `ToolBinding` 上冻结 `environmentId`，Platform 在执行期通过 [`ToolExecutionContext`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionContext.java) 注入 [`BoundEnvironment`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java)。`BoundEnvironment` 只暴露冻结的 `EnvironmentId` 与 `execute(capability, request, listener)`，Tool 通过该窄接口执行 `EnvironmentCapabilityDescriptor` 即可调用环境能力；连接注册中心与环境网关路由由 Platform 统一管理。环境能力作为工具声明的执行依赖存在，与工具的定义模型解耦。
 
 ### BranchView、state access 与 effects
 
@@ -195,7 +195,7 @@ candidate branch
 - **依赖图原子校验**：Catalog 在调用 Contributor 前先行验证依赖有向图的完整性与无环性；一旦检测到缺失依赖或环路，立即终止装配，保证目录构建的原子性。
 - **不可变冻结保障**：Catalog 冻结完成后，贡献者标识、描述符、依赖要求、优先级以及检索列表完全不可变，工具与投影器实例引用保持稳定。
 - **统一模型表达**：本地执行与环境委托共用 Tool SPI，具体实现与 `ToolRequirements` 共同表达执行位置。
-- **调用状态一致性**：Runtime Invocation 持久化冻结工具定义、贡献者归属、环境要求、状态访问声明与环境绑定；Platform 执行期比对当前目录，检测到漂移（drift）时确定性拒绝执行。
+- **调用状态一致性**：Runtime Invocation 持久化冻结工具定义、贡献者归属、环境要求、状态访问声明与冻结的 `environmentId`；Platform 执行期比对当前目录，检测到漂移（drift）时确定性拒绝执行。
 - **所有权隔离与副作用约束**：Tool 仅允许对其所属 Contributor 已注册、且已显式声明 WRITE 访问的 customType 产生状态追加副作用。
 - **执行终态与副作用互斥**：执行错误与追加副作用严格互斥；当资源外部化或副作用校验未通过时，整个执行结果视为失败并原子回滚。
 - **启动期装配生命周期**：扩展配置在应用启动期确定；若 Contributor 集合发生变更，通过重新启动应用重建全局目录。

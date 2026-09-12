@@ -12,7 +12,7 @@ DTO；宿主通过构造器注入全部外部能力，因此会话状态机可�
 
 ### 核心职责
 
-- 拥有 daemon 协议 v1 的服务端会话状态：HELLO 认证与 WELCOME 下发、READY 能力登记、HEARTBEAT 续约、入站/出站 sequence、
+- 拥有 daemon 协议 v2 的服务端会话状态：HELLO 认证与 WELCOME 下发、READY 能力登记、HEARTBEAT 续约、入站/出站 sequence、
   连接代际与关闭清理。
 - 以 `DaemonLeaseStore` 的围栏返回值推进租约语义：抢占/接管、READY 写入、心跳续约、断开宽限；存储不可用时 fail-closed。
 - 按 `(environmentId, invocationId)` 协调在途调用：发送 `INVOKE`、透传 `STARTED/PARTIAL`、收敛唯一终态、处理 `CANCEL` 与
@@ -25,8 +25,8 @@ DTO；宿主通过构造器注入全部外部能力，因此会话状态机可�
   `DaemonLeaseStore`；核心不感知 SQL 或 `harness_work`。
 - WebSocket 传输：由 Web 的 `EnvironmentDaemonWebSocketHandler` 把物理连接适配为 `DaemonChannel`；核心不感知 Spring 或
   JSR-356。
-- 产品读模型映射：skill 正文与目录浏览结果由 Platform 的 `EnvironmentDaemonGateway` 与 `LocalDirectoryExecutor` 映射为平台
-  DTO。
+- 产品读模型映射：Environment Card 与 live projection 由 Platform 的 `EnvironmentDaemonGateway` 与 `EnvironmentServiceImpl` 映射为平台
+  DTO；skill 正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.load` 取得，Platform 不提供旁路加载链。
 - 会话设置：心跳超时与资源上限由宿主每次判定现读注入，核心不缓存配置。
 
 ## 依赖边界
@@ -64,7 +64,7 @@ DaemonEndpoint                 -> open / receive / close           （transport 
 EnvironmentCapabilityTransport -> invoke                            （产品调用方调用）
 ```
 
-握手时序与协议编解码仍由 `harness-environment` 的 v1 契约定义；本模块负责把协议推进为可观察状态：
+握手时序与协议编解码仍由 `harness-environment` 的 v2 契约定义；本模块负责把协议推进为可观察状态：
 
 ```text
 open(channel)

@@ -11,7 +11,6 @@ describe('AgentPane command registry', () => {
     expect(THREAD_COMMANDS.map((command) => command.id)).toEqual([
       'thread',
       'agent',
-      'environment',
       'yolo',
       'models',
       'tree',
@@ -58,7 +57,6 @@ describe('AgentPane command registry', () => {
     expect(commandIdsForTarget(target)).toEqual([
       'thread',
       'agent',
-      'environment',
       'yolo',
       'models',
       'tree',

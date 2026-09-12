@@ -148,7 +148,6 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       UUID threadId =
           oneShotService.submit(
               requireText(settings.promptAgentName(), "promptAgentName"),
-              ".",
               promptBuilder.systemPrompt(),
               promptRequest,
               mediaPreflight(context, manifest));

@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.time.Duration;
@@ -30,15 +29,13 @@ class EnvironmentCapabilityTransportTest {
           "1",
           new InputSchema(null, Map.of("path", new StringSchema(null)), Set.of("path"), false),
           Duration.ofSeconds(10));
-  private static final EnvironmentBinding BINDING =
-      new EnvironmentBinding(
-          EnvironmentId.parse("123e4567-e89b-12d3-a456-426614174000"), "workspace");
+  private static final EnvironmentId ENVIRONMENT_ID =
+      EnvironmentId.parse("123e4567-e89b-12d3-a456-426614174000");
   private static final EnvironmentCapabilityExecutionRequest REQUEST =
       new EnvironmentCapabilityExecutionRequest(
           DESCRIPTOR,
           new EnvironmentCapabilityCall("call-1", "{\"path\":\"README.md\"}"),
-          Duration.ZERO,
-          null);
+          Duration.ZERO);
 
   /** 多个 partial 必须按 FIFO 顺序透传，FakeTransport 的 terminal fence 丢弃 late event，cancel 必须幂等。 */
   @Test
@@ -46,7 +43,8 @@ class EnvironmentCapabilityTransportTest {
     FakeTransport transport = new FakeTransport(Mode.STREAM);
     RecordingListener listener = new RecordingListener();
 
-    EnvironmentCapabilityExecutionHandle handle = transport.invoke(BINDING, REQUEST, listener);
+    EnvironmentCapabilityExecutionHandle handle =
+        transport.invoke(ENVIRONMENT_ID, REQUEST, listener);
 
     assertEquals(List.of("partial-1", "partial-2", "complete"), listener.events);
     assertFalse(listener.error);
@@ -61,12 +59,12 @@ class EnvironmentCapabilityTransportTest {
   @Test
   void forwardsTerminalFailureAndCancellationExceptions() {
     RecordingListener failed = new RecordingListener();
-    new FakeTransport(Mode.FAILED).invoke(BINDING, REQUEST, failed);
+    new FakeTransport(Mode.FAILED).invoke(ENVIRONMENT_ID, REQUEST, failed);
     assertTrue(failed.error);
     assertInstanceOf(EnvironmentCapabilityFailedException.class, failed.terminal);
 
     RecordingListener cancelled = new RecordingListener();
-    new FakeTransport(Mode.CANCELLED).invoke(BINDING, REQUEST, cancelled);
+    new FakeTransport(Mode.CANCELLED).invoke(ENVIRONMENT_ID, REQUEST, cancelled);
     assertTrue(cancelled.error);
     assertInstanceOf(EnvironmentCapabilityCancelledException.class, cancelled.terminal);
   }
@@ -84,7 +82,7 @@ class EnvironmentCapabilityTransportTest {
     FakeTransport transport = new FakeTransport(mode);
     RecordingListener listener = new RecordingListener();
 
-    assertThrows(exceptionType, () -> transport.invoke(BINDING, REQUEST, listener));
+    assertThrows(exceptionType, () -> transport.invoke(ENVIRONMENT_ID, REQUEST, listener));
     assertFalse(transport.invoked);
     assertTrue(listener.events.isEmpty());
     assertFalse(listener.error);
@@ -109,10 +107,10 @@ class EnvironmentCapabilityTransportTest {
 
     @Override
     public EnvironmentCapabilityExecutionHandle invoke(
-        EnvironmentBinding binding,
+        EnvironmentId environmentId,
         EnvironmentCapabilityExecutionRequest request,
         EnvironmentCapabilityExecutionListener listener) {
-      assertEquals(BINDING, binding);
+      assertEquals(ENVIRONMENT_ID, environmentId);
       assertEquals(REQUEST, request);
       if (mode == Mode.BUSY) {
         throw new EnvironmentCapabilityBusyException("busy");

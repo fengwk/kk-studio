@@ -41,8 +41,8 @@ class ModelRequestSpecJsonCodecTest {
             + ",\"preambleMessages\":[],\"toolBindings\":["
             + bindingCodec.encode(requestSpec.toolBindings().getFirst())
             + "],\"skillBindings\":[{\"name\":\"review\",\"description\":\"Review code\","
-            + "\"sourceEnvironment\":{\"environmentId\":\"123e4567-e89b-12d3-a456-426614174000\","
-            + "\"workspacePath\":\".\"}}],\"subagentBindings\":[],\"cacheControl\":"
+            + "\"sourceEnvironmentId\":\"123e4567-e89b-12d3-a456-426614174000\"}],"
+            + "\"subagentBindings\":[],\"cacheControl\":"
             + providerCodec.encodeCacheControlNode(requestSpec.cacheControl())
             + "}";
 

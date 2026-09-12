@@ -2,16 +2,15 @@ import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import { translate } from '@/shared/i18n'
 
 /**
- * Environment binding 的只读形状。
+ * Footer 展示所需的 Environment 身份。
  */
-export interface EnvironmentBindingShape {
+export interface EnvironmentStatusIdentity {
   environmentId: string
-  environmentName?: string
-  workspacePath: string
+  environmentName?: string | null
 }
 
 export interface ThreadStatusSegment {
-  key: 'environment' | 'git' | 'usage' | 'context' | 'cache'
+  key: 'environment' | 'usage' | 'context' | 'cache'
   className: string
   text: string
   title: string
@@ -22,11 +21,10 @@ export interface ThreadStatusModel {
 }
 
 export interface ThreadStatusModelInput {
-  /** 完整 Environment binding；null 时只读展示 `none env`。 */
-  environment?: EnvironmentBindingShape | null
+  /** Environment 身份；null 时只读展示 `none env`。 */
+  environment?: EnvironmentStatusIdentity | null
   /** 实时可用标记；false 时展示 unavailable 事实。 */
   environmentReady?: boolean
-  gitBranch?: string | null
   /** 当前 root-to-head 已关闭 Turn 的累计 usage；缺失时按 0 展示。 */
   branchUsage?: TurnUsage | null
   contextWindow?: number
@@ -46,33 +44,19 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
   const segments: ThreadStatusSegment[] = []
   const binding = input.environment
   const environmentName = binding ? clean(binding.environmentName || binding.environmentId) : ''
-  const environmentWorkspacePath = binding ? clean(binding.workspacePath) : ''
-  if (environmentName && environmentWorkspacePath) {
-    const fullWorkspace = workspaceDisplayPath(environmentWorkspacePath)
-    const compactWorkspace = middleEllipsis(fullWorkspace, 42)
+  if (environmentName) {
     const text = input.environmentReady === false
       ? translate('ai.runtime.status.environmentUnavailableText', {
         name: environmentName,
-        workspace: compactWorkspace,
       })
       : translate('ai.runtime.status.environmentText', {
         name: environmentName,
-        workspace: compactWorkspace,
-      })
-    const title = input.environmentReady === false
-      ? translate('ai.runtime.status.environmentUnavailableText', {
-        name: environmentName,
-        workspace: fullWorkspace,
-      })
-      : translate('ai.runtime.status.environmentText', {
-        name: environmentName,
-        workspace: fullWorkspace,
       })
     segments.push({
       key: 'environment',
       className: 'thread-status-environment',
       text,
-      title,
+      title: text,
     })
   } else {
     const noneText = translate('ai.runtime.status.environmentNoneText')
@@ -81,16 +65,6 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
       className: 'thread-status-environment',
       text: noneText,
       title: noneText,
-    })
-  }
-
-  const gitBranch = clean(input.gitBranch)
-  if (gitBranch) {
-    segments.push({
-      key: 'git',
-      className: 'thread-status-git',
-      text: translate('ai.runtime.status.gitBranchText', { branch: gitBranch }),
-      title: translate('ai.runtime.status.gitBranchTitle', { branch: gitBranch }),
     })
   }
 
@@ -128,21 +102,6 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     title: translate('ai.runtime.status.cacheHitTitle', { percent }),
   })
   return { segments }
-}
-
-function workspaceDisplayPath(path: string): string {
-  return path === '.' ? '@/' : `@/${path}`
-}
-
-/** 中间省略保留路径首尾，title 始终携带完整安全 wire path。 */
-export function middleEllipsis(value: string, maxLength: number): string {
-  if (value.length <= maxLength || maxLength < 5) {
-    return value
-  }
-  const remaining = maxLength - 1
-  const head = Math.ceil(remaining / 2)
-  const tail = Math.floor(remaining / 2)
-  return `${value.slice(0, head)}…${value.slice(value.length - tail)}`
 }
 
 const EMPTY_USAGE: TurnUsage = {

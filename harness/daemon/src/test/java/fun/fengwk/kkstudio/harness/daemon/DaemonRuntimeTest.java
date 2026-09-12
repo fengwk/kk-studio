@@ -26,9 +26,9 @@ import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.daemon.coding.CodingCapabilities;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryResourceStore;
+import fun.fengwk.kkstudio.harness.daemon.coding.ReadCapability;
 import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.WriteCapability;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
@@ -425,9 +425,13 @@ class DaemonRuntimeTest {
         DaemonInvocationState.FAILED, journal.find("unknown-invocation").orElseThrow().state());
   }
 
-  /** workspacePath 是必填 wire 字段：缺失/非文本/未知字段在协议边界拒绝，不触达 capability SPI。 */
+  /**
+   * 测试意图：v2 INVOKE 外壳不携带目录，coding workdir 只存在于具体 arguments 中——携带已删除的 {@code workspacePath}
+   * 字段（文本或数字）必须在协议边界作为 unknown field 拒绝，且不触达 capability SPI。
+   */
   @Test
-  void rejectsMissingOrUnknownInvokeWorkspaceFieldsBeforeSideEffects() throws InterruptedException {
+  void rejectsUnknownWorkspacePathFieldInV2InvokePayloadBeforeSideEffects()
+      throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
@@ -458,99 +462,60 @@ class DaemonRuntimeTest {
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
             + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":3,\"payload\":{\"capabilityId\":\"test\","
-            + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":100,"
-            + "\"extra\":true}}");
+            + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":100}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
     assertEquals(0, tool.executions.get());
 
+    // 去掉 workspacePath 的严格 v2 payload 正常执行，证明拒绝只针对该未知字段。
     transport.receive(invoke("valid-after-rejected-workspace", 1));
     transport.takeMessages(2);
     assertEquals(1, tool.executions.get());
   }
 
-  /** workspace 必须在 Environment Root 内 canonicalize 为现存目录：形状非法/删除/非目录/symlink 越界都收敛为 FAILED。 */
+  /**
+   * 测试意图：coding capability 的 workdir 只来自该次调用 arguments，缺失时在请求构造期被 schema 确定性拒绝（因此没有 STARTED），且绝不回退到
+   * Environment Root。
+   *
+   * <p>用真实 {@link ReadCapability}：Environment Root 下放置同名文件；若实现发生回退，capability 就能读到该文件并在 COMPLETED
+   * 内容中出现其文本，从而被本测试捕获。
+   */
   @Test
-  void rejectsWorkspaceThatCannotResolveToDirectoryInsideRoot() throws Exception {
-    Path root = Files.createTempDirectory("daemon-workspace-root");
+  void omittedWorkdirIsRejectedWithoutEnvironmentRootFallback() throws Exception {
+    Path root = Files.createTempDirectory("daemon-workdir-root");
     try {
-      Path nested = Files.createDirectories(root.resolve("projects").resolve("web"));
-      Files.writeString(root.resolve("file.txt"), "x");
-      Path outside = Files.createTempDirectory("daemon-workspace-outside");
-      Path escaping = Files.createSymbolicLink(root.resolve("escape"), outside);
-
+      Files.writeString(root.resolve("local.txt"), "from-environment-root");
       FakeTransport transport = new FakeTransport();
-      TestCapability tool = new TestCapability();
-      runtime = runtime(transport, tool, root);
+      DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+      registry.register(
+          new ReadCapability(
+              new CodingToolsConfig(root, 2000, 50 * 1024, "bash", new InMemoryResourceStore()),
+              Executors.newVirtualThreadPerTaskExecutor()));
+      runtime = runtime(transport, registry, root);
 
       runtime.start();
       transport.awaitConnections(1);
       completeHandshake(0);
       transport.takeMessages(2);
 
-      // root 与 nested 现存目录都成功启动，并把 canonical 目录作为 invocation workdir。
-      transport.receive(invokeWithWorkspace("workspace-root", 1, "test", "1.0.0", 100, "."));
-      List<DaemonEnvelope> started = transport.takeMessages(2);
-      assertMessageTypes(started, ACK, STARTED);
-      assertEquals(root.toRealPath(), tool.request.workdir());
-      tool.complete(new EnvironmentCapabilityResult("workspace-root", List.of(), false, "{}"));
-      transport.takeMessages(1);
-
+      // 省略 workdir：schema 必填校验在构造执行请求时失败 → 直接 FAILED，绝不发出 STARTED。
       transport.receive(
-          invokeWithWorkspace("workspace-nested", 2, "test", "1.0.0", 100, "projects/web"));
-      assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
-      assertEquals(nested.toRealPath(), tool.request.workdir());
-      tool.complete(new EnvironmentCapabilityResult("workspace-nested", List.of(), false, "{}"));
-      transport.takeMessages(1);
+          invoke("missing-workdir", 1, "fs.read", "2", 100, "{\"path\":\"local.txt\"}"));
+      List<DaemonEnvelope> missing = transport.takeMessages(2);
+      assertMessageTypes(missing, ACK, DaemonMessageType.FAILED);
+      String failure = missing.get(1).payloadJson();
+      assertTrue(failure.contains("workdir"), failure);
+      assertFalse(failure.contains("from-environment-root"), failure);
 
-      // 形状非法（非空但非 canonical）在 workspace canonicalize 层收敛为 FAILED。
-      String[] invalidShapes = {"/abs", "C:\\x", "a\\b", "a/../b", "a\u0007b"};
-      for (int index = 0; index < invalidShapes.length; index++) {
-        transport.receive(
-            invokeWithWorkspace(
-                "invalid-shape-" + index, 3 + index, "test", "1.0.0", 100, invalidShapes[index]));
-        List<DaemonEnvelope> messages = transport.takeMessages(2);
-        assertMessageTypes(messages, ACK, DaemonMessageType.FAILED);
-        String payload = messages.get(1).payloadJson();
-        assertTrue(payload.contains("path"), payload);
-      }
-
-      // 空 / 空白 workspacePath 在协议边界（必填非空文本）被拒绝为 ERROR。
-      String[] blankWorkspaces = {"", " "};
-      for (int index = 0; index < blankWorkspaces.length; index++) {
-        transport.receive(
-            invokeWithWorkspace(
-                "blank-workspace-" + index,
-                8 + index,
-                "test",
-                "1.0.0",
-                100,
-                blankWorkspaces[index]));
-        assertMessageTypes(transport.takeMessages(1), ERROR);
-      }
-
-      // 路径删除 / 非目录 / symlink 越界同样是确定性 FAILED，并按原因给出可诊断消息。
-      String[] invalidResolutions = {"deleted", "file.txt", "escape"};
-      String[] expectedMessages = {
-        "does not resolve to an existing directory",
-        "is not a directory",
-        "escapes environment root"
-      };
-      for (int index = 0; index < invalidResolutions.length; index++) {
-        transport.receive(
-            invokeWithWorkspace(
-                "invalid-resolution-" + index,
-                8 + index,
-                "test",
-                "1.0.0",
-                100,
-                invalidResolutions[index]));
-        List<DaemonEnvelope> messages = transport.takeMessages(2);
-        assertMessageTypes(messages, ACK, DaemonMessageType.FAILED);
-        assertTrue(
-            messages.get(1).payloadJson().contains(expectedMessages[index]),
-            messages.get(1).payloadJson());
-      }
-      assertEquals(2, tool.executions.get());
+      // 显式绝对 workdir 正常执行并读到该目录下的文件；可见内容证明目录来自 arguments 而非 Environment Root。
+      transport.receive(
+          invoke(
+              "explicit-workdir",
+              2,
+              "fs.read",
+              "2",
+              100,
+              "{\"path\":\"local.txt\",\"workdir\":\"" + jsonEscape(root.toString()) + "\"}"));
+      assertMessageTypes(transport.takeMessages(3), ACK, STARTED, DaemonMessageType.COMPLETED);
     } finally {
       deleteRecursively(root);
     }
@@ -593,7 +558,7 @@ class DaemonRuntimeTest {
             ENVIRONMENT_ID,
             "invalid-capability-id",
             3,
-            "{\"capabilityId\":\"TEST\",\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\","
+            "{\"capabilityId\":\"TEST\",\"capabilityVersion\":\"1.0.0\","
                 + "\"arguments\":{},\"timeoutMillis\":1000}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
   }
@@ -613,14 +578,14 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
             + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,"
             + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
-            + "\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":1000}}");
+            + "\"arguments\":{},\"timeoutMillis\":1000}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
     transport.receiveRaw(
         "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
             + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,"
             + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
-            + "\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":1000}}");
+            + "\"arguments\":{},\"timeoutMillis\":1000}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
     transport.receive(invoke("valid-after-unsupported-version", 1));
@@ -643,7 +608,7 @@ class DaemonRuntimeTest {
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
             + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
-            + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},"
+            + "\"capabilityVersion\":\"1.0.0\",\"arguments\":{},"
             + "\"timeoutMillis\":1000}}");
 
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
@@ -733,67 +698,6 @@ class DaemonRuntimeTest {
     assertEquals(1, tool.executions.get());
   }
 
-  /** fs.list-directory 作为标准 capability 执行，返回包含展示/父级/条目的标准 JSON。 */
-  @Test
-  void listsDirectoryViaCapabilityInvocation() throws Exception {
-    Path envRoot = Files.createTempDirectory("daemon-dir-listing");
-    Files.createDirectories(envRoot.resolve("src/main"));
-    Files.createDirectories(envRoot.resolve("docs"));
-    Files.writeString(envRoot.resolve("README.md"), "x");
-    try {
-      FakeTransport transport = new FakeTransport();
-      CodingToolsConfig toolsConfig = CodingToolsConfig.fromSystemProperties(envRoot);
-      DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
-      CodingCapabilities.registerAll(
-          registry,
-          toolsConfig,
-          Executors.newVirtualThreadPerTaskExecutor(),
-          Executors.newSingleThreadScheduledExecutor());
-      runtime = runtime(transport, registry, envRoot);
-
-      runtime.start();
-      transport.awaitConnections(1);
-      completeHandshake(0);
-      transport.takeMessages(2);
-
-      transport.receive(
-          invoke(
-              "list-1",
-              1,
-              EnvironmentCapabilityIds.FS_LIST_DIRECTORY,
-              "1",
-              ".",
-              "{\"path\":\".\"}"));
-      List<DaemonEnvelope> messages = transport.takeMessages(3);
-      assertMessageTypes(messages, ACK, STARTED, COMPLETED);
-      EnvironmentCapabilityResult result = resultCodec.decodeResult(messages.get(2).payloadJson());
-      assertFalse(result.error());
-      String json = ((JsonResultContent) result.contents().get(0)).json();
-      assertTrue(json.contains("\"displayPath\":\".\""));
-      assertTrue(json.contains("\"path\":\"docs\""));
-      assertTrue(json.contains("\"path\":\"src\""));
-
-      // generic capability failure 仍需保留稳定分类线索，且不得回显 daemon 绝对路径。
-      transport.receive(
-          invoke(
-              "list-missing",
-              2,
-              EnvironmentCapabilityIds.FS_LIST_DIRECTORY,
-              "1",
-              ".",
-              "{\"path\":\"missing\"}"));
-      messages = transport.takeMessages(3);
-      assertMessageTypes(messages, ACK, STARTED, COMPLETED);
-      result = resultCodec.decodeResult(messages.get(2).payloadJson());
-      assertTrue(result.error());
-      String error = ((TextResultContent) result.contents().get(0)).text();
-      assertEquals("Error: directory does not exist: missing", error);
-      assertFalse(error.contains(envRoot.toString()));
-    } finally {
-      deleteRecursively(envRoot);
-    }
-  }
-
   /** skill.load 作为标准 capability 执行，成功返回指令正文。 */
   @Test
   void loadsSkillViaCapabilityInvocation() throws Exception {
@@ -818,12 +722,7 @@ class DaemonRuntimeTest {
 
       transport.receive(
           invoke(
-              "skill-1",
-              1,
-              EnvironmentCapabilityIds.SKILL_LOAD,
-              "1",
-              ".",
-              "{\"name\":\"my-skill\"}"));
+              "skill-1", 1, EnvironmentCapabilityIds.SKILL_LOAD, "1", "{\"name\":\"my-skill\"}"));
       List<DaemonEnvelope> messages = transport.takeMessages(3);
       assertMessageTypes(messages, ACK, STARTED, COMPLETED);
       EnvironmentCapabilityResult result = resultCodec.decodeResult(messages.get(2).payloadJson());
@@ -992,14 +891,15 @@ class DaemonRuntimeTest {
       completeHandshake(0);
       transport.takeMessages(2);
       transport.receive(
-          invokeWithArguments(
+          invoke(
               "write-timeout",
               1,
               "fs.write",
-              "1",
+              "2",
               100,
-              ".",
-              "{\"path\":\"timeout.txt\",\"content\":\"must not be written\"}"));
+              "{\"workdir\":\""
+                  + jsonEscape(root.toString())
+                  + "\",\"path\":\"timeout.txt\",\"content\":\"must not be written\"}"));
 
       assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
       List<DaemonEnvelope> terminal = transport.takeMessages(1);
@@ -2238,52 +2138,16 @@ class DaemonRuntimeTest {
       String capabilityId,
       String capabilityVersion,
       long timeoutMillis) {
-    return new DaemonEnvelope(
-        DaemonProtocol.VERSION,
-        DaemonMessageType.INVOKE,
-        ENVIRONMENT_ID,
-        invocationId,
-        sequence,
-        "{\"capabilityId\":\""
-            + capabilityId
-            + "\",\"capabilityVersion\":\""
-            + capabilityVersion
-            + "\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":"
-            + timeoutMillis
-            + "}");
+    return invoke(invocationId, sequence, capabilityId, capabilityVersion, timeoutMillis, "{}");
   }
 
-  private DaemonEnvelope invokeWithWorkspace(
+  /** 严格 v2 INVOKE：外壳只有 capabilityId/capabilityVersion/arguments/timeoutMillis，目录只来自 arguments。 */
+  private DaemonEnvelope invoke(
       String invocationId,
       long sequence,
       String capabilityId,
       String capabilityVersion,
       long timeoutMillis,
-      String workspacePath) {
-    return new DaemonEnvelope(
-        DaemonProtocol.VERSION,
-        DaemonMessageType.INVOKE,
-        ENVIRONMENT_ID,
-        invocationId,
-        sequence,
-        "{\"capabilityId\":\""
-            + capabilityId
-            + "\",\"capabilityVersion\":\""
-            + capabilityVersion
-            + "\",\"workspacePath\":\""
-            + jsonEscape(workspacePath)
-            + "\",\"arguments\":{},\"timeoutMillis\":"
-            + timeoutMillis
-            + "}");
-  }
-
-  private DaemonEnvelope invokeWithArguments(
-      String invocationId,
-      long sequence,
-      String capabilityId,
-      String capabilityVersion,
-      long timeoutMillis,
-      String workspacePath,
       String argumentsJson) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
@@ -2295,8 +2159,6 @@ class DaemonRuntimeTest {
             + capabilityId
             + "\",\"capabilityVersion\":\""
             + capabilityVersion
-            + "\",\"workspacePath\":\""
-            + jsonEscape(workspacePath)
             + "\",\"arguments\":"
             + argumentsJson
             + ",\"timeoutMillis\":"
@@ -2326,7 +2188,7 @@ class DaemonRuntimeTest {
             + capabilityId
             + "\",\"capabilityVersion\":\""
             + capabilityVersion
-            + "\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":0}");
+            + "\",\"arguments\":{},\"timeoutMillis\":0}");
   }
 
   private DaemonEnvelope invoke(
@@ -2334,7 +2196,6 @@ class DaemonRuntimeTest {
       long sequence,
       EnvironmentCapabilityId capabilityId,
       String capabilityVersion,
-      String workspacePath,
       String argumentsJson) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
@@ -2346,8 +2207,6 @@ class DaemonRuntimeTest {
             + capabilityId.value()
             + "\",\"capabilityVersion\":\""
             + capabilityVersion
-            + "\",\"workspacePath\":\""
-            + workspacePath
             + "\",\"arguments\":"
             + argumentsJson
             + ",\"timeoutMillis\":10000}");

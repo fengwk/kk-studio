@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -109,10 +109,8 @@ final class HarnessRuntimeTestSupport {
   static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-  static final EnvironmentBinding ENV =
-      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
-  static final EnvironmentBinding ENV2 =
-      EnvironmentBindings.binding("22222222-2222-2222-2222-222222222222");
+  static final EnvironmentId ENV = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+  static final EnvironmentId ENV2 = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
 
   private HarnessRuntimeTestSupport() {}
 
@@ -978,10 +976,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   static BranchSettings settings() {
-    return new BranchSettings(
-        ENV == null ? null : ENV.workspacePath(),
-        "agent",
-        new ModelSelection("provider", "model", "v1"));
+    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
   }
 
   static ModelRequestSpec modelRequest() {

@@ -10,12 +10,8 @@ import type {
   ChatPanelLabels,
   ChatPanelTranscriptInput,
 } from '@/features/ai/runtime/ChatPanel'
-import { useEnvironmentWorkspaceMetadata } from '@/features/ai/environment/useEnvironmentWorkspaceMetadata'
 import type { ToolDialogueMessage, TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
-import type {
-  EnvironmentBindingDTO,
-  EnvironmentCardDTO,
-} from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type {
   HarnessSessionEntryDTO,
   HarnessThreadCommandDTO,
@@ -76,7 +72,7 @@ export function useBoundThreadPanelLabels(
   environments: EnvironmentCardDTO[],
   controller: {
     runtimeLabels: {
-      environment: EnvironmentBindingDTO | null
+      environment: string | null
       contextWindow: number | undefined
     }
     branchUsage: TurnUsage | null
@@ -86,28 +82,25 @@ export function useBoundThreadPanelLabels(
     () => new Map(environments.map((environment) => [environment.id, environment.ready])),
     [environments],
   )
-  const environmentBinding = controller.runtimeLabels.environment
-  const boundEnvCard = environmentBinding
-    ? environments.find((e) => e.id === environmentBinding.environmentId)
+  const environmentId = controller.runtimeLabels.environment
+  const boundEnvCard = environmentId
+    ? environments.find((e) => e.id === environmentId)
     : undefined
   const environmentReady =
     boundEnvCard != null
       ? boundEnvCard.ready
-      : environmentBinding != null
-        ? (environmentReadyById.get(environmentBinding.environmentId) ?? false)
+      : environmentId != null
+        ? (environmentReadyById.get(environmentId) ?? false)
         : undefined
-  const environment = environmentBinding
+  const environment = environmentId
     ? {
-        environmentId: environmentBinding.environmentId,
-        environmentName: boundEnvCard?.name ?? environmentBinding.environmentId,
-        workspacePath: environmentBinding.workspacePath,
+        environmentId,
+        environmentName: boundEnvCard?.name ?? environmentId,
       }
     : null
-  const { gitBranch } = useEnvironmentWorkspaceMetadata(environmentBinding, environmentReady)
   return {
     environment,
     environmentReady,
-    gitBranch,
     branchUsage: controller.branchUsage,
     contextWindow: controller.runtimeLabels.contextWindow,
   }

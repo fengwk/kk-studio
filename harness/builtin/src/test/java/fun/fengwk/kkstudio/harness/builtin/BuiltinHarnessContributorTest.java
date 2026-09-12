@@ -272,13 +272,20 @@ class BuiltinHarnessContributorTest {
 
     ToolDescriptor descriptor = tool.definition().descriptor();
     assertEquals(toolName, descriptor.name());
-    assertEquals("1", descriptor.version());
+    // environment tool 的 model contract 版本跟随 capability descriptor 版本（workdir 能力为 "2"）。
+    EnvironmentCapabilityDescriptor capability = EnvironmentCapabilityCatalog.require(capabilityId);
+    assertEquals(capability.version(), descriptor.version());
     assertEquals(toolName, descriptor.rendererKey());
     assertEquals(sideEffect, descriptor.sideEffect());
     assertEquals(timeout, descriptor.timeout());
     assertFalse(descriptor.description().isBlank());
+    if (EnvironmentCapabilityCatalog.requiresWorkdir(capabilityId)) {
+      // 模型提示词必须与 schema 的必填绝对 workdir 契约一致，避免生成必然被服务端拒绝的相对或缺省目录调用。
+      assertTrue(descriptor.description().contains("Every call must include `workdir`"));
+      assertTrue(descriptor.description().contains("expanded absolute directory"));
+      assertFalse(descriptor.description().contains("workdir` defaults"));
+    }
 
-    EnvironmentCapabilityDescriptor capability = EnvironmentCapabilityCatalog.require(capabilityId);
     assertEquals(capability.inputSchema(), descriptor.inputSchema());
     assertEquals(capability.timeout(), descriptor.timeout());
     assertEquals(capability, envCapabilityTool.capability());

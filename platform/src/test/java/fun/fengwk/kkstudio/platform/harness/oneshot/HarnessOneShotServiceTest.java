@@ -77,10 +77,8 @@ class HarnessOneShotServiceTest {
     return new UUID(0L, value);
   }
 
-  private static final String WORKSPACE_PATH = ".";
   private static final BranchSettings SETTINGS =
-      new BranchSettings(
-          WORKSPACE_PATH, "h3-agent", new ModelSelection("provider", "model", "default"));
+      new BranchSettings("h3-agent", new ModelSelection("provider", "model", "default"));
 
   private HarnessRuntime runtime;
   private AgentBranchSettingsMaterializer materializer;
@@ -94,7 +92,7 @@ class HarnessOneShotServiceTest {
     materializer = mock(AgentBranchSettingsMaterializer.class);
     ObjectProvider<HarnessRuntime> runtimes = mock(ObjectProvider.class);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
-    when(materializer.materialize(any(), any())).thenReturn(SETTINGS);
+    when(materializer.materialize(any())).thenReturn(SETTINGS);
     changeSource = new TestThreadChangeSource();
     service = new HarnessOneShotService(runtimes, materializer, changeSource);
   }
@@ -105,7 +103,6 @@ class HarnessOneShotServiceTest {
     UUID threadId =
         service.submit(
             "h3-agent",
-            WORKSPACE_PATH,
             "system",
             new AgentMessage(
                 AgentMessageRole.USER,
@@ -133,7 +130,6 @@ class HarnessOneShotServiceTest {
     UUID threadId =
         service.submit(
             "h3-agent",
-            WORKSPACE_PATH,
             "system",
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("user"))),
             preflight);
@@ -331,7 +327,6 @@ class HarnessOneShotServiceTest {
         () ->
             service.submit(
                 "h3-agent",
-                WORKSPACE_PATH,
                 "system",
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("wrong role")))));

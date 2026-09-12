@@ -13,7 +13,11 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -23,24 +27,24 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
  * 由当前 Thread Agent 选中、用于加载完整 SKILL.md 正文的 internal Tool。
  *
- * <p>仅解析已选中的 skill；source Environment 来自 invocation 持久化的 binding（binding-first）。 不暴露本地路径。
+ * <p>校验冻结的已选 skill 与其 source Environment 后，直接经 {@link BoundEnvironment#execute} 调用 {@code
+ * skill.load} 能力；不存在 skill body 专用的加载器链。 {@code skill.load} 不要求 workdir：skill 按身份/来源定位，不依赖会话 cwd。
  */
 public final class LoadSkillTool implements Tool {
+
   public static final String NAME = "load_skill";
   public static final String VERSION = "1";
   public static final AgentToolId AGENT_TOOL_ID = BuiltinToolIds.LOAD_SKILL;
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final EnvironmentCapabilityDescriptor CAPABILITY =
+      EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_LOAD);
   private static final ToolDescriptor DESCRIPTOR =
       new ToolDescriptor(
           NAME,
@@ -51,24 +55,27 @@ public final class LoadSkillTool implements Tool {
           ToolSideEffect.READ_ONLY,
           Duration.ofMinutes(1));
 
+  /** skill.load capability 的执行请求描述符：与 catalog 的能力 descriptor 匹配，仅用于经 BoundEnvironment 执行。 */
+  private static final ToolDescriptor SKILL_LOAD_TOOL_DESCRIPTOR =
+      new ToolDescriptor(
+          NAME,
+          VERSION,
+          SkillToolPrompts.load("load_skill.md"),
+          NAME,
+          CAPABILITY.inputSchema(),
+          ToolSideEffect.READ_ONLY,
+          CAPABILITY.timeout());
+
   private final ThreadSelectedSkillLookup skillLookup;
-  private final SkillBodyLoader skillBodyLoader;
   private final Supplier<Duration> loadTimeout;
 
   /** 无默认超时：加载超时必须由生产装配从 SystemSettings 快照显式传入（test 基座同样显式传 fixture 值）。 */
-  public LoadSkillTool(
-      ThreadSelectedSkillLookup skillLookup,
-      SkillBodyLoader skillBodyLoader,
-      Duration loadTimeout) {
-    this(skillLookup, skillBodyLoader, constantTimeout(loadTimeout));
+  public LoadSkillTool(ThreadSelectedSkillLookup skillLookup, Duration loadTimeout) {
+    this(skillLookup, constantTimeout(loadTimeout));
   }
 
-  public LoadSkillTool(
-      ThreadSelectedSkillLookup skillLookup,
-      SkillBodyLoader skillBodyLoader,
-      Supplier<Duration> loadTimeout) {
+  public LoadSkillTool(ThreadSelectedSkillLookup skillLookup, Supplier<Duration> loadTimeout) {
     this.skillLookup = Objects.requireNonNull(skillLookup, "skillLookup");
-    this.skillBodyLoader = Objects.requireNonNull(skillBodyLoader, "skillBodyLoader");
     this.loadTimeout = Objects.requireNonNull(loadTimeout, "loadTimeout");
   }
 
@@ -87,7 +94,6 @@ public final class LoadSkillTool implements Tool {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(listener, "listener");
     String callId = request.call().id();
-    Handle handle = new Handle(listener, callId);
     try {
       ToolExecutionContext context = request.context();
       if (context == null) {
@@ -97,57 +103,47 @@ public final class LoadSkillTool implements Tool {
       if (environment.isEmpty()) {
         throw new IllegalArgumentException("No environment bound in execution context");
       }
-      BoundEnvironment boundEnv = environment.get();
+      BoundEnvironment boundEnvironment = environment.get();
       String skillName = parseName(request.call().argumentsJson());
       Optional<SelectedSkill> selected =
           skillLookup.findSelected(context.invocationId(), context.threadId(), skillName);
       if (selected.isEmpty()) {
-        complete(handle, error(callId, "unknown or unselected skill: " + skillName));
-        return handle;
+        return complete(listener, error(callId, "unknown or unselected skill: " + skillName));
       }
       SelectedSkill skill = selected.get();
-      if (skill.sourceEnvironment() == null) {
-        complete(handle, error(callId, "skill has no Environment body: " + skill.name()));
-        return handle;
+      if (skill.sourceEnvironmentId() == null) {
+        return complete(listener, error(callId, "skill has no Environment body: " + skill.name()));
       }
-      if (!Objects.equals(skill.sourceEnvironment(), boundEnv.binding())) {
-        complete(
-            handle,
+      if (!Objects.equals(skill.sourceEnvironmentId(), boundEnvironment.environmentId())) {
+        return complete(
+            listener,
             error(
                 callId,
                 "skill source environment mismatch: expected "
-                    + skill.sourceEnvironment().environmentId()
+                    + skill.sourceEnvironmentId()
                     + " but got "
-                    + boundEnv.binding().environmentId()));
-        return handle;
+                    + boundEnvironment.environmentId()));
       }
-      CompletableFuture<SkillBodyLoader.SkillBodyLoadResult> future =
-          skillBodyLoader.load(skill.sourceEnvironment(), skill.name(), loadTimeout());
-      handle.future.set(future);
-      future.whenComplete(
-          (result, error) -> {
-            if (handle.cancelled.get() || handle.completed.get()) {
-              return;
-            }
-            if (error != null) {
-              complete(handle, error(callId, failureMessage(skill.name(), error)));
-              return;
-            }
-            if (result instanceof SkillBodyLoader.SkillBodyLoadResult.Loaded loaded) {
-              complete(
-                  handle,
-                  new ToolResult(
-                      callId, List.of(new TextResultContent(loaded.content())), false, "{}"));
-            } else if (result instanceof SkillBodyLoader.SkillBodyLoadResult.Failed failed) {
-              complete(handle, error(callId, failed.message()));
-            } else {
-              complete(handle, error(callId, skill.name() + " load returned an empty result"));
-            }
-          });
+      return boundEnvironment.execute(
+          CAPABILITY, skillLoadRequest(request, skill.name(), loadTimeout()), listener);
     } catch (RuntimeException error) {
-      complete(handle, error(callId, message(error)));
+      return complete(listener, error(callId, message(error)));
     }
-    return handle;
+  }
+
+  /** skill.load 的 arguments 只有 skill 名称：不注入 workdir 或任何目录状态。 */
+  private static ToolExecutionRequest skillLoadRequest(
+      ToolExecutionRequest request, String skillName, Duration timeout) {
+    String argumentsJson = "{\"name\":\"" + escapeJson(skillName) + "\"}";
+    return new ToolExecutionRequest(
+        SKILL_LOAD_TOOL_DESCRIPTOR,
+        new ToolCall(request.call().id(), NAME, argumentsJson),
+        timeout,
+        request.context());
+  }
+
+  private static String escapeJson(String value) {
+    return value.replace("\\", "\\\\").replace("\"", "\\\"");
   }
 
   private static String parseName(String argumentsJson) {
@@ -177,28 +173,14 @@ public final class LoadSkillTool implements Tool {
     }
   }
 
-  private static void complete(Handle handle, ToolResult result) {
-    if (handle.completed.compareAndSet(false, true)) {
-      handle.listener.onComplete(result);
-    }
+  private static ToolExecutionHandle complete(ToolExecutionListener listener, ToolResult result) {
+    listener.onComplete(result);
+    return new CompletedHandle();
   }
 
   private static ToolResult error(String callId, String message) {
     String detail = message == null || message.isBlank() ? "tool execution failed" : message;
     return new ToolResult(callId, List.of(new TextResultContent(detail)), true, "{}");
-  }
-
-  private static String failureMessage(String skillName, Throwable error) {
-    Throwable cause =
-        error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
-    if (cause instanceof CancellationException) {
-      return skillName + " load was cancelled";
-    }
-    String detail = cause.getMessage();
-    if (detail == null || detail.isBlank()) {
-      return skillName + " is offline; " + skillName + " is unavailable";
-    }
-    return detail;
   }
 
   private Duration loadTimeout() {
@@ -222,29 +204,13 @@ public final class LoadSkillTool implements Tool {
     return detail == null || detail.isBlank() ? error.getClass().getSimpleName() : detail;
   }
 
-  private static final class Handle implements ToolExecutionHandle {
-    private final ToolExecutionListener listener;
-    private final String callId;
+  /** 同步失败/拒绝时已通知 listener 的空 handle；取消是无意义操作。 */
+  private static final class CompletedHandle implements ToolExecutionHandle {
     private final AtomicBoolean cancelled = new AtomicBoolean();
-    private final AtomicBoolean completed = new AtomicBoolean();
-    private final AtomicReference<CompletableFuture<?>> future = new AtomicReference<>();
-
-    private Handle(ToolExecutionListener listener, String callId) {
-      this.listener = listener;
-      this.callId = callId;
-    }
 
     @Override
     public void cancel() {
-      if (cancelled.compareAndSet(false, true)) {
-        CompletableFuture<?> pending = future.get();
-        if (pending != null) {
-          pending.cancel(true);
-        }
-        if (completed.compareAndSet(false, true)) {
-          listener.onComplete(error(callId, "Operation cancelled"));
-        }
-      }
+      cancelled.set(true);
     }
 
     @Override

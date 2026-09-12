@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -47,10 +46,7 @@ class CompactionFileSectionsTest {
 
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
   private static final BranchSettings SETTINGS =
-      new BranchSettings(
-          EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111").workspacePath(),
-          "agent",
-          new ModelSelection("provider", "model", "v1"));
+      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
 
   @Test
   void extractsReadWriteAndEditWithModifiedWinningOverRead() {

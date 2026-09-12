@@ -52,7 +52,7 @@ test('run-agent-matrix contract: NEW_SESSION request is atomic', () => {
   assert.deepEqual(request.commands[0].contents, [{ type: 'TEXT', text: prompt }])
 })
 
-test('run-agent-matrix contract: NEW_SESSION root settings persist workspacePath only', () => {
+test('run-agent-matrix contract: NEW_SESSION root settings freeze exactly agentName and model', () => {
   const chat = fakeChat()
   const agent = fakeAgent()
   const model = fakeModel()
@@ -60,16 +60,13 @@ test('run-agent-matrix contract: NEW_SESSION root settings persist workspacePath
     chat,
     agent,
     testCase: fakeCase(model),
-    workspacePath: '.',
     prompt: 'investigate this case',
   })
-  assert.deepEqual(
-    request.rootSettings,
-    branchSettingsOf(agent, model, {
-      workspacePath: '.',
-    }),
-  )
-  assert.deepEqual(Object.keys(request.rootSettings).sort(), ['agentName', 'model', 'workspacePath'])
+  assert.deepEqual(request.rootSettings, branchSettingsOf(agent, model))
+  assert.deepEqual(Object.keys(request.rootSettings).sort(), ['agentName', 'model'])
+  // 产品 Workspace 已删除：root settings 不得再携带任何目录/环境覆盖字段。
+  assert.equal(Object.hasOwn(request.rootSettings, 'workspacePath'), false)
+  assert.equal(Object.hasOwn(request.rootSettings, 'environmentId'), false)
 })
 
 test('run-agent-matrix contract: accepted snapshot assertions enforce the canonical envelope', () => {
@@ -77,19 +74,18 @@ test('run-agent-matrix contract: accepted snapshot assertions enforce the canoni
   const model = fakeModel()
   const accepted = acceptedEnvelope(chat, model)
   assert.doesNotThrow(() =>
-    assertThreadSettings(accepted, fakeCase(model), '.', chat.agentName),
+    assertThreadSettings(accepted, fakeCase(model), chat.agentName),
   )
-  // 不匹配的 workspacePath 必须拒绝。
-  const mismatchedWorkspace = structuredClone(accepted)
-  mismatchedWorkspace.thread.branchSettings.workspacePath = 'other/path'
+  // 不匹配的 agentName 必须拒绝。
+  const mismatchedAgent = structuredClone(accepted)
+  mismatchedAgent.thread.branchSettings.agentName = 'other-agent'
   assert.throws(
     () => assertThreadSettings(
-      mismatchedWorkspace,
+      mismatchedAgent,
       fakeCase(model),
-      '.',
       chat.agentName,
     ),
-    /Thread workspacePath mismatch/,
+    /Thread Agent mismatch/,
   )
   // 携带未预期字段时，branch settings shape 校验必须拒绝。
   const unexpectedShape = structuredClone(accepted)
@@ -98,7 +94,6 @@ test('run-agent-matrix contract: accepted snapshot assertions enforce the canoni
     () => assertThreadSettings(
       unexpectedShape,
       fakeCase(model),
-      '.',
       chat.agentName,
     ),
     /Thread branch settings shape mismatch/,
@@ -107,7 +102,7 @@ test('run-agent-matrix contract: accepted snapshot assertions enforce the canoni
   const nonAtomic = structuredClone(accepted)
   nonAtomic.acceptedCommands = []
   assert.throws(
-    () => assertThreadSettings(nonAtomic, fakeCase(model), '.', chat.agentName),
+    () => assertThreadSettings(nonAtomic, fakeCase(model), chat.agentName),
     /Thread identity mismatch/,
   )
 })
@@ -149,9 +144,7 @@ function acceptedEnvelope(chat, model) {
       nextCommandSequence: '2',
       version: '1',
       yoloEnabled: true,
-      branchSettings: branchSettingsOf(fakeAgent(), model, {
-        workspacePath: '.',
-      }),
+      branchSettings: branchSettingsOf(fakeAgent(), model),
       status: 'PROCESSING',
       processing: true,
     },

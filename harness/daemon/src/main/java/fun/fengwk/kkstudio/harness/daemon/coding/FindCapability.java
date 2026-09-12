@@ -30,7 +30,7 @@ public final class FindCapability extends AbstractCodingCapability {
   EnvironmentCapabilityResult run(
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    Path workdir = EnvironmentPaths.workdir(optionalString(args, "workdir"), request.workdir());
+    Path workdir = EnvironmentPaths.workdir(string(args, "workdir"));
     Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
     int limit = optionalPositiveInt(args, "limit", 1000, 100_000);
     Duration timeout = effectiveSearchTimeout(request.effectiveTimeout(), args);
@@ -41,7 +41,7 @@ public final class FindCapability extends AbstractCodingCapability {
     GlobPattern pattern = GlobPattern.compile(sourcePattern);
     control.check();
     List<String> completeLines = new ArrayList<>();
-    for (Path file : SearchFiles.collect(config.environmentRoot(), path, control)) {
+    for (Path file : SearchFiles.collect(workdir, path, control)) {
       control.check();
       String searchRelative = SearchFiles.toPosix(path.relativize(file));
       String basename = file.getFileName().toString();

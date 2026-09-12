@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentWorkspacePath;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
@@ -29,8 +28,7 @@ final class HistoryValueCodecs {
 
   static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final Set<String> BRANCH_SETTINGS_FIELDS =
-      orderedSet("workspacePath", "agentName", "model");
+  private static final Set<String> BRANCH_SETTINGS_FIELDS = orderedSet("agentName", "model");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
@@ -66,11 +64,6 @@ final class HistoryValueCodecs {
 
   static ObjectNode encodeBranchSettings(BranchSettings settings) {
     ObjectNode node = NODES.objectNode();
-    if (settings.workspacePath() == null) {
-      node.putNull("workspacePath");
-    } else {
-      node.put("workspacePath", settings.workspacePath());
-    }
     node.put("agentName", settings.agentName());
     node.set("model", encodeModelSelection(settings.model()));
     return node;
@@ -80,21 +73,8 @@ final class HistoryValueCodecs {
     ObjectNode node = requireObject(value, context);
     requireExactFields(node, BRANCH_SETTINGS_FIELDS, context);
     return new BranchSettings(
-        nullableWorkspacePath(node, "workspacePath", context),
         requiredText(node, "agentName", context),
         decodeModelSelection(node.get("model"), context + ".model"));
-  }
-
-  /** 读取可空 canonical workspace path。 */
-  static String nullableWorkspacePath(ObjectNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (value.isNull()) {
-      return null;
-    }
-    if (!value.isTextual() || value.textValue().isBlank()) {
-      throw new IllegalArgumentException(context + "." + field + " must be a non-blank string");
-    }
-    return EnvironmentWorkspacePath.requireCanonicalRelativePath(value.textValue());
   }
 
   // ---------- ModelSelection ----------

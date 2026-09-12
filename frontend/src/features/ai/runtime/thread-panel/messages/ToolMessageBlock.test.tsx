@@ -263,7 +263,7 @@ describe('ToolMessageBlock', () => {
           phase: 'call',
           arguments: JSON.stringify({
             path: '/app/quicksort.py',
-            workdir: 'workspace',
+            workdir: '/srv/project',
             offset: 2,
             limit: 20,
           }),
@@ -279,7 +279,7 @@ describe('ToolMessageBlock', () => {
     const toggle = screen.getByRole('button', { name: '展开工具预览' })
     expect(header).toHaveAttribute(
       'title',
-      'read /app/quicksort.py in workspace [offset=2 limit=20]',
+      'read /app/quicksort.py in /srv/project [offset=2 limit=20]',
     )
     expect(header.tagName).toBe('DIV')
     expect(header).toHaveClass('has-toggle')

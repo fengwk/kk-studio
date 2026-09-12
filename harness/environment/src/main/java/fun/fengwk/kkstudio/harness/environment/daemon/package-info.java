@@ -11,15 +11,16 @@
  *
  * <p>Capability INVOKE payload 由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityInvokeCodec} 编解码，字段固定为 {@code
- * capabilityId}、{@code capabilityVersion}、{@code workspacePath}、{@code arguments} 和 {@code
- * timeoutMillis}；Environment Daemon 使用 {@link
- * fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol#VERSION} (v1)。
+ * capabilityId}、{@code capabilityVersion}、{@code arguments} 和 {@code timeoutMillis}；Environment
+ * Daemon 使用 {@link fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol#VERSION} (v2)。
  *
  * <p>result payload（{@code PARTIAL} / {@code COMPLETED}）由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec} 编解码，通过通用 {@code
- * INVOKE} 模型承载所有能力（包括 Skill 与目录列表）， 目录浏览结果与 Resource 引用分别由 {@link
- * fun.fengwk.kkstudio.harness.environment.daemon.EnvironmentDirectoryListing} 与 {@link
+ * INVOKE} 模型承载所有能力（包括 Skill），Resource 引用由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef} 建模。
+ *
+ * <p>需要 workdir 的能力由具体 arguments 携带目标 OS 上的绝对目录；{@link
+ * fun.fengwk.kkstudio.harness.environment.daemon.DaemonWorkdirSyntax} 提供发送前的纯词法形状校验。
  *
  * <p>本包仅负责协议报文与值对象的严格 wire 校验与编解码，不维护连接状态、connection generation、route lease 或 journal 事实。
  */

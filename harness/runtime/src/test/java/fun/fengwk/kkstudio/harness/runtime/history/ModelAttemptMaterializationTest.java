@@ -8,8 +8,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
@@ -73,13 +72,10 @@ class ModelAttemptMaterializationTest {
   private static final Instant T3 = T0.plusSeconds(3);
   private static final Instant T4 = T0.plusSeconds(4);
   private static final Instant T6 = T0.plusSeconds(6);
-  private static final EnvironmentBinding ENVIRONMENT =
-      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
+  private static final EnvironmentId ENVIRONMENT =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final BranchSettings SETTINGS =
-      new BranchSettings(
-          ENVIRONMENT == null ? null : ENVIRONMENT.workspacePath(),
-          "agent",
-          new ModelSelection("provider", "model", "v1"));
+      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
 
   @Test
   void acceptsExactFailedAttemptAndTerminalPartial() {

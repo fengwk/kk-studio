@@ -77,7 +77,11 @@ class NativeSearchCapabilitiesTest {
     write(".git/config", "needle\n");
 
     EnvironmentCapabilityResult found =
-        invoke(find(config()), "{\"pattern\":\"*\",\"path\":\".\"}");
+        invoke(
+            find(config()),
+            "{\"pattern\":\"*\",\"path\":\".\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     String findText = text(found);
     List<String> findLines = List.of(findText.split("\n"));
     assertTrue(findText.contains(".hidden.txt"));
@@ -98,7 +102,11 @@ class NativeSearchCapabilitiesTest {
     assertFalse(findText.contains(".git/config"));
 
     EnvironmentCapabilityResult grepped =
-        invoke(grep(config()), "{\"pattern\":\"needle\",\"path\":\".\"}");
+        invoke(
+            grep(config()),
+            "{\"pattern\":\"needle\",\"path\":\".\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     String grepText = text(grepped);
     assertTrue(grepText.contains(".hidden.txt:1:needle"));
     assertTrue(grepText.contains("logs/deep/keep.log:1:needle"));
@@ -116,13 +124,21 @@ class NativeSearchCapabilitiesTest {
     write("foo/keep.txt", "visible\n");
 
     EnvironmentCapabilityResult negatedDirectory =
-        invoke(find(config()), "{\"pattern\":\"*\",\"path\":\".\"}");
+        invoke(
+            find(config()),
+            "{\"pattern\":\"*\",\"path\":\".\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertTrue(text(negatedDirectory).contains("foo/keep.txt"));
     assertFalse(text(negatedDirectory).contains("foo/bar.log"));
 
     Files.writeString(environmentRoot.resolve(".gitignore"), "foo\n");
     EnvironmentCapabilityResult ignoredDirectory =
-        invoke(find(config()), "{\"pattern\":\"*\",\"path\":\".\"}");
+        invoke(
+            find(config()),
+            "{\"pattern\":\"*\",\"path\":\".\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertFalse(text(ignoredDirectory).contains("foo/keep.txt"));
     assertFalse(text(ignoredDirectory).contains("foo/bar.log"));
   }
@@ -141,33 +157,63 @@ class NativeSearchCapabilitiesTest {
         environmentRoot.resolve("search-link"), environmentRoot.resolve("search"));
 
     EnvironmentCapabilityResult basenames =
-        invoke(find(config()), "{\"pattern\":\"*.ts\",\"path\":\"search\"}");
+        invoke(
+            find(config()),
+            "{\"pattern\":\"*.ts\",\"path\":\"search\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertEquals(
         "search/.hidden.ts\nsearch/a.ts\nsearch/nested/b.ts\nsearch/z.ts", text(basenames));
     assertFalse(text(basenames).contains("link.ts"));
 
     EnvironmentCapabilityResult fullPath =
-        invoke(find(config()), "{\"pattern\":\"nested/*.ts\",\"path\":\"search\"}");
+        invoke(
+            find(config()),
+            "{\"pattern\":\"nested/*.ts\",\"path\":\"search\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertEquals("search/nested/b.ts", text(fullPath));
 
     EnvironmentCapabilityResult doubleStar =
-        invoke(find(config()), "{\"pattern\":\"**/*.ts\",\"path\":\"search\"}");
+        invoke(
+            find(config()),
+            "{\"pattern\":\"**/*.ts\",\"path\":\"search\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertEquals(
         "search/.hidden.ts\nsearch/a.ts\nsearch/nested/b.ts\nsearch/z.ts", text(doubleStar));
 
     EnvironmentCapabilityResult characterClass =
-        invoke(find(config()), "{\"pattern\":\"[ab].ts\",\"path\":\"search\"}");
+        invoke(
+            find(config()),
+            "{\"pattern\":\"[ab].ts\",\"path\":\"search\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertEquals("search/a.ts\nsearch/nested/b.ts", text(characterClass));
     assertTrue(
-        text(invoke(find(config()), "{\"pattern\":\"*\",\"path\":\"search/a.ts\"}"))
+        text(invoke(
+                find(config()),
+                "{\"pattern\":\"*\",\"path\":\"search/a.ts\",\"workdir\":"
+                    + json(environmentRoot.toString())
+                    + "}"))
             .contains("path must be a directory"));
     // 参数路径上的符号链接不再被拒绝：解析为真实路径后照常检索，遍历仍不跟随内部符号链接。
     assertEquals(
         "search/.hidden.ts\nsearch/a.ts\nsearch/nested/b.ts\nsearch/z.ts",
-        text(invoke(find(config()), "{\"pattern\":\"*.ts\",\"path\":\"search-link\"}")));
+        text(
+            invoke(
+                find(config()),
+                "{\"pattern\":\"*.ts\",\"path\":\"search-link\",\"workdir\":"
+                    + json(environmentRoot.toString())
+                    + "}")));
     assertEquals(
         "search/a.ts:1:a",
-        text(invoke(grep(config()), "{\"pattern\":\"a\",\"path\":\"search/link.ts\"}")));
+        text(
+            invoke(
+                grep(config()),
+                "{\"pattern\":\"a\",\"path\":\"search/link.ts\",\"workdir\":"
+                    + json(environmentRoot.toString())
+                    + "}")));
   }
 
   /** grep 的 literal/regex/ignore-case/include 组合必须保持逐行去重。 */
@@ -181,17 +227,25 @@ class NativeSearchCapabilitiesTest {
         invoke(
             grep(config()),
             "{\"pattern\":\"alpha.foo\",\"path\":\".\",\"literal\":true,"
-                + "\"ignore_case\":true,\"include\":\"**/*.txt\"}");
+                + "\"ignore_case\":true,\"include\":\"**/*.txt\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertEquals("a.txt:2:alpha.foo alpha.foo\nnested/c.txt:1:ALPHA.FOO", text(literal));
 
     EnvironmentCapabilityResult regex =
-        invoke(grep(config()), "{\"pattern\":\"^Alpha\\\\s+foo$\",\"path\":\"a.txt\"}");
+        invoke(
+            grep(config()),
+            "{\"pattern\":\"^Alpha\\\\s+foo$\",\"path\":\"a.txt\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertEquals("a.txt:1:Alpha foo", text(regex));
 
     EnvironmentCapabilityResult once =
         invoke(
             grep(config()),
-            "{\"pattern\":\"alpha\\\\.foo\",\"path\":\"a.txt\",\"ignore_case\":true}");
+            "{\"pattern\":\"alpha\\\\.foo\",\"path\":\"a.txt\",\"ignore_case\":true,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertEquals("a.txt:2:alpha.foo alpha.foo", text(once));
   }
 
@@ -204,7 +258,9 @@ class NativeSearchCapabilitiesTest {
         invoke(
             grep(config()),
             "{\"pattern\":\"alpha\\nbeta|gamma\\ndelta\",\"path\":\"multi.txt\","
-                + "\"multiline\":true}");
+                + "\"multiline\":true,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
 
     assertEquals("multi.txt:2:alpha\nmulti.txt:3:beta gamma\nmulti.txt:4:delta", text(result));
   }
@@ -217,17 +273,29 @@ class NativeSearchCapabilitiesTest {
     Files.write(environmentRoot.resolve("binary.bin"), new byte[] {'n', 0, 'e'});
 
     EnvironmentCapabilityResult direct =
-        invoke(grep(config()), "{\"pattern\":\"needle\",\"path\":\"binary.bin\"}");
+        invoke(
+            grep(config()),
+            "{\"pattern\":\"needle\",\"path\":\"binary.bin\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertTrue(direct.error());
     assertTrue(text(direct).contains("file appears to be binary"));
 
     EnvironmentCapabilityResult directory =
-        invoke(grep(config()), "{\"pattern\":\"needle\",\"path\":\".\"}");
+        invoke(
+            grep(config()),
+            "{\"pattern\":\"needle\",\"path\":\".\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertFalse(directory.error());
     assertEquals("text.txt:1:needle", text(directory));
 
     EnvironmentCapabilityResult invalid =
-        invoke(grep(config()), "{\"pattern\":\"[\",\"path\":\".\"}");
+        invoke(
+            grep(config()),
+            "{\"pattern\":\"[\",\"path\":\".\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertTrue(invalid.error());
     assertTrue(text(invalid).contains("Invalid regex"));
   }
@@ -274,7 +342,11 @@ class NativeSearchCapabilitiesTest {
     GrepCapability grep = grep(config(2000, 50 * 1024, store));
 
     EnvironmentCapabilityResult grepResult =
-        invoke(grep, "{\"pattern\":\".+\",\"path\":\".\",\"include\":\"*.txt\",\"limit\":1}");
+        invoke(
+            grep,
+            "{\"pattern\":\".+\",\"path\":\".\",\"include\":\"*.txt\",\"limit\":1,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertTrue(text(grepResult).contains("line truncated to 500 chars"));
     assertTrue(text(grepResult).contains("1 results limit reached"));
     ResourceResultContent grepResource = resource(grepResult);
@@ -286,14 +358,20 @@ class NativeSearchCapabilitiesTest {
     EnvironmentCapabilityResult findResult =
         invoke(
             find(config(2000, 50 * 1024, store)),
-            "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":1}");
+            "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":1,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertTrue(text(findResult).contains("1 results limit reached"));
     String completeFind =
         new String(store.get(resource(findResult).resource().sha256()), StandardCharsets.UTF_8);
     assertEquals("a.txt\nb.txt\nc.txt", completeFind);
 
     EnvironmentCapabilityResult previewLimitedGrep =
-        invoke(grep(config(1, 20, store)), "{\"pattern\":\"needle\",\"path\":\".\",\"limit\":10}");
+        invoke(
+            grep(config(1, 20, store)),
+            "{\"pattern\":\"needle\",\"path\":\".\",\"limit\":10,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertTrue(text(previewLimitedGrep).contains("configured preview limits"));
     assertEquals(
         "b.txt:1:needle\nc.txt:1:needle",
@@ -301,7 +379,11 @@ class NativeSearchCapabilitiesTest {
             store.get(resource(previewLimitedGrep).resource().sha256()), StandardCharsets.UTF_8));
 
     EnvironmentCapabilityResult previewLimitedFind =
-        invoke(find(config(1, 5, store)), "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":10}");
+        invoke(
+            find(config(1, 5, store)),
+            "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":10,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertTrue(text(previewLimitedFind).contains("Output truncated"));
     assertEquals(
         "a.txt\nb.txt\nc.txt",
@@ -346,6 +428,11 @@ class NativeSearchCapabilitiesTest {
     Files.writeString(path, content);
   }
 
+  /** 以 JSON 字符串字面量表示任意本地路径，避免手工拼接转义。 */
+  private static String json(String value) throws Exception {
+    return AbstractCodingCapability.OBJECT_MAPPER.writeValueAsString(value);
+  }
+
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String arguments)
       throws Exception {
     RecordingListener listener = new RecordingListener();
@@ -353,8 +440,7 @@ class NativeSearchCapabilitiesTest {
         new EnvironmentCapabilityExecutionRequest(
             capability.descriptor(),
             new EnvironmentCapabilityCall("native-search", arguments),
-            Duration.ZERO,
-            environmentRoot),
+            Duration.ZERO),
         listener);
     assertTrue(listener.completed.await(5, TimeUnit.SECONDS));
     return listener.result;

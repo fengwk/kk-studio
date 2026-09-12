@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -112,40 +111,26 @@ class HarnessRuntimeRequestMapperTest {
   }
 
   @Test
-  void mapsFixedSetPrefixEnvironmentAndRawRequestHash() {
-    // 只允许稳定 SET_* 前缀，workspace path 与 USER_MESSAGE raw hash 必须保持精确。
+  void mapsFixedSetPrefixAndRawRequestHash() {
+    // 只允许稳定 SET_AGENT -> SET_MODEL 前缀，USER_MESSAGE raw hash 必须保持精确。
     HarnessCommandBatchDTO request = request(threadTarget(), userCommand("user"));
-    HarnessCommandCreateDTO workspace = command("SET_ENVIRONMENT", "workspace");
-    workspace.setWorkspacePath("workspace");
     HarnessCommandCreateDTO agent = command("SET_AGENT", "agent");
     agent.setAgentName("default-assistant");
     HarnessCommandCreateDTO model = command("SET_MODEL", "model");
     model.setModel(modelSelection());
-    request.setCommands(List.of(workspace, agent, model, userCommand("user")));
+    request.setCommands(List.of(agent, model, userCommand("user")));
 
     AcceptCommandsCommand mapped = HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
 
     assertEquals(
         List.of(
-            ThreadCommandType.SET_ENVIRONMENT,
             ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_MODEL,
             ThreadCommandType.USER_MESSAGE),
         mapped.commands().stream().map(command -> command.payload().type()).toList());
-    SetEnvironmentCommandPayload workspacePayload =
-        assertInstanceOf(
-            SetEnvironmentCommandPayload.class, mapped.commands().getFirst().payload());
-    assertEquals("workspace", workspacePayload.workspacePath());
     assertEquals(
         ThreadCommandPayloadJsonCodec.requestHash(mapped.commands().getLast().payload()),
         mapped.commands().getLast().requestHash());
-
-    workspace.setWorkspacePath(null);
-    mapped = HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
-    workspacePayload =
-        assertInstanceOf(
-            SetEnvironmentCommandPayload.class, mapped.commands().getFirst().payload());
-    assertNull(workspacePayload.workspacePath());
   }
 
   @Test
@@ -323,11 +308,18 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void rejectsUnsupportedCommandTypes() {
-    // 产品 HTTP surface 既不开放 CUSTOM_MESSAGE，也不接受未知 discriminator。
+    // 产品 HTTP surface 不开放 CUSTOM_MESSAGE/SET_ENVIRONMENT，也不接受未知 discriminator。
     HarnessCommandCreateDTO custom = command("CUSTOM_MESSAGE", "custom");
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), custom)));
+
+    HarnessCommandCreateDTO legacyEnvironment = command("SET_ENVIRONMENT", "legacy-environment");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+                request(threadTarget(), legacyEnvironment, userCommand("tail"))));
 
     HarnessCommandCreateDTO unknown = command("UNKNOWN", "unknown");
     assertThrows(
@@ -380,7 +372,7 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void rejectsCrossCommandFieldsAndMissingPayloads() {
-    // 每个 command variant 只能携带自己的字段，显式 null 仅对 SET_ENVIRONMENT 表示清除。
+    // 每个 command variant 只能携带自己的字段；已删除的 SET_ENVIRONMENT discriminator 必须拒绝。
     HarnessCommandCreateDTO user = userCommand("user-with-agent");
     user.setAgentName("forbidden");
     assertCommandRejected(user);
@@ -394,11 +386,6 @@ class HarnessRuntimeRequestMapperTest {
     model.setModel(modelSelection());
     model.setAgentName("forbidden");
     assertCommandRejected(model);
-
-    HarnessCommandCreateDTO workspace = command("SET_ENVIRONMENT", "workspace-with-contents");
-    workspace.setWorkspacePath(null);
-    workspace.setContents(List.of());
-    assertCommandRejected(workspace);
 
     assertCommandRejected(command("SET_ENVIRONMENT", "missing-workspace"));
     assertCommandRejected(command("USER_MESSAGE", "missing-contents"));
@@ -558,7 +545,6 @@ class HarnessRuntimeRequestMapperTest {
 
   private static HarnessBranchSettingsDTO branchSettings() {
     HarnessBranchSettingsDTO settings = new HarnessBranchSettingsDTO();
-    settings.setWorkspacePath(null);
     settings.setAgentName("default-assistant");
     settings.setModel(modelSelection());
     return settings;

@@ -83,11 +83,11 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         token_b = token_b_match.group(1)
         self.assertNotEqual(token_a, token_b)
 
-    def test_ui_smoke_uses_workspace_only_ui(self):
-        """UI smoke must not require Environment option picker and must clean up temporary agent in finally."""
+    def test_ui_smoke_creates_agent_bound_environment_chat(self):
+        """UI smoke must bind Environment through the Agent only and clean up the temporary agent."""
         ui_smoke = UI_SMOKE_MJS.read_text(encoding="utf-8")
         self.assertNotIn("选择 Environment", ui_smoke)
-        self.assertIn("ui.chat.create_environment_workspace", ui_smoke)
+        self.assertIn("ui.chat.create_agent_bound_environment", ui_smoke)
         self.assertIn("tempAgentName", ui_smoke)
         self.assertIn("environmentId: card.id", ui_smoke)
         self.assertIn("model: REAL_UI_MODEL_ID", ui_smoke)
@@ -95,12 +95,15 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         self.assertIn("agentCreateRes.status === 201", ui_smoke)
         self.assertNotIn("agentCreateRes.status === 200", ui_smoke)
         self.assertIn("apiDeleteByName(args.backendUrl, 'agents', tempAgentName)", ui_smoke)
+        # Workspace 路径选择器已随 W2-A 删除：UI smoke 只能断言它不存在。
         self.assertIn('button[aria-label="工作区路径"]', ui_smoke)
+        self.assertIn("Create Chat still rendered a workspace path selector", ui_smoke)
 
     def test_lifecycle_fixture_is_canonical(self):
-        """HarnessRuntimePostgresqlLifecycleIntegrationTest must use canonical workspacePath."""
+        """HarnessRuntimePostgresqlLifecycleIntegrationTest must seed canonical branch settings."""
         content = LIFECYCLE_TEST_JAVA.read_text(encoding="utf-8")
-        self.assertIn('"workspacePath": null', content)
+        self.assertNotIn('"workspacePath"', content)
+        self.assertIn('{"settings": {"agentName": "lifecycle-test"', content)
 
 
 if __name__ == "__main__":

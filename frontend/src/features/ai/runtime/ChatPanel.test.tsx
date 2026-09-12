@@ -21,7 +21,7 @@ describe('ChatPanel', () => {
     render(
       <ChatPanel
         labels={{
-          environment: { environmentId: 'env-1', environmentName: 'local', workspacePath: '.' },
+          environment: { environmentId: 'env-1', environmentName: 'local' },
           environmentReady: true,
           branchUsage: {
             input: 10,
@@ -55,7 +55,7 @@ describe('ChatPanel', () => {
       />,
     )
     expect(screen.getByText('hello')).toBeInTheDocument()
-    expect(screen.getByText('env:local · @/')).toBeInTheDocument()
+    expect(screen.getByText('env:local')).toBeInTheDocument()
     expect(screen.getByText('↑10 · ↓2 · $0.125')).toBeInTheDocument()
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()

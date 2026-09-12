@@ -28,7 +28,7 @@ import {
  * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
  * - NEW_THREAD{sessionId,startEntryId,threadId,yoloEnabled}：在既有 Session 既有 Entry 下开新 Thread
  * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：在既有 Thread 上继续
- * commands 必须是固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL 前缀 +
+ * commands 必须是固定顺序 SET_AGENT,SET_MODEL 前缀 +
  * 恰一条末尾 USER_MESSAGE；CUSTOM_MESSAGE 在产品 HTTP 面被拒绝。
  */
 
@@ -54,27 +54,6 @@ function nonNegativeDecimal(value, field) {
   return raw
 }
 
-export function isCanonicalWorkspacePath(workspacePath) {
-  if (
-    typeof workspacePath !== 'string'
-    || workspacePath.length === 0
-    || workspacePath.length > 2048
-    || workspacePath.includes('\\')
-    || workspacePath.startsWith('/')
-    || /^[A-Za-z]:/.test(workspacePath)
-    || /[\u0000-\u001f\u007f-\u009f]/.test(workspacePath)
-  ) {
-    return false
-  }
-  return workspacePath === '.'
-    || workspacePath.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
-}
-
-export function isCanonicalWorkspacePathOrNull(workspacePath) {
-  if (workspacePath === null) return true
-  return isCanonicalWorkspacePath(workspacePath)
-}
-
 /** 严格校验 Thread 投影 DTO 的 canonical UUID 标识字段并返回 threadId。 */
 export function threadIdOf(thread) {
   const threadId = canonicalUuid(thread?.threadId, 'threadId')
@@ -93,44 +72,31 @@ export function threadIdOf(thread) {
   return threadId
 }
 
-/** 创建 Chat（name-based Agent 引用；可选默认分支 workspacePath；Thread branchSettings 独立）。 */
+/** 创建 Chat（name-based Agent 引用；环境由 Agent 拥有，Chat 不携带任何 workspace/environment 状态）。 */
 export async function createChat(
   ctx,
-  { title, agentName, yoloEnabled = false, workspacePath = null },
+  { title, agentName, yoloEnabled = false },
 ) {
   const { status, json } = await ctx.call('POST', '/api/ai/chats', {
     title,
     agentName,
     yoloEnabled,
-    workspacePath,
   })
   assert(status === 201, `create Chat status ${status}: ${JSON.stringify(json)}`)
   const chat = envelopeData(json)
   assert(chat?.id && chat?.agentName, `invalid Chat: ${JSON.stringify(chat)}`)
-  assert(
-    isCanonicalWorkspacePathOrNull(chat.workspacePath),
-    `Chat workspacePath must be null or a canonical relative path: ${JSON.stringify(chat)}`,
-  )
+  assert(!Object.hasOwn(chat, 'workspacePath'), `Chat leaked workspacePath: ${JSON.stringify(chat)}`)
   assert(!Object.hasOwn(chat, 'environment'), `Chat leaked environment: ${JSON.stringify(chat)}`)
   assert(!Object.hasOwn(chat, 'environmentName'), `Chat leaked environmentName: ${JSON.stringify(chat)}`)
   assert(!Object.hasOwn(chat, 'environmentId'), `Chat leaked environmentId: ${JSON.stringify(chat)}`)
   return chat
 }
 
-/** 由 Agent + Model 引用构造完整 branchSettings（workspacePath 为可空相对路径）。 */
-export function branchSettingsOf(
-  agent,
-  model,
-  { workspacePath = null } = {},
-) {
+/** 由 Agent + Model 引用构造完整 branchSettings（当前契约精确为 agentName + model）。 */
+export function branchSettingsOf(agent, model) {
   assert(agent?.name, `agent name required: ${JSON.stringify(agent)}`)
   assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
-  assert(
-    isCanonicalWorkspacePathOrNull(workspacePath),
-    `workspacePath must be null or a canonical relative path: ${JSON.stringify(workspacePath)}`,
-  )
   return {
-    workspacePath,
     agentName: agent.name,
     model: {
       providerName: model.providerName,
@@ -489,15 +455,6 @@ export function userMessageCommand(content, idempotencyKey) {
   assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
   // Strict wire: USER_MESSAGE carries ONLY type/idempotencyKey/contents（TEXT/ATTACHMENT，无文本 shorthand）。
   return { type: 'USER_MESSAGE', idempotencyKey, contents: [{ type: 'TEXT', text: content }] }
-}
-
-export function setEnvironmentCommand(workspacePath, idempotencyKey) {
-  assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
-  assert(
-    isCanonicalWorkspacePathOrNull(workspacePath),
-    `workspacePath must be null or a canonical relative path: ${JSON.stringify(workspacePath)}`,
-  )
-  return { type: 'SET_ENVIRONMENT', idempotencyKey, workspacePath }
 }
 
 export function setAgentCommand(agentName, idempotencyKey) {

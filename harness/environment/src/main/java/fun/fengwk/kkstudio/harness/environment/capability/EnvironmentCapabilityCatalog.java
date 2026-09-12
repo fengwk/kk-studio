@@ -24,11 +24,26 @@ import java.util.Set;
  */
 public final class EnvironmentCapabilityCatalog {
 
+  /** 未改变形态的能力版本（{@code skill.load} 等）。 */
   public static final String VERSION = "1";
+
+  /** 引入必填绝对 workdir 的 coding/process/LSP 能力版本。 */
+  public static final String WORKDIR_VERSION = "2";
 
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/environment/capability/schemas/";
   private static final SchemaJsonCodec CODEC = new SchemaJsonCodec();
+  private static final Set<EnvironmentCapabilityId> WORKDIR_CAPABILITY_IDS =
+      Set.of(
+          EnvironmentCapabilityIds.FS_READ,
+          EnvironmentCapabilityIds.FS_WRITE,
+          EnvironmentCapabilityIds.FS_APPLY_EDIT,
+          EnvironmentCapabilityIds.PROCESS_EXEC,
+          EnvironmentCapabilityIds.FS_SEARCH,
+          EnvironmentCapabilityIds.FS_FIND,
+          EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
+          EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
+          EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
   private static final List<EnvironmentCapabilityDescriptor> DESCRIPTORS = createDescriptors();
   private static final Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> BY_ID =
       indexById(DESCRIPTORS);
@@ -55,22 +70,33 @@ public final class EnvironmentCapabilityCatalog {
 
   private static List<EnvironmentCapabilityDescriptor> createDescriptors() {
     return List.of(
-        descriptor(EnvironmentCapabilityIds.FS_READ, Duration.ofMinutes(1)),
-        descriptor(EnvironmentCapabilityIds.FS_WRITE, Duration.ofMinutes(1)),
-        descriptor(EnvironmentCapabilityIds.FS_APPLY_EDIT, Duration.ofMinutes(1)),
-        descriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofHours(1)),
-        descriptor(EnvironmentCapabilityIds.FS_SEARCH, Duration.ofHours(1)),
-        descriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofHours(1)),
-        descriptor(EnvironmentCapabilityIds.FS_LIST_DIRECTORY, Duration.ofMinutes(1)),
-        descriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
-        descriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),
-        descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)),
+        workdirDescriptor(EnvironmentCapabilityIds.FS_READ, Duration.ofMinutes(1)),
+        workdirDescriptor(EnvironmentCapabilityIds.FS_WRITE, Duration.ofMinutes(1)),
+        workdirDescriptor(EnvironmentCapabilityIds.FS_APPLY_EDIT, Duration.ofMinutes(1)),
+        workdirDescriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofHours(1)),
+        workdirDescriptor(EnvironmentCapabilityIds.FS_SEARCH, Duration.ofHours(1)),
+        workdirDescriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofHours(1)),
+        workdirDescriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
+        workdirDescriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),
+        workdirDescriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)),
         descriptor(EnvironmentCapabilityIds.SKILL_LOAD, Duration.ofMinutes(1)));
   }
 
   private static EnvironmentCapabilityDescriptor descriptor(
       EnvironmentCapabilityId id, Duration timeout) {
     return new EnvironmentCapabilityDescriptor(id, VERSION, loadSchema(id), timeout);
+  }
+
+  /** 使用引入必填 workdir 的能力版本构造 descriptor。 */
+  private static EnvironmentCapabilityDescriptor workdirDescriptor(
+      EnvironmentCapabilityId id, Duration timeout) {
+    return new EnvironmentCapabilityDescriptor(id, WORKDIR_VERSION, loadSchema(id), timeout);
+  }
+
+  /** 该能力是否要求具体 arguments 携带目标 Daemon 上的显式绝对 workdir。 */
+  public static boolean requiresWorkdir(EnvironmentCapabilityId id) {
+    require(id);
+    return WORKDIR_CAPABILITY_IDS.contains(id);
   }
 
   private static Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> indexById(

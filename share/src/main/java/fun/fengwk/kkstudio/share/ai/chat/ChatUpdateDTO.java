@@ -20,22 +20,6 @@ public class ChatUpdateDTO {
   /** 部分更新：省略（null）保留当前值；提供时必须为已存在的 Agent definition 名（约束同创建）。 */
   private String agentName;
 
-  /** 部分更新：仅在 {@link #workspacePathProvided} 为 true 时生效；显式 null 表示清除默认 workspace path。 */
-  private String workspacePath;
-
-  @JsonIgnore private boolean workspacePathProvided;
-
-  @JsonSetter("workspacePath")
-  public void setWorkspacePath(String workspacePath) {
-    this.workspacePath = workspacePath;
-    this.workspacePathProvided = true;
-  }
-
-  @JsonIgnore
-  public boolean isWorkspacePathProvided() {
-    return workspacePathProvided;
-  }
-
   /** 部分更新：仅在 {@link #yoloEnabledProvided} 为 true 时生效，且显式提供时不得为 null。 */
   private Boolean yoloEnabled;
 

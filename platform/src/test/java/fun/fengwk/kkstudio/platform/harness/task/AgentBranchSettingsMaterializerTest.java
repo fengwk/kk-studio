@@ -22,8 +22,6 @@ import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 /** 按最新 Agent/Model catalog 为子 Agent 物化 branch settings。 */
 class AgentBranchSettingsMaterializerTest {
 
-  private static final String WORKSPACE_PATH = "prod";
-
   private AgentDefinitionRepository agentRepository;
   private AgentModelRepository modelRepository;
   private AgentBranchSettingsMaterializer materializer;
@@ -60,9 +58,9 @@ class AgentBranchSettingsMaterializerTest {
   void materializesLatestAgentModelAndVariant() {
     stub("alpha", null, validModelConfig());
 
-    BranchSettings settings = materializer.materialize("alpha", WORKSPACE_PATH);
+    BranchSettings settings = materializer.materialize("alpha");
 
-    assertEquals(WORKSPACE_PATH, settings.workspacePath());
+    // branch settings 只冻结 Agent 与 model selection：环境与目录都不进入历史。
     assertEquals("alpha", settings.agentName());
     assertEquals(new ModelSelection("openai", "gpt-x", "quality"), settings.model());
   }
@@ -72,7 +70,7 @@ class AgentBranchSettingsMaterializerTest {
   void honorsExplicitAgentVariantOverride() {
     stub("alpha", "fast", validModelConfig());
 
-    BranchSettings settings = materializer.materialize("alpha", WORKSPACE_PATH);
+    BranchSettings settings = materializer.materialize("alpha");
 
     assertEquals(new ModelSelection("openai", "gpt-x", "fast"), settings.model());
   }
@@ -82,26 +80,20 @@ class AgentBranchSettingsMaterializerTest {
   void rejectsMissingOrInvalidCatalogInputs() {
     when(agentRepository.getByName("ghost")).thenReturn(null);
     IllegalArgumentException missingAgent =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> materializer.materialize("ghost", WORKSPACE_PATH));
+        assertThrows(IllegalArgumentException.class, () -> materializer.materialize("ghost"));
     assertTrue(missingAgent.getMessage().contains("subagent not found: ghost"));
 
     stub("alpha", null, validModelConfig());
     when(modelRepository.getByProviderNameAndName("openai", "gpt-x")).thenReturn(null);
     IllegalArgumentException missingModel =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> materializer.materialize("alpha", WORKSPACE_PATH));
+        assertThrows(IllegalArgumentException.class, () -> materializer.materialize("alpha"));
     assertTrue(
         missingModel.getMessage().contains("subagent model not found: openai/gpt-x"),
         missingModel.getMessage());
 
     stub("alpha", "ghost-variant", validModelConfig());
     IllegalArgumentException missingVariant =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> materializer.materialize("alpha", WORKSPACE_PATH));
+        assertThrows(IllegalArgumentException.class, () -> materializer.materialize("alpha"));
     assertTrue(
         missingVariant
             .getMessage()
@@ -114,9 +106,7 @@ class AgentBranchSettingsMaterializerTest {
   void wrapsCorruptModelConfigsWithCauses() {
     stub("alpha", null, "not-json");
     IllegalArgumentException modelConfigError =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> materializer.materialize("alpha", WORKSPACE_PATH));
+        assertThrows(IllegalArgumentException.class, () -> materializer.materialize("alpha"));
     assertTrue(
         modelConfigError.getMessage().contains("invalid subagent model configuration: alpha"));
     assertInstanceOf(IllegalArgumentException.class, modelConfigError.getCause());

@@ -517,13 +517,13 @@ python3 scripts/security/check-sensitive-data.py
 git diff --check
 ```
 
-`--docs` 必须以 `Total registered: 91` 结束；精确 case inventory、标题和
+`--docs` 必须以 `Total registered: 93` 结束；精确 case inventory、标题和
 requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局、Markdown
 链接、H1、源码路径和旧词守卫。敏感数据门禁扫描当前 tracked 文件和非 ignored
 未跟踪文件，覆盖高置信密钥、Webhook、个人绝对路径和已知私有环境标识；命中时
 只输出规则与 `path:line`。该入口不扫描 Git 历史，历史审计是公开策略中的独立步骤。
 
-## 8. E2E：API levels、flags 和当前 91-case matrix
+## 8. E2E：API levels、flags 和当前 93-case matrix
 
 ### 8.1 入口和 flags
 
@@ -607,18 +607,18 @@ Daemon environment root 默认是其下的 `environment`，可由
 
 | Level | 注册数 | 默认/开关 | 当前覆盖 |
 | --- | ---: | --- | --- |
-| L1 | 70 | 默认执行 66；storage/function/attachment case 需显式开关 | 免费 API contract、CRUD、Session/Thread（含默认名派生与重命名持久化）、command batch、CAS、idempotency、i18n、model attempt、Canvas API |
+| L1 | 73 | 默认执行 69（单实例带 `--frontend-url`；distributed 模式不含 `frontend.proxy_model_contract`，为 66）；storage/function/attachment case 需显式开关 | 免费 API contract、CRUD、Session/Thread（含默认名派生与重命名持久化）、command batch、CAS、idempotency、i18n、model attempt、Canvas API |
 | L2 | 10 | `--real` 默认选择四模型文本缓存、多推理级别烟雾与 stop；task delegation 还需 `--with-tools` | 四模型文本与 Prompt Cache、四模型多推理级别烟雾、真实 task delegation、stop partial/replay/continue |
 | L3 | 1 | `--real --with-branch` | 同 Session `NEW_THREAD` 分支 Thread |
-| L4 | 7 | `--with-tools`；四模型 Tool 需再加 `--real`，Resource 外部化需再加 `--with-canvas-storage` | Environment READY 与 capability 投影、directories、四模型 terminal replay、approval 后 Resource 外部化 |
-| L5 | 3 | `--distributed` | 双节点分布式 mock topology：跨节点 Environment CRUD 共享状态、双向 directory mailbox 路由、DB loss fail-closed 与有界 recovery |
+| L4 | 6 | `--with-tools`；四模型 Tool 需再加 `--real`，Resource 外部化需再加 `--with-canvas-storage` | Environment READY 与 capability 投影、四模型 terminal replay、approval 后 Resource 外部化 |
+| L5 | 3 | `--distributed` | 双节点分布式 mock topology：跨节点 Environment CRUD、租约投影与 DB loss recovery |
 | UI/L5 | 注册 39，默认 36 | `--ui`；额外 `--with-tools`、`--real` | Playwright 页面、Composer、debug、settings 和 runtime UI |
 
 L1 的默认关闭 categories 是 storage upload、attachment 和 fake Function；
 它们分别需要 `--with-canvas-storage` 或 `--with-canvas-function`。
 
 因此 `--with-canvas-function` 会同时打开 storage、fake Function、rebuild，
-让 L1 的 70 个 case 都可选择；它不等于真实 Provider。
+让 L1 的 73 个 case 都可选择；它不等于真实 Provider。
 
 ### 8.3 API categories 与精确 inventory
 
@@ -626,9 +626,8 @@ L1 的 categories 是 seed/catalog、Thread command、CRUD、i18n、settings/eve
 model attempt 和 Canvas API；storage、attachment 和 fake Function 由显式开关
 启用。L2 的 categories 是真实文本 turn、多推理级别烟雾、task delegation 和 stop/partial/replay；
 L3 是同一 Session 的 `NEW_THREAD` 分支；L4 是 Environment READY 与原子 capability
-投影、directory、approval 和 Resource externalization；L5 是双节点分布式 mock topology，
-覆盖跨节点 Environment CRUD 共享状态、双向 owner mailbox marker 目录路由、
-DB loss fail-closed 与有界 recovery。对应 gates 分别是 `--real`、`--real --with-branch`、
+投影、approval 和 Resource externalization；L5 是双节点分布式 mock topology，
+覆盖跨节点 Environment CRUD、租约投影一致性与 DB loss fail-closed/recovery。对应 gates 分别是 `--real`、`--real --with-branch`、
 `--with-tools`、`--distributed`，需要真实 Tool history 时再加 `--with-canvas-storage`。
 
 精确的 API case ID、标题和 `requires` 只由
@@ -637,10 +636,10 @@ DB loss fail-closed 与有界 recovery。对应 gates 分别是 `--real`、`--re
 ### 8.4 UI matrix：注册 39，默认 36
 
 UI 由 `scripts/e2e/ui-smoke.mjs`、`scripts/e2e/ui/composer-matrix.mjs` 和
-`scripts/e2e/ui/workspace-contracts.mjs` 注册；它不是 91 个 API case 的一部分。
+`scripts/e2e/ui/workspace-contracts.mjs` 注册；它不是 93 个 API case 的一部分。
 UI categories 是页面/runtime、Composer/debug 和 Workspace contract；`--ui` 是
 总 gate，默认执行 36 项无成本/无 daemon 用例；`--with-tools` 增加 2 项
-（Environment Workspace 创建与 ToolCard approval/layout），`--real` 增加 1 项真实
+（Agent-owned Environment Chat 创建与 ToolCard approval/layout），`--real` 增加 1 项真实
 Provider 覆盖。精确 UI inventory 以这些脚本中的注册表为准。
 
 UI 单独入口的当前帮助格式：
@@ -737,17 +736,12 @@ topology、两个 backend URL 和双 app/daemon 容器日志（进 `logs/`，写
 1. **跨节点 CRUD 共享状态（`distributed.shared_state`）**：在 node A POST 随机临时 Environment Card，
    在 node B GET 与更新，回 node A 验证更新内容与 CAS version，再跨节点删除并在两节点验证 404；
    使用 `finally` 尽力清理，禁止将一次性 registrationToken 写入 artifact/log。
-2. **双向 owner mailbox marker（`distributed.lease_mailbox_routing`）**：固定环境
-   `distributed-a`（`33333333-3333-3333-3333-333333333333`）连 app-a，
-   `distributed-b`（`44444444-4444-4444-4444-444444444444`）连 app-b；两个 App 均投影
-   两者 READY；从 node B 查询 env A 根目录必须命中 `distributed-a-only`、从 node A 查询 env B
-   根目录必须命中 `distributed-b-only`，强制走 PostgreSQL directory mailbox 且 marker 绝不混淆。
-3. **DB loss fail-closed 与 recovery（`distributed.db_loss_fail_closed`）**：先证明
-   node B -> env A mailbox 成功；通过受限白名单 helper 调 `disconnect-db-a` 断开 node A DB 网络；
-   断网后从 node A 调 env A directories 必须返回 HTTP 409 且 envelope 含 `ENVIRONMENT_UNAVAILABLE`，
-   证明本地 websocket/内存状态不能绕过 DB；`finally` 中无条件执行 `reconnect-db-a`，随后有界轮询
-   node A DB API 与 node B -> env A directory，恢复并再次读取 A marker，证明 DB-authoritative route/mailbox
-   恢复而非缓存。
+2. **租约投影一致性（`distributed.lease_routing`）**：固定 Environment 分别连接 app-a 与 app-b，
+   两个 App 都必须把两者投影为 READY；同一 Environment 的身份、状态、`rootPath` 与 capability
+   列表在两个节点逐项一致，并包含 workdir 版 `fs.read@2`。
+3. **DB loss fail-closed 与 recovery（`distributed.db_loss_fail_closed`）**：断开 node A 的 DB
+   网络后，其 DB 权威 Environment 读取必须失败而不能回退本机 WebSocket；`finally` 无条件恢复网络，
+   随后有界等待两个节点重新投影相同的 READY route。
 
 ## 9. Reliability：确定性回归和 Agent matrix
 

@@ -11,8 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -158,7 +157,7 @@ class ModelRequestSpecTest {
   @Test
   void requiresMatchingEnvironmentRoutes() {
     // Environment tool 与 skill source 必须落在同一 environment，避免一次请求混用多个 workspace。
-    EnvironmentBinding other = EnvironmentBindings.binding("22222222-2222-2222-2222-222222222222");
+    EnvironmentId other = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
     assertThrows(
         IllegalArgumentException.class,
         () ->

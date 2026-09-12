@@ -16,7 +16,6 @@ import type {
 
 function settings(overrides: Partial<HarnessBranchSettingsDTO> = {}): HarnessBranchSettingsDTO {
   return {
-    workspacePath: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     ...overrides,
@@ -44,7 +43,6 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
 
 function draftOf(overrides: Partial<BranchDraft> = {}): BranchDraft {
   return {
-    workspacePath: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     yoloEnabled: false,
@@ -97,13 +95,11 @@ describe('command batch replay identity', () => {
     const batch = plan({
       effectiveBase: draftOf(),
       draft: draftOf({
-        workspacePath: '.',
         agentName: 'coder',
         model: { providerName: 'openai', modelName: 'GPT-5', variant: 'v2' },
       }),
     })
     expect(batch.request.commands.map((command) => command.type)).toEqual([
-      'SET_ENVIRONMENT',
       'SET_AGENT',
       'SET_MODEL',
       'USER_MESSAGE',

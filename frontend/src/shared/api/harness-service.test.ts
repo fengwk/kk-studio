@@ -31,7 +31,6 @@ describe('harnessService', () => {
         sessionId: 's1',
         threadId: 't1',
         rootSettings: {
-          workspacePath: null,
           agentName: 'assistant',
           model: { providerName: 'p', modelName: 'm', variant: 'v' },
         },

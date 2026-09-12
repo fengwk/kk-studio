@@ -62,7 +62,6 @@ public class PostgresqlChatRepository implements ChatRepository {
     target.setId(chat.getId());
     target.setTitle(chat.getTitle());
     target.setAgentName(chat.getAgentName());
-    target.setWorkspacePath(chat.getWorkspacePath());
     target.setYoloEnabled(chat.isYoloEnabled());
     return target;
   }
@@ -75,7 +74,6 @@ public class PostgresqlChatRepository implements ChatRepository {
     target.setId(row.getId());
     target.setTitle(row.getTitle());
     target.setAgentName(row.getAgentName());
-    target.setWorkspacePath(row.getWorkspacePath());
     target.setYoloEnabled(row.isYoloEnabled());
     target.setVersion(row.getVersion());
     target.setCreateTime(row.getCreateTime());

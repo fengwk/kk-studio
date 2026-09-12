@@ -57,7 +57,6 @@ class SystemSettingsTest {
 
     assertEquals(8L * 1024 * 1024, defaults.environment().maxResourceBytes());
     assertEquals(60_000L, defaults.environment().heartbeatTimeoutMillis());
-    assertEquals(10_000L, defaults.environment().directoryListTimeoutMillis());
 
     SystemSettings.Integrations integrations = defaults.integrations();
     assertEquals(false, integrations.comfyui().enabled());
@@ -380,8 +379,7 @@ class SystemSettingsTest {
 
   @Test
   void rejectsInvalidEnvironmentAndSeedanceBudgets() {
-    assertThrows(
-        IllegalArgumentException.class, () -> new SystemSettings.Environment(0L, 60_000L, 10_000L));
+    assertThrows(IllegalArgumentException.class, () -> new SystemSettings.Environment(0L, 60_000L));
     assertThrows(
         IllegalArgumentException.class,
         () -> new SystemSettings.Seedance(false, null, 6, 600_000L, 30_000L, 1_800_000L));

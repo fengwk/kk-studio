@@ -3,7 +3,6 @@ import type {
   DecimalLong,
   InstantTimestamp,
 } from '@/shared/api/contracts/base'
-import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
 
 /**
  * 冻结进 branch settings 快照的不可变 provider/model/variant 选择。
@@ -18,7 +17,6 @@ export interface HarnessModelSelectionDTO {
  * 单个 Entry branch 的完整 branch settings 快照。
  */
 export interface HarnessBranchSettingsDTO {
-  workspacePath: string | null
   agentName: string
   model: HarnessModelSelectionDTO
 }
@@ -124,7 +122,6 @@ export type HarnessCommandCreateDTO =
   | HarnessUserMessageCommandDTO
   | { type: 'SET_AGENT'; idempotencyKey: string; agentName: string }
   | { type: 'SET_MODEL'; idempotencyKey: string; model: HarnessModelSelectionDTO }
-  | { type: 'SET_ENVIRONMENT'; idempotencyKey: string; workspacePath: string | null }
 
 /**
  * Thread YOLO policy 直接更新请求；expectedVersion 是精确的 version CAS 游标
@@ -191,7 +188,7 @@ export interface ModelInvocationDTO {
 /**
  * ToolInvocation 查询投影；id 均为 canonical UUID string。
  * toolCallId / toolName / argumentsJson 恒来自 durable ToolCall；toolVersion / toolId /
- * environment 在存在对应 binding 时提供（unknown tool binding 时 toolId 为 null），
+ * environmentId 在存在对应 binding 时提供（unknown tool binding 时 toolId 为 null），
  * rendererKey 恒有值（binding null 时固定回退为 "tool"）。
  * approvalJson / resultJson / errorJson 是规范的运行时 codec JSON，仅在其对应阶段非 null。
  */
@@ -208,7 +205,7 @@ export interface ToolInvocationDTO {
   rendererKey: string
   /** binding 存在时为 canonical stable AgentToolId；unknown tool binding 为 null。 */
   toolId: string | null
-  environment: EnvironmentBindingDTO | null
+  environmentId: string | null
   argumentsJson: string
   approvalJson: string | null
   resultJson: string | null

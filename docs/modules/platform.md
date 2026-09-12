@@ -137,7 +137,7 @@ URL、Bearer token 或 header。
 
 ### Chat 与 owner
 
-`ChatServiceImpl`提供 Chat CRUD。Chat 保存 title、agentName、可空 `workspacePath`、
+`ChatServiceImpl`提供 Chat CRUD。Chat 保存 title、agentName、
 `yoloEnabled`、version 和时间；Agent definition 的可空 `environmentId` 是 Environment 身份来源；`ChatMutationFactory`负责名称、标题和默认 YOLO 的规范化，`ChatGuard`负责存在性与
 Agent 引用校验。更新和删除都需要 CAS version。
 
@@ -207,27 +207,19 @@ HEARTBEAT 握手推进、sequence、在途 invocation 与终态所有权。Platf
 三个窄端口实现：`EnvironmentRegistry`（租约围栏）、`EnvironmentRepository` 解析的注册凭据（`DaemonRegistrationDirectory`）与
 `SystemSettingsSnapshot`（每次判定现读的心跳超时与资源上限）。
 
-Platform 侧的产品适配器只做映射，不持有会话状态：
+Platform 侧的产品适配器只做映射，不持有会话状态：`EnvironmentDaemonGateway` 暴露会话核心
+（`EnvironmentDaemonServer`）与租约实现（`EnvironmentRegistry`），供 Web 层 WebSocket transport 与产品查询复用；
+`EnvironmentServiceImpl` 在 Product CRUD 上执行 CAS 与引用校验。Platform 不提供目录浏览或 Skill 正文的旁路加载链：
+skill 正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.load` 能力取得。
 
-- `EnvironmentDaemonGateway`：实现 `EnvironmentSkillLoader` 与 `EnvironmentDirectoryLister`，把 skill 与目录调用桥接到
-  会话核心并映射为平台 DTO；
-- `LocalDirectoryExecutor`：实现本节点目录查询窄端口 `LocalDirectoryQueryPort`，把 `FS_LIST_DIRECTORY` 结果映射为产品读模型；
-- 跨节点目录查询由 `EnvironmentQueryCoordinator` 以 PostgreSQL `environment_directory_query` mailbox 协调，经端口注入而非运行期
-  可变注册。
+每个 Environment 的调用只按 `invocationId` 关联：同一 Environment 允许任意数量的 capability 并发在途，不同能力之间没有共享槽位，
+也不存在环境级容量或排队。唯一拒绝重复的规则是同一 Environment 内重用相同的活动 `invocationId`（调用方错误）。发送前按该连接
+READY 中冻结的目标 Daemon OS 对 `arguments.workdir` 做纯词法校验；真实存在性、目录类型与可访问性由 Daemon 判定。
 
-每个 Environment 的调用只按 `invocationId` 关联：同一 Environment 允许任意数量的 capability 并发在途，Tool、`skill.load` 与
-`fs.list-directory` 之间没有共享槽位，也不存在环境级容量或排队。唯一拒绝重复的规则是同一 Environment 内重用相同的活动
-`invocationId`（调用方错误）。control-plane timeout 会发送 `CANCEL`、终结该 invocation，并以有界 invocation tombstone 吸收
-迟到 callback。
-
-会话核心只接受 protocol v1 HELLO 和严格的 `capabilityCatalogVersion`。INVOKE payload 使用
-`capabilityId`、`capabilityVersion`、`workspacePath`、`arguments`、`timeoutMillis`，不携带 model
-Tool name；所有结果通过通用 `STARTED/PARTIAL/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
+会话核心只接受 protocol v2 HELLO 和严格的 `capabilityCatalogVersion`。INVOKE payload 使用
+`capabilityId`、`capabilityVersion`、`arguments`、`timeoutMillis`，不携带 model
+Tool name，也不携带第二份目录字段；所有结果通过通用 `STARTED/PARTIAL/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
 `invocationId` 关联。发送不确定时关闭连接并把在途 invocation 收敛为 uncertain，不重发可能已经产生副作用的请求。
-
-非 route owner 节点的目录查询写入 `environment_directory_query` 并发 NOTIFY；owner 节点按 lease token claim。
-`EnvironmentQueryCoordinator` 对每个 Environment 使用单一 drain，前一查询 terminal 并完成回填后才 claim 下一条，
-避免同一 Query 在 mailbox 上被并发重复执行；通知只负责唤醒，定期 resync 负责丢通知恢复。
 
 ### Provider adapters 与 PlatformModelGateway
 
@@ -286,7 +278,7 @@ Platform 接收由 Web 组合根冻结的不可变 `HarnessCatalog`，并将其�
 contributor provenance 与 requirements 相等；贡献缺失或
 definition/requirements 漂移直接生成确定性的 `TOOL_NOT_FOUND` /
 `TOOL_DEFINITION_MISMATCH` Deny，不进入 permission evaluator。正常路径按
-AgentToolId、arguments、Environment workspace 或 server workdir 生成
+AgentToolId、arguments 与单次调用 `arguments.workdir` 生成
 `ALLOW`、`ASK` 或 `DENY`，不改写 binding/arguments，也不感知 YOLO。`start`
 先获取 tool admission（默认 `kk-studio.harness.execution-admission.tool=64`），
 再通过单一执行路径执行：
@@ -311,18 +303,18 @@ Tool 的 `AppendCustomEntry` intent 必须属于自身 Contributor、命中已�
 
 1. 当前 Agent、Model、Provider、Variant 和 ProviderFactory，并把 Variant 未显式声明的输出上限补齐为 Model 全局 `limit.output`（冻结的 `ModelRequestSpec` 中不再保留 null 上限）；
 2. 当前 Environment context；
-3. Agent config 中的每个工具 ID 均通过 `RuntimeToolCatalog.findTool(id)` 查找并校验 `tool.definition().visibility() == ToolVisibility.SELECTABLE`；若 `tool.requirements().environmentRequired()` 为 true 但当前 branch 无 `EnvironmentBinding`，则在 planning 阶段被确定性拒绝并返回 `AssistantError.code=PLANNING_FAILED`；
+3. Agent config 中的每个工具 ID 均通过 `RuntimeToolCatalog.findTool(id)` 查找并校验 `tool.definition().visibility() == ToolVisibility.SELECTABLE`；若 `tool.requirements().environmentRequired()` 为 true 但当前 Agent definition 无可用 Environment，则在 planning 阶段被确定性拒绝并返回 `AssistantError.code=PLANNING_FAILED`；
 4. skills、subagents 和内部 `load_skill` / `task`；
 5. Contributor context projector、system prompt、cache control、context window 和 output budget。
 
-Agent 配置有 skills 时按稳定 ID 追加 `LoadSkillTool`；subagents 非空且 Session depth 小于 `SubagentConfig.maxDepth` 时按稳定 ID 追加 `TaskTool`。每个 tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor；Environment tool 使用 branch 当前完整 Environment binding。Skill 必须由当前选中的 live Environment 提供，且 Environment 必须 READY；缺失、未 READY、能力或 Model 不支持时返回统一 `AssistantError.code=PLANNING_FAILED`。Repository/catalog 基础设施异常向上抛出，由 ThreadProcessor 按 runtime policy reschedule。
+Agent 配置有 skills 时按稳定 ID 追加 `LoadSkillTool`；subagents 非空且 Session depth 小于 `SubagentConfig.maxDepth` 时按稳定 ID 追加 `TaskTool`。每个 tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor；Environment tool 使用当前 Agent definition 选定的 Environment。Skill 必须由当前选中的 live Environment 提供，且 Environment 必须 READY；缺失、未 READY、能力或 Model 不支持时返回统一 `AssistantError.code=PLANNING_FAILED`。Repository/catalog 基础设施异常向上抛出，由 ThreadProcessor 按 runtime policy reschedule。
 
-system prompt 由 `AgentPromptComposer` 拼接正文、当前 Environment、skill 和 subagent sections，并只替换 `${date}`、`${workspace}`、`${cwd}` 等已知 placeholder。Contributor context projector 以 `BranchView` 追加 preamble。`DatabaseThreadSelectedSkillLookup` 从冻结 ModelRequestSpec 读取 skill binding，`EnvironmentSkillBodyLoader` 再经 Environment gateway 读取正文；不会用当前 Agent 配置扩张已冻结调用。
+system prompt 由 `AgentPromptComposer` 拼接正文、当前 Environment、skill 和 subagent sections，并只替换已知的 `${date}` placeholder；其余 `${...}` 占位符与未闭合形式的原文保持不变。Contributor context projector 以 `BranchView` 追加 preamble。`DatabaseThreadSelectedSkillLookup` 从冻结 ModelRequestSpec 读取 skill binding，正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.load` 能力读取；不会用当前 Agent 配置扩张已冻结调用。
 
 Compaction resolver 是窄路径：只解析 `CompactionPreparation.executionModel`，不查 Agent prompt、contributor、skill、Environment availability 或 prompt cache，只返回零 tools/skills/subagents 的 ModelRequestSpec。
 
 `AgentBranchSettingsMaterializer`为新建/恢复的 subagent 按最新 Agent/Model catalog 物化只包含
-environment、agentName 和 model 的 BranchSettings；工具、skill 和 subagent binding 在每个 live turn 的
+`agentName` 和 model 的 `BranchSettings`；环境由 Agent definition 决定，工具、skill 和 subagent binding 在每个 live turn 的
 `DatabaseTurnResolver` 中按最新 Agent definition 解析。Task 的 agent name、description、parent/root/depth 和
 task invocation 归属在 durable binding 中冻结，执行期间不依据运行时 Catalog 变更扩权。
 
@@ -402,7 +394,7 @@ ThreadProcessor
 ```text
 ToolProcessor
   -> ToolExecutionGateway.preflight
-       -> PermissionEvaluator + frozen workdir
+       -> PermissionEvaluator + arguments.workdir
   -> admission + exact catalog/binding route
   -> Started(handle), gate closed
   -> Runtime markRunning + handle.activate
@@ -476,7 +468,7 @@ Function dispatcher claim + RUNNING lease
 | --- | --- | --- |
 | `tool` | permission 默认 `base.write`/`base.edit`/`base.bash` 各 `* -> ask`，`*` 为全局 wildcard，`defaultYolo=false`，Model Busy retry 5s、Tool RetryLater 5s、skill load 30s | admission/permission 读取点 live |
 | `aiRuntime` | retry 3 次、EXPONENTIAL、base 2s、max 60s；compaction keep 20000；subagent depth 2、per-parent concurrency 10、maxTurns 50 | retry、resolver、subagent 配置读取点 |
-| `environment` | resource 8 MiB、heartbeat 60s、directory list 10s | Environment gateway 查询/超时读取点 |
+| `environment` | resource 8 MiB、heartbeat 60s | Environment gateway 资源上限与心跳超时读取点 |
 | `integrations.comfyui` | disabled；connect 10s、read 30s、WebSocket 1800s、input 50 MiB | client topology 由启动快照决定 |
 | `integrations.openCliHub` | disabled、base URL 未配置；request 120s、long poll 130s、JSON 512 KiB、error 4 KiB | adapter 创建与执行参数 |
 | `integrations.seedance/gptImage2/minimaxH3` | 各自 enabled/paid 开关、workspace、prompt/ComfyUI timeout 和 polling 约束 | adapter 的启动快照与执行读取点 |
@@ -546,7 +538,7 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
   `ToolExecutionGatewayStartTest`、`CompositeRuntimeToolCatalogTest`、
   `RuntimeToolCatalogConfigurationTest`、`GlobalStorageToolResultHistoryMaterializerTest`。
 - Resolver/materialization：`DatabaseTurnResolverTest`、`AgentBranchSettingsMaterializerTest`、
-  `AgentPromptComposerTest`、`DatabaseThreadSelectedSkillLookupTest`、`EnvironmentSkillBodyLoaderTest`。
+  `AgentPromptComposerTest`、`DatabaseThreadSelectedSkillLookupTest`、`LoadSkillToolTest`。
 - Canvas/ComfyUI：`PlatformCanvasCommandServiceTest`、`PlatformCanvasResourceLifecycleTest`、
   `PlatformCanvasFunctionBlobAccessTest`、`OpenCliCanvasFunctionAdaptersTest`、
   `MiniMaxH3CanvasFunctionAdapterTest`、`ComfyuiRuntimeServiceTest`、`ComfyuiWorkflowApiBindingsParserTest`。
@@ -561,7 +553,7 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
   `PostgresqlStorageSchemaTest`。
 
 这些测试覆盖的是当前 application layer 的可观察 contract：CAS、owner lock order、Blob ref 对账、S3 cleanup lease、
-Provider/Tool admission、terminal-once、Environment bind、Canvas resource pin、strict codec 和 schema 约束。
+Provider/Tool admission、terminal-once、Environment 路由冻结、Canvas resource pin、strict codec 与 schema 约束。
 
 ---
 

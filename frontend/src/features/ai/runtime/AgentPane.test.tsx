@@ -47,7 +47,6 @@ vi.mock('@/shared/api/agent-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
-    listDirectories: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/chat-service', () => ({
@@ -121,7 +120,6 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     status: 'IDLE',
     processing: false,
     branchSettings: {
-      workspacePath: null,
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     },
@@ -537,11 +535,6 @@ describe('AgentPane orchestration', () => {
     await user.keyboard('{Escape}')
 
     await user.click(composer)
-    await user.keyboard('/environment{Enter}')
-    expect(await screen.findByRole('region', { name: /local 目录/ })).toBeInTheDocument()
-    await user.keyboard('{Escape}')
-
-    await user.click(composer)
     await user.keyboard('/shortcuts{Enter}')
     expect(await screen.findByRole('region', { name: '键盘快捷键' })).toBeInTheDocument()
   })
@@ -806,8 +799,6 @@ describe('AgentPane orchestration', () => {
     expect(hook.result.current.error).toBeTruthy()
     act(() => hook.result.current.selectAgent('assistant'))
     expect(hook.result.current.error).toBeNull()
-    act(() => hook.result.current.selectWorkspacePath('.'))
-    expect(hook.result.current.activeDraft?.workspacePath).toBe('.')
     act(() => hook.result.current.composer.settings?.onModelChange({
       providerName: 'minimax',
       modelName: 'MiniMax',
@@ -823,7 +814,6 @@ describe('AgentPane orchestration', () => {
       entryType: 'ROOT',
       payloadJson: JSON.stringify({
         settings: {
-          workspacePath: '.',
           agentName: 'assistant',
           model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
         },
@@ -832,29 +822,11 @@ describe('AgentPane orchestration', () => {
     }))
     expect(hook.result.current.target.kind).toBe('NEW_THREAD_DRAFT')
     act(() => hook.result.current.selectEntry({
-      entryId: 'entry-null-environment',
-      sessionId: 'session-1',
-      parentEntryId: null,
-      entryType: 'ROOT',
-      payloadJson: JSON.stringify({ settings: { workspacePath: null } }),
-      createTime: null,
-    }))
-    act(() => hook.result.current.selectEntry({
-      entryId: 'entry-missing-environment',
+      entryId: 'entry-missing-settings',
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: JSON.stringify({ settings: {} }),
-      createTime: null,
-    }))
-    act(() => hook.result.current.selectEntry({
-      entryId: 'entry-invalid-environment',
-      sessionId: 'session-1',
-      parentEntryId: null,
-      entryType: 'ROOT',
-      payloadJson: JSON.stringify({
-        settings: { workspacePath: 123 },
-      }),
       createTime: null,
     }))
     await hook.result.current.refreshPaneProjection()
@@ -1422,7 +1394,6 @@ describe('AgentPane orchestration', () => {
     const hook = renderController({ agents: [] })
     await waitFor(() => expect(hook.result.current.activeDraft).toBeNull())
     expect(hook.result.current.composer.disabled).toBe(true)
-    act(() => hook.result.current.selectWorkspacePath('.'))
     act(() => hook.result.current.selectEntry({
       entryId: 'entry-without-draft',
       sessionId: 'session-1',
@@ -1452,7 +1423,6 @@ describe('AgentPane orchestration', () => {
     )
     const hook = renderController()
     await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
-    act(() => hook.result.current.selectWorkspacePath('.'))
     act(() => hook.result.current.selectAgent('assistant'))
     act(() => hook.result.current.composer.settings?.onModelChange({
       providerName: 'minimax',

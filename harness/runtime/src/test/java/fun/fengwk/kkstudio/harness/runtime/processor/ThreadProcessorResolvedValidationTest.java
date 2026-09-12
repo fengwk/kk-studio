@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
@@ -59,24 +59,20 @@ import java.util.UUID;
 class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
 
   @Test
-  void routeMismatchIsContractErrorWithZeroMutation() {
-    // branch workspace path 与 resolved binding 的 path 不一致是 Resolver 契约错误。
-    ModelRequestSpec spec = requestWithEnvironmentTool(branchSettings());
-    assertPathMismatchRollsBack(spec, branchSettings().withWorkspacePath("other/repo"));
-  }
-
-  private void assertPathMismatchRollsBack(ModelRequestSpec spec, BranchSettings candidate) {
+  void environmentRequiredToolBindsDirectEnvironmentIdOnBranchWithoutDirectory() {
+    // branch 不再持有目录：environment-required tool 的 environmentId 与 branch 事实不构成冲突，正常落库。
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
-    UUID userCommand =
-        seedCommand(
-            fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
+    seedCommand(
+        fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(spec, 100_000, 16_384));
+    fixture.resolver.results.add(
+        new TurnResolver.Resolved(requestWithEnvironmentTool(branchSettings()), 100_000, 16_384));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    assertThrows(IllegalStateException.class, () -> fixture.processor.process(claim));
-    assertEquals(1, path(fixture.store, baseline.threadId()).entries().size());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
+    // 基线 ROOT + 本轮 TURN_START + USER = 3：environment-required tool 不再引入任何目录事实。
+    assertEquals(3, path(fixture.store, baseline.threadId()).entries().size());
   }
 
   @Test
@@ -147,8 +143,8 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),
             new ContributorBinding("base", "fs", List.of()),
-            settings.workspacePath() != null,
-            EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111"));
+            true,
+            EnvironmentId.parse("11111111-1111-1111-1111-111111111111"));
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),

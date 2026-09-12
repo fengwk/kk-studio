@@ -275,7 +275,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           conn,
           "select string_agg(version, ',' order by installed_rank)"
               + " from flyway_schema_history where version is not null",
-          "1,2");
+          "1,2,3");
       assertDevSeedPresent(conn);
     }
 
@@ -292,7 +292,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           conn,
           "select string_agg(version, ',' order by installed_rank)"
               + " from flyway_schema_history where version is not null",
-          "1,2");
+          "1,2,3");
       assertE2eSeedContent(conn);
     }
 
@@ -310,7 +310,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           conn,
           "select string_agg(version, ',' order by installed_rank)"
               + " from flyway_schema_history where version is not null",
-          "1,2");
+          "1,2,3");
       assertDevSeedPresent(conn);
       assertSingleLong(conn, "select count(*) from system_setting where id = 1", 1L);
     }

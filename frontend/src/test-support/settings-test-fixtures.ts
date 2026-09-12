@@ -39,7 +39,6 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
     environment: {
       maxResourceBytes: '8388608',
       heartbeatTimeoutMillis: '60000',
-      directoryListTimeoutMillis: '10000',
     },
     integrations: {
       comfyui: {
@@ -398,16 +397,6 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
                 path: 'environment.heartbeatTimeoutMillis',
                 labelKey: 'settings.field.environment.heartbeatTimeoutMillis',
                 hintKey: 'settings.field.environment.heartbeatTimeoutMillis.hint',
-                type: 'LONG',
-                nullable: false,
-                min: 1,
-                max: null,
-                options: null,
-              },
-              {
-                path: 'environment.directoryListTimeoutMillis',
-                labelKey: 'settings.field.environment.directoryListTimeoutMillis',
-                hintKey: 'settings.field.environment.directoryListTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,

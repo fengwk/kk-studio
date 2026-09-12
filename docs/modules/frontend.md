@@ -24,7 +24,7 @@ React/Vite/TypeScript 工程；开发时由 Vite 提供页面，发布时由 Mav
 
 - Frontend 不在运行时下载、执行或评估第三方 JavaScript；Extension 是编译
   进来的受信任 React module。
-- Frontend 不把 PostgreSQL、S3 bucket/key、Daemon workspace 或 provider
+- Frontend 不把 PostgreSQL、S3 bucket/key、Daemon 本机绝对路径或 provider
   credential 变成 UI 层的持久事实。
 - Frontend 不把 lossy realtime notification 当作 durable transcript、Canvas
   graph 或 command cursor。
@@ -47,7 +47,7 @@ React/Vite/TypeScript 工程；开发时由 Vite 提供页面，发布时由 Mav
 - upload、signed URL 和 Canvas Function 的分阶段操作在 unmount、Canvas 切换、
   timeout 或失败时清理本地 pending state；服务端以 handle、CAS 和过期策略继续
   收敛。
-- shared 层不依赖 feature；feature controller 不把本地 draft、workspace path、
+- shared 层不依赖 feature；feature controller 不把本地 draft、目录状态、
   credential 或对象存储内部字段写入 durable API。
 
 ## 3. 总体图
@@ -138,7 +138,7 @@ WorkbenchShell 的顺序是 `AppShell`、`header` slot、动态 `StudioRoutes` �
 | AI | `/chats` | Chat 列表、创建 Chat、搜索 |
 | AI | `/chats/:chatId` | Chat Workspace 和 Pane |
 | AI | `/agents`、`/models`、`/providers` | Catalog CRUD |
-| AI | `/environments` | Environment 与 workspace 浏览 |
+| AI | `/environments` | Environment 注册与 live 状态 |
 | Canvas | `/canvas` | Canvas Library |
 | Canvas | `/canvas/:canvasId` | canonical UUID Canvas Editor |
 | ComfyUI | `/comfyui` | Workflow 列表、编辑、运行 |
@@ -193,7 +193,7 @@ errors；`409` 由 `isConflictError` 识别，只有 `errors.reason` 精确匹�
 | [base.ts](../../frontend/src/shared/api/contracts/base.ts) | `ResultEnvelope`、分页、时间、canonical decimal、`CatalogVersion`、`CanvasVersion` |
 | [ai-runtime.ts](../../frontend/src/shared/api/contracts/ai-runtime.ts) | Session/Entry/Thread、branch settings、command、stop、approval、model/tool invocation、snapshot、command batch |
 | [ai-catalog.ts](../../frontend/src/shared/api/contracts/ai-catalog.ts) | Provider、Model、Agent、Tool catalog 与 config |
-| [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | READY Environment、Capability/Skill、workspace binding 与目录 |
+| [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | READY Environment、Capability/Skill 与 Card CRUD |
 | [studio.ts](../../frontend/src/shared/api/contracts/studio.ts) | Canvas document、node/resource/group/link、snapshot、patch、version event、typed command |
 | [storage.ts](../../frontend/src/shared/api/contracts/storage.ts) | PENDING/READY upload、presigned PUT、render-time presigned URL |
 | [comfyui.ts](../../frontend/src/shared/api/contracts/comfyui.ts) | Workflow、input binding、run、job、cancel |
@@ -210,7 +210,7 @@ errors；`409` 由 `isConflictError` 识别，只有 `errors.reason` 精确匹�
 | [agent-service.ts](../../frontend/src/shared/api/agent-service.ts) | `/ai/catalog/providers|models|agents|tools` | Provider/Model/Agent CRUD，删除使用 `expectedVersion` CAS |
 | [chat-service.ts](../../frontend/src/shared/api/chat-service.ts) | `/ai/chats` | Chat list/create/get/update/delete 与 owner Session 查询 |
 | [mcp-server-service.ts](../../frontend/src/shared/api/mcp-server-service.ts) | `/ai/mcp-servers` | MCP Server CRUD、refresh 与 `expectedVersion` CAS |
-| [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/harness/environments`、directories | Environment READY 查询和单层 workspace directory |
+| [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/harness/environments`、`/{id}/token` | Environment Card CRUD、rotate-token 与按需只读 token；无目录查询 |
 | [harness-service.ts](../../frontend/src/shared/api/harness-service.ts) | `/harness/command-batches|sessions|threads` | Harness command、Session 查询、Thread 快照与运行控制 |
 | [studio-service.ts](../../frontend/src/shared/api/studio-service.ts) | `/canvases` | Canvas CRUD/命令/资源/Function Run 与 owner Session 查询；自有 `canvasRequest`、strict envelope、AbortSignal、ApiError |
 | [storage-service.ts](../../frontend/src/shared/api/storage-service.ts) | `/storage/uploads`、blob presigned URL | upload handle 生命周期和浏览器安全 header |
@@ -242,16 +242,17 @@ props。
 
 ### 7.1 Catalog、Chat 和 Environment
 
-AI feature 由 `CatalogRuntime`、`ChatRuntime`、`AgentPane` 和
-`EnvironmentWorkspacePanel` 组成：
+AI feature 由 `CatalogRuntime`、`ChatRuntime` 和 `AgentPane` 组成：
 
 - Catalog 页面分别渲染 Provider、Model、Agent cards/forms；structured config
   使用 Model variant、limits、modalities、pricing，Agent 的 `toolIds`、
   `skills`、`subagents` 使用 catalog candidate 校验。CRUD mutation 统一
   在成功后失效对应 query，冲突沿用 ConflictPresenter。
-- Chat list 使用 `ChatRuntime` + `ChatCardsPanel`；Agent definition 绑定 Environment ID，Chat 只持久化 nullable `workspacePath`。
-- Environment 页面读取 live Environment、原子 Capability、Skill 和目录；Capability 只展示
-  canonical `id`，不把 capability ID 当作 model Tool name；`"."` 是 workspace root 的 wire 表示，UI 显示为 `@/`。
+- Chat list 使用 `ChatRuntime` + `ChatCardsPanel`；Environment 归属完全由 Agent definition 的 `environmentId` 决定，
+  Chat 只持久化 title、agentName 与 YOLO 开关，不持有目录。
+- Environment 页面读取 live Environment、原子 Capability 与 Skill；Capability 只展示
+  canonical `id`，不把 capability ID 当作 model Tool name。不存在目录浏览器：工具调用的目标目录由模型在
+  arguments 中显式给出，前端不注入默认目录。
 - `builtin.ai` 的 `task` renderer 只展示宿主投影的 message；approval 和
   状态机操作仍由宿主 controller 负责。
 
@@ -296,8 +297,8 @@ sequenceDiagram
 - `NEW_SESSION` 只发送 `USER_MESSAGE`；完整 BranchDraft 写进
   `rootSettings`，避免再发送一组初始 `SET_*`。
 - `NEW_THREAD_DRAFT` 和 `BOUND_THREAD` 在 `USER_MESSAGE` 前按固定顺序追加
-  `SET_ENVIRONMENT`、`SET_AGENT`、`SET_MODEL` 的 diff；Agent 工具选择由最新 Agent definition 的
-  `config.toolIds` 决定，不生成 branch tool command。
+  `SET_AGENT`、`SET_MODEL` 的 diff；Agent 工具选择由最新 Agent definition 的
+  `config.toolIds` 决定，不生成 branch tool command，也不发送目录状态。
 - `BOUND_THREAD` 的 target 是 `THREAD`，带
   `expectedHeadEntryId` 和 `expectedNextCommandSequence`；YOLO 是
   `PUT /yolo` 的直接控制面，不进入 mailbox。

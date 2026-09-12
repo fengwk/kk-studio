@@ -14,7 +14,7 @@ import java.util.List;
 @Data
 public class HarnessCommandCreateDTO {
 
-  /** SET_ENVIRONMENT、SET_AGENT、SET_MODEL 或 USER_MESSAGE。 */
+  /** SET_AGENT、SET_MODEL 或 USER_MESSAGE。 */
   private String type;
 
   /** canonical UUID string 幂等键。 */
@@ -29,9 +29,6 @@ public class HarnessCommandCreateDTO {
   /** SET_MODEL 的目标模型。 */
   private HarnessModelSelectionDTO model;
 
-  /** SET_ENVIRONMENT 的 workspace path；显式 null 表示清除 workspace path。 */
-  private String workspacePath;
-
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean contentsFieldPresent;
@@ -43,10 +40,6 @@ public class HarnessCommandCreateDTO {
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean modelFieldPresent;
-
-  @Getter(AccessLevel.NONE)
-  @Setter(AccessLevel.NONE)
-  private boolean workspacePathFieldPresent;
 
   @JsonSetter("type")
   public void setType(Object value) {
@@ -77,12 +70,6 @@ public class HarnessCommandCreateDTO {
     this.modelFieldPresent = true;
   }
 
-  @JsonSetter("workspacePath")
-  public void setWorkspacePath(String value) {
-    this.workspacePath = value;
-    this.workspacePathFieldPresent = true;
-  }
-
   @JsonIgnore
   public boolean hasContentsField() {
     return contentsFieldPresent;
@@ -96,11 +83,6 @@ public class HarnessCommandCreateDTO {
   @JsonIgnore
   public boolean hasModelField() {
     return modelFieldPresent;
-  }
-
-  @JsonIgnore
-  public boolean hasWorkspacePathField() {
-    return workspacePathFieldPresent;
   }
 
   @JsonAnySetter

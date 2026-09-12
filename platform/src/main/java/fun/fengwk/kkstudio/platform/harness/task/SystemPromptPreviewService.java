@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.task;
 
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
@@ -66,8 +65,8 @@ public final class SystemPromptPreviewService {
     BranchSettings settings = path.baseSettings();
     AgentDefinition agent = agentDefinitionRepository.getByName(settings.agentName());
     Instant now = clock.instant();
-    EnvironmentBinding binding = resolveBinding(agent, settings);
-    CurrentEnvironmentContext environment = resolveCurrentEnvironment(binding, now);
+    EnvironmentId environmentId = resolveEnvironmentId(agent);
+    CurrentEnvironmentContext environment = resolveCurrentEnvironment(environmentId, now);
     if (agent == null) {
       return promptComposer.compose(null, environment, List.of(), List.of());
     }
@@ -80,44 +79,42 @@ public final class SystemPromptPreviewService {
     return promptComposer.compose(
         agent.getSystemPrompt(),
         environment,
-        previewSkills(config.getSkills(), binding),
+        previewSkills(config.getSkills(), environmentId),
         previewSubagents(config.getSubagents(), path));
   }
 
-  private static EnvironmentBinding resolveBinding(AgentDefinition agent, BranchSettings settings) {
-    if (agent == null || agent.getEnvironmentId() == null || settings.workspacePath() == null) {
+  /** 环境完全由 Agent definition 决定：branch settings 不再持有目录状态。 */
+  private static EnvironmentId resolveEnvironmentId(AgentDefinition agent) {
+    if (agent == null || agent.getEnvironmentId() == null) {
       return null;
     }
-    return new EnvironmentBinding(
-        EnvironmentId.of(agent.getEnvironmentId()), settings.workspacePath());
+    return EnvironmentId.of(agent.getEnvironmentId());
   }
 
   private CurrentEnvironmentContext resolveCurrentEnvironment(
-      EnvironmentBinding binding, Instant now) {
-    if (binding == null) {
+      EnvironmentId environmentId, Instant now) {
+    if (environmentId == null) {
       return new CurrentEnvironmentContext(
           null, null, now.atZone(clock.getZone()).toLocalDate(), null);
     }
-    EnvironmentConnection liveEnvironment =
-        environmentRegistry.find(binding.environmentId()).orElse(null);
+    EnvironmentConnection liveEnvironment = environmentRegistry.find(environmentId).orElse(null);
     DaemonEnvironmentInfo environmentInfo =
         liveEnvironment == null || liveEnvironment.daemonCapabilities() == null
             ? null
             : liveEnvironment.daemonCapabilities().environment();
     ZoneId zone = environmentInfo == null ? clock.getZone() : ZoneId.of(environmentInfo.timeZone());
     return new CurrentEnvironmentContext(
-        binding,
+        environmentId,
         environmentInfo == null ? null : environmentInfo.operatingSystem(),
         now.atZone(zone).toLocalDate(),
         environmentInfo == null ? null : environmentInfo.note());
   }
 
-  private List<SkillBinding> previewSkills(List<String> skillNames, EnvironmentBinding binding) {
-    if (skillNames == null || skillNames.isEmpty() || binding == null) {
+  private List<SkillBinding> previewSkills(List<String> skillNames, EnvironmentId environmentId) {
+    if (skillNames == null || skillNames.isEmpty() || environmentId == null) {
       return List.of();
     }
-    EnvironmentConnection environment =
-        environmentRegistry.find(binding.environmentId()).orElse(null);
+    EnvironmentConnection environment = environmentRegistry.find(environmentId).orElse(null);
     if (environment == null) {
       return List.of();
     }
@@ -129,7 +126,7 @@ public final class SystemPromptPreviewService {
               .findFirst()
               .orElse(null);
       if (skill != null) {
-        bindings.add(new SkillBinding(skill.name(), skill.description(), binding));
+        bindings.add(new SkillBinding(skill.name(), skill.description(), environmentId));
       }
     }
     return List.copyOf(bindings);

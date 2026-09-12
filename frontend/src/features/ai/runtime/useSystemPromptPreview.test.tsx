@@ -38,7 +38,7 @@ describe('useSystemPromptPreview', () => {
     await waitFor(() => expect(result.current).toContain('- date:'))
     expect(harnessService.getSystemPromptPreview).toHaveBeenCalledTimes(1)
 
-    // SET_ENVIRONMENT 与 USER_MESSAGE 同批生效后，working=true 代表最新 branch 已可现算。
+    // SET_AGENT/SET_MODEL 与 USER_MESSAGE 同批生效后，working=true 代表最新 branch 已可现算。
     rerender({ working: true })
     await waitFor(() => expect(result.current).toContain('- name: local-dev'))
     expect(harnessService.getSystemPromptPreview).toHaveBeenCalledTimes(2)

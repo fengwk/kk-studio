@@ -11,7 +11,6 @@ interface ManualCompactionAvailability {
 export type ThreadCommandId =
   | 'thread'
   | 'agent'
-  | 'environment'
   | 'yolo'
   | 'models'
   | 'tree'
@@ -43,7 +42,6 @@ export interface ThreadCommand {
 export const THREAD_COMMANDS: ThreadCommand[] = [
   command('thread', ['branch', 'switch', 'session']),
   command('agent', ['set', 'switch', 'definition']),
-  command('environment', ['set', 'switch', 'runtime', 'target']),
   command('yolo', ['auto', 'approve', 'tool']),
   command('models', ['model', 'variant', 'provider', 'switch']),
   command('tree', ['history', 'branch', 'entry']),
@@ -69,11 +67,10 @@ function command(id: ThreadCommandId, keywords: string[]): ThreadCommand {
 }
 
 const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
-  NEW_SESSION_DRAFT: ['thread', 'agent', 'environment', 'yolo', 'models', 'upload', 'shortcuts'],
+  NEW_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'upload', 'shortcuts'],
   NEW_THREAD_DRAFT: [
     'thread',
     'agent',
-    'environment',
     'yolo',
     'models',
     'tree',

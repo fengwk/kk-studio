@@ -28,7 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -41,7 +40,7 @@ import java.util.UUID;
 
 /**
  * acceptCommands 的 THREAD target：cursor 原子接受、ordered exact replay（hash / partial / order）、
- * SET_ENVIRONMENT 静止 admission 与 batch shape（steering vs user batch）。
+ * SET_AGENT 静止 admission 与 batch shape（steering vs user batch）。
  */
 class HarnessRuntimeAcceptThreadTest {
 
@@ -256,11 +255,11 @@ class HarnessRuntimeAcceptThreadTest {
   }
 
   /**
-   * SET_ENVIRONMENT 无 quiescent admission：live Model / THREAD Work 期间接受 {@code SET_ENVIRONMENT +
-   * 恰一条 user message}，只入队 / 推进 cursor，不改当前 open Turn（SET_* 由 Reducer 于下一个 INPUT 边界收割）。
+   * SET_AGENT 无 quiescent admission：live Model / THREAD Work 期间接受 {@code SET_AGENT + 恰一条 user
+   * message}，只入队 / 推进 cursor，不改当前 open Turn（SET_* 由 Reducer 于下一个 INPUT 边界收割）。
    */
   @Test
-  void setEnvironmentDuringLiveOrWorkIsAcceptedAndOnlyAdvancesCursor() {
+  void setAgentDuringLiveOrWorkIsAcceptedAndOnlyAdvancesCursor() {
     // 场景一：live MODEL_ACTIVE（当前 open Turn 在跑）+ THREAD Work 行 —— 接受且只推进 cursor。
     HarnessRuntimeTestSupport.ModelBaseline live = seedModel(store, ModelInvocationStatus.RUNNING);
     seedThreadWork(store, live.threadId());
@@ -272,9 +271,7 @@ class HarnessRuntimeAcceptThreadTest {
                 live.threadId(),
                 liveHead,
                 1,
-                List.of(
-                    new NewThreadCommand(new SetEnvironmentCommandPayload(null), TestIds.id(1)),
-                    userMessageCommand(TestIds.id(2), "hi"))),
+                List.of(setAgentCommand(TestIds.id(1)), userMessageCommand(TestIds.id(2), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(liveResult.replayed());
     assertEquals(
@@ -293,9 +290,7 @@ class HarnessRuntimeAcceptThreadTest {
                 idle.threadId(),
                 idle.rootEntryId(),
                 1,
-                List.of(
-                    new NewThreadCommand(new SetEnvironmentCommandPayload(null), TestIds.id(3)),
-                    userMessageCommand(TestIds.id(4), "hi"))),
+                List.of(setAgentCommand(TestIds.id(3)), userMessageCommand(TestIds.id(4), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(idleResult.replayed());
     // 只入队 + 推进 cursor：version +1、nextSeq 1->3、head 不变。

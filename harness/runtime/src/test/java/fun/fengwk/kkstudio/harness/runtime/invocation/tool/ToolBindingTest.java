@@ -8,8 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -22,8 +21,8 @@ import java.util.List;
 /** ToolBinding 的 definition/contributor/environmentRequired/environment 契约与不变式。 */
 class ToolBindingTest {
 
-  private static final EnvironmentBinding ENV_ID =
-      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
+  private static final EnvironmentId ENV_ID =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
   @Test
   void exposesOnlyDefinitionContributorEnvironmentRequiredAndEnvironmentComponents() {
@@ -31,12 +30,12 @@ class ToolBindingTest {
     assertTrue(ToolBinding.class.isRecord());
     RecordComponent[] components = ToolBinding.class.getRecordComponents();
     assertEquals(
-        List.of("definition", "contributor", "environmentRequired", "environment"),
+        List.of("definition", "contributor", "environmentRequired", "environmentId"),
         Arrays.stream(components).map(RecordComponent::getName).toList());
     assertEquals(AgentToolDefinition.class, components[0].getType());
     assertEquals(ContributorBinding.class, components[1].getType());
     assertEquals(boolean.class, components[2].getType());
-    assertEquals(EnvironmentBinding.class, components[3].getType());
+    assertEquals(EnvironmentId.class, components[3].getType());
   }
 
   @Test
@@ -47,7 +46,7 @@ class ToolBindingTest {
             definition("bash"), contributorProvenance("core", "bash", List.of()), false, null);
     assertEquals("bash", host.descriptor().name());
     assertFalse(host.environmentRequired());
-    assertNull(host.environment());
+    assertNull(host.environmentId());
     assertEquals("core", host.contributor().contributorId());
 
     ToolBinding environment =
@@ -55,7 +54,7 @@ class ToolBindingTest {
             definition("fs"), contributorProvenance("base", "read", List.of()), true, ENV_ID);
     assertEquals("fs", environment.descriptor().name());
     assertTrue(environment.environmentRequired());
-    assertEquals(ENV_ID, environment.environment());
+    assertEquals(ENV_ID, environment.environmentId());
     assertEquals("base", environment.contributor().contributorId());
   }
 
@@ -66,14 +65,14 @@ class ToolBindingTest {
     ToolBinding combined =
         new ToolBinding(definition("state_tool"), statefulContributor, true, ENV_ID);
     assertTrue(combined.environmentRequired());
-    assertEquals(ENV_ID, combined.environment());
+    assertEquals(ENV_ID, combined.environmentId());
     assertEquals(statefulContributor, combined.contributor());
     assertFalse(combined.contributor().stateAccesses().isEmpty());
 
     ToolBinding stateWithoutEnv =
         new ToolBinding(definition("state_tool"), statefulContributor, false, null);
     assertFalse(stateWithoutEnv.environmentRequired());
-    assertNull(stateWithoutEnv.environment());
+    assertNull(stateWithoutEnv.environmentId());
     assertEquals(statefulContributor, stateWithoutEnv.contributor());
   }
 

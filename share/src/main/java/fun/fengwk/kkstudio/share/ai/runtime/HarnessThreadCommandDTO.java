@@ -19,10 +19,7 @@ public class HarnessThreadCommandDTO {
   /** Thread 内单调递增的命令序号：strict positive decimal string（从 1 开始）。 */
   private String sequence;
 
-  /**
-   * 命令类型，取 {@code ThreadCommandType} 枚举名：USER_MESSAGE / CUSTOM_MESSAGE / SET_AGENT / SET_MODEL /
-   * SET_ENVIRONMENT。
-   */
+  /** 命令类型，取 {@code ThreadCommandType} 枚举名：USER_MESSAGE / CUSTOM_MESSAGE / SET_AGENT / SET_MODEL。 */
   private String type;
 
   /** 派生生命周期状态，取 {@code ThreadCommandState} 枚举名：QUEUED / APPLIED / CANCELLED。 */

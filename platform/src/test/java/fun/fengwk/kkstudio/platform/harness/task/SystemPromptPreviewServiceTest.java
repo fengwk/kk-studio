@@ -93,7 +93,7 @@ class SystemPromptPreviewServiceTest {
     EnvironmentRegistry environments = mock(EnvironmentRegistry.class);
     EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
-    when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot("."));
+    when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot());
     AgentDefinition agent = new AgentDefinition();
     agent.setEnvironmentId(environmentId.value());
     agent.setName("assistant");
@@ -120,7 +120,7 @@ class SystemPromptPreviewServiceTest {
 
     String preview = service(runtime, agents, codec, environments).preview(THREAD_ID);
 
-    assertTrue(preview.contains("- workspace: ."), preview);
+    assertFalse(preview.contains("workspace"), preview);
     assertTrue(preview.contains("- system: wsl"), preview);
     assertTrue(preview.contains("- date: 2026-08-16"), preview);
     assertTrue(preview.contains("- note: Local &lt;dev&gt; &amp; tools."), preview);
@@ -148,13 +148,8 @@ class SystemPromptPreviewServiceTest {
   }
 
   private static ThreadSnapshot snapshot() {
-    return snapshot(null);
-  }
-
-  private static ThreadSnapshot snapshot(String workspacePath) {
     BranchSettings settings =
-        new BranchSettings(
-            workspacePath, "assistant", new ModelSelection("provider", "model", "default"));
+        new BranchSettings("assistant", new ModelSelection("provider", "model", "default"));
     EntryPath path =
         new EntryPath(
             List.of(new Entry(SESSION_ID, SESSION_ID, null, new RootPayload(settings), NOW)));

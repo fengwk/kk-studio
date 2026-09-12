@@ -48,7 +48,7 @@ class CompactionHistoryTest {
   private static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   private static final BranchSettings SETTINGS =
-      new BranchSettings(null, "agent", new ModelSelection("provider", "model", "variant"));
+      new BranchSettings("agent", new ModelSelection("provider", "model", "variant"));
 
   @Test
   void pendingContinuationRequiresOwnedHistoryAndKnownCurrentCompactionStart() {

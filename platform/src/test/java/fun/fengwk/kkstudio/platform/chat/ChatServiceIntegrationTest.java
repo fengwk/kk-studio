@@ -4,7 +4,6 @@ import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.Postgr
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -133,7 +132,6 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
                       null,
                       new RootPayload(
                           new BranchSettings(
-                              null,
                               "default-assistant",
                               new ModelSelection("stub", "acceptance-stub", "default"))),
                       Instant.parse("2026-08-02T00:00:00Z"))));
@@ -182,46 +180,32 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
     }
   }
 
+  /** Chat 不再有 workspace 默认目录：legacy workspacePath 字段在 DTO 边界被严格拒绝，且不残留任何目录状态。 */
   @Test
-  void workspacePathDefaultIsNullableSetAndClearable() {
+  void legacyWorkspacePathIsRejectedAndChatCarriesNoDirectoryState() {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle("env-default");
     create.setAgentName("default-assistant");
-    create.setWorkspacePath(".");
+    assertThrows(
+        IllegalArgumentException.class, () -> create.rejectUnknownField("workspacePath", "."));
+
     ChatDTO created = chatService.createChat(create);
-    assertEquals(".", created.getWorkspacePath());
     String chatId = created.getId();
     try {
-      ChatUpdateDTO clear = new ChatUpdateDTO();
-      clear.setWorkspacePath(null);
-      clear.setExpectedVersion("0");
-      ChatDTO cleared = chatService.updateChat(chatId, clear);
-      assertNull(cleared.getWorkspacePath());
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> {
+            ChatUpdateDTO clear = new ChatUpdateDTO();
+            clear.setExpectedVersion(created.getVersion());
+            clear.rejectUnknownField("workspacePath", null);
+          });
 
-      ChatUpdateDTO set = new ChatUpdateDTO();
-      set.setWorkspacePath("sub/dir");
-      set.setExpectedVersion("1");
-      ChatDTO updated = chatService.updateChat(chatId, set);
-      assertEquals("sub/dir", updated.getWorkspacePath());
-
-      // 非法 workspace 路径提供时确定性拒绝，绝不持久化。
-      ChatUpdateDTO invalidPath = new ChatUpdateDTO();
-      invalidPath.setWorkspacePath("/abs");
-      invalidPath.setExpectedVersion("2");
-      assertThrows(AiValidationException.class, () -> chatService.updateChat(chatId, invalidPath));
-      ChatCreateDTO invalidCreate = new ChatCreateDTO();
-      invalidCreate.setTitle("invalid-env");
-      invalidCreate.setAgentName("default-assistant");
-      invalidCreate.setWorkspacePath("../escape");
-      assertThrows(AiValidationException.class, () -> chatService.createChat(invalidCreate));
-
-      // 缺省（不提供 workspacePath）保留当前值。
-      ChatUpdateDTO untouched = new ChatUpdateDTO();
-      untouched.setTitle("still env-2");
-      untouched.setExpectedVersion("2");
-      assertEquals("sub/dir", chatService.updateChat(chatId, untouched).getWorkspacePath());
+      ChatDTO roundTripped = chatService.getChat(chatId);
+      assertEquals("env-default", roundTripped.getTitle());
+      assertEquals("default-assistant", roundTripped.getAgentName());
     } finally {
       chatService.deleteChat(chatId, chatService.getChat(chatId).getVersion());
+      assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat(chatId));
     }
   }
 

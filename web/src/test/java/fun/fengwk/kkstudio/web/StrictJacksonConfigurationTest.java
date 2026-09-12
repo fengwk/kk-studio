@@ -58,29 +58,24 @@ class StrictJacksonConfigurationTest {
           model.setModelName("claude-3-5-sonnet");
           model.setVariant("default");
 
-          HarnessBranchSettingsDTO settingsNullWorkspace = new HarnessBranchSettingsDTO();
-          settingsNullWorkspace.setWorkspacePath(null);
-          settingsNullWorkspace.setAgentName("code-assistant");
-          settingsNullWorkspace.setModel(model);
+          HarnessBranchSettingsDTO settings = new HarnessBranchSettingsDTO();
+          settings.setAgentName("code-assistant");
+          settings.setModel(model);
 
-          String expectedNullWorkspace =
-              "{\"workspacePath\":null,\"agentName\":\"code-assistant\",\"model\":{"
+          String expected =
+              "{\"agentName\":\"code-assistant\",\"model\":{"
                   + "\"providerName\":\"anthropic\","
                   + "\"modelName\":\"claude-3-5-sonnet\","
                   + "\"variant\":\"default\"}}";
-          assertEquals(expectedNullWorkspace, mapper.writeValueAsString(settingsNullWorkspace));
-
-          HarnessBranchSettingsDTO settingsWithPath = new HarnessBranchSettingsDTO();
-          settingsWithPath.setWorkspacePath("/workspace/project");
-          settingsWithPath.setAgentName("code-assistant");
-          settingsWithPath.setModel(model);
-
-          String expectedWithPath =
-              "{\"workspacePath\":\"/workspace/project\",\"agentName\":\"code-assistant\",\"model\":{"
-                  + "\"providerName\":\"anthropic\","
-                  + "\"modelName\":\"claude-3-5-sonnet\","
-                  + "\"variant\":\"default\"}}";
-          assertEquals(expectedWithPath, mapper.writeValueAsString(settingsWithPath));
+          assertEquals(expected, mapper.writeValueAsString(settings));
+          assertThrows(
+              JacksonException.class,
+              () ->
+                  mapper.readValue(
+                      "{\"workspacePath\":\"/workspace/project\",\"agentName\":\"code-assistant\","
+                          + "\"model\":{\"providerName\":\"anthropic\",\"modelName\":"
+                          + "\"claude-3-5-sonnet\",\"variant\":\"default\"}}",
+                      HarnessBranchSettingsDTO.class));
         });
   }
 

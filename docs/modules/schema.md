@@ -10,6 +10,7 @@
 flowchart LR
     Schema[schema resources]
     V1[V1__schema.sql<br/>baseline]
+    Migrations[V2+ incremental migrations]
     Seeds[db/seed/{dev,e2e,canvas-test}]
     Flyway[Flyway]
     PG[(PostgreSQL)]
@@ -17,8 +18,10 @@ flowchart LR
     Tests[platform / harness-infra / canvas-infra tests]
 
     Schema --> V1
+    Schema --> Migrations
     Schema --> Seeds
     V1 --> Flyway
+    Migrations --> Flyway
     Seeds --> Flyway
     Flyway --> PG
     Web --> Flyway
@@ -48,7 +51,8 @@ flowchart LR
 
 ```text
 schema/src/main/resources/db/migration/V1__schema.sql
-schema/src/main/resources/db/migration/V2__<description>.sql   # 增量 migration，按需新增
+schema/src/main/resources/db/migration/V2__model_identity_and_variant.sql
+schema/src/main/resources/db/migration/V3__remove_workspace.sql
 schema/src/main/resources/db/seed/dev/R__dev_seed.sql
 schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql
 schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql
@@ -95,6 +99,13 @@ Web 依赖 `spring-boot-starter-flyway`、`flyway-database-postgresql` 以及 ru
   固定。
 - `storage_blob` 的 ACTIVE hash 唯一；`ACTIVE` 必须有正引用，`DELETING` 的
   `ref_count` 必须为零。
+
+### Incremental migrations
+
+- V2 分离模型逻辑身份与 Provider wire `modelId`，并把 Variant 收敛为推理强度选择。
+- V3 删除产品 Workspace 状态、目录查询信箱和 `SET_ENVIRONMENT`，把 Harness
+  durable JSON 中的环境绑定收敛为直接 `EnvironmentId`。迁移在存在活动
+  Invocation 或旧 JSON 形状损坏时 fail-fast，并依赖 Flyway 事务整体回滚。
 
 ### Profile seeds
 
@@ -153,6 +164,8 @@ profile seed，也没有生产凭据默认值。
 
 - `schema/pom.xml`
 - `schema/src/main/resources/db/migration/V1__schema.sql`
+- `schema/src/main/resources/db/migration/V2__model_identity_and_variant.sql`
+- `schema/src/main/resources/db/migration/V3__remove_workspace.sql`
 - `schema/src/main/resources/db/seed/dev/R__dev_seed.sql`
 - `schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql`
 - `schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql`
@@ -162,6 +175,7 @@ profile seed，也没有生产凭据默认值。
 - `web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/FlywayAutoConfigurationIntegrationTest.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java`
+- `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlWorkspaceRemovalMigrationTest.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java`
 - `canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresCanvasInfraTestSupport.java`
 

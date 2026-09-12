@@ -7,13 +7,17 @@
     },
     "workdir": {
       "type": "string",
-      "description": "Working directory for resolving relative paths. Defaults to the agent's current working directory. If provided, relative paths resolve from that directory."
+      "description": "Absolute directory on the target daemon's file system that this call runs in. Required on every call; it is never inherited from a previous call, a session default, or the environment root. Provide an expanded absolute path (no '~', no environment variable placeholders); Windows targets use a drive-rooted or UNC path."
     },
     "target": {
       "type": "string",
       "description": "A raw `jdt://` URI, a workspace symbol output line, or a `file://` / `.class` path."
     }
   },
-  "required": ["path", "target"],
+  "required": [
+    "path",
+    "target",
+    "workdir"
+  ],
   "additionalProperties": false
 }

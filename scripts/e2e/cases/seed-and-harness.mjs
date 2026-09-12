@@ -24,7 +24,6 @@ import {
   renameSession,
   renameThread,
   setAgentCommand,
-  setEnvironmentCommand,
   setModelCommand,
   setThreadYolo,
   stopThread,
@@ -278,7 +277,7 @@ registerCase({
   id: 'thread.branch_settings_projection',
   level: 'L1',
   title: 'NEW_SESSION rootSettings 完整投影到 Thread 快照',
-  docs: 'workspacePath/agentName/model 与 yoloEnabled 原样持久化并投影；Chat 默认值独立',
+  docs: 'agentName/model 与 yoloEnabled 原样持久化并投影；Chat 默认值独立',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -288,7 +287,6 @@ registerCase({
       yoloEnabled: false,
     })
     const requested = {
-      workspacePath: null,
       agentName: ctx.vars.agent.name,
       model: modelSelectionOf(ctx),
     }
@@ -1305,11 +1303,11 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知类型、额外字段、缺失 workspacePath 与非法路径 => 400',
+  docs: '前端固定顺序 SET_AGENT,SET_MODEL,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；已删除的 SET_ENVIRONMENT discriminator 与 workspacePath 字段在任何 command type 上 => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
-    // 隔离 Thread：SET_ENVIRONMENT admission 要求 pre-state 干净（无 queued USER/CUSTOM、IDLE、无 Work）。
+    // 隔离 Thread：SET_* 命令消费要求 pre-state 干净（无 queued USER/CUSTOM、IDLE、无 Work）。
     const chat = await createChat(ctx, {
       title: `e2e-set-all-${cid().slice(0, 8)}`,
       agentName: ctx.vars.agent.name,
@@ -1332,7 +1330,6 @@ registerCase({
     const modelSelection = modelSelectionOf(ctx)
     const missingAgentName = `missing-agent-${cid().slice(0, 8)}`
     const commands = [
-      setEnvironmentCommand(null, cid()),
       setAgentCommand(missingAgentName, cid()),
       setModelCommand(
         {
@@ -1357,7 +1354,7 @@ registerCase({
     const dto = accepted.acceptedCommands
     assert(
       dto.map((command) => command.type).join(',') ===
-        'SET_ENVIRONMENT,SET_AGENT,SET_MODEL,USER_MESSAGE',
+        'SET_AGENT,SET_MODEL,USER_MESSAGE',
       JSON.stringify(dto),
     )
     for (let i = 1; i < dto.length; i++) {
@@ -1375,7 +1372,6 @@ registerCase({
     assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
     const finalSnapshot = await getThreadSnapshot(ctx, threadId)
     const expectedSettings = {
-      workspacePath: null,
       agentName: missingAgentName,
       model: {
         providerName: modelSelection.providerName,
@@ -1461,7 +1457,8 @@ registerCase({
         }),
       { status: 400 },
     )
-    // SET_ENVIRONMENT 必须区分字段缺省与显式 null：缺省拒绝，显式 null（上方主 batch）合法解绑。
+    // 已删除的 SET_ENVIRONMENT discriminator 必须按 unknown command type 拒绝（authoritative W2-A
+    // HarnessRuntimeRequestMapperTest.rejectsUnsupportedCommandTypes 同形）。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -1473,9 +1470,9 @@ registerCase({
           }),
           commands: [{ type: 'SET_ENVIRONMENT', idempotencyKey: cid() }],
         }),
-      { status: 400, messageIncludes: /workspacePath/i },
+      { status: 400, messageIncludes: /unknown command type/i },
     )
-    // 其他 discriminator 即使显式传 workspacePath:null 也必须按 forbidden 拒绝。
+    // 其他 discriminator 即使显式传 workspacePath 也必须按 unknown HTTP command field 拒绝。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -1512,33 +1509,14 @@ registerCase({
           }),
           commands: [
             {
-              type: 'SET_ENVIRONMENT',
+              type: 'SET_AGENT',
               idempotencyKey: cid(),
+              agentName: 'x',
               unexpected: { workspacePath: '.' },
             },
           ],
         }),
       { status: 400, messageIncludes: /unexpected/i },
-    )
-    // 非法 canonical 相对路径也必须被拒绝（例如包含 ..）。
-    await expectHttpError(
-      () =>
-        acceptCommandBatch(ctx, {
-          owner: chatOwner(chat.id),
-          target: threadTarget({
-            threadId,
-            expectedHeadEntryId: fresh.thread.headEntryId,
-            expectedNextCommandSequence: fresh.thread.nextCommandSequence,
-          }),
-          commands: [
-            {
-              type: 'SET_ENVIRONMENT',
-              idempotencyKey: cid(),
-              workspacePath: '../escaped',
-            },
-          ],
-        }),
-      { status: 400, messageIncludes: /path/i },
     )
   },
 })

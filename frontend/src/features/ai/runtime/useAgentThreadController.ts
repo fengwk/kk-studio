@@ -675,10 +675,7 @@ function resolveRuntimeLabels(
   )
   const contextWindow = extractContextWindow(model)
   const agent = settings?.agentName ? agents.find((item) => item.name === settings.agentName) : undefined
-  const environment =
-    agent?.environmentId && settings?.workspacePath
-      ? { environmentId: agent.environmentId, workspacePath: settings.workspacePath }
-      : null
+  const environment = agent?.environmentId ?? null
   return {
     environment,
     contextWindow,

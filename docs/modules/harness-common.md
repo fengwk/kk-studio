@@ -24,7 +24,7 @@
 ### 协作边界
 
 - `AgentToolId`、`AgentToolDefinition`、`ToolCall` 与 `ToolResult` 等工具契约归入 [`harness-tool`](harness-tool.md)。
-- `EnvironmentId`、`EnvironmentBinding`、Capability catalog 与 Daemon 通信协议归入 [`harness-environment`](harness-environment.md)。
+- `EnvironmentId`、Capability catalog 与 Daemon 通信协议归入 [`harness-environment`](harness-environment.md)。
 - 执行 SPI（`Tool` / `EnvironmentCapability`）与网关路由由执行与编排模块提供。
 - Spring 容器装配、JDBC 持久化与模型 Provider SDK 均由外部容器与上层应用承接。
 

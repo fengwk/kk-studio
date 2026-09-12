@@ -506,9 +506,7 @@ public final class ThreadProcessor {
         if (invocation.status() == ToolInvocationStatus.READY) {
           readyRequested = true;
           EnvironmentId environmentId =
-              invocation.binding() == null || invocation.binding().environment() == null
-                  ? null
-                  : invocation.binding().environment().environmentId();
+              invocation.binding() == null ? null : invocation.binding().environmentId();
           tx.requestWork(new WorkTarget(WorkTargetType.TOOL, invocation.id()), now, environmentId);
         }
       }

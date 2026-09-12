@@ -651,11 +651,6 @@ const CORE_STATE_ENUMS = [
     constants: ['NOT_FOUND', 'CONFLICT'],
   },
   {
-    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/environment/query/EnvironmentQueryStatus.java',
-    enumName: 'EnvironmentQueryStatus',
-    constants: ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED'],
-  },
-  {
     path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/environment/registry/LiveEnvironmentStatus.java',
     enumName: 'LiveEnvironmentStatus',
     constants: ['CONNECTING', 'READY'],

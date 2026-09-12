@@ -67,32 +67,32 @@ class ChatMutationFactoryTest {
     assertTrue(chat.isYoloEnabled());
   }
 
+  /** Chat 不再承载 workspace：创建与更新都不接受该字段，且 Chat 行本身不存在目录状态。 */
   @Test
-  void validatesWorkspacePathCanonicalRelativeOrNull() {
+  void rejectsLegacyWorkspacePathFieldOnCreateAndUpdate() {
     ChatMutationFactory factory = factory(false);
 
-    ChatCreateDTO valid = new ChatCreateDTO();
-    valid.setTitle("valid");
-    valid.setAgentName("assistant");
-    valid.setWorkspacePath("src/main");
-    Chat chat = factory.newChat(valid);
-    assertEquals("src/main", chat.getWorkspacePath());
+    ChatCreateDTO create = new ChatCreateDTO();
+    create.setTitle("valid");
+    create.setAgentName("assistant");
+    Chat chat = factory.newChat(create);
+    assertEquals("valid", chat.getTitle());
 
-    ChatCreateDTO abs = new ChatCreateDTO();
-    abs.setTitle("abs");
-    abs.setAgentName("assistant");
-    abs.setWorkspacePath("/absolute");
-    assertThrows(AiValidationException.class, () -> factory.newChat(abs));
+    ChatUpdateDTO update = new ChatUpdateDTO();
+    update.setTitle("next");
+    factory.apply(chat, update);
+    assertEquals("next", chat.getTitle());
 
-    ChatCreateDTO escape = new ChatCreateDTO();
-    escape.setTitle("escape");
-    escape.setAgentName("assistant");
-    escape.setWorkspacePath("../escape");
-    assertThrows(AiValidationException.class, () -> factory.newChat(escape));
-
-    ChatUpdateDTO updateAbs = new ChatUpdateDTO();
-    updateAbs.setWorkspacePath("/absolute");
-    assertThrows(AiValidationException.class, () -> factory.apply(chat, updateAbs));
+    // legacy workspace 字段在 DTO 边界就被幂等拒绝，绝不会作为未知字段被静默忽略。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> create.rejectUnknownField("workspacePath", "src/main"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> update.rejectUnknownField("workspacePath", "/absolute"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> update.rejectUnknownField("environmentId", "11111111-1111-1111-1111-111111111111"));
   }
 
   private static ChatMutationFactory factory(boolean defaultYolo) {

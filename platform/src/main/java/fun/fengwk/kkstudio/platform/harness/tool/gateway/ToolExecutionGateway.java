@@ -21,7 +21,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
@@ -61,7 +61,6 @@ import fun.fengwk.kkstudio.platform.harness.GatewayExecutorSafety;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 
-import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -114,8 +113,6 @@ public final class ToolExecutionGateway implements ToolGateway {
   private final PermissionEvaluator permissionEvaluator;
   private final ToolSettingsProvider toolSettingsProvider;
   private final ToolResultExternalizer externalizer;
-  private final Path workdir;
-  private final Path environmentRoot;
   private final ExecutorService executor;
   private final Supplier<Duration> retryDelay;
   private final Clock clock;
@@ -129,8 +126,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       ResourceStore resourceStore,
-      Path workdir,
-      Path environmentRoot,
       int resourceMaxBytes,
       ExecutorService executor,
       Supplier<Duration> retryDelay,
@@ -147,9 +142,6 @@ public final class ToolExecutionGateway implements ToolGateway {
     this.externalizer =
         new ToolResultExternalizer(
             Objects.requireNonNull(resourceStore, "resourceStore"), resourceMaxBytes);
-    this.workdir = Objects.requireNonNull(workdir, "workdir").toAbsolutePath().normalize();
-    this.environmentRoot =
-        Objects.requireNonNull(environmentRoot, "environmentRoot").toAbsolutePath().normalize();
     this.executor = Objects.requireNonNull(executor, "executor");
     this.retryDelay = Objects.requireNonNull(retryDelay, "retryDelay");
     this.clock = Objects.requireNonNull(clock, "clock");
@@ -244,7 +236,6 @@ public final class ToolExecutionGateway implements ToolGateway {
             new PermissionEvaluationContext(
                 resolved.contribution().definition().id(),
                 request.call().argumentsJson(),
-                permissionWorkdir(request),
                 settings));
     PermissionAction action = evaluation.action();
     return switch (action) {
@@ -253,13 +244,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       case DENY -> new ToolGateway.Deny(
           new ToolInvocationError(PERMISSION_DENIED_KIND, PERMISSION_DENIED_MESSAGE));
     };
-  }
-
-  private Path permissionWorkdir(ToolInvocationRequest request) {
-    if (request.binding().environmentRequired() && request.binding().environment() != null) {
-      return environmentRoot.resolve(Path.of(request.binding().environment().workspacePath()));
-    }
-    return workdir;
   }
 
   /** 获取并发租约并准备异步执行；实际工具调用等待返回句柄被激活。 */
@@ -291,14 +275,14 @@ public final class ToolExecutionGateway implements ToolGateway {
                     + contribution.definition().id()));
       }
       if (execution.request().binding().environmentRequired()
-          && execution.request().binding().environment() == null) {
+          && execution.request().binding().environmentId() == null) {
         lease.close();
         return new ToolGateway.Rejected(
             new ToolInvocationError(
                 UNAVAILABLE_KIND,
                 "Environment tool "
                     + contribution.definition().id()
-                    + " has no environment binding (the branch has no selected environment)."));
+                    + " has no frozen environmentId."));
       }
 
       BranchView branch =
@@ -307,7 +291,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       BoundEnvironment boundEnvironment =
           execution.request().binding().environmentRequired()
               ? new PlatformBoundEnvironment(
-                  execution.request().binding().environment(),
+                  execution.request().binding().environmentId(),
                   capabilityTransport,
                   execution.invocationId().toString(),
                   execution.request().call().id())
@@ -319,14 +303,9 @@ public final class ToolExecutionGateway implements ToolGateway {
               clock.instant(),
               branch,
               Optional.ofNullable(boundEnvironment));
-      Path executionWorkdir = permissionWorkdir(execution.request());
       ToolExecutionRequest toolRequest =
           new ToolExecutionRequest(
-              currentDescriptor,
-              execution.request().call(),
-              Duration.ZERO,
-              context,
-              executionWorkdir);
+              currentDescriptor, execution.request().call(), Duration.ZERO, context);
 
       GatedToolExecutionListener bridge =
           new GatedToolExecutionListener(
@@ -416,25 +395,25 @@ public final class ToolExecutionGateway implements ToolGateway {
 
   /** Platform 的 {@link BoundEnvironment} 适配实现，桥接底层的 {@link EnvironmentCapabilityTransport}。 */
   private static final class PlatformBoundEnvironment implements BoundEnvironment {
-    private final EnvironmentBinding binding;
+    private final EnvironmentId environmentId;
     private final EnvironmentCapabilityTransport capabilityTransport;
     private final String invocationId;
     private final String modelCallId;
 
     private PlatformBoundEnvironment(
-        EnvironmentBinding binding,
+        EnvironmentId environmentId,
         EnvironmentCapabilityTransport capabilityTransport,
         String invocationId,
         String modelCallId) {
-      this.binding = Objects.requireNonNull(binding, "binding");
+      this.environmentId = Objects.requireNonNull(environmentId, "environmentId");
       this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
       this.invocationId = Objects.requireNonNull(invocationId, "invocationId");
       this.modelCallId = Objects.requireNonNull(modelCallId, "modelCallId");
     }
 
     @Override
-    public EnvironmentBinding binding() {
-      return binding;
+    public EnvironmentId environmentId() {
+      return environmentId;
     }
 
     @Override
@@ -452,9 +431,9 @@ public final class ToolExecutionGateway implements ToolGateway {
             new EnvironmentCapabilityCall(invocationId, request.call().argumentsJson());
         EnvironmentCapabilityExecutionRequest capabilityRequest =
             new EnvironmentCapabilityExecutionRequest(
-                capability, capabilityCall, request.timeout(), null);
+                capability, capabilityCall, request.timeout());
         EnvironmentCapabilityExecutionHandle transportHandle =
-            capabilityTransport.invoke(binding, capabilityRequest, capabilityListener);
+            capabilityTransport.invoke(environmentId, capabilityRequest, capabilityListener);
         if (transportHandle == null) {
           listener.onError(
               new IllegalStateException(
@@ -538,8 +517,9 @@ public final class ToolExecutionGateway implements ToolGateway {
   }
 
   private static String reason(PermissionPromptPreview preview) {
-    String value =
-        preview.tool() + " requires approval in " + preview.workdir() + ": " + preview.arguments();
+    // 只在该调用真实携带 workdir 时展示目录；没有 workdir 语义的工具不显示虚构默认目录。
+    String location = preview.workdir() == null ? "" : " in " + preview.workdir();
+    String value = preview.tool() + " requires approval" + location + ": " + preview.arguments();
     if (value.length() <= ASK_REASON_MAX_CHARACTERS) {
       return value;
     }

@@ -5,8 +5,6 @@ export interface ChatDTO {
   id: string
   title: string | null
   agentName: string
-  /** 可选的默认分支 workspace path；null 表示未指定工作目录。 */
-  workspacePath: string | null
   yoloEnabled: boolean
   version: CatalogVersion
   createTime: InstantTimestamp
@@ -16,15 +14,12 @@ export interface ChatDTO {
 export interface ChatCreateDTO {
   title?: string
   agentName: string
-  /** 可选的默认分支 workspace path；省略或 null 表示未指定。 */
-  workspacePath?: string | null
   yoloEnabled?: boolean
 }
 
 export interface ChatUpdateDTO {
   title?: string | null
   agentName?: string | null
-  workspacePath?: string | null
   yoloEnabled?: boolean | null
   expectedVersion: CatalogVersion
 }

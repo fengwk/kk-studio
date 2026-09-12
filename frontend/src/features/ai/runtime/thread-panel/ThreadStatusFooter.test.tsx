@@ -1,7 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ThreadStatusFooter } from '@/features/ai/runtime/thread-panel/ThreadStatusFooter'
-import { middleEllipsis } from '@/features/ai/runtime/thread-panel/thread-status-format'
 
 describe('ThreadStatusFooter', () => {
   it('renders zero usage facts when no closed-turn usage exists', () => {
@@ -14,18 +13,16 @@ describe('ThreadStatusFooter', () => {
     expect(footer.querySelector('button')).toBeNull()
   })
 
-  it('renders Environment/Workspace and Git as readonly facts', () => {
+  it('renders Environment identity as readonly facts', () => {
     render(
       <ThreadStatusFooter
-        environment={{ environmentId: 'env-local-id', environmentName: 'local', workspacePath: 'proj/a' }}
+        environment={{ environmentId: 'env-local-id', environmentName: 'local' }}
         environmentReady
-        gitBranch="feature/footer"
       />,
     )
 
     const footer = screen.getByLabelText('会话状态')
-    expect(footer).toHaveTextContent('env:local · @/proj/a')
-    expect(footer).toHaveTextContent('git:feature/footer')
+    expect(footer).toHaveTextContent('env:local')
     expect(footer.querySelector('button')).toBeNull()
   })
 
@@ -33,49 +30,32 @@ describe('ThreadStatusFooter', () => {
   it('falls back to environmentId when environmentName is omitted', () => {
     render(
       <ThreadStatusFooter
-        environment={{ environmentId: 'env-uuid-42', workspacePath: 'proj/sub' }}
+        environment={{ environmentId: 'env-uuid-42' }}
         environmentReady
       />,
     )
 
     const footer = screen.getByLabelText('会话状态')
-    expect(footer).toHaveTextContent('env:env-uuid-42 · @/proj/sub')
+    expect(footer).toHaveTextContent('env:env-uuid-42')
   })
 
-  it('marks an unavailable binding without replacing it or exposing an absolute path', () => {
+  it('marks an unavailable binding without replacing it', () => {
     render(
       <ThreadStatusFooter
-        environment={{ environmentId: 'env-dev-id', environmentName: 'dev', workspacePath: '.' }}
+        environment={{ environmentId: 'env-dev-id', environmentName: 'dev' }}
         environmentReady={false}
       />,
     )
 
     const footer = screen.getByLabelText('会话状态')
-    expect(footer).toHaveTextContent('env:dev · @/ (unavailable)')
-    expect(footer.textContent).not.toContain('/home/')
-  })
-
-  it('uses middle ellipsis in text while keeping the complete safe path in title', () => {
-    const path = 'projects/very-long-directory-name/packages/runtime/thread-panel'
-    render(
-      <ThreadStatusFooter
-        environment={{ environmentId: 'env-dev-id', environmentName: 'dev', workspacePath: path }}
-        environmentReady
-      />,
-    )
-
-    const segment = screen.getByLabelText('会话状态').querySelector('.thread-status-environment .thread-status-seg')
-    expect(segment).toHaveTextContent('…')
-    expect(segment).toHaveAttribute('title', `env:dev · @/${path}`)
-    expect(middleEllipsis('abcdefghij', 7)).toBe('abc…hij')
+    expect(footer).toHaveTextContent('env:dev (unavailable)')
   })
 
   it('renders usage, context estimate, and cache hit rate in stable readonly order', () => {
     render(
       <ThreadStatusFooter
-        environment={{ environmentId: 'env-local-id', environmentName: 'local', workspacePath: '.' }}
+        environment={{ environmentId: 'env-local-id', environmentName: 'local' }}
         environmentReady
-        gitBranch="main"
         branchUsage={{
           input: 30,
           output: 9,
@@ -91,8 +71,7 @@ describe('ThreadStatusFooter', () => {
 
     const segments = [...screen.getByLabelText('会话状态').querySelectorAll('.thread-status-seg')]
     expect(segments.map((segment) => segment.textContent)).toEqual([
-      'env:local · @/',
-      'git:main',
+      'env:local',
       '↑30 · ↓9 · R14 · W17 · $0.500',
       'ctx 61/128k',
       'cache 23%',

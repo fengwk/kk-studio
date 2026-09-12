@@ -25,7 +25,7 @@ composition root。Web 不实现 Catalog、Canvas、Harness、Storage 或 Enviro
 - 暴露严格、可定位、统一 `Result<T>` envelope 的 Controller/API families。
 - 将 PostgreSQL notification、durable snapshot/version、realtime overlay 和 WebSocket resync 连接起来。
 - 为浏览器和 Environment Daemon 提供有界、顺序一致、失败可恢复的异步发送链。
-- 在 HTTP async boundary、trusted JAR、启动/关闭 lifecycle 和部署安全边界上保持清晰职责。
+- 在 WebSocket 发送边界、trusted JAR、启动/关闭 lifecycle 和部署安全边界上保持清晰职责。
 
 ### Non-goals
 
@@ -170,8 +170,7 @@ Profile locations 是：
 | Canvas Function | `/api/canvas-function-models`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel` | model catalog、run、query、cancel |
 | Storage | `/api/storage` | upload reserve/complete/delete、`POST /api/storage/blobs/{blobId}/download-url|preview-url` |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
-| Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token` | Environment Card CRUD、rotate-token、live projection |
-| Environment directory | `GET /api/harness/environments/{id}/directories` | control-plane 单层目录 async query |
+| Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token` | Environment Card CRUD、rotate-token、只读 token、live projection；无目录浏览端点 |
 | ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |
 | ComfyUI runtime | `POST /api/comfyui/workflows/{workflowId}/runs`、`/api/comfyui/runs/{runId}` | stateless 202 run、job/cancel/output download，文件输入使用 blobId |
 
@@ -191,7 +190,7 @@ Thread progression 由 Work dispatcher 异步完成。Canvas command 返回带 `
   Session.name 由服务端从首个非空白用户文本派生，root Thread.name 固定 `main`）；
   `NEW_THREAD` 携带 `{sessionId, startEntryId, threadId, yoloEnabled}`（无 name 输入，
   新 Thread.name 固定 `branch-<threadId 前 8 位>`），旧 `ENTRY`/`ENTRY_DRAFT` 不复存在；
-- product HTTP command 只允许 `SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL`前缀和一条最后的
+- product HTTP command 只允许 `SET_AGENT -> SET_MODEL`前缀和一条最后的
   `USER_MESSAGE`；Agent 工具选择随最新 Agent definition 的 `config.toolIds` 解析，不通过 branch command
   发送；`CUSTOM_MESSAGE`不开放到 product HTTP surface；
 - User content 只允许 `TEXT`、`ATTACHMENT`、`RESOURCE`，Attachment 由 Platform acceptance transaction 转成 durable
@@ -343,7 +342,7 @@ version source。建立上游时先注册 consumer 再读取 cursor；fan-out �
 1. 在 Spring WebSocket 和 native JSR-356 session 两侧设置 `max-message-bytes`；
 2. 创建 `SpringWebSocketConnection`和每连接 `DaemonOutboundSender`；
 3. 把 open/receive/close 委托给会话核心的 `DaemonEndpoint`（`harness/environment-server` 的 `EnvironmentDaemonServer`）；
-4. 会话核心只接受 protocol v1 HELLO 及严格的 `capabilityCatalogVersion`，并负责校验通用 capability INVOKE payload；
+4. 会话核心只接受 protocol v2 HELLO 及严格的 `capabilityCatalogVersion`，并负责校验通用 capability INVOKE payload；
 5. 会话核心先解绑 registry、在途 invocation 和 pending request，再关闭 sender。
 
 `SpringWebSocketConnection`只实现核心的 `DaemonChannel`；web 层不解释协议，也不保存任何会话状态。
@@ -357,32 +356,15 @@ send timeout，超时/异常会关闭入队围栏、通知会话核心进行 unc
 `EnvironmentDaemonWebSocketContainerFactoryBean`检测不到 `ServerContainer`时 no-op，因此测试 context 不需要
 真实 JSR-356 container；真实 servlet container 才提升默认文本/二进制 buffer。
 
-### HTTP async boundary：Environment directory
+### Environment 端点与 async 边界
 
-`GET /api/harness/environments/{id}/directories?path=.`是 control-plane read-only 查询，不经过 Tool permission、不会
-创建 ToolInvocation，也不把绝对路径返回给浏览器。它通过 `fs.list-directory` generic capability 执行，同一 Environment
-可并发承载多次查询；本节点不是 route owner 时经 PostgreSQL `environment_directory_query` mailbox
-转发到 owner 节点。
+Environment 的 HTTP surface 只有 Card CRUD、registration token 与 live projection；
+每个文件、进程、检索与 LSP 调用都由模型在 arguments 中显式给出目标 OS 的绝对 `workdir`，由 Daemon 校验真实存在性、
+目录类型与可访问性。Web 层不承载目录查询，也没有对应的 `CompletionStage` 分支：异步 boundary 只保留
+Application Event WebSocket 的订阅与 `DaemonOutboundSender`。
 
-Controller 直接返回 `CompletionStage<ResponseEntity<Result<?>>>`：
-
-```text
-Controller
-  -> EnvironmentDirectoryLister.listDirectory(..., timeout)
-  -> CompletionStage.handle(mapResult/mapAsyncFailure)
-  -> Spring MVC async dispatch
-```
-
-Servlet request thread 不 `join`或等待 future。typed failure 映射为
-`INVALID_PATH/NOT_DIRECTORY -> 400`、`ENVIRONMENT_NOT_FOUND/NOT_FOUND -> 404`、
-`ENVIRONMENT_UNAVAILABLE -> 409`、`TIMEOUT -> 504`、`IO_ERROR -> 502`。timeout 从
-`SystemSettings.environment.directoryListTimeoutMillis`在请求时读取。PostgreSQL 是权威
-gate，生产数据源配置了三个 5 秒网络超时边界以实现快速 fail-closed，均低于默认 10 秒 directory
-request budget：
-1. Hikari 连接池获取等待 `spring.datasource.hikari.connection-timeout` 固定为 5000ms（5 秒）；
-2. PostgreSQL JDBC 连接建立超时 `spring.datasource.hikari.data-source-properties.connectTimeout` 固定为 5 秒，作为 TCP connect 上限，防止断网时持续等待连接建立；
-3. PostgreSQL JDBC 底层 socket 读超时 `spring.datasource.hikari.data-source-properties.socketTimeout` 固定为 5 秒，防止断网时阻塞在 socket read。
-当连接池无法提供有效连接或数据库网络不可达时，等待最多 5 秒并在默认请求预算内映射
+PostgreSQL 是 route 权威 gate：数据源设置了 Hikari 连接池获取 5 秒、JDBC `connectTimeout` 5 秒
+与 `socketTimeout` 5 秒三个超时边界；当连接池无法提供有效连接或数据库发生网络故障时，在预算内快速 fail-closed 并映射
 `ENVIRONMENT_UNAVAILABLE`，绝不回退到内存 route。
 
 ### Trusted JAR 启动加载
@@ -416,10 +398,9 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
    不改变 PostgreSQL durable truth。
 7. Harness worker dispatcher、processor、event loop、heartbeat scheduler 和 sender 都有明确 owner；worker 关闭不会
    释放 notification loop，事件 channel 关闭也不会留下 Runtime subscription。
-8. HTTP async endpoint 只返回 completion stage，不在 servlet thread 执行阻塞 Daemon round trip；future timeout 和 transport
-   error 都映射为稳定应用 error code。Environment directory 以 PostgreSQL 作为权威 gate，数据源设置了 Hikari 连接池获取
-   5 秒、JDBC connectTimeout 5 秒与 socketTimeout 5 秒三个超时边界，均低于默认 10 秒请求预算；当连接池无法提供有效连接或数据库
-   发生网络故障时，在预算内快速 fail-closed 并映射 `ENVIRONMENT_UNAVAILABLE`，绝不回退到内存 route。
+8. WebSocket 每连接发送链都有 frame count + UTF-8 bytes 上限、单一 in-flight 顺序和有限 send timeout；失败先停止入队，
+   再清理订阅/registry，最后关闭 transport。Environment WebSocket 的等待链路在 DB 连接与 send timeout 预算内
+   fail-closed，control-plane 不存在目录 round trip。
 9. Trusted JAR list 在 catalog 创建后不可变，jar scan 只从显式目录发生；任何加载异常在 context 可用前关闭已创建
    classloader。
 10. strict JSON field、canonical UUID、canonical decimal、DTO discriminator 和 duplicate detection 在 Web boundary
@@ -529,12 +510,11 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 - `web/src/test/java/fun/fengwk/kkstudio/web/environment/EnvironmentDaemonWebSocketEndpointTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/environment/EnvironmentDaemonWebSocketHandlerTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/environment/EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest.java`
-- `web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioEnvironmentDirectoryControllerTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/SpaFallbackTest.java`
 
 这些测试覆盖 Web composition 的真实风险：唯一 root 与依赖方向、Flyway single baseline、PostgreSQL notification
 reconnect/resync、worker NOTIFY/poll 两条唤醒路径、ack-before-event、bounded sender、Environment large READY frame、
-HTTP async error mapping、dynamic MCP discovery/planning/execution、strict DTO、trusted JAR classloader lifecycle、
+bounded sender 的 fail-closed 行为、dynamic MCP discovery/planning/execution、strict DTO、trusted JAR classloader lifecycle、
 locale fallback 和静态 SPA fallback。
 
 ---

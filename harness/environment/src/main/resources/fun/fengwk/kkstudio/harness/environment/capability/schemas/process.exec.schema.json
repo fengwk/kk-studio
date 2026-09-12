@@ -7,13 +7,16 @@
     },
     "workdir": {
       "type": "string",
-      "description": "Working directory for the command. Defaults to the agent's current working directory. If provided, the command runs from that directory and relative paths in the command resolve from it. Prefer this over embedding `cd ... &&` in `command`."
+      "description": "Absolute directory on the target daemon's file system that this call runs in. Required on every call; it is never inherited from a previous call, a session default, or the environment root. Provide an expanded absolute path (no '~', no environment variable placeholders); Windows targets use a drive-rooted or UNC path."
     },
     "timeout_seconds": {
       "type": "integer",
       "description": "Positive timeout in seconds. Defaults to 120 (2 minutes). For commands that may run longer, provide a larger value."
     }
   },
-  "required": ["command"],
+  "required": [
+    "command",
+    "workdir"
+  ],
   "additionalProperties": false
 }

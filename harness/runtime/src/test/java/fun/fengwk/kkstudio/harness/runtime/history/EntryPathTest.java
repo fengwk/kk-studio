@@ -4,14 +4,11 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
@@ -105,12 +102,11 @@ class EntryPathTest {
   void baseSettingsReturnsExactLatestSnapshotWhenEnvironmentAndAgentChanged() {
     // 多个关闭 Turn 之间 environment/agent 都变化过，最新快照的 environment 为 null：
     // baseSettings() 必须返回最新 ROOT/TURN_START 的完整快照，绝不回看更旧的非 null environment/agent。
-    BranchSettings rootSettings = settingsPath(null, "root-agent");
+    BranchSettings rootSettings = settings("root-agent");
     BranchSettings firstTurn =
-        settingsPath(
-                EnvironmentBindings.binding("33333333-3333-3333-3333-333333333333"), "first-agent")
+        settings("first-agent")
             .withModel(new ModelSelection("anthropic", "claude-sonnet", "custom"));
-    BranchSettings latestTurn = settingsPath(null, "latest-agent");
+    BranchSettings latestTurn = settings("latest-agent");
     Entry root = root(rootSettings);
     Entry start1 = turnStart(id(2L), id(1L), TurnStartReason.INPUT, firstTurn);
     Entry user1 = userMessage(id(3L), id(2L));
@@ -125,7 +121,6 @@ class EntryPathTest {
 
     BranchSettings base = path.baseSettings();
     assertEquals(latestTurn, base);
-    assertNull(base.workspacePath());
     assertEquals("latest-agent", base.agentName());
     assertEquals(new ModelSelection("anthropic", "claude-sonnet", "default"), base.model());
     assertNotEquals(firstTurn, base);
@@ -1284,13 +1279,7 @@ class EntryPathTest {
   }
 
   private static BranchSettings settings(String agentName) {
-    return settingsPath(null, agentName);
-  }
-
-  private static BranchSettings settingsPath(EnvironmentBinding environment, String agentName) {
     return new BranchSettings(
-        environment == null ? null : environment.workspacePath(),
-        agentName,
-        new ModelSelection("anthropic", "claude-sonnet", "default"));
+        agentName, new ModelSelection("anthropic", "claude-sonnet", "default"));
   }
 }

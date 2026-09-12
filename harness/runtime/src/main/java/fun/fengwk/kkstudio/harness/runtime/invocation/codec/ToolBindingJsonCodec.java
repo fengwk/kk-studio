@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
@@ -33,7 +33,7 @@ public final class ToolBindingJsonCodec {
     node.set("definition", DEFINITION_CODEC.encodeNode(binding.definition()));
     node.set("contributor", encodeContributor(binding.contributor()));
     node.put("environmentRequired", binding.environmentRequired());
-    InvocationJsonSupport.putNullable(node, "environment", binding.environment());
+    InvocationJsonSupport.putNullable(node, "environmentId", binding.environmentId());
     return node;
   }
 
@@ -44,15 +44,15 @@ public final class ToolBindingJsonCodec {
   public ToolBinding decodeNode(JsonNode value) {
     ObjectNode node = InvocationJsonSupport.object(value, CONTEXT);
     InvocationJsonSupport.requireFields(
-        node, CONTEXT, "definition", "contributor", "environmentRequired", "environment");
+        node, CONTEXT, "definition", "contributor", "environmentRequired", "environmentId");
     AgentToolDefinition definition =
         DEFINITION_CODEC.decodeNode(InvocationJsonSupport.required(node, "definition", CONTEXT));
     ContributorBinding contributor =
         decodeContributor(InvocationJsonSupport.required(node, "contributor", CONTEXT));
     boolean environmentRequired = InvocationJsonSupport.bool(node, "environmentRequired", CONTEXT);
-    EnvironmentBinding environment =
-        InvocationJsonSupport.nullableEnvironmentBinding(node, "environment", CONTEXT);
-    return new ToolBinding(definition, contributor, environmentRequired, environment);
+    EnvironmentId environmentId =
+        InvocationJsonSupport.nullableEnvironmentId(node, "environmentId", CONTEXT);
+    return new ToolBinding(definition, contributor, environmentRequired, environmentId);
   }
 
   private static ObjectNode encodeContributor(ContributorBinding contributor) {

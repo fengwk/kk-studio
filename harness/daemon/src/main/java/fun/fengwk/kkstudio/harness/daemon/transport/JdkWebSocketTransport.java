@@ -129,7 +129,7 @@ public final class JdkWebSocketTransport implements DaemonTransport {
 
     @Override
     public CompletionStage<?> onBinary(WebSocket webSocket, ByteBuffer data, boolean last) {
-      // 当前协议 v1 仅允许 UTF-8 文本帧，二进制帧视为协议违规直接拒绝。
+      // 当前 Daemon 协议仅允许 UTF-8 文本帧，二进制帧视为协议违规直接拒绝。
       reject(webSocket, "binary frames are not supported");
       return CompletableFuture.failedFuture(
           new IllegalStateException("binary frames are not supported"));

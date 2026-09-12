@@ -249,7 +249,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     UUID rootEntryId = UUID.randomUUID();
     Session session = new Session(sessionId, "session", now);
     BranchSettings branchSettings =
-        new BranchSettings(null, agentName, new ModelSelection(providerName, modelName, "default"));
+        new BranchSettings(agentName, new ModelSelection(providerName, modelName, "default"));
     Entry rootEntry = new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings), now);
 
     harnessStore.transaction(
@@ -274,7 +274,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     assertEquals(persistedTool.getModelName(), mcpBinding.definition().descriptor().name());
     assertEquals("0", mcpBinding.definition().descriptor().version());
     assertFalse(mcpBinding.environmentRequired());
-    assertNull(mcpBinding.environment());
+    assertNull(mcpBinding.environmentId());
     assertEquals(McpStableIds.CONTRIBUTOR_ID.value(), mcpBinding.contributor().contributorId());
     assertEquals(
         McpStableIds.localName(persistedTool.getId()), mcpBinding.contributor().localName());

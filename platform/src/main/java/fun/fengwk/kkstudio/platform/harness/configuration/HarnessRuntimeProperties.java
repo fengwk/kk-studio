@@ -6,10 +6,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import java.nio.file.Path;
 
 /**
- * Harness Runtime 的纯 bootstrap 部署配置：进程内 worker 开关与沙箱路径。
+ * Harness Runtime 的纯 bootstrap 部署配置：进程内 worker 开关与 Backend 资源存储根。
  *
  * <p>Processor、compaction 与 subagent 等运行软策略由数据库 SystemSettings 承载；Dispatcher 容量与调度节奏由独立的 {@link
  * HarnessDispatcherProperties} 承载。
+ *
+ * <p>{@code resource-root} 只是 Backend 内容寻址资源存储的宿主目录。工具目录由每次调用的具体 arguments 提供，Backend 不持有默认
+ * cwd、目录边界或 Environment 根配置。
  */
 @Data
 @ConfigurationProperties(prefix = "kk-studio.harness.runtime")
@@ -18,30 +21,15 @@ public class HarnessRuntimeProperties {
   /** 是否启动本进程的 Work dispatcher / listener；关闭时控制/查询平面仍然可用。 */
   private boolean workersEnabled = true;
 
-  /** Environment 沙箱根目录：绝对路径标准化后作为工具 workdir 的边界；未配置时取进程当前目录 （user.dir）。 */
-  private Path environmentRoot = Path.of(System.getProperty("user.dir", "."));
+  /** Backend 内容寻址资源存储根目录；未配置时取进程当前目录下的 {@code .kkstudio/resources}。 */
+  private Path resourceRoot =
+      Path.of(System.getProperty("user.dir", "."), ".kkstudio", "resources");
 
-  /** 默认工作目录：绝对路径直接使用，相对路径基于 environmentRoot 解析，必须位于 environmentRoot 之内。 */
-  private Path workdir = Path.of(".");
-
-  public Path resolvedEnvironmentRoot() {
-    if (environmentRoot == null) {
+  public Path resolvedResourceRoot() {
+    if (resourceRoot == null) {
       throw new IllegalArgumentException(
-          "kk-studio.harness.runtime.environment-root must not be null");
+          "kk-studio.harness.runtime.resource-root must not be null");
     }
-    return environmentRoot.toAbsolutePath().normalize();
-  }
-
-  public Path resolvedWorkdir() {
-    if (workdir == null) {
-      throw new IllegalArgumentException("kk-studio.harness.runtime.workdir must not be null");
-    }
-    Path root = resolvedEnvironmentRoot();
-    Path resolved = workdir.isAbsolute() ? workdir.normalize() : root.resolve(workdir).normalize();
-    if (!resolved.startsWith(root)) {
-      throw new IllegalArgumentException(
-          "kk-studio.harness.runtime.workdir must stay within environment-root");
-    }
-    return resolved;
+    return resourceRoot.toAbsolutePath().normalize();
   }
 }

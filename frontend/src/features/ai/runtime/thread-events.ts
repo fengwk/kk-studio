@@ -720,7 +720,7 @@ function projectActiveToolRecord(
     { label: translate('ai.runtime.event.detail.attempt'), value: String(invocation.attempt) },
     {
       label: translate('ai.runtime.event.detail.environment'),
-      value: invocation.environment != null ? formatDisplayJson(invocation.environment) : '',
+      value: invocation.environmentId ?? '',
     },
     { label: translate('ai.runtime.event.detail.arguments'), value: formatDisplayJson(invocation.argumentsJson) },
   ]

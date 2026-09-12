@@ -35,7 +35,6 @@ describe('ThreadComposer and commands', () => {
     expect(THREAD_COMMANDS.map((c) => c.id)).toEqual([
       'thread',
       'agent',
-      'environment',
       'yolo',
       'models',
       'tree',
@@ -57,7 +56,6 @@ describe('ThreadComposer and commands', () => {
     expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
       'thread',
       'agent',
-      'environment',
       'yolo',
       'models',
       'upload',

@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -45,10 +44,7 @@ class CompactionSummaryAssemblerTest {
   private static final UUID OWNER_THREAD_ID = id(101L);
   private static final Instant NOW = Instant.parse("2026-08-20T00:00:00Z");
   private static final BranchSettings SETTINGS =
-      new BranchSettings(
-          EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111").workspacePath(),
-          "agent",
-          new ModelSelection("provider", "model", "v1"));
+      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
 
   @Test
   void historyPhaseStoresOnlyCanonicalPartialSummary() {

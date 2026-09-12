@@ -5,8 +5,9 @@ Usage:
 - For existing files, prefer `edit`; use `write` only for whole-file replacement or roughly 60%+ file-wide rewrites, never for localized edits that an `edit` can handle safely.
 - Provide complete content without placeholders such as `...` or omitted sections.
 - `write` returns a success message only. If you need to inspect the resulting file content, use `read` afterward.
+- Every call must include `workdir`. It must be an expanded absolute directory on the target daemon's file system; no call inherits a previous directory, session default, environment root, cwd, or home directory.
 
 Examples:
-- `write({ path: "src/new-module.ts", content: "export const demo = 1;\n" })`
-- `write({ path: "docs/new-template.md", workdir: "packages/web", content: "# New template\n\nComplete file content.\n" })`
+- `write({ path: "src/new-module.ts", workdir: "/srv/project", content: "export const demo = 1;\n" })`
+- `write({ path: "docs/new-template.md", workdir: "/srv/project/packages/web", content: "# New template\n\nComplete file content.\n" })`
 - `write({ path: "generated/report.txt", workdir: "/tmp/agent-artifacts", content: "full generated report\n" })`

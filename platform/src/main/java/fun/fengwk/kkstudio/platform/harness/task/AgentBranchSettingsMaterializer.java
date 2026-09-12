@@ -30,7 +30,8 @@ public final class AgentBranchSettingsMaterializer {
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
   }
 
-  public BranchSettings materialize(String agentName, String workspacePath) {
+  /** 子 Agent 只物化自身的 Agent/Model 选择；不继承任何目录状态。 */
+  public BranchSettings materialize(String agentName) {
     AgentDefinition agent = agentRepository.getByName(agentName);
     if (agent == null) {
       throw new IllegalArgumentException("subagent not found: " + agentName);
@@ -62,7 +63,6 @@ public final class AgentBranchSettingsMaterializer {
                 new IllegalArgumentException(
                     "subagent model variant not found: " + agentName + " variant=" + variantName));
     return new BranchSettings(
-        workspacePath,
         agent.getName(),
         new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variantName));
   }

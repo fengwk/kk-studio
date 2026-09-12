@@ -51,7 +51,7 @@ POM 见 [`pom.xml`](../../harness/builtin/pom.xml)，包级职责见 [`package-i
 | `fun.fengwk.kkstudio.harness.builtin` | 系统第一方内置能力根包，提供唯一的 `BuiltinHarnessContributor`、`BuiltinToolIds` 全局常量与完成态句柄 | 集中注册 14 个统一内置工具、Goal 自定义类型与投影器；底层网络传输与持久化调度由外层模块负责 |
 | `fun.fengwk.kkstudio.harness.builtin.environment` | 内置 Environment capability 工具实现（`EnvironmentCapabilityTool`）与 prompt 模板加载 | 委托执行期注入的 `BoundEnvironment` 执行环境能力；传输协议解析与宿主进程管理由环境守护进程承接 |
 | `fun.fengwk.kkstudio.harness.builtin.goal` | 内置 Goal 状态管理工具（`create_goal`、`get_goal`、`update_goal`）、纯上下文投影器（`GoalContextProjector`）、快照模型（`GoalState`）与严格确定性 JSON 编解码器（`GoalStateCodec`） | 依托通用 `harness_entry` 的 CUSTOM 载荷存储，通过 `AppendCustomEntry` 由 Core 原子追加 |
-| `fun.fengwk.kkstudio.harness.builtin.skill` | 内部 Skill 加载工具（`LoadSkillTool`）及正文加载契约 | 仅供当前 Thread Agent 选中的 Skill 按需加载，通过环境绑定安全读取而隐藏宿主绝对路径 |
+| `fun.fengwk.kkstudio.harness.builtin.skill` | 内部 Skill 加载工具（`LoadSkillTool`）、选中 Skill 元数据（`SelectedSkill`）与查找契约（`ThreadSelectedSkillLookup`） | 仅供当前 Thread Agent 选中的 Skill 按需加载；校验冻结的 skill 与来源 Environment 一致后经 `BoundEnvironment` 调用 `skill.load` 能力，不存在正文专用加载器链 |
 | `fun.fengwk.kkstudio.harness.builtin.subagent` | 内部 Subagent 委派工具适配器（`TaskTool`）、任务请求契约（`SubagentTaskRequest`）、执行端口（`SubagentRunner`）与动态配置接入 | 负责参数校验与委派转发，委托 `SubagentRunner` 执行；多轮调度引擎与持久化状态机由运行时负责 |
 
 ## 核心模型 / API
@@ -122,7 +122,7 @@ updatedAt:   Instant
 
 ### Skill 与 Subagent 工具
 
-- [`LoadSkillTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillTool.java)：作为内部工具（`ToolVisibility.INTERNAL`）注册，依据 `ThreadSelectedSkillLookup` 与 `SkillBodyLoader` 按需加载 Skill 正文内容。
+- [`LoadSkillTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillTool.java)：作为内部工具（`ToolVisibility.INTERNAL`）注册，声明 `ToolRequirements.environment()`；依据 `ThreadSelectedSkillLookup` 解析冻结的 `SelectedSkill`，校验其 `sourceEnvironmentId` 与当前绑定 Environment 一致后，直接经 `BoundEnvironment.execute` 以 `{name}` arguments 调用 `skill.load` 能力读取正文。`skill.load` 不要求 workdir，Tool 也不注入任何目录状态。
 - [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java)：作为内部工具（`ToolVisibility.INTERNAL`）注册，委托外部注入的 `SubagentRunner` 创建或恢复 Subagent Session 与 Thread，在有界并发与深度控制下执行子任务并返回汇总报告。
 
 ## 执行 / 状态 trace

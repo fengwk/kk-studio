@@ -1732,7 +1732,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影固定 11 个原子 capabilities（version=1）+ skills + rootPath（daemon canonical Environment Root），且不公开旧 tools 或 READY environment metadata',
+  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影固定 10 个原子 capabilities + skills + rootPath（daemon canonical Environment Root），coding/process/LSP 为 workdir 版（version=2）、skill.load 保持 version=1，且不公开旧 tools 或 READY environment metadata',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -1742,27 +1742,30 @@ registerCase({
       typeof match.rootPath === 'string' && match.rootPath.length > 0,
       safeDiagnosticJson(match),
     )
-    const expectedCapabilityIds = [
+    // 具体工具 arguments 必须携带显式绝对 workdir，因此 coding/process/LSP 能力版本升为 2；
+    // 目录浏览能力已随产品 Workspace 删除，不再是 catalog 的一部分。
+    const workdirCapabilityIds = [
       'fs.read',
       'fs.write',
       'fs.apply-edit',
       'process.exec',
       'fs.search',
       'fs.find',
-      'fs.list-directory',
       'lsp.goto-definition',
       'lsp.workspace-symbols',
       'lsp.java-decompile',
-      'skill.load',
     ]
+    const expectedCapabilityIds = [...workdirCapabilityIds, 'skill.load']
     const actualCapabilities = match.capabilities || []
     const ids = actualCapabilities.map((capability) => capability.id)
     assert(
       ids.length === expectedCapabilityIds.length
         && expectedCapabilityIds.every((id) => ids.includes(id))
-        && actualCapabilities.every((capability) => capability.version === '1'),
-      safeDiagnosticJson({ expectedCapabilityIds, actualCapabilities }),
+        && actualCapabilities.every((capability) =>
+          capability.version === (capability.id === 'skill.load' ? '1' : '2')),
+      safeDiagnosticJson({ expectedCapabilityIds, workdirCapabilityIds, actualCapabilities }),
     )
+    assert(!ids.includes('fs.list-directory'), safeDiagnosticJson(actualCapabilities))
     assert(Array.isArray(match.skills), safeDiagnosticJson(match))
     assert(
       !Object.hasOwn(match, 'tools')
@@ -1779,70 +1782,11 @@ registerCase({
 })
 
 registerCase({
-  id: 'daemon.directories',
-  level: 'L4',
-  title: 'Environment Root 单层目录浏览 API',
-  requires: ['tools'],
-  docs: 'GET /api/harness/environments/{id}/directories（control-plane 只读）：缺省 path="." 浏览 root——canonical 相对 wire path、displayPath 等于请求 path 的最后一段（root 为 "."，只作展示、绝不暴露 daemon 本地绝对路径）、root 的 parentPath="."、truncated 布尔、gitBranch 可空、entries 只含直属子目录（{name,path}：name 是目录名且等于 path 最后一段，path 是请求目录的直接子路径）；显式 path="." 与缺省一致；".." 段 400 INVALID_PATH、不存在目录 404 NOT_FOUND、非法环境 ID 400',
-  async run(ctx) {
-    const envId = ctx.vars.daemonEnvironment?.id
-    assert(envId, 'daemonEnvironment must have canonical UUID id')
-    const base = `/api/harness/environments/${encodeURIComponent(envId)}/directories`
-    const { json } = await ctx.call('GET', base)
-    const dir = envelopeData(json)
-    assert(dir?.path === '.', safeDiagnosticJson(json))
-    assert(dir.displayPath === '.', safeDiagnosticJson(json))
-    assert(dir.parentPath === '.', safeDiagnosticJson(json))
-    assert(typeof dir.truncated === 'boolean', safeDiagnosticJson(json))
-    assert(
-      !Object.hasOwn(dir, 'gitBranch') || dir.gitBranch === null || typeof dir.gitBranch === 'string',
-      safeDiagnosticJson(json),
-    )
-    assert(Array.isArray(dir.entries), safeDiagnosticJson(json))
-    for (const entry of dir.entries) {
-      assert(
-        typeof entry.name === 'string'
-          && entry.name.length > 0
-          && typeof entry.path === 'string'
-          && entry.path.length > 0,
-        safeDiagnosticJson(entry),
-      )
-      assert(!Object.hasOwn(entry, 'displayPath'), safeDiagnosticJson(entry))
-      const prefix = dir.path === '.' ? '' : `${dir.path}/`
-      assert(entry.path.startsWith(prefix), safeDiagnosticJson(entry))
-      assert(!entry.path.slice(prefix.length).includes('/'), safeDiagnosticJson(entry))
-      assert(entry.name === entry.path.split('/').at(-1), safeDiagnosticJson(entry))
-    }
-    const explicit = envelopeData(
-      (await ctx.call('GET', `${base}?path=${encodeURIComponent('.')}`)).json,
-    )
-    assert(
-      explicit.path === '.' && explicit.displayPath === '.' && explicit.parentPath === '.',
-      safeDiagnosticJson(explicit),
-    )
-    const invalid = await expectHttpError(
-      () => ctx.call('GET', `${base}?path=${encodeURIComponent('../escape')}`),
-      { status: 400 },
-    )
-    assert(String(invalid.body).includes('INVALID_PATH'), invalid.body)
-    const missing = await expectHttpError(
-      () => ctx.call('GET', `${base}?path=${encodeURIComponent('no-such-dir-zz')}`),
-      { status: 404 },
-    )
-    assert(String(missing.body).includes('NOT_FOUND'), missing.body)
-    await expectHttpError(
-      () => ctx.call('GET', '/api/harness/environments/Not-Canonical/directories'),
-      { status: 400 },
-    )
-  },
-})
-
-registerCase({
   id: 'tool.read_turn',
   level: 'L4',
   title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 Resource 外部化',
   requires: ['real', 'tools', 'canvas-storage'],
-  docs: '使用 minimax-anthropic/MiniMax-M3 + backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（冻结 EnvironmentBinding、无 location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节；后续模型轮次在嵌套 Resource fallback/materialization 后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束',
+  docs: '使用 minimax-anthropic/MiniMax-M3 + backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（ToolInvocationDTO 只暴露扁平 environmentId，无 location/environment wrapper）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节；后续模型轮次在嵌套 Resource fallback/materialization 后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     const minimaxModel = await requireRealMiniMaxM3(ctx)
@@ -1876,12 +1820,12 @@ registerCase({
           && JSON.stringify(agentConfig.subagents) === JSON.stringify([]),
         `temporary tool Agent config must be exactly toolIds=[base.read], skills=[], subagents=[]: ${safeDiagnosticJson(toolAgent)}`,
       )
-      const expectedEnvironment = {
-        environmentId: ctx.vars.daemonEnvironment.id,
-        workspacePath: '.',
-      }
       const envRoot = process.env.DAEMON_ENV_ROOT
       assert(envRoot, 'DAEMON_ENV_ROOT must be exported by scripts/e2e/lib.sh')
+      // 具体工具 arguments 必须携带目标 Daemon 上的显式绝对 workdir；Daemon 的 environment root
+      // 就是 e2e fixture 所在目录，因此该绝对路径同时是 fixture 位置与调用 workdir。
+      const workdir = path.resolve(envRoot)
+      assert(path.isAbsolute(workdir), `workdir must be absolute: ${workdir}`)
       const fixturePath = path.join(envRoot, 'e2e-resource.txt')
       const fixtureLines = Array.from(
         { length: 32 },
@@ -1902,25 +1846,21 @@ registerCase({
         title: `e2e-tool-chat-${suffix}`,
         agentName: toolAgent.name,
         yoloEnabled: false,
-        workspacePath: '.',
       })
       const accepted = await createNewSession(ctx, {
         owner: chatOwner(chat.id),
         sessionId: cid(),
         threadId: cid(),
-        rootSettings: branchSettingsOf(
-          toolAgent,
-          {
-            providerName: minimaxModel.providerName,
-            modelName: minimaxModel.modelName,
-            variant: minimaxModel.variant,
-          },
-          { workspacePath: '.' },
-        ),
+        rootSettings: branchSettingsOf(toolAgent, {
+          providerName: minimaxModel.providerName,
+          modelName: minimaxModel.modelName,
+          variant: minimaxModel.variant,
+        }),
         yoloEnabled: false,
         commands: [
           userMessageCommand(
-            '必须调用 read 工具读取文件 e2e-resource.txt，使用参数 {"path":"e2e-resource.txt"}，'
+            `必须调用 read 工具读取文件 e2e-resource.txt，使用参数 `
+              + `{"path":"e2e-resource.txt","workdir":"${workdir}"}，`
               + '不要猜测或跳过工具，然后用一句话总结读取结果。',
             cid(),
           ),
@@ -1928,7 +1868,7 @@ registerCase({
       })
       const tid = accepted.thread.threadId
       assert(
-        accepted.thread.branchSettings.workspacePath === '.',
+        !Object.hasOwn(accepted.thread.branchSettings, 'workspacePath'),
         safeDiagnosticJson(accepted.thread.branchSettings),
       )
       let waiting = null
@@ -1969,11 +1909,15 @@ registerCase({
         `ToolInvocationDTO must not expose toolBackend: ${safeDiagnosticJson(readInvocation)}`,
       )
       assert(
-        JSON.stringify(readInvocation.environment) === JSON.stringify(expectedEnvironment),
-        `read invocation must freeze the complete Environment binding: ${safeDiagnosticJson({
+        readInvocation.environmentId === ctx.vars.daemonEnvironment.id,
+        `read invocation must freeze the Agent-owned EnvironmentId: ${safeDiagnosticJson({
           readInvocation,
-          expectedEnvironment,
+          expectedEnvironmentId: ctx.vars.daemonEnvironment.id,
         })}`,
+      )
+      assert(
+        !Object.hasOwn(readInvocation, 'environment'),
+        `ToolInvocationDTO must not expose the removed EnvironmentBinding wrapper: ${safeDiagnosticJson(readInvocation)}`,
       )
       assert(
         !Object.hasOwn(readInvocation, 'location'),
@@ -1984,6 +1928,12 @@ registerCase({
           && Number.isSafeInteger(readInvocation.attempt)
           && readInvocation.attempt === 0,
         safeDiagnosticJson(readInvocation),
+      )
+      // workdir 只存在于具体工具 arguments：durable frozen arguments 必须携带显式绝对目录。
+      const readArguments = JSON.parse(readInvocation.argumentsJson || '{}')
+      assert(
+        readArguments.path === 'e2e-resource.txt' && readArguments.workdir === workdir,
+        `read arguments must carry the explicit absolute workdir: ${safeDiagnosticJson(readArguments)}`,
       )
       const approvalJson = JSON.parse(readInvocation.approvalJson || '{}')
       assert(

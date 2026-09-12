@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -125,21 +124,15 @@ class BashSurfaceAnalyzerTest {
                     new PermissionRule("echo *", PermissionAction.ALLOW),
                     new PermissionRule("rm *", PermissionAction.DENY))),
             false);
-    String arguments = "{\"command\":\"echo ok && rm -rf tmp\",\"workdir\":\".\"}";
+    String arguments = "{\"command\":\"echo ok && rm -rf tmp\",\"workdir\":\"/tmp/environment\"}";
 
     assertEquals(
         PermissionAction.DENY,
-        evaluator
-            .evaluate(
-                new PermissionEvaluationContext(
-                    BASH, arguments, Path.of("/tmp/environment"), settings))
-            .action());
+        evaluator.evaluate(new PermissionEvaluationContext(BASH, arguments, settings)).action());
     assertEquals(
         PermissionAction.DENY,
         evaluator
-            .evaluate(
-                new PermissionEvaluationContext(
-                    CUSTOM_BASH, arguments, Path.of("/tmp/environment"), settings))
+            .evaluate(new PermissionEvaluationContext(CUSTOM_BASH, arguments, settings))
             .action());
   }
 
@@ -162,11 +155,8 @@ class BashSurfaceAnalyzerTest {
   }
 
   private PermissionAction evaluate(String command, ToolSettings settings) {
-    String arguments = "{\"command\":" + quote(command) + ",\"workdir\":\".\"}";
-    return evaluator
-        .evaluate(
-            new PermissionEvaluationContext(BASH, arguments, Path.of("/tmp/environment"), settings))
-        .action();
+    String arguments = "{\"command\":" + quote(command) + ",\"workdir\":\"/tmp/environment\"}";
+    return evaluator.evaluate(new PermissionEvaluationContext(BASH, arguments, settings)).action();
   }
 
   private String quote(String value) {
