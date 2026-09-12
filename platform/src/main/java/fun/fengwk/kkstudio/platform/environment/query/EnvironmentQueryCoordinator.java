@@ -9,6 +9,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.environment.directory.LocalDirectoryQueryPort;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryDTO;
@@ -25,7 +26,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Supplier;
 
 /**
  * 跨节点只读 Environment 目录查询协调器（弱交付信箱 + PostgreSQL NOTIFY + 本地执行）。
@@ -127,26 +127,20 @@ public class EnvironmentQueryCoordinator {
   private final JdbcTemplate jdbcTemplate;
   private final ObjectMapper objectMapper;
   private final UUID ownerNodeId;
+  private final LocalDirectoryQueryPort localDirectoryQueryPort;
   private final Map<UUID, PendingQuery> pendingQueries = new ConcurrentHashMap<>();
   private final Map<EnvironmentId, QueryDrain> queryDrains = new ConcurrentHashMap<>();
-  private volatile LocalDirectoryQueryExecutor localExecutor;
-  private volatile Supplier<Set<EnvironmentId>> localReadyEnvironmentsSupplier = Set::of;
 
   public EnvironmentQueryCoordinator(
       JdbcTemplate jdbcTemplate,
       ObjectMapper objectMapper,
-      @Qualifier("nodeInstanceId") UUID ownerNodeId) {
+      @Qualifier("nodeInstanceId") UUID ownerNodeId,
+      LocalDirectoryQueryPort localDirectoryQueryPort) {
     this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     this.ownerNodeId = Objects.requireNonNull(ownerNodeId, "ownerNodeId");
-  }
-
-  public void registerLocalExecutor(
-      LocalDirectoryQueryExecutor executor,
-      Supplier<Set<EnvironmentId>> readyEnvironmentsSupplier) {
-    this.localExecutor = Objects.requireNonNull(executor, "executor");
-    this.localReadyEnvironmentsSupplier =
-        Objects.requireNonNull(readyEnvironmentsSupplier, "readyEnvironmentsSupplier");
+    this.localDirectoryQueryPort =
+        Objects.requireNonNull(localDirectoryQueryPort, "localDirectoryQueryPort");
   }
 
   /**
@@ -227,7 +221,7 @@ public class EnvironmentQueryCoordinator {
     } catch (IllegalArgumentException ignored) {
       return;
     }
-    if (localReadyEnvironmentsSupplier.get().contains(environmentId)) {
+    if (localReadyEnvironments().contains(environmentId)) {
       claimAndExecuteQueriesFor(environmentId);
     }
   }
@@ -255,7 +249,7 @@ public class EnvironmentQueryCoordinator {
 
   /** 当本地环境变为 READY 时唤醒 mailbox 排空（READY 双唤醒的一部分）。 */
   public void onEnvironmentReady(EnvironmentId environmentId) {
-    if (environmentId != null && localReadyEnvironmentsSupplier.get().contains(environmentId)) {
+    if (environmentId != null && localReadyEnvironments().contains(environmentId)) {
       claimAndExecuteQueriesFor(environmentId);
     }
   }
@@ -274,15 +268,16 @@ public class EnvironmentQueryCoordinator {
     }
 
     // 检查本地持有的 READY 环境是否有未认领的 query
-    for (EnvironmentId environmentId : localReadyEnvironmentsSupplier.get()) {
+    for (EnvironmentId environmentId : localReadyEnvironments()) {
       claimAndExecuteQueriesFor(environmentId);
     }
   }
 
+  private Set<EnvironmentId> localReadyEnvironments() {
+    return localDirectoryQueryPort.localReadyEnvironments();
+  }
+
   private void claimAndExecuteQueriesFor(EnvironmentId environmentId) {
-    if (localExecutor == null) {
-      return;
-    }
     QueryDrain drain = queryDrains.computeIfAbsent(environmentId, ignored -> new QueryDrain());
     synchronized (drain) {
       drain.requested = true;
@@ -304,7 +299,7 @@ public class EnvironmentQueryCoordinator {
         drain.requested = false;
       }
 
-      if (localExecutor == null || !localReadyEnvironmentsSupplier.get().contains(environmentId)) {
+      if (!localReadyEnvironments().contains(environmentId)) {
         if (retryRequestedOrStop(drain)) {
           continue;
         }
@@ -382,8 +377,7 @@ public class EnvironmentQueryCoordinator {
   }
 
   private void executeClaimedQuery(ClaimedQuery query, Runnable onFinished) {
-    LocalDirectoryQueryExecutor executor = this.localExecutor;
-    if (executor == null || !localReadyEnvironmentsSupplier.get().contains(query.environmentId)) {
+    if (!localReadyEnvironments().contains(query.environmentId)) {
       failQuery(
           query.id,
           EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
@@ -405,7 +399,9 @@ public class EnvironmentQueryCoordinator {
 
     CompletableFuture<EnvironmentDirectoryListResult> execution;
     try {
-      execution = executor.executeLocalDirectoryList(query.environmentId, query.path, timeout);
+      execution =
+          localDirectoryQueryPort.executeLocalDirectoryList(
+              query.environmentId, query.path, timeout);
     } catch (RuntimeException error) {
       failQuery(query.id, EnvironmentDirectoryFailureCode.IO_ERROR, error.getMessage());
       onFinished.run();

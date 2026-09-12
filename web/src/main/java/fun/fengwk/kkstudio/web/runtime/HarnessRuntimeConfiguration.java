@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
@@ -34,7 +35,6 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.resource.ManagedResourceDownloadService;
@@ -330,7 +330,7 @@ public class HarnessRuntimeConfiguration {
 
   /** READY 事件唤醒 Runtime 侧 Work dispatcher；实际 Environment 事实由 {@link TurnResolver} 在 resolve 时读取。 */
   @Bean
-  public EnvironmentReadyListener harnessEnvironmentReadyListener(
+  public EnvironmentSessionListener harnessEnvironmentSessionListener(
       ObjectProvider<HarnessWorkDispatcher> dispatcherProvider) {
     return ignoredEnvironmentId -> dispatcherProvider.ifAvailable(HarnessWorkDispatcher::wake);
   }

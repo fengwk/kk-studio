@@ -21,6 +21,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSink;
@@ -37,7 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
@@ -122,7 +122,7 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
   @Autowired private HarnessDispatcherProperties harnessDispatcherProperties;
   @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
-  @Autowired private EnvironmentReadyListener environmentReadyListener;
+  @Autowired private EnvironmentSessionListener environmentSessionListener;
 
   @Autowired
   @Qualifier("harnessRuntimeLifecycle")
@@ -160,7 +160,7 @@ class HarnessRuntimeConfigurationTest {
     assertEquals(3, harnessDispatcherProperties.getWorker().getConcurrency());
     assertEquals(5, harnessDispatcherProperties.getWorker().getQueueCapacity());
     assertNotNull(postgresqlNotificationLoop);
-    assertNotNull(environmentReadyListener);
+    assertNotNull(environmentSessionListener);
     assertEquals(
         new InvocationRetryPolicy(
             3,
