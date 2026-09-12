@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentCapabilityDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentSkillDTO;
@@ -134,6 +135,20 @@ public class EnvironmentServiceImpl implements EnvironmentService {
   }
 
   @Override
+  public EnvironmentRegistrationTokenDTO getRegistrationToken(EnvironmentId id) {
+    Objects.requireNonNull(id, "id");
+    Environment env = environmentRepository.getById(id.value());
+    if (env == null) {
+      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+    }
+    EnvironmentRegistrationTokenDTO dto = new EnvironmentRegistrationTokenDTO();
+    dto.setId(env.getId().toString());
+    dto.setRegistrationToken(env.getRegistrationToken());
+    dto.setVersion(CatalogVersions.format(env.getVersion()));
+    return dto;
+  }
+
+  @Override
   @Transactional
   public EnvironmentCardDTO rotateToken(EnvironmentId id, String expectedVersion) {
     Objects.requireNonNull(id, "id");
@@ -145,10 +160,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     if (env.getVersion() != expected) {
       throw new AiVersionConflictException(
           RESOURCE, id.toString(), expectedVersion, CatalogVersions.format(env.getVersion()));
-    }
-    if (environmentRegistry.hasActiveLease(id)) {
-      throw new AiInUseException(
-          RESOURCE, "cannot rotate token while environment has an active connection lease");
     }
     env.setRegistrationToken(UUID.randomUUID().toString());
     if (!environmentRepository.updateById(env, expected)) {

@@ -314,7 +314,7 @@ public class EnvironmentRegistry {
     return jdbcTemplate.query(LIST_SQL, new EnvironmentConnectionRowMapper());
   }
 
-  /** 数据库现在时判定指定环境是否有任意活跃租约（用于 admin rotateToken/delete 在锁行下的安全准入）。 */
+  /** 数据库现在时判定指定环境是否有任意活跃租约（用于 delete 在锁行下的安全准入）。 */
   public boolean hasActiveLease(EnvironmentId environmentId) {
     if (environmentId == null) {
       return false;
