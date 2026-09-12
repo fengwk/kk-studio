@@ -36,13 +36,10 @@ final class ToolArgumentAliasNormalizer {
   private ToolArgumentAliasNormalizer() {}
 
   static String normalize(String toolName, String argumentsJson) {
-    if (toolName == null || argumentsJson == null || !ALLOWLIST.contains(toolName)) {
+    if (!ALLOWLIST.contains(toolName)) {
       return argumentsJson;
     }
-    JsonNode tree = JsonValues.readTree(argumentsJson);
-    if (!(tree instanceof ObjectNode objectNode)) {
-      return argumentsJson;
-    }
+    ObjectNode objectNode = (ObjectNode) JsonValues.readTree(argumentsJson);
     if (objectNode.has(CANONICAL_PATH)) {
       return argumentsJson;
     }

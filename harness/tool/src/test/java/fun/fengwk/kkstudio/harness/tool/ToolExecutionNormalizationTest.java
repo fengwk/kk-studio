@@ -259,4 +259,20 @@ class ToolExecutionNormalizationTest {
         new ToolCall("call-1", toolName, "{\"file\":\"test.txt\"}").validateFor(descriptor);
     assertEquals("{\"path\":\"test.txt\"}", call.argumentsJson());
   }
+
+  /** 别名原值完整保留，不进行 trim 或内容修改。 */
+  @Test
+  void validateForPreservesRawAliasValueWithoutTrimming() {
+    ToolCall call =
+        new ToolCall("call-1", "read", "{\"file\":\"  a.txt  \"}").validateFor(DESCRIPTOR);
+    assertEquals("{\"path\":\"  a.txt  \"}", call.argumentsJson());
+  }
+
+  /** 无 path 且无可用 alias 时不作改写，继续由 schema 严格拒绝缺失 required 字段。 */
+  @Test
+  void validateForRejectsMissingPathWhenNoAliasProvided() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolCall("call-1", "read", "{}").validateFor(DESCRIPTOR));
+  }
 }
