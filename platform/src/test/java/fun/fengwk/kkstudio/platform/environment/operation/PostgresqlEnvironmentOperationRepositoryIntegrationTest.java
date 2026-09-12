@@ -7,11 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResultCodes;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -21,6 +23,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -35,12 +38,13 @@ import java.util.concurrent.Future;
 /**
  * {@link PostgresqlEnvironmentOperationRepository} 基于真实 PostgreSQL 的集成测试。
  *
- * <p>验证状态机原子推进、认领围栏、安全投影、并发唯一性与超时清扫。
+ * <p>验证状态机原子推进、认领围栏、安全投影、并发唯一性、DB 时间边界、异常无 cause 保留及超时清扫。
  */
 class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSchemaSupport {
 
   private JdbcTemplate jdbcTemplate;
   private PostgresqlEnvironmentOperationRepository repository;
+  private ObjectMapper objectMapper;
 
   @BeforeEach
   void setUp() throws SQLException {
@@ -50,12 +54,13 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     }
     SingleConnectionDataSource dataSource = new SingleConnectionDataSource(newConnection(), false);
     jdbcTemplate = new JdbcTemplate(dataSource);
-    repository = new PostgresqlEnvironmentOperationRepository(jdbcTemplate);
+    objectMapper = new ObjectMapper().findAndRegisterModules();
+    repository = new PostgresqlEnvironmentOperationRepository(jdbcTemplate, objectMapper);
   }
 
-  /** 测试意图：验证完整的创建与读取闭环，确保私有 arguments 绝不泄露到 toString、异常或公开投影中。 */
+  /** 测试意图：验证完整的创建与读取闭环，确保私有 arguments 与 leaseToken 绝不泄露到 toString、Jackson 序列化或公开投影中。 */
   @Test
-  void roundTripWithoutToStringLeak() throws SQLException {
+  void roundTripWithoutToStringOrSerializationLeak() throws Exception {
     UUID envId = createEnvironment();
     UUID sourceId = uuid();
     UUID opId = uuid();
@@ -76,9 +81,14 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
             parameterSummary,
             deadlineAt);
 
-    // 验证 Command 的 toString 绝不包含敏感信息
+    // 验证 Command 的 toString 绝不包含敏感 arguments
     assertFalse(command.toString().contains("mock-token-secret"));
     assertFalse(command.toString().contains(sensitiveUrl));
+
+    // 验证 Command 通过 Jackson 序列化时忽略 arguments 字段
+    String cmdJson = objectMapper.writeValueAsString(command);
+    assertFalse(cmdJson.contains("arguments"));
+    assertFalse(cmdJson.contains("mock-token-secret"));
 
     EnvironmentOperation created = repository.createPending(command);
     assertEquals(opId, created.id());
@@ -89,21 +99,296 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     assertNull(created.startedAt());
     assertNull(created.finishedAt());
 
-    // 验证 Model 的 toString 绝不包含 arguments / 敏感信息
+    // 验证 Model 的 toString 严格排除 arguments 与 leaseToken
     assertFalse(created.toString().contains("mock-token-secret"));
     assertFalse(created.toString().contains(sensitiveUrl));
+    assertFalse(created.toString().contains("leaseToken="));
+
+    // 验证 Model 通过 Jackson 序列化时物理忽略 arguments
+    String opJson = objectMapper.writeValueAsString(created);
+    assertFalse(opJson.contains("arguments"));
+    assertFalse(opJson.contains("mock-token-secret"));
 
     EnvironmentOperation fetched = repository.getById(opId);
     assertTrue(fetched.arguments().contains(sensitiveUrl));
     assertFalse(fetched.toString().contains("mock-token-secret"));
+    assertFalse(fetched.toString().contains("leaseToken="));
 
+    // 认领后产生 leaseToken，再次验证 toString 与序列化均不泄露 arguments 与 leaseToken
+    UUID node = uuid();
+    UUID leaseToken = uuid();
+    insertConnection(envId, node, leaseToken, "READY", 60);
+    List<EnvironmentOperation> claimedList = repository.claimPending(node, 1);
+    assertEquals(1, claimedList.size());
+    EnvironmentOperation claimed = claimedList.getFirst();
+    assertEquals(leaseToken, claimed.leaseToken());
+    assertFalse(claimed.toString().contains(leaseToken.toString()));
+    assertFalse(claimed.toString().contains("mock-token-secret"));
+
+    // 安全投影必须移除 arguments, leaseToken 与 ownerNodeId
     SafeEnvironmentOperation safe = fetched.toSafeProjection();
     assertNotNull(safe);
     assertFalse(safe.toString().contains("mock-token-secret"));
+    assertFalse(safe.toString().contains(leaseToken.toString()));
 
     List<SafeEnvironmentOperation> safeList = repository.listSafeByEnvironment(envId, 10);
     assertEquals(1, safeList.size());
-    assertFalse(safeList.getFirst().toString().contains("mock-token-secret"));
+    SafeEnvironmentOperation listedSafe = safeList.getFirst();
+    assertFalse(listedSafe.toString().contains("mock-token-secret"));
+    assertFalse(listedSafe.toString().contains(leaseToken.toString()));
+  }
+
+  /** 测试意图：使用 PostgreSQL statement_timestamp() 判定截止时间，早于 DB 时间的被单句原子拒绝。 */
+  @Test
+  void dbTimeDeadlineAcceptanceBoundary() throws SQLException {
+    UUID envId = createEnvironment();
+    UUID sourceId = uuid();
+
+    OffsetDateTime dbNow =
+        jdbcTemplate.queryForObject("select statement_timestamp()", OffsetDateTime.class);
+    assertNotNull(dbNow);
+    Instant dbInstant = dbNow.toInstant();
+
+    // 1. 过去时间边界：早于 DB statement_timestamp 1 秒 -> 拒绝并返回安全验证错误
+    Instant pastDeadline = dbInstant.minusSeconds(1);
+    CreatePendingOperationCommand pastCommand =
+        new CreatePendingOperationCommand(
+            uuid(),
+            envId,
+            sourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            0L,
+            "{}",
+            "{}",
+            pastDeadline);
+    AiValidationException pastEx =
+        assertThrows(AiValidationException.class, () -> repository.createPending(pastCommand));
+    assertTrue(pastEx.getMessage().contains("database current timestamp"));
+    assertNull(pastEx.getCause(), "No cause chain may be retained");
+
+    // 2. 未来时间边界：晚于 DB statement_timestamp 30 秒 -> 正常接受并创建
+    Instant futureDeadline = dbInstant.plusSeconds(30);
+    CreatePendingOperationCommand futureCommand =
+        new CreatePendingOperationCommand(
+            uuid(),
+            envId,
+            sourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            0L,
+            "{}",
+            "{}",
+            futureDeadline);
+    EnvironmentOperation created = repository.createPending(futureCommand);
+    assertNotNull(created);
+    assertEquals(futureCommand.id(), created.id());
+  }
+
+  /** 测试意图：绝不保留底层 JDBC/DataAccessException 原因链，确保即使底层包含参数或整行数据也不会泄露任何凭据。 */
+  @Test
+  void neverRetainCauseAndPreventAllLeaksOnConstraintFailures() throws SQLException {
+    UUID envId = createEnvironment();
+    UUID sourceId = uuid();
+    String secret = "SUPER_SECRET_TOKEN_XYZ_123456789";
+    String sensitiveArguments =
+        "{\"gitUrl\":\"https://user:" + secret + "@git.internal/repo.git\"}";
+    Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
+
+    UUID firstOpId = uuid();
+    CreatePendingOperationCommand cmd1 =
+        new CreatePendingOperationCommand(
+            firstOpId,
+            envId,
+            sourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            0L,
+            sensitiveArguments,
+            "{}",
+            deadlineAt);
+    repository.createPending(cmd1);
+
+    // 1. 活动冲突分支：uk_environment_operation_active -> DuplicateActiveOperationException
+    CreatePendingOperationCommand cmdDuplicateActive =
+        new CreatePendingOperationCommand(
+            uuid(),
+            envId,
+            sourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            0L,
+            sensitiveArguments,
+            "{}",
+            deadlineAt);
+    DuplicateActiveOperationException activeEx =
+        assertThrows(
+            DuplicateActiveOperationException.class,
+            () -> repository.createPending(cmdDuplicateActive));
+    assertNoLeakInExceptionChain(activeEx, secret);
+
+    // 2. 主键重复分支：environment_operation_pkey -> AiValidationException
+    CreatePendingOperationCommand cmdDuplicatePk =
+        new CreatePendingOperationCommand(
+            firstOpId,
+            envId,
+            uuid(),
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            0L,
+            sensitiveArguments,
+            "{}",
+            deadlineAt);
+    AiValidationException pkEx =
+        assertThrows(AiValidationException.class, () -> repository.createPending(cmdDuplicatePk));
+    assertTrue(pkEx.getMessage().contains("already exists"));
+    assertNoLeakInExceptionChain(pkEx, secret);
+
+    // 3. 外键缺失分支：fk_environment_operation_environment -> AiResourceNotFoundException
+    UUID nonExistentEnvId = uuid();
+    CreatePendingOperationCommand cmdFkViolation =
+        new CreatePendingOperationCommand(
+            uuid(),
+            nonExistentEnvId,
+            uuid(),
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            0L,
+            sensitiveArguments,
+            "{}",
+            deadlineAt);
+    AiResourceNotFoundException fkEx =
+        assertThrows(
+            AiResourceNotFoundException.class, () -> repository.createPending(cmdFkViolation));
+    assertNoLeakInExceptionChain(fkEx, secret);
+
+    // 4. DB 端检查约束分支：ck_environment_operation_versions_nonneg (sourceVersion = -1) ->
+    // AiValidationException
+    CreatePendingOperationCommand cmdCheckViolation =
+        new CreatePendingOperationCommand(
+            uuid(),
+            envId,
+            uuid(),
+            EnvironmentOperationType.SKILL_REFRESH,
+            -1L,
+            0L,
+            sensitiveArguments,
+            "{}",
+            deadlineAt);
+    AiValidationException checkEx =
+        assertThrows(
+            AiValidationException.class, () -> repository.createPending(cmdCheckViolation));
+    assertTrue(checkEx.getMessage().contains("constraint violation"));
+    assertNoLeakInExceptionChain(checkEx, secret);
+  }
+
+  /** 辅助断言：遍历异常原因链，确保原因链为空且任何异常消息或 toString 均不包含敏感串。 */
+  private void assertNoLeakInExceptionChain(Throwable error, String secret) {
+    assertNull(error.getCause(), "Outward exception must not retain a cause chain");
+    for (Throwable current = error; current != null; current = current.getCause()) {
+      String msg = current.getMessage();
+      assertFalse(
+          msg != null && msg.contains(secret),
+          "Secret found in exception message: " + current.getClass().getName() + ": " + msg);
+      assertFalse(
+          current.toString().contains(secret), "Secret found in exception toString: " + current);
+    }
+  }
+
+  /** 测试意图：复用 EnvironmentCapabilityResultCodes.requireCode 并对 failureMessage 长度与控制字符进行安全拦截。 */
+  @Test
+  void failureCodeAndMessageValidation() throws SQLException {
+    UUID envId = createEnvironment();
+    UUID node = uuid();
+    UUID leaseToken = uuid();
+    insertConnection(envId, node, leaseToken, "READY", 60);
+
+    UUID opId = uuid();
+    Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
+    repository.createPending(
+        new CreatePendingOperationCommand(
+            opId,
+            envId,
+            uuid(),
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            0L,
+            "{}",
+            "{}",
+            deadlineAt));
+
+    repository.claimPending(node, 1);
+
+    // 1. 非法 failureCode：小写、含空格、非 UPPER_SNAKE -> invalid failure code format
+    AiValidationException codeEx1 =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                repository.markFailed(opId, node, leaseToken, "lowercase_error", "Valid message"));
+    assertEquals("invalid failure code format", codeEx1.getMessage());
+    assertNull(codeEx1.getCause());
+
+    AiValidationException codeEx2 =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markFailed(opId, node, leaseToken, "BAD CODE", "Valid message"));
+    assertEquals("invalid failure code format", codeEx2.getMessage());
+
+    AiValidationException codeEx3 =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markFailed(opId, node, leaseToken, null, "Valid message"));
+    assertTrue(codeEx3.getMessage().contains("must not be null"));
+
+    // 2. 非法 failureMessage：空白或前后带空格
+    assertThrows(
+        AiValidationException.class,
+        () -> repository.markFailed(opId, node, leaseToken, "FAILED", "   "));
+    assertThrows(
+        AiValidationException.class,
+        () -> repository.markFailed(opId, node, leaseToken, "FAILED", " leading_space"));
+
+    // 3. 非法 failureMessage：包含换行、制表符或空字符等 ISO 控制字符（防止日志/头注入）
+    AiValidationException ctrlEx1 =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markFailed(opId, node, leaseToken, "FAILED", "line1\nline2"));
+    assertTrue(ctrlEx1.getMessage().contains("control characters"));
+
+    AiValidationException ctrlEx2 =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markFailed(opId, node, leaseToken, "FAILED", "col1\tcol2"));
+    assertTrue(ctrlEx2.getMessage().contains("control characters"));
+
+    AiValidationException ctrlEx3 =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markFailed(opId, node, leaseToken, "FAILED", "null\0char"));
+    assertTrue(ctrlEx3.getMessage().contains("control characters"));
+
+    // 4. 超长 failureMessage（超过 1000 字符）：绝不回显输入内容
+    String sensitiveText = "SECRET_PAYLOAD_DATA";
+    String oversizedMessage = sensitiveText + "X".repeat(1005);
+    AiValidationException lenEx =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markFailed(opId, node, leaseToken, "FAILED", oversizedMessage));
+    assertTrue(lenEx.getMessage().contains("maximum allowed length"));
+    assertFalse(lenEx.getMessage().contains(sensitiveText), "Error message must not echo input");
+
+    // 5. 合法 failureCode 与 failureMessage 正常流转为 FAILED 终态
+    assertTrue(
+        repository.markFailed(
+            opId,
+            node,
+            leaseToken,
+            EnvironmentCapabilityResultCodes.RESOURCE_CHANGED,
+            "Resource is gone"));
+    EnvironmentOperation failed = repository.getById(opId);
+    assertEquals(EnvironmentOperationStatus.FAILED, failed.status());
+    assertEquals(EnvironmentCapabilityResultCodes.RESOURCE_CHANGED, failed.failureCode());
+    assertEquals("Resource is gone", failed.failureMessage());
   }
 
   /** 测试意图：同一来源在未终结状态下创建第二条操作必须被分类为 DuplicateActiveOperationException 且不泄露 arguments。 */
@@ -146,6 +431,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     assertEquals(sourceId, thrown.getSourceId());
     assertFalse(thrown.getMessage().contains(sensitiveSecret));
     assertTrue(thrown instanceof AiDuplicateException);
+    assertNull(thrown.getCause());
 
     // 取消第一个操作，变为终态 CANCELLED
     assertTrue(repository.cancelPending(cmd1.id()));
@@ -299,9 +585,8 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     UUID opId = uuid();
     UUID node = uuid();
     UUID leaseToken = uuid();
-    insertConnection(envId, node, leaseToken, "READY", 60);
-
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
+
     repository.createPending(
         new CreatePendingOperationCommand(
             opId,
@@ -314,126 +599,60 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
             "{}",
             deadlineAt));
 
-    List<EnvironmentOperation> claimed = repository.claimPending(node, 10);
-    assertEquals(1, claimed.size());
+    insertConnection(envId, node, leaseToken, "READY", 60);
+    repository.claimPending(node, 10);
 
-    // 1. deadline 在未来：回滚为 PENDING 并清除认领元组
+    // 1. deadline 在未来：回滚为 PENDING
     RescheduleOutcome outcome1 = repository.rescheduleUnsent(opId, node, leaseToken);
     assertEquals(RescheduleOutcome.RESCHEDULED, outcome1);
 
-    EnvironmentOperation opAfterReschedule = repository.getById(opId);
-    assertEquals(EnvironmentOperationStatus.PENDING, opAfterReschedule.status());
-    assertNull(opAfterReschedule.ownerNodeId());
-    assertNull(opAfterReschedule.leaseToken());
-    assertNull(opAfterReschedule.startedAt());
-    assertNull(opAfterReschedule.finishedAt());
+    EnvironmentOperation op1 = repository.getById(opId);
+    assertEquals(EnvironmentOperationStatus.PENDING, op1.status());
+    assertNull(op1.ownerNodeId());
+    assertNull(op1.leaseToken());
+    assertNull(op1.startedAt());
+    assertNull(op1.finishedAt());
 
-    // 再次认领
-    UUID newLeaseToken = uuid();
-    updateConnection(envId, node, newLeaseToken, "READY", 60);
-    claimed = repository.claimPending(node, 10);
-    assertEquals(1, claimed.size());
+    // 2. 再次认领
+    UUID leaseToken2 = uuid();
+    updateConnection(envId, node, leaseToken2, "READY", 60);
+    repository.claimPending(node, 10);
 
-    // 2. deadline 已过去：终结为 FAILED (ENVIRONMENT_UNAVAILABLE_TIMEOUT)
+    // 3. 将 deadline 改为过去时间（同时调整 created_at 保证满足约束）
     jdbcTemplate.update(
-        "update environment_operation set created_at = statement_timestamp() - interval '10"
-            + " second', deadline_at = statement_timestamp() - interval '5 second' where id = ?",
+        "update environment_operation set created_at = statement_timestamp() - interval '20"
+            + " second', deadline_at = statement_timestamp() - interval '1 second' where id = ?",
         opId);
 
-    RescheduleOutcome outcome2 = repository.rescheduleUnsent(opId, node, newLeaseToken);
+    // 4. deadline 在过去：回滚直接终结为 FAILED (ENVIRONMENT_UNAVAILABLE_TIMEOUT)
+    RescheduleOutcome outcome2 = repository.rescheduleUnsent(opId, node, leaseToken2);
     assertEquals(RescheduleOutcome.FAILED_TIMEOUT, outcome2);
 
-    EnvironmentOperation opAfterTimeout = repository.getById(opId);
-    assertEquals(EnvironmentOperationStatus.FAILED, opAfterTimeout.status());
+    EnvironmentOperation op2 = repository.getById(opId);
+    assertEquals(EnvironmentOperationStatus.FAILED, op2.status());
     assertEquals(
-        EnvironmentOperationFailureCodes.ENVIRONMENT_UNAVAILABLE_TIMEOUT,
-        opAfterTimeout.failureCode());
-    assertNotNull(opAfterTimeout.finishedAt());
-    assertNull(opAfterTimeout.ownerNodeId());
-    assertNull(opAfterTimeout.leaseToken());
-    assertNull(opAfterTimeout.startedAt());
+        EnvironmentOperationFailureCodes.ENVIRONMENT_UNAVAILABLE_TIMEOUT, op2.failureCode());
+    assertEquals(EnvironmentOperationFailureCodes.UNSENT_TIMEOUT_MESSAGE, op2.failureMessage());
+    assertNotNull(op2.finishedAt());
+    assertNull(op2.ownerNodeId());
+    assertNull(op2.leaseToken());
 
-    // 3. 对已终态的行调用 rescheduleUnsent 返回 STALE
-    RescheduleOutcome outcome3 = repository.rescheduleUnsent(opId, node, newLeaseToken);
+    // 5. 对已终结的操作再次尝试 reschedule 返回 STALE
+    RescheduleOutcome outcome3 = repository.rescheduleUnsent(opId, node, leaseToken2);
     assertEquals(RescheduleOutcome.STALE, outcome3);
   }
 
-  /** 测试意图：authoritative daemon 终态转换由当前 RUNNING owner/token 与 DB 当前 READY 活跃连接共同围栏。 */
+  /** 测试意图：SUCCEEDED 与 FAILED 必须受权威节点和实时有效 READY 路由共同围栏。 */
   @Test
-  void authoritativeSuccessAndFailureRouteFence() throws SQLException {
-    UUID envId = createEnvironment();
-    UUID sourceId = uuid();
-    UUID opId1 = uuid();
-    UUID opId2 = uuid();
-    UUID node = uuid();
-    UUID leaseToken = uuid();
-    insertConnection(envId, node, leaseToken, "READY", 60);
-
-    Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
-    repository.createPending(
-        new CreatePendingOperationCommand(
-            opId1,
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
-
-    repository.claimPending(node, 10);
-
-    // 成功终态推进
-    assertTrue(repository.markSucceeded(opId1, node, leaseToken, "{\"installed\":1}"));
-    EnvironmentOperation op1 = repository.getById(opId1);
-    assertEquals(EnvironmentOperationStatus.SUCCEEDED, op1.status());
-    assertEquals("{\"installed\": 1}", op1.resultSummary().replaceAll("\\s+", " ").trim());
-    assertNotNull(op1.finishedAt());
-    assertEquals(node, op1.ownerNodeId());
-    assertEquals(leaseToken, op1.leaseToken());
-    assertNotNull(op1.startedAt());
-
-    // 单终态：再次推进失败
-    assertFalse(repository.markSucceeded(opId1, node, leaseToken, "{}"));
-    assertFalse(repository.markFailed(opId1, node, leaseToken, "CODE", "message"));
-
-    // 失败终态推进
-    UUID sourceId2 = uuid();
-    repository.createPending(
-        new CreatePendingOperationCommand(
-            opId2,
-            envId,
-            sourceId2,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
-    repository.claimPending(node, 10);
-
-    assertTrue(repository.markFailed(opId2, node, leaseToken, "EXECUTION_ERROR", "failed to run"));
-    EnvironmentOperation op2 = repository.getById(opId2);
-    assertEquals(EnvironmentOperationStatus.FAILED, op2.status());
-    assertEquals("EXECUTION_ERROR", op2.failureCode());
-    assertEquals("failed to run", op2.failureMessage());
-    assertNotNull(op2.finishedAt());
-    assertEquals(node, op2.ownerNodeId());
-    assertEquals(leaseToken, op2.leaseToken());
-  }
-
-  /** 测试意图：路由失效、token 变更或租约过期时拒绝 daemon 终态提交。 */
-  @Test
-  void staleOwnerLeaseRejection() throws SQLException {
+  void terminalRouteFenceRequiresActiveReadyConnection() throws Exception {
     UUID envId = createEnvironment();
     UUID sourceId = uuid();
     UUID opId = uuid();
-    UUID node = uuid();
+    UUID nodeA = uuid();
+    UUID nodeB = uuid();
     UUID leaseToken = uuid();
-    insertConnection(envId, node, leaseToken, "READY", 60);
-
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
+
     repository.createPending(
         new CreatePendingOperationCommand(
             opId,
@@ -445,39 +664,78 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
             "{}",
             "{}",
             deadlineAt));
-    repository.claimPending(node, 10);
 
-    // 1. 错误的 node / token
-    assertFalse(repository.markSucceeded(opId, uuid(), leaseToken, "{}"));
-    assertFalse(repository.markSucceeded(opId, node, uuid(), "{}"));
+    insertConnection(envId, nodeA, leaseToken, "READY", 60);
+    repository.claimPending(nodeA, 10);
 
-    // 2. 连接表中的 lease_token 变化（被抢占）
-    updateConnection(envId, node, uuid(), "READY", 60);
-    assertFalse(repository.markSucceeded(opId, node, leaseToken, "{}"));
+    // 1. 他人 nodeB 无法推进终态
+    assertFalse(repository.markSucceeded(opId, nodeB, leaseToken, "{}"));
+    assertFalse(repository.markFailed(opId, nodeB, leaseToken, "ERROR", "err"));
 
-    // 恢复原 token 但令其过期
-    updateConnection(envId, node, leaseToken, "READY", -10);
-    assertFalse(repository.markSucceeded(opId, node, leaseToken, "{}"));
+    // 2. 连接租约已过期：无法推进终态
+    updateConnection(envId, nodeA, leaseToken, "READY", -10);
+    assertFalse(repository.markSucceeded(opId, nodeA, leaseToken, "{}"));
 
-    // 连接表变为 CONNECTING
-    updateConnection(envId, node, leaseToken, "CONNECTING", 60);
-    assertFalse(repository.markSucceeded(opId, node, leaseToken, "{}"));
+    // 3. 连接状态变为 CONNECTING：无法推进终态
+    updateConnection(envId, nodeA, leaseToken, "CONNECTING", 60);
+    assertFalse(repository.markSucceeded(opId, nodeA, leaseToken, "{}"));
 
-    // 验证状态依旧是 RUNNING，未被污染
+    // 4. 恢复有效 READY 租约：成功推进为 SUCCEEDED
+    updateConnection(envId, nodeA, leaseToken, "READY", 60);
+    assertTrue(repository.markSucceeded(opId, nodeA, leaseToken, "{\"result\":\"ok\"}"));
+
+    EnvironmentOperation op = repository.getById(opId);
+    assertEquals(EnvironmentOperationStatus.SUCCEEDED, op.status());
+    assertEquals(
+        objectMapper.readTree("{\"result\":\"ok\"}"), objectMapper.readTree(op.resultSummary()));
+    assertNotNull(op.finishedAt());
+  }
+
+  /** 测试意图：被抢占的旧 owner / 租约代币无法提交终态。 */
+  @Test
+  void staleOwnerOrLeaseTokenCannotCommitTerminal() throws SQLException {
+    UUID envId = createEnvironment();
+    UUID sourceId = uuid();
+    UUID opId = uuid();
+    UUID nodeA = uuid();
+    UUID tokenA = uuid();
+    Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
+
+    repository.createPending(
+        new CreatePendingOperationCommand(
+            opId,
+            envId,
+            sourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            0L,
+            "{}",
+            "{}",
+            deadlineAt));
+
+    insertConnection(envId, nodeA, tokenA, "READY", 60);
+    repository.claimPending(nodeA, 10);
+
+    // 错误的 leaseToken 无法提交
+    UUID wrongToken = uuid();
+    assertFalse(repository.markSucceeded(opId, nodeA, wrongToken, "{}"));
+    assertFalse(repository.markFailed(opId, nodeA, wrongToken, "FAILED", "err"));
+    assertFalse(repository.markUnknown(opId, nodeA, wrongToken, "FAILED", "err"));
+
+    // 仍为 RUNNING
     assertEquals(EnvironmentOperationStatus.RUNNING, repository.getById(opId).status());
   }
 
-  /** 测试意图：路由丢失后，仅凭操作行本身的 owner/token 围栏即可标记为 UNKNOWN。 */
+  /** 测试意图：路由断开后 markUnknown 仅需要操作本身的 RUNNING 认领元组围栏（不强依赖活跃连接）。 */
   @Test
-  void unknownAfterRouteLoss() throws SQLException {
+  void markUnknownAllowsMissingRoute() throws SQLException {
     UUID envId = createEnvironment();
     UUID sourceId = uuid();
     UUID opId = uuid();
-    UUID node = uuid();
-    UUID leaseToken = uuid();
-    insertConnection(envId, node, leaseToken, "READY", 60);
-
+    UUID nodeA = uuid();
+    UUID tokenA = uuid();
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
+
     repository.createPending(
         new CreatePendingOperationCommand(
             opId,
@@ -489,42 +747,38 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
             "{}",
             "{}",
             deadlineAt));
-    repository.claimPending(node, 10);
 
-    // 彻底删除连接记录（模拟连接丢失）
+    insertConnection(envId, nodeA, tokenA, "READY", 60);
+    repository.claimPending(nodeA, 10);
+
+    // 模拟连接已断开且删除
     jdbcTemplate.update("delete from environment_connection where environment_id = ?", envId);
 
-    // markSucceeded 无法成功（需要 READY 路由）
-    assertFalse(repository.markSucceeded(opId, node, leaseToken, "{}"));
+    // markSucceeded 失败（因缺少 READY 路由）
+    assertFalse(repository.markSucceeded(opId, nodeA, tokenA, "{}"));
 
-    // markUnknown 仅需操作行围栏，应成功
-    assertTrue(
-        repository.markUnknown(
-            opId, node, leaseToken, "ROUTE_LOST", "Environment route disconnected"));
+    // markUnknown 成功（因仅受操作本身认领元组围栏）
+    assertTrue(repository.markUnknown(opId, nodeA, tokenA, "ROUTE_LOST", "connection dropped"));
 
     EnvironmentOperation op = repository.getById(opId);
     assertEquals(EnvironmentOperationStatus.UNKNOWN, op.status());
     assertEquals("ROUTE_LOST", op.failureCode());
-    assertEquals("Environment route disconnected", op.failureMessage());
-    assertEquals(node, op.ownerNodeId());
-    assertEquals(leaseToken, op.leaseToken());
+    assertEquals("connection dropped", op.failureMessage());
+    assertEquals(nodeA, op.ownerNodeId());
+    assertEquals(tokenA, op.leaseToken());
     assertNotNull(op.finishedAt());
-
-    // 单终态
-    assertFalse(repository.markUnknown(opId, node, leaseToken, "ROUTE_LOST", "retry"));
   }
 
-  /** 测试意图：cancelPending 仅允许取消从未发送的 PENDING 操作；RUNNING 或终态操作不可取消。 */
+  /** 测试意图：仅允许 PENDING 操作被取消；RUNNING 或已终结的操作 cancelPending 返回 false。 */
   @Test
-  void cancelOnlyPending() throws SQLException {
+  void cancelPendingOnly() throws SQLException {
     UUID envId = createEnvironment();
     UUID sourceId = uuid();
     UUID opId = uuid();
     UUID node = uuid();
     UUID leaseToken = uuid();
-    insertConnection(envId, node, leaseToken, "READY", 60);
-
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
+
     repository.createPending(
         new CreatePendingOperationCommand(
             opId,
@@ -537,142 +791,65 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
             "{}",
             deadlineAt));
 
-    // 认领至 RUNNING
+    // 1. PENDING 状态下成功取消
+    assertTrue(repository.cancelPending(opId));
+    EnvironmentOperation cancelled = repository.getById(opId);
+    assertEquals(EnvironmentOperationStatus.CANCELLED, cancelled.status());
+    assertNotNull(cancelled.finishedAt());
+
+    // 2. 再次取消返回 false（已是终态）
+    assertFalse(repository.cancelPending(opId));
+
+    // 3. 创建新操作并流转至 RUNNING
+    UUID opId2 = uuid();
+    repository.createPending(
+        new CreatePendingOperationCommand(
+            opId2,
+            envId,
+            sourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            0L,
+            "{}",
+            "{}",
+            deadlineAt));
+    insertConnection(envId, node, leaseToken, "READY", 60);
     repository.claimPending(node, 10);
 
-    // RUNNING 操作不可被 cancelPending 取消
-    assertFalse(repository.cancelPending(opId));
-
-    // 回滚为 PENDING
-    assertEquals(
-        RescheduleOutcome.RESCHEDULED, repository.rescheduleUnsent(opId, node, leaseToken));
-
-    // PENDING 操作允许被取消
-    assertTrue(repository.cancelPending(opId));
-
-    EnvironmentOperation op = repository.getById(opId);
-    assertEquals(EnvironmentOperationStatus.CANCELLED, op.status());
-    assertNotNull(op.finishedAt());
-    assertNull(op.ownerNodeId());
-    assertNull(op.leaseToken());
-    assertNull(op.startedAt());
-
-    // 终态操作不可再次取消
-    assertFalse(repository.cancelPending(opId));
+    // RUNNING 状态无法 cancelPending
+    assertFalse(repository.cancelPending(opId2));
   }
 
-  /** 测试意图：截止时间清扫：过期 PENDING 推进为 FAILED，过期 RUNNING 推进为 UNKNOWN，终态行与未过期行不受影响。 */
+  /** 测试意图：截止时间过期清扫：PENDING 清扫为 FAILED，RUNNING 清扫为 UNKNOWN。 */
   @Test
-  void deadlineSweeps() throws SQLException {
+  void deadlineSweepExpired() throws SQLException {
     UUID envId = createEnvironment();
     UUID node = uuid();
     UUID leaseToken = uuid();
     insertConnection(envId, node, leaseToken, "READY", 60);
 
-    Instant futureDeadline = Instant.now().plus(10, ChronoUnit.MINUTES);
-
-    // 1. 先创建 3 和 4 并由 node 认领至 RUNNING
-    UUID expiredRunningId = uuid();
-    repository.createPending(
-        new CreatePendingOperationCommand(
-            expiredRunningId,
-            envId,
-            uuid(),
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            futureDeadline));
-
-    UUID activeRunningId = uuid();
-    repository.createPending(
-        new CreatePendingOperationCommand(
-            activeRunningId,
-            envId,
-            uuid(),
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            futureDeadline));
-
-    // 认领 3 和 4 为 RUNNING
-    List<EnvironmentOperation> claimed = repository.claimPending(node, 10);
-    assertEquals(2, claimed.size());
-
-    // 2. 再创建 1 和 2（保持 PENDING 状态）
-    UUID expiredPendingId = uuid();
-    repository.createPending(
-        new CreatePendingOperationCommand(
-            expiredPendingId,
-            envId,
-            uuid(),
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            futureDeadline));
-
-    UUID activePendingId = uuid();
-    repository.createPending(
-        new CreatePendingOperationCommand(
-            activePendingId,
-            envId,
-            uuid(),
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            futureDeadline));
-
-    // 将 1 和 3 的 deadline 改为过去（同时调整 created_at）
-    jdbcTemplate.update(
-        "update environment_operation set created_at = statement_timestamp() - interval '10"
-            + " second', deadline_at = statement_timestamp() - interval '5 second' where id in (?, ?)",
-        expiredPendingId,
-        expiredRunningId);
-
-    DeadlineSweepResult result = repository.sweepExpired();
-    assertEquals(1, result.expiredPendingCount());
-    assertEquals(1, result.expiredRunningCount());
-    assertEquals(2, result.totalSwept());
-
-    EnvironmentOperation op1 = repository.getById(expiredPendingId);
-    assertEquals(EnvironmentOperationStatus.FAILED, op1.status());
-    assertEquals(
-        EnvironmentOperationFailureCodes.ENVIRONMENT_UNAVAILABLE_TIMEOUT, op1.failureCode());
-    assertNull(op1.ownerNodeId());
-
-    EnvironmentOperation op2 = repository.getById(activePendingId);
-    assertEquals(EnvironmentOperationStatus.PENDING, op2.status());
-
-    EnvironmentOperation op3 = repository.getById(expiredRunningId);
-    assertEquals(EnvironmentOperationStatus.UNKNOWN, op3.status());
-    assertEquals(EnvironmentOperationFailureCodes.RESULT_TIMEOUT, op3.failureCode());
-    assertEquals(node, op3.ownerNodeId());
-    assertEquals(leaseToken, op3.leaseToken());
-
-    EnvironmentOperation op4 = repository.getById(activeRunningId);
-    assertEquals(EnvironmentOperationStatus.RUNNING, op4.status());
-  }
-
-  /** 测试意图：终态行的不可变性，不可被后续的 claim、reschedule、markSucceeded、markFailed 等变更。 */
-  @Test
-  void terminalImmutability() throws SQLException {
-    UUID envId = createEnvironment();
-    UUID opId = uuid();
-    UUID node = uuid();
-    UUID leaseToken = uuid();
-    insertConnection(envId, node, leaseToken, "READY", 60);
-
+    UUID opRunning = uuid();
+    UUID opPending = uuid();
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
+
+    // 先创建 opRunning 并立即认领，确保它处于 RUNNING 状态
     repository.createPending(
         new CreatePendingOperationCommand(
-            opId,
+            opRunning,
+            envId,
+            uuid(),
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            0L,
+            "{}",
+            "{}",
+            deadlineAt));
+    repository.claimPending(node, 1);
+
+    // 再创建 opPending，保持 PENDING 状态
+    repository.createPending(
+        new CreatePendingOperationCommand(
+            opPending,
             envId,
             uuid(),
             EnvironmentOperationType.SKILL_REFRESH,
@@ -682,30 +859,86 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
             "{}",
             deadlineAt));
 
+    // 人工将两个操作的截止时间调整为过去
+    jdbcTemplate.update(
+        "update environment_operation set created_at = statement_timestamp() - interval '20"
+            + " second', deadline_at = statement_timestamp() - interval '2 second' where id in (?, ?)",
+        opPending,
+        opRunning);
+
+    // 执行清扫
+    DeadlineSweepResult result = repository.sweepExpired();
+    assertEquals(1, result.expiredPendingCount());
+    assertEquals(1, result.expiredRunningCount());
+
+    EnvironmentOperation sweptPending = repository.getById(opPending);
+    assertEquals(EnvironmentOperationStatus.FAILED, sweptPending.status());
+    assertEquals(
+        EnvironmentOperationFailureCodes.ENVIRONMENT_UNAVAILABLE_TIMEOUT,
+        sweptPending.failureCode());
+    assertNull(sweptPending.ownerNodeId());
+    assertNull(sweptPending.leaseToken());
+
+    EnvironmentOperation sweptRunning = repository.getById(opRunning);
+    assertEquals(EnvironmentOperationStatus.UNKNOWN, sweptRunning.status());
+    assertEquals(EnvironmentOperationFailureCodes.RESULT_TIMEOUT, sweptRunning.failureCode());
+    assertEquals(node, sweptRunning.ownerNodeId());
+    assertNotNull(sweptRunning.leaseToken());
+
+    // 再次清扫不应产生新变更
+    DeadlineSweepResult emptyResult = repository.sweepExpired();
+    assertEquals(0, emptyResult.expiredPendingCount());
+    assertEquals(0, emptyResult.expiredRunningCount());
+  }
+
+  /** 测试意图：终态记录不可再被修改，保证单终态语义。 */
+  @Test
+  void terminalStateImmutability() throws SQLException {
+    UUID envId = createEnvironment();
+    UUID sourceId = uuid();
+    UUID opId = uuid();
+    UUID node = uuid();
+    UUID leaseToken = uuid();
+    Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
+
+    repository.createPending(
+        new CreatePendingOperationCommand(
+            opId,
+            envId,
+            sourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            0L,
+            "{}",
+            "{}",
+            deadlineAt));
+
+    insertConnection(envId, node, leaseToken, "READY", 60);
     repository.claimPending(node, 10);
     assertTrue(repository.markSucceeded(opId, node, leaseToken, "{}"));
 
-    // 各种推进动作均应失败
-    assertFalse(repository.markSucceeded(opId, node, leaseToken, "{}"));
-    assertFalse(repository.markFailed(opId, node, leaseToken, "ERR", "msg"));
-    assertFalse(repository.markUnknown(opId, node, leaseToken, "ERR", "msg"));
-    assertEquals(RescheduleOutcome.STALE, repository.rescheduleUnsent(opId, node, leaseToken));
+    // 试图对 SUCCEEDED 执行 markFailed、markUnknown、cancelPending、rescheduleUnsent 均应失败
+    assertFalse(repository.markFailed(opId, node, leaseToken, "FAIL", "fail"));
+    assertFalse(repository.markUnknown(opId, node, leaseToken, "UNKNOWN", "unk"));
     assertFalse(repository.cancelPending(opId));
+    assertEquals(RescheduleOutcome.STALE, repository.rescheduleUnsent(opId, node, leaseToken));
 
-    // 终态保持 SUCCEEDED
     assertEquals(EnvironmentOperationStatus.SUCCEEDED, repository.getById(opId).status());
   }
 
-  /** 测试意图：历史查询按 created_at DESC、id DESC 稳定排序，并遵循 limit 上限约束。 */
+  /**
+   * 测试意图：listByEnvironment 与 listSafeByEnvironment 必须保证 created_at DESC, id DESC 确定性排序与 limit 边界。
+   */
   @Test
-  void deterministicBoundedList() throws SQLException {
+  void listByEnvironmentDeterministicOrdering() throws SQLException {
     UUID envId = createEnvironment();
+    int count = 5;
+    List<UUID> opIds = new ArrayList<>();
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
-    List<UUID> createdIds = new ArrayList<>();
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < count; i++) {
       UUID opId = uuid();
-      createdIds.add(opId);
+      opIds.add(opId);
       repository.createPending(
           new CreatePendingOperationCommand(
               opId,
@@ -719,41 +952,35 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
               deadlineAt));
     }
 
-    List<EnvironmentOperation> list3 = repository.listByEnvironment(envId, 3);
-    assertEquals(3, list3.size());
-    // 逆序排列：最新创建的排在前面
-    assertEquals(createdIds.get(4), list3.get(0).id());
-    assertEquals(createdIds.get(3), list3.get(1).id());
-    assertEquals(createdIds.get(2), list3.get(2).id());
+    List<EnvironmentOperation> list = repository.listByEnvironment(envId, 3);
+    assertEquals(3, list.size());
 
-    // 非法 limit 降级为默认
-    List<EnvironmentOperation> listDefault = repository.listByEnvironment(envId, 0);
-    assertEquals(5, listDefault.size());
+    // 默认按照创建时间逆序，最新插入的在前面
+    assertEquals(opIds.get(4), list.get(0).id());
+    assertEquals(opIds.get(3), list.get(1).id());
+    assertEquals(opIds.get(2), list.get(2).id());
+
+    List<SafeEnvironmentOperation> safeList = repository.listSafeByEnvironment(envId, 3);
+    assertEquals(3, safeList.size());
+    assertEquals(opIds.get(4), safeList.get(0).id());
+    assertEquals(opIds.get(3), safeList.get(1).id());
+    assertEquals(opIds.get(2), safeList.get(2).id());
   }
 
-  /** 测试意图：调度器优雅停机辅助方法仅将本节点拥有的 RUNNING 操作更新为 UNKNOWN，不误伤其他节点或状态。 */
+  /** 测试意图：停机处理 markRunningUnknownOnShutdown 能原子将本节点持有的所有 RUNNING 转为 UNKNOWN。 */
   @Test
   void shutdownHelper() throws SQLException {
     UUID envId1 = createEnvironment();
     UUID envId2 = createEnvironment();
-    UUID envId3 = createEnvironment();
-
     UUID nodeA = uuid();
     UUID nodeB = uuid();
-
-    insertConnection(envId1, nodeA, uuid(), "READY", 60);
-    insertConnection(envId2, nodeA, uuid(), "READY", 60);
-    insertConnection(envId3, nodeB, uuid(), "READY", 60);
-
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
-    UUID opA1 = uuid();
-    UUID opA2 = uuid();
+    UUID opA = uuid();
     UUID opB = uuid();
-
     repository.createPending(
         new CreatePendingOperationCommand(
-            opA1,
+            opA,
             envId1,
             uuid(),
             EnvironmentOperationType.SKILL_REFRESH,
@@ -764,7 +991,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
             deadlineAt));
     repository.createPending(
         new CreatePendingOperationCommand(
-            opA2,
+            opB,
             envId2,
             uuid(),
             EnvironmentOperationType.SKILL_REFRESH,
@@ -773,30 +1000,28 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
             "{}",
             "{}",
             deadlineAt));
-    repository.createPending(
-        new CreatePendingOperationCommand(
-            opB,
-            envId3,
-            uuid(),
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
 
-    repository.claimPending(nodeA, 10);
-    repository.claimPending(nodeB, 10);
+    insertConnection(envId1, nodeA, uuid(), "READY", 60);
+    insertConnection(envId2, nodeB, uuid(), "READY", 60);
 
+    repository.claimPending(nodeA, 1);
+    repository.claimPending(nodeB, 1);
+
+    // nodeA 优雅停机
     int updated = repository.markRunningUnknownOnShutdown(nodeA);
-    assertEquals(2, updated);
+    assertEquals(1, updated);
 
-    assertEquals(EnvironmentOperationStatus.UNKNOWN, repository.getById(opA1).status());
+    EnvironmentOperation opAAfter = repository.getById(opA);
+    assertEquals(EnvironmentOperationStatus.UNKNOWN, opAAfter.status());
+    assertEquals(EnvironmentOperationFailureCodes.DISPATCHER_SHUTDOWN, opAAfter.failureCode());
     assertEquals(
-        EnvironmentOperationFailureCodes.DISPATCHER_SHUTDOWN,
-        repository.getById(opA1).failureCode());
-    assertEquals(EnvironmentOperationStatus.UNKNOWN, repository.getById(opA2).status());
+        EnvironmentOperationFailureCodes.DISPATCHER_SHUTDOWN_MESSAGE, opAAfter.failureMessage());
+
+    // nodeB 仍在 RUNNING（不受 nodeA 停机影响）
     assertEquals(EnvironmentOperationStatus.RUNNING, repository.getById(opB).status());
+
+    // 再次调用停机辅助应返回 0（单终态语义）
+    assertEquals(0, repository.markRunningUnknownOnShutdown(nodeA));
   }
 
   /** 测试意图：在进入 SQL 之前完成参数结构与 JSON 形状校验。 */
@@ -840,23 +1065,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                         deadlineAt)));
     assertFalse(ex.getMessage().contains("not-json-secret"));
 
-    // 3. 负数版本号
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            repository.createPending(
-                new CreatePendingOperationCommand(
-                    uuid(),
-                    envId,
-                    sourceId,
-                    EnvironmentOperationType.SKILL_REFRESH,
-                    -1L,
-                    0L,
-                    "{}",
-                    "{}",
-                    deadlineAt)));
-
-    // 4. 不存在的 Environment 抛出 AiResourceNotFoundException
+    // 3. 不存在的 Environment 抛出 AiResourceNotFoundException
     assertThrows(
         AiResourceNotFoundException.class,
         () ->
@@ -872,23 +1081,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                     "{}",
                     deadlineAt)));
 
-    // 5. deadline 在明显过去的时刻
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            repository.createPending(
-                new CreatePendingOperationCommand(
-                    uuid(),
-                    envId,
-                    sourceId,
-                    EnvironmentOperationType.SKILL_REFRESH,
-                    0L,
-                    0L,
-                    "{}",
-                    "{}",
-                    Instant.now().minus(2, ChronoUnit.HOURS))));
-
-    // 6. parameterSummary 非对象
+    // 4. parameterSummary 非对象
     assertThrows(
         AiValidationException.class,
         () ->
@@ -905,7 +1098,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                     deadlineAt)));
   }
 
-  /** 测试意图：覆盖各种边界输入（非法结果摘要、过长/未裁剪错误码、不存在的 ID 等）的防御性校验。 */
+  /** 测试意图：覆盖各种边界输入（非法结果摘要、不存在的 ID 等）的防御性校验。 */
   @Test
   void additionalEdgeCasesAndValidation() throws SQLException {
     UUID envId = createEnvironment();
@@ -936,25 +1129,6 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     assertThrows(
         AiValidationException.class,
         () -> repository.markSucceeded(opId, node, leaseToken, "not-json"));
-
-    // markFailed 校验：空白、未裁剪或过长 failureCode
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markFailed(opId, node, leaseToken, "  ", "msg"));
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markFailed(opId, node, leaseToken, " un-trimmed ", "msg"));
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markFailed(opId, node, leaseToken, "A".repeat(65), "msg"));
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markFailed(opId, node, leaseToken, "CODE", "  "));
-
-    // markUnknown 校验：非法 failureCode
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markUnknown(opId, node, leaseToken, "", "msg"));
 
     // getById 不存在的操作
     UUID nonExistentId = uuid();

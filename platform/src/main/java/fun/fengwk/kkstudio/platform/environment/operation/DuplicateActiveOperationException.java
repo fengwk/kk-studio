@@ -8,7 +8,7 @@ import java.util.UUID;
 /**
  * 同一 (environment_id, source_id) 已存在未终结操作冲突；映射为 HTTP 409。
  *
- * <p>本异常绝不回显任何调用参数或凭证。
+ * <p>本异常绝不回显任何调用参数或凭证，也不保留底层包含完整行数据的 JDBC 异常原因链。
  */
 public class DuplicateActiveOperationException extends AiDuplicateException {
 
@@ -22,18 +22,6 @@ public class DuplicateActiveOperationException extends AiDuplicateException {
             + Objects.requireNonNull(environmentId, "environmentId")
             + " and source "
             + Objects.requireNonNull(sourceId, "sourceId"));
-    this.environmentId = environmentId;
-    this.sourceId = sourceId;
-  }
-
-  public DuplicateActiveOperationException(UUID environmentId, UUID sourceId, Throwable cause) {
-    super(
-        "environment_operation",
-        "active operation already exists for environment "
-            + Objects.requireNonNull(environmentId, "environmentId")
-            + " and source "
-            + Objects.requireNonNull(sourceId, "sourceId"),
-        cause);
     this.environmentId = environmentId;
     this.sourceId = sourceId;
   }
