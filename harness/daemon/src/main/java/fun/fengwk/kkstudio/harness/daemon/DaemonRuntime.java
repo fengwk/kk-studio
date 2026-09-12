@@ -450,9 +450,13 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private boolean sendReady(ActiveConnection connection) {
+    DaemonSkillRegistry.PublishedInventory inventory = skillRegistry.inventory();
     DaemonCapabilities capabilities =
         new DaemonCapabilities(
-            DaemonCapabilities.VERSION, environmentInfo, skillRegistry.snapshots());
+            DaemonCapabilities.VERSION,
+            environmentInfo,
+            inventory.sourceSetVersion(),
+            inventory.snapshots());
     return sendOn(
         connection, DaemonMessageType.READY, null, capabilitiesCodec.encode(capabilities));
   }

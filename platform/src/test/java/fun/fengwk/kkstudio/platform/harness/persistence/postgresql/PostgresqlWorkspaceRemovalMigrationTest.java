@@ -108,7 +108,9 @@ class PostgresqlWorkspaceRemovalMigrationTest extends PostgresSchemaSupport {
         LegacyFixtures fixtures = legacyFixtures();
         seedLegacyData(connection, fixtures);
 
-        migrate(connection, "classpath:db/migration");
+        // 本测试的 fixture 携带非空冻结 skillBindings，V4 会（按设计）拒绝该形状；
+        // V4 的迁移契约由 PostgresqlSkillSourceMigrationTest 独立覆盖，这里只断言 V3 的结论。
+        migrateTo(connection, "3");
 
         assertEquals(3, currentVersion(connection));
         assertFalse(columnExists(connection, "chat", "workspace_path"));
@@ -200,8 +202,7 @@ class PostgresqlWorkspaceRemovalMigrationTest extends PostgresSchemaSupport {
         execute(connection, "update harness_model_invocation set status = '" + status + "'");
 
         FlywayException failure =
-            assertThrows(
-                FlywayException.class, () -> migrate(connection, "classpath:db/migration"));
+            assertThrows(FlywayException.class, () -> migrateTo(connection, "3"));
 
         assertTrue(rootMessages(failure).contains("model invocations are active"), status);
         assertLegacySchemaWasPreserved(connection);
@@ -221,8 +222,7 @@ class PostgresqlWorkspaceRemovalMigrationTest extends PostgresSchemaSupport {
         execute(connection, "update harness_tool_invocation set status = '" + status + "'");
 
         FlywayException failure =
-            assertThrows(
-                FlywayException.class, () -> migrate(connection, "classpath:db/migration"));
+            assertThrows(FlywayException.class, () -> migrateTo(connection, "3"));
 
         assertTrue(rootMessages(failure).contains("tool invocations are active"), status);
         assertLegacySchemaWasPreserved(connection);
@@ -274,8 +274,7 @@ class PostgresqlWorkspaceRemovalMigrationTest extends PostgresSchemaSupport {
         execute(connection, malformed.sql());
 
         FlywayException failure =
-            assertThrows(
-                FlywayException.class, () -> migrate(connection, "classpath:db/migration"));
+            assertThrows(FlywayException.class, () -> migrateTo(connection, "3"));
 
         assertTrue(rootMessages(failure).contains(malformed.expectedMessage()), malformed.sql());
         assertLegacySchemaWasPreserved(connection);

@@ -202,6 +202,56 @@ class DaemonSkillRegistryTest {
             .body());
   }
 
+  /**
+   * 测试意图：READY 需要的“集合版本 + 快照”必须来自同一次发布，因此 {@code inventory()} 随每次成功发布整体前进， 随重启恢复，并且失败发布与只读查询都不会改动它。
+   *
+   * <p>集合版本与行版本是两个独立维度：这里显式让集合版本先于行版本前进，证明暴露的是集合版本而不是 sourceVersion。
+   */
+  @Test
+  void inventoryTracksTheGenerationOfThePublishedSourceSet() throws IOException {
+    Path dataDir = tempDir.resolve("data");
+    Path root = Files.createDirectories(tempDir.resolve("root"));
+    writeSkill(root, "alpha", "Alpha skill", "# Alpha\n");
+    DaemonSkillRegistry registry = DaemonSkillRegistry.open(dataDir, tempDir);
+
+    DaemonSkillRegistry.PublishedInventory empty = registry.inventory();
+    assertEquals(0L, empty.sourceSetVersion());
+    assertTrue(empty.snapshots().isEmpty());
+
+    // 集合版本 5、行版本 1：暴露的必须是集合版本。
+    DaemonSkillSourceSnapshot published = registry.refresh(config(root, 1, 5));
+    DaemonSkillRegistry.PublishedInventory afterPublish = registry.inventory();
+    assertEquals(5L, afterPublish.sourceSetVersion());
+    assertEquals(List.of(published), afterPublish.snapshots());
+    assertEquals(afterPublish.snapshots(), registry.snapshots());
+
+    // 失败发布（跨来源同名冲突）不得改动已发布的集合版本或快照。
+    Path otherRoot = Files.createDirectories(tempDir.resolve("other-root"));
+    writeSkill(otherRoot, "alpha", "Conflicting skill", "# duplicate\n");
+    assertThrows(
+        DaemonSkillException.class,
+        () ->
+            registry.refresh(
+                DaemonSkillSourceConfig.path(
+                    OTHER_SOURCE_ID,
+                    1,
+                    6,
+                    otherRoot.toString(),
+                    false,
+                    Set.of(SOURCE_ID, OTHER_SOURCE_ID))));
+    assertEquals(5L, registry.inventory().sourceSetVersion());
+    assertEquals(1, registry.inventory().snapshots().size());
+
+    // 重启必须恢复同一集合版本：持久 manifest 是唯一事实源。
+    DaemonSkillRegistry reopened = DaemonSkillRegistry.open(dataDir, tempDir);
+    assertEquals(5L, reopened.inventory().sourceSetVersion());
+    assertEquals(List.of(published), reopened.inventory().snapshots());
+
+    // 返回视图不可变，调用方无法借它污染已发布事实。
+    assertThrows(
+        UnsupportedOperationException.class, () -> registry.inventory().snapshots().add(published));
+  }
+
   /** 发布失败（跨来源同名冲突）不得改动已持久化的 manifest 与后续重启结果。 */
   @Test
   void failedPublicationLeavesManifestUntouched() throws IOException {

@@ -17,6 +17,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -55,6 +56,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "chat_session",
           "environment",
           "environment_connection",
+          "environment_inventory",
+          "environment_operation",
+          "environment_skill",
+          "environment_skill_source",
           "harness_session",
           "harness_entry",
           "harness_thread",
@@ -272,6 +277,72 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "runtime_info",
         "last_seen_at",
         "lease_until");
+    assertColumns(
+        "environment_inventory",
+        "environment_id",
+        "source_set_version",
+        "applied_source_set_version",
+        "capabilities_version",
+        "operating_system",
+        "time_zone",
+        "note",
+        "root_path",
+        "owner_node_id",
+        "lease_token",
+        "reported_at",
+        "created_at",
+        "updated_at");
+    assertColumns(
+        "environment_skill_source",
+        "source_id",
+        "environment_id",
+        "source_type",
+        "path",
+        "default_source",
+        "git_url",
+        "git_ref",
+        "scan_path",
+        "version",
+        "status",
+        "applied_version",
+        "applied_revision",
+        "diagnostics",
+        "last_error_code",
+        "last_error_message",
+        "last_applied_at",
+        "created_at",
+        "updated_at");
+    assertColumns(
+        "environment_skill",
+        "environment_id",
+        "source_id",
+        "name",
+        "source_version",
+        "description",
+        "base_directory",
+        "content_revision",
+        "discovered_at");
+    assertColumns(
+        "environment_operation",
+        "id",
+        "environment_id",
+        "source_id",
+        "operation_type",
+        "status",
+        "source_version",
+        "source_set_version",
+        "arguments",
+        "parameter_summary",
+        "deadline_at",
+        "owner_node_id",
+        "lease_token",
+        "started_at",
+        "finished_at",
+        "result_summary",
+        "failure_code",
+        "failure_message",
+        "created_at",
+        "updated_at");
   }
 
   @Test
@@ -368,6 +439,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "canvas_node", "function_config_json");
     assertColumnType("jsonb", "canvas_function_run", "state_json");
     assertColumnType("jsonb", "environment_connection", "runtime_info");
+    assertColumnType("jsonb", "environment_skill_source", "diagnostics");
+    assertColumnType("jsonb", "environment_operation", "arguments");
+    assertColumnType("jsonb", "environment_operation", "parameter_summary");
+    assertColumnType("jsonb", "environment_operation", "result_summary");
+    // V4 表不得存放任何文件正文：Skill 正文只存在于 Daemon 的不可变 blob 中。
+    assertColumnType("character", "environment_skill", "content_revision");
     assertColumnType("integer", "canvas_function_run", "attempt");
     assertColumnType("character varying", "canvas_function_run", "lease_token");
   }
@@ -423,12 +500,25 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "environment", "updated_at");
     assertColumnType("timestamp with time zone", "environment_connection", "last_seen_at");
     assertColumnType("timestamp with time zone", "environment_connection", "lease_until");
+    assertColumnType("timestamp with time zone", "environment_inventory", "reported_at");
+    assertColumnType("timestamp with time zone", "environment_inventory", "created_at");
+    assertColumnType("timestamp with time zone", "environment_inventory", "updated_at");
+    assertColumnType("timestamp with time zone", "environment_skill_source", "last_applied_at");
+    assertColumnType("timestamp with time zone", "environment_skill_source", "created_at");
+    assertColumnType("timestamp with time zone", "environment_skill_source", "updated_at");
+    assertColumnType("timestamp with time zone", "environment_skill", "discovered_at");
+    assertColumnType("timestamp with time zone", "environment_operation", "deadline_at");
+    assertColumnType("timestamp with time zone", "environment_operation", "started_at");
+    assertColumnType("timestamp with time zone", "environment_operation", "finished_at");
+    assertColumnType("timestamp with time zone", "environment_operation", "created_at");
+    assertColumnType("timestamp with time zone", "environment_operation", "updated_at");
   }
 
   @Test
   void usesNativeBooleanForFlags() throws SQLException {
     assertColumnType("boolean", "harness_thread", "yolo_enabled");
     assertColumnType("boolean", "chat", "yolo_enabled");
+    assertColumnType("boolean", "environment_skill_source", "default_source");
   }
 
   @Test
@@ -969,6 +1059,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "chat_session", "chat_id");
     assertColumnType("uuid", "canvas_session", "session_id");
     assertColumnType("uuid", "canvas_session", "canvas_id");
+    assertColumnType("uuid", "environment_inventory", "environment_id");
+    assertColumnType("uuid", "environment_skill_source", "source_id");
+    assertColumnType("uuid", "environment_skill_source", "environment_id");
+    assertColumnType("uuid", "environment_skill", "environment_id");
+    assertColumnType("uuid", "environment_skill", "source_id");
+    assertColumnType("uuid", "environment_operation", "id");
+    assertColumnType("uuid", "environment_operation", "environment_id");
+    assertColumnType("uuid", "environment_operation", "source_id");
   }
 
   @Test
@@ -1171,7 +1269,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_storage_upload_candidate",
             "uk_mcp_server_name",
             "uk_mcp_tool_model_name",
-            "uk_mcp_tool_server_source_name"),
+            "uk_mcp_tool_server_source_name",
+            "uk_environment_skill_source_environment",
+            "uk_environment_skill_source_default",
+            "uk_environment_skill_environment_name",
+            "uk_environment_operation_active"),
         indexes,
         "the final schema must expose only its declared domain unique keys");
 
@@ -1194,7 +1296,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " 'fk_canvas_function_run_node',"
                     + " 'fk_canvas_function_resource_pin_node',"
                     + " 'fk_chat_session_chat', 'fk_chat_session_session',"
-                    + " 'fk_canvas_session_canvas', 'fk_canvas_session_session', 'fk_mcp_tool_server')")) {
+                    + " 'fk_canvas_session_canvas', 'fk_canvas_session_session', 'fk_mcp_tool_server',"
+                    + " 'fk_environment_inventory_environment',"
+                    + " 'fk_environment_skill_source_environment',"
+                    + " 'fk_environment_skill_source',"
+                    + " 'fk_environment_operation_environment')")) {
       while (rs.next()) {
         foreignKeys.add(rs.getString(1));
       }
@@ -1221,7 +1327,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_chat_session_session",
             "fk_canvas_session_canvas",
             "fk_canvas_session_session",
-            "fk_mcp_tool_server"),
+            "fk_mcp_tool_server",
+            "fk_environment_inventory_environment",
+            "fk_environment_skill_source_environment",
+            "fk_environment_skill_source",
+            "fk_environment_operation_environment"),
         foreignKeys,
         "all non-Harness ownership relations must be enforced by PostgreSQL");
   }
@@ -1263,6 +1373,182 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertTrue(
         blobIndex.contains("(blob_id, session_id)"),
         () -> "blob reverse-lookup index must cover (blob_id, session_id): " + blobIndex);
+  }
+
+  /**
+   * V4 Skill 表的结构契约：复合主键/复合 FK、级联删除、每环境至多一个缺省来源， 以及 environment_operation.source_id 故意不建
+   * FK（来源删除后历史必须保留）。
+   */
+  @Test
+  void skillSourceTablesExposeCompositeKeysAndDeliberateCascades() throws SQLException {
+    // environment_skill 的身份是 (source_id, name)，Environment 内名称唯一。
+    Set<String> skillPrimaryKeys = new TreeSet<>();
+    try (Connection conn = newConnection();
+        Statement st = conn.createStatement();
+        ResultSet rs =
+            st.executeQuery(
+                "select a.attname from pg_index i"
+                    + " join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey)"
+                    + " where i.indrelid = 'environment_skill'::regclass and i.indisprimary")) {
+      while (rs.next()) {
+        skillPrimaryKeys.add(rs.getString(1));
+      }
+    }
+    assertEquals(Set.of("source_id", "name"), skillPrimaryKeys);
+
+    // 复合 FK 指向来源配置，并且确实级联删除。
+    assertEquals(
+        "CASCADE",
+        singleString(
+            "select case confdeltype when 'r' then 'RESTRICT' when 'a' then 'NO ACTION'"
+                + " when 'c' then 'CASCADE' when 'n' then 'SET NULL' else 'SET DEFAULT' end"
+                + " from pg_constraint where conname = 'fk_environment_skill_source'"));
+    // FK 的本地列必须正好是 (environment_id, source_id)：只指向 environment 无法保证来源同属该 Environment。
+    assertEquals(
+        "environment_id,source_id",
+        singleString(
+            "select string_agg(attribute.attname, ',' order by key.ordinality)"
+                + " from pg_constraint as constraint_"
+                + " cross join lateral unnest(constraint_.conkey) with ordinality"
+                + " as key(attnum, ordinality)"
+                + " join pg_attribute as attribute"
+                + " on attribute.attrelid = constraint_.conrelid and attribute.attnum = key.attnum"
+                + " where constraint_.conname = 'fk_environment_skill_source'"));
+    assertEquals(
+        "environment_id,source_id",
+        singleString(
+            "select string_agg(attribute.attname, ',' order by key.ordinality)"
+                + " from pg_constraint as constraint_"
+                + " cross join lateral unnest(constraint_.confkey) with ordinality"
+                + " as key(attnum, ordinality)"
+                + " join pg_attribute as attribute"
+                + " on attribute.attrelid = constraint_.confrelid and attribute.attnum = key.attnum"
+                + " where constraint_.conname = 'fk_environment_skill_source'"));
+
+    // 每个 Environment 至多一个缺省来源：partial unique index 精确存在。
+    String defaultIndex =
+        singleString(
+            "select indexdef from pg_indexes"
+                + " where schemaname = 'public' and indexname = 'uk_environment_skill_source_default'");
+    assertTrue(
+        defaultIndex.contains("(environment_id)") && defaultIndex.contains("WHERE default_source"),
+        () -> "default source uniqueness must be a partial unique index: " + defaultIndex);
+
+    // 未终结操作唯一性：只约束 PENDING/RUNNING。
+    String activeIndex =
+        singleString(
+            "select indexdef from pg_indexes"
+                + " where schemaname = 'public' and indexname = 'uk_environment_operation_active'");
+    assertTrue(
+        activeIndex.contains("(environment_id, source_id)")
+            && activeIndex.contains("'PENDING'")
+            && activeIndex.contains("'RUNNING'"),
+        () -> "active operation uniqueness must be partial over PENDING/RUNNING: " + activeIndex);
+    String claimIndex =
+        singleString(
+            "select indexdef from pg_indexes"
+                + " where schemaname = 'public' and indexname = 'idx_environment_operation_claim'");
+    assertTrue(
+        claimIndex.contains("(status, deadline_at, environment_id)")
+            && claimIndex.contains("WHERE"),
+        () -> "claim index must be partial over PENDING: " + claimIndex);
+
+    // operation.source_id 故意没有外键：删除来源不得抹掉操作历史。
+    assertEquals(
+        0L,
+        singleLong(
+            "select count(*) from pg_constraint as constraint_"
+                + " cross join lateral unnest(constraint_.conkey) as key(attnum)"
+                + " join pg_attribute as attribute"
+                + " on attribute.attrelid = constraint_.conrelid and attribute.attnum = key.attnum"
+                + " where constraint_.contype = 'f'"
+                + " and constraint_.conrelid = 'environment_operation'::regclass"
+                + " and attribute.attname = 'source_id'"));
+
+    // 级联删除行为：删除来源行会移除其持久 Skill inventory，但不影响 Environment 本身。
+    UUID environmentId = uuid(970_001L);
+    UUID sourceId = uuid(970_002L);
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "insert into environment (id, name, registration_token) values (?, ?, ?)")) {
+      ps.setObject(1, environmentId);
+      ps.setString(2, "skill-cascade-env-" + FIXTURE_IDS.incrementAndGet());
+      ps.setString(3, "skill-cascade-token");
+      assertEquals(1, ps.executeUpdate());
+    }
+    try (Connection conn = newConnection()) {
+      insertSkillSource(conn, sourceId, environmentId, "path", "/skills", false, 1L, "READY", 1L);
+      try (PreparedStatement ps =
+          conn.prepareStatement(
+              "insert into environment_skill (environment_id, source_id, name, source_version,"
+                  + " description, base_directory, content_revision, discovered_at)"
+                  + " values (?, ?, 'dev', 1, 'Dev rules', '/skills/dev', ?, current_timestamp)")) {
+        ps.setObject(1, environmentId);
+        ps.setObject(2, sourceId);
+        ps.setString(3, "a".repeat(64));
+        assertEquals(1, ps.executeUpdate());
+      }
+    }
+    assertEquals(
+        1L,
+        singleLong("select count(*) from environment_skill where source_id = '" + sourceId + "'"));
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement("delete from environment_skill_source where source_id = ?")) {
+      ps.setObject(1, sourceId);
+      assertEquals(1, ps.executeUpdate(), "source deletion must be allowed");
+    }
+    assertEquals(
+        0L,
+        singleLong("select count(*) from environment_skill where source_id = '" + sourceId + "'"),
+        "deleting a source must cascade its latest durable skills");
+  }
+
+  /**
+   * 插入一行合法的来源配置；供 V4 结构测试复用。
+   *
+   * <p>被应用三元组用数据库时间填充：{@code created_at} 也是数据库时间，用 JVM 时钟可能比它早若干微秒并撞上 {@code
+   * ck_environment_skill_source_time_order}。
+   */
+  private static void insertSkillSource(
+      Connection conn,
+      UUID sourceId,
+      UUID environmentId,
+      String sourceType,
+      String path,
+      boolean defaultSource,
+      long version,
+      String status,
+      Long appliedVersion)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into environment_skill_source (source_id, environment_id, source_type, path,"
+                + " default_source, version, status, applied_version, applied_revision,"
+                + " last_applied_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?,"
+                + " case when ?::bigint is null then null else current_timestamp end)")) {
+      ps.setObject(1, sourceId);
+      ps.setObject(2, environmentId);
+      ps.setString(3, sourceType);
+      ps.setString(4, path);
+      ps.setBoolean(5, defaultSource);
+      ps.setLong(6, version);
+      ps.setString(7, status);
+      if (appliedVersion == null) {
+        ps.setNull(8, Types.BIGINT);
+        ps.setNull(9, Types.VARCHAR);
+      } else {
+        ps.setLong(8, appliedVersion);
+        ps.setString(9, "a".repeat(40));
+      }
+      if (appliedVersion == null) {
+        ps.setNull(10, Types.BIGINT);
+      } else {
+        ps.setLong(10, appliedVersion);
+      }
+      ps.executeUpdate();
+    }
   }
 
   @Test

@@ -53,6 +53,7 @@ flowchart LR
 schema/src/main/resources/db/migration/V1__schema.sql
 schema/src/main/resources/db/migration/V2__model_identity_and_variant.sql
 schema/src/main/resources/db/migration/V3__remove_workspace.sql
+schema/src/main/resources/db/migration/V4__skill_sources_and_operations.sql
 schema/src/main/resources/db/seed/dev/R__dev_seed.sql
 schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql
 schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql
@@ -106,17 +107,32 @@ Web 依赖 `spring-boot-starter-flyway`、`flyway-database-postgresql` 以及 ru
 - V3 删除产品 Workspace 状态、目录查询信箱和 `SET_ENVIRONMENT`，把 Harness
   durable JSON 中的环境绑定收敛为直接 `EnvironmentId`。迁移在存在活动
   Invocation 或旧 JSON 形状损坏时 fail-fast，并依赖 Flyway 事务整体回滚。
+- V4 把 Skill 事实从“Daemon READY 的瞬时上报”推进为 Platform 的持久权威状态：
+  `environment_inventory` 每个 Environment 一行，保存期望来源集合代际
+  (`source_set_version`) 与最近一次被围栏接受的 READY 报告；
+  `environment_skill_source` 是 Platform 唯一的来源配置，`version` 同时是行级
+  CAS 令牌与 Daemon `sourceVersion`；`environment_skill` 只保存每个来源最新一次
+  成功扫描的 inventory（正文永不入库）；`environment_operation` 是跨节点管理
+  信箱与不可变历史，`source_id` 故意不建 FK 以保留来源删除后的历史。
+  迁移在任何 mutation 之前 fail-fast：存在活动 Invocation、`agent_definition.config`
+  缺失/畸形/非空 `skills`、或冻结 `request_spec.skillBindings` 缺失/畸形/非空时
+  整体回滚。回填对每个既有 Environment 生成一行 inventory 与一个 id 由
+  `md5(environment_id::text || ':default-skill-source')::uuid` 派生的缺省 PATH
+  来源（`~/.agents/skills`、`version = 0`、`UNAPPLIED`），不依赖扩展、随机数或序列。
 
 ### Profile seeds
 
 | profile | 资源 | 内容 |
 | --- | --- | --- |
 | dev | `db/seed/dev/R__dev_seed.sql` | stub Provider/Model/Agent |
-| e2e | `db/seed/e2e/R__e2e_seed.sql` | Provider、Model、default Agent 与权限设置 |
+| e2e | `db/seed/e2e/R__e2e_seed.sql` | Provider、Model、default Agent、权限设置与 e2e Environment 的 inventory/缺省来源 |
 | canvas-test | `db/seed/canvas-test/R__canvas_test_seed.sql` | S3、Canvas Function integration 的测试开关与时间预算 |
 
 baseline 直接插入 `system_setting` 默认聚合；profile seed 只覆盖其 profile
-需要的事实，并使用明确的 SQL 条件保证重复执行结果稳定。
+需要的事实，并使用明确的 SQL 条件保证重复执行结果稳定。e2e Environment 在 V4
+之后才被 seed 插入，因此它们不会由 V4 回填获得 inventory/缺省来源；`R__e2e_seed.sql`
+按与 V4 完全相同的确定性规则补齐，且只建立缺失行：同一确定性 ID 的已有来源行
+绝不被覆盖，已经存在其它缺省来源时也不插入第二个。
 
 ## 主流程
 
@@ -166,6 +182,7 @@ profile seed，也没有生产凭据默认值。
 - `schema/src/main/resources/db/migration/V1__schema.sql`
 - `schema/src/main/resources/db/migration/V2__model_identity_and_variant.sql`
 - `schema/src/main/resources/db/migration/V3__remove_workspace.sql`
+- `schema/src/main/resources/db/migration/V4__skill_sources_and_operations.sql`
 - `schema/src/main/resources/db/seed/dev/R__dev_seed.sql`
 - `schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql`
 - `schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql`
@@ -176,6 +193,7 @@ profile seed，也没有生产凭据默认值。
 - `web/src/test/java/fun/fengwk/kkstudio/web/FlywayAutoConfigurationIntegrationTest.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlWorkspaceRemovalMigrationTest.java`
+- `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSkillSourceMigrationTest.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java`
 - `canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresCanvasInfraTestSupport.java`
 
