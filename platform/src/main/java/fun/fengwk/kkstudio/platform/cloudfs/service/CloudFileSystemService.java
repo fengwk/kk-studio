@@ -105,7 +105,7 @@ public interface CloudFileSystemService {
    * <ul>
    *   <li>根目录与 {@code /.artifacts} 禁止公开删除；
    *   <li>非空目录拒绝删除；
-   *   <li>TEXT 节点删除时在同事务内级联删除所有文本版本历史；
+   *   <li>TEXT 节点删除时在同事务内显式删除所有文本版本历史；
    *   <li>BLOB 节点删除时在同事务内调用 {@code StorageBlobManager.release} 释放一份底层引用。
    * </ul>
    *

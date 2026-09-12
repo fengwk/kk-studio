@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.cloudfs.domain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -31,6 +32,15 @@ class ToolArtifactPathTest {
     assertEquals(THREAD_ID, parsed.threadId());
     assertEquals(INVOCATION_ID, parsed.invocationId());
     assertEquals("txt", parsed.extension());
+
+    // Coordinates equals, hashCode, toString
+    ToolArtifactPath.ToolArtifactCoordinates same =
+        new ToolArtifactPath.ToolArtifactCoordinates(THREAD_ID, INVOCATION_ID, "txt");
+    assertEquals(parsed, same);
+    assertEquals(parsed.hashCode(), same.hashCode());
+    assertNotEquals(parsed, null);
+    assertNotEquals(parsed, "other");
+    assertTrue(parsed.toString().contains(THREAD_ID.toString()));
   }
 
   /** 验证使用精确 "json" 扩展名与合法 UUID 格式化和解析 Tool Artifact 虚拟路径。 */
@@ -118,9 +128,17 @@ class ToolArtifactPathTest {
             "/.artifacts/tool-results/not-a-valid-uuid/22222222-2222-2222-2222-222222222222.txt");
     assertFalse(ToolArtifactPath.isToolArtifactPath(malformedThread));
     assertThrows(CloudPathValidationException.class, () -> ToolArtifactPath.parse(malformedThread));
+
+    // 36-char non-UUID string that throws in UUID.fromString
+    CloudPath invalidHexThread =
+        CloudPath.of(
+            "/.artifacts/tool-results/zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz/22222222-2222-2222-2222-222222222222.txt");
+    assertFalse(ToolArtifactPath.isToolArtifactPath(invalidHexThread));
+    assertThrows(
+        CloudPathValidationException.class, () -> ToolArtifactPath.parse(invalidHexThread));
   }
 
-  /** 验证路径解析对非精确 txt/json 扩展名（如大写、非法类型）的判定与拦截。 */
+  /** 验证路径解析对非精确 txt/json 扩展名（如大写、非法类型）及文件名的判定与拦截。 */
   @Test
   void testParseAndIsToolArtifactPathStrictExtension() {
     // Uppercase extension in path
@@ -137,9 +155,37 @@ class ToolArtifactPathTest {
     assertFalse(ToolArtifactPath.isToolArtifactPath(binExt));
     assertThrows(CloudPathValidationException.class, () -> ToolArtifactPath.parse(binExt));
 
+    // No extension / no dot
+    CloudPath noDot =
+        CloudPath.of(
+            "/.artifacts/tool-results/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222");
+    assertFalse(ToolArtifactPath.isToolArtifactPath(noDot));
+    assertThrows(CloudPathValidationException.class, () -> ToolArtifactPath.parse(noDot));
+
+    // Trailing dot
+    CloudPath trailingDot =
+        CloudPath.of(
+            "/.artifacts/tool-results/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.");
+    assertFalse(ToolArtifactPath.isToolArtifactPath(trailingDot));
+    assertThrows(CloudPathValidationException.class, () -> ToolArtifactPath.parse(trailingDot));
+
+    // Invalid prefix segments
+    CloudPath wrongSegment0 =
+        CloudPath.of(
+            "/wrong/tool-results/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.txt");
+    assertFalse(ToolArtifactPath.isToolArtifactPath(wrongSegment0));
+    assertThrows(CloudPathValidationException.class, () -> ToolArtifactPath.parse(wrongSegment0));
+
+    CloudPath wrongSegment1 =
+        CloudPath.of(
+            "/.artifacts/wrong/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.txt");
+    assertFalse(ToolArtifactPath.isToolArtifactPath(wrongSegment1));
+    assertThrows(CloudPathValidationException.class, () -> ToolArtifactPath.parse(wrongSegment1));
+
     // Non-artifact path locations
     assertFalse(ToolArtifactPath.isToolArtifactPath(CloudPath.of("/knowledge/file.txt")));
     assertFalse(ToolArtifactPath.isToolArtifactPath(CloudPath.of("/.artifacts")));
     assertFalse(ToolArtifactPath.isToolArtifactPath(null));
+    assertThrows(CloudPathValidationException.class, () -> ToolArtifactPath.parse(null));
   }
 }

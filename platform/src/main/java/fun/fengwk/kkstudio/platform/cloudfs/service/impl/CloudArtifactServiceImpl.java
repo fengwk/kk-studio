@@ -26,8 +26,11 @@ import java.util.UUID;
 @Service
 public class CloudArtifactServiceImpl implements CloudArtifactService {
 
+  private static final UUID PRESEEDED_ARTIFACTS_DIR_ID =
+      UUID.fromString("c0000000-0000-0000-0000-000000000003");
   private static final UUID PRESEEDED_TOOL_RESULTS_DIR_ID =
       UUID.fromString("c0000000-0000-0000-0000-000000000004");
+  private static final String TOOL_RESULTS_DIR_NAME = "tool-results";
   private static final CloudPath TOOL_RESULTS_DIR_PATH = CloudPath.of("/.artifacts/tool-results");
 
   private final CloudNodeRepository nodeRepository;
@@ -65,17 +68,15 @@ public class CloudArtifactServiceImpl implements CloudArtifactService {
     CloudNode toolResultsDir =
         nodeRepository
             .findById(PRESEEDED_TOOL_RESULTS_DIR_ID)
-            .or(() -> resolvePath(TOOL_RESULTS_DIR_PATH))
-            .orElseThrow(
-                () ->
-                    new CloudNodeNotFoundException(
-                        "Tool results base directory missing: " + TOOL_RESULTS_DIR_PATH));
-    if (!toolResultsDir.isDirectory()) {
+            .orElseThrow(() -> new CloudNodeNotFoundException(TOOL_RESULTS_DIR_PATH));
+    if (!toolResultsDir.isDirectory()
+        || !TOOL_RESULTS_DIR_NAME.equals(toolResultsDir.getName())
+        || !PRESEEDED_ARTIFACTS_DIR_ID.equals(toolResultsDir.getParentId())) {
       throw new CloudNodeKindConflictException(
           TOOL_RESULTS_DIR_PATH, CloudNodeKind.DIRECTORY, toolResultsDir.getKind());
     }
 
-    String threadDirName = threadId.toString().toLowerCase();
+    String threadDirName = threadId.toString();
     Optional<CloudNode> threadDirOpt =
         nodeRepository.findByParentIdAndName(toolResultsDir.getId(), threadDirName);
     CloudNode threadDir;
@@ -96,10 +97,7 @@ public class CloudArtifactServiceImpl implements CloudArtifactService {
         threadDir =
             nodeRepository
                 .findByParentIdAndName(toolResultsDir.getId(), threadDirName)
-                .orElseThrow(
-                    () ->
-                        new CloudNodeNotFoundException(
-                            "Failed to resolve thread directory: " + threadDirName));
+                .orElseThrow(() -> new CloudNodeNotFoundException(path.parent()));
       }
     } else {
       threadDir = threadDirOpt.get();
@@ -135,10 +133,7 @@ public class CloudArtifactServiceImpl implements CloudArtifactService {
     CloudNode racedExisting =
         nodeRepository
             .findByParentIdAndName(threadDir.getId(), path.name())
-            .orElseThrow(
-                () ->
-                    new CloudNodeNotFoundException(
-                        "Artifact node missing after conflict: " + path));
+            .orElseThrow(() -> new CloudNodeNotFoundException(path));
     return checkIdempotentReplay(path, racedExisting, blob);
   }
 
@@ -160,19 +155,5 @@ public class CloudArtifactServiceImpl implements CloudArtifactService {
         String.format(
             "Artifact conflict at %s: existing artifact blob content does not match new content",
             path));
-  }
-
-  private Optional<CloudNode> resolvePath(CloudPath path) {
-    UUID currentParentId = null;
-    CloudNode current = null;
-    for (String seg : path.segments()) {
-      Optional<CloudNode> opt = nodeRepository.findByParentIdAndName(currentParentId, seg);
-      if (opt.isEmpty()) {
-        return Optional.empty();
-      }
-      current = opt.get();
-      currentParentId = current.getId();
-    }
-    return Optional.ofNullable(current);
   }
 }

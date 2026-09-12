@@ -22,6 +22,14 @@ public interface CloudNodeRepository {
   Optional<CloudNode> findByParentIdAndName(UUID parentId, String name);
 
   /**
+   * 根据父节点 ID 和名称排他锁定查询唯一定位节点（SELECT ... FOR UPDATE）。
+   *
+   * @param parentId 父节点 ID；若为 null 则查询根目录直接子节点
+   * @param name 分段名称
+   */
+  Optional<CloudNode> findByParentIdAndNameForUpdate(UUID parentId, String name);
+
+  /**
    * 查询指定父节点下的所有直接子节点，按名称升序排列。
    *
    * @param parentId 父节点 ID；若为 null 则查询根目录直接子节点

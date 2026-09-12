@@ -11,7 +11,7 @@ public class CloudCycleException extends CloudFileSystemException {
   public CloudCycleException(CloudPath sourcePath, CloudPath targetPath) {
     super(
         String.format(
-            "Cannot move directory %s into itself or its descendant %s", sourcePath, targetPath));
+            "Cannot move node %s into itself or its descendant %s", sourcePath, targetPath));
     this.sourcePath = sourcePath;
     this.targetPath = targetPath;
   }

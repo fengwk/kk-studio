@@ -23,15 +23,14 @@ public class PostgresqlCloudTextRevisionRepository implements CloudTextRevisionR
 
   @Override
   public Optional<CloudTextRevision> findCurrentByNodeId(UUID nodeId) {
-    if (nodeId == null) {
-      return Optional.empty();
-    }
+    Objects.requireNonNull(nodeId, "nodeId");
     return Optional.ofNullable(toDomain(mapper.getCurrentByNodeId(nodeId)));
   }
 
   @Override
   public Optional<CloudTextRevision> findByNodeIdAndRevision(UUID nodeId, long revision) {
-    if (nodeId == null || revision <= 0) {
+    Objects.requireNonNull(nodeId, "nodeId");
+    if (revision <= 0) {
       return Optional.empty();
     }
     return Optional.ofNullable(toDomain(mapper.getByNodeIdAndRevision(nodeId, revision)));
@@ -46,7 +45,8 @@ public class PostgresqlCloudTextRevisionRepository implements CloudTextRevisionR
 
   @Override
   public int unsetCurrent(UUID nodeId, long expectedRevision) {
-    if (nodeId == null || expectedRevision <= 0) {
+    Objects.requireNonNull(nodeId, "nodeId");
+    if (expectedRevision <= 0) {
       return 0;
     }
     return mapper.unsetCurrent(nodeId, expectedRevision);
@@ -54,9 +54,7 @@ public class PostgresqlCloudTextRevisionRepository implements CloudTextRevisionR
 
   @Override
   public int deleteByNodeId(UUID nodeId) {
-    if (nodeId == null) {
-      return 0;
-    }
+    Objects.requireNonNull(nodeId, "nodeId");
     return mapper.deleteByNodeId(nodeId);
   }
 
@@ -66,9 +64,9 @@ public class PostgresqlCloudTextRevisionRepository implements CloudTextRevisionR
     }
     return CloudTextRevision.builder()
         .nodeId(revisionDO.getNodeId())
-        .revision(revisionDO.getRevision() != null ? revisionDO.getRevision() : 0L)
+        .revision(revisionDO.getRevision())
         .content(revisionDO.getContent())
-        .sizeBytes(revisionDO.getSizeBytes() != null ? revisionDO.getSizeBytes() : 0L)
+        .sizeBytes(revisionDO.getSizeBytes())
         .sha256(revisionDO.getSha256())
         .current(Boolean.TRUE.equals(revisionDO.getIsCurrent()))
         .createdAt(revisionDO.getCreateTime())
@@ -76,9 +74,7 @@ public class PostgresqlCloudTextRevisionRepository implements CloudTextRevisionR
   }
 
   private CloudTextRevisionDO toDO(CloudTextRevision revision) {
-    if (revision == null) {
-      return null;
-    }
+    Objects.requireNonNull(revision, "revision");
     return CloudTextRevisionDO.builder()
         .nodeId(revision.getNodeId())
         .revision(revision.getRevision())
