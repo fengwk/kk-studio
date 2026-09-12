@@ -810,6 +810,24 @@ class EnvironmentDaemonGatewayFinalTest extends PostgresSchemaSupport {
     assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(connection.envelopes()));
   }
 
+  /**
+   * 测试意图：未知 registrationToken 被拒绝时，发给 Daemon 的 ERROR 载荷只能含稳定通用原因（REGISTRATION_REJECTED）， 绝不能回显提交的
+   * token 原值，避免凭据经协议错误路径外泄。
+   */
+  @Test
+  void unknownRegistrationTokenIsRejectedWithoutEchoingTokenValue() {
+    Fixture fixture = fixture();
+    FakeConnection connection = new FakeConnection("connection-token-leak-check");
+    fixture.gateway.open(connection);
+    fixture.gateway.receive(connection.connectionId(), helloWithToken("super-secret-token", 0));
+
+    assertTrue(connection.closed);
+    assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(connection.envelopes()));
+    String payloadJson = connection.envelopes().get(0).payloadJson();
+    assertTrue(payloadJson.contains(DaemonProtocol.ERROR_CODE_REGISTRATION_REJECTED), payloadJson);
+    assertFalse(payloadJson.contains("super-secret-token"), payloadJson);
+  }
+
   @Test
   void duplicateHelloAndReadyAreRejectedAsSingleUseHandshakeMessages() {
     Fixture fixture = fixture();
