@@ -57,18 +57,22 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         self.assertNotIn("environmentId", default_assistant_stmt)
         self.assertNotIn("11111111-1111-1111-1111-111111111111", default_assistant_stmt)
 
-    def test_three_startup_paths_use_registration_token(self):
-        """lib.sh, reliability compose, and distributed compose must only use registration token."""
+    def test_three_startup_paths_use_registration_token_and_data_directory(self):
+        """Every daemon startup path must pass its registration token and durable data directory."""
         lib_content = E2E_LIB_SH.read_text(encoding="utf-8")
         self.assertIn("--registration-token", lib_content)
+        self.assertIn("--data-dir", lib_content)
+        self.assertNotIn("--skill-dir", lib_content)
         self.assertIn("e2e-token-host-tool", lib_content)
 
         rel_content = RELIABILITY_COMPOSE.read_text(encoding="utf-8")
         self.assertIn("--registration-token", rel_content)
+        self.assertIn("--data-dir", rel_content)
         self.assertIn("e2e-token-reliability", rel_content)
 
         dist_content = DISTRIBUTED_COMPOSE.read_text(encoding="utf-8")
         self.assertIn("--registration-token", dist_content)
+        self.assertEqual(2, dist_content.count("--data-dir"))
         self.assertIn("e2e-token-dist-a", dist_content)
         self.assertIn("e2e-token-dist-b", dist_content)
 

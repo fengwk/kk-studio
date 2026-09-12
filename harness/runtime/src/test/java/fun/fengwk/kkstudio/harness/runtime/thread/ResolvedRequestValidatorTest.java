@@ -79,7 +79,7 @@ class ResolvedRequestValidatorTest {
         normalSpec(
             SETTINGS,
             List.of(environmentTool(ENV_BINDING)),
-            List.of(new SkillBinding("dev", "developer rules", ENV_BINDING)),
+            List.of(skillBinding("dev", ENV_BINDING)),
             List.of(),
             ProviderCacheControl.none());
 
@@ -158,7 +158,7 @@ class ResolvedRequestValidatorTest {
         preparation(),
         List.of(),
         List.of(),
-        List.of(new SkillBinding("dev", "developer rules", null)),
+        List.of(skillBinding("dev", ENV_BINDING)),
         List.of(),
         ProviderCacheControl.none());
   }
@@ -213,9 +213,20 @@ class ResolvedRequestValidatorTest {
                     normalSpec(
                         SETTINGS,
                         List.of(environmentTool(OTHER_ENVIRONMENT_ID)),
-                        List.of(new SkillBinding("dev", "developer rules", OTHER_ENVIRONMENT_ID)),
+                        List.of(skillBinding("dev", OTHER_ENVIRONMENT_ID)),
                         List.of(),
                         ProviderCacheControl.none()))));
+  }
+
+  /** 冻结的六字段 skill binding fixture：身份、描述、baseDirectory 与 revision 全部必填。 */
+  private static SkillBinding skillBinding(String name, EnvironmentId sourceEnvironmentId) {
+    return new SkillBinding(
+        sourceEnvironmentId,
+        UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        name,
+        "developer rules",
+        "/home/dev/.agents/skills/" + name,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
   }
 
   private static void assertCompactionRejects(

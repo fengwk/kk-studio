@@ -233,6 +233,8 @@ services:
       - Distributed test node A (shared data, no app-to-app network).
       - --environment-root
       - /workspace
+      - --data-dir
+      - /workspace/.kkstudio/daemon
     volumes:
       - daemon-workspace-a:/workspace
     networks:
@@ -255,6 +257,8 @@ services:
       - Distributed test node B (shared data, no app-to-app network).
       - --environment-root
       - /workspace
+      - --data-dir
+      - /workspace/.kkstudio/daemon
     volumes:
       - daemon-workspace-b:/workspace
     networks:

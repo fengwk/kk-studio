@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.builtin.skill;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
@@ -33,8 +34,9 @@ import java.util.function.Supplier;
 /**
  * 由当前 Thread Agent 选中、用于加载完整 SKILL.md 正文的 internal Tool。
  *
- * <p>校验冻结的已选 skill 与其 source Environment 后，直接经 {@link BoundEnvironment#execute} 调用 {@code
- * skill.load} 能力；不存在 skill body 专用的加载器链。 {@code skill.load} 不要求 workdir：skill 按身份/来源定位，不依赖会话 cwd。
+ * <p>校验冻结的已选 skill 与其 source Environment 后，直接经 {@link BoundEnvironment#execute} 以冻结的 {@code
+ * sourceId/name/revision} 调用 {@code skill.load} 能力；不存在 skill body 专用的加载器链。{@code skill.load} 不要求
+ * workdir：skill 按身份/来源定位，不依赖会话 cwd。
  */
 public final class LoadSkillTool implements Tool {
 
@@ -111,9 +113,6 @@ public final class LoadSkillTool implements Tool {
         return complete(listener, error(callId, "unknown or unselected skill: " + skillName));
       }
       SelectedSkill skill = selected.get();
-      if (skill.sourceEnvironmentId() == null) {
-        return complete(listener, error(callId, "skill has no Environment body: " + skill.name()));
-      }
       if (!Objects.equals(skill.sourceEnvironmentId(), boundEnvironment.environmentId())) {
         return complete(
             listener,
@@ -125,25 +124,27 @@ public final class LoadSkillTool implements Tool {
                     + boundEnvironment.environmentId()));
       }
       return boundEnvironment.execute(
-          CAPABILITY, skillLoadRequest(request, skill.name(), loadTimeout()), listener);
+          CAPABILITY, skillLoadRequest(request, skill, loadTimeout()), listener);
     } catch (RuntimeException error) {
       return complete(listener, error(callId, message(error)));
     }
   }
 
-  /** skill.load 的 arguments 只有 skill 名称：不注入 workdir 或任何目录状态。 */
+  /**
+   * skill.load 的 arguments 是冻结的全部身份字段（sourceId/name/revision），不含 workdir：内部能力必须精确匹配选择当时的版本，
+   * 绝不允许按名称回退到同名新版本。arguments 由 Jackson 构造，避免手写转义引入非法 JSON。
+   */
   private static ToolExecutionRequest skillLoadRequest(
-      ToolExecutionRequest request, String skillName, Duration timeout) {
-    String argumentsJson = "{\"name\":\"" + escapeJson(skillName) + "\"}";
+      ToolExecutionRequest request, SelectedSkill skill, Duration timeout) {
+    ObjectNode arguments = OBJECT_MAPPER.createObjectNode();
+    arguments.put("sourceId", skill.sourceId().toString());
+    arguments.put("name", skill.name());
+    arguments.put("revision", skill.contentRevision());
     return new ToolExecutionRequest(
         SKILL_LOAD_TOOL_DESCRIPTOR,
-        new ToolCall(request.call().id(), NAME, argumentsJson),
+        new ToolCall(request.call().id(), NAME, arguments.toString()),
         timeout,
         request.context());
-  }
-
-  private static String escapeJson(String value) {
-    return value.replace("\\", "\\\\").replace("\"", "\\\"");
   }
 
   private static String parseName(String argumentsJson) {

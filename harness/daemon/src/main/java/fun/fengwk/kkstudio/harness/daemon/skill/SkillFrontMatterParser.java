@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon.skill;
 
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -7,8 +9,11 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 
@@ -16,7 +21,9 @@ import java.util.Set;
  * 针对 Agent Skills {@code SKILL.md} 的轻量前置元数据（front matter）解析器。
  *
  * <p>仅解析顶层必需的 {@code name} 与 {@code description} 字段，支持普通标量、单/双引号标量与缩进的 {@code |} / {@code >}
- * 块标量；安全忽略未知顶层字段，不回显文档敏感内容。
+ * 块标量；安全忽略未知顶层字段。失败以 {@link SkillParseException} 的短原因表达，绝不回显正文内容。
+ *
+ * <p>{@code contentRevision} 是 SKILL.md <b>原始字节</b>的 lowercase SHA-256，因此正文任何字节变化都改变 revision。
  */
 final class SkillFrontMatterParser {
 
@@ -24,118 +31,70 @@ final class SkillFrontMatterParser {
 
   static DaemonSkill parse(Path skillDir, String source) {
     Path skillFile = skillDir.resolve("SKILL.md");
-    if (!Files.isRegularFile(skillFile)) {
-      throw new IllegalArgumentException("SKILL.md not found in " + skillDir);
-    }
-
-    String rawText;
+    byte[] rawBytes;
     try {
-      byte[] bytes = Files.readAllBytes(skillFile);
-      rawText =
-          StandardCharsets.UTF_8
-              .newDecoder()
-              .onMalformedInput(CodingErrorAction.REPORT)
-              .onUnmappableCharacter(CodingErrorAction.REPORT)
-              .decode(ByteBuffer.wrap(bytes))
-              .toString();
-    } catch (CharacterCodingException error) {
-      throw new IllegalArgumentException(
-          "cannot load SKILL.md from " + skillDir + " (" + source + "): invalid UTF-8 encoding",
-          error);
+      rawBytes = Files.readAllBytes(skillFile);
     } catch (IOException error) {
-      throw new IllegalArgumentException(
-          "cannot load SKILL.md from " + skillDir + " (" + source + "): read error", error);
+      throw new SkillParseException("SKILL.md is not readable (" + source + ")");
     }
-
+    String rawText = decodeUtf8(rawBytes, source);
     if (rawText.startsWith("\uFEFF")) {
       rawText = rawText.substring(1);
     }
 
     List<String> lines = splitLines(rawText);
     if (lines.isEmpty() || !lines.getFirst().trim().equals("---")) {
-      throw new IllegalArgumentException(
-          "cannot load SKILL.md from "
-              + skillDir
-              + " ("
-              + source
-              + "): missing front matter opening delimiter");
+      throw new SkillParseException("missing front matter opening delimiter");
     }
 
     int closingIndex = -1;
-    for (int i = 1; i < lines.size(); i++) {
-      if (lines.get(i).trim().equals("---")) {
-        closingIndex = i;
+    for (int index = 1; index < lines.size(); index++) {
+      if (lines.get(index).trim().equals("---")) {
+        closingIndex = index;
         break;
       }
     }
-
     if (closingIndex == -1) {
-      throw new IllegalArgumentException(
-          "cannot load SKILL.md from "
-              + skillDir
-              + " ("
-              + source
-              + "): missing front matter closing delimiter");
+      throw new SkillParseException("missing front matter closing delimiter");
     }
 
     String name = null;
     String description = null;
     Set<String> seenKeys = new HashSet<>();
-
-    int i = 1;
-    while (i < closingIndex) {
-      String line = lines.get(i);
+    int lineIndex = 1;
+    while (lineIndex < closingIndex) {
+      String line = lines.get(lineIndex);
       String trimmed = line.trim();
       if (trimmed.isEmpty() || trimmed.startsWith("#")) {
-        i++;
+        lineIndex++;
         continue;
       }
-
       if (line.startsWith(" ") || line.startsWith("\t") || !line.contains(":")) {
-        throw new IllegalArgumentException(
-            "cannot load SKILL.md from "
-                + skillDir
-                + " ("
-                + source
-                + "): malformed front matter entry");
+        throw new SkillParseException("malformed front matter entry");
       }
 
-      int colonIdx = line.indexOf(':');
-      String key = line.substring(0, colonIdx).trim();
+      int colonIndex = line.indexOf(':');
+      String key = line.substring(0, colonIndex).trim();
       if (key.isEmpty()) {
-        throw new IllegalArgumentException(
-            "cannot load SKILL.md from "
-                + skillDir
-                + " ("
-                + source
-                + "): empty key in front matter");
+        throw new SkillParseException("empty front matter key");
       }
-
       if (!seenKeys.add(key)) {
-        throw new IllegalArgumentException(
-            "cannot load SKILL.md from "
-                + skillDir
-                + " ("
-                + source
-                + "): duplicate front matter field '"
-                + key
-                + "'");
+        throw new SkillParseException("duplicate front matter field");
       }
 
-      String afterColon = line.substring(colonIdx + 1).trim();
-
+      String afterColon = line.substring(colonIndex + 1).trim();
       if (afterColon.startsWith("|") || afterColon.startsWith(">")) {
         char style = afterColon.charAt(0);
         List<String> blockLines = new ArrayList<>();
-        i++;
-        while (i < closingIndex) {
-          String nextLine = lines.get(i);
+        lineIndex++;
+        while (lineIndex < closingIndex) {
+          String nextLine = lines.get(lineIndex);
           if (nextLine.trim().equals("---")) {
             break;
           }
           if (nextLine.trim().isEmpty() || nextLine.startsWith(" ") || nextLine.startsWith("\t")) {
             blockLines.add(nextLine);
-            i++;
+            lineIndex++;
           } else {
             break;
           }
@@ -148,7 +107,7 @@ final class SkillFrontMatterParser {
         }
       } else if (afterColon.isEmpty()) {
         List<String> continuationLines = new ArrayList<>();
-        int peek = i + 1;
+        int peek = lineIndex + 1;
         while (peek < closingIndex) {
           String nextLine = lines.get(peek);
           if (nextLine.trim().equals("---")) {
@@ -161,21 +120,18 @@ final class SkillFrontMatterParser {
             break;
           }
         }
+        String value;
         if (!continuationLines.isEmpty()) {
-          i = peek;
-          String blockValue = formatBlockScalar(continuationLines, '|');
-          if ("name".equals(key)) {
-            name = blockValue;
-          } else if ("description".equals(key)) {
-            description = blockValue;
-          }
+          lineIndex = peek;
+          value = formatBlockScalar(continuationLines, '|');
         } else {
-          if ("name".equals(key)) {
-            name = "";
-          } else if ("description".equals(key)) {
-            description = "";
-          }
-          i++;
+          value = "";
+          lineIndex++;
+        }
+        if ("name".equals(key)) {
+          name = value;
+        } else if ("description".equals(key)) {
+          description = value;
         }
       } else {
         String scalarValue = parseScalar(afterColon);
@@ -184,33 +140,58 @@ final class SkillFrontMatterParser {
         } else if ("description".equals(key)) {
           description = scalarValue;
         }
-        i++;
+        lineIndex++;
       }
     }
 
     if (name == null || name.isBlank()) {
-      throw new IllegalArgumentException(
-          "invalid SKILL.md metadata at " + skillDir + " (" + source + "): missing non-blank name");
+      throw new SkillParseException("missing non-blank front matter name");
     }
     if (description == null || description.isBlank()) {
-      throw new IllegalArgumentException(
-          "invalid SKILL.md metadata at "
-              + skillDir
-              + " ("
-              + source
-              + "): missing non-blank description");
+      throw new SkillParseException("missing non-blank front matter description");
+    }
+    name = name.trim();
+    description = description.trim();
+    // 超限元数据是单个坏 Skill 的事实，必须在解析期以结构性原因失败，才能变成有界诊断而不是中止整个来源的发布。
+    if (name.length() > DaemonSkillDescriptor.MAX_NAME_CHARS) {
+      throw new SkillParseException("front matter name exceeds the supported length");
+    }
+    if (description.length() > DaemonSkillDescriptor.MAX_DESCRIPTION_CHARS) {
+      throw new SkillParseException("front matter description exceeds the supported length");
     }
 
     StringBuilder bodyBuilder = new StringBuilder();
-    for (int lineIdx = closingIndex + 1; lineIdx < lines.size(); lineIdx++) {
+    for (int index = closingIndex + 1; index < lines.size(); index++) {
       if (!bodyBuilder.isEmpty()) {
         bodyBuilder.append("\n");
       }
-      bodyBuilder.append(lines.get(lineIdx));
+      bodyBuilder.append(lines.get(index));
     }
     String body = bodyBuilder.toString().trim();
+    return new DaemonSkill(name, description, skillDir, contentRevision(rawBytes, source), body);
+  }
 
-    return new DaemonSkill(name.trim(), description.trim(), body);
+  /** 内容 revision：SKILL.md 原始字节的 lowercase SHA-256（十六进制）。 */
+  static String contentRevision(byte[] rawBytes, String source) {
+    try {
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      return HexFormat.of().formatHex(digest.digest(rawBytes));
+    } catch (NoSuchAlgorithmException error) {
+      throw new IllegalStateException("SHA-256 is unavailable for " + source, error);
+    }
+  }
+
+  private static String decodeUtf8(byte[] rawBytes, String source) {
+    try {
+      return StandardCharsets.UTF_8
+          .newDecoder()
+          .onMalformedInput(CodingErrorAction.REPORT)
+          .onUnmappableCharacter(CodingErrorAction.REPORT)
+          .decode(ByteBuffer.wrap(rawBytes))
+          .toString();
+    } catch (CharacterCodingException error) {
+      throw new SkillParseException("SKILL.md is not valid UTF-8 (" + source + ")");
+    }
   }
 
   private static String parseScalar(String value) {
@@ -268,8 +249,8 @@ final class SkillFrontMatterParser {
     }
 
     int minIndent = Integer.MAX_VALUE;
-    for (int idx = 0; idx <= lastNonEmpty; idx++) {
-      String line = lines.get(idx);
+    for (int index = 0; index <= lastNonEmpty; index++) {
+      String line = lines.get(index);
       if (line.trim().isEmpty()) {
         continue;
       }
@@ -287,8 +268,8 @@ final class SkillFrontMatterParser {
     }
 
     List<String> unindented = new ArrayList<>();
-    for (int idx = 0; idx <= lastNonEmpty; idx++) {
-      String line = lines.get(idx);
+    for (int index = 0; index <= lastNonEmpty; index++) {
+      String line = lines.get(index);
       if (line.trim().isEmpty()) {
         unindented.add("");
       } else if (line.length() >= minIndent) {
@@ -300,23 +281,22 @@ final class SkillFrontMatterParser {
 
     if (style == '|') {
       return String.join("\n", unindented).trim();
-    } else {
-      StringBuilder sb = new StringBuilder();
-      boolean inParagraph = false;
-      for (String line : unindented) {
-        if (line.isEmpty()) {
-          sb.append("\n\n");
-          inParagraph = false;
-        } else {
-          if (inParagraph) {
-            sb.append(" ");
-          }
-          sb.append(line);
-          inParagraph = true;
-        }
-      }
-      return sb.toString().trim();
     }
+    StringBuilder sb = new StringBuilder();
+    boolean inParagraph = false;
+    for (String line : unindented) {
+      if (line.isEmpty()) {
+        sb.append("\n\n");
+        inParagraph = false;
+      } else {
+        if (inParagraph) {
+          sb.append(" ");
+        }
+        sb.append(line);
+        inParagraph = true;
+      }
+    }
+    return sb.toString().trim();
   }
 
   private static List<String> splitLines(String text) {

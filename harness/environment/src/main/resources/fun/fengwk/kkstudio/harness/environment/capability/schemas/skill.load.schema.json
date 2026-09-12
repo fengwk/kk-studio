@@ -1,11 +1,20 @@
 {
   "type": "object",
+  "description": "Exact frozen skill identity. Never carries a workdir: skills are located by identity, not by session directory.",
   "properties": {
+    "sourceId": {
+      "type": "string",
+      "description": "Stable Skill source UUID the frozen revision belongs to."
+    },
     "name": {
       "type": "string",
       "description": "Name of the skill to load."
+    },
+    "revision": {
+      "type": "string",
+      "description": "Frozen content revision recorded when the skill was selected."
     }
   },
-  "required": ["name"],
+  "required": ["sourceId", "name", "revision"],
   "additionalProperties": false
 }

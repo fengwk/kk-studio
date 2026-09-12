@@ -3,11 +3,14 @@ package fun.fengwk.kkstudio.harness.environment.daemon;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.UUID;
 
-/** READY capabilities v1 codec 的严格版本、environment metadata 与能力摘要契约。 */
+/** READY capabilities v2 codec 的严格版本、来源快照、唯一性与 environment metadata 契约。 */
 class DaemonCapabilitiesCodecTest {
 
   private static final DaemonEnvironmentInfo ENVIRONMENT =
@@ -18,81 +21,125 @@ class DaemonCapabilitiesCodecTest {
           + "\"timeZone\":\"Asia/Shanghai\",\"note\":\"Linux environment.\","
           + "\"rootPath\":\"/home/dev\"}";
 
+  private static final UUID SOURCE_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+
+  private static final String REVISION = "a".repeat(64);
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
   private final DaemonCapabilitiesCodec codec = new DaemonCapabilitiesCodec();
 
+  /** 完整来源快照必须精确往返，wire 只包含新形状（没有旧顶层 skills）。 */
   @Test
-  void roundTripsCapabilitiesWithExactWireOrder() {
+  void roundTripsCapabilitiesWithSourceSnapshots() {
+    DaemonSkillSourceSnapshot snapshot =
+        new DaemonSkillSourceSnapshot(
+            SOURCE_ID,
+            3,
+            REVISION,
+            List.of(
+                new DaemonSkillDescriptor(
+                    SOURCE_ID,
+                    3,
+                    "dev",
+                    "Developer rules",
+                    "/home/dev/.agents/skills/dev",
+                    REVISION)),
+            List.of(
+                new DaemonSkillDiagnostic(
+                    "/home/dev/.agents/skills/broken", "missing front matter name")));
     DaemonCapabilities original =
-        new DaemonCapabilities(
-            DaemonCapabilities.VERSION,
-            ENVIRONMENT,
-            List.of(new DaemonSkillDescriptor("dev", "Developer rules")));
+        new DaemonCapabilities(DaemonCapabilities.VERSION, ENVIRONMENT, List.of(snapshot));
 
     String encoded = codec.encode(original);
 
     assertEquals(original, codec.decode(encoded));
     assertEquals(
-        "{\"version\":1,"
+        "{\"version\":2,"
             + ENVIRONMENT_JSON
-            + ",\"skills\":[{\"name\":\"dev\",\"description\":\"Developer rules\"}]}",
+            + ",\"skillSources\":[{\"sourceId\":\"11111111-1111-1111-1111-111111111111\","
+            + "\"sourceVersion\":3,\"sourceRevision\":\""
+            + REVISION
+            + "\",\"skills\":[{\"sourceId\":\"11111111-1111-1111-1111-111111111111\","
+            + "\"sourceVersion\":3,\"name\":\"dev\",\"description\":\"Developer rules\","
+            + "\"baseDirectory\":\"/home/dev/.agents/skills/dev\",\"contentRevision\":\""
+            + REVISION
+            + "\"}],\"diagnostics\":[{\"location\":\"/home/dev/.agents/skills/broken\","
+            + "\"message\":\"missing front matter name\"}]}]}",
         encoded);
   }
 
   @Test
-  void encodesEmptyCapabilityLists() {
+  void encodesEmptySkillSources() {
     assertEquals(
-        "{\"version\":1," + ENVIRONMENT_JSON + ",\"skills\":[]}",
+        "{\"version\":2," + ENVIRONMENT_JSON + ",\"skillSources\":[]}",
         codec.encode(new DaemonCapabilities(DaemonCapabilities.VERSION, ENVIRONMENT, List.of())));
   }
 
+  /** 旧顶层 skills 形状与所有非 v2 版本都必须被拒绝，不做双解码。 */
   @Test
-  void rejectsUnsupportedVersionsAndMissingEnvironment() {
-    assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":0," + ENVIRONMENT_JSON + ",\"skills\":[]}"));
-    assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":2," + ENVIRONMENT_JSON + ",\"skills\":[]}"));
-    assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":1,\"environment\":null,\"skills\":[]}"));
-  }
-
-  @Test
-  void rejectsUnknownDuplicateAndTrailingFields() {
-    assertThrows(
-        DaemonProtocolException.class, () -> codec.decode(payload("\"secret\":\"x\",", "")));
+  void rejectsLegacyAndUnsupportedVersions() {
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
                 "{\"version\":1,"
                     + ENVIRONMENT_JSON
-                    + ",\"environment\":{\"operatingSystem\":\"linux\","
-                    + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\"},"
-                    + "\"skills\":[]}"));
+                    + ",\"skills\":[{\"name\":\"dev\",\"description\":\"Developer rules\"}]}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode("{\"version\":0," + ENVIRONMENT_JSON + ",\"skillSources\":[]}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode("{\"version\":3," + ENVIRONMENT_JSON + ",\"skillSources\":[]}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode("{\"version\":\"2\"," + ENVIRONMENT_JSON + ",\"skillSources\":[]}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode("{\"version\":2,\"environment\":null,\"skillSources\":[]}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode("{\"version\":2," + ENVIRONMENT_JSON + ",\"skills\":[]}"));
+  }
+
+  @Test
+  void rejectsUnknownDuplicateAndTrailingFields() {
+    assertThrows(
+        DaemonProtocolException.class, () -> codec.decode(payload("\"secret\":\"x\",", "")));
     assertThrows(DaemonProtocolException.class, () -> codec.decode(payload("", "") + " x"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\",\"extra\":\"x\"},"
-                    + "\"skills\":[]}"));
+                    + "\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"workingDirectory\":\"/workspace\",\"timeZone\":\"UTC\","
-                    + "\"note\":\"Linux environment.\"},\"skills\":[]}"));
+                    + "\"note\":\"Linux environment.\",\"rootPath\":\"/home/dev\"},"
+                    + "\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
-                    + "\"timeZone\":\"UTC\",\"note\":\"one\",\"note\":\"two\"},"
-                    + "\"skills\":[]}"));
+                "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
+                    + "\"timeZone\":\"UTC\",\"note\":\"one\",\"note\":\"two\","
+                    + "\"rootPath\":\"/home/dev\"},\"skillSources\":[]}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
+                    + "\"timeZone\":\"UTC\",\"note\":\"n\",\"rootPath\":\"/home/dev\"},"
+                    + "\"skillSources\":[{\"sourceId\":\""
+                    + SOURCE_ID
+                    + "\",\"sourceVersion\":1,\"sourceRevision\":\""
+                    + REVISION
+                    + "\",\"skills\":[],\"diagnostics\":[],\"extra\":true}]}"));
   }
 
   @Test
@@ -101,30 +148,29 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":1,\"environment\":{\"timeZone\":\"UTC\","
-                    + "\"note\":\"Linux environment.\"},\"skills\":[]}"));
+                "{\"version\":2,\"environment\":{\"timeZone\":\"UTC\","
+                    + "\"note\":\"Linux environment.\",\"rootPath\":\"/home/dev\"},"
+                    + "\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
-                    + "\"note\":\"Linux environment.\"},\"skills\":[]}"));
+                "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
+                    + "\"note\":\"Linux environment.\",\"rootPath\":\"/home/dev\"},"
+                    + "\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
-                    + "\"timeZone\":\"UTC\"},\"skills\":[]}"));
+                "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
+                    + "\"timeZone\":\"UTC\",\"note\":\"n\"},\"skillSources\":[]}"));
   }
 
   @Test
   void rejectsInvalidNestedCapabilityShapes() {
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":\"1\"," + ENVIRONMENT_JSON + ",\"skills\":[]}"));
-    assertThrows(
-        DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":1," + ENVIRONMENT_JSON + ",\"skills\":{}}"));
+        () -> codec.decode("{\"version\":2," + ENVIRONMENT_JSON + ",\"skillSources\":{}}"));
     assertThrows(DaemonProtocolException.class, () -> codec.decode(payload("", "null")));
     assertThrows(
         DaemonProtocolException.class,
@@ -132,8 +178,160 @@ class DaemonCapabilitiesCodecTest {
             codec.decode(
                 payload(
                     "",
-                    "{\"name\":\"same\",\"description\":\"one\"},"
-                        + "{\"name\":\"same\",\"description\":\"two\"}")));
+                    "{\"sourceId\":\"not-a-uuid\",\"sourceVersion\":1,\"sourceRevision\":\""
+                        + REVISION
+                        + "\",\"skills\":[],\"diagnostics\":[]}")));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                payload(
+                    "",
+                    "{\"sourceId\":\""
+                        + SOURCE_ID
+                        + "\",\"sourceVersion\":-1,\"sourceRevision\":\""
+                        + REVISION
+                        + "\",\"skills\":[],\"diagnostics\":[]}")));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                payload(
+                    "",
+                    "{\"sourceId\":\""
+                        + SOURCE_ID
+                        + "\",\"sourceVersion\":1,\"sourceRevision\":\"\","
+                        + "\"skills\":[],\"diagnostics\":[]}")));
+  }
+
+  /** skill 的 baseDirectory/revision 必须存在且合法；缺少 contentRevision 的旧形状被拒绝。 */
+  @Test
+  void rejectsInvalidSkillDescriptors() {
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                payload(
+                    "",
+                    "{\"sourceId\":\""
+                        + SOURCE_ID
+                        + "\",\"sourceVersion\":1,\"sourceRevision\":\""
+                        + REVISION
+                        + "\",\"skills\":[{\"sourceId\":\""
+                        + SOURCE_ID
+                        + "\",\"sourceVersion\":1,\"name\":\"dev\","
+                        + "\"description\":\"Developer rules\","
+                        + "\"baseDirectory\":\"/home/dev/.agents/skills/dev\"}],"
+                        + "\"diagnostics\":[]}")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonSkillDescriptor(
+                SOURCE_ID, 1, "dev", "Developer rules", "relative/path", REVISION));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DaemonSkillDescriptor(SOURCE_ID, 1, "dev", "Developer rules", "/abs", "ABCDEF"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonSkillDescriptor(
+                SOURCE_ID, 1, "dev\nother", "Developer rules", "/abs", REVISION));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonSkillDescriptor(
+                SOURCE_ID, 1, "dev", "Developer\u0000rules", "/abs", REVISION));
+  }
+
+  /** 来源 revision 只能是 PATH 聚合 SHA-256 或 Git 完整 commit id，任意标签文本不能进入持久快照。 */
+  @Test
+  void rejectsNonCanonicalSourceRevision() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DaemonSkillSourceSnapshot(SOURCE_ID, 1, "main", List.of(), List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonSkillSourceSnapshot(
+                SOURCE_ID, 1, REVISION.toUpperCase(), List.of(), List.of()));
+  }
+
+  /** 同一来源内重复 name 与跨来源同名都必须在构造边界失败。 */
+  @Test
+  void rejectsDuplicateSkillNames() {
+    DaemonSkillDescriptor skill =
+        new DaemonSkillDescriptor(SOURCE_ID, 1, "same", "one", "/abs", REVISION);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonSkillSourceSnapshot(
+                SOURCE_ID, 1, REVISION, List.of(skill, skill), List.of()));
+    UUID otherSourceId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonCapabilities(
+                DaemonCapabilities.VERSION,
+                ENVIRONMENT,
+                List.of(
+                    new DaemonSkillSourceSnapshot(
+                        SOURCE_ID, 1, REVISION, List.of(skill), List.of()),
+                    new DaemonSkillSourceSnapshot(
+                        otherSourceId,
+                        1,
+                        REVISION,
+                        List.of(
+                            new DaemonSkillDescriptor(
+                                otherSourceId, 1, "same", "two", "/abs2", REVISION)),
+                        List.of()))));
+  }
+
+  @Test
+  void rejectsDuplicateSourceIds() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonCapabilities(
+                DaemonCapabilities.VERSION,
+                ENVIRONMENT,
+                List.of(
+                    new DaemonSkillSourceSnapshot(SOURCE_ID, 1, REVISION, List.of(), List.of()),
+                    new DaemonSkillSourceSnapshot(SOURCE_ID, 2, REVISION, List.of(), List.of()))));
+  }
+
+  /** skill descriptor 的 sourceId/sourceVersion 必须与所属来源一致。 */
+  @Test
+  void rejectsSkillBelongingToAnotherSource() {
+    UUID otherSourceId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonSkillSourceSnapshot(
+                SOURCE_ID,
+                1,
+                REVISION,
+                List.of(new DaemonSkillDescriptor(otherSourceId, 1, "dev", "d", "/abs", REVISION)),
+                List.of()));
+  }
+
+  /** 展平 helper 只按来源顺序串接 descriptor，不做任何按名覆盖。 */
+  @Test
+  void flattensSkillsInSourceOrder() {
+    DaemonCapabilities capabilities =
+        new DaemonCapabilities(
+            DaemonCapabilities.VERSION,
+            ENVIRONMENT,
+            List.of(
+                new DaemonSkillSourceSnapshot(
+                    SOURCE_ID,
+                    1,
+                    REVISION,
+                    List.of(new DaemonSkillDescriptor(SOURCE_ID, 1, "a", "A", "/abs", REVISION)),
+                    List.of())));
+
+    assertEquals(
+        List.of("a"),
+        capabilities.flattenSkills().stream().map(DaemonSkillDescriptor::name).toList());
   }
 
   @Test
@@ -162,31 +360,6 @@ class DaemonCapabilitiesCodecTest {
     assertInvalidRootPath("/home/dev\u0000x");
   }
 
-  /** rootPath 是必填展示字段：缺失或非法 rootPath 都在 wire 边界拒绝。 */
-  @Test
-  void rejectsMissingOrInvalidRootPath() {
-    assertThrows(
-        DaemonProtocolException.class,
-        () ->
-            codec.decode(
-                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
-                    + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\"},"
-                    + "\"skills\":[]}"));
-  }
-
-  @Test
-  void rejectsDuplicateSkillNames() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new DaemonCapabilities(
-                DaemonCapabilities.VERSION,
-                ENVIRONMENT,
-                List.of(
-                    new DaemonSkillDescriptor("same", "one"),
-                    new DaemonSkillDescriptor("same", "two"))));
-  }
-
   @Test
   void rejectsMalformedPayload() {
     assertThrows(DaemonProtocolException.class, () -> codec.decode("not-json"));
@@ -194,46 +367,36 @@ class DaemonCapabilitiesCodecTest {
     assertThrows(DaemonProtocolException.class, () -> codec.decode("null"));
   }
 
+  private static String payload(String prefix, String skillSources) {
+    return "{\"version\":2,"
+        + prefix
+        + ENVIRONMENT_JSON
+        + ",\"skillSources\":"
+        + skillSources
+        + "}";
+  }
+
   private void assertInvalidEnvironment(String operatingSystem, String timeZone, String note) {
-    assertThrows(
-        DaemonProtocolException.class,
-        () ->
-            codec.decode(
-                payloadWithEnvironment(operatingSystem, jsonEscape(timeZone), jsonEscape(note))));
+    ObjectNode root = OBJECT_MAPPER.createObjectNode();
+    root.put("version", DaemonCapabilities.VERSION);
+    ObjectNode environment = root.putObject("environment");
+    environment.put("operatingSystem", operatingSystem);
+    environment.put("timeZone", timeZone);
+    environment.put("note", note);
+    environment.put("rootPath", "/home/dev");
+    root.putArray("skillSources");
+    assertThrows(DaemonProtocolException.class, () -> codec.decode(root.toString()));
   }
 
   private void assertInvalidRootPath(String rootPath) {
-    assertThrows(
-        DaemonProtocolException.class,
-        () ->
-            codec.decode(
-                "{\"version\":1,\"environment\":{\"operatingSystem\":\"linux\","
-                    + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\",\"rootPath\":\""
-                    + jsonEscape(rootPath)
-                    + "\"},\"skills\":[]}"));
-  }
-
-  private static String payloadWithEnvironment(
-      String operatingSystem, String timeZoneJson, String noteJson) {
-    return "{\"version\":1,\"environment\":{\"operatingSystem\":\""
-        + operatingSystem
-        + "\",\"timeZone\":\""
-        + timeZoneJson
-        + "\",\"note\":\""
-        + noteJson
-        + "\",\"rootPath\":\"/home/dev\"},\"skills\":[]}";
-  }
-
-  private static String payload(String rootPrefix, String skills) {
-    return "{\"version\":1," + rootPrefix + ENVIRONMENT_JSON + ",\"skills\":[" + skills + "]}";
-  }
-
-  private static String jsonEscape(String value) {
-    return value
-        .replace("\\", "\\\\")
-        .replace("\u0000", "\\u0000")
-        .replace("\n", "\\n")
-        .replace("\u2028", "\\u2028")
-        .replace("\"", "\\\"");
+    ObjectNode root = OBJECT_MAPPER.createObjectNode();
+    root.put("version", DaemonCapabilities.VERSION);
+    ObjectNode environment = root.putObject("environment");
+    environment.put("operatingSystem", "linux");
+    environment.put("timeZone", "UTC");
+    environment.put("note", "Linux environment.");
+    environment.put("rootPath", rootPath);
+    root.putArray("skillSources");
+    assertThrows(DaemonProtocolException.class, () -> codec.decode(root.toString()));
   }
 }

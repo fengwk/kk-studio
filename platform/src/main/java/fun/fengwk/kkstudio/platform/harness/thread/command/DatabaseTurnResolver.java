@@ -474,7 +474,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return List.copyOf(bindings);
   }
 
-  /** Agent skills 只从最新 Agent config 读取，且必须由 Agent 选择的 Environment 精确提供。 */
+  /**
+   * Agent skills 只从最新 Agent config 读取，且必须由 Agent 选择的 Environment 精确提供。
+   *
+   * <p>B2 之前的临时边界：选择仍基于当前 READY 快照的展平列表（READY 已保证 sourceId 唯一与名称全局唯一），冻结时写入全部 descriptor
+   * 字段（sourceEnvironmentId/sourceId/name/description/baseDirectory/revision）。B2 改为读取权威持久 inventory。
+   */
   private List<SkillBinding> resolveSkills(List<String> skillNames, EnvironmentId environmentId) {
     if (skillNames.isEmpty()) {
       return List.of();
@@ -503,7 +508,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
         throw rejection(
             "skill not found on the latest environment " + environmentId + ": " + skillName);
       }
-      bindings.add(new SkillBinding(skill.name(), skill.description(), environmentId));
+      bindings.add(
+          new SkillBinding(
+              environmentId,
+              skill.sourceId(),
+              skill.name(),
+              skill.description(),
+              skill.baseDirectory(),
+              skill.contentRevision()));
     }
     return List.copyOf(bindings);
   }

@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.skill;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -39,6 +39,9 @@ class DatabaseThreadSelectedSkillLookupTest {
 
   private static final UUID INVOCATION_ID = new UUID(0L, 42L);
   private static final UUID THREAD_ID = new UUID(0L, 7L);
+  private static final UUID SOURCE_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  private static final String CONTENT_REVISION =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   @Test
   void resolvesFrozenSkillBindingsThroughTheCodec() {
@@ -50,9 +53,13 @@ class DatabaseThreadSelectedSkillLookupTest {
 
     assertTrue(result.isPresent());
     SelectedSkill skill = result.get();
+    // 全部六个冻结字段都必须来自持久请求，load_skill 才能按精确版本取回正文。
+    assertEquals(ENV_ID, skill.sourceEnvironmentId());
+    assertEquals(SOURCE_ID, skill.sourceId());
     assertEquals("review", skill.name());
     assertEquals("Review code", skill.description());
-    assertEquals(ENV_ID, skill.sourceEnvironmentId());
+    assertEquals("/host/skills/review", skill.baseDirectory());
+    assertEquals(CONTENT_REVISION, skill.contentRevision());
 
     assertTrue(lookup.findSelected(INVOCATION_ID, THREAD_ID, "unknown").isEmpty());
   }
@@ -66,15 +73,18 @@ class DatabaseThreadSelectedSkillLookupTest {
     assertTrue(lookup.findSelected(INVOCATION_ID, THREAD_ID, "review").isEmpty());
   }
 
+  /** 冻结字段在持久化边界上原样保留：不同来源的同一名称互不覆盖。 */
   @Test
-  void preservesPlatformSkillWithoutSourceEnvironment() {
+  void preservesEveryFrozenIdentityFieldFromThePersistedRequest() {
     SelectedSkillBindingMapper mapper = mock(SelectedSkillBindingMapper.class);
-    when(mapper.findModelRequest(INVOCATION_ID, THREAD_ID)).thenReturn(encodedRequest(null));
+    when(mapper.findModelRequest(INVOCATION_ID, THREAD_ID)).thenReturn(encodedRequest(ENV_ID));
 
     ThreadSelectedSkillLookup lookup = new DatabaseThreadSelectedSkillLookup(mapper);
-    Optional<SelectedSkill> result = lookup.findSelected(INVOCATION_ID, THREAD_ID, "review");
-    assertTrue(result.isPresent());
-    assertNull(result.get().sourceEnvironmentId());
+    SelectedSkill skill = lookup.findSelected(INVOCATION_ID, THREAD_ID, "review").orElseThrow();
+
+    assertEquals("/host/skills/review", skill.baseDirectory());
+    assertEquals(CONTENT_REVISION, skill.contentRevision());
+    assertNotNull(skill.sourceId());
   }
 
   private static String encodedRequest(EnvironmentId sourceEnvironmentId) {
@@ -87,7 +97,14 @@ class DatabaseThreadSelectedSkillLookupTest {
             1024,
             List.of(),
             List.of(),
-            List.of(new SkillBinding("review", "Review code", sourceEnvironmentId)),
+            List.of(
+                new SkillBinding(
+                    sourceEnvironmentId,
+                    SOURCE_ID,
+                    "review",
+                    "Review code",
+                    "/host/skills/review",
+                    CONTENT_REVISION)),
             List.of(),
             ProviderCacheControl.none());
     return REQUEST_CODEC.encode(requestSpec);

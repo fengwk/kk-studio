@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonTerminalMessage;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
+import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillSourceCapability;
 import fun.fengwk.kkstudio.harness.daemon.skill.SkillLoadCapability;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
@@ -123,6 +124,15 @@ public final class DaemonRuntime implements AutoCloseable {
         (registry, executor, scheduler) -> {
           CodingCapabilities.registerAll(registry, toolsConfig, executor, scheduler);
           registry.register(new SkillLoadCapability(skillRegistry, executor));
+          registry.register(
+              new DaemonSkillSourceCapability(
+                  DaemonSkillSourceCapability.Operation.REFRESH, skillRegistry, executor));
+          registry.register(
+              new DaemonSkillSourceCapability(
+                  DaemonSkillSourceCapability.Operation.INSTALL, skillRegistry, executor));
+          registry.register(
+              new DaemonSkillSourceCapability(
+                  DaemonSkillSourceCapability.Operation.UPDATE, skillRegistry, executor));
         });
   }
 
@@ -234,12 +244,19 @@ public final class DaemonRuntime implements AutoCloseable {
             config.environmentRoot().toString());
     this.nextReconnectDelay = config.initialReconnectDelay();
     if (requireFixedCapabilityCatalog
-        && !List.copyOf(capabilityRegistry.descriptors())
-            .equals(EnvironmentCapabilityCatalog.descriptors())) {
+        && !List.copyOf(capabilityRegistry.descriptors()).equals(fixedCapabilityDescriptors())) {
       throw new IllegalStateException(
           "daemon capability registry does not match EnvironmentCapabilityCatalog");
     }
     capabilityRegistry.freeze();
+  }
+
+  /** 生产装配注册的 capability descriptor 全集：模型可见能力在前，管理专用能力在后。 */
+  private static List<EnvironmentCapabilityDescriptor> fixedCapabilityDescriptors() {
+    List<EnvironmentCapabilityDescriptor> descriptors =
+        new ArrayList<>(EnvironmentCapabilityCatalog.descriptors());
+    descriptors.addAll(EnvironmentCapabilityCatalog.managementDescriptors());
+    return List.copyOf(descriptors);
   }
 
   private static ScheduledThreadPoolExecutor newScheduler() {
@@ -435,7 +452,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private boolean sendReady(ActiveConnection connection) {
     DaemonCapabilities capabilities =
         new DaemonCapabilities(
-            DaemonCapabilities.VERSION, environmentInfo, List.copyOf(skillRegistry.descriptors()));
+            DaemonCapabilities.VERSION, environmentInfo, skillRegistry.snapshots());
     return sendOn(
         connection, DaemonMessageType.READY, null, capabilitiesCodec.encode(capabilities));
   }

@@ -38,8 +38,14 @@ public record EnvironmentConnection(
     return EnvironmentCapabilityCatalog.descriptors();
   }
 
+  /**
+   * 展平 READY 来源快照中的全部 skill 描述。
+   *
+   * <p>这是 B2 之前的临时实现边界：Platform 尚未持久化权威 inventory，因此只从当前 READY 快照读取；READY 已在构造期保证 sourceId 唯一与
+   * skill 名称全局唯一，因此展平结果没有隐式优先级。
+   */
   public List<DaemonSkillDescriptor> skills() {
-    return daemonCapabilities == null ? List.of() : daemonCapabilities.skills();
+    return daemonCapabilities == null ? List.of() : daemonCapabilities.flattenSkills();
   }
 
   public String rootPath() {

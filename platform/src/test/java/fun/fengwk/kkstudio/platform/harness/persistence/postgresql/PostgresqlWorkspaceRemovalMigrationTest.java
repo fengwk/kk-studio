@@ -84,6 +84,12 @@ class PostgresqlWorkspaceRemovalMigrationTest extends PostgresSchemaSupport {
       UUID.fromString("00000000-0000-0000-0000-000000000109");
   private static final UUID DIRECTORY_QUERY_ID =
       UUID.fromString("00000000-0000-0000-0000-000000000110");
+  private static final UUID SKILL_SOURCE_ID =
+      UUID.fromString("00000000-0000-0000-0000-000000000111");
+  private static final UUID HOST_SKILL_SOURCE_ID =
+      UUID.fromString("00000000-0000-0000-0000-000000000112");
+  private static final String CONTENT_REVISION =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   @BeforeEach
   void resetSchema() throws SQLException {
@@ -442,8 +448,20 @@ class PostgresqlWorkspaceRemovalMigrationTest extends PostgresSchemaSupport {
             List.of(),
             List.of(environmentTool, hostTool),
             List.of(
-                new SkillBinding("review", "Review code", environmentId),
-                new SkillBinding("host-skill", "Host skill", null)),
+                new SkillBinding(
+                    environmentId,
+                    SKILL_SOURCE_ID,
+                    "review",
+                    "Review code",
+                    "/host/skills/review",
+                    CONTENT_REVISION),
+                new SkillBinding(
+                    environmentId,
+                    HOST_SKILL_SOURCE_ID,
+                    "host-skill",
+                    "Host skill",
+                    "/host/skills/host-skill",
+                    CONTENT_REVISION)),
             List.of(),
             ProviderCacheControl.none());
 

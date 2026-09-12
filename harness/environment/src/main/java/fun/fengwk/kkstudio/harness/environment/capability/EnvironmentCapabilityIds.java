@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
+import java.util.Set;
+
 /** 固定 Environment Capability 的原子 canonical 身份。 */
 public final class EnvironmentCapabilityIds {
 
@@ -19,6 +21,16 @@ public final class EnvironmentCapabilityIds {
       new EnvironmentCapabilityId("lsp.java-decompile");
   public static final EnvironmentCapabilityId SKILL_LOAD =
       new EnvironmentCapabilityId("skill.load");
+  public static final EnvironmentCapabilityId SKILL_SOURCE_REFRESH =
+      new EnvironmentCapabilityId("skill.source.refresh");
+  public static final EnvironmentCapabilityId SKILL_SOURCE_INSTALL =
+      new EnvironmentCapabilityId("skill.source.install");
+  public static final EnvironmentCapabilityId SKILL_SOURCE_UPDATE =
+      new EnvironmentCapabilityId("skill.source.update");
+
+  /** 仅供管理执行器使用的能力：复用 INVOKE/CANCEL/结果通道，但绝不进入模型 Tool 目录。 */
+  public static final Set<EnvironmentCapabilityId> MANAGEMENT_ONLY =
+      Set.of(SKILL_SOURCE_REFRESH, SKILL_SOURCE_INSTALL, SKILL_SOURCE_UPDATE);
 
   private EnvironmentCapabilityIds() {}
 }
