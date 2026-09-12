@@ -579,6 +579,94 @@ class CloudFileSystemConcurrencyIntegrationTest extends S3PostgresSpringTestSupp
   }
 
   /**
+   * 针对标准 canonical 字符串字典序反例（/a! 与 /a/b 并发移动）的真实 PG 并发回归测试：
+   *
+   * <p>在标准 ASCII 字符串序中，'!' (33) < '/' (47)，导致 /a! < /a/b； 若以此字符串序决定加锁顺序， 并发尝试 move1 (/a! ->
+   * /a/b/a!) 与 move2 (/a -> /a!/a) 时， T1 持有 /a! 并等待 /a，T2 持有 /a 并等待 /a!，导致经典 AB-BA 死锁。
+   *
+   * <p>通过分段序列层级全序（/a < /a/b < /a!），加锁顺序全局一致， 证明有界超时内绝不死锁，胜者单调收敛，落败方抛出
+   * CloudNodeNotFoundException，最终树严格无环且合法串行收敛。
+   */
+  @Test
+  void testConcurrentPunctuationSegmentMovesNoDeadlockAndNoCycle() throws Exception {
+    fileSystemService.mkdir(CloudPath.of("/a/b"), true);
+    fileSystemService.mkdir(CloudPath.of("/a!"), false);
+
+    int threadCount = 2;
+    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+    try {
+      CyclicBarrier barrier = new CyclicBarrier(threadCount);
+      AtomicInteger successCount = new AtomicInteger(0);
+      AtomicInteger notFoundCount = new AtomicInteger(0);
+      List<Throwable> unexpectedErrors = Collections.synchronizedList(new ArrayList<>());
+
+      List<Future<?>> futures = new ArrayList<>();
+      // 线程 1 尝试 /a! -> /a/b/a!
+      futures.add(
+          executor.submit(
+              () -> {
+                try {
+                  barrier.await();
+                  fileSystemService.moveNode(CloudPath.of("/a!"), CloudPath.of("/a/b/a!"), 0L);
+                  successCount.incrementAndGet();
+                } catch (CloudNodeNotFoundException e) {
+                  notFoundCount.incrementAndGet();
+                } catch (Throwable t) {
+                  unexpectedErrors.add(t);
+                }
+              }));
+      // 线程 2 尝试 /a -> /a!/a
+      futures.add(
+          executor.submit(
+              () -> {
+                try {
+                  barrier.await();
+                  fileSystemService.moveNode(CloudPath.of("/a"), CloudPath.of("/a!/a"), 0L);
+                  successCount.incrementAndGet();
+                } catch (CloudNodeNotFoundException e) {
+                  notFoundCount.incrementAndGet();
+                } catch (Throwable t) {
+                  unexpectedErrors.add(t);
+                }
+              }));
+
+      for (Future<?> f : futures) {
+        f.get(10, TimeUnit.SECONDS);
+      }
+
+      assertTrue(unexpectedErrors.isEmpty(), () -> "Unexpected errors: " + unexpectedErrors);
+      assertEquals(1, successCount.get(), "Exactly one cross-ancestor move must succeed");
+      assertEquals(
+          1, notFoundCount.get(), "Losing thread must fail with CloudNodeNotFoundException");
+
+      // 树不变量断言：遍历 cloud_node 树全图，严格无环
+      assertTreeAcyclic();
+
+      // 串行化收敛断言：恰好收敛为一条合法链（/a/b/a! 或 /a!/a/b），另一被移走的节点不再位于根节点
+      boolean path1Exists = fileSystemService.findNode(CloudPath.of("/a/b/a!")).isPresent();
+      boolean path2Exists = fileSystemService.findNode(CloudPath.of("/a!/a/b")).isPresent();
+      assertTrue(
+          path1Exists ^ path2Exists, "Tree must converge to exactly one serialized linear chain");
+
+      if (path1Exists) {
+        assertTrue(
+            fileSystemService.findNode(CloudPath.of("/a!")).isEmpty(),
+            "/a! should no longer exist at root");
+        assertTrue(
+            fileSystemService.findNode(CloudPath.of("/a")).isPresent(), "/a must exist at root");
+      } else {
+        assertTrue(
+            fileSystemService.findNode(CloudPath.of("/a")).isEmpty(),
+            "/a should no longer exist at root");
+        assertTrue(
+            fileSystemService.findNode(CloudPath.of("/a!")).isPresent(), "/a! must exist at root");
+      }
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /**
    * 验证并发创建文本（expectedRevision=0）与目录时，若目录创建成功，落败的文本创建稳定抛出 CloudNodeKindConflictException 而非 revision
    * conflict。
    */

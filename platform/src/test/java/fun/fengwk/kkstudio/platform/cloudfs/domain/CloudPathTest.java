@@ -109,7 +109,7 @@ class CloudPathTest {
     assertThrows(CloudPathValidationException.class, () -> workspace.child("sub\\dir"));
   }
 
-  /** 验证 equals、hashCode、toString 与 compareTo 的契约一致性。 */
+  /** 验证 equals、hashCode、toString 与 compareTo 的契约一致性，以及分段层级全序。 */
   @Test
   void testEqualityAndComparisonContracts() {
     CloudPath p1 = CloudPath.of("/workspace/file.txt");
@@ -127,6 +127,39 @@ class CloudPathTest {
 
     assertTrue(p1.compareTo(p3) < 0);
     assertEquals(0, p1.compareTo(p2));
+    assertEquals(0, p1.compareTo(p1));
+    assertThrows(NullPointerException.class, () -> p1.compareTo(null));
+
+    // 确定性验证层级全序：/a < /a/b < /a!
+    // 旧的 canonical 字符串比较由于 '!' (33) < '/' (47) 会错误判定 /a! < /a/b。
+    // 分段层级全序下：/a 是 /a/b 的祖先前缀，所以 /a < /a/b；
+    // 比较 /a/b 与 /a! 时首个分段 "a" < "a!"，所以 /a/b < /a!。
+    CloudPath a = CloudPath.of("/a");
+    CloudPath ab = CloudPath.of("/a/b");
+    CloudPath aExcl = CloudPath.of("/a!");
+
+    assertTrue(a.compareTo(ab) < 0, "祖先 /a 必须先于其后代 /a/b");
+    assertTrue(ab.compareTo(aExcl) < 0, "分支后代 /a/b 必须先于兄弟 /a!");
+    assertTrue(a.compareTo(aExcl) < 0, "/a 必须先于 /a!");
+
+    // 验证反绝对称性与传递性
+    assertEquals(-Integer.signum(a.compareTo(ab)), Integer.signum(ab.compareTo(a)));
+    assertEquals(-Integer.signum(ab.compareTo(aExcl)), Integer.signum(aExcl.compareTo(ab)));
+    assertEquals(-Integer.signum(a.compareTo(aExcl)), Integer.signum(aExcl.compareTo(a)));
+
+    // 验证 equals 与 compareTo 契约一致性：compareTo == 0 当且仅当 equals 为 true
+    CloudPath aCopy = CloudPath.of("/a");
+    assertEquals(0, a.compareTo(aCopy));
+    assertEquals(a, aCopy);
+    assertTrue(a.compareTo(ab) < 0);
+    assertNotEquals(a, ab);
+
+    // 根节点始终是全序中的最小值
+    CloudPath root = CloudPath.root();
+    assertTrue(root.compareTo(a) < 0);
+    assertTrue(root.compareTo(ab) < 0);
+    assertTrue(root.compareTo(aExcl) < 0);
+    assertEquals(0, root.compareTo(CloudPath.of("/")));
   }
 
   /** 验证孤立高/低半区代理对（unpaired surrogate）被严格拒绝，杜绝静默替换字符。 */
