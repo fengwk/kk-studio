@@ -11,8 +11,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityR
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshot;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshotCodec;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -51,49 +49,53 @@ class EnvironmentOperationCompletionCoordinatorImpl
       UUID sourceId,
       long sourceVersion,
       EnvironmentCapabilityResult result) {
-    Objects.requireNonNull(result, "result");
-
-    if (result.error()) {
-      log.info("Capability returned error for operation {}", operationId);
-      return publisher.publishOperationFailure(
+    if (result == null) {
+      log.warn("Capability returned null result for operation {}", operationId);
+      return publisher.publishInvalidResult(
           environmentId,
           operationId,
           ownerNodeId,
           leaseToken,
           sourceSetVersion,
           sourceId,
-          sourceVersion,
-          EnvironmentOperationFailureCodes.OPERATION_FAILED,
-          EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
+          sourceVersion);
     }
 
     if (result.callId() == null || !result.callId().equals(operationId.toString())) {
       log.warn("Capability result callId mismatch for operation {}", operationId);
-      return publisher.publishOperationFailure(
+      return publisher.publishInvalidResult(
           environmentId,
           operationId,
           ownerNodeId,
           leaseToken,
           sourceSetVersion,
           sourceId,
-          sourceVersion,
-          EnvironmentOperationFailureCodes.INVALID_RESULT,
-          EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
+          sourceVersion);
+    }
+
+    if (result.error()) {
+      log.info("Capability returned error for operation {}", operationId);
+      return publisher.publishExecutionFailure(
+          environmentId,
+          operationId,
+          ownerNodeId,
+          leaseToken,
+          sourceSetVersion,
+          sourceId,
+          sourceVersion);
     }
 
     if (result.contents().size() != 1
         || !(result.contents().getFirst() instanceof JsonResultContent jsonContent)) {
       log.warn("Capability returned invalid result contents for operation {}", operationId);
-      return publisher.publishOperationFailure(
+      return publisher.publishInvalidResult(
           environmentId,
           operationId,
           ownerNodeId,
           leaseToken,
           sourceSetVersion,
           sourceId,
-          sourceVersion,
-          EnvironmentOperationFailureCodes.INVALID_RESULT,
-          EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
+          sourceVersion);
     }
 
     DaemonSkillSourceSnapshot snapshot;
@@ -102,42 +104,31 @@ class EnvironmentOperationCompletionCoordinatorImpl
       snapshot = snapshotCodec.decodeNode(node, "skillSourceSnapshot");
     } catch (RuntimeException | JsonProcessingException e) {
       log.warn("Failed to decode skill source snapshot for operation {}", operationId);
-      return publisher.publishOperationFailure(
+      return publisher.publishInvalidResult(
           environmentId,
           operationId,
           ownerNodeId,
           leaseToken,
           sourceSetVersion,
           sourceId,
-          sourceVersion,
-          EnvironmentOperationFailureCodes.INVALID_RESULT,
-          EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
+          sourceVersion);
     }
 
     if (!sourceId.equals(snapshot.sourceId()) || sourceVersion != snapshot.sourceVersion()) {
       log.warn("Snapshot source identity mismatch for operation {}", operationId);
-      return publisher.publishOperationFailure(
+      return publisher.publishInvalidResult(
           environmentId,
           operationId,
           ownerNodeId,
           leaseToken,
           sourceSetVersion,
           sourceId,
-          sourceVersion,
-          EnvironmentOperationFailureCodes.INVALID_RESULT,
-          EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
+          sourceVersion);
     }
 
-    String resultSummaryJson = buildSuccessSummary(snapshot);
     log.info("Publishing success for operation {}", operationId);
     return publisher.publishOperationSuccess(
-        environmentId,
-        operationId,
-        ownerNodeId,
-        leaseToken,
-        sourceSetVersion,
-        snapshot,
-        resultSummaryJson);
+        environmentId, operationId, ownerNodeId, leaseToken, sourceSetVersion, snapshot);
   }
 
   @Override
@@ -150,16 +141,14 @@ class EnvironmentOperationCompletionCoordinatorImpl
       UUID sourceId,
       long sourceVersion) {
     log.info("Coordinating execution failure for operation {}", operationId);
-    return publisher.publishOperationFailure(
+    return publisher.publishExecutionFailure(
         environmentId,
         operationId,
         ownerNodeId,
         leaseToken,
         sourceSetVersion,
         sourceId,
-        sourceVersion,
-        EnvironmentOperationFailureCodes.OPERATION_FAILED,
-        EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
+        sourceVersion);
   }
 
   @Override
@@ -171,19 +160,5 @@ class EnvironmentOperationCompletionCoordinatorImpl
         leaseToken,
         EnvironmentOperationFailureCodes.TRANSPORT_ERROR,
         EnvironmentOperationFailureCodes.TRANSPORT_ERROR_MESSAGE);
-  }
-
-  private String buildSuccessSummary(DaemonSkillSourceSnapshot snapshot) {
-    Map<String, Object> summary = new LinkedHashMap<>();
-    summary.put("skillCount", snapshot.skills().size());
-    summary.put("diagnosticCount", snapshot.diagnostics().size());
-    if (snapshot.sourceRevision() != null && !snapshot.sourceRevision().isBlank()) {
-      summary.put("sourceRevision", snapshot.sourceRevision());
-    }
-    try {
-      return objectMapper.writeValueAsString(summary);
-    } catch (JsonProcessingException e) {
-      return "{}";
-    }
   }
 }

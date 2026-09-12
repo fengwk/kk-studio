@@ -12,23 +12,23 @@ import java.util.concurrent.ScheduledExecutorService;
 @Configuration(proxyBeanMethods = false)
 public class EnvironmentOperationConfiguration {
 
-  @Bean(destroyMethod = "shutdown")
+  @Bean(destroyMethod = "shutdownNow")
   @Qualifier("environmentOperationDrainExecutor")
   public ExecutorService environmentOperationDrainExecutor() {
     return Executors.newSingleThreadExecutor(
-        Thread.ofPlatform().name("env-op-drain-", 0).factory());
+        Thread.ofPlatform().daemon(true).name("env-op-drain-", 0).factory());
   }
 
-  @Bean(destroyMethod = "shutdown")
+  @Bean(destroyMethod = "shutdownNow")
   @Qualifier("environmentOperationWorkerExecutor")
   public ExecutorService environmentOperationWorkerExecutor() {
     return Executors.newVirtualThreadPerTaskExecutor();
   }
 
-  @Bean(destroyMethod = "shutdown")
+  @Bean(destroyMethod = "shutdownNow")
   @Qualifier("environmentOperationPollScheduler")
   public ScheduledExecutorService environmentOperationPollScheduler() {
     return Executors.newSingleThreadScheduledExecutor(
-        Thread.ofPlatform().name("env-op-poll-", 0).factory());
+        Thread.ofPlatform().daemon(true).name("env-op-poll-", 0).factory());
   }
 }

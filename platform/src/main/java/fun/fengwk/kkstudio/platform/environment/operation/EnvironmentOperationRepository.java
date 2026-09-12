@@ -12,7 +12,7 @@ import java.util.UUID;
 interface EnvironmentOperationRepository {
 
   /** 稳定通知通道：每当成功插入 PENDING 操作时由 PostgreSQL 事务耦合发出通知。 */
-  String NOTIFY_CHANNEL = "environment_operation_pending";
+  String NOTIFY_CHANNEL = EnvironmentOperationDispatcher.CHANNEL;
 
   /**
    * 插入一条完整的 PENDING 行。

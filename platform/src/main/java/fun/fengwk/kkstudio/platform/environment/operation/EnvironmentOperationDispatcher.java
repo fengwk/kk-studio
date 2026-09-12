@@ -43,6 +43,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 @Component
 public class EnvironmentOperationDispatcher {
 
+  public static final String CHANNEL = "environment_operation_pending";
+
   private static final int BATCH_SIZE = 50;
   private static final long POLL_INTERVAL_MS = 2000;
 
@@ -56,7 +58,10 @@ public class EnvironmentOperationDispatcher {
 
   private final ReentrantReadWriteLock lifecycleLock = new ReentrantReadWriteLock(true);
   private final ConcurrentMap<UUID, ActiveExecution> activeExecutions = new ConcurrentHashMap<>();
-  private final AtomicBoolean started = new AtomicBoolean(false);
+  private final AtomicBoolean wakeRequested = new AtomicBoolean(false);
+  private final AtomicBoolean drainRunning = new AtomicBoolean(false);
+
+  private volatile boolean started = false;
   private volatile boolean stopped = false;
   private ScheduledFuture<?> pollFuture;
 
@@ -82,7 +87,7 @@ public class EnvironmentOperationDispatcher {
   }
 
   public boolean isRunning() {
-    return started.get() && !stopped;
+    return started && !stopped;
   }
 
   public int getActiveHandleCount() {
@@ -90,15 +95,27 @@ public class EnvironmentOperationDispatcher {
   }
 
   /** 启动后台轮询调度与清扫任务。 */
-  public synchronized void start() {
-    if (stopped) {
-      throw new IllegalStateException("Dispatcher has been permanently stopped");
-    }
-    if (started.compareAndSet(false, true)) {
-      pollFuture =
-          pollScheduler.scheduleWithFixedDelay(
-              this::pollAndSweep, 0, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+  public void start() {
+    lifecycleLock.writeLock().lock();
+    try {
+      if (stopped) {
+        throw new IllegalStateException("Dispatcher has been permanently stopped");
+      }
+      if (started) {
+        return;
+      }
+      try {
+        pollFuture =
+            pollScheduler.scheduleWithFixedDelay(
+                this::pollAndSweep, 0, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+      } catch (RuntimeException e) {
+        log.warn("Failed to schedule poll task for node {}", nodeId);
+        throw e;
+      }
+      started = true;
       log.info("EnvironmentOperationDispatcher started for node {}", nodeId);
+    } finally {
+      lifecycleLock.writeLock().unlock();
     }
   }
 
@@ -113,14 +130,16 @@ public class EnvironmentOperationDispatcher {
       stopped = true;
       if (pollFuture != null) {
         pollFuture.cancel(true);
+        pollFuture = null;
       }
       try {
         repository.markRunningUnknownOnShutdown(nodeId);
-      } catch (Exception e) {
-        log.warn("Failed to mark running operations unknown on shutdown for node {}", nodeId, e);
+      } catch (RuntimeException e) {
+        log.warn("Failed to mark running operations unknown on shutdown for node {}", nodeId);
       }
       for (ActiveExecution execution : activeExecutions.values()) {
         execution.terminal.set(true);
+        execution.abandoned = true;
         if (execution.handle != null) {
           handlesToCancel.add(execution.handle);
         }
@@ -133,67 +152,94 @@ public class EnvironmentOperationDispatcher {
     for (EnvironmentCapabilityExecutionHandle handle : handlesToCancel) {
       try {
         handle.cancel();
-      } catch (Exception ignored) {
+      } catch (RuntimeException ignored) {
       }
     }
     log.info("EnvironmentOperationDispatcher stopped for node {}", nodeId);
   }
 
-  /** 唤醒分发器立即执行一轮排空检查。 */
+  /** 唤醒分发器立即执行一轮排空检查。start 前或 stop 后为 no-op；并发 wake 合并为单一 drain。 */
   public void wake() {
-    if (!stopped) {
-      triggerDrain();
+    if (!isRunning()) {
+      return;
+    }
+    wakeRequested.set(true);
+    if (drainRunning.compareAndSet(false, true)) {
+      submitDrain();
     }
   }
 
   /** 执行一轮本地与全局超时清扫（可由测试或轮询直接调用）。 */
   public void runSweeper() {
+    List<EnvironmentCapabilityExecutionHandle> handlesToCancel = new ArrayList<>();
     try {
       List<SweptOperationInfo> swept = repository.sweepLocalExpiredRunning(nodeId);
       for (SweptOperationInfo info : swept) {
-        ActiveExecution execution = activeExecutions.remove(info.id());
-        if (execution != null) {
-          execution.terminal.set(true);
+        ActiveExecution execution = activeExecutions.get(info.id());
+        if (execution != null && execution.terminal.compareAndSet(false, true)) {
+          activeExecutions.remove(info.id());
+          execution.abandoned = true;
           if (execution.handle != null) {
-            try {
-              execution.handle.cancel();
-            } catch (Exception ignored) {
-            }
+            handlesToCancel.add(execution.handle);
           }
         }
       }
       repository.sweepExpiredPending();
       repository.sweepExpiredRunning();
-    } catch (Exception e) {
-      log.warn("Failed to sweep expired operations", e);
+    } catch (RuntimeException e) {
+      log.warn("Failed to sweep expired operations for node {}", nodeId);
+    }
+    for (EnvironmentCapabilityExecutionHandle handle : handlesToCancel) {
+      try {
+        handle.cancel();
+      } catch (RuntimeException ignored) {
+      }
     }
   }
 
   private void pollAndSweep() {
-    if (stopped) {
+    if (!isRunning()) {
       return;
     }
     runSweeper();
-    triggerDrain();
+    wake();
   }
 
-  private void triggerDrain() {
-    if (stopped) {
+  private void submitDrain() {
+    if (!isRunning()) {
+      drainRunning.set(false);
       return;
     }
     try {
-      drainExecutor.submit(this::drainPendingOperations);
-    } catch (Exception e) {
-      log.warn("Failed to submit drain task", e);
+      drainExecutor.execute(this::runDrain);
+    } catch (RuntimeException error) {
+      drainRunning.set(false);
+      log.warn("Drain executor rejected task for node {}", nodeId);
+    }
+  }
+
+  private void runDrain() {
+    try {
+      do {
+        wakeRequested.set(false);
+        drainPendingOperations();
+      } while (isRunning() && wakeRequested.get());
+    } catch (RuntimeException error) {
+      log.warn("Drain loop failed for node {}", nodeId);
+    } finally {
+      drainRunning.set(false);
+      if (isRunning() && wakeRequested.get() && drainRunning.compareAndSet(false, true)) {
+        submitDrain();
+      }
     }
   }
 
   private void drainPendingOperations() {
-    while (!stopped) {
+    while (isRunning()) {
       List<ClaimedOperation> claimed;
       lifecycleLock.readLock().lock();
       try {
-        if (stopped) {
+        if (!isRunning()) {
           return;
         }
         claimed = repository.claimPendingWithTimeout(nodeId, BATCH_SIZE);
@@ -208,10 +254,16 @@ public class EnvironmentOperationDispatcher {
       for (ClaimedOperation op : claimed) {
         lifecycleLock.readLock().lock();
         try {
-          if (stopped) {
+          if (!isRunning()) {
             repository.rescheduleUnsent(op.operation().id(), nodeId, op.operation().leaseToken());
-          } else {
+            continue;
+          }
+          try {
             workerExecutor.submit(() -> executeOperation(op));
+          } catch (RuntimeException error) {
+            log.warn(
+                "Worker executor rejected operation {} for node {}", op.operation().id(), nodeId);
+            repository.rescheduleUnsent(op.operation().id(), nodeId, op.operation().leaseToken());
           }
         } finally {
           lifecycleLock.readLock().unlock();
@@ -226,16 +278,6 @@ public class EnvironmentOperationDispatcher {
     UUID leaseToken = op.leaseToken();
     UUID envId = op.environmentId();
 
-    lifecycleLock.readLock().lock();
-    try {
-      if (stopped) {
-        repository.rescheduleUnsent(opId, nodeId, leaseToken);
-        return;
-      }
-    } finally {
-      lifecycleLock.readLock().unlock();
-    }
-
     EnvironmentCapabilityExecutionRequest request;
     try {
       EnvironmentCapabilityId capId = capabilityIdFor(op.operationType());
@@ -249,8 +291,8 @@ public class EnvironmentOperationDispatcher {
       EnvironmentCapabilityCall call =
           new EnvironmentCapabilityCall(opId.toString(), op.arguments());
       request = new EnvironmentCapabilityExecutionRequest(descriptor, call, timeout);
-    } catch (Throwable t) {
-      log.warn("Deterministic request construction failure for operation {}", opId, t);
+    } catch (RuntimeException e) {
+      log.warn("Deterministic request construction failure for operation {}", opId);
       coordinator.coordinateExecutionFailure(
           envId,
           opId,
@@ -265,17 +307,6 @@ public class EnvironmentOperationDispatcher {
     ActiveExecution execution =
         new ActiveExecution(
             opId, envId, leaseToken, op.sourceSetVersion(), op.sourceId(), op.sourceVersion());
-
-    lifecycleLock.readLock().lock();
-    try {
-      if (stopped) {
-        repository.rescheduleUnsent(opId, nodeId, leaseToken);
-        return;
-      }
-      activeExecutions.put(opId, execution);
-    } finally {
-      lifecycleLock.readLock().unlock();
-    }
 
     EnvironmentCapabilityExecutionListener listener =
         new EnvironmentCapabilityExecutionListener() {
@@ -321,33 +352,56 @@ public class EnvironmentOperationDispatcher {
         };
 
     EnvironmentCapabilityExecutionHandle handle;
+    lifecycleLock.readLock().lock();
     try {
-      handle = transport.invoke(new EnvironmentId(envId), request, listener);
-    } catch (EnvironmentCapabilityBusyException | EnvironmentCapabilityUnavailableException e) {
-      if (execution.terminal.compareAndSet(false, true)) {
-        activeExecutions.remove(opId);
+      if (!isRunning()) {
         repository.rescheduleUnsent(opId, nodeId, leaseToken);
+        return;
       }
-      return;
-    } catch (EnvironmentCapabilitySendUncertainException e) {
-      if (execution.terminal.compareAndSet(false, true)) {
-        activeExecutions.remove(opId);
-      }
-      return;
-    } catch (Throwable t) {
-      if (execution.terminal.compareAndSet(false, true)) {
-        activeExecutions.remove(opId);
-        coordinator.coordinateTransportUnknown(opId, nodeId, leaseToken);
-      }
-      return;
-    }
-
-    execution.handle = handle;
-    if (execution.terminal.get() || stopped) {
+      activeExecutions.put(opId, execution);
       try {
-        handle.cancel();
-      } catch (Exception ignored) {
+        handle = transport.invoke(new EnvironmentId(envId), request, listener);
+      } catch (EnvironmentCapabilityBusyException | EnvironmentCapabilityUnavailableException e) {
+        if (execution.terminal.compareAndSet(false, true)) {
+          activeExecutions.remove(opId);
+          repository.rescheduleUnsent(opId, nodeId, leaseToken);
+        }
+        return;
+      } catch (EnvironmentCapabilitySendUncertainException e) {
+        if (execution.terminal.compareAndSet(false, true)) {
+          activeExecutions.remove(opId);
+        }
+        return;
+      } catch (RuntimeException e) {
+        if (execution.terminal.compareAndSet(false, true)) {
+          activeExecutions.remove(opId);
+          coordinator.coordinateTransportUnknown(opId, nodeId, leaseToken);
+        }
+        return;
       }
+
+      if (handle == null) {
+        if (execution.terminal.compareAndSet(false, true)) {
+          activeExecutions.remove(opId);
+          coordinator.coordinateTransportUnknown(opId, nodeId, leaseToken);
+        } else {
+          activeExecutions.remove(opId);
+        }
+        return;
+      }
+
+      execution.handle = handle;
+      if (execution.terminal.get()) {
+        activeExecutions.remove(opId);
+        if (execution.abandoned) {
+          try {
+            handle.cancel();
+          } catch (RuntimeException ignored) {
+          }
+        }
+      }
+    } finally {
+      lifecycleLock.readLock().unlock();
     }
   }
 
@@ -367,6 +421,7 @@ public class EnvironmentOperationDispatcher {
     final UUID sourceId;
     final long sourceVersion;
     final AtomicBoolean terminal = new AtomicBoolean(false);
+    volatile boolean abandoned = false;
     volatile EnvironmentCapabilityExecutionHandle handle;
 
     ActiveExecution(

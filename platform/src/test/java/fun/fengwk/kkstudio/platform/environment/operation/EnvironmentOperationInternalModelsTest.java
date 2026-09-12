@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -123,5 +124,51 @@ class EnvironmentOperationInternalModelsTest {
     String str = cmd.toString();
     assertTrue(str.contains(opId.toString()));
     assertFalse(str.contains("my_password_xyz"), "arguments 绝不能泄露在 toString 中");
+  }
+
+  /** 测试意图：验证 EnvironmentOperation 在 toString() 与 Jackson 序列化中均彻底排除 leaseToken 与 arguments。 */
+  @Test
+  void environmentOperationDoesNotLeakSecretsInToStringAndJson() throws Exception {
+    UUID opId = UUID.randomUUID();
+    UUID envId = UUID.randomUUID();
+    UUID sourceId = UUID.randomUUID();
+    UUID ownerNodeId = UUID.randomUUID();
+    UUID leaseToken = UUID.randomUUID();
+    String secretArgs = "{\"privateKey\":\"super_secret_ssh_key\"}";
+
+    EnvironmentOperation op =
+        new EnvironmentOperation(
+            opId,
+            envId,
+            sourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationStatus.RUNNING,
+            1L,
+            2L,
+            secretArgs,
+            "{\"type\":\"git\"}",
+            Instant.now().plusSeconds(60),
+            ownerNodeId,
+            leaseToken,
+            Instant.now(),
+            null,
+            null,
+            null,
+            null,
+            Instant.now(),
+            Instant.now());
+
+    String str = op.toString();
+    assertTrue(str.contains(opId.toString()));
+    assertFalse(str.contains("super_secret_ssh_key"), "arguments 绝不能泄露在 toString 中");
+    assertFalse(str.contains(leaseToken.toString()), "leaseToken 绝不能泄露在 toString 中");
+    assertFalse(str.contains("leaseToken"), "leaseToken 字段名必须在 toString 中彻底省略");
+
+    ObjectMapper mapper = new ObjectMapper();
+    mapper.findAndRegisterModules();
+    String json = mapper.writeValueAsString(op);
+    assertFalse(json.contains("super_secret_ssh_key"), "arguments 绝不能被 Jackson 序列化");
+    assertFalse(json.contains(leaseToken.toString()), "leaseToken 绝不能被 Jackson 序列化");
+    assertFalse(json.contains("leaseToken"), "leaseToken 字段名绝不能出现在 JSON 中");
   }
 }

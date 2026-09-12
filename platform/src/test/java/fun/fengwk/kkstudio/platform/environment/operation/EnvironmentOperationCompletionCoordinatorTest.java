@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.environment.operation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -11,7 +10,6 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
@@ -46,23 +44,31 @@ class EnvironmentOperationCompletionCoordinatorTest {
         new EnvironmentOperationCompletionCoordinatorImpl(publisher, repository, objectMapper);
   }
 
-  /** 测试意图：验证当 daemon 报告 error=true 时，始终固化使用安全常量 OPERATION_FAILED，严禁透传 daemon 控制的 details.code。 */
+  /** 测试意图：验证当传入 null 结果时，直接收敛为 INVALID_RESULT，绝不抛出异常等待超时。 */
+  @Test
+  void coordinateResultWithNullResultPersistsInvalidResult() {
+    when(publisher.publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L)))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, null);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(publisher)
+        .publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L));
+  }
+
+  /** 测试意图：验证当 daemon 报告 error=true 时，固化调用 publishExecutionFailure。 */
   @Test
   void coordinateResultWithErrorPersistsConstantOperationFailed() {
     EnvironmentCapabilityResult errorResult =
         EnvironmentCapabilityResult.codedError(
             opId.toString(), "DAEMON_CONTROLLED_CODE", "Sensitive daemon path /secret");
 
-    when(publisher.publishOperationFailure(
-            eq(envId),
-            eq(opId),
-            eq(nodeId),
-            eq(leaseToken),
-            eq(1L),
-            eq(sourceId),
-            eq(2L),
-            eq(EnvironmentOperationFailureCodes.OPERATION_FAILED),
-            eq(EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE)))
+    when(publisher.publishExecutionFailure(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L)))
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
@@ -71,16 +77,29 @@ class EnvironmentOperationCompletionCoordinatorTest {
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
-        .publishOperationFailure(
-            envId,
-            opId,
-            nodeId,
-            leaseToken,
-            1L,
-            sourceId,
-            2L,
-            EnvironmentOperationFailureCodes.OPERATION_FAILED,
-            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
+        .publishExecutionFailure(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L));
+  }
+
+  /** 测试意图：验证在检查 error 之前先验证 callId，若 callId 不匹配即使 error=true 也收敛为 INVALID_RESULT。 */
+  @Test
+  void coordinateResultWithErrorAndCallIdMismatchPrefersInvalidResult() {
+    EnvironmentCapabilityResult errorResult =
+        EnvironmentCapabilityResult.codedError(
+            "wrong-call-id", "DAEMON_CONTROLLED_CODE", "Sensitive daemon path /secret");
+
+    when(publisher.publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L)))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateResult(
+            envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, errorResult);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(publisher)
+        .publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L));
   }
 
   /** 测试意图：验证返回结果的 callId 与 operation UUID 不匹配时，按 INVALID_RESULT 安全失败终结。 */
@@ -88,16 +107,8 @@ class EnvironmentOperationCompletionCoordinatorTest {
   void coordinateResultWithCallIdMismatchCallsPublisherFailureWithInvalidResult() {
     EnvironmentCapabilityResult result = EnvironmentCapabilityResult.json("wrong-call-id", "{}");
 
-    when(publisher.publishOperationFailure(
-            eq(envId),
-            eq(opId),
-            eq(nodeId),
-            eq(leaseToken),
-            eq(1L),
-            eq(sourceId),
-            eq(2L),
-            eq(EnvironmentOperationFailureCodes.INVALID_RESULT),
-            eq(EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE)))
+    when(publisher.publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L)))
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
@@ -105,19 +116,11 @@ class EnvironmentOperationCompletionCoordinatorTest {
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
-        .publishOperationFailure(
-            envId,
-            opId,
-            nodeId,
-            leaseToken,
-            1L,
-            sourceId,
-            2L,
-            EnvironmentOperationFailureCodes.INVALID_RESULT,
-            EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
+        .publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L));
   }
 
-  /** 测试意图：验证成功结果是单个 JsonResultContent 且解码为 Snapshot 时，提取安全计数摘要后调用 publishOperationSuccess。 */
+  /** 测试意图：验证成功结果是单个 JsonResultContent 且解码为 Snapshot 时调用 publishOperationSuccess。 */
   @Test
   void coordinateResultWithValidSnapshotCallsPublisherSuccess() {
     DaemonSkillDescriptor skill =
@@ -138,29 +141,16 @@ class EnvironmentOperationCompletionCoordinatorTest {
     EnvironmentCapabilityResult result = EnvironmentCapabilityResult.json(opId.toString(), json);
 
     when(publisher.publishOperationSuccess(
-            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(snapshot), anyString()))
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(snapshot)))
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
         coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
-
-    ArgumentCaptor<String> summaryCaptor = ArgumentCaptor.forClass(String.class);
     verify(publisher)
         .publishOperationSuccess(
-            eq(envId),
-            eq(opId),
-            eq(nodeId),
-            eq(leaseToken),
-            eq(1L),
-            eq(snapshot),
-            summaryCaptor.capture());
-
-    String summary = summaryCaptor.getValue();
-    assertTrue(summary.contains("\"skillCount\":1"));
-    assertTrue(summary.contains("\"diagnosticCount\":1"));
-    assertTrue(summary.contains("\"sourceRevision\":\"0123456789abcdef0123456789abcdef01234567\""));
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(snapshot));
   }
 
   /** 测试意图：验证非单个 JsonResultContent（如 Text 结果）按 INVALID_RESULT 终结为 FAILED。 */
@@ -170,16 +160,8 @@ class EnvironmentOperationCompletionCoordinatorTest {
         new EnvironmentCapabilityResult(
             opId.toString(), List.of(new TextResultContent("not-json")), false, "{}");
 
-    when(publisher.publishOperationFailure(
-            eq(envId),
-            eq(opId),
-            eq(nodeId),
-            eq(leaseToken),
-            eq(1L),
-            eq(sourceId),
-            eq(2L),
-            eq(EnvironmentOperationFailureCodes.INVALID_RESULT),
-            eq(EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE)))
+    when(publisher.publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L)))
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
@@ -187,31 +169,15 @@ class EnvironmentOperationCompletionCoordinatorTest {
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
-        .publishOperationFailure(
-            envId,
-            opId,
-            nodeId,
-            leaseToken,
-            1L,
-            sourceId,
-            2L,
-            EnvironmentOperationFailureCodes.INVALID_RESULT,
-            EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
+        .publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L));
   }
 
   /** 测试意图：验证 coordinateExecutionFailure 调用发布器终结为常量 OPERATION_FAILED。 */
   @Test
   void coordinateExecutionFailureCallsPublisherWithConstantFailed() {
-    when(publisher.publishOperationFailure(
-            eq(envId),
-            eq(opId),
-            eq(nodeId),
-            eq(leaseToken),
-            eq(1L),
-            eq(sourceId),
-            eq(2L),
-            eq(EnvironmentOperationFailureCodes.OPERATION_FAILED),
-            eq(EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE)))
+    when(publisher.publishExecutionFailure(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L)))
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
@@ -219,16 +185,8 @@ class EnvironmentOperationCompletionCoordinatorTest {
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
-        .publishOperationFailure(
-            envId,
-            opId,
-            nodeId,
-            leaseToken,
-            1L,
-            sourceId,
-            2L,
-            EnvironmentOperationFailureCodes.OPERATION_FAILED,
-            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
+        .publishExecutionFailure(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L));
   }
 
   /** 测试意图：验证 coordinateTransportUnknown 将未决操作收敛至 UNKNOWN (TRANSPORT_ERROR)。 */

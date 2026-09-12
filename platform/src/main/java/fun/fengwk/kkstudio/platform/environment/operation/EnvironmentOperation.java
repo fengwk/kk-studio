@@ -138,7 +138,7 @@ final class EnvironmentOperation {
   }
 
   @JsonIgnore
-  public UUID leaseToken() {
+  UUID leaseToken() {
     return leaseToken;
   }
 
