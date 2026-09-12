@@ -8,7 +8,6 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atMost;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -43,7 +42,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 验证 {@link EnvironmentOperationDispatcher} 的执行分发与并发契约：
@@ -434,9 +432,12 @@ class EnvironmentOperationDispatcherTest {
     verify(repository, never()).rescheduleUnsent(any(), any(), any());
   }
 
-  /** 测试意图：验证单个 worker 被线程池拒绝执行时，确定未发送，安全 rescheduleUnsent 且循环继续处理后续认领行。 */
+  /**
+   * 测试意图：验证当 worker 线程池拒绝执行时（表明调度器关机或不可用），立即将当前操作及该批次中所有剩余已认领未提交的操作原子 rescheduleUnsent， 并退出排空循环；在该
+   * wake 周期内绝不执行第二次 repository claim，且绝不发起 transport invoke，避免死循环重认领热点。
+   */
   @Test
-  void workerRejectionReschedulesAndContinues() throws Exception {
+  void workerRejectionReschedulesBatchAndExitsDrainCycle() throws Exception {
     UUID opId1 = UUID.randomUUID();
     UUID opId2 = UUID.randomUUID();
     ClaimedOperation claimed1 = createClaimedOperation(opId1);
@@ -447,21 +448,8 @@ class EnvironmentOperationDispatcherTest {
         .thenReturn(List.of());
 
     ExecutorService rejectingWorkerExecutor = mock(ExecutorService.class);
-    AtomicBoolean first = new AtomicBoolean(true);
-    CountDownLatch secondSubmitted = new CountDownLatch(1);
-
-    doAnswer(
-            inv -> {
-              if (first.compareAndSet(true, false)) {
-                throw new RejectedExecutionException("Worker rejected");
-              }
-              secondSubmitted.countDown();
-              Runnable r = inv.getArgument(0);
-              Thread.ofVirtual().start(r);
-              return null;
-            })
-        .when(rejectingWorkerExecutor)
-        .submit(any(Runnable.class));
+    when(rejectingWorkerExecutor.submit(any(Runnable.class)))
+        .thenThrow(new RejectedExecutionException("Worker rejected"));
 
     EnvironmentOperationDispatcher rejectingDispatcher =
         new EnvironmentOperationDispatcher(
@@ -476,10 +464,17 @@ class EnvironmentOperationDispatcherTest {
     rejectingDispatcher.start();
     rejectingDispatcher.wake();
 
-    assertTrue(secondSubmitted.await(5, TimeUnit.SECONDS));
+    // 等待 drainExecutor 屏障任务完成
+    drainExecutor.submit(() -> {}).get(5, TimeUnit.SECONDS);
 
-    // 验证 op1 被安全 rescheduleUnsent
-    verify(repository).rescheduleUnsent(eq(opId1), eq(nodeId), any());
+    // 验证本 wake 周期内仅 claim 了一次，绝无第二次 claim
+    verify(repository, times(1)).claimPendingWithTimeout(eq(nodeId), anyInt());
+    // 验证批次中所有行均被 rescheduleUnsent 恰好一次
+    verify(repository, times(1)).rescheduleUnsent(eq(opId1), eq(nodeId), any());
+    verify(repository, times(1)).rescheduleUnsent(eq(opId2), eq(nodeId), any());
+    // 验证绝不发起 transport invoke
+    verify(transport, never()).invoke(any(), any(), any());
+
     rejectingDispatcher.stop();
   }
 
