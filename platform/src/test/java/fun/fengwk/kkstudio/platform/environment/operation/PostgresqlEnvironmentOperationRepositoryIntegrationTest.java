@@ -55,7 +55,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     SingleConnectionDataSource dataSource = new SingleConnectionDataSource(newConnection(), false);
     jdbcTemplate = new JdbcTemplate(dataSource);
     objectMapper = new ObjectMapper().findAndRegisterModules();
-    repository = new PostgresqlEnvironmentOperationRepository(jdbcTemplate, objectMapper);
+    repository = new PostgresqlEnvironmentOperationRepository(jdbcTemplate);
   }
 
   /** 测试意图：验证完整的创建与读取闭环，确保私有 arguments 与 leaseToken 绝不泄露到 toString、Jackson 序列化或公开投影中。 */
@@ -124,6 +124,13 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     assertEquals(leaseToken, claimed.leaseToken());
     assertFalse(claimed.toString().contains(leaseToken.toString()));
     assertFalse(claimed.toString().contains("mock-token-secret"));
+
+    // 针对处于 RUNNING 且持有 leaseToken 的模型，通过 Jackson 序列化必须物理排除 arguments 与 leaseToken
+    String claimedJson = objectMapper.writeValueAsString(claimed);
+    assertFalse(claimedJson.contains("leaseToken"));
+    assertFalse(claimedJson.contains(leaseToken.toString()));
+    assertFalse(claimedJson.contains("arguments"));
+    assertFalse(claimedJson.contains("mock-token-secret"));
 
     // 安全投影必须移除 arguments, leaseToken 与 ownerNodeId
     SafeEnvironmentOperation safe = fetched.toSafeProjection();
@@ -261,25 +268,6 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
         assertThrows(
             AiResourceNotFoundException.class, () -> repository.createPending(cmdFkViolation));
     assertNoLeakInExceptionChain(fkEx, secret);
-
-    // 4. DB 端检查约束分支：ck_environment_operation_versions_nonneg (sourceVersion = -1) ->
-    // AiValidationException
-    CreatePendingOperationCommand cmdCheckViolation =
-        new CreatePendingOperationCommand(
-            uuid(),
-            envId,
-            uuid(),
-            EnvironmentOperationType.SKILL_REFRESH,
-            -1L,
-            0L,
-            sensitiveArguments,
-            "{}",
-            deadlineAt);
-    AiValidationException checkEx =
-        assertThrows(
-            AiValidationException.class, () -> repository.createPending(cmdCheckViolation));
-    assertTrue(checkEx.getMessage().contains("constraint violation"));
-    assertNoLeakInExceptionChain(checkEx, secret);
   }
 
   /** 辅助断言：遍历异常原因链，确保原因链为空且任何异常消息或 toString 均不包含敏感串。 */
@@ -1024,14 +1012,51 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     assertEquals(0, repository.markRunningUnknownOnShutdown(nodeA));
   }
 
-  /** 测试意图：在进入 SQL 之前完成参数结构与 JSON 形状校验。 */
+  /** 测试意图：在进入 SQL 之前完成参数结构、版本非负与严格 JSON 形状（拦截重复 key 与尾随 token）校验。 */
   @Test
   void validationBeforeSql() throws SQLException {
     UUID envId = createEnvironment();
     UUID sourceId = uuid();
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
-    // 1. 非法的 arguments JSON（非对象）
+    // 1. 版本非负校验（进入 SQL 前拦截）
+    AiValidationException srcVerEx =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                repository.createPending(
+                    new CreatePendingOperationCommand(
+                        uuid(),
+                        envId,
+                        sourceId,
+                        EnvironmentOperationType.SKILL_REFRESH,
+                        -1L,
+                        0L,
+                        "{}",
+                        "{}",
+                        deadlineAt)));
+    assertTrue(srcVerEx.getMessage().contains("sourceVersion must be non-negative"));
+    assertNull(srcVerEx.getCause());
+
+    AiValidationException srcSetVerEx =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                repository.createPending(
+                    new CreatePendingOperationCommand(
+                        uuid(),
+                        envId,
+                        sourceId,
+                        EnvironmentOperationType.SKILL_REFRESH,
+                        0L,
+                        -1L,
+                        "{}",
+                        "{}",
+                        deadlineAt)));
+    assertTrue(srcSetVerEx.getMessage().contains("sourceSetVersion must be non-negative"));
+    assertNull(srcSetVerEx.getCause());
+
+    // 2. 非法的 arguments JSON（非对象）
     assertThrows(
         AiValidationException.class,
         () ->
@@ -1047,7 +1072,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                     "{}",
                     deadlineAt)));
 
-    // 2. 畸形 JSON 语法（确认错误信息不泄漏私有内容）
+    // 3. 畸形 JSON 语法（确认错误信息不泄漏私有内容）
     AiValidationException ex =
         assertThrows(
             AiValidationException.class,
@@ -1064,8 +1089,50 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                         "{}",
                         deadlineAt)));
     assertFalse(ex.getMessage().contains("not-json-secret"));
+    assertNull(ex.getCause());
 
-    // 3. 不存在的 Environment 抛出 AiResourceNotFoundException
+    // 4. arguments 包含重复 object key（严格拦截，且不泄露输入值）
+    AiValidationException dupKeyEx =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                repository.createPending(
+                    new CreatePendingOperationCommand(
+                        uuid(),
+                        envId,
+                        sourceId,
+                        EnvironmentOperationType.SKILL_REFRESH,
+                        0L,
+                        0L,
+                        "{\"secretKey\":\"valueA\",\"secretKey\":\"valueB\"}",
+                        "{}",
+                        deadlineAt)));
+    assertTrue(dupKeyEx.getMessage().contains("arguments must be a valid JSON object"));
+    assertFalse(dupKeyEx.getMessage().contains("valueA"));
+    assertFalse(dupKeyEx.getMessage().contains("valueB"));
+    assertNull(dupKeyEx.getCause());
+
+    // 5. arguments 包含尾随 token（严格拦截，且不泄露输入值）
+    AiValidationException trailingEx =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                repository.createPending(
+                    new CreatePendingOperationCommand(
+                        uuid(),
+                        envId,
+                        sourceId,
+                        EnvironmentOperationType.SKILL_REFRESH,
+                        0L,
+                        0L,
+                        "{\"secretKey\":\"value\"} trailing_secret_garbage",
+                        "{}",
+                        deadlineAt)));
+    assertTrue(trailingEx.getMessage().contains("arguments must be a valid JSON object"));
+    assertFalse(trailingEx.getMessage().contains("trailing_secret_garbage"));
+    assertNull(trailingEx.getCause());
+
+    // 6. 不存在的 Environment 抛出 AiResourceNotFoundException
     assertThrows(
         AiResourceNotFoundException.class,
         () ->
@@ -1081,7 +1148,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                     "{}",
                     deadlineAt)));
 
-    // 4. parameterSummary 非对象
+    // 7. parameterSummary 非对象、重复 key、尾随 token
     assertThrows(
         AiValidationException.class,
         () ->
@@ -1096,6 +1163,43 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                     "{}",
                     "\"not-an-object\"",
                     deadlineAt)));
+
+    AiValidationException paramDupEx =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                repository.createPending(
+                    new CreatePendingOperationCommand(
+                        uuid(),
+                        envId,
+                        sourceId,
+                        EnvironmentOperationType.SKILL_REFRESH,
+                        0L,
+                        0L,
+                        "{}",
+                        "{\"param\":1,\"param\":2}",
+                        deadlineAt)));
+    assertTrue(paramDupEx.getMessage().contains("parameterSummary must be a valid JSON object"));
+    assertNull(paramDupEx.getCause());
+
+    AiValidationException paramTrailingEx =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                repository.createPending(
+                    new CreatePendingOperationCommand(
+                        uuid(),
+                        envId,
+                        sourceId,
+                        EnvironmentOperationType.SKILL_REFRESH,
+                        0L,
+                        0L,
+                        "{}",
+                        "{\"param\":1} extra_token",
+                        deadlineAt)));
+    assertTrue(
+        paramTrailingEx.getMessage().contains("parameterSummary must be a valid JSON object"));
+    assertNull(paramTrailingEx.getCause());
   }
 
   /** 测试意图：覆盖各种边界输入（非法结果摘要、不存在的 ID 等）的防御性校验。 */
@@ -1122,13 +1226,34 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
 
     repository.claimPending(node, 10);
 
-    // markSucceeded 校验：非法 resultSummary JSON
+    // markSucceeded 校验：非法 resultSummary JSON（非对象、畸形、重复 key 与尾随 token）
     assertThrows(
         AiValidationException.class,
         () -> repository.markSucceeded(opId, node, leaseToken, "[1, 2, 3]"));
     assertThrows(
         AiValidationException.class,
         () -> repository.markSucceeded(opId, node, leaseToken, "not-json"));
+
+    AiValidationException resDupEx =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                repository.markSucceeded(
+                    opId, node, leaseToken, "{\"secretRes\":\"1\",\"secretRes\":\"2\"}"));
+    assertTrue(resDupEx.getMessage().contains("resultSummary must be a valid JSON object"));
+    assertFalse(resDupEx.getMessage().contains("secretRes"));
+    assertFalse(resDupEx.getMessage().contains("1"));
+    assertNull(resDupEx.getCause());
+
+    AiValidationException resTrailingEx =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                repository.markSucceeded(
+                    opId, node, leaseToken, "{\"secretRes\":\"1\"} trailing_secret"));
+    assertTrue(resTrailingEx.getMessage().contains("resultSummary must be a valid JSON object"));
+    assertFalse(resTrailingEx.getMessage().contains("trailing_secret"));
+    assertNull(resTrailingEx.getCause());
 
     // getById 不存在的操作
     UUID nonExistentId = uuid();

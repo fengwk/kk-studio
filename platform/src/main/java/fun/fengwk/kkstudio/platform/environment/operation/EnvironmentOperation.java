@@ -32,7 +32,7 @@ final class EnvironmentOperation {
   private final String parameterSummary;
   private final Instant deadlineAt;
   private final UUID ownerNodeId;
-  private final UUID leaseToken;
+  @JsonIgnore private final UUID leaseToken;
   private final Instant startedAt;
   private final Instant finishedAt;
   private final String resultSummary;
@@ -137,7 +137,7 @@ final class EnvironmentOperation {
     return ownerNodeId;
   }
 
-  @JsonProperty
+  @JsonIgnore
   public UUID leaseToken() {
     return leaseToken;
   }

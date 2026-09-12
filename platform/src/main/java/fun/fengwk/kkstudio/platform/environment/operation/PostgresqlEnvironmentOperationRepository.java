@@ -1,8 +1,5 @@
 package fun.fengwk.kkstudio.platform.environment.operation;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.postgresql.util.PSQLException;
 import org.postgresql.util.ServerErrorMessage;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResultCodes;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -374,17 +372,10 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
       """;
 
   private final JdbcTemplate jdbcTemplate;
-  private final ObjectMapper objectMapper;
-
-  public PostgresqlEnvironmentOperationRepository(JdbcTemplate jdbcTemplate) {
-    this(jdbcTemplate, new ObjectMapper());
-  }
 
   @Autowired
-  public PostgresqlEnvironmentOperationRepository(
-      JdbcTemplate jdbcTemplate, @Autowired(required = false) ObjectMapper objectMapper) {
+  public PostgresqlEnvironmentOperationRepository(JdbcTemplate jdbcTemplate) {
     this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
-    this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
   }
 
   @Override
@@ -580,6 +571,14 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
     Objects.requireNonNull(command.sourceId(), "sourceId");
     Objects.requireNonNull(command.operationType(), "operationType");
     Objects.requireNonNull(command.deadlineAt(), "deadlineAt");
+    if (command.sourceVersion() < 0) {
+      throw new AiValidationException(
+          "environment_operation", "sourceVersion must be non-negative");
+    }
+    if (command.sourceSetVersion() < 0) {
+      throw new AiValidationException(
+          "environment_operation", "sourceSetVersion must be non-negative");
+    }
     validateJsonObject("arguments", command.arguments(), true);
     validateJsonObject("parameterSummary", command.parameterSummary(), true);
   }
@@ -591,18 +590,17 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
       }
       return;
     }
+    if (required && rawJson.isBlank()) {
+      throw new AiValidationException("environment_operation", fieldName + " must not be blank");
+    }
     if (rawJson.length() > MAX_JSON_CHARS) {
       throw new AiValidationException(
           "environment_operation",
           fieldName + " exceeds maximum allowed length of " + MAX_JSON_CHARS);
     }
     try {
-      JsonNode node = objectMapper.readTree(rawJson);
-      if (node == null || !node.isObject()) {
-        throw new AiValidationException(
-            "environment_operation", fieldName + " must be a JSON object");
-      }
-    } catch (JsonProcessingException error) {
+      JsonValues.requireJsonObject(rawJson, fieldName);
+    } catch (IllegalArgumentException ignored) {
       throw new AiValidationException(
           "environment_operation", fieldName + " must be a valid JSON object");
     }
