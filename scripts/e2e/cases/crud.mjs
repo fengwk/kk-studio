@@ -77,6 +77,7 @@ registerCase({
         await ctx.call('POST', '/api/ai/catalog/models', {
           providerName: provider.name,
           name: modelName,
+          modelId: `wire-invupd-${suffix}`,
           description: 'ok',
           config: baseModelConfig(),
         })
@@ -88,6 +89,7 @@ registerCase({
           'PUT',
           modelPath(provider.name, modelName),
           {
+            modelId: model.modelId,
             description: 'bad',
             config: baseModelConfig({ defaultVariant: 'nope' }),
             expectedVersion: model.version,
@@ -237,6 +239,7 @@ registerCase({
         await ctx.call('POST', '/api/ai/catalog/models', {
           providerName: provider.name,
           name,
+          modelId: `wire-lifecycle-${suffix}`,
           description: 'create',
           config: baseModelConfig(),
         })
@@ -251,13 +254,14 @@ registerCase({
       abilities: { tools: false, reasoning: true, inputModalities: ['TEXT', 'IMAGE'] },
       defaultVariant: 'fast',
       variants: [
-        { id: 'fast', temperature: 0.1 },
-        { id: 'quality', temperature: 0.4, reasoningEffort: 'high' },
+        { id: 'fast' },
+        { id: 'quality', reasoningEffort: 'high' },
       ],
     })
     const updated = envelopeData(
       (
         await ctx.call('PUT', modelPath(provider.name, name), {
+          modelId: model.modelId,
           description: 'updated',
           config: updatedConfig,
           expectedVersion: model.version,
@@ -275,6 +279,7 @@ registerCase({
         await ctx.call('POST', '/api/ai/catalog/models', {
           providerName: provider.name,
           name,
+          modelId: `wire-recreated-${suffix}`,
           description: 'recreated',
           config: baseModelConfig(),
         })

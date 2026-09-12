@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** invocation.model 包共享的测试 fixture。 */
 final class InvocationTestData {
@@ -76,6 +77,7 @@ final class InvocationTestData {
     return new ModelDescriptor(
         "provider",
         "model",
+        "model",
         Set.of(ModelInputModality.TEXT),
         true,
         true,
@@ -96,7 +98,8 @@ final class InvocationTestData {
   static ProviderRequest providerRequest(List<ToolBinding> bindings) {
     return new ProviderRequest(
         modelDescriptor(),
-        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        new ModelVariant("v1"),
+        1024,
         List.of(),
         bindings.stream()
             .map(
@@ -140,8 +143,10 @@ final class InvocationTestData {
     ProviderRequest provider = providerRequest(bindings);
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         provider.model(),
         provider.variant(),
+        1024,
         List.of(),
         bindings,
         List.of(),

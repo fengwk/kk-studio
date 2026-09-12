@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.catalog.model.runtime;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 
 import java.math.BigDecimal;
@@ -23,7 +23,7 @@ class AgentModelRuntimeConfigParserTest {
   private final AgentModelRuntimeConfigParser parser =
       new AgentModelRuntimeConfigParser(new ObjectMapper());
 
-  /** 每个可执行字段（含 6 个独立价格）都经严格解析保留下来。 */
+  /** 每个可执行字段（含 6 个独立价格）都经严格解析保留下来；variant 只保留 id 与 reasoningEffort。 */
   @Test
   void parsesCompleteRuntimeModelWithoutTokenBasedPriceInference() {
     var parsed = parser.parse(validConfig());
@@ -35,16 +35,7 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(parsed.tools());
     assertTrue(parsed.reasoning());
     assertEquals("quality", parsed.defaultVariant());
-    assertEquals(1, parsed.variants().size());
-    assertEquals("quality", parsed.variants().get(0).id());
-    assertEquals(4096, parsed.variants().get(0).maxOutputTokens());
-    assertEquals(0.4, parsed.variants().get(0).temperature());
-    assertEquals(0.8, parsed.variants().get(0).topP());
-    assertEquals(20, parsed.variants().get(0).topK());
-    assertEquals(0.1, parsed.variants().get(0).frequencyPenalty());
-    assertEquals(0.2, parsed.variants().get(0).presencePenalty());
-    assertEquals(List.of("done"), parsed.variants().get(0).stopSequences());
-    assertEquals("high", parsed.variants().get(0).reasoningEffort());
+    assertEquals(List.of(new ModelVariant("quality", "high")), parsed.variants());
     assertEquals("USD", parsed.pricing().currency());
     assertEquals("batch", parsed.pricing().pricingTier());
     assertEquals("priority", parsed.pricing().serviceTier());
@@ -66,26 +57,63 @@ class AgentModelRuntimeConfigParserTest {
     var parsed = parser.parse(encoded);
     assertEquals("USD", parsed.pricing().currency());
     assertEquals("quality", parsed.defaultVariant());
-    assertEquals(1, parsed.variants().size());
-    assertEquals("high", parsed.variants().get(0).reasoningEffort());
+    assertEquals(List.of(new ModelVariant("quality", "high")), parsed.variants());
   }
 
-  /** off 的 reasoningEffort 规范化为 null。 */
+  /** off 是显式关闭语义，绝不与 null（协议默认）静默映射。 */
   @Test
-  void normalizesOffReasoningEffortToNull() {
+  void keepsOffReasoningEffortAsExplicitDisable() {
     String config =
         validConfig().replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"off\"");
     var parsed = parser.parse(config);
-    assertNull(parsed.variants().get(0).reasoningEffort());
+    assertEquals("off", parsed.variants().get(0).reasoningEffort());
+    assertTrue(parsed.variants().get(0).reasoningOff());
+  }
+
+  /** 未声明 reasoningEffort 的 variant 保持 null，与显式 off 是不同语义。 */
+  @Test
+  void keepsAbsentReasoningEffortAsProtocolDefault() {
+    String config = validConfig().replace(",\"reasoningEffort\":\"high\"", "");
+    var parsed = parser.parse(config);
+    assertEquals(new ModelVariant("quality"), parsed.variants().get(0));
+    assertFalse(parsed.variants().get(0).reasoningOff());
   }
 
   /** 禁用的 reasoning 在描述符上以 falsy 的 tools/reasoning 布尔形式呈现。 */
   @Test
   void exposesReasoningAndToolsAsBooleans() {
-    String config = validConfig().replace("\"reasoning\":true", "\"reasoning\":false");
+    String config =
+        validConfig()
+            .replace("\"reasoning\":true", "\"reasoning\":false")
+            .replace(",\"reasoningEffort\":\"high\"", "");
     var parsed = parser.parse(config);
     assertFalse(parsed.reasoning());
     assertTrue(parsed.tools());
+  }
+
+  /** reasoning=false 但 variant 仍携带 reasoningEffort 是自相矛盾配置，必须拒绝。 */
+  @Test
+  void rejectsReasoningEffortWhenReasoningAbilityIsDisabled() {
+    assertInvalid(
+        validConfig().replace("\"reasoning\":true", "\"reasoning\":false"),
+        "reasoningEffort must be null when config.abilities.reasoning is false");
+    assertInvalid(
+        validConfig()
+            .replace("\"reasoning\":true", "\"reasoning\":false")
+            .replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"off\""),
+        "reasoningEffort must be null when config.abilities.reasoning is false");
+  }
+
+  /** reasoning=false 且全部 variant 的 reasoningEffort 为 null（协议默认）是合法配置。 */
+  @Test
+  void acceptsNullReasoningEffortWhenReasoningAbilityIsDisabled() {
+    String config =
+        validConfig()
+            .replace("\"reasoning\":true", "\"reasoning\":false")
+            .replace(",\"reasoningEffort\":\"high\"", "");
+    var parsed = parser.parse(config);
+    assertFalse(parsed.reasoning());
+    assertEquals(new ModelVariant("quality"), parsed.variants().get(0));
   }
 
   /** 缺失字段、错误的 JSON 类型、未知枚举与无效 variant 都明确失败。 */
@@ -95,7 +123,9 @@ class AgentModelRuntimeConfigParserTest {
     assertInvalid(validConfig().replace("128000", "\"128000\""), "limit.context");
     assertInvalid(
         validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[]"), "inputModalities must not be empty");
-    assertInvalid(validConfig().replace("\"topP\":0.8", "\"topP\":2"), "topP must be in");
+    assertInvalid(
+        validConfig().replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"extreme\""),
+        "reasoningEffort must be one of");
     assertInvalid(
         validConfig()
             .replace("\"reasoningPerMillionTokens\":3.6", "\"reasoningPerMillionTokens\":null"),
@@ -113,41 +143,39 @@ class AgentModelRuntimeConfigParserTest {
     assertInvalid(
         validConfig().replace("\"output\":8192", "\"output\":128001"),
         "must not exceed limit.context");
-    assertInvalid(
-        validConfig()
-            .replace(
-                "\"variants\":[{\"id\":\"quality\",\"maxOutputTokens\":4096,"
-                    + "\"temperature\":0.4,\"topP\":0.8,\"topK\":20,"
-                    + "\"frequencyPenalty\":0.1,\"presencePenalty\":0.2,"
-                    + "\"stopSequences\":[\"done\"],\"reasoningEffort\":\"high\"}]",
-                "\"variants\":[]"),
-        "variants must not be empty");
+    assertInvalid(validConfig().replace(VARIANT_JSON, ""), "config.variants must not be empty");
     assertInvalid(validConfig().replace("\"variants\":[{", "\"variants\":[1,{"), "variants[0]");
     assertInvalid(
         validConfig()
             .replace(
-                "\"stopSequences\":[\"done\"],\"reasoningEffort\":\"high\"}]",
-                "\"stopSequences\":[\"done\"],\"reasoningEffort\":\"high\"},{\"id\":\"quality\"}]"),
+                "\"reasoningEffort\":\"high\"}]",
+                "\"reasoningEffort\":\"high\"},{" + "\"id\":\"quality\"}]"),
         "duplicate id");
     assertInvalid(
         validConfig().replace("\"defaultVariant\":\"quality\"", "\"defaultVariant\":\"missing\""),
         "defaultVariant must match");
-    assertInvalid(
-        validConfig().replace("\"maxOutputTokens\":4096", "\"maxOutputTokens\":999999"),
-        "must not exceed model");
-    assertInvalid(validConfig().replace("\"topK\":20", "\"topK\":0"), "topK");
-    assertInvalid(
-        validConfig().replace("\"temperature\":0.4", "\"temperature\":\"hot\""),
-        "variants[0].temperature");
-    assertInvalid(
-        validConfig().replace("\"stopSequences\":[\"done\"]", "\"stopSequences\":[1]"),
-        "stopSequences[0]");
     assertInvalid(
         validConfig().replace("\"serviceTierMultiplier\":1.25", "\"serviceTierMultiplier\":0"),
         "serviceTierMultiplier must be positive");
     assertInvalid(
         validConfig().replace("\"inputPerMillionTokens\":1.1", "\"inputPerMillionTokens\":-1"),
         "inputPerMillionTokens must not be negative");
+  }
+
+  /**
+   * variant 只保留 id 与 reasoningEffort：任何已删除的采样、penalty、stopSequences 与单次输出上限都必须作为未知字段被
+   * 拒绝，绝不作为兼容路径被静默忽略。
+   */
+  @Test
+  void rejectsEveryRemovedVariantField() {
+    for (String removed : REMOVED_VARIANT_FIELDS) {
+      String config =
+          validConfig()
+              .replace(
+                  "\"id\":\"quality\",\"reasoningEffort\":\"high\"",
+                  "\"id\":\"quality\"," + removed + "\"reasoningEffort\":\"high\"");
+      assertInvalid(config, "config.variants[0]." + removed.substring(1, removed.indexOf('"', 1)));
+    }
   }
 
   /** 已持久化的 JSON 永远不能被静默修复：null/空白/畸形结构应大声抛出。 */
@@ -182,19 +210,6 @@ class AgentModelRuntimeConfigParserTest {
     assertInvalid(
         validConfig().replace("\"id\":\"quality\"", "\"id\":\" quality \""),
         "surrounding whitespace");
-  }
-
-  /** Provider 特定的 penalty 区间可能包含负值；通用契约仅要求有穷性。 */
-  @Test
-  void acceptsFiniteNegativePenalties() {
-    var parsed =
-        parser.parse(
-            validConfig()
-                .replace("\"frequencyPenalty\":0.1", "\"frequencyPenalty\":-0.5")
-                .replace("\"presencePenalty\":0.2", "\"presencePenalty\":-1.0"));
-
-    assertEquals(-0.5, parsed.variants().get(0).frequencyPenalty());
-    assertEquals(-1.0, parsed.variants().get(0).presencePenalty());
   }
 
   /** 类型化 DTO 形式拒绝 null 和损坏的子结构；部分子结构会以明确方式失败。 */
@@ -251,15 +266,27 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(error.getMessage().contains(message), error.getMessage());
   }
 
+  /** canonical variant wire：只含 id 与 reasoningEffort。 */
+  private static final String VARIANT_JSON =
+      "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\"}],";
+
+  /** 已从 variant 契约删除的字段：必须作为未知字段被严格拒绝。 */
+  private static final List<String> REMOVED_VARIANT_FIELDS =
+      List.of(
+          "\"maxOutputTokens\":4096,",
+          "\"temperature\":0.4,",
+          "\"topP\":0.8,",
+          "\"topK\":20,",
+          "\"frequencyPenalty\":0.1,",
+          "\"presencePenalty\":0.2,",
+          "\"stopSequences\":[\"done\"],");
+
   private String validConfig() {
     return "{\"limit\":{\"context\":128000,\"output\":8192},"
         + "\"abilities\":{\"tools\":true,\"reasoning\":true,"
         + "\"inputModalities\":[\"TEXT\",\"IMAGE\"]},"
         + "\"defaultVariant\":\"quality\","
-        + "\"variants\":[{\"id\":\"quality\",\"maxOutputTokens\":4096,"
-        + "\"temperature\":0.4,\"topP\":0.8,\"topK\":20,"
-        + "\"frequencyPenalty\":0.1,\"presencePenalty\":0.2,"
-        + "\"stopSequences\":[\"done\"],\"reasoningEffort\":\"high\"}],"
+        + VARIANT_JSON
         + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"batch\","
         + "\"serviceTier\":\"priority\",\"serviceTierMultiplier\":1.25,"
         + "\"version\":\"2026-07-16\",\"inputPerMillionTokens\":1.1,"

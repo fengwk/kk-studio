@@ -37,7 +37,6 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -136,7 +135,7 @@ final class GeminiRequestEncoder {
         if (canReplay(
             msg.replayState(),
             descriptor,
-            request.model().modelName(),
+            request.model().modelId(),
             currentPrefixHash,
             msg.contents())) {
           for (JsonNode partNode : msg.replayState().payload().path("parts")) {
@@ -202,52 +201,19 @@ final class GeminiRequestEncoder {
     ModelVariant variant = request.variant();
     ObjectNode genConfig = NODES.objectNode();
 
-    if (variant != null) {
-      if (variant.maxOutputTokens() != null) {
-        genConfig.put("maxOutputTokens", variant.maxOutputTokens());
-      }
-      if (variant.temperature() != null) {
-        genConfig.put("temperature", variant.temperature());
-      }
-      if (variant.topP() != null) {
-        genConfig.put("topP", variant.topP());
-      }
-      if (variant.topK() != null) {
-        genConfig.put("topK", variant.topK());
-      }
-      if (variant.stopSequences() != null && !variant.stopSequences().isEmpty()) {
-        ArrayNode stopSeq = genConfig.putArray("stopSequences");
-        for (String seq : variant.stopSequences()) {
-          stopSeq.add(seq);
-        }
-      }
-      if (variant.presencePenalty() != null) {
-        genConfig.put("presencePenalty", variant.presencePenalty());
-      }
-      if (variant.frequencyPenalty() != null) {
-        genConfig.put("frequencyPenalty", variant.frequencyPenalty());
-      }
-    }
+    // 输出预算只来自 Model 级 limit.output（普通请求再按剩余上下文收敛），不来自 variant。
+    genConfig.put("maxOutputTokens", request.outputTokens());
 
-    // reasoning effort 映射到 thinkingConfig
-    boolean modelReasoning = request.model().reasoning();
+    // reasoning effort 映射到 thinkingConfig：未声明时不生成，off 显式关闭，其余级别下发生效级别
     String reasoningEffort = variant != null ? variant.reasoningEffort() : null;
-
-    if (modelReasoning || reasoningEffort != null) {
+    if (reasoningEffort != null) {
       ObjectNode thinkingConfig = genConfig.putObject("thinkingConfig");
-      thinkingConfig.put("includeThoughts", true);
-
-      if (reasoningEffort != null) {
-        String effort = reasoningEffort.trim().toLowerCase(Locale.ROOT);
-        if ("minimal".equals(effort)
-            || "low".equals(effort)
-            || "medium".equals(effort)
-            || "high".equals(effort)) {
-          thinkingConfig.put("thinkingLevel", effort);
-        } else {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "unknown or unsupported reasoning effort");
-        }
+      if (variant.reasoningOff()) {
+        thinkingConfig.put("includeThoughts", false);
+        thinkingConfig.put("thinkingBudget", 0);
+      } else {
+        thinkingConfig.put("includeThoughts", true);
+        thinkingConfig.put("thinkingLevel", reasoningEffort);
       }
     }
 

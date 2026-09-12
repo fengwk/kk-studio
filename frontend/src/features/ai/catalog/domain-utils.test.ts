@@ -41,6 +41,7 @@ function modelDraft(overrides: Partial<ModelDraft> = {}): ModelDraft {
     ...emptyModelDraft(),
     providerName: 'minimax',
     name: 'MiniMax-M2.7',
+    modelId: 'minimax-upstream',
     ...overrides,
   }
 }
@@ -69,9 +70,9 @@ function fullConfig(): AgentModelConfigDTO {
 
 function model(overrides: Partial<AgentModelDTO> = {}): AgentModelDTO {
   return {
-    id: 'model-1',
     providerName: 'minimax',
     name: 'MiniMax-M2.7',
+    modelId: 'minimax-upstream',
     description: 'Chat model',
     config: fullConfig(),
     version: '1',
@@ -134,9 +135,7 @@ describe('AI domain utilities', () => {
             variants: [
               {
                 id: 'quality',
-                temperature: 0.2,
-                maxOutputTokens: 256,
-                topK: 32,
+                reasoningEffort: 'high',
               },
             ],
           },
@@ -145,9 +144,10 @@ describe('AI domain utilities', () => {
     ).toMatchObject({
       providerName: 'minimax',
       name: 'MiniMax-M2.7',
+      modelId: 'minimax-upstream',
       defaultVariant: 'quality',
       variants: [
-        { id: 'quality', temperature: '0.2', maxOutputTokens: '256', topK: '32' },
+        { id: 'quality', reasoningEffort: 'high' },
       ],
     })
 
@@ -218,9 +218,6 @@ describe('AI domain utilities', () => {
             ...baseVariant,
             id: 'quality',
             reasoningEffort: 'high',
-            temperature: '0.1',
-            maxOutputTokens: '256',
-            topK: '32',
           },
         ],
       }),
@@ -228,6 +225,7 @@ describe('AI domain utilities', () => {
     expect(editableModel).toMatchObject({
       providerName: 'minimax',
       name: 'MiniMax-M2.7',
+      modelId: 'minimax-upstream',
       description: 'chat model',
     })
     expect(editableModel.config).toMatchObject({
@@ -419,11 +417,12 @@ describe('AI domain utilities', () => {
 
     expect(toModelDraft(model({ description: null }))).toMatchObject({
       providerName: 'minimax',
+      modelId: 'minimax-upstream',
       description: '',
       contextWindow: '128000',
       maxOutputTokens: '8192',
       defaultVariant: 'default',
-      variants: [{ id: 'default', reasoningEffort: '', temperature: '', topK: '' }],
+      variants: [{ id: 'default', reasoningEffort: '' }],
     })
 
     expect(

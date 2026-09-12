@@ -16,9 +16,12 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 
 /** ModelGateway public contract：execution key、admission certainty 与 value validation。 */
 class ModelGatewayTest {
+
+  private static final UUID CONNECTION_GENERATION_ID = new UUID(0L, 1L);
 
   @Test
   void startResultIsSealedWithExactlyFourAdmissionOutcomes() {
@@ -33,27 +36,50 @@ class ModelGatewayTest {
   @Test
   void executionFreezesTheKeyAndTheRequest() {
     ModelGateway.Execution execution =
-        new ModelGateway.Execution(id(42L), 3, ProviderType.OPENAI, PortTestData.providerRequest());
+        new ModelGateway.Execution(
+            id(42L),
+            3,
+            ProviderType.OPENAI,
+            CONNECTION_GENERATION_ID,
+            PortTestData.providerRequest());
     assertEquals(id(42L), execution.invocationId());
     assertEquals(3, execution.proposedAttempt());
     assertEquals(ProviderType.OPENAI, execution.providerType());
+    assertEquals(CONNECTION_GENERATION_ID, execution.providerConnectionGenerationId());
     assertEquals(PortTestData.providerRequest(), execution.request());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelGateway.Execution(
-                id(1L), 0, ProviderType.OPENAI, PortTestData.providerRequest()));
+                id(1L),
+                0,
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                PortTestData.providerRequest()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelGateway.Execution(
-                id(1L), -1, ProviderType.OPENAI, PortTestData.providerRequest()));
+                id(1L),
+                -1,
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                PortTestData.providerRequest()));
     assertThrows(
         NullPointerException.class,
-        () -> new ModelGateway.Execution(id(1L), 1, ProviderType.OPENAI, null));
+        () ->
+            new ModelGateway.Execution(
+                id(1L), 1, ProviderType.OPENAI, CONNECTION_GENERATION_ID, null));
     assertThrows(
         NullPointerException.class,
-        () -> new ModelGateway.Execution(id(1L), 1, null, PortTestData.providerRequest()));
+        () ->
+            new ModelGateway.Execution(
+                id(1L), 1, null, CONNECTION_GENERATION_ID, PortTestData.providerRequest()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ModelGateway.Execution(
+                id(1L), 1, ProviderType.OPENAI, null, PortTestData.providerRequest()));
   }
 
   @Test
@@ -108,7 +134,11 @@ class ModelGatewayTest {
     ModelGateway.StartResult result =
         gateway.start(
             new ModelGateway.Execution(
-                id(7L), 1, ProviderType.OPENAI, PortTestData.providerRequest()),
+                id(7L),
+                1,
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                PortTestData.providerRequest()),
             events());
     assertTrue(result instanceof ModelGateway.Started);
   }

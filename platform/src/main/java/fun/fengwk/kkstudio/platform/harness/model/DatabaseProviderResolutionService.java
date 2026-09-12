@@ -30,9 +30,10 @@ import java.util.UUID;
 /**
  * 按当前 {@code agent_provider} 行解析每次 Model attempt 的 Provider。
  *
- * <p>每次 {@link #resolve} 都按 {@code request.model().providerName()} 读取最新一行，以该行当前的 providerType /
- * baseUrl / credential / config 选择当前 {@link ProviderFactory} 并构造 adapter；Provider 更新后下一次 attempt
- * 立即使用新连接事实，删除后确定性 not found，同名重建后解析到新行。
+ * <p>每次 {@link #resolve} 都按 {@code request.model().providerName()} 读取最新一行，并在创建 adapter 前校验
+ * providerType 与 connection generation 均等于 invocation 冻结值。endpoint、credential 或协议配置变化以及同名重建都会轮换
+ * generation，使既有 invocation 确定性拒绝；不轮换 generation 的 timeout-only 更新保持 attempt-time live，删除后确定性 not
+ * found。
  *
  * <p>持久 request 中已有的 {@link ProviderCacheControl} 按当前 {@code provider.configJson} 下 factory 的
  * {@link ProviderFactory#promptCacheCapability(String)} 规范化：当前 capability 无法表达时降级为 {@code
@@ -63,8 +64,10 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
   }
 
   @Override
-  public ResolvedExecution resolve(ProviderType frozenType, ProviderRequest request) {
+  public ResolvedExecution resolve(
+      ProviderType frozenType, UUID frozenConnectionGenerationId, ProviderRequest request) {
     Objects.requireNonNull(frozenType, "frozenType");
+    Objects.requireNonNull(frozenConnectionGenerationId, "frozenConnectionGenerationId");
     Objects.requireNonNull(request, "request");
     String providerName = request.model().providerName();
     AgentProvider provider = providerRepository.getByName(providerName);
@@ -97,6 +100,13 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
     if (connectionGenerationId == null) {
       throw new IllegalStateException(
           "provider " + providerName + " connectionGenerationId must not be null");
+    }
+    if (!connectionGenerationId.equals(frozenConnectionGenerationId)) {
+      throw new IllegalArgumentException(
+          "provider connection generation drift: frozen="
+              + frozenConnectionGenerationId
+              + " current="
+              + connectionGenerationId);
     }
     // 准入期验证 endpoint 非空白：确定性失败在 resolve 阶段暴露，而不是推迟到 transport。
     new ProviderDescriptor(
@@ -134,6 +144,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
         new ProviderRequest(
             request.model(),
             request.variant(),
+            request.outputTokens(),
             // 每次 attempt 物化 durable Resource：durable 请求只含 blobId/name/preview，media URL 仅存在于有效请求。
             resourceMaterializer.materialize(request.messages(), request.model().inputModalities()),
             request.tools(),

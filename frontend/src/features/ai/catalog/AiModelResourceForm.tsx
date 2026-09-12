@@ -85,23 +85,9 @@ export function ModelForm({
     onChange({ ...draft, inputModalities: next.length > 0 ? next : ['TEXT'] })
   }
 
-  /** 开启 Reasoning 时，为空的思考强度用 Variant ID 或 medium 预填。 */
+  /** Reasoning 只切换能力开关；空思考强度表示不覆盖协议默认，不自动补全。 */
   function setReasoning(enabled: boolean) {
-    if (!enabled) {
-      onChange({ ...draft, reasoning: false })
-      return
-    }
-    onChange({
-      ...draft,
-      reasoning: true,
-      variants: draft.variants.map((variant) => ({
-        ...variant,
-        reasoningEffort:
-          variant.reasoningEffort.trim() ||
-          variant.id.trim() ||
-          'medium',
-      })),
-    })
+    onChange({ ...draft, reasoning: enabled })
   }
 
   function updatePricing(field: keyof ModelPricingDraft, value: string) {
@@ -144,7 +130,21 @@ export function ModelForm({
           readOnly={mode === 'edit'}
           required
         />
+        <span className="inline-hint">{t('ai.catalog.form.nameHint')}</span>
         {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
+      </label>
+
+      <label className={`form-group${fieldErrors.modelId ? ' is-error' : ''}`}>
+        <FieldLabel required>{t('ai.catalog.form.modelId')}</FieldLabel>
+        <input
+          aria-label={t('ai.catalog.form.modelId')}
+          value={draft.modelId}
+          onChange={(event) => onChange({ ...draft, modelId: event.target.value })}
+          placeholder="claude-fable-5-dd-3M-xaMiniM"
+          required
+        />
+        <span className="inline-hint">{t('ai.catalog.form.modelIdHint')}</span>
+        {fieldErrors.modelId ? <span className="field-error">{fieldErrors.modelId}</span> : null}
       </label>
 
       <label className="form-group">
@@ -193,6 +193,7 @@ export function ModelForm({
               placeholder="8192"
               required
             />
+            <span className="inline-hint">{t('ai.catalog.form.maxOutputLimitHint')}</span>
             {fieldErrors.maxOutputTokens ? (
               <span className="field-error">{fieldErrors.maxOutputTokens}</span>
             ) : null}
@@ -304,25 +305,16 @@ export function ModelForm({
         ) : null}
       </label>
 
-      <div
-        className={
-          fieldErrors.variants || fieldErrors.reasoningEffort ? 'is-error' : undefined
-        }
-      >
+      <div className={fieldErrors.variants ? 'is-error' : undefined}>
         <VariantListEditor
           label={t('ai.catalog.form.variants')}
           variants={draft.variants}
           defaultVariant={selectedDefaultVariant}
           reasoning={draft.reasoning}
-          effortError={Boolean(fieldErrors.reasoningEffort)}
           onChange={commitVariants}
         />
         {/* 只保留一条汇总错误，避免顶部 banner + 字段旁重复堆叠 */}
-        {fieldErrors.reasoningEffort || fieldErrors.variants ? (
-          <span className="field-error">
-            {fieldErrors.reasoningEffort || fieldErrors.variants}
-          </span>
-        ) : null}
+        {fieldErrors.variants ? <span className="field-error">{fieldErrors.variants}</span> : null}
       </div>
     </>
   )

@@ -17,10 +17,10 @@ import java.util.List;
  *                cacheWritePerMillionTokens, cacheWriteLongPerMillionTokens,
  *                reasoningPerMillionTokens }
  * defaultVariant: existing variant id
- * variants:     non-empty list with at least {@code id} (optional reasoningEffort,
- *                maxOutputTokens, temperature, topP, topK, frequencyPenalty,
- *                presencePenalty, stopSequences)
+ * variants:     non-empty list with at least {@code id} (optional reasoningEffort)
  * </pre>
+ *
+ * <p>{@code limit.output} 是模型级单次输出预算的事实源：每次请求的输出上限由它与当前剩余上下文计算，绝不放入 variant。
  */
 @Data
 public class AgentModelConfigDTO {

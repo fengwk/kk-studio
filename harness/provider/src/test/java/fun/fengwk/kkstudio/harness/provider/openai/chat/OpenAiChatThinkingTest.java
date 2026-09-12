@@ -78,8 +78,14 @@ class OpenAiChatThinkingTest {
             new BigDecimal("10.00"));
     modelDesc =
         new ModelDescriptor(
-            "deepseek", "deepseek-reasoner", Set.of(ModelInputModality.TEXT), true, true, pricing);
-    defaultVariant = new ModelVariant("default", null, null, null, null, null, null, null, null);
+            "deepseek",
+            "deepseek-reasoner",
+            "deepseek-reasoner",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            pricing);
+    defaultVariant = new ModelVariant("default");
     encoder = new OpenAiChatRequestEncoder();
     recordedEvents = new ArrayList<>();
     ProviderStreamHandler handler =
@@ -107,7 +113,12 @@ class OpenAiChatThinkingTest {
             ProviderMessageRole.USER, List.of(new ProviderTextBlock("What is 1+1?")));
     ProviderRequest turn1Request =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(user1), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(user1),
+            List.of(),
+            ProviderCacheControl.none());
 
     OpenAiChatEncodedRequest encoded1 =
         encoder.encode(turn1Request, descriptor, OpenAiChatConfiguration.defaults());
@@ -178,6 +189,7 @@ class OpenAiChatThinkingTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, turn1Asst, user2),
             List.of(),
             ProviderCacheControl.none());

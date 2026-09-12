@@ -54,7 +54,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 
-/** 测试意图：全面验证 OpenAI Chat 请求编码器（Golden 结构、Sampling、Tools、Messages、Replay、媒体、三种缓存模式）。 */
+/** 测试意图：全面验证 OpenAI Chat 请求编码器（Golden 结构、输出预算、推理、Tools、Messages、Replay、媒体、三种缓存模式）。 */
 class OpenAiChatRequestEncoderTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -87,8 +87,8 @@ class OpenAiChatRequestEncoderTest {
             new BigDecimal("10.00"));
     modelDesc =
         new ModelDescriptor(
-            "openai", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
-    defaultVariant = new ModelVariant("default", null, null, null, null, null, null, null, null);
+            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
+    defaultVariant = new ModelVariant("default");
   }
 
   @Test
@@ -98,7 +98,12 @@ class OpenAiChatRequestEncoderTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")));
     ProviderRequest request =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
 
     OpenAiChatEncodedRequest encoded =
         encoder.encode(request, descriptor, OpenAiChatConfiguration.defaults());
@@ -125,7 +130,12 @@ class OpenAiChatRequestEncoderTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")));
     ProviderRequest request =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
 
     OpenAiChatEncodedRequest encoded = encoder.encode(request, descriptor, config);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -133,16 +143,26 @@ class OpenAiChatRequestEncoderTest {
   }
 
   @Test
-  @DisplayName("Reasoning effort 仅在非空时映射，空时不发")
+  @DisplayName("STANDARD 格式下 off 映射为 none、null 不发送推理字段")
   void testReasoningEffortMapping() throws Exception {
-    ModelVariant variantWithReasoning =
-        new ModelVariant("v1", null, null, null, null, null, null, null, "high");
+    // STANDARD 与 DEEPSEEK 共用同一门控：非 reasoning 模型不发送任何推理字段
+    ModelDescriptor reasoningModel =
+        new ModelDescriptor(
+            "openai",
+            "gpt-4o-reasoning",
+            "gpt-4o-reasoning",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            modelDesc.pricing());
+    ModelVariant variantWithReasoning = new ModelVariant("v1", "high");
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve this")));
     ProviderRequest req1 =
         new ProviderRequest(
-            modelDesc,
+            reasoningModel,
             variantWithReasoning,
+            1024,
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -152,15 +172,32 @@ class OpenAiChatRequestEncoderTest {
             encoder.encode(req1, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
     assertEquals("high", root1.path("reasoning_effort").asText());
 
-    ModelVariant variantOff =
-        new ModelVariant("v2", null, null, null, null, null, null, null, "off");
+    ModelVariant variantOff = new ModelVariant("v2", "off");
     ProviderRequest req2 =
         new ProviderRequest(
-            modelDesc, variantOff, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            reasoningModel,
+            variantOff,
+            1024,
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
     JsonNode root2 =
         MAPPER.readTree(
             encoder.encode(req2, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
-    assertFalse(root2.has("reasoning_effort"));
+    assertEquals("none", root2.path("reasoning_effort").asText());
+
+    ProviderRequest req3 =
+        new ProviderRequest(
+            modelDesc,
+            variantWithReasoning,
+            1024,
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode root3 =
+        MAPPER.readTree(
+            encoder.encode(req3, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
+    assertFalse(root3.has("reasoning_effort"));
   }
 
   @Test
@@ -169,6 +206,7 @@ class OpenAiChatRequestEncoderTest {
     ModelDescriptor reasoningModel =
         new ModelDescriptor(
             "deepseek",
+            "deepseek-reasoner",
             "deepseek-reasoner",
             Set.of(ModelInputModality.TEXT),
             true,
@@ -181,108 +219,106 @@ class OpenAiChatRequestEncoderTest {
 
     // 1. DEEPSEEK 格式下 reasoning=true 且 effort="low" -> thinking:{type:"enabled"} 且
     // reasoning_effort:"low"
-    ModelVariant variantLow =
-        new ModelVariant("v1", null, null, null, null, null, null, null, "low");
+    ModelVariant variantLow = new ModelVariant("v1", "low");
     ProviderRequest reqLow =
         new ProviderRequest(
-            reasoningModel, variantLow, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            reasoningModel,
+            variantLow,
+            1024,
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
     JsonNode rootLow =
         MAPPER.readTree(encoder.encode(reqLow, descriptor, deepseekConfig).bodyUtf8Bytes());
     assertEquals("enabled", rootLow.path("thinking").path("type").asText());
     assertEquals("low", rootLow.path("reasoning_effort").asText());
 
-    // 2. DEEPSEEK 格式下 reasoning=true 且 effort="none" -> thinking:{type:"disabled"} 且无
-    // reasoning_effort
-    ModelVariant variantNone =
-        new ModelVariant("v2", null, null, null, null, null, null, null, "none");
-    ProviderRequest reqNone =
-        new ProviderRequest(
-            reasoningModel, variantNone, List.of(userMsg), List.of(), ProviderCacheControl.none());
-    JsonNode rootNone =
-        MAPPER.readTree(encoder.encode(reqNone, descriptor, deepseekConfig).bodyUtf8Bytes());
-    assertEquals("disabled", rootNone.path("thinking").path("type").asText());
-    assertFalse(rootNone.has("reasoning_effort"));
-
-    // 3. DEEPSEEK 格式下 reasoning=true 且 effort=null (通过 "off" 规范化为 null) ->
-    // thinking:{type:"disabled"} 且无 reasoning_effort
-    ModelVariant variantOff =
-        new ModelVariant("v3", null, null, null, null, null, null, null, "off");
+    // 2. DEEPSEEK 格式下 reasoning=true 且 effort="off" -> 显式 thinking:{type:"disabled"}
+    // 且不发送 reasoning_effort（off 是显式关闭，不是某个强度值）
+    ModelVariant variantOff = new ModelVariant("v2", "off");
     ProviderRequest reqOff =
         new ProviderRequest(
-            reasoningModel, variantOff, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            reasoningModel,
+            variantOff,
+            1024,
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
     JsonNode rootOff =
         MAPPER.readTree(encoder.encode(reqOff, descriptor, deepseekConfig).bodyUtf8Bytes());
     assertEquals("disabled", rootOff.path("thinking").path("type").asText());
     assertFalse(rootOff.has("reasoning_effort"));
 
-    // 4. DEEPSEEK 格式下 reasoning=true 且 variant.reasoningEffort 为 null -> thinking:{type:"disabled"}
-    // 且无 reasoning_effort
+    // 3. DEEPSEEK 格式下 reasoning=true 且 variant.reasoningEffort 为 null -> 不覆盖协议默认：
+    // thinking 与 reasoning_effort 都不发送
     ProviderRequest reqDefaultVariant =
         new ProviderRequest(
             reasoningModel,
             defaultVariant,
+            1024,
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootDefaultVariant =
         MAPPER.readTree(
             encoder.encode(reqDefaultVariant, descriptor, deepseekConfig).bodyUtf8Bytes());
-    assertEquals("disabled", rootDefaultVariant.path("thinking").path("type").asText());
+    assertFalse(rootDefaultVariant.has("thinking"));
     assertFalse(rootDefaultVariant.has("reasoning_effort"));
 
-    // 5. DEEPSEEK 格式下 reasoning=false 且 effort="low" -> 均不生成 thinking 和 reasoning_effort
+    // 4. DEEPSEEK 格式下 reasoning=false 且 effort="low" -> 均不生成 thinking 和 reasoning_effort
     ProviderRequest reqNonReasoningWithEffort =
         new ProviderRequest(
-            modelDesc, variantLow, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc, variantLow, 1024, List.of(userMsg), List.of(), ProviderCacheControl.none());
     JsonNode rootNonReasoningWithEffort =
         MAPPER.readTree(
             encoder.encode(reqNonReasoningWithEffort, descriptor, deepseekConfig).bodyUtf8Bytes());
     assertFalse(rootNonReasoningWithEffort.has("thinking"));
     assertFalse(rootNonReasoningWithEffort.has("reasoning_effort"));
 
-    // 6. DEEPSEEK 格式下 reasoning=false 且 effort=null -> 均不生成 thinking 和 reasoning_effort
+    // 5. DEEPSEEK 格式下 reasoning=false 且 effort=null -> 均不生成 thinking 和 reasoning_effort
     ProviderRequest reqNonReasoningNull =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
     JsonNode rootNonReasoningNull =
         MAPPER.readTree(
             encoder.encode(reqNonReasoningNull, descriptor, deepseekConfig).bodyUtf8Bytes());
     assertFalse(rootNonReasoningNull.has("thinking"));
     assertFalse(rootNonReasoningNull.has("reasoning_effort"));
 
-    // 7. STANDARD 格式下保持字节级兼容：有 effort 时仅出 reasoning_effort，不出 thinking
+    // 6. STANDARD 格式保持标准编码：有 effort 时仅出 reasoning_effort，不出 thinking
     OpenAiChatConfiguration standardConfig = OpenAiChatConfiguration.defaults();
     JsonNode rootStandard =
         MAPPER.readTree(encoder.encode(reqLow, descriptor, standardConfig).bodyUtf8Bytes());
     assertFalse(rootStandard.has("thinking"));
     assertEquals("low", rootStandard.path("reasoning_effort").asText());
+
+    // 7. STANDARD 格式下 off 映射为协议关闭值 none
+    JsonNode rootStandardOff =
+        MAPPER.readTree(encoder.encode(reqOff, descriptor, standardConfig).bodyUtf8Bytes());
+    assertFalse(rootStandardOff.has("thinking"));
+    assertEquals("none", rootStandardOff.path("reasoning_effort").asText());
+
+    // 8. STANDARD 格式下 null effort 不发送任何推理字段
+    JsonNode rootStandardDefault =
+        MAPPER.readTree(
+            encoder.encode(reqDefaultVariant, descriptor, standardConfig).bodyUtf8Bytes());
+    assertFalse(rootStandardDefault.has("reasoning_effort"));
   }
 
   @Test
-  @DisplayName("TopK 不受支持时严格拒绝抛出 INVALID_REQUEST")
-  void testRejectTopK() {
-    ModelVariant variant = new ModelVariant("v", null, null, null, 10, null, null, null, null);
+  @DisplayName("输出预算 max_tokens 正确映射到 JSON")
+  void testOutputBudgetParameter() throws Exception {
+    ModelVariant variant = new ModelVariant("v");
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest request =
         new ProviderRequest(
-            modelDesc, variant, List.of(userMsg), List.of(), ProviderCacheControl.none());
-
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(request, descriptor, OpenAiChatConfiguration.defaults()));
-  }
-
-  @Test
-  @DisplayName("Sampling 参数正确映射到 JSON")
-  void testSamplingParameters() throws Exception {
-    ModelVariant variant =
-        new ModelVariant("v", 100, 0.7, 0.9, null, 0.5, 0.5, List.of("STOP_1", "STOP_2"), null);
-    ProviderMessage userMsg =
-        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
-    ProviderRequest request =
-        new ProviderRequest(
-            modelDesc, variant, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc, variant, 100, List.of(userMsg), List.of(), ProviderCacheControl.none());
 
     JsonNode root =
         MAPPER.readTree(
@@ -290,13 +326,6 @@ class OpenAiChatRequestEncoderTest {
                 .encode(request, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     assertEquals(100, root.path("max_tokens").asInt());
-    assertEquals(0.7, root.path("temperature").asDouble());
-    assertEquals(0.9, root.path("top_p").asDouble());
-    assertEquals(0.5, root.path("frequency_penalty").asDouble());
-    assertEquals(0.5, root.path("presence_penalty").asDouble());
-    assertEquals(2, root.path("stop").size());
-    assertEquals("STOP_1", root.path("stop").get(0).asText());
-    assertEquals("STOP_2", root.path("stop").get(1).asText());
   }
 
   @Test
@@ -313,6 +342,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(userMsg),
             List.of(tool),
             ProviderCacheControl.none());
@@ -344,7 +374,12 @@ class OpenAiChatRequestEncoderTest {
     ProviderMessage toolMsg = new ProviderMessage(ProviderMessageRole.TOOL, List.of(resultBlock));
     ProviderRequest request =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(toolMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(toolMsg),
+            List.of(),
+            ProviderCacheControl.none());
 
     JsonNode root =
         MAPPER.readTree(
@@ -367,7 +402,12 @@ class OpenAiChatRequestEncoderTest {
             List.of(new ProviderImageBlock("image/jpeg", "https://example.com/a.jpg")));
     ProviderRequest reqImg =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(userImg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(userImg),
+            List.of(),
+            ProviderCacheControl.none());
 
     // 1. 未配置 IMAGE，拒绝
     assertThrows(
@@ -396,6 +436,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(userAudioUrl),
             List.of(),
             ProviderCacheControl.none());
@@ -417,6 +458,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(userAudioBase64),
             List.of(),
             ProviderCacheControl.none());
@@ -436,7 +478,12 @@ class OpenAiChatRequestEncoderTest {
                     "application/pdf", "data:application/pdf;base64,JVBERi==")));
     ProviderRequest reqPdf =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(userPdf), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(userPdf),
+            List.of(),
+            ProviderCacheControl.none());
     assertThrows(
         ProviderException.class,
         () -> encoder.encode(reqPdf, descriptor, OpenAiChatConfiguration.defaults()));
@@ -462,7 +509,12 @@ class OpenAiChatRequestEncoderTest {
             List.of(new ProviderVideoBlock("video/mp4", "https://example.com/v.mp4")));
     ProviderRequest reqVideo =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(userVideo), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(userVideo),
+            List.of(),
+            ProviderCacheControl.none());
     assertThrows(
         ProviderException.class,
         () -> encoder.encode(reqVideo, descriptor, OpenAiChatConfiguration.defaults()));
@@ -477,7 +529,12 @@ class OpenAiChatRequestEncoderTest {
     // 先编码一次以获取一致的前缀 hash
     ProviderRequest turn1Req =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(userMsg1), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(userMsg1),
+            List.of(),
+            ProviderCacheControl.none());
     OpenAiChatEncodedRequest turn1Encoded =
         encoder.encode(turn1Req, descriptor, OpenAiChatConfiguration.defaults());
 
@@ -508,6 +565,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(userMsg1, validAsstMsg, userMsg2),
             List.of(),
             ProviderCacheControl.none());
@@ -547,6 +605,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(userMsg1, illegalAsstMsg, userMsg2),
             List.of(),
             ProviderCacheControl.none());
@@ -573,6 +632,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(userMsg1, fallbackAsstMsg, userMsg2),
             List.of(),
             ProviderCacheControl.none());
@@ -605,6 +665,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(sysMsg, userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -621,7 +682,12 @@ class OpenAiChatRequestEncoderTest {
         ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "my-key-legacy");
     ProviderRequest reqLegacy =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(sysMsg, userMsg), List.of(), cacheControlLegacy);
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(sysMsg, userMsg),
+            List.of(),
+            cacheControlLegacy);
     JsonNode rootLegacy =
         MAPPER.readTree(encoder.encode(reqLegacy, descriptor, configLegacy).bodyUtf8Bytes());
     assertEquals("my-key-legacy", rootLegacy.path("prompt_cache_key").asText());
@@ -638,7 +704,7 @@ class OpenAiChatRequestEncoderTest {
             EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION));
     ProviderRequest reqGpt =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(sysMsg, userMsg), List.of(), cacheControlGpt);
+            modelDesc, defaultVariant, 1024, List.of(sysMsg, userMsg), List.of(), cacheControlGpt);
     JsonNode rootGpt =
         MAPPER.readTree(encoder.encode(reqGpt, descriptor, configGpt).bodyUtf8Bytes());
     assertEquals("my-key-gpt", rootGpt.path("prompt_cache_key").asText());
@@ -659,6 +725,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(sysMsg, userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -674,7 +741,7 @@ class OpenAiChatRequestEncoderTest {
         ProviderCacheControl.affinity(PromptCacheRetention.LONG, "my-key-long");
     ProviderRequest reqLegacyLong =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(sysMsg, userMsg), List.of(), cacheControlLong);
+            modelDesc, defaultVariant, 1024, List.of(sysMsg, userMsg), List.of(), cacheControlLong);
     JsonNode rootLegacyLong =
         MAPPER.readTree(encoder.encode(reqLegacyLong, descriptor, configLegacy).bodyUtf8Bytes());
     assertEquals("24h", rootLegacyLong.path("prompt_cache_retention").asText());
@@ -695,6 +762,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(asstWithThinking),
             List.of(),
             ProviderCacheControl.none());
@@ -716,6 +784,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(asstWithImage),
             List.of(),
             ProviderCacheControl.none());
@@ -732,6 +801,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(sysWithImage),
             List.of(),
             ProviderCacheControl.none());
@@ -749,6 +819,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(toolJsonMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -772,7 +843,12 @@ class OpenAiChatRequestEncoderTest {
             List.of(new ProviderAudioBlock("audio/flac", "data:audio/flac;base64,123")));
     ProviderRequest reqFlac =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(audioFlac), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(audioFlac),
+            List.of(),
+            ProviderCacheControl.none());
     assertThrows(ProviderException.class, () -> encoder.encode(reqFlac, descriptor, audioConfig));
 
     // 7. 非法 data URI 音频数据
@@ -784,6 +860,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(audioBadUri),
             List.of(),
             ProviderCacheControl.none());
@@ -798,7 +875,12 @@ class OpenAiChatRequestEncoderTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest req1 =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(user1), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(user1),
+            List.of(),
+            ProviderCacheControl.none());
     String hash =
         encoder.encode(req1, descriptor, OpenAiChatConfiguration.defaults()).sourcePrefixHash();
 
@@ -816,6 +898,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, badRoleMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -842,6 +925,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, mismatchTextMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -870,6 +954,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, badToolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -903,6 +988,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, validToolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -931,6 +1017,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, badRoleTypeMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -958,6 +1045,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, nonObjToolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -976,6 +1064,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -991,6 +1080,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -1013,7 +1103,12 @@ class OpenAiChatRequestEncoderTest {
             List.of(new ProviderAudioBlock("audio/mp3", "data:audio/mp3;base64,AAA=")));
     ProviderRequest reqMp3 =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(mp3Msg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(mp3Msg),
+            List.of(),
+            ProviderCacheControl.none());
     JsonNode rootMp3 =
         MAPPER.readTree(encoder.encode(reqMp3, descriptor, audioConfig).bodyUtf8Bytes());
     assertEquals(
@@ -1042,7 +1137,12 @@ class OpenAiChatRequestEncoderTest {
                     "application/msword", "data:application/msword;base64,AAA=")));
     ProviderRequest reqBadDoc =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(badDocMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(badDocMsg),
+            List.of(),
+            ProviderCacheControl.none());
     assertThrows(ProviderException.class, () -> encoder.encode(reqBadDoc, descriptor, pdfConfig));
 
     // 5. PDF 纯 base64 自动补充 data:application/pdf;base64, 前缀
@@ -1052,7 +1152,12 @@ class OpenAiChatRequestEncoderTest {
             List.of(new ProviderDocumentBlock("application/pdf", "JVBERi0xLjQK")));
     ProviderRequest reqRawPdf =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(rawPdfMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(rawPdfMsg),
+            List.of(),
+            ProviderCacheControl.none());
     JsonNode rootRawPdf =
         MAPPER.readTree(encoder.encode(reqRawPdf, descriptor, pdfConfig).bodyUtf8Bytes());
     assertEquals(
@@ -1083,7 +1188,12 @@ class OpenAiChatRequestEncoderTest {
             List.of(new ProviderToolCallBlock(new ProviderToolCall("c_last", "calc", "{}"))));
     ProviderRequest reqLastToolBreak =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(userMsg, asstOnlyTools), List.of(), cacheControlGpt);
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(userMsg, asstOnlyTools),
+            List.of(),
+            cacheControlGpt);
     JsonNode rootBreak =
         MAPPER.readTree(encoder.encode(reqLastToolBreak, descriptor, configGpt).bodyUtf8Bytes());
     ArrayNode messages = (ArrayNode) rootBreak.path("messages");
@@ -1116,6 +1226,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(userMsg, toolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1143,6 +1254,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(userMsg, badToolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1179,6 +1291,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, badRoleMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1208,6 +1321,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, unknownFieldMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1238,6 +1352,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, mismatchThinkingMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1268,6 +1383,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, validFallbackMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1305,6 +1421,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, msg1),
             List.of(),
             ProviderCacheControl.none());
@@ -1336,6 +1453,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, msg2),
             List.of(),
             ProviderCacheControl.none());
@@ -1370,6 +1488,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, msg3),
             List.of(),
             ProviderCacheControl.none());
@@ -1404,6 +1523,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, msg4),
             List.of(),
             ProviderCacheControl.none());
@@ -1440,6 +1560,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, asstMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1488,6 +1609,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, msg1),
             List.of(),
             ProviderCacheControl.none());
@@ -1523,6 +1645,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, msg2),
             List.of(),
             ProviderCacheControl.none());
@@ -1556,6 +1679,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, msg3),
             List.of(),
             ProviderCacheControl.none());
@@ -1590,6 +1714,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, msg4),
             List.of(),
             ProviderCacheControl.none());
@@ -1627,6 +1752,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, msg1),
             List.of(),
             ProviderCacheControl.none());
@@ -1654,6 +1780,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(user1, msg2),
             List.of(),
             ProviderCacheControl.none());
@@ -1674,7 +1801,12 @@ class OpenAiChatRequestEncoderTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")));
     ProviderRequest turn1Req =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(turn1User), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(turn1User),
+            List.of(),
+            ProviderCacheControl.none());
 
     OpenAiChatEncodedRequest encodedTurn1 =
         encoder.encode(turn1Req, descriptor, OpenAiChatConfiguration.defaults());
@@ -1753,6 +1885,7 @@ class OpenAiChatRequestEncoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(turn1User, turn1Asst, turn2User),
             List.of(),
             ProviderCacheControl.none());
@@ -1796,6 +1929,7 @@ class OpenAiChatRequestEncoderTest {
           new ProviderRequest(
               modelDesc,
               defaultVariant,
+              1024,
               List.of(user1, fallbackMsg),
               List.of(),
               ProviderCacheControl.none());
@@ -1830,6 +1964,7 @@ class OpenAiChatRequestEncoderTest {
           new ProviderRequest(
               modelDesc,
               defaultVariant,
+              1024,
               List.of(user1, replayMsg),
               List.of(),
               ProviderCacheControl.none());
@@ -1861,6 +1996,7 @@ class OpenAiChatRequestEncoderTest {
           new ProviderRequest(
               modelDesc,
               defaultVariant,
+              1024,
               List.of(user1, msgWithBadDurable),
               List.of(),
               ProviderCacheControl.none());

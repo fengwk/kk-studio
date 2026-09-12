@@ -65,6 +65,7 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
     AgentModelDO result = new AgentModelDO();
     result.setProviderName(model.getProviderName());
     result.setName(model.getName());
+    result.setModelId(model.getModelId());
     result.setDescription(model.getDescription());
     result.setConfigJson(model.getConfigJson());
     return result;
@@ -77,6 +78,7 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
     AgentModel result = new AgentModel();
     result.setProviderName(model.getProviderName());
     result.setName(model.getName());
+    result.setModelId(model.getModelId());
     result.setDescription(model.getDescription());
     result.setConfigJson(model.getConfigJson());
     result.setVersion(model.getVersion());

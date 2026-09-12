@@ -30,10 +30,14 @@ class ModelRequestSpecJsonCodecTest {
   void roundTripsEnvironmentRequestWithCanonicalJson() {
     ModelRequestSpec requestSpec = environmentModelRequest();
     String expected =
-        "{\"providerType\":\"OPENAI\",\"model\":"
+        "{\"providerType\":\"OPENAI\",\"providerConnectionGenerationId\":\""
+            + requestSpec.providerConnectionGenerationId()
+            + "\",\"model\":"
             + modelCodec.encodeDescriptor(requestSpec.model())
             + ",\"variant\":"
             + modelCodec.encodeVariant(requestSpec.variant())
+            + ",\"outputTokens\":"
+            + requestSpec.outputTokens()
             + ",\"preambleMessages\":[],\"toolBindings\":["
             + bindingCodec.encode(requestSpec.toolBindings().getFirst())
             + "],\"skillBindings\":[{\"name\":\"review\",\"description\":\"Review code\","
@@ -56,8 +60,10 @@ class ModelRequestSpecJsonCodecTest {
     ModelRequestSpec requestSpec =
         new ModelRequestSpec(
             base.providerType(),
+            base.providerConnectionGenerationId(),
             base.model(),
             base.variant(),
+            base.outputTokens(),
             base.preambleMessages(),
             base.toolBindings(),
             base.skillBindings(),
@@ -80,8 +86,10 @@ class ModelRequestSpecJsonCodecTest {
     assertEquals(
         Set.of(
             "providerType",
+            "providerConnectionGenerationId",
             "model",
             "variant",
+            "outputTokens",
             "preambleMessages",
             "toolBindings",
             "skillBindings",
@@ -103,6 +111,10 @@ class ModelRequestSpecJsonCodecTest {
     ObjectNode providerType = encodedNode();
     providerType.put("providerType", "UNKNOWN");
     assertInvalid(providerType);
+
+    ObjectNode providerConnectionGenerationId = encodedNode();
+    providerConnectionGenerationId.put("providerConnectionGenerationId", "not-a-uuid");
+    assertInvalid(providerConnectionGenerationId);
 
     ObjectNode toolsType = encodedNode();
     toolsType.putObject("toolBindings");

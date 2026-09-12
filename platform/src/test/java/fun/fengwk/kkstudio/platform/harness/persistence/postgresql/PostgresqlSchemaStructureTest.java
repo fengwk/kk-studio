@@ -135,6 +135,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "agent_model",
         "provider_name",
         "name",
+        "model_id",
         "description",
         "config",
         "created_at",

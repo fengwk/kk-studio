@@ -11,8 +11,11 @@ public class AgentModelDO {
   /** 绑定 Provider 名称（必填，复合主键一部分，外键引用 agent_provider.name）。 */
   private String providerName;
 
-  /** 上游 Provider 的模型名称（必填，与 provider_name 组成复合主键）。 */
+  /** 模型逻辑名（必填，与 provider_name 组成复合主键）。 */
   private String name;
+
+  /** 发往上游 Provider 的真实模型标识（必填，varchar(256)，不参与唯一性约束）。 */
+  private String modelId;
 
   /** 描述，可选；varchar(512)，null 表示未填写。 */
   private String description;

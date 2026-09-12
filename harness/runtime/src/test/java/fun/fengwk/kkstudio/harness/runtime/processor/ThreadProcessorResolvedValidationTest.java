@@ -151,8 +151,10 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
             EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111"));
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         new ModelDescriptor(
             settings.model().providerName(),
+            settings.model().modelName(),
             settings.model().modelName(),
             Set.of(ModelInputModality.TEXT),
             true,
@@ -169,8 +171,8 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO)),
-        new ModelVariant(
-            settings.model().variant(), null, null, null, null, null, null, List.of(), null),
+        new ModelVariant(settings.model().variant()),
+        1024,
         List.of(),
         List.of(environmentTool),
         List.of(),

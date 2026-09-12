@@ -2,6 +2,7 @@
   "model": {
     "providerName": "openai",
     "modelName": "gpt-5-mini",
+    "modelId": "gpt-5-mini-2025-08-07",
     "inputModalities": ["IMAGE", "TEXT"],
     "tools": true,
     "reasoning": true,
@@ -21,15 +22,9 @@
   },
   "variant": {
     "id": "balanced",
-    "maxOutputTokens": 1024,
-    "temperature": 0.2,
-    "topP": 0.8,
-    "topK": 40,
-    "frequencyPenalty": -0.1,
-    "presencePenalty": 0.1,
-    "stopSequences": ["END", "STOP"],
     "reasoningEffort": "medium"
   },
+  "outputTokens": 1024,
   "messages": [
     {"role": "SYSTEM", "contents": [{"type": "text", "text": "You are a careful assistant."}]},
     {"role": "USER", "contents": [

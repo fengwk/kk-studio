@@ -1339,6 +1339,7 @@ async function createHoldingQueueFixture(
       {
         providerName: state.provider.name,
         name: `e2e-ui-hold-model-${suffix}`,
+        modelId: `wire-ui-hold-${suffix}`,
         description: 'Local hold model for free UI queue tests.',
         config: baseModelConfig({
           limit: { context: 4096, output: 128 },
@@ -1347,10 +1348,7 @@ async function createHoldingQueueFixture(
             reasoning: false,
             inputModalities: ['TEXT'],
           },
-          variants: [
-            { id: 'default', temperature: 0 },
-            { id: 'review', temperature: 0 },
-          ],
+          variants: [{ id: 'default' }, { id: 'review' }],
         }),
       },
     )

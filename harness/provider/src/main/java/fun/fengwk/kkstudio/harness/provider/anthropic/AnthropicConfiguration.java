@@ -9,23 +9,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.Map;
-
 /**
  * Anthropic Messages 适配器持久化配置。
  *
- * <p>支持解析 {@code anthropicThinkingMode}（取值为 {@code ADAPTIVE} 或 {@code BUDGET}） 以及可选的 {@code
- * modelAliases}（logical model name -> wire model id）。 严格校验 JSON 语法与已知字段类型，忽略未知字段，且绝不在异常消息或日志中输出
- * config 内容或凭据。
+ * <p>支持解析 {@code anthropicThinkingMode}（取值为 {@code ADAPTIVE} 或 {@code BUDGET}）。严格校验 JSON
+ * 语法与已知字段类型，忽略 未知字段，且绝不在异常消息或日志中输出 config 内容或凭据。
+ *
+ * <p>wire 模型标识不在此处配置：请求根字段 {@code model} 直接取 {@code ModelDescriptor.modelId()}。
  */
-public record AnthropicConfiguration(
-    AnthropicThinkingMode anthropicThinkingMode, Map<String, String> modelAliases) {
+public record AnthropicConfiguration(AnthropicThinkingMode anthropicThinkingMode) {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   public static final String FIELD_ANTHROPIC_THINKING_MODE = "anthropicThinkingMode";
-  public static final String FIELD_MODEL_ALIASES = "modelAliases";
 
   static {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -35,61 +30,11 @@ public record AnthropicConfiguration(
   public AnthropicConfiguration {
     anthropicThinkingMode =
         anthropicThinkingMode != null ? anthropicThinkingMode : AnthropicThinkingMode.ADAPTIVE;
-    if (modelAliases == null || modelAliases.isEmpty()) {
-      modelAliases = Map.of();
-    } else {
-      for (Map.Entry<String, String> entry : modelAliases.entrySet()) {
-        String key = entry.getKey();
-        String val = entry.getValue();
-        if (key == null || key.isBlank() || !key.strip().equals(key)) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "field "
-                  + FIELD_MODEL_ALIASES
-                  + " keys must be non-empty strings without surrounding whitespace");
-        }
-        if (val == null || val.isBlank() || !val.strip().equals(val)) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "field "
-                  + FIELD_MODEL_ALIASES
-                  + " values must be non-empty strings without surrounding whitespace");
-        }
-      }
-      modelAliases = Map.copyOf(modelAliases);
-    }
   }
 
-  public AnthropicConfiguration(AnthropicThinkingMode anthropicThinkingMode) {
-    this(anthropicThinkingMode, Map.of());
-  }
-
-  /** 返回默认配置（ADAPTIVE 模式，空 modelAliases）。 */
+  /** 返回默认配置（ADAPTIVE 模式）。 */
   public static AnthropicConfiguration defaults() {
-    return new AnthropicConfiguration(AnthropicThinkingMode.ADAPTIVE, Map.of());
-  }
-
-  /**
-   * 将逻辑模型名解析为 wire 模型标识。
-   *
-   * @param logicalModelName 逻辑模型名称
-   * @return 若存在别名映射则返回 wire 模型标识，否则返回原逻辑模型名称
-   */
-  public String resolveModelName(String logicalModelName) {
-    if (logicalModelName == null) {
-      return null;
-    }
-    return modelAliases.getOrDefault(logicalModelName, logicalModelName);
-  }
-
-  /** 避免配置对象进入诊断上下文时回显任意 model alias key/value。 */
-  @Override
-  public String toString() {
-    return "AnthropicConfiguration[anthropicThinkingMode="
-        + anthropicThinkingMode
-        + ", modelAliasesSize="
-        + modelAliases.size()
-        + "]";
+    return new AnthropicConfiguration(AnthropicThinkingMode.ADAPTIVE);
   }
 
   /**
@@ -132,45 +77,6 @@ public record AnthropicConfiguration(
       }
     }
 
-    Map<String, String> modelAliases = Map.of();
-    if (root.has(FIELD_MODEL_ALIASES)) {
-      JsonNode node = root.get(FIELD_MODEL_ALIASES);
-      if (!node.isObject()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "field " + FIELD_MODEL_ALIASES + " must be a JSON object");
-      }
-      Map<String, String> aliases = new LinkedHashMap<>();
-      Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
-      while (fields.hasNext()) {
-        Map.Entry<String, JsonNode> entry = fields.next();
-        String key = entry.getKey();
-        if (key.isBlank() || !key.strip().equals(key)) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "field "
-                  + FIELD_MODEL_ALIASES
-                  + " keys must be non-empty strings without surrounding whitespace");
-        }
-        JsonNode valueNode = entry.getValue();
-        if (!valueNode.isTextual()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "field " + FIELD_MODEL_ALIASES + " values must be strings");
-        }
-        String val = valueNode.textValue();
-        if (val.isBlank() || !val.strip().equals(val)) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "field "
-                  + FIELD_MODEL_ALIASES
-                  + " values must be non-empty strings without surrounding whitespace");
-        }
-        aliases.put(key, val);
-      }
-      modelAliases = aliases;
-    }
-
-    return new AnthropicConfiguration(mode, modelAliases);
+    return new AnthropicConfiguration(mode);
   }
 }

@@ -166,14 +166,14 @@ class GeminiSecurityAndArchitectureTest {
     return new ModelDescriptor(
         "gemini-2.5-flash",
         "gemini-2.5-flash",
+        "gemini-2.5-flash",
         Set.of(ModelInputModality.TEXT),
         true,
         false,
         pricing);
   }
 
-  private static final ModelVariant DEFAULT_VARIANT =
-      new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
+  private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
 
   /** 验证所有 JSON、SSE 以及 URI 解析失败时使用固定脱敏异常消息，绝不回显原始输入、payload 或底层异常原因。 */
   @Test
@@ -202,7 +202,7 @@ class GeminiSecurityAndArchitectureTest {
         };
     ProviderRequest req =
         new ProviderRequest(
-            dummyModel(), DEFAULT_VARIANT, List.of(), List.of(), ProviderCacheControl.none());
+            dummyModel(), DEFAULT_VARIANT, 1024, List.of(), List.of(), ProviderCacheControl.none());
     ProviderDescriptor desc =
         new ProviderDescriptor(
             "p1",
@@ -229,6 +229,7 @@ class GeminiSecurityAndArchitectureTest {
         new ProviderRequest(
             dummyModel(),
             DEFAULT_VARIANT,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,

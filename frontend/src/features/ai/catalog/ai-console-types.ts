@@ -22,15 +22,8 @@ export interface VariantDraft {
   /** 仅客户端使用的 React key。 */
   draftId: string
   id: string
+  /** 合法取值 high/medium/low/off；空串表示协议默认。 */
   reasoningEffort: string
-  maxOutputTokens: string
-  temperature: string
-  topP: string
-  topK: string
-  frequencyPenalty: string
-  presencePenalty: string
-  /** 表单中以逗号分隔；持久化为字符串数组。 */
-  stopSequences: string
 }
 
 /**
@@ -54,7 +47,10 @@ export interface ModelPricingDraft {
 /** model 资源的表单草稿。输入保持字符串类型以获得可预测的编辑体验。 */
 export interface ModelDraft {
   providerName: string
+  /** 不可变的模型逻辑名。 */
   name: string
+  /** 发往上游 Provider 的真实模型标识；可编辑且必填。 */
+  modelId: string
   description: string
   contextWindow: string
   maxOutputTokens: string

@@ -30,9 +30,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** ModelRequestSpec 的冻结、唯一名称/ID 与 environment 一致性检查。 */
 class ModelRequestSpecTest {
+
+  private static final UUID CONNECTION_GENERATION_ID = new UUID(0L, 1L);
 
   @Test
   void freezesProviderModelVariantAndOrderedBindings() {
@@ -44,6 +47,7 @@ class ModelRequestSpecTest {
             List.of(new SubagentBinding("reviewer", "Review changes")));
 
     assertEquals(ProviderType.OPENAI, spec.providerType());
+    assertEquals(CONNECTION_GENERATION_ID, spec.providerConnectionGenerationId());
     assertEquals("provider", spec.model().providerName());
     assertEquals("v1", spec.variant().id());
     assertEquals(List.of("bash", "fs"), names(spec.toolBindings()));
@@ -64,8 +68,10 @@ class ModelRequestSpecTest {
     ModelRequestSpec spec =
         new ModelRequestSpec(
             ProviderType.OPENAI,
+            CONNECTION_GENERATION_ID,
             modelDescriptor(),
             variant(),
+            1024,
             preamble,
             tools,
             skills,
@@ -189,8 +195,10 @@ class ModelRequestSpecTest {
         () ->
             new ModelRequestSpec(
                 null,
+                CONNECTION_GENERATION_ID,
                 modelDescriptor(),
                 variant(),
+                1024,
                 List.of(),
                 List.of(),
                 List.of(),
@@ -201,8 +209,24 @@ class ModelRequestSpecTest {
         () ->
             new ModelRequestSpec(
                 ProviderType.OPENAI,
+                null,
                 modelDescriptor(),
                 variant(),
+                1024,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                ProviderCacheControl.none()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ModelRequestSpec(
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                modelDescriptor(),
+                variant(),
+                1024,
                 null,
                 List.of(),
                 List.of(),
@@ -213,8 +237,10 @@ class ModelRequestSpecTest {
         () ->
             new ModelRequestSpec(
                 ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
                 modelDescriptor(),
                 variant(),
+                1024,
                 List.of(),
                 null,
                 List.of(),
@@ -226,8 +252,10 @@ class ModelRequestSpecTest {
       List<ToolBinding> tools, List<SkillBinding> skills, List<SubagentBinding> subagents) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        CONNECTION_GENERATION_ID,
         modelDescriptor(),
         variant(),
+        1024,
         List.of(),
         tools,
         skills,
@@ -247,7 +275,7 @@ class ModelRequestSpecTest {
   }
 
   private static ModelVariant variant() {
-    return new ModelVariant("v1", null, null, null, null, null, null, List.of(), null);
+    return new ModelVariant("v1");
   }
 
   private static List<String> names(List<ToolBinding> bindings) {

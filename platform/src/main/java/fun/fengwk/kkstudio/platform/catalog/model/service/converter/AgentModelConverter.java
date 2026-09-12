@@ -29,6 +29,7 @@ public class AgentModelConverter {
     AgentModelDTO dto = new AgentModelDTO();
     dto.setProviderName(model.getProviderName());
     dto.setName(model.getName());
+    dto.setModelId(model.getModelId());
     dto.setDescription(model.getDescription());
     dto.setConfig(decodeConfig(model));
     dto.setVersion(CatalogVersions.format(model.getVersion()));

@@ -33,7 +33,9 @@ class GatewayConfigurationConditionalTest {
   void modelGatewayDefaultBeanIsSuppressedByAnyPortImplementation() {
     runner
         .withUserConfiguration(ModelExecutionConfiguration.class)
-        .withBean(ProviderResolutionService.class, () -> (frozenType, request) -> null)
+        .withBean(
+            ProviderResolutionService.class,
+            () -> (frozenType, frozenConnectionGenerationId, request) -> null)
         .withBean(
             ModelGateway.class,
             () ->
@@ -83,7 +85,9 @@ class GatewayConfigurationConditionalTest {
   void modelGatewayDefaultBeanIsCreatedWhenNoPortImplementationExists() {
     runner
         .withUserConfiguration(ModelExecutionConfiguration.class)
-        .withBean(ProviderResolutionService.class, () -> (frozenType, request) -> null)
+        .withBean(
+            ProviderResolutionService.class,
+            () -> (frozenType, frozenConnectionGenerationId, request) -> null)
         .run(
             context -> {
               assertTrue(context.containsBean("platformModelGateway"));

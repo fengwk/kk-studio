@@ -41,8 +41,7 @@ class GeminiRequestMapperTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private final GeminiRequestEncoder encoder = new GeminiRequestEncoder();
-  private static final ModelVariant VARIANT =
-      new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
+  private static final ModelVariant VARIANT = new ModelVariant("default");
 
   private static ProviderDescriptor descriptor() {
     return new ProviderDescriptor(
@@ -68,7 +67,13 @@ class GeminiRequestMapperTest {
             BigDecimal.ZERO,
             BigDecimal.ZERO);
     return new ModelDescriptor(
-        "google-test", "gemini-2.5-flash", Set.of(ModelInputModality.TEXT), true, false, pricing);
+        "google-test",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash",
+        Set.of(ModelInputModality.TEXT),
+        true,
+        false,
+        pricing);
   }
 
   /** 验证上游 PartsAndContentsMapper 的 user content 与 parts 映射规范。 */
@@ -78,6 +83,7 @@ class GeminiRequestMapperTest {
         new ProviderRequest(
             model(),
             VARIANT,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,
@@ -119,6 +125,7 @@ class GeminiRequestMapperTest {
         new ProviderRequest(
             model(),
             VARIANT,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Check weather")))),
@@ -146,6 +153,7 @@ class GeminiRequestMapperTest {
         new ProviderRequest(
             model(),
             VARIANT,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Compute 1+1"))),
@@ -198,7 +206,8 @@ class GeminiRequestMapperTest {
         };
 
     ProviderRequest req =
-        new ProviderRequest(model(), VARIANT, List.of(), List.of(), ProviderCacheControl.none());
+        new ProviderRequest(
+            model(), VARIANT, 1024, List.of(), List.of(), ProviderCacheControl.none());
 
     // STOP -> COMPLETE
     GeminiStreamAccumulator accStop =
@@ -247,5 +256,18 @@ class GeminiRequestMapperTest {
         "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"RECITATION\"}]}");
     assertEquals(GenerationStopReason.FILTERED, accRecitation.finish().response().stopReason());
+
+    // IMAGE_RECITATION -> FILTERED
+    GeminiStreamAccumulator accImageRecitation =
+        new GeminiStreamAccumulator(
+            req,
+            descriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            new GeminiStreamBridge(noop));
+    accImageRecitation.handleEvent(
+        "message",
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"IMAGE_RECITATION\"}]}");
+    assertEquals(
+        GenerationStopReason.FILTERED, accImageRecitation.finish().response().stopReason());
   }
 }

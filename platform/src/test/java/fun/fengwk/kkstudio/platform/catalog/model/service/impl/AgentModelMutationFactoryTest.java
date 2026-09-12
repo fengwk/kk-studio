@@ -32,6 +32,7 @@ public class AgentModelMutationFactoryTest {
   public void shouldRequireExecutableModelConfigurationAndKeepIdentity() {
     AgentModelMutationFactory factory = factory();
     AgentModelCreateDTO create = new AgentModelCreateDTO();
+    create.setModelId("wire-model");
 
     assertThrows(AiValidationException.class, () -> factory.newModel("provider", "model", create));
     AgentModel existing = new AgentModel();
@@ -62,6 +63,7 @@ public class AgentModelMutationFactoryTest {
     AgentModel model = new AgentModel();
     model.setProviderName("provider");
     model.setName("model");
+    model.setModelId("wire-model");
     AgentModelConfigDTO baseline = validConfig();
     AgentModelPricingDTO pricing = baseline.getPricing();
     pricing.setCurrency("EUR");
@@ -77,6 +79,7 @@ public class AgentModelMutationFactoryTest {
     pricing.setReasoningPerMillionTokens(new BigDecimal("4"));
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
+    update.setModelId(model.getModelId());
     update.setDescription("updated");
     update.setConfig(baseline);
     factory.update(model, update);
@@ -120,6 +123,7 @@ public class AgentModelMutationFactoryTest {
     AgentModelCreateDTO create = new AgentModelCreateDTO();
     create.setName(name);
     create.setProviderName("provider");
+    create.setModelId("wire-" + name);
     create.setDescription(description);
     create.setConfig(validConfig());
     return create;

@@ -18,6 +18,7 @@ function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
     ...emptyModelDraft(),
     providerName: 'provider-1',
     name: 'model-a',
+    modelId: 'wire-model-a',
     ...overrides,
   }
 }
@@ -52,13 +53,6 @@ function fullConfig(): AgentModelConfigDTO {
       {
         id: 'quality',
         reasoningEffort: 'high',
-        maxOutputTokens: 4096,
-        temperature: 0.4,
-        topP: 0.8,
-        topK: 20,
-        frequencyPenalty: 0.1,
-        presencePenalty: 0.2,
-        stopSequences: ['END', 'STOP'],
       },
     ],
   }
@@ -66,9 +60,9 @@ function fullConfig(): AgentModelConfigDTO {
 
 function model(configOverride?: AgentModelConfigDTO): AgentModelDTO {
   return {
-    id: 'model-1',
     providerName: 'provider-1',
     name: 'model-a',
+    modelId: 'wire-model-a',
     description: 'desc',
     config: configOverride ?? fullConfig(),
     version: '1',
@@ -95,13 +89,6 @@ describe('ai-model-draft-codec', () => {
         {
           id: 'quality',
           reasoningEffort: 'high',
-          maxOutputTokens: '4096',
-          temperature: '0.4',
-          topP: '0.8',
-          topK: '20',
-          frequencyPenalty: '0.1',
-          presencePenalty: '0.2',
-          stopSequences: 'END, STOP',
         },
       ],
       pricing: {
@@ -136,18 +123,11 @@ describe('ai-model-draft-codec', () => {
           ...base,
           id: 'quality',
           reasoningEffort: 'high',
-          maxOutputTokens: '4096',
-          temperature: '0.4',
-          topP: '0.8',
-          topK: '20',
-          frequencyPenalty: '0.1',
-          presencePenalty: '0.2',
-          stopSequences: 'END, STOP',
         },
         {
           ...base,
           id: 'provider-defaults',
-          reasoningEffort: 'off',
+          reasoningEffort: '',
         },
       ],
     })
@@ -179,19 +159,13 @@ describe('ai-model-draft-codec', () => {
         {
           id: 'quality',
           reasoningEffort: 'high',
-          maxOutputTokens: 4096,
-          temperature: 0.4,
-          topP: 0.8,
-          frequencyPenalty: 0.1,
-          presencePenalty: 0.2,
-          topK: 20,
-          stopSequences: ['END', 'STOP'],
         },
         { id: 'provider-defaults' },
       ],
     })
     expect(editable.config).toEqual(config)
     expect(editable.name).toBe('model-a')
+    expect(editable.modelId).toBe('wire-model-a')
     expect(editable.description).toBe('model desc')
   })
   /** 关闭 reasoning 时必须防止陈旧的隐藏 reasoning-effort 值传到 providers。 */
@@ -220,38 +194,12 @@ describe('ai-model-draft-codec', () => {
     )
     expect(() =>
       buildModelConfig(
-        draft({ variants: [{ ...base, temperature: 'not-a-number' }] }),
+        draft({ reasoning: true, variants: [{ ...base, reasoningEffort: 'invalid-effort' }] }),
       ),
-    ).toThrow('temperature must be a number')
-    expect(() =>
-      buildModelConfig(
-        draft({ variants: [{ ...base, maxOutputTokens: '9000' }] }),
-      ),
-    ).toThrow('exceeds model maxOutputTokens')
-    expect(() =>
-      buildModelConfig(draft({ variants: [{ ...base, temperature: '-0.1' }] })),
-    ).toThrow('temperature must not be negative')
-    expect(() =>
-      buildModelConfig(draft({ variants: [{ ...base, topP: '0' }] })),
-    ).toThrow('topP must be in (0, 1]')
+    ).toThrow(/reasoningEffort must be one of/)
     expect(() =>
       buildModelConfig(draft({ inputModalities: ['TEXT', 'TEXT'] })),
     ).toThrow('contains duplicate value')
-  })
-
-  /** 通用 variant 保留 OpenAI 兼容 providers 支持的有限负值 penalty。 */
-  it('preserves negative frequency and presence penalties', () => {
-    const base = emptyModelDraft().variants[0]
-    const config = buildModelConfig(
-      draft({
-        variants: [{ ...base, frequencyPenalty: '-0.5', presencePenalty: '-1' }],
-      }),
-    )
-
-    expect(config.variants[0]).toMatchObject({
-      frequencyPenalty: -0.5,
-      presencePenalty: -1,
-    })
   })
 
   /** 创建/更新 DTO 不使用字符串编码的 JSON 构建。 */
@@ -261,8 +209,10 @@ describe('ai-model-draft-codec', () => {
     const create = toEditableModel(input)
     expect(create.providerName).toBe('provider-1')
     expect(create.name).toBe('stub')
+    expect(create.modelId).toBe('wire-model-a')
     expect(create.config).toEqual(config)
     expect(toEditableModelUpdate(input)).not.toHaveProperty('providerName')
+    expect(toEditableModelUpdate(input).modelId).toBe('wire-model-a')
   })
 
   /** 通过不可变数组切换时，永远不会丢失最后一个 input modality。 */

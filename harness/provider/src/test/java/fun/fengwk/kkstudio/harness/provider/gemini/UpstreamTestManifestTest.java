@@ -31,11 +31,11 @@ import java.util.Set;
  *
  * <ul>
  *   <li>源文件、类与方法自洽性：精确枚举 51 个测试源文件与 676 个真实方法全集，拒绝虚构、重复或遗漏。
- *   <li>状态诚实与无虚假对等：精确维护 190 项适用 invocation 为 PORTED 与 PASSED，全部 targetTest
- *       经反射机制验证真实存在且带 @Test/@ParameterizedTest 注解且无 @Disabled；0 项待处理（PORT_PENDING）；全部 486 项
+ *   <li>状态诚实与无虚假对等：精确维护 145 项适用 invocation 为 PORTED 与 PASSED，全部 targetTest
+ *       经反射机制验证真实存在且带 @Test/@ParameterizedTest 注解且无 @Disabled；0 项待处理（PORT_PENDING）；全部 531 项
  *       OUT_OF_SCOPE 详述架构不匹配原因；拒绝用虚假同名测试建立不合规对等。
  *   <li>类路径测试夹具校验：所有 PORTED 声明的 fixture 资源均通过相对路径检查、防止路径穿越、在类路径下真实非空存在。
- *   <li>能力不匹配（mismatch）显式化：全部 486 项 OUT_OF_SCOPE 均详述具体架构不匹配原因，其 targetTest 严格为 null。
+ *   <li>能力不匹配（mismatch）显式化：全部 531 项 OUT_OF_SCOPE 均详述具体架构不匹配原因，其 targetTest 严格为 null。
  *   <li>真实凭据隔离正交性：281 项依赖真实凭据（@EnabledIfEnvironmentVariable）的集成测试独立标为
  *       NOT_EXECUTED_REQUIRES_CREDENTIAL，正交独立于 mappingStatus。
  *   <li>动态断言：所有统计指标均由测试动态遍历计算并断言，不单纯信任 summary 自报。
@@ -49,9 +49,9 @@ class UpstreamTestManifestTest {
   private static final int EXPECTED_TOTAL_SOURCES = 51;
   private static final int EXPECTED_TOTAL_METHODS = 676;
   private static final int EXPECTED_TOTAL_INVOCATIONS = 676;
-  private static final int EXPECTED_PORTED_INVOCATIONS = 190;
+  private static final int EXPECTED_PORTED_INVOCATIONS = 145;
   private static final int EXPECTED_IN_SCOPE_PENDING_INVOCATIONS = 0;
-  private static final int EXPECTED_OUT_OF_SCOPE_INVOCATIONS = 486;
+  private static final int EXPECTED_OUT_OF_SCOPE_INVOCATIONS = 531;
   private static final int EXPECTED_REAL_CREDENTIAL_INVOCATIONS = 281;
 
   private static final ObjectMapper MAPPER = new ObjectMapper();

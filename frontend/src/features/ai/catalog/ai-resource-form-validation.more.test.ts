@@ -29,6 +29,7 @@ function model(overrides: Partial<ModelDraft> = {}): ModelDraft {
   return {
     ...emptyModelDraft({ name: 'minimax' }),
     name: 'model',
+    modelId: 'wire-model',
     ...overrides,
   }
 }
@@ -69,10 +70,6 @@ describe('ai-resource-form-validation additional branches', () => {
     ['contextWindow must be positive', /上下文窗口/],
     ['maxOutputTokens must be positive', /最大输出长度/],
     ['input modality is required', /输入类型/],
-    ['temperature must not be negative', /Temperature/],
-    ['topP must be in range', /Top P/],
-    ['topK must be positive', /Top K/],
-    ['frequencyPenalty must be a number', /Penalty/],
     ['providerName is required', /Provider/],
     ['providerType is invalid', /Provider Type/],
     ['pricing.inputPerMillionTokens must not be negative', /价格/],
@@ -121,13 +118,15 @@ describe('ai-resource-form-validation additional branches', () => {
     expect(validate(modal)).toEqual({ ok: true, message: '', fields: {} })
   })
 
-  it('auto-fills missing reasoning effort and preserves explicit effort', () => {
+  /** 空思考强度表示协议默认，不再被自动补全；显式 effort 原样保留。 */
+  it('keeps blank reasoning effort as the protocol default and preserves explicit effort', () => {
     const withBlankEffort = model({ reasoning: true })
     const blankResult = validate(
       { kind: 'model', mode: 'create' },
       { modelDraft: withBlankEffort },
     )
     expect(blankResult.ok).toBe(true)
+    expect(withBlankEffort.variants[0]!.reasoningEffort).toBe('')
 
     const withExplicitEffort = model({
       reasoning: true,
@@ -185,9 +184,8 @@ describe('ai-resource-form-validation additional branches', () => {
     [model({ variants: [] }), 'variants'],
     [model({ contextWindow: '0' }), 'contextWindow'],
     [model({ maxOutputTokens: '999999' }), 'maxOutputTokens'],
-    [model({ variants: [{ ...model().variants[0]!, temperature: '-1' }] }), 'variants'],
-    [model({ variants: [{ ...model().variants[0]!, topP: '2' }] }), 'variants'],
-    [model({ variants: [{ ...model().variants[0]!, topK: '0' }] }), 'variants'],
+    [model({ modelId: '   ' }), 'modelId'],
+    [model({ reasoning: true, variants: [{ ...model().variants[0]!, reasoningEffort: 'invalid-effort' }] }), 'variants'],
     [model({ pricing: { ...model().pricing, inputPerMillionTokens: '-1' } }), 'pricing'],
   ] as Array<[ModelDraft, string]>)('maps invalid model body %# to %s', (modelDraft, field) => {
     const result = validate({ kind: 'model', mode: 'create' }, { modelDraft })
