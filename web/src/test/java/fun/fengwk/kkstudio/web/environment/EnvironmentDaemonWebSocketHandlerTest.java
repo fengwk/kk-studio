@@ -15,9 +15,8 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.adapter.NativeWebSocketSession;
 
-import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonConnection;
-import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonEndpoint;
-import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentGatewayProperties;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonChannel;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonEndpoint;
 
 /** Environment Daemon handler 的连接装配、入站桥接与幂等解绑契约。 */
 class EnvironmentDaemonWebSocketHandlerTest {
@@ -30,15 +29,14 @@ class EnvironmentDaemonWebSocketHandlerTest {
   /** 关闭事件先且只向 Gateway 解绑一次；sender 随后独立关闭。 */
   @Test
   void forwardsInboundAndDisconnectsGatewayExactlyOnce() throws Exception {
-    EnvironmentDaemonEndpoint endpoint = mock(EnvironmentDaemonEndpoint.class);
+    DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
     EnvironmentDaemonWebSocketHandler handler =
-        new EnvironmentDaemonWebSocketHandler(endpoint, gatewayProperties(16L * 1024 * 1024));
+        new EnvironmentDaemonWebSocketHandler(endpoint, transportProperties(16L * 1024 * 1024));
     WebSocketSession session = mock(WebSocketSession.class);
     when(session.getId()).thenReturn("connection-id");
     when(session.isOpen()).thenReturn(true);
     handler.afterConnectionEstablished(session);
-    ArgumentCaptor<EnvironmentDaemonConnection> connectionCaptor =
-        ArgumentCaptor.forClass(EnvironmentDaemonConnection.class);
+    ArgumentCaptor<DaemonChannel> connectionCaptor = ArgumentCaptor.forClass(DaemonChannel.class);
     verify(endpoint).open(connectionCaptor.capture());
     assertEquals("connection-id", connectionCaptor.getValue().connectionId());
 
@@ -52,9 +50,9 @@ class EnvironmentDaemonWebSocketHandlerTest {
   /** 新连接使用部署配置的单帧上限。 */
   @Test
   void appliesConfiguredMaxMessageBytesOnEachConnection() {
-    EnvironmentDaemonEndpoint endpoint = mock(EnvironmentDaemonEndpoint.class);
+    DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
     EnvironmentDaemonWebSocketHandler handler =
-        new EnvironmentDaemonWebSocketHandler(endpoint, gatewayProperties(4L * 1024 * 1024));
+        new EnvironmentDaemonWebSocketHandler(endpoint, transportProperties(4L * 1024 * 1024));
     NativeWebSocketSession session = mock(NativeWebSocketSession.class);
     Session jsrSession = mock(Session.class);
     when(session.getId()).thenReturn("connection-id");
@@ -68,8 +66,8 @@ class EnvironmentDaemonWebSocketHandlerTest {
     verify(jsrSession).setMaxBinaryMessageBufferSize(4 * 1024 * 1024);
   }
 
-  private static EnvironmentGatewayProperties gatewayProperties(long maxMessageBytes) {
-    EnvironmentGatewayProperties properties = new EnvironmentGatewayProperties();
+  private static EnvironmentDaemonTransportProperties transportProperties(long maxMessageBytes) {
+    EnvironmentDaemonTransportProperties properties = new EnvironmentDaemonTransportProperties();
     properties.setMaxMessageBytes(maxMessageBytes);
     return properties;
   }

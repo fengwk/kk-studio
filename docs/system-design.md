@@ -181,6 +181,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `harness/common` | Prompt template/loader、JSON 边界工具、ResourceRef、统一 ResultContent 与 InputSchema 体系 | 依赖 JDK/Jackson，无其它 Harness 依赖 |
 | `harness/tool` | Tool identity、descriptor、call/result 与 Tool JSON codecs（Result 组合 ResultContent） | 依赖 `harness-common` 与 Jackson |
 | `harness/environment` | Environment binding、Capability SPI/catalog 与 Daemon v1 wire（CapabilityResult 组合 ResultContent） | 依赖 `harness-common` 与 Jackson，绝不依赖 `harness-tool` |
+| `harness/environment-server` | Environment daemon 会话核心：连接代际、租约围栏与按 `invocationId` 的调用协调 | 依赖 `harness-common`、`harness-environment` 与 Jackson，绝不依赖 Spring/JDBC/web |
 | `harness/runtime` | Session/Entry/Thread/Command/Invocation/Work 状态机与 processors | 依赖 `harness-common`、`harness-tool`、`harness-environment`、Jackson、SLF4J、JGit |
 | `harness/provider` | JDK 21 HttpClient + SSE 传输、增量解析与原生 Anthropic Messages 协议 | 直接依赖仅 `harness-runtime` 与 Jackson，无 Spring/LangChain4j 依赖 |
 | `harness/contributor-api` | trusted Contributor 的 Catalog、BranchView、统一 Tool、effect 与 projector API | 生产依赖 `harness-tool`、`harness-environment`，不进生产 Common/Runtime |
@@ -205,18 +206,20 @@ platform -> canvas-core
 platform -> harness-common
 platform -> harness-tool -> harness-common
 platform -> harness-environment -> harness-common
+platform -> harness-environment-server -> harness-environment -> harness-common
 platform -> harness-builtin -> harness-contributor-api
 platform -> harness-runtime
 platform -> harness-provider -> harness-runtime
 platform -> harness-contributor-api
 harness-daemon -> harness-common
 harness-daemon -> harness-environment -> harness-common
+web -> harness-environment-server
 ```
 
 `platform` 的架构测试禁止它引用 `canvas-infra`、`harness-infra`、`web` 和
-`harness-daemon` 的生产实现；`web` 的架构测试要求它直接声明 Canvas Infra、
-Harness Infra、Contributor API、Runtime、Environment，保证组合根不会依赖未声明的传递实现；Platform 声明并依赖
-Common、Builtin 模块。
+`harness-daemon` 的生产实现；`web` 的架构测试要求组合根直接声明 Platform、Canvas Infra、
+Harness Infra、Contributor API 与 Environment，保证组合根不会依赖未声明的传递实现；Platform 声明并依赖
+Common、Builtin、Environment Server 模块。
 
 ## 3. Web composition root
 
@@ -309,13 +312,14 @@ Harness command acceptance 不推进 Canvas Graph version。
 | Storage | `storage_blob`、`storage_upload`、`session_blob_ref`、Canvas Resource 引用 | S3 stream、预签名 URL、`StorageMaintenance` |
 | Settings | `system_setting(id=1, config, version)` | `SystemSettingsSnapshot` 与 after-commit 回读 |
 | Realtime | Thread/Canvas version、聚合落盘的 Invocation checkpoint、Work 状态 | PostgreSQL `NOTIFY`、应用事件 WebSocket、Model/Tool live overlay |
-| Environment | Thread ROOT/TURN_START 的 `workspacePath` 快照、ToolInvocation 的 `{environmentId, workspacePath}`；`environment_connection` route lease；`environment_directory_query` mailbox | `EnvironmentDaemonGateway` 持有本节点连接、invocation 与心跳投影 |
+| Environment | Thread ROOT/TURN_START 的 `workspacePath` 快照、ToolInvocation 的 `{environmentId, workspacePath}`；`environment_connection` route lease；`environment_directory_query` mailbox | `harness/environment-server` 的 `EnvironmentDaemonServer` 持有本节点连接、invocation 与心跳投影；`EnvironmentRegistry` 提供租约围栏 |
 | Contributor / Tool | Entry 中的 `CUSTOM(contributorId, customType, schemaVersion, data)`；MCP server/tool 配置 | 启动期冻结 `HarnessCatalog` 元数据；`RuntimeToolCatalog` 聚合静态工具与 DB-backed MCP 工具 |
 
 Settings 的写入使用完整 section + `expectedVersion` CAS。提交成功后回读
 `system_setting` 并原子替换进程快照；跨节点通过 `system_settings_changed` 通知
 触发同样的权威回读。Environment 的 durable identity 是 canonical UUID
-`environmentId`，name 是唯一展示与配置标识，每个环境只有一个 live active capability invocation 槽位。
+`environmentId`，name 是唯一展示与配置标识，同一环境允许任意数量的 capability invocation 并发在途（按
+`invocationId` 关联）。
 
 ## 5. 事务边界与并发协议
 
@@ -450,6 +454,7 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
 - [harness-contributor-api 模块](modules/harness-contributor-api.md)：trusted Java Contributor SPI 与 catalog。
 - [harness-daemon 模块](modules/harness-daemon.md)：Environment Daemon 与 Daemon wire。
 - [harness-environment 模块](modules/harness-environment.md)：Environment binding、Capability 与 Daemon v1 wire。
+- [harness-environment-server 模块](modules/harness-environment-server.md)：daemon 会话、租约围栏与 `invocationId` 调用协调核心。
 - [harness-infra 模块](modules/harness-infra.md)：Harness Store、Work、通知与 ResourceStore。
 - [harness-runtime 模块](modules/harness-runtime.md)：Agent Runtime 状态机与 processors。
 - [harness-tool 模块](modules/harness-tool.md)：Tool identity、descriptor、call/result 与 Tool JSON codecs。

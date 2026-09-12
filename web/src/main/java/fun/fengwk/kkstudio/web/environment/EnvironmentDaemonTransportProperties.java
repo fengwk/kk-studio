@@ -1,14 +1,19 @@
-package fun.fengwk.kkstudio.platform.environment.gateway;
+package fun.fengwk.kkstudio.web.environment;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
 
-/** Environment Daemon gateway 的传输边界配置。 */
+/**
+ * Environment Daemon WebSocket 传输边界配置（每连接单帧上限、出站队列容量/字节与发送超时）。
+ *
+ * <p>这些是传输层安全边界，不属于 Environment 会话状态，也不构成任何 Environment 并发配额：同一 Environment 的调用并发由会话核心按 {@code
+ * invocationId} 独立持有。
+ */
 @Data
 @ConfigurationProperties(prefix = "kk-studio.harness.environment-gateway")
-public class EnvironmentGatewayProperties {
+public class EnvironmentDaemonTransportProperties {
 
   static final long DEFAULT_MAX_MESSAGE_BYTES = 16L * 1024 * 1024;
   static final int DEFAULT_QUEUE_CAPACITY = 256;

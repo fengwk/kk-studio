@@ -395,8 +395,8 @@ kk-studio 根 POM 直接配置并提供 JaCoCo `0.8.11`：
 - `test` phase 执行 `report`；
 - 各模块报告位于对应 `target/site/jacoco/`。
 
-`harness/common`、`harness/tool`、`harness/environment`、`harness/runtime`、
-`harness/contributor-api`、`harness/builtin`、`platform` 与 `web` 在自己的 module
+`harness/common`、`harness/tool`、`harness/environment`、`harness/environment-server`、
+`harness/runtime`、`harness/contributor-api`、`harness/builtin`、`platform` 与 `web` 在自己的 module
 POM 中增加了绑定到 `verify` 的 JaCoCo `check` execution，只按 `CLASS` include
 检查当前关键类，要求 `LINE COVEREDRATIO >= 0.90`：
 
@@ -421,6 +421,7 @@ find . -path '*/target/site/jacoco/index.html' -print
 - `fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding`
 - `fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec`
 - `fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec`
+- `fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer`
 - `fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway`
 - `fun.fengwk.kkstudio.platform.harness.tool.gateway.ToolExecutionGateway`
 - `fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper`
