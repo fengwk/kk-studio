@@ -488,21 +488,32 @@ class SkillInventoryPublisherIntegrationTest extends PostgresSpringTestSupport {
     assertEquals("UNAPPLIED", reread.getStatus(), "编辑后是 UNAPPLIED，陈旧失败更新未生效");
 
     // 3. 错误码格式校验（UPPER_SNAKE）：非法格式结构化拒绝且不泄密
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            skillSourceRepository.markSourceFailed(
-                environmentId.value(), defaultSourceId, 1L, "lowercase_error", "msg"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            skillSourceRepository.markSourceFailed(
-                environmentId.value(), defaultSourceId, 1L, "123_INVALID", "msg"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            skillSourceRepository.markSourceFailed(
-                environmentId.value(), defaultSourceId, 1L, "ERR-WITH-DASH", "msg"));
+    IllegalArgumentException lowerEx =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                skillSourceRepository.markSourceFailed(
+                    environmentId.value(), defaultSourceId, 1L, "lowercase_error", "msg"));
+    assertEquals("invalid error code", lowerEx.getMessage());
+    assertNull(lowerEx.getCause());
+
+    IllegalArgumentException digitFirstEx =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                skillSourceRepository.markSourceFailed(
+                    environmentId.value(), defaultSourceId, 1L, "123_INVALID", "msg"));
+    assertEquals("invalid error code", digitFirstEx.getMessage());
+    assertNull(digitFirstEx.getCause());
+
+    IllegalArgumentException dashEx =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                skillSourceRepository.markSourceFailed(
+                    environmentId.value(), defaultSourceId, 1L, "ERR-WITH-DASH", "msg"));
+    assertEquals("invalid error code", dashEx.getMessage());
+    assertNull(dashEx.getCause());
 
     // 4. 消息格式校验（控制字符/超长）
     assertThrows(

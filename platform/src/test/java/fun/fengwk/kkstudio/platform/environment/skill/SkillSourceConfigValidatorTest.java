@@ -241,4 +241,30 @@ class SkillSourceConfigValidatorTest {
     assertEquals("malformed skill diagnostics", malformedEx.getMessage());
     assertNull(malformedEx.getCause());
   }
+
+  /** 意图：NormalizedConfig 的 toString() 仅输出结构类型，绝不泄露 path/gitUrl/gitRef/scanPath 等配置与凭据信息。 */
+  @Test
+  void normalizedConfigExcludesSensitiveFieldsFromToString() {
+    NormalizedConfig pathConfig =
+        SkillSourceConfigValidator.normalize("path", "/srv/secret-path", null, null, null);
+    String pathStr = pathConfig.toString();
+    assertTrue(pathStr.contains("PATH"), pathStr);
+    assertFalse(pathStr.contains("secret-path"), pathStr);
+    assertEquals("NormalizedConfig[type=PATH]", pathStr);
+
+    NormalizedConfig gitConfig =
+        SkillSourceConfigValidator.normalize(
+            "git",
+            null,
+            "https://user:token@example.test/repo.git",
+            "feature/secret-branch",
+            "secret-scan-dir");
+    String gitStr = gitConfig.toString();
+    assertTrue(gitStr.contains("GIT"), gitStr);
+    assertFalse(gitStr.contains("user:token"), gitStr);
+    assertFalse(gitStr.contains("example.test"), gitStr);
+    assertFalse(gitStr.contains("secret-branch"), gitStr);
+    assertFalse(gitStr.contains("secret-scan-dir"), gitStr);
+    assertEquals("NormalizedConfig[type=GIT]", gitStr);
+  }
 }
