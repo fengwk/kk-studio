@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
@@ -23,7 +22,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -267,8 +265,7 @@ class HarnessContractTest {
   @Test
   void boundEnvironmentContract() {
     DummyBoundEnvironment env = new DummyBoundEnvironment();
-    assertEquals("11111111-1111-1111-1111-111111111111", env.binding().environmentId().toString());
-    assertEquals(".", env.binding().workspacePath());
+    assertEquals("11111111-1111-1111-1111-111111111111", env.environmentId().toString());
 
     EnvironmentCapabilityDescriptor cap =
         new EnvironmentCapabilityDescriptor(
@@ -323,18 +320,6 @@ class HarnessContractTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new ToolExecutionRequest(DESCRIPTOR, rawCall, Duration.ofSeconds(-1)));
-
-    // 校验绝对路径 workdir
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolExecutionRequest(
-                DESCRIPTOR, rawCall, Duration.ZERO, null, Path.of("relative/path")));
-
-    ToolExecutionRequest absoluteReq =
-        new ToolExecutionRequest(
-            DESCRIPTOR, rawCall, Duration.ZERO, null, Path.of("/absolute/path"));
-    assertEquals(Path.of("/absolute/path"), absoluteReq.workdir());
   }
 
   /** 验证 ToolContribution 单一 record 构造与契约校验（descriptor 与 requirements 一致性）。 */
@@ -437,9 +422,8 @@ class HarnessContractTest {
 
   private static final class DummyBoundEnvironment implements BoundEnvironment {
     @Override
-    public EnvironmentBinding binding() {
-      return new EnvironmentBinding(
-          EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), ".");
+    public EnvironmentId environmentId() {
+      return EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
     }
 
     @Override

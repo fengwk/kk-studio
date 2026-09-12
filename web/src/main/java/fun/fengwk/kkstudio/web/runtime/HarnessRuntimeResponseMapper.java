@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.runtime;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.CancelledUserMessage;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
@@ -30,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
-import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCancelledUserMessageDTO;
@@ -100,7 +98,6 @@ public final class HarnessRuntimeResponseMapper {
   private static HarnessBranchSettingsDTO toBranchSettingsDto(BranchSettings settings) {
     Objects.requireNonNull(settings, "settings");
     HarnessBranchSettingsDTO dto = new HarnessBranchSettingsDTO();
-    dto.setWorkspacePath(settings.workspacePath());
     dto.setAgentName(settings.agentName());
     dto.setModel(toModelSelectionDto(settings.model()));
     return dto;
@@ -183,7 +180,9 @@ public final class HarnessRuntimeResponseMapper {
       dto.setToolId(binding.definition().id().value());
       dto.setToolVersion(binding.descriptor().version());
       dto.setRendererKey(binding.descriptor().rendererKey());
-      dto.setEnvironment(toEnvironmentBindingDto(binding.environment()));
+      // 环境身份平铺为 nullable canonical UUID 文本；不保留单字段 wrapper。
+      dto.setEnvironmentId(
+          binding.environmentId() == null ? null : binding.environmentId().toString());
     }
     dto.setApprovalJson(
         invocation.approval() == null ? null : TOOL_APPROVALS.encode(invocation.approval()));
@@ -321,16 +320,6 @@ public final class HarnessRuntimeResponseMapper {
       cancelled.add(messageDto);
     }
     dto.setCancelledUserMessages(List.copyOf(cancelled));
-    return dto;
-  }
-
-  private static EnvironmentBindingDTO toEnvironmentBindingDto(EnvironmentBinding binding) {
-    if (binding == null) {
-      return null;
-    }
-    EnvironmentBindingDTO dto = new EnvironmentBindingDTO();
-    dto.setEnvironmentId(binding.environmentId().toString());
-    dto.setWorkspacePath(binding.workspacePath());
     return dto;
   }
 }

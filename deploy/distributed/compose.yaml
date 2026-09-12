@@ -206,7 +206,7 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       [
-        "mkdir -p /workspace-a/distributed-a-only /workspace-b/distributed-b-only && chown -R 10001:10001 /workspace-a /workspace-b",
+        "mkdir -p /workspace-a /workspace-b && chown -R 10001:10001 /workspace-a /workspace-b",
       ]
     volumes:
       - daemon-workspace-a:/workspace-a

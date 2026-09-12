@@ -1,8 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -78,8 +77,7 @@ import java.util.function.Consumer;
  */
 final class StoreTestSupport {
 
-  static final EnvironmentBinding ENV_ID =
-      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
+  static final EnvironmentId ENV_ID = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   static final UUID OWNER_THREAD_ID = TestIds.id(10L);
   static final int CONTEXT_WINDOW = 100_000;
   static final int MAX_OUTPUT_TOKENS = 16_384;
@@ -528,7 +526,7 @@ final class StoreTestSupport {
                 definition.visibility()),
             invocation.binding().contributor(),
             invocation.binding().environmentRequired(),
-            invocation.binding().environment());
+            invocation.binding().environmentId());
     return new ToolInvocation(
         invocation.id(),
         invocation.modelInvocationId(),
@@ -547,10 +545,7 @@ final class StoreTestSupport {
   }
 
   static BranchSettings branchSettings() {
-    return new BranchSettings(
-        ENV_ID == null ? null : ENV_ID.workspacePath(),
-        "agent",
-        new ModelSelection("provider", "model", "v1"));
+    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
   }
 
   static ModelRequestSpec modelRequest() {

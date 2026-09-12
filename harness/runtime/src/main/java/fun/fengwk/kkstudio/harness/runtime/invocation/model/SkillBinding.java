@@ -1,14 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 /**
  * 冻结到一次 Model invocation 中的不可变 skill 事实。
  *
- * <p>body 被刻意排除在外：只有稳定的 canonical name、description，以及可空的完整 source Environment binding， 才是 durable
- * 请求事实。展示元数据与 skill body 不会进入请求。
+ * <p>body 被刻意排除在外：只有稳定的 canonical name、description，以及可空的 source Environment 路由身份， 才是 durable
+ * 请求事实。展示元数据与 skill body 不会进入请求；目录不参与冻结。
  */
-public record SkillBinding(String name, String description, EnvironmentBinding sourceEnvironment) {
+public record SkillBinding(String name, String description, EnvironmentId sourceEnvironmentId) {
 
   public SkillBinding {
     name = requireCanonical(name, "name", 128);

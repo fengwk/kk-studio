@@ -17,9 +17,9 @@ import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 
 import java.lang.reflect.RecordComponent;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -52,11 +52,11 @@ class EnvironmentCapabilityContractTest {
     assertEquals(Duration.class, components[3].getType());
   }
 
-  /** 反射锁定执行请求只包含 descriptor、call、timeout 和 workdir。 */
+  /** 反射锁定执行请求只包含 descriptor、call 与 timeout：workdir 只存在于具体 arguments。 */
   @Test
   void requestContainsOnlyCapabilityExecutionFields() {
     assertArrayEquals(
-        new String[] {"descriptor", "call", "timeout", "workdir"},
+        new String[] {"descriptor", "call", "timeout"},
         componentNames(EnvironmentCapabilityExecutionRequest.class.getRecordComponents()));
   }
 
@@ -141,34 +141,28 @@ class EnvironmentCapabilityContractTest {
         new EnvironmentCapabilityExecutionRequest(
             DESCRIPTOR,
             new EnvironmentCapabilityCall("call-1", "{\"offset\":\"20\",\"path\":\"README.md\"}"),
-            Duration.ZERO,
-            Path.of("/workspace"));
+            Duration.ZERO);
 
     assertEquals("{\"offset\":20,\"path\":\"README.md\"}", request.call().argumentsJson());
     assertEquals(Duration.ZERO, request.timeout());
     assertEquals(Duration.ofSeconds(10), request.effectiveTimeout());
-    assertEquals(Path.of("/workspace"), request.workdir());
   }
 
-  /** workdir 非空时必须是 absolute path，timeout 不能为负。 */
+  /** timeout 不能为负；请求外壳不携带 workdir（目录只存在于 arguments）。 */
   @Test
-  void validatesRequestTimeoutAndWorkdir() {
+  void validatesRequestTimeoutAndCarriesNoWorkdir() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new EnvironmentCapabilityExecutionRequest(
                 DESCRIPTOR,
                 new EnvironmentCapabilityCall("call-1", "{\"path\":\"a\"}"),
-                Duration.ofSeconds(-1),
-                null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new EnvironmentCapabilityExecutionRequest(
-                DESCRIPTOR,
-                new EnvironmentCapabilityCall("call-1", "{\"path\":\"a\"}"),
-                Duration.ZERO,
-                Path.of("relative/workdir")));
+                Duration.ofSeconds(-1)));
+    assertEquals(
+        List.of("descriptor", "call", "timeout"),
+        Arrays.stream(EnvironmentCapabilityExecutionRequest.class.getRecordComponents())
+            .map(RecordComponent::getName)
+            .toList());
   }
 
   /** Capability result 的 details JSON 默认值、object 校验和 content 数量边界。 */
@@ -232,8 +226,7 @@ class EnvironmentCapabilityContractTest {
         new EnvironmentCapabilityExecutionRequest(
             DESCRIPTOR,
             new EnvironmentCapabilityCall("call-1", "{\"path\":\"README.md\"}"),
-            Duration.ZERO,
-            null);
+            Duration.ZERO);
 
     EnvironmentCapabilityExecutionHandle handle = capability.execute(request, listener);
 

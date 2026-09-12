@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec;
 
@@ -30,7 +30,7 @@ class ToolBindingJsonCodecTest {
             + ",\"contributor\":"
             + "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
             + ",\"environmentRequired\":true"
-            + ",\"environment\":"
+            + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
             + "}";
     assertEquals(environmentJson, codec.encode(environment));
@@ -44,11 +44,11 @@ class ToolBindingJsonCodecTest {
             + ",\"contributor\":"
             + "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
             + ",\"environmentRequired\":false"
-            + ",\"environment\":null}";
+            + ",\"environmentId\":null}";
     assertEquals(hostJson, codec.encode(host));
     assertEquals(host, codec.decode(hostJson));
     assertFalse(codec.decode(hostJson).environmentRequired());
-    assertNull(codec.decode(hostJson).environment());
+    assertNull(codec.decode(hostJson).environmentId());
 
     ToolBinding declarative = binding(false, true);
     String declarativeJson =
@@ -58,7 +58,7 @@ class ToolBindingJsonCodecTest {
             + "{\"contributorId\":\"goal\",\"localName\":\"create\","
             + "\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"WRITE\"}]}"
             + ",\"environmentRequired\":false"
-            + ",\"environment\":null}";
+            + ",\"environmentId\":null}";
     assertEquals(declarativeJson, codec.encode(declarative));
     assertEquals(declarative, codec.decode(declarativeJson));
 
@@ -70,13 +70,13 @@ class ToolBindingJsonCodecTest {
             + "{\"contributorId\":\"goal\",\"localName\":\"create\","
             + "\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"WRITE\"}]}"
             + ",\"environmentRequired\":true"
-            + ",\"environment\":"
+            + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
             + "}";
     assertEquals(stateWithEnvJson, codec.encode(stateWithEnv));
     assertEquals(stateWithEnv, codec.decode(stateWithEnvJson));
     assertTrue(codec.decode(stateWithEnvJson).environmentRequired());
-    assertEquals(ENVIRONMENT_ID, codec.decode(stateWithEnvJson).environment());
+    assertEquals(ENVIRONMENT_ID, codec.decode(stateWithEnvJson).environmentId());
   }
 
   /** 字符串边界在任何领域值构造之前拒绝畸形文档。 */
@@ -85,8 +85,8 @@ class ToolBindingJsonCodecTest {
     String json = codec.encode(binding(false));
     String duplicate =
         json.replace(
-            "\"environment\":null",
-            "\"environment\":null,\"environment\":{\"name\":\"env-1\",\"workspacePath\":\".\"}");
+            "\"environmentId\":null",
+            "\"environmentId\":null,\"environmentId\":\"22222222-2222-2222-2222-222222222222\"");
 
     assertThrows(NullPointerException.class, () -> codec.encode(null));
     assertThrows(NullPointerException.class, () -> codec.decode(null));
@@ -98,7 +98,7 @@ class ToolBindingJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /** 顶层字段必须恰好是 definition/contributor/environmentRequired/environment。 */
+  /** 顶层字段必须恰好是 definition/contributor/environmentRequired/environmentId。 */
   @Test
   void rejectsUnknownMissingAndWrongTypeTopLevelFields() {
     ToolBinding environment = binding(true);
@@ -108,7 +108,7 @@ class ToolBindingJsonCodecTest {
             + definition
             + ",\"contributor\":{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
             + ",\"environmentRequired\":true"
-            + ",\"environment\":"
+            + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
             + "}";
 
@@ -134,7 +134,8 @@ class ToolBindingJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(valid.replace(",\"environment\":" + environmentJson(ENVIRONMENT_ID), "")));
+            codec.decode(
+                valid.replace(",\"environmentId\":" + environmentJson(ENVIRONMENT_ID), "")));
 
     // 字段类型错误
     assertThrows(
@@ -182,7 +183,7 @@ class ToolBindingJsonCodecTest {
                     + definition
                     + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\",\"stateAccesses\":[],\"unknown\":true}"
                     + ",\"environmentRequired\":false"
-                    + ",\"environment\":null}"));
+                    + ",\"environmentId\":null}"));
 
     // 缺少 stateAccesses
     assertThrows(
@@ -193,7 +194,7 @@ class ToolBindingJsonCodecTest {
                     + definition
                     + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\"}"
                     + ",\"environmentRequired\":false"
-                    + ",\"environment\":null}"));
+                    + ",\"environmentId\":null}"));
 
     // stateAccesses 元素格式非法
     assertThrows(
@@ -204,10 +205,10 @@ class ToolBindingJsonCodecTest {
                     + definition
                     + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\",\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"INVALID\"}]}"
                     + ",\"environmentRequired\":false"
-                    + ",\"environment\":null}"));
+                    + ",\"environmentId\":null}"));
   }
 
-  /** 解码边界必须重新校验 environmentRequired 与 environment 的一致性。 */
+  /** 解码边界必须重新校验 environmentRequired 与 environmentId 的一致性。 */
   @Test
   void rejectsMismatchedEnvironmentRequiredAndEnvironmentCombinations() {
     ToolBinding host = binding(false);
@@ -225,7 +226,7 @@ class ToolBindingJsonCodecTest {
                     + ",\"contributor\":"
                     + emptyContributorJson
                     + ",\"environmentRequired\":true"
-                    + ",\"environment\":null}"));
+                    + ",\"environmentId\":null}"));
 
     // environmentRequired 为 false 但 environment 非 null
     assertThrows(
@@ -237,16 +238,12 @@ class ToolBindingJsonCodecTest {
                     + ",\"contributor\":"
                     + emptyContributorJson
                     + ",\"environmentRequired\":false"
-                    + ",\"environment\":"
+                    + ",\"environmentId\":"
                     + environmentJson(ENVIRONMENT_ID)
                     + "}"));
   }
 
-  private static String environmentJson(EnvironmentBinding binding) {
-    return "{\"environmentId\":\""
-        + binding.environmentId()
-        + "\",\"workspacePath\":\""
-        + binding.workspacePath()
-        + "\"}";
+  private static String environmentJson(EnvironmentId environmentId) {
+    return "\"" + environmentId + "\"";
   }
 }

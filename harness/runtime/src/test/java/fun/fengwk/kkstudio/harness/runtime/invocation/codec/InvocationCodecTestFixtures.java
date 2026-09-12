@@ -2,8 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
@@ -37,10 +36,10 @@ import java.util.UUID;
 /** 严格 Invocation codec 测试间共享的小型完整测试值。 */
 final class InvocationCodecTestFixtures {
 
-  static final EnvironmentBinding ENVIRONMENT_ID =
-      EnvironmentBindings.binding("123e4567-e89b-12d3-a456-426614174000");
-  static final EnvironmentBinding OTHER_ENVIRONMENT_ID =
-      EnvironmentBindings.binding("123e4567-e89b-12d3-a456-426614174001");
+  static final EnvironmentId ENVIRONMENT_ID =
+      EnvironmentId.parse("123e4567-e89b-12d3-a456-426614174000");
+  static final EnvironmentId OTHER_ENVIRONMENT_ID =
+      EnvironmentId.parse("123e4567-e89b-12d3-a456-426614174001");
 
   private static final ToolDescriptorJsonCodec TOOL_DESCRIPTOR_CODEC =
       new ToolDescriptorJsonCodec();

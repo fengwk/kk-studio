@@ -9,11 +9,11 @@ import java.time.Instant;
  * ToolInvocation 查询投影（tool_invocation 表）；实体 id 均为 canonical UUID string。
  *
  * <p>工具身份字段由 durable ToolCall 直接派生：{@code toolCallId} / {@code toolName} / {@code argumentsJson}
- * 恒有值。binding 派生字段仅在 binding 非 null 时有值：{@code toolId} / {@code toolVersion} / {@code environment}
- * （binding 为 null（unknown tool 槽位）时显式序列化 null），而 {@code rendererKey} 在 binding 非 null 时来自
- * binding，否则固定回退为 {@code tool}。{@code approvalJson} / {@code resultJson} / {@code errorJson} 为
- * canonical runtime codec JSON，仅对应阶段非 null；{@code environment} 为 nullable 完整 Environment
- * binding（{@code {environmentId, workspacePath}}）。
+ * 恒有值。binding 派生字段仅在 binding 非 null 时有值：{@code toolId} / {@code toolVersion} / {@code
+ * environmentId} （binding 为 null（unknown tool 槽位）时显式序列化 null），而 {@code rendererKey} 在 binding 非
+ * null 时来自 binding，否则固定回退为 {@code tool}。{@code approvalJson} / {@code resultJson} / {@code
+ * errorJson} 为 canonical runtime codec JSON，仅对应阶段非 null；{@code environmentId} 为 nullable
+ * 环境路由身份（canonical UUID string 或 null）。
  */
 @Data
 public class ToolInvocationDTO {
@@ -56,11 +56,10 @@ public class ToolInvocationDTO {
   private String toolId;
 
   /**
-   * 完整 Environment binding：绑定环境的工具为冻结的 {@code {environmentId, workspacePath}}，其它为
-   * null（{@code @JsonInclude(ALWAYS)} 保证 null 显式序列化）。
+   * 环境路由身份：绑定环境的工具为冻结的 canonical UUID string，其它为 null（{@code @JsonInclude(ALWAYS)} 保证 null 显式序列化）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private EnvironmentBindingDTO environment;
+  private String environmentId;
 
   /** Provider 提供的 JSON 参数原文（tool call arguments）。 */
   private String argumentsJson;

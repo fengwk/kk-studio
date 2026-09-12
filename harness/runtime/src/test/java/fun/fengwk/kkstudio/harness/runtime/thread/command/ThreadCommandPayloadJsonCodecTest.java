@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -19,21 +18,19 @@ import java.util.List;
 /** Thread command payload codec：严格 canonical 形态、无类型 JSON 与未知字段拒绝。 */
 class ThreadCommandPayloadJsonCodecTest {
 
-  private static final String ENV = "123e4567-e89b-12d3-a456-426614174000";
+  private static final String LEGACY_WORKSPACE_PATH = "123e4567-e89b-12d3-a456-426614174000";
   private static final ModelSelection MODEL =
       new ModelSelection("anthropic", "claude-sonnet", "default");
   private final ThreadCommandPayloadJsonCodec codec = new ThreadCommandPayloadJsonCodec();
 
   @Test
-  void roundTripsAllSixCommandTypes() {
+  void roundTripsAllFourCommandTypes() {
     List<ThreadCommandPayload> payloads =
         List.of(
             new UserMessageCommandPayload(user("hello")),
             new CustomMessageCommandPayload(system("system")),
             new SetAgentCommandPayload("coding"),
-            new SetModelCommandPayload(MODEL),
-            new SetEnvironmentCommandPayload(ENV),
-            new SetEnvironmentCommandPayload(null));
+            new SetModelCommandPayload(MODEL));
 
     for (ThreadCommandPayload payload : payloads) {
       assertEquals(payload, codec.decode(payload.type(), codec.encode(payload)));
@@ -53,9 +50,6 @@ class ThreadCommandPayloadJsonCodecTest {
             + "\"variant\":\"default\"}}",
         codec.encode(new SetModelCommandPayload(MODEL)));
     assertEquals("{\"agentName\":\"coding\"}", codec.encode(new SetAgentCommandPayload("coding")));
-    assertEquals(
-        "{\"workspacePath\":\"" + ENV + "\"}", codec.encode(new SetEnvironmentCommandPayload(ENV)));
-    assertEquals("{\"workspacePath\":null}", codec.encode(new SetEnvironmentCommandPayload(null)));
   }
 
   @Test
@@ -96,7 +90,15 @@ class ThreadCommandPayloadJsonCodecTest {
         () -> codec.decode(ThreadCommandType.SET_AGENT, "{\"agentName\":\" a\"}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"unexpected\":1}"));
+        () ->
+            codec.decode(
+                ThreadCommandType.SET_MODEL,
+                "{\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\",\"workspacePath\":null}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                ThreadCommandType.SET_AGENT, "{\"agentName\":\"a\",\"workspacePath\":null}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.USER_MESSAGE, "{\"message\":[]}"));
@@ -177,17 +179,20 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(NullPointerException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, null));
   }
 
-  /** SET_ENVIRONMENT 的显式 null 与 canonical path round-trip 语义。 */
+  /** 已删除的 SET_ENVIRONMENT / workspacePath 形状不再被任何 command type 接受。 */
   @Test
-  void preservesWorkspacePathClearSemantics() {
-    SetEnvironmentCommandPayload cleared =
-        (SetEnvironmentCommandPayload)
-            codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"workspacePath\":null}");
-    assertNull(cleared.workspacePath());
-    SetEnvironmentCommandPayload bound =
-        (SetEnvironmentCommandPayload)
-            codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"workspacePath\":\"" + ENV + "\"}");
-    assertEquals(ENV, bound.workspacePath());
+  void rejectsLegacyWorkspacePathPayloadAcrossAllTypes() {
+    for (ThreadCommandType type : ThreadCommandType.values()) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> codec.decode(type, "{\"workspacePath\":\"" + LEGACY_WORKSPACE_PATH + "\"}"),
+          "SET_ENVIRONMENT 形状必须对 " + type + " 保持拒绝");
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> codec.decode(type, "{\"workspacePath\":null}"),
+          "SET_ENVIRONMENT 形状必须对 " + type + " 保持拒绝");
+    }
+    assertEquals(4, ThreadCommandType.values().length);
   }
 
   private static AgentMessage user(String text) {

@@ -3,8 +3,13 @@ package fun.fengwk.kkstudio.harness.environment.daemon;
 /** Environment Daemon wire 协议的版本与状态码常量。 */
 public final class DaemonProtocol {
 
-  /** 当前 Environment Daemon wire 协议版本。 */
-  public static final int VERSION = 1;
+  /**
+   * 当前 Environment Daemon wire 协议版本。
+   *
+   * <p>v2 删除 INVOKE 的 {@code workspacePath} 外壳字段：目录只作为具体 capability 的必填 arguments
+   * 提供。旧版本帧被明确拒绝，不做双协议 fallback。
+   */
+  public static final int VERSION = 2;
 
   /**
    * ERROR payload 的可选 {@code code}：目标 Environment 当前已有活跃连接租约，daemon 应按配置退避重连 （同 registration token

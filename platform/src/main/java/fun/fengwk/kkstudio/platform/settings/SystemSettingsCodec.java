@@ -227,9 +227,7 @@ public class SystemSettingsCodec {
     }
     return new SystemSettings.Environment(
         requiredMillis(dto.getMaxResourceBytes(), "environment.maxResourceBytes"),
-        requiredMillis(dto.getHeartbeatTimeoutMillis(), "environment.heartbeatTimeoutMillis"),
-        requiredMillis(
-            dto.getDirectoryListTimeoutMillis(), "environment.directoryListTimeoutMillis"));
+        requiredMillis(dto.getHeartbeatTimeoutMillis(), "environment.heartbeatTimeoutMillis"));
   }
 
   private static SystemSettings.Integrations toIntegrations(SystemSettingsIntegrationsDTO dto) {
@@ -454,7 +452,6 @@ public class SystemSettingsCodec {
     SystemSettingsEnvironmentDTO dto = new SystemSettingsEnvironmentDTO();
     dto.setMaxResourceBytes(environment.maxResourceBytes());
     dto.setHeartbeatTimeoutMillis(environment.heartbeatTimeoutMillis());
-    dto.setDirectoryListTimeoutMillis(environment.directoryListTimeoutMillis());
     return dto;
   }
 

@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.skill.SelectedSkill;
 import fun.fengwk.kkstudio.harness.builtin.skill.ThreadSelectedSkillLookup;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
+import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -34,7 +34,7 @@ import java.util.UUID;
  */
 class DatabaseThreadSelectedSkillLookupTest {
 
-  private static final EnvironmentBinding ENV_ID = TestEnvironmentBindings.binding("env-1");
+  private static final EnvironmentId ENV_ID = TestEnvironments.environmentId("env-1");
   private static final ModelRequestSpecJsonCodec REQUEST_CODEC = new ModelRequestSpecJsonCodec();
 
   private static final UUID INVOCATION_ID = new UUID(0L, 42L);
@@ -52,7 +52,7 @@ class DatabaseThreadSelectedSkillLookupTest {
     SelectedSkill skill = result.get();
     assertEquals("review", skill.name());
     assertEquals("Review code", skill.description());
-    assertEquals(ENV_ID, skill.sourceEnvironment());
+    assertEquals(ENV_ID, skill.sourceEnvironmentId());
 
     assertTrue(lookup.findSelected(INVOCATION_ID, THREAD_ID, "unknown").isEmpty());
   }
@@ -74,10 +74,10 @@ class DatabaseThreadSelectedSkillLookupTest {
     ThreadSelectedSkillLookup lookup = new DatabaseThreadSelectedSkillLookup(mapper);
     Optional<SelectedSkill> result = lookup.findSelected(INVOCATION_ID, THREAD_ID, "review");
     assertTrue(result.isPresent());
-    assertNull(result.get().sourceEnvironment());
+    assertNull(result.get().sourceEnvironmentId());
   }
 
-  private static String encodedRequest(EnvironmentBinding sourceEnvironment) {
+  private static String encodedRequest(EnvironmentId sourceEnvironmentId) {
     ModelRequestSpec requestSpec =
         new ModelRequestSpec(
             ProviderType.OPENAI,
@@ -87,7 +87,7 @@ class DatabaseThreadSelectedSkillLookupTest {
             1024,
             List.of(),
             List.of(),
-            List.of(new SkillBinding("review", "Review code", sourceEnvironment)),
+            List.of(new SkillBinding("review", "Review code", sourceEnvironmentId)),
             List.of(),
             ProviderCacheControl.none());
     return REQUEST_CODEC.encode(requestSpec);

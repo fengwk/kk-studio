@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,11 +29,14 @@ class ToolExecutionGatewayConstructionTest {
 
   private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
 
+  /**
+   * 测试意图：生产 {@link HarnessRuntimeProperties} 构造器只承载 resourceRoot，不再向 gateway 注入任何默认目录；展开 host 调用时
+   * 也不得凭空出现 backend 侧默认路径。
+   */
   @Test
-  void productionPropertiesConstructorResolvesAndNormalizesWorkdir() {
+  void productionPropertiesConstructorInjectsNoDefaultWorkdir() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
-    properties.setEnvironmentRoot(Path.of("/env-root"));
-    properties.setWorkdir(Path.of("sub/./deep"));
+    properties.setResourceRoot(Path.of(".kkstudio/resources"));
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
@@ -45,7 +49,9 @@ class ToolExecutionGatewayConstructionTest {
         assertInstanceOf(
             ToolGateway.Ask.class,
             gateway.preflight(ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)));
-    assertTrue(ask.reason().contains("/env-root/sub/deep"), ask.reason());
+    assertFalse(ask.reason().contains("(default)"), ask.reason());
+    assertFalse(ask.reason().contains(" in "), ask.reason());
+    assertEquals(Path.of(".kkstudio/resources"), properties.getResourceRoot());
   }
 
   @Test

@@ -1,70 +1,57 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-/** Branch settings 的 immutable snapshot、canonical workspace path 规范化与 agentName 校验。 */
+import java.lang.reflect.RecordComponent;
+import java.util.Arrays;
+import java.util.List;
+
+/** Branch settings 的 immutable snapshot、agentName 校验与「不保存目录状态」契约。 */
 class BranchSettingsTest {
 
   @Test
-  void preservesWorkspacePathAndModel() {
+  void preservesAgentNameAndModel() {
     BranchSettings settings =
-        new BranchSettings(
-            "projects/web", "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
+        new BranchSettings("coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
 
-    assertEquals("projects/web", settings.workspacePath());
     assertEquals("coding", settings.agentName());
+    assertEquals("claude-sonnet", settings.model().modelName());
+  }
+
+  /** 目录不再属于 branch 历史：record 组件固定为 agentName/model，任何 workspace 字段都不允许回归。 */
+  @Test
+  void exposesNoWorkspaceState() {
+    assertEquals(
+        List.of("agentName", "model"),
+        Arrays.stream(BranchSettings.class.getRecordComponents())
+            .map(RecordComponent::getName)
+            .toList());
   }
 
   @Test
-  void allowsNoWorkspaceAndValidatesCanonicalPathShape() {
-    BranchSettings settings =
-        new BranchSettings(
-            null, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
-
-    assertNull(settings.workspacePath());
-    // absolute 路径在构造边界拒绝（canonical 相对 wire 路径契约）。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new BranchSettings(
-                "/projects/web",
-                "coding",
-                new ModelSelection("anthropic", "claude-sonnet", "default")));
-    // '..' 段拒绝。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new BranchSettings(
-                "../escape",
-                "coding",
-                new ModelSelection("anthropic", "claude-sonnet", "default")));
-  }
-
-  @Test
-  void replacesWorkspacePathViaWithMethod() {
+  void replacesAgentNameAndModelViaWithMethods() {
     BranchSettings base =
-        new BranchSettings(
-            "projects/web", "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
+        new BranchSettings("coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
 
-    BranchSettings cleared = base.withWorkspacePath(null);
-    BranchSettings rebound = cleared.withWorkspacePath("other/repo");
+    BranchSettings rebound = base.withAgentName("reviewer");
+    BranchSettings remodelled =
+        rebound.withModel(new ModelSelection("anthropic", "claude-opus", "default"));
 
-    assertNull(cleared.workspacePath());
-    assertEquals("other/repo", rebound.workspacePath());
-    assertEquals(base.agentName(), rebound.agentName());
+    assertEquals("reviewer", rebound.agentName());
     assertEquals(base.model(), rebound.model());
+    // withModel 只换 model：agentName 保持上游 withAgentName 的结果，不回退为 base。
+    assertEquals("reviewer", remodelled.agentName());
+    assertEquals("claude-opus", remodelled.model().modelName());
   }
 
   @Test
   void rejectsNullModelBlankAndOversizedNames() {
     ModelSelection model = new ModelSelection("anthropic", "claude-sonnet", "default");
-    assertThrows(IllegalArgumentException.class, () -> new BranchSettings(null, " ", model));
-    assertThrows(
-        IllegalArgumentException.class, () -> new BranchSettings(null, "c".repeat(129), model));
-    assertThrows(NullPointerException.class, () -> new BranchSettings(null, "coding", null));
+    assertThrows(IllegalArgumentException.class, () -> new BranchSettings(" ", model));
+    assertThrows(IllegalArgumentException.class, () -> new BranchSettings("c".repeat(129), model));
+    assertThrows(NullPointerException.class, () -> new BranchSettings("coding", null));
   }
 }

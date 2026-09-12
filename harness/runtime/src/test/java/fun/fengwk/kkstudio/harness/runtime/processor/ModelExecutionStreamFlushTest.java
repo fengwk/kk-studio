@@ -2228,7 +2228,7 @@ class ModelExecutionStreamFlushTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings(null, "agent", new ModelSelection("provider", "model", "v1"));
+    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
   }
 
   private record Baseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}

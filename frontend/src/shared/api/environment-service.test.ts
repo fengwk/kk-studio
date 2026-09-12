@@ -122,35 +122,4 @@ describe('environmentService', () => {
       '/harness/environments/env-1?expectedVersion=3',
     )
   })
-
-  /**
-   * 测试意图：验证浏览 Environment 目录端点使用 /harness/environments/{id}/directories?path=，
-   * 确保路径编码及默认 path 为 '.' 正常生效。
-   */
-  it('lists a single-level directory with UUID encoded and wire path query param under /harness', async () => {
-    const client = {
-      get: vi.fn(async () => ({
-        path: 'proj/sub',
-        displayPath: 'sub',
-        parentPath: 'proj',
-        truncated: false,
-        gitBranch: null,
-        entries: [],
-      })),
-      post: vi.fn(async () => ({})),
-      put: vi.fn(async () => ({})),
-      delete: vi.fn(async () => ({})),
-    }
-    const service = createEnvironmentService(client)
-    await service.listDirectories('env-uuid-1', 'proj/sub')
-    expect(client.get).toHaveBeenCalledWith(
-      '/harness/environments/env-uuid-1/directories?path=proj%2Fsub',
-    )
-
-    // path 缺省为 root '.'。
-    await service.listDirectories('env-uuid-1')
-    expect(client.get).toHaveBeenCalledWith(
-      '/harness/environments/env-uuid-1/directories?path=.',
-    )
-  })
 })

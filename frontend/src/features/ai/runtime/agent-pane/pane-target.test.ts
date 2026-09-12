@@ -97,7 +97,6 @@ describe('PaneTarget durable-local FSM', () => {
           sessionId: 's1',
           threadId: 't1',
           rootSettings: {
-            workspacePath: null,
             agentName: 'assistant',
             model: { providerName: 'p', modelName: 'm', variant: 'v' },
           },
@@ -110,7 +109,6 @@ describe('PaneTarget durable-local FSM', () => {
         }],
       },
       branchDraft: {
-        workspacePath: null,
         agentName: 'assistant',
         model: { providerName: 'p', modelName: 'm', variant: 'v' },
         yoloEnabled: false,
@@ -175,7 +173,6 @@ describe('PaneTarget durable-local FSM', () => {
           sessionId: 's1',
           threadId: 't1',
           rootSettings: {
-            workspacePath: null,
             agentName: 'assistant',
             model: { providerName: 'p', modelName: 'm', variant: 'v' },
           },
@@ -188,7 +185,6 @@ describe('PaneTarget durable-local FSM', () => {
         }],
       },
       branchDraft: {
-        workspacePath: null,
         agentName: 'assistant',
         model: { providerName: 'p', modelName: 'm', variant: 'v' },
         yoloEnabled: false,
@@ -267,8 +263,6 @@ describe('PaneTarget durable-local FSM', () => {
         idempotencyKey: 'c1',
         model: { providerName: 'p', modelName: 'm', variant: 'v' },
       },
-      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: null },
-      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: 'proj/sub' },
       {
         type: 'USER_MESSAGE',
         idempotencyKey: 'c1',
@@ -279,11 +273,12 @@ describe('PaneTarget durable-local FSM', () => {
       expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
     }
 
-    // 验证 SET_ENVIRONMENT 实施 exact own-key 校验：拒绝 environment/environmentId/environmentName 及任意额外 key
+    // 验证拒绝未知命令类型（持久化形状只接受现存 command type 集合）
     for (const rejectedCommand of [
-      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', environment: 'local' },
-      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', environment: { name: 'local', workspacePath: '.' } },
-      { type: 'SET_ENVIRONMENT', idempotencyKey: 'c1', workspacePath: '.', extraField: 'invalid' },
+      { type: 'UNKNOWN_COMMAND', idempotencyKey: 'c1' },
+      { type: 'UNKNOWN_COMMAND', idempotencyKey: 'c1', value: null },
+      { type: 'UNKNOWN_COMMAND', idempotencyKey: 'c1', value: 'proj/sub' },
+      { type: 'UNKNOWN_COMMAND', idempotencyKey: 'c1', value: '.', environment: 'local' },
     ]) {
       setRequest({ ...validRequest, commands: [rejectedCommand] })
       expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
@@ -327,6 +322,18 @@ describe('PaneTarget durable-local FSM', () => {
       },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    // exact own-key 拒绝 rootSettings 上的未知字段
+    setRequest({
+      ...validRequest,
+      target: {
+        type: 'NEW_SESSION',
+        sessionId: 's1',
+        threadId: 't1',
+        rootSettings: { ...validRequest.target.rootSettings, unexpectedSetting: '.' },
+        yoloEnabled: false,
+      },
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setRequest({
       ...validRequest,
       target: { type: 'NEW_THREAD', sessionId: 's1', startEntryId: '', threadId: 't1', yoloEnabled: false },
@@ -343,6 +350,9 @@ describe('PaneTarget durable-local FSM', () => {
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setPending({ branchDraft: { ...valid.branchDraft, model: null } })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    // exact own-key 拒绝 branchDraft 上的未知字段
+    setPending({ branchDraft: { ...valid.branchDraft, unexpectedSetting: '.' } })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setPending({
       composerParts: [{ partId: 'p1', type: 'attachment', uploadId: 'u1', filename: 'file.txt' }],

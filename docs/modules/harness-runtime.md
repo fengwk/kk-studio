@@ -54,7 +54,7 @@ Runtime 生产源码覆盖以下 26 个包（均位于 `fun.fengwk.kkstudio.harn
 | `runtime.admission` | 进程内并发准入控制（`ConcurrencyAdmission`），提供线程安全且非阻塞的信号量准入 | 纯内存维护并发槽位，分发支持幂等关闭的 `Lease` 凭证；跨节点分布式调度与并发控制由基础设施层负责 |
 | `runtime.cache` | Prompt Cache 稳定 affinity key 派生以及请求级 `cacheControl` 终结（`PromptCacheRequestFinalizer`） | 基于固定上下文规则纯内存派生稳定 cache key，在请求构造终结阶段确定性生成最终 cacheControl |
 | `runtime.compaction` | 上下文压缩规划（`CompactionPlanner`）、Prompt 模板构建、压缩结果评估与最小化持久化标记 | 纯函数式规划与评估；压缩流程统一复用标准 `ModelInvocation` 与 MODEL 调度邮箱，由 `ModelProcessor` 执行 |
-| `runtime.entry` | 共享的 Entry 基础值对象模型（`BranchSettings`、`ModelSelection`、`TurnStartReason`、`TurnEndOutcome`） | 定义轻量不可变值对象，承载分支配置与 turn 状态标识；完整载荷结构与 JSON 编解码由 `runtime.history` 承载 |
+| `runtime.entry` | 共享的 Entry 基础值对象模型（`BranchSettings`、`ModelSelection`、`TurnStartReason`、`TurnEndOutcome`） | 定义轻量不可变值对象，承载分支配置（`agentName` 与 model）与 turn 状态标识；环境由 Agent definition 决定，目录只存在于具体工具 arguments 中，因此分支历史不保存目录状态；完整载荷结构与 JSON 编解码由 `runtime.history` 承载 |
 | `runtime.history` | 不可变 Entry Tree 事实模型、`EntryPath` 根到 head 连续路径构建、turn 文法校验与历史 JSON 编解码 | 记录会话追加历史事实，校验同会话与 parent 连续性并严格守卫 turn 文法；执行调度状态由 `runtime.work` 承载 |
 | `runtime.invocation.codec` | Model 与 Tool Invocation 持久化列的严格确定性 JSON 编解码 | 保证跨 JVM 与存储的线协议（wire format）一致性；序列化与反序列化时严格校验字段，检测到未知或非法字段立即拒绝 |
 | `runtime.invocation.model` | ModelInvocation 持久化状态、冻结请求契约（`ModelRequestSpec`）、重试审计记录与请求物化 | 维护 Model 调用工作流的持久化状态、冻结请求契约与重试审计记录；调度租约由 `runtime.work` 独立管理，网络契约使用中立模型 |
@@ -64,7 +64,7 @@ Runtime 生产源码覆盖以下 26 个包（均位于 `fun.fengwk.kkstudio.harn
 | `runtime.model.codec` | Model 描述符（`ModelDescriptor`）与变体（`ModelVariant`）的确定性 JSON 编解码器 | 维护权威的模型描述符编解码规范；反序列化时严格过滤未知字段，保证平台内部标识与敏感密钥不发生外泄 |
 | `runtime.model.provider` | 供应商中立的通信契约（请求、响应与流式事件）以及上下文窗口压力检测（`ContextPressureDetector`） | 抽象供应商交互契约与标准错误分类；核心契约与外部具体 SDK 保持独立 |
 | `runtime.model.provider.codec` | ProviderRequest 与 ProviderResponse 确定性 JSON 编解码器 | 基于 Jackson 生成稳定的中立模型 wire 格式，供跨进程与网络适配使用 |
-| `runtime.permission` | 有序 Tool 权限求值器（`PermissionEvaluator`）、权限配置模型与 Bash 静态表面分析器 | 按有序规则与相对工作目录路径求值生成 Allow/Ask/Deny 策略判定；真实路径校验与能力执行由 Environment Daemon 负责 |
+| `runtime.permission` | 有序 Tool 权限求值器（`PermissionEvaluator`）、权限配置模型与 Bash 静态表面分析器 | 按有序规则与单次调用 `arguments.workdir` 派生的相对 POSIX 路径求值生成 Allow/Ask/Deny 策略判定；不读取 Backend 本机 cwd/HOME，真实路径校验与能力执行由 Environment Daemon 负责 |
 | `runtime.port` | 面向基础设施的反向依赖抽象端口（`TurnResolver`、`ModelGateway`、`ToolGateway`、`RealtimeEventSink`） | 定义面向基础设施的反向依赖抽象端口，严格隔离底层存储驱动、网络调用与外部执行实现 |
 | `runtime.processor` | Target 级执行处理器（`ThreadProcessor`、`ModelProcessor`、`ToolProcessor`）与两阶段激活执行体 | 驱动 Target 级执行状态流转，执行所有权围栏校验，通过 Gateway 委托外部调用并通过 Store 完成短事务提交 |
 | `runtime.realtime` | 实时事件传输模型（`RealtimeEvent`）及其 JSON 编解码器 | 定义向客户端分发的增量覆盖（live overlay）事件；事件传输采用有损设计，丢失时不影响数据库底层状态一致性 |
@@ -131,7 +131,7 @@ createdAt / updatedAt
 - `NEW_THREAD`：在已有会话的指定 Entry 节点上派生出新 Thread，原分支历史完整保留，无需拷贝 Entry；
 - `THREAD`：依据客户端传入的 `expectedHeadEntryId` 与 `expectedNextCommandSequence`，向现有线程追加命令批次。
 
-命令类型包含 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_ENVIRONMENT`、`SET_AGENT` 和 `SET_MODEL`。配置类命令的前缀顺序固定为：环境变更（SET_ENVIRONMENT）→ 智能体变更（SET_AGENT）→ 模型变更（SET_MODEL）。智能体可用的工具列表直接从外部最新的 Agent 声明 `config.toolIds` 中解析得出。初始化批次以一条末尾的类用户消息结束；日常追加批次允许包含一条用户消息或一条 SYSTEM 引导消息。YOLO 自动放行模式由独立的 `setThreadYolo` 接口直接修改线程状态，不排入命令邮箱。
+命令类型包含 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_AGENT` 和 `SET_MODEL`。配置类命令的前缀顺序固定为：智能体变更（SET_AGENT）→ 模型变更（SET_MODEL）。Agent definition 决定环境，目录只由每次工具调用自己的 arguments 提供，因此命令邮箱不携带环境或目录变更。智能体可用的工具列表直接从外部最新的 Agent 声明 `config.toolIds` 中解析得出。初始化批次以一条末尾的类用户消息结束；日常追加批次允许包含一条用户消息或一条 SYSTEM 引导消息。YOLO 自动放行模式由独立的 `setThreadYolo` 接口直接修改线程状态，不排入命令邮箱。
 
 命令的持久化状态根据其标记字段推导得出：
 - 无附加标记时为待处理态 `QUEUED`；
@@ -162,9 +162,9 @@ toolBindings / skillBindings / subagentBindings
 cacheControl
 ```
 
-请求冻结供应商类型、模型与变体、引导消息、工具、Skill、Subagent 绑定以及缓存策略。完整历史、可由 `toolBindings` 派生的 Provider tools、顶层 Environment、YOLO、上下文窗口、凭证、端点和压缩临时元数据保留在各自事实源中。[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 在执行前根据不可变的 `EntryPath` 与冻结 Spec 纯内存物化标准 `ProviderRequest`。普通交互回合物化 MESSAGE、CUSTOM_MESSAGE、ASSISTANT_ABORTED 与完成的压缩摘要；压缩回合生成专用的摘要 SYSTEM 与 USER 提示词，工具列表为空。
+请求冻结供应商类型、模型与变体、引导消息、工具、Skill、Subagent 绑定以及缓存策略。完整历史、可由 `toolBindings` 派生的 Provider tools、Agent definition 决定的环境、YOLO、上下文窗口、凭证、端点和压缩临时元数据保留在各自事实源中；环境只以冻结的 `environmentId` 出现在 `toolBindings` 与 `skillBindings` 中。[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 在执行前根据不可变的 `EntryPath` 与冻结 Spec 纯内存物化标准 `ProviderRequest`。普通交互回合物化 MESSAGE、CUSTOM_MESSAGE、ASSISTANT_ABORTED 与完成的压缩摘要；压缩回合生成专用的摘要 SYSTEM 与 USER 提示词，工具列表为空。
 
-`ToolInvocation` 维护工具调用的持久化事实：包含冻结的 `ToolCall` 调用参数、`ToolBinding` 规范、关联的 Assistant 节点 ID、`callIndex` 序号、审批状态、执行结果、副作用批次及错误描述。`ToolBinding` 封装了工具定义、插件归属（`ContributorBinding`）、环境依赖声明以及可选的具体执行环境绑定；当且仅当声明需要环境（`environmentRequired=true`）时，环境绑定字段必须非空。`CUSTOM` 节点载荷记录 `(contributorId, customType, schemaVersion, dataJson)`；`CUSTOM_MESSAGE` 节点载荷记录 `(contributorId, customType, rendererKey, message, detailsJson)`。状态流转如下：
+`ToolInvocation` 维护工具调用的持久化事实：包含冻结的 `ToolCall` 调用参数、`ToolBinding` 规范、关联的 Assistant 节点 ID、`callIndex` 序号、审批状态、执行结果、副作用批次及错误描述。`ToolBinding` 封装了工具定义、插件归属（`ContributorBinding`）、环境依赖声明（`environmentRequired`）以及可空的冻结环境路由身份（`environmentId`）；当且仅当声明需要环境（`environmentRequired=true`）时，`environmentId` 必须非空。`ModelRequestSpec` 要求所有环境绑定工具与 skill source 共享同一 `EnvironmentId`。`CUSTOM` 节点载荷记录 `(contributorId, customType, schemaVersion, dataJson)`；`CUSTOM_MESSAGE` 节点载荷记录 `(contributorId, customType, rendererKey, message, detailsJson)`。状态流转如下：
 
 ```text
 WAITING_APPROVAL -> READY -> DISPATCHING -> RUNNING
@@ -314,7 +314,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 主动停止机制（Stop）在 Thread 锁内校验所属线程、当前版本与客户端 `stopRequestId`；活跃回合闭合后，该幂等键写入 STOPPED `TURN_END` 的 `closeRequestId`，供后续精确重放。若当前处于 IDLE 状态，仅取消队列中排队的 Commands；若检测到活跃的模型或工具调用，系统写入已中止或错误屏障节点（aborted/error/cancelled barrier），闭合当前回合，清理关联的 Work 任务，并删除未完成的 Invocation 实体；在持久化事务成功提交后，系统才在当前 JVM 进程内调用 Processor 的本地取消，本地取消的成败不影响已持久化的终态。
 
 人工审批控制（Approval）由 `decideToolApproval` 驱动：仅在当前线程处于 `ToolActive` 且工具调用处于 `WAITING_APPROVAL` 时接收决策指令；决策通过（`ALLOWED`）时状态转为 READY 并安排 TOOL Work，决策拒绝（`DENIED`）时标记为 FAILED 并唤醒 THREAD Work；相同的决策标识与载荷作为幂等重放安全处理，不递增线程版本号。
-权限规则求值由 [`PermissionEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluator.java) 依据规则生成 Allow、Ask、Deny 候选结果。规则键支持全局通配符 `*` 或标准 `AgentToolId`，按全局规则到具体工具规则的顺序执行，数组声明顺序即为实际求值顺序；文件路径按单次调用的工作目录解析为相对路径后再进行规则匹配。真实文件系统边界、符号链接检查与进程隔离由 Environment Daemon 在执行入口落实。
+权限规则求值由 [`PermissionEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluator.java) 依据规则生成 Allow、Ask、Deny 候选结果。规则键支持全局通配符 `*` 或标准 `AgentToolId`，按全局规则到具体工具规则的顺序执行，数组声明顺序即为实际求值顺序；文件路径只按该次调用 `arguments.workdir` 词法解析为相对 POSIX 路径后再进行规则匹配，不读取 Backend 的 cwd 或 HOME，没有 `workdir` 语义的工具（如 `load_skill`、MCP）不会获得隐藏默认目录。真实文件系统边界、符号链接检查与进程隔离由 Environment Daemon 在执行入口落实。
 
 子智能体会话（Subagent Session）由内部工具 [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 驱动，直接复用标准运行时协议与存储表。创建时校验父级 ModelInvocation 冻结的子智能体绑定参数，调用 `HarnessRuntime.acceptCommands(NEW_SESSION, SubagentContext)` 创建标准的持久化子线程；恢复已有会话时要求同时属于当前父级与同一根线程，且子线程已处于静止状态。父级通过 `HarnessThreadChangeSource` 接收可能发生版本变化的唤醒信号，配合 [`ChangeGate`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ChangeGate.java) 合并并消费变化；并发槽位由 `SubagentRunRegistry` 动态管控，超出并发限制时直接拒绝发起。`maxTurns` 到期时追加软提醒，`idleTimeout` 到期时取消当前子执行并保留对应 Session，便于后续恢复。
 

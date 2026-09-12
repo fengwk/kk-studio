@@ -8,10 +8,11 @@ Usage:
 - Use `offset` and `limit` to read large files in chunks. Continue with subsequent chunks to cover new content; only read a wider window around a region when you need more local context.
 - When a file is central to the task, keep reading in chunks until you have covered the whole relevant file.
 - Use `read` on directories instead of `bash ls`.
+- Every call must include `workdir`. It must be an expanded absolute directory on the target daemon's file system; no call inherits a previous directory, session default, environment root, cwd, or home directory.
 
 Examples:
-- `read({ path: "src/example.ts", workdir: "packages/web" })`
-- `read({ path: "src/example.ts", workdir: "services/api", offset: 120, limit: 40 })`
-- `read({ path: "." })`
-- `read({ path: "src/" })`
+- `read({ path: "src/example.ts", workdir: "/srv/project/packages/web" })`
+- `read({ path: "src/example.ts", workdir: "/srv/project/services/api", offset: 120, limit: 40 })`
+- `read({ path: ".", workdir: "/srv/project" })`
+- `read({ path: "src/", workdir: "C:/src/project" })`
 - `read({ path: "screenshot.png", workdir: "/tmp/agent-artifacts" })`

@@ -43,7 +43,6 @@ import type {
   RuntimeThreadSummaryDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
-import { useEnvironmentWorkspaceMetadata } from '@/features/ai/environment/useEnvironmentWorkspaceMetadata'
 import {
   buildAcceptanceRequest,
   isDefiniteAcceptanceFailure,
@@ -73,7 +72,6 @@ import { parsePayload } from '@/features/ai/runtime/payload-json'
 
 export type PaneInteraction =
   | 'agent'
-  | 'environment'
   | 'shortcuts'
   | 'tree'
   | 'thread-sessions'
@@ -100,7 +98,6 @@ export interface RenameTarget {
 
 export interface AgentPaneDefaults {
   agentName?: string
-  workspacePath?: string | null
   yoloEnabled?: boolean
 }
 
@@ -204,7 +201,6 @@ export function useAgentPaneController({
           agent,
           defaults.yoloEnabled ?? false,
           models,
-          defaults.workspacePath,
         ) != null,
       )
     const materialized = preferred == null
@@ -213,12 +209,11 @@ export function useAgentPaneController({
         preferred,
         defaults.yoloEnabled ?? false,
         models,
-        defaults.workspacePath,
       )
     if (materialized != null) {
       setLocalDraft(materialized)
     }
-  }, [agents, defaults.agentName, defaults.workspacePath, defaults.yoloEnabled, localDraft, models, target])
+  }, [agents, defaults.agentName, defaults.yoloEnabled, localDraft, models, target])
 
   /**
    * Retain at most one inactive running Thread projection. The active Thread
@@ -756,9 +751,6 @@ export function useAgentPaneController({
       case 'agent':
         setInteraction('agent')
         return
-      case 'environment':
-        setInteraction('environment')
-        return
       case 'yolo':
         if (isBoundTarget(target)) {
           branchPanel.setYoloEnabled(!(branchPanel.draft?.yoloEnabled ?? false))
@@ -804,27 +796,15 @@ export function useAgentPaneController({
         return
       }
     } else {
-      const prevAgent = agents.find((item) => item.name === localDraft?.agentName)
       setLocalDraft((current) => materializeAgentBranchDraft(
         agent,
         models,
         current,
         defaults.yoloEnabled ?? false,
-        defaults.workspacePath ?? null,
-        prevAgent,
       ))
     }
     setInteraction(null)
     setActionError(null)
-  }
-
-  function selectWorkspacePath(workspacePath: string | null): void {
-    if (isBoundTarget(target)) {
-      branchPanel.selectWorkspacePath(workspacePath)
-    } else {
-      setLocalDraft((current) => current ? { ...current, workspacePath } : current)
-    }
-    setInteraction(null)
   }
 
   function selectEntry(entry: HarnessSessionEntryDTO): void {
@@ -910,16 +890,11 @@ export function useAgentPaneController({
       },
     },
   }
-  const workspacePath = activeDraft?.workspacePath ?? null
   const currentAgent = agents.find((item) => item.name === activeDraft?.agentName)
   const boundEnvironment = currentAgent?.environmentId
     ? environments.find((env) => env.id === currentAgent.environmentId) ?? null
     : null
   const environmentReady = boundEnvironment ? boundEnvironment.ready : undefined
-  const environmentBinding = boundEnvironment
-    ? { environmentId: boundEnvironment.id, workspacePath: workspacePath ?? '.' }
-    : null
-  const { gitBranch } = useEnvironmentWorkspaceMetadata(environmentBinding, environmentReady)
   const error = actionError
     ?? (isBoundTarget(target) ? branchPanel.yoloError ?? controller.actionError : null)
     ?? (isNewThreadTarget(target) && treeEntriesQuery.error
@@ -977,7 +952,6 @@ export function useAgentPaneController({
     retryAcceptance,
     abandonPendingAcceptance,
     selectAgent,
-    selectWorkspacePath,
     selectEntry,
     selectSession,
     selectThread,
@@ -992,9 +966,7 @@ export function useAgentPaneController({
     threadSelectionItem,
     buildBoundThreadTranscript,
     boundEnvironment,
-    workspacePath,
     environmentReady,
-    gitBranch,
   }
 }
 
@@ -1032,7 +1004,6 @@ function branchDraftFromEntry(
   const model = isRecord(settings.model) ? settings.model : null
   return {
     ...cloneDraft(fallback),
-    workspacePath: decodeWorkspacePath(settings.workspacePath, fallback.workspacePath),
     agentName: typeof settings.agentName === 'string' ? settings.agentName : fallback.agentName,
     model: {
       providerName: typeof model?.providerName === 'string'
@@ -1072,19 +1043,6 @@ function branchDraftFromEntryPath(
     draft = branchDraftFromEntry(entry, draft) ?? draft
   }
   return draft
-}
-
-function decodeWorkspacePath(
-  value: unknown,
-  fallback: string | null,
-): string | null {
-  if (value === null) {
-    return null
-  }
-  if (typeof value === 'string') {
-    return value
-  }
-  return fallback
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

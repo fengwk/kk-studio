@@ -49,7 +49,6 @@ export interface SystemSettingsAiRuntimeDTO {
 export interface SystemSettingsEnvironmentDTO {
   maxResourceBytes: DecimalLong
   heartbeatTimeoutMillis: DecimalLong
-  directoryListTimeoutMillis: DecimalLong
 }
 
 export interface ComfyuiIntegrationDTO {

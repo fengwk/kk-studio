@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.permission;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -9,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -65,20 +66,26 @@ class PermissionEvaluatorTest {
         evaluate(CUSTOM_EXEC, "{\"command\":\"npm install\"}", settings).action());
   }
 
-  /** path target 只产生到 effective workdir 的单一规范相对 POSIX 路径；`@` 前缀、绝对输入与 trailing slash hint 归一。 */
+  /**
+   * path target 是纯词法计算：只归一绝对输入、`\\` 分隔符、`.`/`..` 折叠与 trailing slash hint，不读取 Backend HOME 或文件系统，也不把
+   * UI 展示前缀解释成路径语法。
+   */
   @Test
-  void describesSingleEffectiveWorkdirRelativePathTarget() {
-    Path workdir = Path.of("/tmp/permission-environment/repo");
+  void describesSingleEffectiveWorkdirRelativePathTargetLexically() {
+    String workdir = "/tmp/permission-environment/repo";
 
     assertEquals(
         new PermissionEvaluator.PathTarget("src/Main.java", false),
         evaluator.describePathTarget("src/Main.java", workdir));
     assertEquals(
-        new PermissionEvaluator.PathTarget("src/Main.java", false),
+        new PermissionEvaluator.PathTarget("@src/Main.java", false),
         evaluator.describePathTarget("@src/Main.java", workdir));
     assertEquals(
         new PermissionEvaluator.PathTarget("src/Main.java", false),
         evaluator.describePathTarget("/tmp/permission-environment/repo/src/Main.java", workdir));
+    assertEquals(
+        new PermissionEvaluator.PathTarget("src/Main.java", false),
+        evaluator.describePathTarget("src/./sub/../Main.java", workdir));
     assertEquals(
         new PermissionEvaluator.PathTarget("docs", true),
         evaluator.describePathTarget("docs/", workdir));
@@ -88,12 +95,58 @@ class PermissionEvaluatorTest {
     assertEquals(
         new PermissionEvaluator.PathTarget("..", true),
         evaluator.describePathTarget("../", workdir));
+    // Windows 目标形态按自身 root 词法解析，不受 Backend OS 影响。
+    assertEquals(
+        new PermissionEvaluator.PathTarget("src/Main.java", false),
+        evaluator.describePathTarget("C:\\repo\\src\\Main.java", "c:/repo"));
+    // 跨 Windows root 保留 root-qualified 坐标；绝对 target 仍可按 Daemon 原生语义执行。
+    assertEquals(
+        new PermissionEvaluator.PathTarget("D:/other/a.txt", false),
+        evaluator.describePathTarget("D:\\other\\a.txt", "C:/repo"));
+    assertEquals(
+        new PermissionEvaluator.PathTarget("src/Main.java", false),
+        evaluator.describePathTarget(
+            "\\\\server\\share\\repo\\src\\Main.java", "//server/share/repo"));
+    assertEquals(
+        new PermissionEvaluator.PathTarget("//other/share/a.txt", false),
+        evaluator.describePathTarget("\\\\other\\share\\a.txt", "//server/share/repo"));
+    // Unix workdir 决定目标路径族：C:/ 是合法的字面相对 segment，多个前导 slash 仍是 Unix root。
+    assertEquals(
+        new PermissionEvaluator.PathTarget("C:/literal.txt", false),
+        evaluator.describePathTarget("C:/literal.txt", "/srv/repo"));
+    assertEquals(
+        new PermissionEvaluator.PathTarget("../../var/data.txt", false),
+        evaluator.describePathTarget("//var/data.txt", "/srv/repo"));
   }
 
-  /** 同一绝对 target 只按 effective workdir 计算规则坐标。 */
+  /** 跨 Windows root 的绝对 target 仍按 basename/root-qualified 规则评估，不得在审批前被当成非法路径。 */
+  @Test
+  void matchesCrossRootWindowsAbsoluteTarget() {
+    ToolSettings settings =
+        settings(
+            Map.of(
+                WRITE.value(),
+                List.of(
+                    new PermissionRule("*", PermissionAction.ASK),
+                    new PermissionRule("a.txt", PermissionAction.DENY))));
+
+    assertEquals(
+        PermissionAction.DENY,
+        evaluateRaw(WRITE, "{\"workdir\":\"C:/repo\",\"path\":\"D:/other/a.txt\"}", settings)
+            .action());
+    assertEquals(
+        PermissionAction.DENY,
+        evaluateRaw(
+                WRITE,
+                "{\"workdir\":\"//server/share/repo\",\"path\":\"//other/share/a.txt\"}",
+                settings)
+            .action());
+  }
+
+  /** 同一绝对 target 只按本次调用 explicit workdir 计算规则坐标。 */
   @Test
   void absoluteTargetMatchesOnlyEffectiveWorkdirRelativeRules() {
-    Path workdir = Path.of("/tmp/permission-environment/repo");
+    String workdir = "/tmp/permission-environment/repo";
     ToolSettings settings =
         settings(
             Map.of(
@@ -105,20 +158,21 @@ class PermissionEvaluatorTest {
 
     assertEquals(
         PermissionAction.ALLOW,
-        evaluateAtWorkdir(
+        evaluateRaw(
                 WRITE,
-                "{\"path\":\"/tmp/permission-environment/repo/src/Main.java\"}",
-                settings,
-                workdir)
+                "{\"workdir\":\""
+                    + workdir
+                    + "\",\"path\":\"/tmp/permission-environment/repo/src/Main.java\"}",
+                settings)
             .action());
-    // 工作目录为 /tmp/permission-environment 时，同一绝对路径的相对坐标是 repo/src/Main.java，规则按该基准命中。
+    // 对照：workdir 为父目录 /tmp/permission-environment 时，同一绝对路径的相对坐标是 repo/src/Main.java。
     assertEquals(
         PermissionAction.DENY,
         evaluate(WRITE, "{\"path\":\"/tmp/permission-environment/repo/src/Main.java\"}", settings)
             .action());
   }
 
-  /** 显式 workdir 决定 path 解析基准，generic Tool 使用单一 `*` 候选。 */
+  /** 显式 absolute workdir 决定 path 解析基准，generic Tool 使用单一 `*` 候选。 */
   @Test
   void matchesExplicitWorkdirAndGenericCandidate() {
     ToolSettings settings =
@@ -133,35 +187,76 @@ class PermissionEvaluatorTest {
 
     assertEquals(
         PermissionAction.ALLOW,
-        evaluate(WRITE, "{\"workdir\":\"repo\",\"path\":\"src/Main.java\"}", settings).action());
-    PermissionEvaluator.Evaluation atPrefixed =
-        evaluate(WRITE, "{\"workdir\":\"@repo\",\"path\":\"src/Main.java\"}", settings);
-    assertEquals(PermissionAction.ALLOW, atPrefixed.action());
-    assertEquals("repo", atPrefixed.promptPreview().workdir());
-    assertEquals(PermissionAction.DENY, evaluate(BROWSER, "{}", settings).action());
+        evaluateRaw(WRITE, "{\"workdir\":\"/srv/repo\",\"path\":\"src/Main.java\"}", settings)
+            .action());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            evaluateRaw(
+                WRITE, "{\"workdir\":\"@/srv/repo\",\"path\":\"src/Main.java\"}", settings));
+    assertEquals(PermissionAction.DENY, evaluateRaw(BROWSER, "{}", settings).action());
   }
 
-  /** `~`、`$HOME` 与 `${HOME}` 路径快捷方式在 effective workdir 解析前展开。 */
+  /** 不展开 `~`/`$HOME`/`${HOME}`：它们只是普通 relative segment，保持字面量，绝不作 Backend HOME 展开。 */
   @Test
-  void expandsSupportedHomeShortcuts() {
-    Path home = Path.of(System.getProperty("user.home"));
+  void neverExpandsHomeShortcuts() {
     ToolSettings settings =
         settings(
             Map.of(
-                WRITE.value(), List.of(new PermissionRule("secret.txt", PermissionAction.DENY))));
+                WRITE.value(),
+                List.of(
+                    new PermissionRule("*", PermissionAction.ASK),
+                    new PermissionRule("secret.txt", PermissionAction.DENY))));
 
+    // 非展开的确切证据：占位符作为字面 segment 保留在规则坐标里，而不是被替换为 /srv/workspace。
     assertEquals(
-        new PermissionEvaluator.PathTarget("secret.txt", false),
-        evaluator.describePathTarget("${HOME}/secret.txt", home));
-    assertEquals(
-        PermissionAction.DENY,
-        evaluateAtWorkdir(WRITE, "{\"path\":\"${HOME}/secret.txt\"}", settings, home).action());
-    assertEquals(
-        PermissionAction.DENY,
-        evaluateAtWorkdir(WRITE, "{\"path\":\"~/secret.txt\"}", settings, home).action());
+        new PermissionEvaluator.PathTarget("${HOME}/secret.txt", false),
+        evaluator.describePathTarget("${HOME}/secret.txt", "/srv/workspace"));
+    // 对照：真正叫 secret.txt 的相对 path 命中 basename 规则 DENY（gitignore 语义，与展开无关）。
     assertEquals(
         PermissionAction.DENY,
-        evaluateAtWorkdir(WRITE, "{\"path\":\"$HOME/secret.txt\"}", settings, home).action());
+        evaluateRaw(WRITE, "{\"workdir\":\"/srv/workspace\",\"path\":\"secret.txt\"}", settings)
+            .action());
+    assertEquals(
+        new PermissionEvaluator.PathTarget("~/secret.txt", false),
+        evaluator.describePathTarget("~/secret.txt", "/srv/workspace"));
+    assertEquals(
+        new PermissionEvaluator.PathTarget("$HOME/secret.txt", false),
+        evaluator.describePathTarget("$HOME/secret.txt", "/srv/workspace"));
+  }
+
+  /** 非编码工具即使恰有 path 参数也不需要 workdir；显式提供的非法 workdir 不会被修正或回退。 */
+  @Test
+  void doesNotInferWorkdirSemanticsFromGenericPathField() {
+    ToolSettings settings =
+        settings(
+            Map.of(
+                WRITE.value(),
+                List.of(new PermissionRule("*", PermissionAction.ASK)),
+                BROWSER.value(),
+                List.of(new PermissionRule("*", PermissionAction.ASK))));
+
+    PermissionEvaluator.Evaluation generic =
+        evaluateRaw(BROWSER, "{\"path\":\"remote/object\"}", settings);
+    assertEquals(PermissionAction.ASK, generic.action());
+    assertNull(generic.promptPreview().workdir());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> evaluateRaw(WRITE, "{\"workdir\":\" \",\"path\":\"src/Main.java\"}", settings));
+  }
+
+  /** 没有 path/command 的工具（例如 load_skill、MCP）preview 不带 workdir，也不做任何目录推断。 */
+  @Test
+  void previewOmitsWorkdirWhenInvocationHasNone() {
+    PermissionEvaluator.Evaluation evaluation =
+        evaluate(
+            BROWSER,
+            "{\"skill\":\"web-search\"}",
+            settings(
+                Map.of(BROWSER.value(), List.of(new PermissionRule("*", PermissionAction.ASK)))));
+
+    assertEquals(PermissionAction.ASK, evaluation.action());
+    assertNull(evaluation.promptPreview().workdir());
   }
 
   /**
@@ -212,14 +307,15 @@ class PermissionEvaluatorTest {
             settings(Map.of(BASH.value(), List.of(new PermissionRule("*", PermissionAction.ASK)))));
 
     assertEquals(PermissionAction.ASK, evaluation.action());
-    assertTrue(evaluation.promptPreview().workdir().endsWith("(default)"));
+    assertNull(evaluation.promptPreview().workdir());
     assertEquals(120, evaluation.promptPreview().arguments().length());
     assertTrue(evaluation.promptPreview().arguments().endsWith("..."));
+    // arguments preview 重新序列化为紧凑单行：输入中的空白不进入 preview。
     assertEquals(
-        "{\"path\":\"README.md\"}",
-        evaluate(
+        "{\"workdir\":\"/srv/repo\",\"path\":\"README.md\"}",
+        evaluateRaw(
                 WRITE,
-                " { \"path\" : \"README.md\" } ",
+                " { \"workdir\" : \"/srv/repo\" , \"path\" : \"README.md\" } ",
                 settings(
                     Map.of(WRITE.value(), List.of(new PermissionRule("*", PermissionAction.ASK)))))
             .promptPreview()
@@ -261,15 +357,22 @@ class PermissionEvaluatorTest {
                 new PermissionRule(deniedPattern, PermissionAction.DENY))));
   }
 
+  /** path 规则夹具：自动为 {@code {"path":...}} 形态注入固定 absolute workdir，让各用例只表达 pattern 关注点。 */
   private PermissionEvaluator.Evaluation evaluate(
       AgentToolId toolId, String arguments, ToolSettings settings) {
-    return evaluateAtWorkdir(toolId, arguments, settings, Path.of("/tmp/permission-environment"));
+    if (arguments.startsWith("{\"path\":")) {
+      return evaluateRaw(
+          toolId,
+          "{\"workdir\":\"/tmp/permission-environment\"," + arguments.substring(1),
+          settings);
+    }
+    return evaluateRaw(toolId, arguments, settings);
   }
 
-  private PermissionEvaluator.Evaluation evaluateAtWorkdir(
-      AgentToolId toolId, String arguments, ToolSettings settings, Path workdir) {
-    return evaluator.evaluate(
-        new PermissionEvaluationContext(toolId, arguments, workdir, settings));
+  /** 按原样评估：需要直接断言缺失/非法 workdir 的用例走这里。 */
+  private PermissionEvaluator.Evaluation evaluateRaw(
+      AgentToolId toolId, String arguments, ToolSettings settings) {
+    return evaluator.evaluate(new PermissionEvaluationContext(toolId, arguments, settings));
   }
 
   private static ToolSettings settings(Map<String, List<PermissionRule>> rules) {

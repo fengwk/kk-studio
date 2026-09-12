@@ -10,27 +10,27 @@ describe('tool display', () => {
   it('formats pi-style summaries for the built-in tool contracts', () => {
     const readSummary = formatToolCallSummary('read', JSON.stringify({
       path: '/app/file.ts',
-      workdir: 'src',
+      workdir: '/srv/project',
       offset: 2,
       limit: 20,
     }))
-    expect(readSummary.text).toBe('read /app/file.ts in src [offset=2 limit=20]')
+    expect(readSummary.text).toBe('read /app/file.ts in /srv/project [offset=2 limit=20]')
     expect(readSummary.coversArguments).toBe(true)
     expect(formatToolCallSummary('grep', JSON.stringify({
       pattern: 'needle',
       path: 'src',
-      workdir: 'repo',
+      workdir: '/srv/project',
       include: '**/*.ts',
       ignore_case: true,
       limit: 12,
     })).text).toBe(
-      'grep "needle" in src from repo [include=**/*.ts ignore_case limit=12]',
+      'grep "needle" in src from /srv/project [include=**/*.ts ignore_case limit=12]',
     )
     expect(formatToolCallSummary('bash', JSON.stringify({
       command: 'npm test',
-      workdir: 'frontend',
+      workdir: '/srv/project/frontend',
       timeout_seconds: 30,
-    })).text).toBe('bash npm test in frontend [timeout_seconds=30]')
+    })).text).toBe('bash npm test in /srv/project/frontend [timeout_seconds=30]')
     expect(formatToolCallSummary('task', JSON.stringify({
       subagent_type: 'explorer',
       session_id: 'child-1',
@@ -39,9 +39,12 @@ describe('tool display', () => {
     })).text).toBe('task explorer [session_id=child-1 maxTurns=12]')
     expect(formatToolCallSummary('lsp_goto_definition', JSON.stringify({
       path: 'src/App.java',
+      workdir: '/srv/project',
       line: 42,
       character: 7,
-    })).text).toBe('lsp_goto_definition src/App.java [line=42 character=7]')
+    })).text).toBe(
+      'lsp_goto_definition src/App.java in /srv/project [line=42 character=7]',
+    )
   })
 
   it('falls back to a compact name + JSON summary without hiding long header content', () => {
@@ -133,9 +136,9 @@ describe('tool display', () => {
   it('formats write/edit summaries with option flags and workdir suffixes', () => {
     expect(formatToolCallSummary('write', JSON.stringify({
       path: 'App.java',
-      workdir: 'src',
+      workdir: '/srv/project/src',
       content: 'class App {}',
-    })).text).toBe('write App.java in src')
+    })).text).toBe('write App.java in /srv/project/src')
     // replace_all=true 渲染为旗标；false/缺省不出现。
     expect(formatToolCallSummary('edit', JSON.stringify({
       path: 'App.java',
@@ -190,19 +193,27 @@ describe('tool display', () => {
   it('formats lsp and load_skill summaries', () => {
     expect(formatToolCallSummary('lsp_workspace_symbols', JSON.stringify({
       path: 'src/App.java',
+      workdir: '/srv/project',
       query: 'UserService',
       limit: 20,
-    })).text).toBe('lsp_workspace_symbols src/App.java "UserService" [limit=20]')
+    })).text).toBe(
+      'lsp_workspace_symbols src/App.java in /srv/project "UserService" [limit=20]',
+    )
     expect(formatToolCallSummary('lsp_workspace_symbols', JSON.stringify({
       path: 'src',
-    })).text).toBe('lsp_workspace_symbols src')
+      workdir: '/srv/project',
+    })).text).toBe('lsp_workspace_symbols src in /srv/project')
     expect(formatToolCallSummary('lsp_java_decompile', JSON.stringify({
       path: 'src/App.java',
+      workdir: '/srv/project',
       target: 'String (Class) - jdt://contents',
-    })).text).toBe('lsp_java_decompile src/App.java "String (Class) - jdt://contents"')
+    })).text).toBe(
+      'lsp_java_decompile src/App.java in /srv/project "String (Class) - jdt://contents"',
+    )
     expect(formatToolCallSummary('lsp_java_decompile', JSON.stringify({
       path: 'src/App.java',
-    })).text).toBe('lsp_java_decompile src/App.java')
+      workdir: '/srv/project',
+    })).text).toBe('lsp_java_decompile src/App.java in /srv/project')
     expect(formatToolCallSummary('load_skill', JSON.stringify({ name: 'dev' })).text)
       .toBe('load_skill dev')
     // name 缺失时回退为原始 JSON 文本（{} 是合法解析结果）。

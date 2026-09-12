@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.environment.server;
 
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.CALL_ONE;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.CALL_TWO;
-import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.ENVIRONMENT;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.ENVIRONMENT_ID;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.OTHER_ENVIRONMENT_ID;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.OTHER_TOKEN;
@@ -20,7 +19,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
@@ -40,7 +38,6 @@ import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTes
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.Fixture;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.RecordingListener;
 
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -70,8 +67,8 @@ class EnvironmentDaemonServerTest {
 
     RecordingListener first = new RecordingListener();
     RecordingListener second = new RecordingListener();
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), first);
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_TWO), second);
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), first);
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), second);
 
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.INVOKE),
@@ -104,13 +101,13 @@ class EnvironmentDaemonServerTest {
   void duplicateActiveInvocationIdIsRejectedWithoutSecondSend() {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-duplicate-id");
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), new RecordingListener());
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
             fixture.server.invoke(
-                ENVIRONMENT, capabilityRequest(CALL_ONE), new RecordingListener()));
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
   }
@@ -130,14 +127,14 @@ class EnvironmentDaemonServerTest {
           @Override
           public void onComplete(EnvironmentCapabilityResult result) {
             if (reentered.compareAndSet(false, true)) {
-              fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_TWO), nested);
+              fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), nested);
             }
           }
 
           @Override
           public void onError(Throwable error) {}
         };
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), listener);
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
     fixture.receive(
         channel,
@@ -158,7 +155,7 @@ class EnvironmentDaemonServerTest {
     CountDownLatch entered = new CountDownLatch(1);
     AtomicBoolean readyInsideCallback = new AtomicBoolean();
     fixture.server.invoke(
-        ENVIRONMENT,
+        ENVIRONMENT_ID,
         capabilityRequest(CALL_ONE),
         new EnvironmentCapabilityExecutionListener() {
           @Override
@@ -191,7 +188,7 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-partials");
     RecordingListener listener = new RecordingListener();
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), listener);
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
     fixture.receive(
         channel,
@@ -231,7 +228,7 @@ class EnvironmentDaemonServerTest {
         EnvironmentCapabilitySendUncertainException.class,
         () ->
             rejected.server.invoke(
-                ENVIRONMENT, capabilityRequest(CALL_ONE), new RecordingListener()));
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
     assertTrue(rejectedChannel.closed());
     assertFalse(rejected.server.isReady(ENVIRONMENT_ID));
 
@@ -242,12 +239,12 @@ class EnvironmentDaemonServerTest {
         EnvironmentCapabilitySendUncertainException.class,
         () ->
             thrown.server.invoke(
-                ENVIRONMENT, capabilityRequest(CALL_ONE), new RecordingListener()));
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
     assertTrue(thrownChannel.closed());
 
     // 未成功登记的 invocation 不得残留：新代际可以复用同一 invocationId。
     FakeChannel retried = rejected.reconnectReady("channel-reject-retry");
-    rejected.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), new RecordingListener());
+    rejected.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), retried.messageTypes());
   }
@@ -262,7 +259,7 @@ class EnvironmentDaemonServerTest {
     FakeChannel channel = fixture.connectReady("channel-terminal-once");
     RecordingListener listener = new RecordingListener();
     EnvironmentCapabilityExecutionHandle handle =
-        fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), listener);
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
     fixture.receive(
         channel, DaemonMessageType.FAILED, CALL_ONE.toString(), 2, "{\"message\":\"boom\"}");
@@ -291,7 +288,7 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-cancelled");
     RecordingListener listener = new RecordingListener();
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), listener);
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
     fixture.receive(
         channel, DaemonMessageType.CANCELLED, CALL_ONE.toString(), 2, "{\"reason\":\"stop\"}");
@@ -306,7 +303,7 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-started");
     RecordingListener listener = new RecordingListener();
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), listener);
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
     fixture.receive(channel, DaemonMessageType.STARTED, CALL_ONE.toString(), 2, "{}");
     fixture.receive(
@@ -328,7 +325,7 @@ class EnvironmentDaemonServerTest {
     FakeChannel channel = fixture.connectReady("channel-expire");
     RecordingListener listener = new RecordingListener();
     EnvironmentCapabilityExecutionHandle handle =
-        fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), listener);
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
     fixture.server.expire(handle);
     fixture.server.expire(handle);
@@ -374,7 +371,7 @@ class EnvironmentDaemonServerTest {
     FakeChannel channel = fixture.connectReady("channel-cancel-idempotent");
     RecordingListener listener = new RecordingListener();
     EnvironmentCapabilityExecutionHandle handle =
-        fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), listener);
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
     handle.cancel();
     handle.cancel();
@@ -404,8 +401,8 @@ class EnvironmentDaemonServerTest {
     FakeChannel channel = fixture.connectReady("channel-close");
     RecordingListener first = new RecordingListener();
     RecordingListener second = new RecordingListener();
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), first);
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_TWO), second);
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), first);
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), second);
 
     fixture.server.close(channel.connectionId());
     fixture.server.close(channel.connectionId());
@@ -425,7 +422,7 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     FakeChannel first = fixture.connectReady("channel-same-id");
     RecordingListener listener = new RecordingListener();
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), listener);
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
     FakeChannel second = fixture.connectReady("channel-same-id");
 
@@ -441,7 +438,7 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     FakeChannel first = fixture.connectReady("channel-first");
     RecordingListener firstListener = new RecordingListener();
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), firstListener);
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), firstListener);
 
     // 旧持有者被判定为已失效（例如租约过期后同一环境重新 HELLO）。
     FakeChannel second = fixture.reconnectReady("channel-second");
@@ -497,7 +494,7 @@ class EnvironmentDaemonServerTest {
         EnvironmentCapabilityUnavailableException.class,
         () ->
             fixture.server.invoke(
-                ENVIRONMENT, capabilityRequest(CALL_ONE), new RecordingListener()));
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
     assertEquals(afterHello, channel.envelopes().size());
 
     fixture.receiveReady(channel);
@@ -506,7 +503,7 @@ class EnvironmentDaemonServerTest {
         EnvironmentCapabilityUnavailableException.class,
         () ->
             fixture.server.invoke(
-                ENVIRONMENT, capabilityRequest(CALL_ONE), new RecordingListener()));
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
     assertEquals(afterHello, channel.envelopes().size());
   }
 
@@ -521,7 +518,7 @@ class EnvironmentDaemonServerTest {
         EnvironmentCapabilityUnavailableException.class,
         () ->
             fixture.server.invoke(
-                ENVIRONMENT, capabilityRequest(CALL_ONE), new RecordingListener()));
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
     assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
   }
 
@@ -535,9 +532,7 @@ class EnvironmentDaemonServerTest {
         EnvironmentCapabilityUnavailableException.class,
         () ->
             fixture.server.invoke(
-                new EnvironmentBinding(OTHER_ENVIRONMENT_ID, "."),
-                capabilityRequest(CALL_ONE),
-                new RecordingListener()));
+                OTHER_ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
 
     EnvironmentCapabilityDescriptor drifted =
         new EnvironmentCapabilityDescriptor(
@@ -549,31 +544,75 @@ class EnvironmentDaemonServerTest {
         IllegalArgumentException.class,
         () ->
             fixture.server.invoke(
-                ENVIRONMENT, requestWithDescriptor(drifted, CALL_ONE), new RecordingListener()));
+                ENVIRONMENT_ID, requestWithDescriptor(drifted, CALL_ONE), new RecordingListener()));
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
             fixture.server.invoke(
-                ENVIRONMENT,
-                new EnvironmentCapabilityExecutionRequest(
-                    descriptor(),
-                    new EnvironmentCapabilityCall(CALL_ONE.toString(), "{\"path\":\"README.md\"}"),
-                    Duration.ofSeconds(5),
-                    Path.of("/abs/path")),
-                new RecordingListener()));
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            fixture.server.invoke(
-                ENVIRONMENT,
+                ENVIRONMENT_ID,
                 new EnvironmentCapabilityExecutionRequest(
                     descriptor(),
                     new EnvironmentCapabilityCall("not-a-uuid", "{\"path\":\"README.md\"}"),
-                    Duration.ofSeconds(5),
-                    null),
+                    Duration.ofSeconds(5)),
                 new RecordingListener()));
+  }
+
+  /**
+   * 测试意图：coding 能力的 workdir 在 frame send 前按该连接 READY 中冻结的 OS 做词法校验——缺失、相对与跨 OS 形态都拒绝且不产生 INVOKE 帧；而
+   * skill.load 不要求 workdir，照常发送。
+   */
+  @Test
+  void validatesWorkdirAgainstReadyOperatingSystemBeforeFrameSend() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-workdir-validation");
+
+    // 缺失 workdir / 相对 workdir / Windows drive 形态（该连接冻结的是 LINUX）都在发送前拒绝。
+    // 注意 `/srv/../repo` 仍是形状合法的 Unix 绝对路径：词法校验不折叠 `..`，越界事实由 Daemon 自身 Path 与 permission 处理。
+    String[] rejectedArguments = {
+      "{\"path\":\"README.md\"}",
+      "{\"workdir\":\"relative/dir\",\"path\":\"README.md\"}",
+      "{\"workdir\":\"C:\\\\repo\",\"path\":\"README.md\"}",
+      "{\"workdir\":\" /srv/repo\",\"path\":\"README.md\"}"
+    };
+    for (String arguments : rejectedArguments) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.server.invoke(
+                  ENVIRONMENT_ID, requestWith(arguments, CALL_ONE), new RecordingListener()),
+          "必须在发送前拒绝: " + arguments);
+    }
+    // 全部被拒：通道上除了 WELCOME 没有任何 INVOKE 帧。
+    assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
+
+    // 显式绝对 workdir 通过校验并真正产生 INVOKE 帧。
+    fixture.server.invoke(
+        ENVIRONMENT_ID,
+        requestWith("{\"workdir\":\"/srv/repo\",\"path\":\"README.md\"}", CALL_ONE),
+        new RecordingListener());
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
+  }
+
+  /** 测试意图：skill.load 不属于 workdir 能力，缺少 workdir 也必须照常发送 INVOKE。 */
+  @Test
+  void skillLoadDoesNotRequireWorkdir() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-skill-load");
+    EnvironmentCapabilityDescriptor skillLoad =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_LOAD);
+
+    fixture.server.invoke(
+        ENVIRONMENT_ID,
+        new EnvironmentCapabilityExecutionRequest(
+            skillLoad,
+            new EnvironmentCapabilityCall(CALL_ONE.toString(), "{\"name\":\"dev\"}"),
+            Duration.ofSeconds(5)),
+        new RecordingListener());
+
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
   }
 
   /** 测试意图：并发 HELLO 抢占同一环境时只有一个连接获得 WELCOME，另一个以 RETRY_LATER 关闭。 */
@@ -593,7 +632,7 @@ class EnvironmentDaemonServerTest {
     assertTrue(first.isOpen());
 
     // 旧持有者必须仍然可服务调用。
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), new RecordingListener());
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), first.messageTypes());
   }
@@ -874,7 +913,7 @@ class EnvironmentDaemonServerTest {
     Fixture otherConnection = new Fixture();
     FakeChannel owner = otherConnection.connectReady("channel-owner");
     otherConnection.server.invoke(
-        ENVIRONMENT, capabilityRequest(CALL_ONE), new RecordingListener());
+        ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
 
     // 同一 Environment 的另一个连接代际不得冒领该 invocation 的回调。
     FakeChannel impostor = otherConnection.reconnectReady("channel-impostor");
@@ -928,11 +967,8 @@ class EnvironmentDaemonServerTest {
 
     RecordingListener firstListener = new RecordingListener();
     RecordingListener secondListener = new RecordingListener();
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), firstListener);
-    fixture.server.invoke(
-        new EnvironmentBinding(OTHER_ENVIRONMENT_ID, "."),
-        capabilityRequest(CALL_TWO),
-        secondListener);
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), firstListener);
+    fixture.server.invoke(OTHER_ENVIRONMENT_ID, capabilityRequest(CALL_TWO), secondListener);
 
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), first.messageTypes());
@@ -1009,7 +1045,7 @@ class EnvironmentDaemonServerTest {
   void settingsAreReadOnEveryDecision() {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-settings");
-    fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), new RecordingListener());
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
     fixture.receive(
         channel,
         DaemonMessageType.COMPLETED,
@@ -1067,12 +1103,9 @@ class EnvironmentDaemonServerTest {
         IllegalArgumentException.class,
         () ->
             fixture.server.invoke(
-                ENVIRONMENT,
+                ENVIRONMENT_ID,
                 new EnvironmentCapabilityExecutionRequest(
-                    descriptor(),
-                    new EnvironmentCapabilityCall("  ", "{}"),
-                    Duration.ofSeconds(5),
-                    null),
+                    descriptor(), new EnvironmentCapabilityCall("  ", "{}"), Duration.ofSeconds(5)),
                 new RecordingListener()));
     assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
 
@@ -1092,10 +1125,10 @@ class EnvironmentDaemonServerTest {
         () -> fixture.server.invoke(null, capabilityRequest(CALL_ONE), new RecordingListener()));
     assertThrows(
         NullPointerException.class,
-        () -> fixture.server.invoke(ENVIRONMENT, null, new RecordingListener()));
+        () -> fixture.server.invoke(ENVIRONMENT_ID, null, new RecordingListener()));
     assertThrows(
         NullPointerException.class,
-        () -> fixture.server.invoke(ENVIRONMENT, capabilityRequest(CALL_ONE), null));
+        () -> fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), null));
   }
 
   /** 测试意图：首帧不是 HELLO 的连接必须以协议错误关闭，且不推进任何会话状态。 */
@@ -1149,12 +1182,19 @@ class EnvironmentDaemonServerTest {
     return EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ);
   }
 
+  /** 以给定 arguments 构造 fs.read 请求；arguments 原样进入执行请求，用于断言发送前 workdir 校验。 */
+  private static EnvironmentCapabilityExecutionRequest requestWith(String arguments, UUID callId) {
+    return new EnvironmentCapabilityExecutionRequest(
+        descriptor(),
+        new EnvironmentCapabilityCall(callId.toString(), arguments),
+        Duration.ofSeconds(5));
+  }
+
   private static EnvironmentCapabilityExecutionRequest requestWithDescriptor(
       EnvironmentCapabilityDescriptor descriptor, UUID callId) {
     return new EnvironmentCapabilityExecutionRequest(
         descriptor,
         new EnvironmentCapabilityCall(callId.toString(), "{\"path\":\"README.md\"}"),
-        Duration.ofSeconds(5),
-        null);
+        Duration.ofSeconds(5));
   }
 }

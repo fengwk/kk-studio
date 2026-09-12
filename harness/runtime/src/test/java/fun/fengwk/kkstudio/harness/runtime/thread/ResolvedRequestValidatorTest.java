@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
@@ -51,13 +50,11 @@ import java.util.UUID;
 /** 直接校验 Resolver 结果与 candidate path 的机械契约，覆盖正常 turn、压缩 turn 和环境边界。 */
 class ResolvedRequestValidatorTest {
   private static final BranchSettings SETTINGS =
-      new BranchSettings("projects/web", "agent", new ModelSelection("provider", "model", "v1"));
-  private static final EnvironmentBinding ENV_BINDING =
-      new EnvironmentBinding(
-          EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), "projects/web");
-  private static final EnvironmentBinding OTHER_BINDING =
-      new EnvironmentBinding(
-          EnvironmentId.parse("22222222-2222-2222-2222-222222222222"), "other/repo");
+      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
+  private static final EnvironmentId ENV_BINDING =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+  private static final EnvironmentId OTHER_ENVIRONMENT_ID =
+      EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
   private static final UUID SESSION_ID = new UUID(0L, 1L);
   private static final UUID THREAD_ID = new UUID(0L, 2L);
   private static final UUID ROOT_ENTRY_ID = new UUID(0L, 3L);
@@ -204,61 +201,21 @@ class ResolvedRequestValidatorTest {
   }
 
   @Test
-  void checksEnvironmentRoutesIncludingNullTransitions() {
-    // 校验 environment-required 工具的 environment 与 branch environment 的一致性。
-    assertRouteMismatch(SETTINGS, environmentTool(OTHER_BINDING));
-
-    BranchSettings unbound = SETTINGS.withWorkspacePath(null);
-    assertRouteMismatch(unbound, environmentTool(ENV_BINDING));
-  }
-
-  @Test
-  void rejectsSkillWhoseSourceRouteDiffersFromCandidateEnvironment() {
-    SkillBinding skill = new SkillBinding("dev", "developer rules", OTHER_BINDING);
-
-    // skill source environment 也必须与 branch environment 完全一致。
-    IllegalStateException error =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                ResolvedRequestValidator.validate(
-                    normalPath(SETTINGS),
-                    null,
-                    resolved(
-                        normalSpec(
-                            SETTINGS,
-                            List.of(),
-                            List.of(skill),
-                            List.of(),
-                            ProviderCacheControl.none()))));
-    assertEquals(
-        "resolved skill source environment="
-            + OTHER_BINDING
-            + " does not match candidate branch environment=projects/web",
-        error.getMessage());
-  }
-
-  private static void assertRouteMismatch(BranchSettings settings, ToolBinding tool) {
-    IllegalStateException error =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                ResolvedRequestValidator.validate(
-                    normalPath(settings),
-                    null,
-                    resolved(
-                        normalSpec(
-                            settings,
-                            List.of(tool),
-                            List.of(),
-                            List.of(),
-                            ProviderCacheControl.none()))));
-    assertEquals(
-        "resolved tool environment="
-            + tool.environment()
-            + " does not match candidate branch environment="
-            + settings.workspacePath(),
-        error.getMessage());
+  void acceptsAnyEnvironmentIdBecauseBranchSettingsCarryNoDirectory() {
+    // branch 只冻结 agent/model；environment 选择由 Agent definition 每轮解析，因此不同 environmentId 的
+    // tool/skill 与该 branch 都不构成 Resolved 契约冲突。
+    assertDoesNotThrow(
+        () ->
+            ResolvedRequestValidator.validate(
+                normalPath(SETTINGS),
+                null,
+                resolved(
+                    normalSpec(
+                        SETTINGS,
+                        List.of(environmentTool(OTHER_ENVIRONMENT_ID)),
+                        List.of(new SkillBinding("dev", "developer rules", OTHER_ENVIRONMENT_ID)),
+                        List.of(),
+                        ProviderCacheControl.none()))));
   }
 
   private static void assertCompactionRejects(
@@ -384,7 +341,7 @@ class ResolvedRequestValidatorTest {
         cacheControl);
   }
 
-  private static ToolBinding environmentTool(EnvironmentBinding environment) {
+  private static ToolBinding environmentTool(EnvironmentId environment) {
     return new ToolBinding(
         toolDefinition("test.fs"),
         new ContributorBinding("base", "fs", List.of()),

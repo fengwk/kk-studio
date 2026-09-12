@@ -171,9 +171,8 @@ public class DatabaseSubagentRunner implements SubagentRunner {
             sourceHeadEntryId = child.thread().headEntryId();
           } else {
             child = resumeChild(runtime, parent, resumeThreadId);
-            BranchSettings target =
-                settingsMaterializer.materialize(
-                    selected.name(), child.entryPath().baseSettings().workspacePath());
+            // 恢复既有子会话只物化自身 Agent/Model；不重新注入父目录。
+            BranchSettings target = settingsMaterializer.materialize(selected.name());
             List<NewThreadCommand> commands =
                 taskCommands(child.entryPath().baseSettings(), target, taskRequest.prompt());
             sourceHeadEntryId = child.thread().headEntryId();
@@ -454,9 +453,8 @@ public class DatabaseSubagentRunner implements SubagentRunner {
       String prompt,
       UUID taskInvocationId) {
     int childDepth = parent.depth() + 1;
-    BranchSettings settings =
-        settingsMaterializer.materialize(
-            subagentType, parent.snapshot().entryPath().baseSettings().workspacePath());
+    // 新建子会话不继承父目录：目录由每次工具调用显式提供。
+    BranchSettings settings = settingsMaterializer.materialize(subagentType);
     try {
       AcceptedCommands accepted =
           runtime.acceptCommands(

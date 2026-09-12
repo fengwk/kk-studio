@@ -241,14 +241,6 @@ public class SystemSettingsSchemaProvider {
                         FieldType.LONG,
                         false,
                         1,
-                        null),
-                    field(
-                        "environment.directoryListTimeoutMillis",
-                        "settings.field.environment.directoryListTimeoutMillis",
-                        null,
-                        FieldType.LONG,
-                        false,
-                        1,
                         null))),
             section(
                 "integrations",

@@ -5,8 +5,7 @@ public enum ThreadCommandType {
   USER_MESSAGE,
   CUSTOM_MESSAGE,
   SET_AGENT,
-  SET_MODEL,
-  SET_ENVIRONMENT;
+  SET_MODEL;
 
   /** 该 command 是否贡献一条会话消息。 */
   public boolean isMessage() {

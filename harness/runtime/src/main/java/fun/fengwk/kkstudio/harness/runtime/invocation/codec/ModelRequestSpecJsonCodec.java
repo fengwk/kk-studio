@@ -124,19 +124,18 @@ public final class ModelRequestSpecJsonCodec {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.put("name", skill.name());
     node.put("description", skill.description());
-    InvocationJsonSupport.putNullable(node, "sourceEnvironment", skill.sourceEnvironment());
+    InvocationJsonSupport.putNullable(node, "sourceEnvironmentId", skill.sourceEnvironmentId());
     return node;
   }
 
   private static SkillBinding decodeSkill(JsonNode value) {
     ObjectNode node = InvocationJsonSupport.object(value, "skillBinding");
     InvocationJsonSupport.requireFields(
-        node, "skillBinding", "name", "description", "sourceEnvironment");
+        node, "skillBinding", "name", "description", "sourceEnvironmentId");
     return new SkillBinding(
         InvocationJsonSupport.text(node, "name", "skillBinding"),
         InvocationJsonSupport.text(node, "description", "skillBinding"),
-        InvocationJsonSupport.nullableEnvironmentBinding(
-            node, "sourceEnvironment", "skillBinding"));
+        InvocationJsonSupport.nullableEnvironmentId(node, "sourceEnvironmentId", "skillBinding"));
   }
 
   private static ObjectNode encodeSubagent(SubagentBinding subagent) {

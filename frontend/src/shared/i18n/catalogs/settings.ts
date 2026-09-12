@@ -479,16 +479,16 @@ export const settingsCatalog = {
     'zh-CN': '运行预算',
   },
   'settings.section.environment.runtime.description': {
-    'en-US': 'Heartbeat, directory listing and resource limits. Applies to the next check or request.',
-    'zh-CN': '心跳、目录列出与资源上限；对下一次判定或请求立即生效。',
+    'en-US': 'Heartbeat and resource limits. Applies to the next check or request.',
+    'zh-CN': '心跳与资源上限；对下一次判定或请求立即生效。',
   },
   'settings.field.environment.maxResourceBytes': {
     'en-US': 'Max resource bytes',
     'zh-CN': '最大资源字节数',
   },
   'settings.field.environment.maxResourceBytes.hint': {
-    'en-US': 'Maximum storage in bytes allowed for a single environment workspace. New resource writes are rejected beyond this limit.',
-    'zh-CN': '单个 Environment 环境工作区允许占用的最大资源字节数。超出限制时将拒绝写入新资源。',
+    'en-US': 'Maximum bytes allowed for a single Environment resource. Larger resource writes are rejected.',
+    'zh-CN': '单个 Environment 资源允许的最大字节数。超出限制时将拒绝写入。',
   },
   'settings.field.environment.heartbeatTimeoutMillis': {
     'en-US': 'Heartbeat timeout (ms)',
@@ -498,15 +498,6 @@ export const settingsCatalog = {
     'en-US': 'Heartbeat timeout in milliseconds for runtime environments. Environments without heartbeats past this duration are marked disconnected.',
     'zh-CN': 'Environment 运行时的心跳超时毫秒数。超过该时间未收到心跳将被标记为失联。',
   },
-  'settings.field.environment.directoryListTimeoutMillis': {
-    'en-US': 'Directory list timeout (ms)',
-    'zh-CN': '目录列出超时（毫秒）',
-  },
-  'settings.field.environment.directoryListTimeoutMillis.hint': {
-    'en-US': 'Timeout in milliseconds for directory listing operations within an environment.',
-    'zh-CN': '在 Environment 环境中遍历或列出目录文件时的超时毫秒数。',
-  },
-
   // --- Integrations ---
   'settings.section.integrations.description': {
     'en-US': 'Non-sensitive runtime parameters for external media and generation integrations.',

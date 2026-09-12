@@ -554,7 +554,6 @@ accepted = json_call(
         thread_id=thread_id,
         command_id=new_id(),
         marker=marker,
-        workspace_path=None,
     ),
 )
 thread = accepted["thread"]

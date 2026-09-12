@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSourc
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
-import fun.fengwk.kkstudio.platform.environment.query.EnvironmentQueryCoordinator;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -67,7 +66,6 @@ public class ApplicationEventConfiguration {
       CanvasVersionHub canvasVersionHub,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
       PostgresqlRealtimeEventSource realtimeEventSource,
-      EnvironmentQueryCoordinator environmentQueryCoordinator,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new PostgresqlNotificationLoop(
@@ -101,17 +99,7 @@ public class ApplicationEventConfiguration {
             new PostgresqlNotificationHandler(
                 PostgresqlRealtimeEventSource.CHANNEL,
                 realtimeEventSource::onNotification,
-                realtimeEventSource::onResync),
-            // 7. 跨节点目录请求：向目标环境所属节点发送目录查询信箱请求
-            new PostgresqlNotificationHandler(
-                EnvironmentQueryCoordinator.REQUEST_CHANNEL,
-                environmentQueryCoordinator::onRequestNotification,
-                environmentQueryCoordinator::onResync),
-            // 8. 跨节点目录响应：目标环境所属节点执行完成目录查询后发出响应，发起方收到后原子领取结果
-            new PostgresqlNotificationHandler(
-                EnvironmentQueryCoordinator.RESPONSE_CHANNEL,
-                environmentQueryCoordinator::onResponseNotification,
-                environmentQueryCoordinator::onResync)),
+                realtimeEventSource::onResync)),
         Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
         Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
   }

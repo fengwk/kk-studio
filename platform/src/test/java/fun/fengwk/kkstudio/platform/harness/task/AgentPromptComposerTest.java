@@ -4,17 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
-import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
+import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
 
 import java.time.Duration;
 import java.time.LocalDate;
@@ -71,11 +69,9 @@ class AgentPromptComposerTest {
   /** Environment、skill 与 subagent 动态值在进入 XML 模板前全部转义。 */
   @Test
   void escapesXmlInDynamicValues() {
-    EnvironmentBinding binding = mock(EnvironmentBinding.class);
-    when(binding.workspacePath()).thenReturn("sub/<&\"'");
     CurrentEnvironmentContext environment =
         new CurrentEnvironmentContext(
-            binding,
+            TestEnvironments.environmentId("env-1"),
             DaemonOperatingSystem.WSL,
             LocalDate.of(2026, 8, 9),
             "Use <mount> & \"commands\" from 'Windows'.");
@@ -87,7 +83,6 @@ class AgentPromptComposerTest {
             List.of(skill("a&b", "uses <angle> and \"quotes\" and 'apos'")),
             List.of(new SubagentBinding("x<y>", "desc & more")));
 
-    assertTrue(result.contains("- workspace: sub/&lt;&amp;&quot;&apos;"), result);
     assertTrue(
         result.contains(
             "- note: Use &lt;mount&gt; &amp; &quot;commands&quot; from &apos;Windows&apos;."),
@@ -156,16 +151,18 @@ class AgentPromptComposerTest {
   /** Agent 正文只替换 date/workspace/cwd；未知或未闭合占位符原文保留，不把 shell 示例打成规划失败。 */
   @Test
   void rendersDeclaredAgentBodyVariablesOnly() {
+    // ${workspace}/${cwd} 已不再是可替换变量：它们必须与其它未知占位符一样保持原文。
     String withBoth = "Today is ${date} in ${workspace}.";
     String bodyOnly = "No placeholders here.";
     String dateOnly = "Today is ${date}.";
     String mixed = "cwd=${cwd} keep ${JAVA_HOME} and ${unterminated";
-    EnvironmentBinding binding = TestEnvironmentBindings.binding("env");
+    EnvironmentId binding = TestEnvironments.environmentId("env");
     CurrentEnvironmentContext selected =
         new CurrentEnvironmentContext(binding, null, LocalDate.of(2026, 8, 9), null);
 
     String rendered = composer.compose(withBoth, selected, List.of(), List.of());
-    assertTrue(rendered.startsWith("Today is 2026-08-09 in ."), rendered);
+    assertTrue(rendered.startsWith("Today is 2026-08-09 in ${workspace}."), rendered);
+    assertFalse(rendered.contains(".${workspace}"), rendered);
 
     String unselectedDate = composer.compose(dateOnly, none(), List.of(), List.of());
     assertTrue(unselectedDate.startsWith("Today is 2026-08-09."), unselectedDate);
@@ -175,7 +172,7 @@ class AgentPromptComposerTest {
 
     String renderedMixed = composer.compose(mixed, selected, List.of(), List.of());
     assertTrue(
-        renderedMixed.startsWith("cwd=. keep ${JAVA_HOME} and ${unterminated"), renderedMixed);
+        renderedMixed.startsWith("cwd=${cwd} keep ${JAVA_HOME} and ${unterminated"), renderedMixed);
   }
 
   /** skills/subagents 列表不可为空引用。 */

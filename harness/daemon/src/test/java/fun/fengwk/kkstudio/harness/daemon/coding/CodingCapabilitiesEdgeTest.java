@@ -58,11 +58,17 @@ class CodingCapabilitiesEdgeTest {
       write(config()), edit(config()), bash(config()), grep(config()), find(config())
     };
     String[] wrong = {
-      "{\"path\":\"x\",\"content\":1}",
-      "{\"path\":\"x\",\"old_string\":\"a\",\"new_string\":\"b\",\"replace_all\":\"yes\"}",
+      "{\"path\":\"x\",\"content\":1,\"workdir\":\"" + environmentRoot + "\"}",
+      "{\"path\":\"x\",\"old_string\":\"a\",\"new_string\":\"b\",\"replace_all\":\"yes\",\"workdir\":\""
+          + environmentRoot
+          + "\"}",
       "{\"command\":\"echo x\",\"workdir\":1}",
-      "{\"pattern\":\"x\",\"path\":\".\",\"limit\":\"one\"}",
-      "{\"pattern\":\"*\",\"path\":\".\",\"timeout_seconds\":false}"
+      "{\"pattern\":\"x\",\"path\":\".\",\"limit\":\"one\",\"workdir\":\""
+          + environmentRoot
+          + "\"}",
+      "{\"pattern\":\"*\",\"path\":\".\",\"timeout_seconds\":false,\"workdir\":\""
+          + environmentRoot
+          + "\"}"
     };
     for (int index = 0; index < capabilities.length; index++) {
       EnvironmentCapability capability = capabilities[index];
@@ -73,16 +79,14 @@ class CodingCapabilitiesEdgeTest {
               new EnvironmentCapabilityExecutionRequest(
                   capability.descriptor(),
                   new EnvironmentCapabilityCall("invalid", arguments),
-                  Duration.ZERO,
-                  environmentRoot));
+                  Duration.ZERO));
       assertThrows(
           IllegalArgumentException.class,
           () ->
               new EnvironmentCapabilityExecutionRequest(
                   capability.descriptor(),
                   new EnvironmentCapabilityCall("unknown", "{\"unknown\":true}"),
-                  Duration.ZERO,
-                  environmentRoot));
+                  Duration.ZERO));
     }
   }
 
@@ -145,7 +149,9 @@ class CodingCapabilitiesEdgeTest {
             return success(request.call().id(), "unexpected");
           }
         };
-    RecordingListener listener = invokeAsync(blocking, "{\"path\":\"x\"}", Duration.ZERO);
+    RecordingListener listener =
+        invokeAsync(
+            blocking, "{\"path\":\"x\",\"workdir\":\"" + environmentRoot + "\"}", Duration.ZERO);
     assertTrue(started.await(5, TimeUnit.SECONDS));
 
     listener.handle.cancel();
@@ -158,60 +164,85 @@ class CodingCapabilitiesEdgeTest {
     EnvironmentCapabilityExecutionRequest wrong =
         new EnvironmentCapabilityExecutionRequest(
             EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC),
-            new EnvironmentCapabilityCall("wrong", "{\"command\":\"true\"}"),
-            Duration.ofSeconds(1),
-            environmentRoot);
+            new EnvironmentCapabilityCall(
+                "wrong", "{\"command\":\"true\",\"workdir\":\"" + environmentRoot + "\"}"),
+            Duration.ofSeconds(1));
     assertThrows(IllegalArgumentException.class, () -> blocking.execute(wrong, listener));
   }
 
-  /** 缺省 cwd 只校验可用性；绝对路径与越出 workdir 的相对路径不再受任何 root 范围限制。 */
+  /** workdir 校验必须绝对且现存；path 保持字面值，绝对路径与越出 workdir 的相对路径不受 root 范围限制。 */
   @Test
-  void environmentPathsResolveDefaultCwdAndAcceptExternalPaths() throws Exception {
+  void environmentPathsUseExplicitWorkdirAndAcceptExternalPaths() throws Exception {
     Path nested = Files.createDirectories(environmentRoot.resolve("nested"));
     Files.writeString(nested.resolve("file.txt"), "x");
+    Files.writeString(nested.resolve("@file.txt"), "x");
     Files.writeString(externalRoot.resolve("external.txt"), "x");
     Path externalFile = externalRoot.resolve("external.txt");
     String traversal = environmentRoot.relativize(externalFile).toString();
 
-    assertEquals(nested.toRealPath(), EnvironmentPaths.workdir("@nested", environmentRoot));
+    assertEquals(nested.toRealPath(), EnvironmentPaths.workdir(nested.toRealPath().toString()));
     assertEquals(
-        nested.resolve("file.txt").toRealPath(), EnvironmentPaths.existing("@file.txt", nested));
+        nested.resolve("@file.txt").toRealPath(),
+        EnvironmentPaths.existing("@file.txt", nested.toRealPath()));
     assertEquals(
-        nested.resolve("future/file.txt"), EnvironmentPaths.writable("future/file.txt", nested));
-    assertEquals(environmentRoot.toRealPath(), EnvironmentPaths.workdir(null, environmentRoot));
-    assertEquals(
-        nested.resolve("file.txt").toRealPath(), EnvironmentPaths.writable("file.txt", nested));
+        nested.resolve("future/file.txt"),
+        EnvironmentPaths.writable("future/file.txt", nested.toRealPath()));
     assertEquals(
         nested.resolve("file.txt").toRealPath(),
-        EnvironmentPaths.existing(nested.resolve("file.txt").toString(), environmentRoot));
-
-    // 绝对路径与 ../ 遍历都是普通路径：workdir 只提供缺省解析基准。
+        EnvironmentPaths.writable("file.txt", nested.toRealPath()));
     assertEquals(
-        externalRoot.toRealPath(),
-        EnvironmentPaths.workdir(externalRoot.toString(), environmentRoot));
-    assertEquals(externalFile.toRealPath(), EnvironmentPaths.existing(traversal, environmentRoot));
+        nested.resolve("file.txt").toRealPath(),
+        EnvironmentPaths.existing(
+            nested.resolve("file.txt").toString(), environmentRoot.toRealPath()));
+
+    // 绝对路径与 ../ 遍历都是普通路径：workdir 只提供相对路径的解析基准。
+    assertEquals(
+        externalRoot.toRealPath(), EnvironmentPaths.workdir(externalRoot.toRealPath().toString()));
     assertEquals(
         externalFile.toRealPath(),
-        EnvironmentPaths.existing(externalFile.toRealPath().toString(), nested));
+        EnvironmentPaths.existing(traversal, environmentRoot.toRealPath()));
+    assertEquals(
+        externalFile.toRealPath(),
+        EnvironmentPaths.existing(externalFile.toRealPath().toString(), nested.toRealPath()));
     assertEquals(
         externalRoot.toRealPath().resolve("external.txt.new"),
-        EnvironmentPaths.writable(traversal + ".new", environmentRoot));
+        EnvironmentPaths.writable(traversal + ".new", environmentRoot.toRealPath()));
+
+    IllegalArgumentException nullError =
+        assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.workdir(null));
+    assertTrue(
+        nullError.getMessage().contains("workdir must be a non-blank absolute directory path"));
+
+    IllegalArgumentException relativeError =
+        assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.workdir("missing"));
+    assertTrue(relativeError.getMessage().contains("workdir must be an absolute path"));
+
+    IllegalArgumentException fileError =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> EnvironmentPaths.workdir(nested.resolve("file.txt").toRealPath().toString()));
+    assertTrue(fileError.getMessage().contains("workdir must be an existing directory"));
+
+    IllegalArgumentException missingDirError =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> EnvironmentPaths.workdir(environmentRoot.resolve("missing").toString()));
+    assertTrue(missingDirError.getMessage().contains("workdir must be an existing directory"));
 
     assertThrows(
-        IllegalArgumentException.class, () -> EnvironmentPaths.workdir("missing", environmentRoot));
+        IllegalArgumentException.class, () -> EnvironmentPaths.existing("", nested.toRealPath()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> EnvironmentPaths.workdir("file.txt", environmentRoot));
-    assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.existing("", nested));
-    assertThrows(
-        IllegalArgumentException.class, () -> EnvironmentPaths.existing("missing", nested));
+        () -> EnvironmentPaths.existing("missing", nested.toRealPath()));
     assertThrows(NullPointerException.class, () -> EnvironmentPaths.existing("file.txt", null));
-    assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.existing("\u0000", nested));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> EnvironmentPaths.existing("\u0000", nested.toRealPath()));
     Path dangling = environmentRoot.resolve("dangling");
     Files.createSymbolicLink(dangling, environmentRoot.resolve("not-created"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> EnvironmentPaths.existing("dangling", environmentRoot));
+        () -> EnvironmentPaths.existing("dangling", environmentRoot.toRealPath()));
   }
 
   @Test
@@ -292,7 +323,10 @@ class CodingCapabilitiesEdgeTest {
         environmentRoot.resolve("utf16.txt"),
         TextFileCodec.encode("alpha\nbeta\n", StandardCharsets.UTF_16LE, 2));
 
-    EnvironmentCapabilityResult result = invoke(read(config()), "{\"path\":\"utf16.txt\"}");
+    EnvironmentCapabilityResult result =
+        invoke(
+            read(config()),
+            "{\"path\":\"utf16.txt\",\"workdir\":" + json(environmentRoot.toString()) + "}");
 
     assertFalse(result.error());
     assertTrue(text(result).contains("1|alpha"));
@@ -304,7 +338,6 @@ class CodingCapabilitiesEdgeTest {
   void configSystemPropertiesAndValidationCoverStandaloneStartupInputs() throws Exception {
     String[] names = {
       "kkstudio.daemon.environment-root",
-      "kkstudio.daemon.default-workdir",
       "kkstudio.daemon.resource-directory",
       "kkstudio.daemon.max-resource-bytes",
       "kkstudio.daemon.bash"
@@ -316,10 +349,9 @@ class CodingCapabilitiesEdgeTest {
     }
     try {
       System.setProperty(names[0], customRoot.toString());
-      System.setProperty(names[1], customRoot.toString());
-      System.setProperty(names[2], environmentRoot.resolve("local-resources").toString());
-      System.setProperty(names[3], "4");
-      System.setProperty(names[4], "custom-bash");
+      System.setProperty(names[1], environmentRoot.resolve("local-resources").toString());
+      System.setProperty(names[2], "4");
+      System.setProperty(names[3], "custom-bash");
       CodingToolsConfig properties = CodingToolsConfig.fromSystemProperties(environmentRoot);
       assertEquals(environmentRoot.toRealPath(), properties.environmentRoot());
       assertEquals("custom-bash", properties.bashExecutable());
@@ -328,11 +360,11 @@ class CodingCapabilitiesEdgeTest {
       assertThrows(
           IllegalArgumentException.class,
           () -> properties.resourceStore().store(new byte[] {1, 2, 3, 4, 5}, "text/plain"));
-      System.setProperty(names[3], "0");
+      System.setProperty(names[2], "0");
       assertThrows(
           IllegalArgumentException.class,
           () -> CodingToolsConfig.fromSystemProperties(environmentRoot));
-      System.setProperty(names[3], "not-a-number");
+      System.setProperty(names[2], "not-a-number");
       assertThrows(
           IllegalArgumentException.class,
           () -> CodingToolsConfig.fromSystemProperties(environmentRoot));
@@ -366,20 +398,42 @@ class CodingCapabilitiesEdgeTest {
     WriteCapability write = write(config());
     EditCapability edit = edit(config());
     EnvironmentCapabilityResult created =
-        invoke(write, "{\"path\":\"new/created.txt\",\"content\":\"one\"}");
+        invoke(
+            write,
+            "{\"path\":\"new/created.txt\",\"content\":\"one\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     EnvironmentCapabilityResult unchanged =
         invoke(
-            edit, "{\"path\":\"new/created.txt\",\"old_string\":\"one\",\"new_string\":\"one\"}");
+            edit,
+            "{\"path\":\"new/created.txt\",\"old_string\":\"one\",\"new_string\":\"one\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     EnvironmentCapabilityResult absent =
         invoke(
-            edit, "{\"path\":\"new/created.txt\",\"old_string\":\"zero\",\"new_string\":\"two\"}");
+            edit,
+            "{\"path\":\"new/created.txt\",\"old_string\":\"zero\",\"new_string\":\"two\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     Files.write(environmentRoot.resolve("binary.txt"), new byte[] {0, 1});
     EnvironmentCapabilityResult binary =
-        invoke(edit, "{\"path\":\"binary.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}");
+        invoke(
+            edit,
+            "{\"path\":\"binary.txt\",\"old_string\":\"a\",\"new_string\":\"b\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     EnvironmentCapabilityResult empty =
-        invoke(edit, "{\"path\":\"new/created.txt\",\"old_string\":\"\",\"new_string\":\"b\"}");
+        invoke(
+            edit,
+            "{\"path\":\"new/created.txt\",\"old_string\":\"\",\"new_string\":\"b\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     EnvironmentCapabilityResult directory =
-        invoke(edit, "{\"path\":\"new\",\"old_string\":\"a\",\"new_string\":\"b\"}");
+        invoke(
+            edit,
+            "{\"path\":\"new\",\"old_string\":\"a\",\"new_string\":\"b\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
 
     assertFalse(created.error());
     assertEquals("one", Files.readString(environmentRoot.resolve("new/created.txt")));
@@ -396,9 +450,18 @@ class CodingCapabilitiesEdgeTest {
         bash(
             new CodingToolsConfig(
                 environmentRoot, 10, 100, "missing-bash", new InMemoryResourceStore()));
-    assertTrue(text(invoke(missing, "{\"command\":\"echo x\"}")).contains("missing-bash"));
+    assertTrue(
+        text(invoke(
+                missing,
+                "{\"command\":\"echo x\",\"workdir\":" + json(environmentRoot.toString()) + "}"))
+            .contains("missing-bash"));
     BashCapability bash = bash(config());
-    EnvironmentCapabilityResult nonZero = invoke(bash, "{\"command\":\"echo failure; exit 7\"}");
+    EnvironmentCapabilityResult nonZero =
+        invoke(
+            bash,
+            "{\"command\":\"echo failure; exit 7\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
     assertTrue(nonZero.error());
     assertTrue(text(nonZero).contains("Command exited with code 7"));
   }
@@ -421,7 +484,9 @@ class CodingCapabilitiesEdgeTest {
     RecordingListener listener =
         invokeAsync(
             bash(config()),
-            "{\"command\":\"printf '\\\\360\\\\237'; sleep 0.05; printf '\\\\230\\\\200'\"}",
+            "{\"command\":\"printf '\\\\360\\\\237'; sleep 0.05; printf '\\\\230\\\\200'\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
             Duration.ofSeconds(2));
 
     assertTrue(listener.await());
@@ -477,12 +542,13 @@ class CodingCapabilitiesEdgeTest {
     listener.handle =
         capability.execute(
             new EnvironmentCapabilityExecutionRequest(
-                capability.descriptor(),
-                new EnvironmentCapabilityCall("edge", arguments),
-                timeout,
-                environmentRoot),
+                capability.descriptor(), new EnvironmentCapabilityCall("edge", arguments), timeout),
             listener);
     return listener;
+  }
+
+  private static String json(String value) throws Exception {
+    return AbstractCodingCapability.OBJECT_MAPPER.writeValueAsString(value);
   }
 
   private static String text(EnvironmentCapabilityResult result) {

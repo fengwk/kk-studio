@@ -30,10 +30,8 @@ public final class LspWorkspaceSymbolsCapability extends AbstractCodingCapabilit
   EnvironmentCapabilityResult run(
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    Path path =
-        EnvironmentPaths.existing(
-            string(args, "path"),
-            EnvironmentPaths.workdir(optionalString(args, "workdir"), request.workdir()));
+    Path workdir = EnvironmentPaths.workdir(string(args, "workdir"));
+    Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
     String query = string(args, "query");
     if (query.isBlank()) {
       throw new IllegalArgumentException("query must not be blank");
@@ -48,6 +46,6 @@ public final class LspWorkspaceSymbolsCapability extends AbstractCodingCapabilit
     if (!bridge.bridgeAvailable()) {
       throw new IllegalStateException(LspBridge.UNAVAILABLE_MESSAGE);
     }
-    return success(request.call().id(), bridge.workspaceSymbols(path, query, limit));
+    return success(request.call().id(), bridge.workspaceSymbols(workdir, path, query, limit));
   }
 }

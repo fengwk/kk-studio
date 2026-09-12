@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -58,7 +57,6 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("USER_MESSAGE", command.getType());
     assertEquals("00000000-0000-0000-0000-000000000001", command.getIdempotencyKey());
     assertTrue(command.hasContentsField());
-    assertFalse(command.hasWorkspacePathField());
   }
 
   @Test
@@ -182,5 +180,20 @@ class HarnessRuntimeDtoContractTest {
 
     assertTrue(snapshot.getManualCompaction().getAvailable());
     assertNull(snapshot.getManualCompaction().getDisabledReason());
+  }
+
+  @Test
+  void toolInvocationDtoExposesFlatEnvironmentId() throws Exception {
+    Field environmentId = ToolInvocationDTO.class.getDeclaredField("environmentId");
+    assertEquals(String.class, environmentId.getType());
+    assertThrows(
+        NoSuchFieldException.class, () -> ToolInvocationDTO.class.getDeclaredField("environment"));
+  }
+
+  @Test
+  void branchSettingsDtoDoesNotExposeWorkspacePath() {
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessBranchSettingsDTO.class.getDeclaredField("workspacePath"));
   }
 }

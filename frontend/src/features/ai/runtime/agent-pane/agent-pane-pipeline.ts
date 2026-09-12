@@ -59,7 +59,6 @@ export function createThreadId(): string {
 
 export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsDTO {
   return {
-    workspacePath: draft.workspacePath,
     agentName: draft.agentName,
     model: { ...draft.model },
   }

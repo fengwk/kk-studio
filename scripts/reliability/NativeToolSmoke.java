@@ -29,6 +29,10 @@ final class NativeToolSmoke {
     Path root = Files.createTempDirectory(Path.of("/workspace"), ".native-tool-smoke-");
     ExecutorService executor = Executors.newCachedThreadPool();
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    Path workdir = root.toRealPath();
+    if (!workdir.isAbsolute()) {
+      throw new AssertionError("smoke workdir must be absolute: " + workdir);
+    }
     try {
       seed(root);
       CodingToolsConfig config =
@@ -42,8 +46,7 @@ final class NativeToolSmoke {
       EnvironmentCapabilityResult recursive =
           invoke(
               new FindCapability(config, executor),
-              "{\"pattern\":\"**/*.ts\",\"path\":\".\"}",
-              root);
+              "{\"pattern\":\"**/*.ts\",\"path\":\".\",\"workdir\":\"" + workdir + "\"}");
       check(
           text(recursive).equals("src/a.ts\nsrc/nested/b.ts"),
           "recursive double-star find mismatch: " + text(recursive));
@@ -51,8 +54,7 @@ final class NativeToolSmoke {
       EnvironmentCapabilityResult slashPattern =
           invoke(
               new FindCapability(config, executor),
-              "{\"pattern\":\"src/*.ts\",\"path\":\".\"}",
-              root);
+              "{\"pattern\":\"src/*.ts\",\"path\":\".\",\"workdir\":\"" + workdir + "\"}");
       check(
           text(slashPattern).equals("src/a.ts"),
           "slash-containing find must remain segment-aware: " + text(slashPattern));
@@ -60,14 +62,15 @@ final class NativeToolSmoke {
       EnvironmentCapabilityResult escapedClass =
           invoke(
               new FindCapability(config, executor),
-              "{\"pattern\":\"[\\\\d].txt\",\"path\":\".\"}",
-              root);
+              "{\"pattern\":\"[\\\\d].txt\",\"path\":\".\",\"workdir\":\"" + workdir + "\"}");
       check(
           text(escapedClass).equals("d.txt"),
           "escaped glob character-class literal mismatch: " + text(escapedClass));
 
       EnvironmentCapabilityResult ignored =
-          invoke(new FindCapability(config, executor), "{\"pattern\":\"*\",\"path\":\".\"}", root);
+          invoke(
+              new FindCapability(config, executor),
+              "{\"pattern\":\"*\",\"path\":\".\",\"workdir\":\"" + workdir + "\"}");
       check(!text(ignored).contains("ignored.txt"), "root .gitignore file leaked");
       check(!text(ignored).contains("ignored-dir/hidden.ts"), "ignored directory leaked");
       check(!text(ignored).contains(".git/config"), ".git metadata leaked");
@@ -77,8 +80,9 @@ final class NativeToolSmoke {
       EnvironmentCapabilityResult grep =
           invoke(
               new GrepCapability(config, executor),
-              "{\"pattern\":\"firstKeptEntryId\",\"path\":\".\",\"include\":\"**/*.ts\"}",
-              root);
+              "{\"pattern\":\"firstKeptEntryId\",\"path\":\".\",\"include\":\"**/*.ts\",\"workdir\":\""
+                  + workdir
+                  + "\"}");
       check(
           text(grep).equals("src/a.ts:1:const firstKeptEntryId = 7;"),
           "grep path/line projection mismatch: " + text(grep));
@@ -86,30 +90,33 @@ final class NativeToolSmoke {
       EnvironmentCapabilityResult multiline =
           invoke(
               new GrepCapability(config, executor),
-              "{\"pattern\":\"alpha\\nbeta\",\"path\":\"multi.txt\",\"multiline\":true}",
-              root);
+              "{\"pattern\":\"alpha\\nbeta\",\"path\":\"multi.txt\",\"multiline\":true,\"workdir\":\""
+                  + workdir
+                  + "\"}");
       check(
           text(multiline).equals("multi.txt:1:alpha\nmulti.txt:2:beta"),
           "multiline grep mismatch: " + text(multiline));
 
       EnvironmentCapabilityResult invalid =
-          invoke(new GrepCapability(config, executor), "{\"pattern\":\"[\",\"path\":\".\"}", root);
+          invoke(
+              new GrepCapability(config, executor),
+              "{\"pattern\":\"[\",\"path\":\".\",\"workdir\":\"" + workdir + "\"}");
       check(invalid.error(), "invalid regex must be an error");
       check(text(invalid).contains("Invalid regex"), "invalid regex error must be explicit");
 
       EnvironmentCapabilityResult binary =
           invoke(
               new GrepCapability(config, executor),
-              "{\"pattern\":\"x\",\"path\":\"binary.bin\"}",
-              root);
+              "{\"pattern\":\"x\",\"path\":\"binary.bin\",\"workdir\":\"" + workdir + "\"}");
       check(binary.error(), "direct binary grep must be an error");
       check(text(binary).contains("binary"), "direct binary grep error must identify binary input");
 
       EnvironmentCapabilityResult ansi =
           invoke(
               new BashCapability(config, executor, scheduler),
-              "{\"command\":\"printf '\\\\033[32mpassed\\\\033[0m\\\\n'\"}",
-              root);
+              "{\"command\":\"printf '\\\\033[32mpassed\\\\033[0m\\\\n'\",\"workdir\":\""
+                  + workdir
+                  + "\"}");
       check(text(ansi).contains("passed"), "ANSI bash output must remain readable");
       check(
           ansi.contents().stream().noneMatch(ResourceResultContent.class::isInstance),
@@ -147,15 +154,14 @@ final class NativeToolSmoke {
   }
 
   private static EnvironmentCapabilityResult invoke(
-      EnvironmentCapability capability, String arguments, Path workdir) throws Exception {
+      EnvironmentCapability capability, String arguments) throws Exception {
     RecordingListener listener = new RecordingListener();
     capability.execute(
         new EnvironmentCapabilityExecutionRequest(
             capability.descriptor(),
             new EnvironmentCapabilityCall(
                 "smoke-" + capability.descriptor().id().value(), arguments),
-            Duration.ofSeconds(15),
-            workdir),
+            Duration.ofSeconds(15)),
         listener);
     if (!listener.completed.await(20, TimeUnit.SECONDS)) {
       throw new AssertionError(capability.descriptor().id() + " did not complete");

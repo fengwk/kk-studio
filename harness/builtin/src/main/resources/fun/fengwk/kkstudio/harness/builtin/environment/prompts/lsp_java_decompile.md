@@ -7,7 +7,8 @@ Usage:
 - `path` is required and should be a file path inside the target Java project/workspace, usually the file you are currently working from; it selects the relevant Java workspace.
 - Prefer the sequence `lsp_workspace_symbols` or `lsp_goto_definition` -> `lsp_java_decompile` for third-party Java classes; this is the most efficient path for inspecting JAR-provided sources.
 - Use this only for Java external definitions; for local source files, prefer `read` or `lsp_goto_definition` directly.
+- Every call must include `workdir`. It must be an expanded absolute directory on the target daemon's file system; no call inherits a previous directory, session default, environment root, cwd, or home directory.
 
 Examples:
-- `lsp_java_decompile({ path: "src/main/java/com/acme/App.java", workdir: "services/java", target: "jdt://contents/java.base/java/lang/String.class?..." })`
-- `lsp_java_decompile({ path: "src/main/java/com/acme/App.java", target: "String (Class) - jdt://contents/java.base/java/lang/String.class?..." })`
+- `lsp_java_decompile({ path: "src/main/java/com/acme/App.java", workdir: "/srv/project/services/java", target: "jdt://contents/java.base/java/lang/String.class?..." })`
+- `lsp_java_decompile({ path: "src/main/java/com/acme/App.java", workdir: "C:/src/project", target: "String (Class) - jdt://contents/java.base/java/lang/String.class?..." })`

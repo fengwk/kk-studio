@@ -59,10 +59,8 @@ public final class HarnessOneShotService {
     this.changeSource = Objects.requireNonNull(changeSource, "changeSource");
   }
 
-  public UUID submit(
-      String agentName, String workspacePath, String systemMessage, AgentMessage userMessage) {
-    return submit(
-        agentName, workspacePath, systemMessage, userMessage, AcceptancePreflight.IDENTITY);
+  public UUID submit(String agentName, String systemMessage, AgentMessage userMessage) {
+    return submit(agentName, systemMessage, userMessage, AcceptancePreflight.IDENTITY);
   }
 
   /**
@@ -73,7 +71,6 @@ public final class HarnessOneShotService {
    */
   public UUID submit(
       String agentName,
-      String workspacePath,
       String systemMessage,
       AgentMessage userMessage,
       AcceptancePreflight preflight) {
@@ -83,7 +80,7 @@ public final class HarnessOneShotService {
       throw new IllegalArgumentException("one-shot userMessage must use USER role");
     }
     HarnessRuntime runtime = requireRuntime();
-    var settings = settingsMaterializer.materialize(agentName, workspacePath);
+    var settings = settingsMaterializer.materialize(agentName);
     CustomMessageCommandPayload systemPayload =
         new CustomMessageCommandPayload(AgentMessage.system(systemMessage));
     CustomMessageCommandPayload userPayload = new CustomMessageCommandPayload(userMessage);

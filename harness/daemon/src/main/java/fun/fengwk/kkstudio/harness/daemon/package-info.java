@@ -9,6 +9,6 @@
  *
  * <p>{@link fun.fengwk.kkstudio.harness.daemon.DaemonRuntime} 统辖双 executor 资源（单线程 scheduler
  * 负责心跳、重连与超时； virtual-thread-per-task executor 负责阻塞执行）、连接 generation 隔离与重试退避，并在运行时冻结 Capability
- * 注册表； {@link fun.fengwk.kkstudio.harness.daemon.InvocationRequestNormalizer} 强制执行工作区真实路径解析与超时规约。
+ * 注册表；coding/process/LSP Capability 从各自 arguments 读取显式 workdir，并在实际执行前校验目标机上的真实目录与超时规约。
  */
 package fun.fengwk.kkstudio.harness.daemon;

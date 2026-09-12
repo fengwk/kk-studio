@@ -43,7 +43,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceStore;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -88,7 +87,6 @@ public final class DaemonRuntime implements AutoCloseable {
   private final ScheduledExecutorService scheduler;
   private final ExecutorService taskExecutor;
   private final ResourceStore resourceStore;
-  private final InvocationRequestNormalizer normalizer;
   private final DaemonEnvironmentInfo environmentInfo;
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
@@ -227,8 +225,6 @@ public final class DaemonRuntime implements AutoCloseable {
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.taskExecutor = Objects.requireNonNull(taskExecutor, "taskExecutor");
     this.resourceStore = resourceStore;
-    this.normalizer =
-        new InvocationRequestNormalizer(config.environmentRoot(), config.defaultToolTimeout());
     DaemonOperatingSystem operatingSystem = DaemonOperatingSystemDetector.detectCurrent();
     this.environmentInfo =
         new DaemonEnvironmentInfo(
@@ -597,9 +593,6 @@ public final class DaemonRuntime implements AutoCloseable {
     }
 
     try {
-      // workspace 必须在发送 STARTED / 执行工具之前 canonicalize 为 Environment Root 内现存目录；
-      // 形状非法、symlink 越界、路径删除或非目录都是确定性 FAILED，绝不产生 STARTED。
-      Path workdir = normalizer.canonicalWorkspace(payload.workspacePath());
       EnvironmentCapability capability =
           capabilityRegistry
               .find(payload.capabilityId())
@@ -613,13 +606,12 @@ public final class DaemonRuntime implements AutoCloseable {
             "capabilityVersion does not match environment descriptor: "
                 + payload.capabilityVersion());
       }
-      Duration timeout = normalizer.resolveTimeout(payload.timeout(), descriptor);
+      Duration timeout = resolveTimeout(payload.timeout(), descriptor);
       EnvironmentCapabilityExecutionRequest request =
           new EnvironmentCapabilityExecutionRequest(
               descriptor,
               new EnvironmentCapabilityCall(envelope.invocationId(), payload.argumentsJson()),
-              timeout,
-              workdir);
+              timeout);
       RunningInvocation invocation = new RunningInvocation(envelope.invocationId());
       running.put(envelope.invocationId(), invocation);
       if (!started.get() || !isRunning(envelope.invocationId()) || !invocation.begin()) {
@@ -632,7 +624,7 @@ public final class DaemonRuntime implements AutoCloseable {
         }
         return;
       }
-      // 仅当工作区、能力元数据与运行时预检全部通过后才发出 STARTED。
+      // 仅当调用参数、能力元数据与运行时预检全部通过后才发出 STARTED。
       sendOn(connection, DaemonMessageType.STARTED, envelope.invocationId(), "{}");
       EnvironmentCapabilityExecutionHandle handle =
           capability.execute(request, new InvocationListener(invocation));
@@ -786,6 +778,17 @@ public final class DaemonRuntime implements AutoCloseable {
     return "{\"message\":" + quote(safeFailureMessage(error)) + "}";
   }
 
+  /** 按 requested -> descriptor -> daemon default 三层规则解析有效执行超时。 */
+  private Duration resolveTimeout(
+      Duration requestedTimeout, EnvironmentCapabilityDescriptor descriptor) {
+    Objects.requireNonNull(requestedTimeout, "requestedTimeout");
+    Objects.requireNonNull(descriptor, "descriptor");
+    if (!requestedTimeout.isZero()) {
+      return requestedTimeout;
+    }
+    return descriptor.timeout().isZero() ? config.defaultToolTimeout() : descriptor.timeout();
+  }
+
   private static String safeFailureMessage(Throwable error) {
     if (error == null) {
       return FALLBACK_FAILURE_MESSAGE;
@@ -810,7 +813,6 @@ public final class DaemonRuntime implements AutoCloseable {
     return new InvokePayload(
         request.capabilityId(),
         request.capabilityVersion(),
-        request.workspacePath(),
         request.argumentsJson(),
         request.timeout());
   }
@@ -1003,7 +1005,6 @@ public final class DaemonRuntime implements AutoCloseable {
   private record InvokePayload(
       EnvironmentCapabilityId capabilityId,
       String capabilityVersion,
-      String workspacePath,
       String argumentsJson,
       Duration timeout) {}
 

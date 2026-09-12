@@ -914,8 +914,8 @@ async function main(argv) {
   })
 
   await run(
-    'ui.chat.create_environment_workspace',
-    'Create Chat 通过 Agent 绑定的单一 Environment Card 选择并确认 workspacePath',
+    'ui.chat.create_agent_bound_environment',
+    'Create Chat 仅通过 Agent 绑定 Environment，Chat 不携带任何 workspace 字段',
     async (caseArt) => {
       const title = `e2e-ui-create-env-${stamp}`
       const tempAgentName = `e2e-ui-agent-${stamp}`
@@ -934,7 +934,7 @@ async function main(argv) {
         `daemon Environment Card id must be canonical UUID (got '${card.id}')`,
       )
 
-      // 2. 创建临时 Agent 并绑定其 environmentId
+      // 2. 创建临时 Agent 并绑定其 environmentId（Environment 归属 Agent，不归属 Chat）
       const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/ai/catalog/agents', {
         name: tempAgentName,
         description: `Temporary e2e agent for ${args.daemonEnv}`,
@@ -948,46 +948,55 @@ async function main(argv) {
         agentCreateRes.status === 201,
         `failed to create temporary agent '${tempAgentName}' (expected 201, got ${agentCreateRes.status}): ${JSON.stringify(agentCreateRes.json)}`,
       )
+      assert(
+        agentCreateRes.json?.data?.environmentId === card.id,
+        `temporary agent did not bind the Environment: ${JSON.stringify(agentCreateRes.json)}`,
+      )
 
       try {
         await goto('/chats')
         await page.getByText('新建 Chat', { exact: true }).click()
+        // Create Chat 只允许选择 Name 与 Agent；不存在 Workspace 路径选择器。
         await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
+        const workspaceShell = page.locator(
+          'button[aria-label="工作区路径"], button[aria-label="Workspace Path"], button.environment-binding-trigger',
+        )
+        assert(
+          await workspaceShell.count() === 0,
+          'Create Chat still rendered a workspace path selector',
+        )
         await selectCustomOption(
           page,
           page.getByRole('button', { name: 'Agent' }),
           tempAgentName,
         )
-
-        // 3. UI 打开 Workspace Path 目录面板（单 Card 派生，不得查找 Environment option region）
-        const workspaceTrigger = page.locator(
-          'button[aria-label="工作区路径"], button[aria-label="Workspace Path"], button.environment-binding-trigger',
-        ).first()
-        await workspaceTrigger.click()
-
-        const directory = page.locator(
-          `[role="region"][aria-label*="${args.daemonEnv}"], [role="region"][aria-label*="目录"], [role="region"][aria-label*="Workspace"]`,
-        ).first()
-        await directory.waitFor({ state: 'visible', timeout: 10_000 })
-
-        // 点击确认当前 Workspace 路径 "."
-        const confirmBtn = directory.getByRole('button', { name: /使用当前 Workspace/ })
-        await confirmBtn.waitFor({ state: 'visible', timeout: 5_000 })
-        await confirmBtn.click()
-
         await page.getByRole('button', { name: '确认创建' }).click()
         // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
         await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 15_000 })
 
+        // 3. 空白工作区 Footer 只投影 Agent 绑定的 Environment 事实。
+        const footer = page.getByLabel('会话状态')
+        await footer.waitFor({ state: 'visible', timeout: 15_000 })
+        const environmentText = await footer
+          .locator('.thread-status-environment .thread-status-seg')
+          .innerText()
+        assert(
+          environmentText.startsWith(`env:${args.daemonEnv}`),
+          `Footer did not project the agent-bound Environment: ${environmentText}`,
+        )
+
+        // 4. Chat 持久化不得携带任何 workspace / environment 字段。
         const { json } = await apiJson(args.backendUrl, 'GET', '/api/ai/chats')
         const created = (json?.data || []).find((chat) => chat.title === title)
-        assert(
-          created?.workspacePath === '.',
-          `Create Chat did not persist workspacePath: ${JSON.stringify(created)}`,
-        )
-        assert(!Object.hasOwn(created, 'environment'), `Chat leaked environment: ${JSON.stringify(created)}`)
-        assert(!Object.hasOwn(created, 'environmentId'), `Chat leaked environmentId: ${JSON.stringify(created)}`)
-        await shot(caseArt, 'create-chat-environment-workspace')
+        assert(created != null, `Create Chat did not persist the chat: ${JSON.stringify(json)}`)
+        for (const field of ['workspacePath', 'environment', 'environmentId']) {
+          assert(
+            !Object.hasOwn(created, field),
+            `Chat leaked removed workspace/environment field '${field}': ${JSON.stringify(created)}`,
+          )
+        }
+        assert(created.agentName === tempAgentName, JSON.stringify(created))
+        await shot(caseArt, 'create-chat-agent-bound-environment')
         expectNoFatal(pageErrors, consoleErrors)
       } finally {
         await apiDeleteByName(args.backendUrl, 'chats', title)

@@ -74,7 +74,6 @@ function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
 ): HarnessBranchSettingsDTO {
   return {
-    workspacePath: null,
     agentName: 'assistant',
     model: modelSelection(),
     ...overrides,
@@ -1290,7 +1289,6 @@ describe('useAgentThreadController', () => {
     })
     const currentThread = threadFixture({
       branchSettings: branchSettings({
-        workspacePath: 'proj/a',
         agentName: 'assistant',
       }),
     })
@@ -1300,10 +1298,7 @@ describe('useAgentThreadController', () => {
       wrapper,
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
-    expect(result.current.runtimeLabels.environment).toEqual({
-      environmentId: 'env-local',
-      workspacePath: 'proj/a',
-    })
+    expect(result.current.runtimeLabels.environment).toBe('env-local')
     expect(result.current.runtimeLabels.contextWindow).toBe(128000)
     expect(result.current.thread?.headEntryId).toBe('h1')
     expect(result.current.thread?.nextCommandSequence).toBe('1')

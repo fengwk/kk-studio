@@ -32,7 +32,6 @@ import java.util.UUID;
 class HistoryEntryPayloadJsonCodecTest {
   private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
-  private static final String ENV = "123e4567-e89b-12d3-a456-426614174000";
   private static final String UUID_2 = "00000000-0000-0000-0000-000000000002";
   private static final String UUID_7 = "00000000-0000-0000-0000-000000000007";
   private static final String UUID_10 = "00000000-0000-0000-0000-00000000000a";
@@ -42,7 +41,7 @@ class HistoryEntryPayloadJsonCodecTest {
 
   @Test
   void roundTripsAllPayloadTypes() {
-    BranchSettings settings = settings(ENV);
+    BranchSettings settings = settings();
     EntryPayload root = new RootPayload(settings);
     EntryPayload turnStart = new TurnStartPayload(TurnStartReason.INPUT, settings, OWNER_THREAD_ID);
     EntryPayload user =
@@ -114,9 +113,9 @@ class HistoryEntryPayloadJsonCodecTest {
             null,
             new ToolResultMetadata(
                 id(2L), "call-1", 1, ToolResultStatus.UNKNOWN, true, ToolResultReason.HISTORY_CUT));
-    EntryPayload root = new RootPayload(settings(null));
+    EntryPayload root = new RootPayload(settings());
     EntryPayload subagentRoot =
-        new RootPayload(settings(null), new SubagentContext(id(11L), id(10L), id(12L), 2));
+        new RootPayload(settings(), new SubagentContext(id(11L), id(10L), id(12L), 2));
     EntryPayload completedEnd =
         new TurnEndPayload(id(7L), TurnEndOutcome.COMPLETED, false, null, null);
 
@@ -129,19 +128,19 @@ class HistoryEntryPayloadJsonCodecTest {
   @Test
   void encodesCanonicalFieldOrder() {
     assertEquals(
-        "{\"settings\":{\"workspacePath\":null,\"agentName\":\"coding\",\"model\":{"
+        "{\"settings\":{\"agentName\":\"coding\",\"model\":{"
             + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
             + "},\"subagentContext\":null}",
-        CODEC.encode(new RootPayload(settings(null))));
+        CODEC.encode(new RootPayload(settings())));
     assertEquals(
-        "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":null,\"agentName\":\"coding\",\"model\":{"
+        "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":\"coding\",\"model\":{"
             + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}},"
             + "\"ownerThreadId\":\""
             + OWNER_THREAD_ID
             + "\",\"contextWindow\":4096,\"maxOutputTokens\":1024,\"compaction\":null}",
         CODEC.encode(
             new TurnStartPayload(
-                TurnStartReason.INPUT, settings(null), OWNER_THREAD_ID, 4096, 1024, null)));
+                TurnStartReason.INPUT, settings(), OWNER_THREAD_ID, 4096, 1024, null)));
     assertEquals(
         "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
             + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"sys\"}]},"
@@ -203,13 +202,13 @@ class HistoryEntryPayloadJsonCodecTest {
         new CompactionStart(
             CompactionPhase.TURN_PREFIX,
             CompactionTrigger.MANUAL,
-            settings(null).model(),
+            settings().model(),
             id(4L),
             id(3L),
             id(2L));
     TurnStartPayload payload =
         new TurnStartPayload(
-            TurnStartReason.COMPACTION, settings(null), OWNER_THREAD_ID, 4096, 1024, start);
+            TurnStartReason.COMPACTION, settings(), OWNER_THREAD_ID, 4096, 1024, start);
 
     assertEquals(payload, CODEC.decode(EntryType.TURN_START, CODEC.encode(payload)));
     assertEquals(payload, CODEC.decodeNode(EntryType.TURN_START, CODEC.encodeNode(payload)));
@@ -242,9 +241,9 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.ROOT,
-                "{\"settings\":{\"workspacePath\":null,\"agentName\":\"a\",\"model\":{"
+                "{\"settings\":{\"agentName\":\"a\",\"model\":{"
                     + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
-                    + "\"settings\":{\"workspacePath\":null,\"agentName\":\"b\",\"model\":{"
+                    + "\"settings\":{\"agentName\":\"b\",\"model\":{"
                     + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, "{\"settings\":{}} {}"));
@@ -264,22 +263,23 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":5,\"settings\":{\"workspacePath\":null,\"agentName\":\"a\","
+                "{\"reason\":5,\"settings\":{\"agentName\":\"a\","
                     + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":null,\"agentName\":\"a\","
+                "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":\"a\","
                     + "\"model\":[\"p\"]}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":null,\"agentName\":5,"
+                "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":5,"
                     + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
+    // 旧 workspacePath 字段已整体删除：携带它（无论字符串还是数字）一律严格拒绝。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -300,7 +300,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":null,\"agentName\":\" \","
+                "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":\" \","
                     + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
@@ -515,7 +515,7 @@ class HistoryEntryPayloadJsonCodecTest {
 
   @Test
   void rejectsWrongTypeDispatchAndMalformedJson() {
-    String rootJson = CODEC.encode(new RootPayload(settings(null)));
+    String rootJson = CODEC.encode(new RootPayload(settings()));
     String messageJson = CODEC.encode(new MessagePayload(user("hi"), null, null));
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(EntryType.MESSAGE, rootJson));
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, messageJson));
@@ -703,7 +703,7 @@ class HistoryEntryPayloadJsonCodecTest {
 
   private static String rootSettingsWith(String reasonField) {
     return reasonField
-        + "\"settings\":{\"workspacePath\":null,\"agentName\":\"a\","
+        + "\"settings\":{\"agentName\":\"a\","
         + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}";
   }
 
@@ -746,8 +746,8 @@ class HistoryEntryPayloadJsonCodecTest {
     return new AssistantMessageMetadata(reason, usage, cost);
   }
 
-  private static BranchSettings settings(String workspacePath) {
+  private static BranchSettings settings() {
     return new BranchSettings(
-        workspacePath, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
+        "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
   }
 }

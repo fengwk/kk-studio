@@ -88,13 +88,13 @@ public class HarnessRuntimeConfiguration {
   }
 
   /**
-   * 内容寻址的本地文件 {@link ResourceStore}，根目录为 {@code environment-root/.kkstudio/resources/}，单对象上限由数据库
+   * 内容寻址的本地文件 {@link ResourceStore}，根目录取自 {@code kk-studio.harness.runtime.resource-root}，单对象上限由数据库
    * SystemSettings.Advanced 的 {@code resourceMaxBytes} 控制（共享启动快照，DB 变更需重启生效）。启动时安全创建根目录。
    */
   @Bean
   public ResourceStore harnessResourceStore(
       HarnessRuntimeProperties properties, SystemSettingsSnapshot systemSettingsSnapshot) {
-    Path root = properties.resolvedEnvironmentRoot().resolve(".kkstudio").resolve("resources");
+    Path root = properties.resolvedResourceRoot();
     int maxBytes = Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
     try {
       Files.createDirectories(root);

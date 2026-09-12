@@ -24,6 +24,8 @@ import java.util.regex.Pattern;
  *
  * <p>这里有意不做成完整的 LSP client。未配置 bridge 命令时，goto 与 workspace-symbol 查询会以明确的不可用消息失败；{@code
  * java_decompile} 对可解析的 class 名或 class 文件仍可通过 {@code javap} 成功。
+ *
+ * <p>bridge 与 {@code javap} 子进程都在本次 capability arguments 显式指定的 workdir 中启动，不继承 Daemon 进程目录。
  */
 final class LspBridge {
 
@@ -59,29 +61,31 @@ final class LspBridge {
     return bridgeCommand != null;
   }
 
-  String gotoDefinition(Path path, int line, int character) throws Exception {
+  String gotoDefinition(Path workdir, Path path, int line, int character) throws Exception {
     return invokeBridge(
+        workdir,
         request("goto_definition")
             .put("path", path.toString())
             .put("line", line)
             .put("character", character));
   }
 
-  String workspaceSymbols(Path path, String query, int limit) throws Exception {
+  String workspaceSymbols(Path workdir, Path path, String query, int limit) throws Exception {
     return invokeBridge(
+        workdir,
         request("workspace_symbols")
             .put("path", path.toString())
             .put("query", query)
             .put("limit", limit));
   }
 
-  String javaDecompile(Path path, String target) throws Exception {
+  String javaDecompile(Path workdir, Path path, String target) throws Exception {
     if (bridgeAvailable()) {
       try {
         return invokeBridge(
-            request("java_decompile").put("path", path.toString()).put("target", target));
+            workdir, request("java_decompile").put("path", path.toString()).put("target", target));
       } catch (IllegalStateException | IOException bridgeError) {
-        String fallback = tryJavap(path, target);
+        String fallback = tryJavap(workdir, path, target);
         if (fallback != null) {
           return fallback
               + "\n\n(note: LSP bridge failed; used javap fallback: "
@@ -91,7 +95,7 @@ final class LspBridge {
         throw bridgeError;
       }
     }
-    String fallback = tryJavap(path, target);
+    String fallback = tryJavap(workdir, path, target);
     if (fallback != null) {
       return fallback + "\n\n(note: LSP bridge unavailable; used javap fallback)";
     }
@@ -101,8 +105,8 @@ final class LspBridge {
             + summarizeTarget(target));
   }
 
-  String tryJavap(Path workspacePath, String target) throws Exception {
-    ResolvedClass resolved = resolveClassTarget(target, workspacePath);
+  String tryJavap(Path workdir, Path sourcePath, String target) throws Exception {
+    ResolvedClass resolved = resolveClassTarget(target, sourcePath);
     if (resolved == null) {
       return null;
     }
@@ -115,7 +119,7 @@ final class LspBridge {
       command.add(resolved.classpath());
     }
     command.add(resolved.className());
-    ProcessBuilder builder = new ProcessBuilder(command);
+    ProcessBuilder builder = new ProcessBuilder(command).directory(workdir.toFile());
     builder.redirectErrorStream(true);
     Process process = builder.start();
     String output = readFully(process.getInputStream());
@@ -142,12 +146,12 @@ final class LspBridge {
     return node;
   }
 
-  private String invokeBridge(ObjectNode request) throws Exception {
+  private String invokeBridge(Path workdir, ObjectNode request) throws Exception {
     if (!bridgeAvailable()) {
       throw new IllegalStateException(UNAVAILABLE_MESSAGE);
     }
     List<String> command = shellCommand(bridgeCommand);
-    ProcessBuilder builder = new ProcessBuilder(command);
+    ProcessBuilder builder = new ProcessBuilder(command).directory(workdir.toFile());
     builder.redirectErrorStream(true);
     Process process = builder.start();
     process.getOutputStream().write(MAPPER.writeValueAsBytes(request));
@@ -174,7 +178,7 @@ final class LspBridge {
     throw new IllegalStateException(error.isBlank() ? "LSP bridge returned an error" : error);
   }
 
-  static ResolvedClass resolveClassTarget(String target, Path workspacePath) {
+  static ResolvedClass resolveClassTarget(String target, Path sourcePath) {
     if (target == null || target.isBlank()) {
       return null;
     }
@@ -192,8 +196,8 @@ final class LspBridge {
     }
     if (value.endsWith(".class") && !value.contains("://")) {
       Path classFile = Path.of(value);
-      if (!classFile.isAbsolute() && workspacePath != null) {
-        Path parent = workspacePath.getParent();
+      if (!classFile.isAbsolute() && sourcePath != null) {
+        Path parent = sourcePath.getParent();
         if (parent != null) {
           classFile = parent.resolve(value).normalize();
         }

@@ -53,7 +53,6 @@ export interface ModelSelectionDraft {
 export interface SystemSettingsEnvironmentDraft {
   maxResourceBytes: DraftNumericField
   heartbeatTimeoutMillis: DraftNumericField
-  directoryListTimeoutMillis: DraftNumericField
 }
 
 export interface ComfyuiIntegrationDraft {
@@ -185,7 +184,6 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
     environment: {
       maxResourceBytes: dto.environment.maxResourceBytes,
       heartbeatTimeoutMillis: dto.environment.heartbeatTimeoutMillis,
-      directoryListTimeoutMillis: dto.environment.directoryListTimeoutMillis,
     },
     integrations: integrationsToDraft(dto.integrations),
     storageMedia: {
@@ -357,7 +355,6 @@ export function assembleSettingsUpdate(
     environment: {
       maxResourceBytes: requiredLong(draft.environment.maxResourceBytes),
       heartbeatTimeoutMillis: requiredLong(draft.environment.heartbeatTimeoutMillis),
-      directoryListTimeoutMillis: requiredLong(draft.environment.directoryListTimeoutMillis),
     },
     integrations: {
       comfyui: {

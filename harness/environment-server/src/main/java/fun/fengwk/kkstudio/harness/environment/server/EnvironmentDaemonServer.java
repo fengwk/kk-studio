@@ -3,8 +3,9 @@ package fun.fengwk.kkstudio.harness.environment.server;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
@@ -23,8 +24,10 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCode
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonWorkdirSyntax;
 
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -43,7 +46,7 @@ import java.util.function.Supplier;
 /**
  * Environment daemon 的服务端会话核心：唯一拥有连接代际的握手、sequence、lease、pending invocation 与终态状态。
  *
- * <p>协议为当前 daemon wire v1：HELLO scope 为 null 且 payload 携带 {@code registrationToken}；核心通过 {@link
+ * <p>协议为当前 daemon wire v2：HELLO scope 为 null 且 payload 携带 {@code registrationToken}；核心通过 {@link
  * DaemonRegistrationDirectory} 解析环境身份，通过 {@link DaemonLeaseStore} 以 {@code (environment_id,
  * owner_node_id, lease_token)} 围栏原子抢占路由（已有活跃路由返回 RETRY_LATER），成功后下发 WELCOME。READY、HEARTBEAT
  * 与断开连接同样以围栏推进状态； 租约存储不可用时 fail-closed。
@@ -209,10 +212,10 @@ public final class EnvironmentDaemonServer
 
   @Override
   public EnvironmentCapabilityExecutionHandle invoke(
-      EnvironmentBinding binding,
+      EnvironmentId environmentId,
       EnvironmentCapabilityExecutionRequest request,
       EnvironmentCapabilityExecutionListener listener) {
-    Objects.requireNonNull(binding, "binding");
+    Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(listener, "listener");
     EnvironmentCapabilityDescriptor descriptor = request.descriptor();
@@ -222,11 +225,7 @@ public final class EnvironmentDaemonServer
       throw new IllegalArgumentException(
           "capability descriptor does not match EnvironmentCapabilityCatalog: " + descriptor.id());
     }
-    if (request.workdir() != null) {
-      throw new IllegalArgumentException("Environment capability request workdir must be null");
-    }
     UUID invocationId = parseUuid(request.call().id(), "call.id");
-    EnvironmentId environmentId = binding.environmentId();
 
     ConnectionState state;
     synchronized (inventory) {
@@ -236,6 +235,7 @@ public final class EnvironmentDaemonServer
     if (state == null || leaseToken == null || !state.isReady()) {
       throw unavailable(environmentId, descriptor.id().value());
     }
+    validateWorkdirShape(state, descriptor, request.call());
 
     // 租约存储访问（可能跨进程/网络）绝不在核心状态锁内执行。
     boolean holdsReady;
@@ -254,7 +254,6 @@ public final class EnvironmentDaemonServer
             new DaemonCapabilityInvokeCodec.InvokeRequest(
                 descriptor.id(),
                 descriptor.version(),
-                binding.workspacePath(),
                 request.call().argumentsJson(),
                 request.timeout()));
     ActiveInvocation active = new ActiveInvocation(environmentId, state, invocationId, listener);
@@ -522,6 +521,7 @@ public final class EnvironmentDaemonServer
         throw new DaemonProtocolException("route fence lost for environment " + environmentId);
       }
       state.ready = true;
+      state.daemonOperatingSystem = capabilities.environment().operatingSystem();
     }
     deferred.add(() -> notifyEnvironmentReady(environmentId));
   }
@@ -665,6 +665,37 @@ public final class EnvironmentDaemonServer
       ConnectionState state, DaemonMessageType type, String invocationId, String payloadJson) {
     DaemonSendOutcome outcome = state.send(type, invocationId, payloadJson);
     return outcome == DaemonSendOutcome.SENT;
+  }
+
+  /**
+   * 发送前按该连接 READY 中冻结的目标 Daemon OS 校验 arguments.workdir 的词法形状。
+   *
+   * <p>只做纯文本校验：不使用 Backend 本机 {@code Path} 解析远端路径，也不做 home/环境变量展开。真实存在性、目录类型与可访问性由 Daemon 用 自己的
+   * {@code Path} 判定。
+   */
+  private static void validateWorkdirShape(
+      ConnectionState state,
+      EnvironmentCapabilityDescriptor descriptor,
+      EnvironmentCapabilityCall call) {
+    if (!EnvironmentCapabilityCatalog.requiresWorkdir(descriptor.id())) {
+      return;
+    }
+    JsonNode arguments = JsonValues.readTree(call.argumentsJson());
+    JsonNode workdir = arguments.get("workdir");
+    DaemonOperatingSystem operatingSystem = state.readyDaemonOperatingSystem();
+    if (operatingSystem == null) {
+      throw new EnvironmentCapabilityUnavailableException(
+          "target daemon operating system is not known; cannot validate workdir for "
+              + descriptor.id().value());
+    }
+    try {
+      DaemonWorkdirSyntax.requireAbsolute(
+          workdir == null || !workdir.isTextual() ? null : workdir.textValue(), operatingSystem);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          "invalid workdir for capability " + descriptor.id().value() + ": " + error.getMessage(),
+          error);
+    }
   }
 
   private void protocolFailure(
@@ -918,6 +949,7 @@ public final class EnvironmentDaemonServer
     private volatile UUID leaseToken;
     private volatile EnvironmentId environmentId;
     private volatile boolean helloReceived;
+    private volatile DaemonOperatingSystem daemonOperatingSystem;
     private volatile boolean ready;
     private volatile boolean sendFailed;
     private volatile boolean cleaned;
@@ -937,6 +969,11 @@ public final class EnvironmentDaemonServer
       environmentId = boundEnvironmentId;
       leaseToken = token;
       helloReceived = true;
+    }
+
+    /** READY 中冻结的目标 Daemon OS；READY 之前为 null。 */
+    private DaemonOperatingSystem readyDaemonOperatingSystem() {
+      return isReady() ? daemonOperatingSystem : null;
     }
 
     private boolean isReady() {

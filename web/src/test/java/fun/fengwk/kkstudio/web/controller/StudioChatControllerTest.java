@@ -1,14 +1,11 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -23,7 +20,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.platform.chat.service.ChatService;
@@ -125,9 +121,9 @@ class StudioChatControllerTest {
     verify(harnessQueryService).listChatSessions(id(7));
   }
 
-  /** 测试意图：验证 POST /api/ai/chats 创建 Chat 请求体支持可选默认 workspacePath，返回 201 Created 状态码。 */
+  /** 测试意图：验证 Chat 创建只接受当前字段，响应中不存在 Workspace 状态。 */
   @Test
-  void createChatCarriesOptionalDefaultWorkspacePath() throws Exception {
+  void createChatCarriesNoWorkspaceState() throws Exception {
     when(chatService.createChat(any(ChatCreateDTO.class)))
         .thenAnswer(
             invocation -> {
@@ -136,7 +132,6 @@ class StudioChatControllerTest {
               dtoOut.setId("1");
               dtoOut.setTitle(dto.getTitle());
               dtoOut.setAgentName(dto.getAgentName());
-              dtoOut.setWorkspacePath(dto.getWorkspacePath());
               return dtoOut;
             });
 
@@ -144,83 +139,62 @@ class StudioChatControllerTest {
         .perform(
             post("/api/ai/chats")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"title\":\"t\",\"agentName\":\"default-assistant\","
-                        + "\"workspacePath\":\"src\"}"))
+                .content("{\"title\":\"t\",\"agentName\":\"default-assistant\"}"))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.workspacePath").value("src"));
+        .andExpect(jsonPath("$.data.workspacePath").doesNotExist());
 
     ArgumentCaptor<ChatCreateDTO> captor = ArgumentCaptor.forClass(ChatCreateDTO.class);
     verify(chatService).createChat(captor.capture());
-    assertEquals("src", captor.getValue().getWorkspacePath());
+    assertEquals("t", captor.getValue().getTitle());
+    assertEquals("default-assistant", captor.getValue().getAgentName());
   }
 
-  /** 测试意图：验证 POST /api/ai/chats 省略 workspacePath 时字段为 null，返回 201 Created 状态码。 */
+  /** 测试意图：验证旧 workspacePath 创建字段在严格 DTO 边界被拒绝。 */
   @Test
-  void createChatOmittingWorkspacePathLeavesItNull() throws Exception {
-    when(chatService.createChat(any(ChatCreateDTO.class))).thenReturn(new ChatDTO());
+  void createChatRejectsLegacyWorkspacePath() throws Exception {
     mockMvc
         .perform(
             post("/api/ai/chats")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"title\":\"t\",\"agentName\":\"default-assistant\"}"))
-        .andExpect(status().isCreated());
-    ArgumentCaptor<ChatCreateDTO> captor = ArgumentCaptor.forClass(ChatCreateDTO.class);
-    verify(chatService).createChat(captor.capture());
-    assertNull(captor.getValue().getWorkspacePath());
+                .content(
+                    "{\"title\":\"t\",\"agentName\":\"default-assistant\","
+                        + "\"workspacePath\":\"src\"}"))
+        .andExpect(status().isBadRequest());
+    verifyNoInteractions(chatService);
   }
 
-  /** 测试意图：验证 PUT /api/ai/chats/{chatId} 响应显式保留 null workspacePath，返回 200 OK 状态码。 */
+  /** 测试意图：验证 Chat 更新继续传递 CAS version，响应中不存在 Workspace 状态。 */
   @Test
-  void chatWireJsonEmitsWorkspacePathExplicitlyIncludingNull() throws Exception {
-    // @JsonInclude(ALWAYS)：null 显式序列化，前端/契约可区分缺省与显式 null。
-    ChatDTO nullEnv = new ChatDTO();
-    nullEnv.setId("7");
-    nullEnv.setTitle("t");
-    nullEnv.setAgentName("default-assistant");
-    nullEnv.setWorkspacePath(null);
-    nullEnv.setYoloEnabled(false);
-    nullEnv.setVersion("2");
-    when(chatService.updateChat(eq("7"), any(ChatUpdateDTO.class))).thenReturn(nullEnv);
+  void updateChatCarriesNoWorkspaceState() throws Exception {
+    ChatDTO updated = new ChatDTO();
+    updated.setId("7");
+    updated.setTitle("t");
+    updated.setAgentName("default-assistant");
+    updated.setYoloEnabled(false);
+    updated.setVersion("2");
+    when(chatService.updateChat(eq("7"), any(ChatUpdateDTO.class))).thenReturn(updated);
 
-    MvcResult result =
-        mockMvc
-            .perform(
-                put("/api/ai/chats/7")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"expectedVersion\":\"2\"}"))
-            .andExpect(status().isOk())
-            .andReturn();
-    String body = result.getResponse().getContentAsString();
-    assertTrue(body.contains("\"workspacePath\":null"), body);
-  }
-
-  /** 测试意图：验证 PUT /api/ai/chats/{chatId} 区分显式 null 与缺省，body 中的 expectedVersion 正常解析，返回 200 OK。 */
-  @Test
-  void updateChatDistinguishesExplicitWorkspacePathNullFromOmission() throws Exception {
-    when(chatService.updateChat(eq("7"), any(ChatUpdateDTO.class))).thenReturn(new ChatDTO());
-
-    // 显式 null：清空默认环境（provided 标记置位）。
-    mockMvc
-        .perform(
-            put("/api/ai/chats/7")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"workspacePath\":null,\"expectedVersion\":\"2\"}"))
-        .andExpect(status().isOk());
-    ArgumentCaptor<ChatUpdateDTO> clearCaptor = ArgumentCaptor.forClass(ChatUpdateDTO.class);
-    verify(chatService).updateChat(eq("7"), clearCaptor.capture());
-    assertTrue(clearCaptor.getValue().isWorkspacePathProvided());
-    assertNull(clearCaptor.getValue().getWorkspacePath());
-
-    // 缺省字段：provided 标记保持 false，服务端保留当前值。
     mockMvc
         .perform(
             put("/api/ai/chats/7")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"2\"}"))
-        .andExpect(status().isOk());
-    ArgumentCaptor<ChatUpdateDTO> omitCaptor = ArgumentCaptor.forClass(ChatUpdateDTO.class);
-    verify(chatService, times(2)).updateChat(eq("7"), omitCaptor.capture());
-    assertFalse(omitCaptor.getValue().isWorkspacePathProvided());
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.workspacePath").doesNotExist());
+    ArgumentCaptor<ChatUpdateDTO> captor = ArgumentCaptor.forClass(ChatUpdateDTO.class);
+    verify(chatService).updateChat(eq("7"), captor.capture());
+    assertEquals("2", captor.getValue().getExpectedVersion());
+  }
+
+  /** 测试意图：验证旧 workspacePath 更新字段在严格 DTO 边界被拒绝。 */
+  @Test
+  void updateChatRejectsLegacyWorkspacePath() throws Exception {
+    mockMvc
+        .perform(
+            put("/api/ai/chats/7")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"workspacePath\":null,\"expectedVersion\":\"2\"}"))
+        .andExpect(status().isBadRequest());
+    verifyNoInteractions(chatService);
   }
 }

@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
@@ -113,9 +112,7 @@ final class ThreadProcessorTestSupport {
 
   static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
   static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
-  static final EnvironmentBinding ENV_ID =
-      new EnvironmentBinding(
-          EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), "projects/web");
+  static final EnvironmentId ENV_ID = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
   static final Duration RESOLVE_FAILURE_DELAY = Duration.ofSeconds(7);
@@ -731,10 +728,7 @@ final class ThreadProcessorTestSupport {
   // -----------------------------------------------------------------------------------------------
 
   static BranchSettings branchSettings() {
-    return new BranchSettings(
-        ENV_ID == null ? null : ENV_ID.workspacePath(),
-        "agent",
-        new ModelSelection("provider", "model", "v1"));
+    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
   }
 
   /** Resolver 成功后的 INPUT TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */

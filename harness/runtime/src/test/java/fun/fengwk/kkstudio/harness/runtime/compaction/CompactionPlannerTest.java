@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -640,11 +639,7 @@ class CompactionPlannerTest {
   /** 自包含合法路径构造器：id 顺序、parent 链、TURN 语法。 */
   private static final class PathBuilder {
     private final List<Entry> entries = new ArrayList<>();
-    private final BranchSettings SETTINGS =
-        new BranchSettings(
-            EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111").workspacePath(),
-            "agent",
-            SETTINGS_MODEL);
+    private final BranchSettings SETTINGS = new BranchSettings("agent", SETTINGS_MODEL);
     private long nextId = 1L;
 
     PathBuilder root() {

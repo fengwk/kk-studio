@@ -14,7 +14,7 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.locks.ReentrantLock;
 
-/** 在 environment root 下按意图创建或替换单个文本文件。 */
+/** 在本次调用显式 workdir 下按意图创建或替换单个文本文件。 */
 public final class WriteCapability extends AbstractCodingCapability {
 
   public WriteCapability(CodingToolsConfig config, ExecutorService executor) {
@@ -29,8 +29,7 @@ public final class WriteCapability extends AbstractCodingCapability {
     String rawPath = string(args, "path");
     String content = string(args, "content");
     Path path =
-        EnvironmentPaths.writable(
-            rawPath, EnvironmentPaths.workdir(optionalString(args, "workdir"), request.workdir()));
+        EnvironmentPaths.writable(rawPath, EnvironmentPaths.workdir(string(args, "workdir")));
     ReentrantLock lock = FileMutations.lock(path);
     try {
       if (execution.isCancelled()) {

@@ -44,7 +44,7 @@ JUnit 只在 test scope。源码只位于
 | --- | --- |
 | `ai.catalog` | Provider、Model、Agent、ModelRef、Tool catalog |
 | `ai.chat` | Chat 与 Chat defaults |
-| `ai.environment` | Environment directory、live daemon、skill/tool |
+| `ai.environment` | Environment Card CRUD、registration token 与 live capability/skill 投影 |
 | `ai.runtime` | Session、Entry、Thread Snapshot、Command batch、Invocation、approval、stop、compaction |
 | `canvas` | Canvas document、Snapshot、Patch、typed command、Resource、Function 与 Run |
 | `comfyui` | Workflow API 与运行请求/结果 |
@@ -91,7 +91,7 @@ wire 中语义上必须出现的 nullable 字段显式使用 `@JsonInclude(ALWAY
 - `CanvasResourceDTO` 的 `blobId`、`textContent`、媒体事实；
 - `CanvasResourceNodeDTO` 的 `groupId`、`function`、`run`；
 - `HarnessThreadSnapshotDTO` 的 manual compaction sidecar；
-- `ChatDTO.workspacePath` 与 Function model/run 的 reason/error。
+- Function model/run 的 reason/error。
 
 Provider credential 使用 write-only JSON property。System Settings DTO 的公共
 字段只表达非敏感运行策略；`SystemSettingsDtoContractTest` 对敏感字段名和嵌套

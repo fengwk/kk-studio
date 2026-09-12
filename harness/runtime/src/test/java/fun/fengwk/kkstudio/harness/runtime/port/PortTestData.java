@@ -1,8 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -31,8 +30,8 @@ import java.util.UUID;
 /** port 契约测试使用的最小化 frozen request fixture。 */
 final class PortTestData {
 
-  private static final EnvironmentBinding ENV_ID =
-      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
+  private static final EnvironmentId ENV_ID =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
   private PortTestData() {}
 

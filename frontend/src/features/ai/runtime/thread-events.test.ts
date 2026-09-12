@@ -92,7 +92,7 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     toolVersion: '1',
     rendererKey: 'bash',
     toolId: 'base.bash',
-    environment: null,
+    environmentId: null,
     argumentsJson: '{"command":"ls"}',
     approvalJson: null,
     resultJson: null,
@@ -826,7 +826,7 @@ describe('buildThreadEventTimeline', () => {
       toolVersion: '2.0',
       rendererKey: 'bash-renderer',
       toolId: 'tools.bash',
-      environment: { type: 'local', workdir: '/workspace' } as unknown as ToolInvocationDTO['environment'],
+      environmentId: 'env-1',
       argumentsJson: '{"command":"echo hello","timeout":30}',
       approvalJson: '{"approved":true,"approver":"admin"}',
       resultJson: '{"exitCode":0,"stdout":"hello\\n"}',
@@ -879,7 +879,7 @@ describe('buildThreadEventTimeline', () => {
     expect(detailMap.get('审批')).toBe(JSON.stringify(JSON.parse(fullInvocation.approvalJson!), null, 2))
     expect(detailMap.get('结果')).toBe(JSON.stringify(JSON.parse(fullInvocation.resultJson!), null, 2))
     expect(detailMap.has('错误')).toBe(false)
-    expect(detailMap.get('运行环境')).toContain('/workspace')
+    expect(detailMap.get('运行环境')).toBe('env-1')
     expect(detailMap.get('实时流')).toContain('hello\\n')
 
     // rawJson 验证完整性

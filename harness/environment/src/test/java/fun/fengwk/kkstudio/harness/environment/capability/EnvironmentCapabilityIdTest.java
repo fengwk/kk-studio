@@ -13,7 +13,7 @@ class EnvironmentCapabilityIdTest {
   @Test
   void acceptsCanonicalExamples() {
     assertEquals("fs.read", new EnvironmentCapabilityId("fs.read").value());
-    assertEquals("fs.list-directory", new EnvironmentCapabilityId("fs.list-directory").value());
+    assertEquals("fs.find", new EnvironmentCapabilityId("fs.find").value());
     assertEquals("process.exec", new EnvironmentCapabilityId("process.exec").value());
     assertEquals("lsp.goto-definition", new EnvironmentCapabilityId("lsp.goto-definition").value());
     assertEquals("skill.load", new EnvironmentCapabilityId("skill.load").toString());

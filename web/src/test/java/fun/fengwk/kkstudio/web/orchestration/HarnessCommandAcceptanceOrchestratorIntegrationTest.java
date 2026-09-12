@@ -349,7 +349,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresT
 
   private static BranchSettings settings() {
     return new BranchSettings(
-        null, "default-assistant", new ModelSelection("stub", "acceptance-stub", "default"));
+        "default-assistant", new ModelSelection("stub", "acceptance-stub", "default"));
   }
 
   private int count(String table, String column, UUID value) {

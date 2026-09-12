@@ -19,9 +19,8 @@ import java.util.Set;
 /**
  * Daemon capability INVOKE payload 的严格 codec。
  *
- * <p>wire 字段及顺序固定为 {@code capabilityId}、{@code capabilityVersion}、{@code workspacePath}、{@code
- * arguments}、{@code timeoutMillis}。所有字段都必填；workspace path 只在此边界要求 non-blank，canonical path 和
- * Environment Root 内解析由后续 Daemon 执行边界负责。
+ * <p>wire 字段及顺序固定为 {@code capabilityId}、{@code capabilityVersion}、{@code arguments}、{@code
+ * timeoutMillis}。所有字段都必填。INVOKE 外壳不携带 workdir：目录只存在于具体 arguments 中，Daemon 由自己的 {@code Path} 校验其结果。
  *
  * <p>解析器启用 duplicate/trailing 拒绝和有界 Jackson read constraints。Capability ID 使用 {@link
  * EnvironmentCapabilityId} 的 canonical 语法；arguments 必须是 JSON object，timeout 必须是非负、无小数的 64 位毫秒整数。
@@ -31,14 +30,12 @@ public final class DaemonCapabilityInvokeCodec {
   public record InvokeRequest(
       EnvironmentCapabilityId capabilityId,
       String capabilityVersion,
-      String workspacePath,
       String argumentsJson,
       Duration timeout) {
 
     public InvokeRequest {
       capabilityId = Objects.requireNonNull(capabilityId, "capabilityId");
       capabilityVersion = requireNonBlank(capabilityVersion, "capabilityVersion");
-      workspacePath = requireNonBlank(workspacePath, "workspacePath");
       argumentsJson = canonicalArguments(argumentsJson);
       timeout = requireTimeout(timeout);
     }
@@ -58,7 +55,7 @@ public final class DaemonCapabilityInvokeCodec {
               .build());
 
   private static final Set<String> FIELDS =
-      Set.of("capabilityId", "capabilityVersion", "workspacePath", "arguments", "timeoutMillis");
+      Set.of("capabilityId", "capabilityVersion", "arguments", "timeoutMillis");
 
   static {
     MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -71,7 +68,6 @@ public final class DaemonCapabilityInvokeCodec {
     ObjectNode root = MAPPER.createObjectNode();
     root.put("capabilityId", request.capabilityId().value());
     root.put("capabilityVersion", request.capabilityVersion());
-    root.put("workspacePath", request.workspacePath());
     root.set("arguments", readArguments(request.argumentsJson()));
     root.put("timeoutMillis", request.timeout().toMillis());
     return write(root);
@@ -86,7 +82,6 @@ public final class DaemonCapabilityInvokeCodec {
       return new InvokeRequest(
           new EnvironmentCapabilityId(requiredText(root, "capabilityId")),
           requiredText(root, "capabilityVersion"),
-          requiredText(root, "workspacePath"),
           write(arguments),
           Duration.ofMillis(requiredNonNegativeLong(root, "timeoutMillis")));
     } catch (IllegalArgumentException error) {

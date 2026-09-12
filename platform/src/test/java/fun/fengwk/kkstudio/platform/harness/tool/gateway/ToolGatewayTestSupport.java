@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
@@ -55,9 +55,8 @@ import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperti
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
-import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
+import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
 
-import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
@@ -88,10 +87,8 @@ import java.util.function.Supplier;
  */
 final class ToolGatewayTestSupport {
 
-  static final Path WORKDIR = Path.of("/workspace").toAbsolutePath().normalize();
-  static final Path ENVIRONMENT_ROOT = Path.of("/environment-root").toAbsolutePath().normalize();
-  static final EnvironmentBinding ENV_A = TestEnvironmentBindings.binding("env-1");
-  static final EnvironmentBinding ENV_B = TestEnvironmentBindings.binding("env-2");
+  static final EnvironmentId ENV_A = TestEnvironments.environmentId("env-1");
+  static final EnvironmentId ENV_B = TestEnvironments.environmentId("env-2");
   static final UUID INVOCATION_ID = new UUID(0L, 42L);
   static final UUID THREAD_ID = new UUID(0L, 7L);
   static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 11L);
@@ -190,7 +187,7 @@ final class ToolGatewayTestSupport {
   }
 
   /** 真实 daemon capability 的 ENVIRONMENT 请求：绑定 {@code bash} 并路由到指定 canonical 环境。 */
-  static ToolInvocationRequest environmentRequest(String callId, EnvironmentBinding environment) {
+  static ToolInvocationRequest environmentRequest(String callId, EnvironmentId environmentId) {
     HarnessCatalog catalog = defaultCatalog();
     ToolContribution bashContribution = catalog.findTool(BuiltinToolIds.BASH).orElseThrow();
     ContributorBinding contributor =
@@ -199,8 +196,8 @@ final class ToolGatewayTestSupport {
             bashContribution.id().localName(),
             List.of());
     return new ToolInvocationRequest(
-        new ToolCall(callId, "bash", "{\"command\":\"ls\"}"),
-        new ToolBinding(bashContribution.definition(), contributor, true, environment));
+        new ToolCall(callId, "bash", "{\"command\":\"ls\",\"workdir\":\"/home/dev\"}"),
+        new ToolBinding(bashContribution.definition(), contributor, true, environmentId));
   }
 
   static ToolGateway.Execution execution(ToolInvocationRequest request) {
@@ -289,38 +286,11 @@ final class ToolGatewayTestSupport {
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
         store,
-        WORKDIR,
-        ENVIRONMENT_ROOT,
         resourceMaxBytes,
         executor,
         OVERLOAD_RETRY_DELAY,
         TEST_CLOCK,
         admission);
-  }
-
-  static ToolExecutionGateway gateway(
-      HarnessCatalog catalog,
-      FakeTransport transport,
-      FakeResourceStore store,
-      ExecutorService executor,
-      ToolSettings settings,
-      Path workdir,
-      Path environmentRoot) {
-    return new ToolExecutionGateway(
-        new HarnessToolCatalogAdapter(catalog),
-        catalog,
-        DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
-        transport,
-        new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
-        new FixedToolSettingsProvider(settings),
-        store,
-        workdir,
-        environmentRoot,
-        RESOURCE_MAX_BYTES,
-        executor,
-        OVERLOAD_RETRY_DELAY,
-        TEST_CLOCK,
-        new ConcurrencyAdmission(Integer.MAX_VALUE));
   }
 
   static ToolExecutionGateway gateway(
@@ -338,8 +308,6 @@ final class ToolGatewayTestSupport {
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
         store,
-        properties.resolvedWorkdir(),
-        properties.resolvedEnvironmentRoot(),
         RESOURCE_MAX_BYTES,
         executor,
         OVERLOAD_RETRY_DELAY,
@@ -446,16 +414,16 @@ final class ToolGatewayTestSupport {
     }
 
     record InvokeRecord(
-        EnvironmentBinding environment,
+        EnvironmentId environmentId,
         EnvironmentCapabilityExecutionRequest request,
         EnvironmentCapabilityExecutionListener listener) {}
 
     @Override
     public EnvironmentCapabilityExecutionHandle invoke(
-        EnvironmentBinding environment,
+        EnvironmentId environmentId,
         EnvironmentCapabilityExecutionRequest request,
         EnvironmentCapabilityExecutionListener listener) {
-      invocations.add(new InvokeRecord(environment, request, listener));
+      invocations.add(new InvokeRecord(environmentId, request, listener));
       switch (action) {
         case SYNC_COMPLETE:
           listener.onComplete(

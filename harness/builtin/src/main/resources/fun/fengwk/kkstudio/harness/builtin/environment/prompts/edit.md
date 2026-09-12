@@ -9,3 +9,8 @@ Usage:
 - The edit fails if `old_string` is not found in the file with an error "Could not find old_string".
 - The edit fails if `old_string` is found more than once, reporting the match count as "Found N exact matches". Either provide a larger string with more surrounding context to make the match unique or use `replace_all` to change every instance of `old_string`.
 - Use `replace_all` for file-wide exact renames or repeated replacements when every occurrence should change.
+- Every call must include `workdir`. It must be an expanded absolute directory on the target daemon's file system; no call inherits a previous directory, session default, environment root, cwd, or home directory.
+
+Examples:
+- `edit({ path: "src/app.ts", old_string: "const port = 80", new_string: "const port = 8080", workdir: "/srv/project" })`
+- `edit({ path: "src/app.ts", old_string: "oldName", new_string: "newName", replace_all: true, workdir: "C:/src/project" })`

@@ -28,10 +28,8 @@ public final class LspGotoDefinitionCapability extends AbstractCodingCapability 
   EnvironmentCapabilityResult run(
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    Path path =
-        EnvironmentPaths.existing(
-            string(args, "path"),
-            EnvironmentPaths.workdir(optionalString(args, "workdir"), request.workdir()));
+    Path workdir = EnvironmentPaths.workdir(string(args, "workdir"));
+    Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
     if (Files.isDirectory(path)) {
       throw new IllegalArgumentException("path must be a file: " + path);
     }
@@ -43,6 +41,6 @@ public final class LspGotoDefinitionCapability extends AbstractCodingCapability 
     if (!bridge.bridgeAvailable()) {
       throw new IllegalStateException(LspBridge.UNAVAILABLE_MESSAGE);
     }
-    return success(request.call().id(), bridge.gotoDefinition(path, line, character));
+    return success(request.call().id(), bridge.gotoDefinition(workdir, path, line, character));
   }
 }

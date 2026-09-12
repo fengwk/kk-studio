@@ -545,10 +545,7 @@ public final class HarnessRuntime {
     tx.updateToolInvocations(List.of(updated));
     tx.updateThread(thread.touchVersion(mutationNow));
     if (command.decision() == ToolApprovalDecision.ALLOWED) {
-      EnvironmentId environmentId =
-          tool.binding() == null || tool.binding().environment() == null
-              ? null
-              : tool.binding().environment().environmentId();
+      EnvironmentId environmentId = tool.binding() == null ? null : tool.binding().environmentId();
       tx.requestWork(new WorkTarget(WorkTargetType.TOOL, tool.id()), workNow, environmentId);
     } else {
       tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), workNow);

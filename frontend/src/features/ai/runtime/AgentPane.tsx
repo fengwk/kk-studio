@@ -6,7 +6,6 @@ import {
   ThreadStatusFooter,
 } from '@/features/ai/runtime'
 import { AgentSelectionPanel, SelectionPanel } from '@/features/ai/chat/SelectionPanel'
-import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import {
@@ -114,12 +113,10 @@ export function AgentPane({
                   ? {
                       environmentId: pane.boundEnvironment.id,
                       environmentName: pane.boundEnvironment.name,
-                      workspacePath: pane.workspacePath ?? '.',
                     }
                   : null
               }
               environmentReady={pane.environmentReady}
-              gitBranch={pane.gitBranch}
             />
           ),
         }}
@@ -208,17 +205,6 @@ export function AgentPane({
           selectionPending={pane.pending}
           onClose={pane.closeInteraction}
           onSelect={pane.selectAgent}
-        />
-      )
-    }
-    if (pane.interaction === 'environment') {
-      return (
-        <EnvironmentWorkspacePanel
-          environment={pane.boundEnvironment}
-          current={pane.workspacePath}
-          pending={pane.pending}
-          onClose={pane.closeInteraction}
-          onSelect={pane.selectWorkspacePath}
         />
       )
     }

@@ -11,8 +11,6 @@ public final class EnvironmentCapabilityIds {
       new EnvironmentCapabilityId("process.exec");
   public static final EnvironmentCapabilityId FS_SEARCH = new EnvironmentCapabilityId("fs.search");
   public static final EnvironmentCapabilityId FS_FIND = new EnvironmentCapabilityId("fs.find");
-  public static final EnvironmentCapabilityId FS_LIST_DIRECTORY =
-      new EnvironmentCapabilityId("fs.list-directory");
   public static final EnvironmentCapabilityId LSP_GOTO_DEFINITION =
       new EnvironmentCapabilityId("lsp.goto-definition");
   public static final EnvironmentCapabilityId LSP_WORKSPACE_SYMBOLS =

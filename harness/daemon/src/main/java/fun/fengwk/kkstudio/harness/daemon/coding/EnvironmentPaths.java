@@ -1,34 +1,45 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import fun.fengwk.kkstudio.harness.daemon.DaemonOperatingSystemDetector;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonWorkdirSyntax;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
 
 /**
- * coding capability 的缺省 cwd 与参数路径解析。
+ * coding capability 的本地 workdir 与参数路径解析。
  *
- * <p>workdir 只是缺省 cwd：Daemon 把 invocation workspace 的真实路径写入 {@code
- * EnvironmentCapabilityExecutionRequest.workdir}，参数省略路径或 workdir 时以它为基准；绝对值直接使用，相对值以它为基准。 workdir
- * 不是文件系统沙箱：绝对路径与越出 workdir 的相对路径只要底层文件系统支持就照常解析，符号链接照常跟随。
+ * <p>workdir 是本次调用 arguments 中的必填字段，指目标 Daemon 上的显式绝对目录。Daemon 用自身 {@code Path} 校验它必须绝对、现存且为目录， 不做
+ * {@code ~}/环境变量展开、不自动 mkdir、不回退到 Environment Root 或任何会话默认值。每次调用独立解析，调用之间不继承目录。
  *
- * <p>本类只保留取得可用缺省 cwd 与目标自身所需的校验：workdir 必须是现存目录，读取目标必须存在，写目标必须能回溯到现存祖先。命令与文件系统的业务授权属于 Platform
+ * <p>workdir 不是文件系统沙箱：绝对路径与越出 workdir 的相对路径只要底层文件系统支持就照常解析，符号链接照常跟随。命令与文件系统的业务授权属于 Platform
  * permission。
  */
 final class EnvironmentPaths {
 
   private EnvironmentPaths() {}
 
-  /** 解析缺省 workdir：未提供时使用 invocation workspace，相对值以其为基准，绝对值直接使用；结果必须是现存目录。 */
-  static Path workdir(String rawWorkdir, Path invocationWorkdir) {
-    Path base = requireWorkdir(invocationWorkdir);
-    if (rawWorkdir == null || rawWorkdir.isBlank()) {
-      return base;
+  /**
+   * 解析本次调用的 workdir：复用目标 OS 的 {@link DaemonWorkdirSyntax} 词法校验（拒绝周边空白与未展开占位符）， 再要求自身 {@code Path}
+   * 视角下绝对、现存、为目录且可读，最后返回其真实路径。
+   *
+   * <p>不做 home/环境变量展开、不自动 mkdir、不回退到 Environment Root 或任何会话默认值；每次调用独立解析。
+   */
+  static Path workdir(String rawWorkdir) {
+    String validated =
+        DaemonWorkdirSyntax.requireAbsolute(
+            rawWorkdir, DaemonOperatingSystemDetector.detectCurrent());
+    Path candidate = parse(validated, "workdir");
+    if (!candidate.isAbsolute()) {
+      throw new IllegalArgumentException("workdir must be an absolute path: " + rawWorkdir);
     }
-    Path candidate = resolve(rawWorkdir, base, "workdir");
     if (!Files.isDirectory(candidate)) {
-      throw new IllegalArgumentException(
-          "workdir must be an existing directory: " + display(rawWorkdir));
+      throw new IllegalArgumentException("workdir must be an existing directory: " + rawWorkdir);
+    }
+    if (!Files.isReadable(candidate)) {
+      throw new IllegalArgumentException("workdir must be a readable directory: " + rawWorkdir);
     }
     return canonicalExisting(candidate, "workdir");
   }
@@ -70,14 +81,17 @@ final class EnvironmentPaths {
   }
 
   private static Path resolve(String raw, Path base, String name) {
-    String value = stripPrefix(raw, name);
-    Path requested;
-    try {
-      requested = Path.of(value);
-    } catch (RuntimeException error) {
-      throw new IllegalArgumentException(name + " is not a valid path: " + value, error);
-    }
+    requirePath(raw, name);
+    Path requested = parse(raw, name);
     return (requested.isAbsolute() ? requested : base.resolve(requested)).normalize();
+  }
+
+  private static Path parse(String raw, String name) {
+    try {
+      return Path.of(raw);
+    } catch (RuntimeException error) {
+      throw new IllegalArgumentException(name + " is not a valid path: " + raw, error);
+    }
   }
 
   private static Path canonicalExisting(Path candidate, String name) {
@@ -88,15 +102,10 @@ final class EnvironmentPaths {
     }
   }
 
-  private static String stripPrefix(String raw, String name) {
+  private static void requirePath(String raw, String name) {
     if (raw == null || raw.isBlank()) {
       throw new IllegalArgumentException(name + " is required");
     }
-    String value = raw.startsWith("@") ? raw.substring(1) : raw;
-    if (value.isBlank()) {
-      throw new IllegalArgumentException(name + " is required");
-    }
-    return value;
   }
 
   private static String display(String value) {

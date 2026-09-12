@@ -97,7 +97,7 @@ class DaemonConfigTest {
 
   /** 未显式配置时，Environment Root 使用启动用户 HOME 的 canonical 目录。 */
   @Test
-  void defaultsWorkdirToCanonicalUserHome(@TempDir Path home) throws Exception {
+  void defaultsEnvironmentRootToCanonicalUserHome(@TempDir Path home) throws Exception {
     String oldHome = System.getProperty("user.home");
     try {
       System.setProperty("user.home", home.toString());
@@ -116,7 +116,7 @@ class DaemonConfigTest {
 
   /** 显式 Environment Root 必须是唯一、已存在的目录，并在解析时 canonical 化。 */
   @Test
-  void validatesExplicitWorkdir(@TempDir Path root) throws Exception {
+  void validatesExplicitEnvironmentRoot(@TempDir Path root) throws Exception {
     Path file = Files.writeString(root.resolve("file.txt"), "x");
     assertThrows(
         IllegalArgumentException.class,

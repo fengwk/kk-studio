@@ -20,7 +20,7 @@ describe('chatService', () => {
     const client = createClient()
     const service = createChatService(client)
     await service.listChats()
-    await service.createChat({ title: 'A', agentName: 'assistant', workspacePath: 'proj/a' })
+    await service.createChat({ title: 'A', agentName: 'assistant' })
     await service.getChat('chat /1')
     await service.updateChat('chat /1', { title: 'B', expectedVersion: '2' })
     await service.deleteChat('chat /1', '5')
@@ -29,7 +29,6 @@ describe('chatService', () => {
     expect(client.post).toHaveBeenCalledWith('/ai/chats', {
       title: 'A',
       agentName: 'assistant',
-      workspacePath: 'proj/a',
     })
     expect(client.get).toHaveBeenNthCalledWith(2, '/ai/chats/chat%20%2F1')
     expect(client.put).toHaveBeenCalledWith('/ai/chats/chat%20%2F1', {
@@ -43,21 +42,21 @@ describe('chatService', () => {
   })
 
   /**
-   * 测试意图：验证创建 Chat 时直接传递可空的 workspacePath 字段，无需嵌套 environment 对象。
+   * 测试意图：验证创建 Chat 时传递 title、agentName 与 yoloEnabled 字段。
    */
-  it('transmits nullable workspacePath directly on Chat creation without environment object', async () => {
+  it('transmits Chat creation payload with agentName and yoloEnabled', async () => {
     const client = createClient()
     const service = createChatService(client)
     await service.createChat({
       title: 'A',
       agentName: 'assistant',
-      workspacePath: 'proj/a',
+      yoloEnabled: true,
     })
 
     expect(client.post).toHaveBeenCalledWith('/ai/chats', {
       title: 'A',
       agentName: 'assistant',
-      workspacePath: 'proj/a',
+      yoloEnabled: true,
     })
   })
 

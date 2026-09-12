@@ -75,7 +75,7 @@ function compareDecimalVersions(a: string, b: string): number {
  * - branch base/draft 从 snapshot 初始化、thread 重绑重置，以及 queued SET_*
  *   pending projection 出的 effectiveBase；
  * - 通过 `buildMessageBatchPlan` 构建原子 message batch；
- * - agent/environment/yolo/model 的 draft-local 编辑（agent 选择冻结其余选中值）；
+ * - agent/model 的 draft-local 编辑（agent 选择冻结其余选中值）；
  * - YOLO 走直接控制面：写请求串行并合并快速连点（每次基于最新权威 version，
  *   latest wins），重绑时以 generation 使旧 Thread 的迟到响应/错误整体失效。
  *
@@ -212,7 +212,6 @@ export function useBoundBranchPanel({
 
   /**
    * Draft-local agent 选择：解析 catalog（与 Agent picker 同源）；
-   * 如果新旧 agent 的 environmentId 不同，workspacePath 重置为 null；否则保持不变。
    * 返回是否解析成功，由调用方决定错误反馈。
    */
   function selectAgent(agentName: string): boolean {
@@ -220,19 +219,8 @@ export function useBoundBranchPanel({
     if (agent == null) {
       return false
     }
-    const prevAgent = controller.agents.find(
-      (candidate) => candidate.name === boundBranchState?.draft.agentName,
-    )
-    if (prevAgent?.environmentId !== agent.environmentId) {
-      editDraft({ agentName, workspacePath: null })
-    } else {
-      editDraft({ agentName })
-    }
+    editDraft({ agentName })
     return true
-  }
-
-  function selectWorkspacePath(workspacePath: string | null) {
-    editDraft({ workspacePath })
   }
 
   /**
@@ -388,7 +376,6 @@ export function useBoundBranchPanel({
     conflict,
     dismissConflict: () => setConflict(null),
     selectAgent,
-    selectWorkspacePath,
     setYoloEnabled,
     selectModel,
     resetDraftFromThread,

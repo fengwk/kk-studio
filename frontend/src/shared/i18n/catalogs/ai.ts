@@ -710,8 +710,8 @@ export const aiCatalog = {
     'zh-CN': '新建 Chat',
   },
   'ai.chat.createDescription': {
-    'en-US': 'Create a persistent Chat workspace (an Agent is required)',
-    'zh-CN': '创建持久 Chat 工作区（必须选择 Agent）',
+    'en-US': 'Create a persistent Chat (an Agent is required)',
+    'zh-CN': '创建持久 Chat（必须选择 Agent）',
   },
   'ai.chat.edit': {
     'en-US': 'Edit Chat',
@@ -761,10 +761,6 @@ export const aiCatalog = {
     'en-US': 'Select an Agent',
     'zh-CN': '请选择 Agent',
   },
-  'ai.chat.noneEnvironment': {
-    'en-US': '(None)',
-    'zh-CN': '（无）',
-  },
   'ai.chat.selected': {
     'en-US': 'Selected',
     'zh-CN': '已选',
@@ -810,8 +806,8 @@ export const aiCatalog = {
     'zh-CN': '新对话',
   },
   'ai.chat.blankDescription': {
-    'en-US': 'Send a message to create a new Thread; /agent changes the visible Chat setting, /environment chooses this pane’s draft workspace path, and /thread reuses an existing Thread.',
-    'zh-CN': '输入后创建新 Thread；/agent 修改当前 Chat 设置，/environment 选择当前 pane 的工作目录草稿，/thread 复用已有 Thread。',
+    'en-US': 'Send a message to create a new Thread. Use slash commands to change the Agent or model, or reuse an existing Thread.',
+    'zh-CN': '输入消息以创建新 Thread。使用斜杠命令切换 Agent 或模型，或复用已有 Thread。',
   },
   'ai.chat.scope': {
     'en-US': 'Scope',
@@ -888,66 +884,6 @@ export const aiCatalog = {
   'ai.chat.selection.tabSort': {
     'en-US': 'Tab switch sort',
     'zh-CN': 'Tab 切换排序',
-  },
-  'ai.chat.workspace.directoryTitle': {
-    'en-US': '{{name}} directory',
-    'zh-CN': '{{name}} 目录',
-  },
-  'ai.chat.workspace.currentPath': {
-    'en-US': 'Current: {{path}}',
-    'zh-CN': '当前：{{path}}',
-  },
-  'ai.chat.workspace.entries': {
-    'en-US': 'Directory entries',
-    'zh-CN': '目录条目',
-  },
-  'ai.chat.workspace.up': {
-    'en-US': 'Up (Backspace)',
-    'zh-CN': '上一级 (Backspace)',
-  },
-  'ai.chat.workspace.upTitle': {
-    'en-US': 'Go to parent directory (Backspace)',
-    'zh-CN': '进入父目录 (Backspace)',
-  },
-  'ai.chat.workspace.refresh': {
-    'en-US': 'Refresh',
-    'zh-CN': '刷新',
-  },
-  'ai.chat.workspace.backToEnvironments': {
-    'en-US': 'Back to environments',
-    'zh-CN': '返回 Environment 列表',
-  },
-  'ai.chat.workspace.confirm': {
-    'en-US': 'Use current Workspace (Ctrl+Enter)',
-    'zh-CN': '使用当前 Workspace (Ctrl+Enter)',
-  },
-  'ai.chat.workspace.confirmDisabled': {
-    'en-US': 'Choose a directory before confirming',
-    'zh-CN': '请先选择一个目录',
-  },
-  'ai.chat.workspace.empty': {
-    'en-US': 'This directory has no subdirectories',
-    'zh-CN': '该目录没有子目录',
-  },
-  'ai.chat.workspace.truncated': {
-    'en-US': 'Too many entries; only the first 1000 are shown',
-    'zh-CN': '目录条目过多，仅显示前 1000 个',
-  },
-  'ai.chat.workspace.gitBranch': {
-    'en-US': 'branch: {{branch}}',
-    'zh-CN': '分支：{{branch}}',
-  },
-  'ai.chat.workspace.loadFailed': {
-    'en-US': 'Failed to load the directory',
-    'zh-CN': '目录加载失败',
-  },
-  'ai.chat.workspace.enterDirectory': {
-    'en-US': 'Enter {{name}}',
-    'zh-CN': '进入 {{name}}',
-  },
-  'ai.chat.workspace.loading': {
-    'en-US': 'Loading directory…',
-    'zh-CN': '正在加载目录…',
   },
   'ai.chat.history.title': {
     'en-US': 'History branches',
@@ -1161,10 +1097,6 @@ export const aiCatalog = {
     'en-US': 'Change this Chat’s visible Agent; the next message uses it',
     'zh-CN': '修改当前 Chat 可见的 Agent；下一条消息直接使用',
   },
-  'ai.runtime.command.environment': {
-    'en-US': 'Change this Chat’s visible Environment; the next message uses it',
-    'zh-CN': '修改当前 Chat 可见的 Environment；下一条消息直接使用',
-  },
   'ai.runtime.command.yolo': {
     'en-US': 'Toggle automatic approval of Tool calls',
     'zh-CN': '切换 YOLO 自动批准工具调用',
@@ -1204,10 +1136,6 @@ export const aiCatalog = {
   'ai.runtime.command.agentLabel': {
     'en-US': 'agent',
     'zh-CN': 'agent',
-  },
-  'ai.runtime.command.environmentLabel': {
-    'en-US': 'environment',
-    'zh-CN': 'environment',
   },
   'ai.runtime.command.models': {
     'en-US': 'Choose the model and variant for the next message',
@@ -1454,12 +1382,12 @@ export const aiCatalog = {
     'zh-CN': '打开原件 {{name}}',
   },
   'ai.runtime.status.environmentUnavailableText': {
-    'en-US': 'env:{{name}} · {{workspace}} (unavailable)',
-    'zh-CN': 'env:{{name}} · {{workspace}} (unavailable)',
+    'en-US': 'env:{{name}} (unavailable)',
+    'zh-CN': 'env:{{name}} (unavailable)',
   },
   'ai.runtime.status.environmentText': {
-    'en-US': 'env:{{name}} · {{workspace}}',
-    'zh-CN': 'env:{{name}} · {{workspace}}',
+    'en-US': 'env:{{name}}',
+    'zh-CN': 'env:{{name}}',
   },
   'ai.runtime.status.environmentNoneText': {
     'en-US': 'none env',
@@ -1468,14 +1396,6 @@ export const aiCatalog = {
   'ai.runtime.status.branchUsageTitle': {
     'en-US': 'Branch usage: {{usage}}',
     'zh-CN': '分支用量：{{usage}}',
-  },
-  'ai.runtime.status.gitBranchText': {
-    'en-US': 'git:{{branch}}',
-    'zh-CN': 'git:{{branch}}',
-  },
-  'ai.runtime.status.gitBranchTitle': {
-    'en-US': 'Git branch: {{branch}}',
-    'zh-CN': 'Git 分支：{{branch}}',
   },
   'ai.runtime.status.contextText': {
     'en-US': 'ctx {{used}}/{{total}}',
@@ -2148,17 +2068,5 @@ export const aiCatalog = {
   'ai.catalog.form.environment': {
     'en-US': 'Bound Environment',
     'zh-CN': '绑定环境',
-  },
-  'ai.chat.noEnvironmentBound': {
-    'en-US': 'Current Agent is not bound to an environment; workspace path selection is disabled.',
-    'zh-CN': '当前 Agent 未绑定环境，无法选择工作区路径。',
-  },
-  'ai.chat.workspacePath': {
-    'en-US': 'Workspace Path',
-    'zh-CN': '工作区路径',
-  },
-  'ai.chat.clearWorkspacePath': {
-    'en-US': 'Clear Workspace Path',
-    'zh-CN': '清除工作目录',
   },
 } satisfies LocaleCatalog

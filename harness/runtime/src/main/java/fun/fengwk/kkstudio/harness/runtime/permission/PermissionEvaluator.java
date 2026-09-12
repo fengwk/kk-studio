@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -34,9 +33,11 @@ public final class PermissionEvaluator {
     PermissionAction action;
     if (input.path("command").isTextual()) {
       action = evaluateBash(input.path("command").asText(), context.settings(), context.toolId());
-    } else if (input.path("path").isTextual() && !input.path("path").asText().trim().isEmpty()) {
-      Path targetWorkdir = resolveWorkdir(input, context.workdir());
-      PathTarget target = describePathTarget(input.path("path").asText(), targetWorkdir);
+    } else if (input.path("path").isTextual()
+        && !input.path("path").asText().trim().isEmpty()
+        && input.hasNonNull("workdir")) {
+      PathTarget target =
+          describePathTarget(input.path("path").asText(), workdirFromArguments(input));
       action = evaluatePathRules(target, context.settings(), context.toolId());
     } else {
       action =
@@ -50,17 +51,54 @@ public final class PermissionEvaluator {
   }
 
   /**
-   * 把工具 {@code path} 参数解析为相对目标。只保留到该次调用 effective workdir 的规范相对 POSIX 路径；raw、
-   * environment-root-relative 与 absolute 候选不再产生，Environment root 不参与 pattern 坐标。
+   * 把工具 {@code path} 参数词法解析为相对目标。只保留到该次调用 explicit workdir 的规范相对 POSIX 路径；绝对 target 直接词法
+   * relativize，相对 target 基于该 workdir 解析。全过程不读取 Backend cwd/HOME，Environment root 与 Backend 文件系统都不参与
+   * pattern 坐标。
+   *
+   * <p>workdir 只能来自本次调用的 {@code arguments.workdir}：没有该字段的调用（例如 {@code load_skill}）不会获得隐藏默认目录。
    */
-  PathTarget describePathTarget(String rawPath, Path workdir) {
-    String stripped = stripAtPrefix(rawPath);
-    boolean directory = stripped.endsWith("/") || stripped.endsWith("\\");
-    Path resolved = Path.of(display(expandHome(stripped)));
-    Path absolute =
-        resolved.isAbsolute() ? resolved.normalize() : workdir.resolve(resolved).normalize();
-    String relative = relativeDisplay(workdir, absolute);
-    return new PathTarget(relative, directory);
+  PathTarget describePathTarget(String rawPath, String workdir) {
+    boolean directory = rawPath.endsWith("/") || rawPath.endsWith("\\");
+    String unifiedWorkdir = unifySeparators(workdir);
+    boolean windows = isWindowsAbsolute(unifiedWorkdir) || unifiedWorkdir.startsWith("//");
+    String normalizedWorkdir = LexicalTargetPath.normalizeAbsolute(unifiedWorkdir);
+    String unified = rawPath.indexOf('\\') < 0 ? rawPath : rawPath.replace('\\', '/');
+    if (!windows && unified.startsWith("//")) {
+      unified = collapseUnixRoot(unified);
+    }
+    String absolute =
+        startsWithRoot(unified, windows)
+            ? LexicalTargetPath.normalizeAbsolute(unified)
+            : LexicalTargetPath.normalizeAbsolute(normalizedWorkdir + "/" + unified);
+    return new PathTarget(LexicalTargetPath.relativize(normalizedWorkdir, absolute), directory);
+  }
+
+  /** 按 explicit workdir 的路径族判断 target 是否为绝对路径，避免用 Backend OS 解释远端文本。 */
+  private static boolean startsWithRoot(String unified, boolean windows) {
+    if (!windows) {
+      return unified.startsWith("/");
+    }
+    return unified.startsWith("//") || isWindowsAbsolute(unified);
+  }
+
+  private static boolean isWindowsAbsolute(String unified) {
+    return unified.length() >= 3
+        && Character.isLetter(unified.charAt(0))
+        && unified.charAt(1) == ':'
+        && unified.charAt(2) == '/';
+  }
+
+  private static String unifySeparators(String value) {
+    return value.indexOf('\\') < 0 ? value : value.replace('\\', '/');
+  }
+
+  /** Unix 的多个前导 slash 属于同一 root；折叠后避免被无 OS 上下文的 UNC 解析分支误判。 */
+  private static String collapseUnixRoot(String value) {
+    int index = 1;
+    while (index < value.length() && value.charAt(index) == '/') {
+      index++;
+    }
+    return "/" + value.substring(index);
   }
 
   List<String> describeCandidates(JsonNode input) {
@@ -124,16 +162,17 @@ public final class PermissionEvaluator {
     return action;
   }
 
+  /** prompt preview 只展示该调用真实携带的 workdir：没有该字段的工具（{@code load_skill}、MCP 等）不显示任何虚构默认目录。 */
   private PermissionPromptPreview promptPreview(
       PermissionEvaluationContext context, JsonNode input) {
     JsonNode workdirNode = input.get("workdir");
     String workdir;
     if (workdirNode == null || workdirNode.isNull()) {
-      workdir = display(context.workdir()) + " (default)";
-    } else if (!workdirNode.isTextual() || stripAtPrefix(workdirNode.asText()).trim().isEmpty()) {
+      workdir = null;
+    } else if (!workdirNode.isTextual() || workdirNode.asText().trim().isEmpty()) {
       workdir = "<invalid-workdir>";
     } else {
-      workdir = singleLine(stripAtPrefix(workdirNode.asText()));
+      workdir = singleLine(workdirNode.asText());
     }
     return new PermissionPromptPreview(
         context.toolId().value(), workdir, truncate(singleLine(writeArguments(input))));
@@ -148,22 +187,20 @@ public final class PermissionEvaluator {
     }
   }
 
-  private Path resolveWorkdir(JsonNode input, Path defaultWorkdir) {
+  /** 只读取本次 arguments 的 workdir；空值与非绝对路径是调用方错误，不存在默认值或展示前缀展开。 */
+  private static String workdirFromArguments(JsonNode input) {
     JsonNode workdirNode = input.get("workdir");
-    if (workdirNode == null || workdirNode.isNull()) {
-      return defaultWorkdir;
-    }
     if (!workdirNode.isTextual()) {
-      throw new IllegalArgumentException("workdir must be a non-blank string when provided");
+      throw new IllegalArgumentException("workdir must be a non-blank string");
     }
-    String rawWorkdir = stripAtPrefix(workdirNode.asText().trim());
+    String rawWorkdir = workdirNode.asText();
     if (rawWorkdir.isBlank()) {
-      throw new IllegalArgumentException("workdir must be a non-blank string when provided");
+      throw new IllegalArgumentException("workdir must be a non-blank string");
     }
-    Path configured = Path.of(display(expandHome(rawWorkdir)));
-    return configured.isAbsolute()
-        ? configured.toAbsolutePath().normalize()
-        : defaultWorkdir.resolve(configured).toAbsolutePath().normalize();
+    if (!rawWorkdir.equals(rawWorkdir.strip())) {
+      throw new IllegalArgumentException("workdir must not have surrounding whitespace");
+    }
+    return LexicalTargetPath.normalizeAbsolute(rawWorkdir);
   }
 
   private JsonNode readArguments(String argumentsJson) {
@@ -179,7 +216,7 @@ public final class PermissionEvaluator {
   }
 
   private boolean wildcardMatches(String pattern, String candidate) {
-    String normalizedPattern = display(expandHome(pattern.trim()));
+    String normalizedPattern = display(pattern.trim());
     String normalizedCandidate = display(candidate.trim());
     StringBuilder regex = new StringBuilder("^");
     for (int i = 0; i < normalizedPattern.length(); i++) {
@@ -196,36 +233,6 @@ public final class PermissionEvaluator {
     return Pattern.compile(regex.toString()).matcher(normalizedCandidate).matches();
   }
 
-  private static String relativeDisplay(Path base, Path target) {
-    try {
-      String relative = display(base.relativize(target));
-      return relative.isEmpty() ? "." : relative;
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("path is not reachable from the effective workdir", error);
-    }
-  }
-
-  private static String expandHome(String value) {
-    String home = System.getProperty("user.home");
-    if (value.equals("~") || value.equals("$HOME") || value.equals("${HOME}")) {
-      return home;
-    }
-    if (value.startsWith("~/") || value.startsWith("~\\")) {
-      return home + "/" + value.substring(2);
-    }
-    if (value.startsWith("$HOME/") || value.startsWith("$HOME\\")) {
-      return home + "/" + value.substring(6);
-    }
-    if (value.startsWith("${HOME}/") || value.startsWith("${HOME}\\")) {
-      return home + "/" + value.substring(8);
-    }
-    return value;
-  }
-
-  private static String stripAtPrefix(String value) {
-    return value.startsWith("@") ? value.substring(1) : value;
-  }
-
   private static String truncate(String value) {
     if (value.length() <= ARGUMENT_PREVIEW_LENGTH) {
       return value.isEmpty() ? "{}" : value;
@@ -235,10 +242,6 @@ public final class PermissionEvaluator {
 
   private static String singleLine(String value) {
     return value.replaceAll("[\\r\\n\\t]+", " ").replaceAll(" {2,}", " ").trim();
-  }
-
-  private static String display(Path value) {
-    return display(value.toString());
   }
 
   private static String display(String value) {

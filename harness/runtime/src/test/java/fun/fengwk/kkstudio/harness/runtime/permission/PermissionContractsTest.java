@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 
-import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -129,7 +128,7 @@ class PermissionContractsTest {
 
     assertEquals(
         PermissionAction.ALLOW, evaluate(WRITE, "{\"path\":\"file1.txt\"}", settings).action());
-    // 显式绝对 workdir 是该次调用的 effective workdir：`secret` 解析为其下相对目标并被该 workdir 相对规则命中。
+    // 显式绝对 workdir 决定 `secret` 的相对坐标，规则按该 workdir 命中。
     assertEquals(
         PermissionAction.DENY,
         evaluate(WRITE, "{\"workdir\":\"/outside\",\"path\":\"secret\"}", settings).action());
@@ -150,16 +149,15 @@ class PermissionContractsTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            evaluator.evaluate(
-                new PermissionEvaluationContext(WRITE, "[]", Path.of("."), ToolSettings.DEFAULT)));
+            evaluator.evaluate(new PermissionEvaluationContext(WRITE, "[]", ToolSettings.DEFAULT)));
     assertThrows(
         NullPointerException.class,
-        () -> new PermissionEvaluationContext(null, "{}", Path.of("."), ToolSettings.DEFAULT));
+        () -> new PermissionEvaluationContext(null, "{}", ToolSettings.DEFAULT));
     PermissionEvaluationContext invalidWorkdir =
         new PermissionEvaluationContext(
-            WRITE, "{\"path\":\"x\",\"workdir\":\"@\"}", Path.of("."), ToolSettings.DEFAULT);
+            WRITE, "{\"path\":\"x\",\"workdir\":\"@\"}", ToolSettings.DEFAULT);
     assertThrows(IllegalArgumentException.class, () -> evaluator.evaluate(invalidWorkdir));
-    assertEquals("<invalid-workdir>", evaluator.preview(invalidWorkdir).workdir());
+    assertEquals("@", evaluator.preview(invalidWorkdir).workdir());
     assertEquals(PermissionAction.ALLOW, PermissionAction.fromValue("allow"));
     assertEquals(PermissionAction.ASK, PermissionAction.fromValue("ask"));
     assertEquals(PermissionAction.DENY, PermissionAction.fromValue("deny"));
@@ -218,9 +216,14 @@ class PermissionContractsTest {
     return new ToolSettings(permission, false);
   }
 
+  /** path 规则夹具：自动为 {@code {"path":...}} 形态注入固定 absolute workdir；其余形态原样评估。 */
   private PermissionEvaluator.Evaluation evaluate(
       AgentToolId tool, String arguments, ToolSettings settings) {
-    return evaluator.evaluate(
-        new PermissionEvaluationContext(tool, arguments, Path.of("/environment"), settings));
+    if (arguments.startsWith("{\"path\":")) {
+      return evaluator.evaluate(
+          new PermissionEvaluationContext(
+              tool, "{\"workdir\":\"/environment\"," + arguments.substring(1), settings));
+    }
+    return evaluator.evaluate(new PermissionEvaluationContext(tool, arguments, settings));
   }
 }

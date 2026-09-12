@@ -14,11 +14,6 @@ vi.mock('@/shared/api/agent-service', () => ({
     listAgents: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/environment-service', () => ({
-  environmentService: {
-    listEnvironments: vi.fn(async () => []),
-  },
-}))
 vi.mock('@/shared/api/chat-service', () => ({
   chatService: {
     listChats: vi.fn(),
@@ -34,7 +29,6 @@ describe('useChatPageController', () => {
       id: 'chat-1',
       title: '新的 Chat',
       agentName: 'default-assistant',
-      workspacePath: null,
       yoloEnabled: false,
       version: '1',
       createTime: null,
@@ -79,7 +73,6 @@ describe('useChatPageController', () => {
       expect(chatService.createChat).toHaveBeenCalledWith({
         title: '新的 Chat',
         agentName: 'default-assistant',
-        workspacePath: null,
       }),
     )
   })
@@ -96,7 +89,6 @@ describe('useChatPageController', () => {
       id: 'chat-99',
       title: 'Panel Chat',
       agentName: 'default-assistant',
-      workspacePath: null,
       yoloEnabled: false,
       version: '1',
       createTime: null,

@@ -68,7 +68,7 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
   public void contribute(HarnessRegistrar registrar) {
     Objects.requireNonNull(registrar, "registrar");
 
-    // 9 Environment capability tools
+    // 9 Environment capability tools（read/write/edit/bash/grep/find + 3 个 LSP）
     registerEnvironment(
         registrar,
         "environment.read",
@@ -169,7 +169,8 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             toolName,
-            "1",
+            // tool descriptor 版本与 capability 输入契约同步：workdir 变更为必填即升版。
+            capability.version(),
             EnvironmentPrompts.load(toolName + ".md"),
             toolName,
             capability.inputSchema(),

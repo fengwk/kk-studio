@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -122,27 +122,27 @@ public record ModelRequestSpec(
 
   private static void requireConsistentEnvironments(
       List<ToolBinding> toolBindings, List<SkillBinding> skillBindings) {
-    EnvironmentBinding environment = null;
+    EnvironmentId environmentId = null;
     boolean environmentSeen = false;
     for (ToolBinding binding : toolBindings) {
       if (!binding.environmentRequired()) {
         continue;
       }
       if (!environmentSeen) {
-        environment = binding.environment();
+        environmentId = binding.environmentId();
         environmentSeen = true;
-      } else if (!Objects.equals(environment, binding.environment())) {
+      } else if (!Objects.equals(environmentId, binding.environmentId())) {
         throw new IllegalArgumentException("environment-bound tools must share one environment");
       }
     }
     for (SkillBinding skill : skillBindings) {
-      if (skill.sourceEnvironment() == null) {
+      if (skill.sourceEnvironmentId() == null) {
         continue;
       }
       if (!environmentSeen) {
-        environment = skill.sourceEnvironment();
+        environmentId = skill.sourceEnvironmentId();
         environmentSeen = true;
-      } else if (!Objects.equals(environment, skill.sourceEnvironment())) {
+      } else if (!Objects.equals(environmentId, skill.sourceEnvironmentId())) {
         throw new IllegalArgumentException(
             "skill source environment must match environment-bound tools");
       }

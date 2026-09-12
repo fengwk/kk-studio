@@ -89,7 +89,6 @@ function draftWith(
   overrides: Partial<BranchDraft> = {},
 ): BranchDraft {
   return {
-    workspacePath: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     yoloEnabled: false,
@@ -137,124 +136,27 @@ describe('BranchDraft materialization failures', () => {
   })
 })
 
-describe('workspacePath semantics in BranchDraft and Agent switching', () => {
-  function settingsWith(workspacePath: string | null): HarnessBranchSettingsDTO {
+describe('BranchDraft conversion and diff semantics', () => {
+  function createSettings(): HarnessBranchSettingsDTO {
     return {
-      workspacePath,
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     }
   }
 
   it('converts HarnessBranchSettingsDTO to BranchDraft via branchDraftFromBranchSettings', () => {
-    const draft = branchDraftFromBranchSettings(settingsWith('proj/a'), true)
+    const draft = branchDraftFromBranchSettings(createSettings(), true)
     expect(draft).toEqual({
-      workspacePath: 'proj/a',
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       yoloEnabled: true,
     })
   })
 
-  it('materializes workspacePath when agent has environmentId, but forces null when agent has no environmentId', () => {
-    const withEnv = agent(['read'], [], [], 'env-uuid-1')
-    const noEnv = agent(['read'], [], [], null)
-
-    const materializedWithEnv = materializeBlankBranchDraft(
-      withEnv,
-      true,
-      [model],
-      'proj/a',
-    )
-    expect(materializedWithEnv?.workspacePath).toBe('proj/a')
-
-    const materializedNoEnv = materializeBlankBranchDraft(
-      noEnv,
-      true,
-      [model],
-      'proj/a',
-    )
-    // 无 environmentId 的 Agent 强制为 null 工作目录
-    expect(materializedNoEnv?.workspacePath).toBeNull()
-  })
-
-  it('resets workspacePath to null when switching to an agent with a different environmentId or no environmentId', () => {
-    const envAgent1 = { ...agent([], [], [], 'env-uuid-1'), name: 'agent1' }
-    const envAgent2 = { ...agent([], [], [], 'env-uuid-2'), name: 'agent2' }
-    const envAgent1Clone = { ...agent([], [], [], 'env-uuid-1'), name: 'agent1-alt' }
-    const noEnvAgent = { ...agent([], [], [], null), name: 'no-env-agent' }
-
-    const existingDraft = draftWith({
-      agentName: 'agent1',
-      workspacePath: 'my-proj',
-    })
-
-    // 1. 切换到不同 environmentId 的 agent -> workspacePath 归零
-    const switchedDifferent = materializeAgentBranchDraft(
-      envAgent2,
-      [model],
-      existingDraft,
-      false,
-      null,
-      envAgent1,
-    )
-    expect(switchedDifferent?.workspacePath).toBeNull()
-
-    // 2. 切换到无 environmentId 的 agent -> workspacePath 归零
-    const switchedToNoEnv = materializeAgentBranchDraft(
-      noEnvAgent,
-      [model],
-      existingDraft,
-      false,
-      null,
-      envAgent1,
-    )
-    expect(switchedToNoEnv?.workspacePath).toBeNull()
-
-    // 3. 切换到相同 environmentId 的 agent -> 保留已有 workspacePath
-    const switchedSame = materializeAgentBranchDraft(
-      envAgent1Clone,
-      [model],
-      existingDraft,
-      false,
-      null,
-      envAgent1,
-    )
-    expect(switchedSame?.workspacePath).toBe('my-proj')
-  })
-
-  it('compares workspacePath in branchDraftsEqual', () => {
-    expect(branchDraftsEqual(draftWith({ workspacePath: 'proj/a' }), draftWith({ workspacePath: 'proj/a' }))).toBe(true)
-    expect(branchDraftsEqual(draftWith({ workspacePath: 'proj/a' }), draftWith({ workspacePath: 'proj/b' }))).toBe(false)
-    expect(branchDraftsEqual(draftWith({ workspacePath: 'proj/a' }), draftWith({ workspacePath: null }))).toBe(false)
-    expect(branchDraftsEqual(draftWith({ workspacePath: null }), draftWith({ workspacePath: null }))).toBe(true)
-  })
-
-  it('emits SET_ENVIRONMENT with the exact workspacePath payload and skips equal workspacePath', () => {
-    const ids = (() => {
-      let next = 0
-      return () => `cid-${++next}`
-    })()
-    const commands = buildBranchDiffCommands(
-      draftWith({ workspacePath: 'proj/a' }),
-      draftWith({ workspacePath: 'proj/b' }),
-      ids,
-    )
-    expect(commands).toHaveLength(1)
-    expect(commands[0]).toEqual({
-      type: 'SET_ENVIRONMENT',
-      idempotencyKey: 'cid-1',
-      workspacePath: 'proj/b',
-    })
-
-    const cleared = buildBranchDiffCommands(draftWith({ workspacePath: 'proj/a' }), draftWith({ workspacePath: null }), ids)
-    expect(cleared[0]).toEqual({
-      type: 'SET_ENVIRONMENT',
-      idempotencyKey: 'cid-2',
-      workspacePath: null,
-    })
-
-    expect(buildBranchDiffCommands(draftWith({ workspacePath: 'proj/a' }), draftWith({ workspacePath: 'proj/a' }), ids)).toEqual([])
+  it('compares fields in branchDraftsEqual', () => {
+    expect(branchDraftsEqual(draftWith({ agentName: 'a' }), draftWith({ agentName: 'a' }))).toBe(true)
+    expect(branchDraftsEqual(draftWith({ agentName: 'a' }), draftWith({ agentName: 'b' }))).toBe(false)
+    expect(branchDraftsEqual(draftWith({ yoloEnabled: true }), draftWith({ yoloEnabled: false }))).toBe(false)
   })
 
   it('emits SET_AGENT/SET_MODEL only for the actually changed field', () => {
@@ -293,7 +195,6 @@ describe('workspacePath semantics in BranchDraft and Agent switching', () => {
     const commands = buildBranchDiffCommands(
       draftWith(),
       draftWith({
-        workspacePath: 'proj/a',
         agentName: 'coder',
         model: { providerName: 'other', modelName: 'Other', variant: 'v2' },
         yoloEnabled: true,
@@ -301,23 +202,10 @@ describe('workspacePath semantics in BranchDraft and Agent switching', () => {
       ids,
     )
     expect(commands.map((command) => command.type)).toEqual([
-      'SET_ENVIRONMENT',
       'SET_AGENT',
       'SET_MODEL',
     ])
     expect(commands.some((command) => command.type === 'SET_YOLO')).toBe(false)
-  })
-
-  it('projects a queued SET_ENVIRONMENT payload as workspacePath', () => {
-    const base = draftWith({ workspacePath: null })
-    const queued: HarnessThreadCommandDTO[] = [
-      queuedSettingCommand('1', 'SET_ENVIRONMENT', { workspacePath: 'proj/sub' }),
-      queuedSettingCommand('2', 'SET_ENVIRONMENT', { workspacePath: null }),
-    ]
-    expect(projectPendingTarget(base, queued).workspacePath).toBeNull()
-
-    const onlyFirst = projectPendingTarget(base, [queued[0]!])
-    expect(onlyFirst.workspacePath).toBe('proj/sub')
   })
 })
 

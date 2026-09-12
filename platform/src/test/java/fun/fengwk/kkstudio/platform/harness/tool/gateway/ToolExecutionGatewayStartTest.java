@@ -102,8 +102,8 @@ class ToolExecutionGatewayStartTest {
       startedResultA.handle().activate();
       startedResultB.handle().activate();
       awaitSize(transport.invocations, 2);
-      assertEquals(ToolGatewayTestSupport.ENV_A, transport.invocations.get(0).environment());
-      assertEquals(ToolGatewayTestSupport.ENV_B, transport.invocations.get(1).environment());
+      assertEquals(ToolGatewayTestSupport.ENV_A, transport.invocations.get(0).environmentId());
+      assertEquals(ToolGatewayTestSupport.ENV_B, transport.invocations.get(1).environmentId());
       assertEquals(
           ToolGatewayTestSupport.INVOCATION_ID.toString(),
           transport.invocations.get(0).request().call().id());
@@ -114,7 +114,9 @@ class ToolExecutionGatewayStartTest {
           EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC),
           transport.invocations.get(0).request().descriptor());
       assertEquals(Duration.ZERO, transport.invocations.get(0).request().timeout());
-      assertEquals(null, transport.invocations.get(0).request().workdir());
+      assertTrue(
+          transport.invocations.get(0).request().call().argumentsJson().contains("workdir"),
+          transport.invocations.get(0).request().call().argumentsJson());
     } finally {
       executor.shutdownNow();
     }
@@ -330,7 +332,9 @@ class ToolExecutionGatewayStartTest {
         gateway.start(
             ToolGatewayTestSupport.execution(
                 new ToolInvocationRequest(
-                    new ToolCall("call-1", "bash", "{\"command\":\"ls\"}"), mismatchedBinding)),
+                    new ToolCall(
+                        "call-1", "bash", "{\"command\":\"ls\",\"workdir\":\"/home/dev\"}"),
+                    mismatchedBinding)),
             new ToolGatewayTestSupport.RecordingListener());
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
     assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
@@ -338,7 +342,7 @@ class ToolExecutionGatewayStartTest {
   }
 
   @Test
-  void environmentToolRequiresEnvironmentBinding() {
+  void environmentToolRequiresEnvironmentId() {
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolGatewayTestSupport.environmentRequest("call-1", null));

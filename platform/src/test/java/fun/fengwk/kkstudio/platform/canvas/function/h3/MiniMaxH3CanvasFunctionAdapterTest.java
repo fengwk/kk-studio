@@ -114,7 +114,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   @Test
   void executesAllStagesAndMaterializesOnlyTarget() {
     RecordingContext context = new RecordingContext();
-    when(oneShot.submit(anyString(), any(), anyString(), any(), any())).thenReturn(THREAD_ID);
+    when(oneShot.submit(anyString(), anyString(), any(), any())).thenReturn(THREAD_ID);
     when(oneShot.await(any(), any(), any())).thenReturn("enhanced prompt");
     when(comfy.upload(anyString(), anyString(), anyLong(), any(), any()))
         .thenReturn(new H3UploadedFile("11.png", "kk-studio/7", "input"));
@@ -160,7 +160,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
                         MiniMaxH3CanvasFunctionAdapter.PROMPT_SUBMITTING,
                         H3AdapterState.empty().withSeed(1L).encode())));
     assertFalse(prompt.getMessage().isBlank());
-    verify(oneShot, never()).submit(anyString(), any(), anyString(), any(), any());
+    verify(oneShot, never()).submit(anyString(), anyString(), any(), any());
 
     IllegalStateException comfyError =
         assertThrows(

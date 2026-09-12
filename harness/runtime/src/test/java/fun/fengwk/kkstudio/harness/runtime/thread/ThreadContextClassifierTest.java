@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -915,10 +914,7 @@ class ThreadContextClassifierTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings(
-        EnvironmentBindings.binding("22222222-2222-2222-2222-222222222222").workspacePath(),
-        "agent",
-        new ModelSelection("provider", "model", "v1"));
+    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
   }
 
   private static List<String> callIds(List<ToolCallMessageContent> calls) {

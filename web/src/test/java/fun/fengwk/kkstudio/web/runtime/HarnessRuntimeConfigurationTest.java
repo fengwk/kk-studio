@@ -171,8 +171,8 @@ class HarnessRuntimeConfigurationTest {
   }
 
   @Test
-  void resourceStoreRootIsCreatedUnderEnvironmentRootAtStartup() {
-    Path root = properties.resolvedEnvironmentRoot().resolve(".kkstudio").resolve("resources");
+  void resourceStoreRootIsCreatedAtStartup() {
+    Path root = properties.resolvedResourceRoot();
     assertTrue(Files.isDirectory(root), "resource store root must exist: " + root);
   }
 

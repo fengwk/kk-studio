@@ -117,7 +117,6 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
             "sessionId":"%s",
             "threadId":"%s",
             "rootSettings":{
-              "workspacePath":null,
               "agentName":"default-assistant",
               "model":{
                 "providerName":"stub",

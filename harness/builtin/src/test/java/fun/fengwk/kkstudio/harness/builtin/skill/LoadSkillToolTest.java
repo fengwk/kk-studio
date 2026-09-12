@@ -3,10 +3,10 @@ package fun.fengwk.kkstudio.harness.builtin.skill;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
@@ -21,8 +21,10 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -31,31 +33,30 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** 覆盖 selected-skill 解析、source Environment 匹配/不匹配、离线失败与取消场景。 */
+/** 覆盖 selected-skill 解析、source Environment 匹配/不匹配、离线失败、超时与取消场景。 */
 class LoadSkillToolTest {
 
-  private static final EnvironmentBinding PLATFORM =
-      new EnvironmentBinding(EnvironmentId.parse("11111111-1111-1111-1111-111111111111"), ".");
-  private static final EnvironmentBinding LOCAL_DEV =
-      new EnvironmentBinding(EnvironmentId.parse("22222222-2222-2222-2222-222222222222"), ".");
+  private static final EnvironmentId PLATFORM =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+  private static final EnvironmentId LOCAL_DEV =
+      EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
 
   /** descriptor 的 name/version/renderer/side-effect/timeout 与单参数 schema 声明及 environment 要求。 */
   @Test
   void exposesCanonicalDescriptorContract() {
     LoadSkillTool tool =
         new LoadSkillTool(
-            (invocationId, threadId, skillName) -> Optional.empty(),
-            (environment, skillName, timeout) -> new CompletableFuture<>(),
-            Duration.ofSeconds(1));
+            (invocationId, threadId, skillName) -> Optional.empty(), Duration.ofSeconds(1));
 
     ToolDescriptor descriptor = tool.descriptor();
     assertEquals(LoadSkillTool.NAME, descriptor.name());
@@ -72,7 +73,7 @@ class LoadSkillToolTest {
     assertFalse(schema.additionalProperties());
   }
 
-  /** 成功加载：当选中的 Skill 来源环境与当前上下文绑定的环境一致时，正常调用 loader 返回正文。 */
+  /** 成功加载：当选中的 Skill 来源环境与当前上下文绑定的环境一致时，向 BoundEnvironment 委托并透传 skill 名称参数与结果。 */
   @Test
   void loadsSelectedSkillBodyFromResolvedSource() throws Exception {
     ThreadSelectedSkillLookup lookup =
@@ -82,52 +83,55 @@ class LoadSkillToolTest {
           }
           return Optional.empty();
         };
-    RecordingBodyLoader loader = new RecordingBodyLoader();
-    loader.result =
-        new SkillBodyLoader.SkillBodyLoadResult.Loaded("dev", "# Skill\n\nDo the thing.\n");
-    LoadSkillTool tool = new LoadSkillTool(lookup, loader, Duration.ofSeconds(2));
+    RecordingBoundEnvironment env = new RecordingBoundEnvironment(PLATFORM);
+    env.result =
+        new ToolResult(
+            "c1", List.of(new TextResultContent("# Skill\n\nDo the thing.\n")), false, "{}");
+    LoadSkillTool tool = new LoadSkillTool(lookup, Duration.ofSeconds(2));
 
-    ToolResult result = execute(tool, PLATFORM, "{\"name\":\"dev\"}");
+    ToolResult result = execute(tool, env, "{\"name\":\"dev\"}");
     assertFalse(result.error());
     assertEquals(
         "# Skill\n\nDo the thing.\n", ((TextResultContent) result.contents().get(0)).text());
-    assertEquals(PLATFORM, loader.environment);
-    assertEquals("dev", loader.skillName);
-    assertEquals(Duration.ofSeconds(2), loader.timeout);
+    assertEquals(
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_LOAD), env.capability);
+    assertNotNull(env.request);
+    assertEquals("{\"name\":\"dev\"}", env.request.call().argumentsJson());
+    assertEquals(Duration.ofSeconds(2), env.timeout);
   }
 
-  /** 环境不匹配校验：当 Skill 所属环境与上下文当前环境不同，工具安全拒绝执行。 */
+  /** 环境不匹配校验：当 Skill 所属环境与上下文当前环境不同，工具安全拒绝执行且不调用 BoundEnvironment。 */
   @Test
   void rejectsSkillSourceEnvironmentMismatch() throws Exception {
     ThreadSelectedSkillLookup lookup =
         (invocationId, threadId, skillName) ->
             Optional.of(new SelectedSkill("project", "Project skill", LOCAL_DEV));
-    RecordingBodyLoader loader = new RecordingBodyLoader();
-    LoadSkillTool tool = new LoadSkillTool(lookup, loader, Duration.ofSeconds(2));
+    RecordingBoundEnvironment env = new RecordingBoundEnvironment(PLATFORM);
+    LoadSkillTool tool = new LoadSkillTool(lookup, Duration.ofSeconds(2));
 
-    ToolResult result = execute(tool, PLATFORM, "{\"name\":\"project\"}");
+    ToolResult result = execute(tool, env, "{\"name\":\"project\"}");
     assertTrue(result.error());
     assertTrue(text(result).contains("mismatch"), text(result));
-    assertNull(loader.environment);
+    assertNull(env.request);
   }
 
-  /** 加载超时在每次 execute 现读 supplier：构造后改值必须传到 SkillBodyLoader。 */
+  /** 加载超时在每次 execute 现读 supplier：构造后改值必须传到 BoundEnvironment 请求。 */
   @Test
   void usesLiveLoadTimeoutSupplierOnEachExecute() throws Exception {
     ThreadSelectedSkillLookup lookup =
         (invocationId, threadId, skillName) ->
             Optional.of(new SelectedSkill("dev", "Developer rules", PLATFORM));
-    RecordingBodyLoader loader = new RecordingBodyLoader();
-    loader.result = new SkillBodyLoader.SkillBodyLoadResult.Loaded("dev", "# Skill\n");
+    RecordingBoundEnvironment env = new RecordingBoundEnvironment(PLATFORM);
+    env.result = new ToolResult("c1", List.of(new TextResultContent("# Skill\n")), false, "{}");
     AtomicReference<Duration> timeout = new AtomicReference<>(Duration.ofSeconds(2));
-    LoadSkillTool tool = new LoadSkillTool(lookup, loader, timeout::get);
+    LoadSkillTool tool = new LoadSkillTool(lookup, timeout::get);
 
-    execute(tool, PLATFORM, "{\"name\":\"dev\"}");
-    assertEquals(Duration.ofSeconds(2), loader.timeout);
+    execute(tool, env, "{\"name\":\"dev\"}");
+    assertEquals(Duration.ofSeconds(2), env.timeout);
 
     timeout.set(Duration.ofSeconds(9));
-    execute(tool, PLATFORM, "{\"name\":\"dev\"}");
-    assertEquals(Duration.ofSeconds(9), loader.timeout);
+    execute(tool, env, "{\"name\":\"dev\"}");
+    assertEquals(Duration.ofSeconds(9), env.timeout);
   }
 
   /** 未选中技能或环境离线时返回明确的错误结果。 */
@@ -140,50 +144,53 @@ class LoadSkillToolTest {
           }
           return Optional.empty();
         };
-    RecordingBodyLoader loader = new RecordingBodyLoader();
-    loader.result =
-        new SkillBodyLoader.SkillBodyLoadResult.Failed(
-            "dev", "platform is offline; dev is unavailable");
-    LoadSkillTool tool = new LoadSkillTool(lookup, loader, Duration.ofSeconds(2));
+    RecordingBoundEnvironment env = new RecordingBoundEnvironment(PLATFORM);
+    env.result =
+        new ToolResult(
+            "c1",
+            List.of(new TextResultContent("platform is offline; dev is unavailable")),
+            true,
+            "{}");
+    LoadSkillTool tool = new LoadSkillTool(lookup, Duration.ofSeconds(2));
 
-    ToolResult unselected = execute(tool, PLATFORM, "{\"name\":\"missing\"}");
+    ToolResult unselected = execute(tool, env, "{\"name\":\"missing\"}");
     assertTrue(unselected.error());
     assertTrue(text(unselected).contains("unknown or unselected skill"));
+    assertNull(env.request);
 
-    ToolResult offline = execute(tool, PLATFORM, "{\"name\":\"dev\"}");
+    ToolResult offline = execute(tool, env, "{\"name\":\"dev\"}");
     assertTrue(offline.error());
     assertTrue(text(offline).contains("offline"));
+    assertNotNull(env.request);
   }
 
-  /** Skill 声明没有 Environment 正文来源时拒绝加载。 */
+  /** Skill 声明没有 Environment 正文来源时拒绝加载且不调用 BoundEnvironment。 */
   @Test
   void rejectsSelectedSkillWithoutAnEnvironmentBody() throws Exception {
     ThreadSelectedSkillLookup lookup =
         (invocationId, threadId, skillName) ->
             Optional.of(new SelectedSkill("platform-only", "Already provided", null));
-    RecordingBodyLoader loader = new RecordingBodyLoader();
-    LoadSkillTool tool = new LoadSkillTool(lookup, loader, Duration.ofSeconds(2));
+    RecordingBoundEnvironment env = new RecordingBoundEnvironment(PLATFORM);
+    LoadSkillTool tool = new LoadSkillTool(lookup, Duration.ofSeconds(2));
 
-    ToolResult result = execute(tool, PLATFORM, "{\"name\":\"platform-only\"}");
+    ToolResult result = execute(tool, env, "{\"name\":\"platform-only\"}");
     assertTrue(result.error());
     assertTrue(text(result).contains("has no Environment body"));
-    assertNull(loader.environment);
+    assertNull(env.request);
   }
 
-  /** 缺少执行上下文或环境绑定时安全处理。 */
+  /** 缺少执行上下文或环境绑定时安全处理，且要求合法的 skill 名称。 */
   @Test
   void requiresDurableContextAndStrictName() throws Exception {
     LoadSkillTool tool =
         new LoadSkillTool(
-            (invocationId, threadId, skillName) -> Optional.empty(),
-            (env, name, timeout) -> CompletableFuture.completedFuture(null),
-            Duration.ofSeconds(1));
+            (invocationId, threadId, skillName) -> Optional.empty(), Duration.ofSeconds(1));
     AtomicReference<ToolResult> result = new AtomicReference<>();
     CountDownLatch latch = new CountDownLatch(1);
     tool.execute(
         new ToolExecutionRequest(
             tool.descriptor(),
-            new ToolCall("c1", "load_skill", "{\"name\":\"dev\"}"),
+            new ToolCall("c1", LoadSkillTool.NAME, "{\"name\":\"dev\"}"),
             Duration.ofSeconds(1),
             null),
         completeListener(result, latch));
@@ -191,33 +198,51 @@ class LoadSkillToolTest {
     assertTrue(result.get().error());
     assertTrue(text(result.get()).contains("durable execution context"));
 
+    AtomicReference<ToolResult> noEnvResult = new AtomicReference<>();
+    CountDownLatch noEnvLatch = new CountDownLatch(1);
+    ToolExecutionContext contextWithoutEnv =
+        new ToolExecutionContext(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            Instant.now(),
+            mock(BranchView.class),
+            Optional.empty());
+    tool.execute(
+        new ToolExecutionRequest(
+            tool.descriptor(),
+            new ToolCall("c2", LoadSkillTool.NAME, "{\"name\":\"dev\"}"),
+            Duration.ofSeconds(1),
+            contextWithoutEnv),
+        completeListener(noEnvResult, noEnvLatch));
+    assertTrue(noEnvLatch.await(2, TimeUnit.SECONDS));
+    assertTrue(noEnvResult.get().error());
+    assertTrue(text(noEnvResult.get()).contains("No environment bound in execution context"));
+
     ToolResult blank = execute(tool, PLATFORM, "{\"name\":\"  \"}");
     assertTrue(blank.error());
+    assertTrue(text(blank).contains("must not be blank"));
   }
 
-  /** cancel 必须中断 pending loader，并且重复 cancel 仍只产生一个 terminal ToolResult。 */
+  /** 取消挂起的加载执行时，委托句柄标记已取消且监听器仅收到一次终态结果。 */
   @Test
   void cancellationCancelsThePendingLoadAndCompletesExactlyOnce() throws Exception {
-    CompletableFuture<SkillBodyLoader.SkillBodyLoadResult> pending = new CompletableFuture<>();
     LoadSkillTool tool =
         new LoadSkillTool(
             (invocationId, threadId, skillName) ->
                 Optional.of(new SelectedSkill("dev", "Developer rules", PLATFORM)),
-            (environment, skillName, timeout) -> pending,
             Duration.ofSeconds(2));
     AtomicReference<ToolResult> result = new AtomicReference<>();
     AtomicInteger terminalCount = new AtomicInteger();
     CountDownLatch latch = new CountDownLatch(1);
 
-    BoundEnvironment boundEnv = mock(BoundEnvironment.class);
-    when(boundEnv.binding()).thenReturn(PLATFORM);
+    RecordingBoundEnvironment env = new RecordingBoundEnvironment(PLATFORM);
     ToolExecutionContext context =
         new ToolExecutionContext(
             UUID.randomUUID(),
             UUID.randomUUID(),
             Instant.now(),
             mock(BranchView.class),
-            Optional.of(boundEnv));
+            Optional.of(env));
 
     ToolExecutionHandle handle =
         tool.execute(
@@ -245,7 +270,6 @@ class LoadSkillToolTest {
     handle.cancel();
     assertTrue(latch.await(2, TimeUnit.SECONDS));
     assertTrue(handle.isCancelled());
-    assertTrue(pending.isCancelled());
     assertEquals(1, terminalCount.get());
     assertTrue(result.get().error());
     assertTrue(
@@ -253,19 +277,18 @@ class LoadSkillToolTest {
   }
 
   private static ToolResult execute(
-      LoadSkillTool tool, EnvironmentBinding environment, String argumentsJson) throws Exception {
+      LoadSkillTool tool, BoundEnvironment boundEnvironment, String argumentsJson)
+      throws Exception {
     AtomicReference<ToolResult> result = new AtomicReference<>();
     CountDownLatch latch = new CountDownLatch(1);
 
-    BoundEnvironment boundEnv = mock(BoundEnvironment.class);
-    when(boundEnv.binding()).thenReturn(environment);
     ToolExecutionContext context =
         new ToolExecutionContext(
             UUID.randomUUID(),
             UUID.randomUUID(),
             Instant.now(),
             mock(BranchView.class),
-            Optional.of(boundEnv));
+            Optional.of(boundEnvironment));
 
     tool.execute(
         new ToolExecutionRequest(
@@ -276,6 +299,11 @@ class LoadSkillToolTest {
         completeListener(result, latch));
     assertTrue(latch.await(2, TimeUnit.SECONDS));
     return result.get();
+  }
+
+  private static ToolResult execute(
+      LoadSkillTool tool, EnvironmentId environment, String argumentsJson) throws Exception {
+    return execute(tool, new RecordingBoundEnvironment(environment), argumentsJson);
   }
 
   private static ToolExecutionListener completeListener(
@@ -299,19 +327,74 @@ class LoadSkillToolTest {
     return ((TextResultContent) result.contents().get(0)).text();
   }
 
-  private static final class RecordingBodyLoader implements SkillBodyLoader {
-    private EnvironmentBinding environment;
-    private String skillName;
+  private static final class RecordingBoundEnvironment implements BoundEnvironment {
+    private final EnvironmentId environmentId;
+    private EnvironmentCapabilityDescriptor capability;
+    private ToolExecutionRequest request;
     private Duration timeout;
-    private SkillBodyLoadResult result;
+    private ToolResult result;
+    private ControllableHandle handle;
+
+    RecordingBoundEnvironment(EnvironmentId environmentId) {
+      this.environmentId = Objects.requireNonNull(environmentId, "environmentId");
+    }
 
     @Override
-    public CompletableFuture<SkillBodyLoadResult> load(
-        EnvironmentBinding binding, String skillName, Duration timeout) {
-      this.environment = binding;
-      this.skillName = skillName;
-      this.timeout = timeout;
-      return CompletableFuture.completedFuture(result);
+    public EnvironmentId environmentId() {
+      return environmentId;
+    }
+
+    @Override
+    public ToolExecutionHandle execute(
+        EnvironmentCapabilityDescriptor capability,
+        ToolExecutionRequest request,
+        ToolExecutionListener listener) {
+      this.capability = capability;
+      this.request = request;
+      this.timeout = request.timeout();
+      this.handle = new ControllableHandle(request.call().id(), listener);
+      if (result != null) {
+        ToolResult callResult =
+            new ToolResult(
+                request.call().id(), result.contents(), result.error(), result.detailsJson());
+        this.handle.complete(callResult);
+      }
+      return handle;
+    }
+  }
+
+  private static final class ControllableHandle implements ToolExecutionHandle {
+    private final AtomicBoolean cancelled = new AtomicBoolean();
+    private final AtomicBoolean completed = new AtomicBoolean();
+    private final String callId;
+    private final ToolExecutionListener listener;
+
+    ControllableHandle(String callId, ToolExecutionListener listener) {
+      this.callId = callId;
+      this.listener = listener;
+    }
+
+    void complete(ToolResult result) {
+      if (completed.compareAndSet(false, true) && listener != null) {
+        listener.onComplete(result);
+      }
+    }
+
+    @Override
+    public void cancel() {
+      if (cancelled.compareAndSet(false, true)) {
+        complete(
+            new ToolResult(
+                callId != null ? callId : "c1",
+                List.of(new TextResultContent("Execution cancelled")),
+                true,
+                "{}"));
+      }
+    }
+
+    @Override
+    public boolean isCancelled() {
+      return cancelled.get();
     }
   }
 }

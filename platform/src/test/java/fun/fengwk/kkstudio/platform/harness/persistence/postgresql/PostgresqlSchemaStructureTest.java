@@ -55,7 +55,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "chat_session",
           "environment",
           "environment_connection",
-          "environment_directory_query",
           "harness_session",
           "harness_entry",
           "harness_thread",
@@ -232,15 +231,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "role",
         "resource_id");
     assertColumns(
-        "chat",
-        "id",
-        "title",
-        "agent_name",
-        "workspace_path",
-        "yolo_enabled",
-        "created_at",
-        "updated_at",
-        "version");
+        "chat", "id", "title", "agent_name", "yolo_enabled", "created_at", "updated_at", "version");
     assertColumns("chat_session", "session_id", "chat_id", "created_at");
     assertColumns("canvas_session", "session_id", "canvas_id", "created_at");
     assertColumns(
@@ -281,17 +272,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "runtime_info",
         "last_seen_at",
         "lease_until");
-    assertColumns(
-        "environment_directory_query",
-        "id",
-        "environment_id",
-        "path",
-        "status",
-        "result",
-        "failure_code",
-        "failure_message",
-        "deadline_at",
-        "created_at");
   }
 
   @Test
@@ -388,7 +368,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "canvas_node", "function_config_json");
     assertColumnType("jsonb", "canvas_function_run", "state_json");
     assertColumnType("jsonb", "environment_connection", "runtime_info");
-    assertColumnType("jsonb", "environment_directory_query", "result");
     assertColumnType("integer", "canvas_function_run", "attempt");
     assertColumnType("character varying", "canvas_function_run", "lease_token");
   }
@@ -444,8 +423,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "environment", "updated_at");
     assertColumnType("timestamp with time zone", "environment_connection", "last_seen_at");
     assertColumnType("timestamp with time zone", "environment_connection", "lease_until");
-    assertColumnType("timestamp with time zone", "environment_directory_query", "deadline_at");
-    assertColumnType("timestamp with time zone", "environment_directory_query", "created_at");
   }
 
   @Test
@@ -668,81 +645,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
               ps.setObject(1, env2);
               ps.setObject(2, node1);
               ps.setObject(3, token1);
-              ps.executeUpdate();
-            }
-          });
-    }
-  }
-
-  @Test
-  void environmentQueryTableConstraintsAreEnforced() throws SQLException {
-    UUID env1 = uuid(101L);
-    UUID q1 = uuid(301L);
-
-    // 正常 PENDING 行可插入
-    try (Connection conn = newConnection()) {
-      try (PreparedStatement ps =
-          conn.prepareStatement(
-              "insert into environment (id, name, registration_token) values (?, 'dev', 'tok1')")) {
-        ps.setObject(1, env1);
-        ps.executeUpdate();
-      }
-      try (PreparedStatement ps =
-          conn.prepareStatement(
-              "insert into environment_directory_query (id, environment_id, path, status, deadline_at) "
-                  + "values (?, ?, 'src', 'PENDING', statement_timestamp() + interval '10 seconds')")) {
-        ps.setObject(1, q1);
-        ps.setObject(2, env1);
-        assertEquals(1, ps.executeUpdate());
-      }
-    }
-
-    // 拒绝非法 status
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_environment_directory_query_state",
-          () -> {
-            try (PreparedStatement ps =
-                conn.prepareStatement(
-                    "insert into environment_directory_query (id, environment_id, path, status, deadline_at) "
-                        + "values (?, ?, 'src', 'INVALID', statement_timestamp() + interval '10 seconds')")) {
-              ps.setObject(1, uuid(302L));
-              ps.setObject(2, env1);
-              ps.executeUpdate();
-            }
-          });
-    }
-
-    // SUCCEEDED 必须携带 JSON object result
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_environment_directory_query_state",
-          () -> {
-            try (PreparedStatement ps =
-                conn.prepareStatement(
-                    "insert into environment_directory_query (id, environment_id, path, status, deadline_at) "
-                        + "values (?, ?, 'src', 'SUCCEEDED', statement_timestamp() + interval '10 seconds')")) {
-              ps.setObject(1, uuid(303L));
-              ps.setObject(2, env1);
-              ps.executeUpdate();
-            }
-          });
-    }
-
-    // FAILED 必须携带 non-blank failure_code
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_environment_directory_query_state",
-          () -> {
-            try (PreparedStatement ps =
-                conn.prepareStatement(
-                    "insert into environment_directory_query (id, environment_id, path, status, failure_code, deadline_at) "
-                        + "values (?, ?, 'src', 'FAILED', '  ', statement_timestamp() + interval '10 seconds')")) {
-              ps.setObject(1, uuid(304L));
-              ps.setObject(2, env1);
               ps.executeUpdate();
             }
           });
@@ -1281,7 +1183,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                 "select conname from pg_constraint where contype = 'f'"
                     + " and conname in ('fk_agent_model_provider',"
                     + " 'fk_agent_definition_model', 'fk_agent_definition_environment',"
-                    + " 'fk_environment_connection_environment', 'fk_environment_directory_query_environment',"
+                    + " 'fk_environment_connection_environment',"
                     + " 'fk_harness_work_environment',"
                     + " 'fk_canvas_group_canvas',"
                     + " 'fk_canvas_node_canvas', 'fk_canvas_node_group',"
@@ -1303,7 +1205,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_agent_definition_model",
             "fk_agent_definition_environment",
             "fk_environment_connection_environment",
-            "fk_environment_directory_query_environment",
             "fk_harness_work_environment",
             "fk_canvas_group_canvas",
             "fk_canvas_node_canvas",

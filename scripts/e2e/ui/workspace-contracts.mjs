@@ -10,7 +10,6 @@ import {
   createNewSession,
   listEnvironments,
   setAgentCommand,
-  setEnvironmentCommand,
   setModelCommand,
   stopThreadForCleanup,
   threadTarget,
@@ -239,11 +238,16 @@ export async function runWorkspaceContractMatrix(ui) {
           await footer.waitFor({ state: 'visible', timeout: 15_000 })
           const environment = footer.locator('.thread-status-environment .thread-status-seg')
           const environmentText = await environment.innerText()
-          assert(environmentText.includes('…'), `long Workspace path was not middle-ellipsized: ${environmentText}`)
+          // Environment 归属当前 branch 的 Agent：fixture 已切到绑定另一 Card 的 Agent，
+          // Footer 必须投影那个 Agent 的 Environment（无 daemon 连接 => unavailable），
+          // 而不是首个 Environment，也不含任何已删除的 workspace 路径。
           assert(
-            await environment.getAttribute('title')
-              === `env:${fixture.environment.name} · @/${fixture.environment.workspacePath} (unavailable)`,
-            `Footer title did not retain the complete safe wire path: ${await environment.getAttribute('title')}`,
+            environmentText === `env:${fixture.otherEnvironment.name} (unavailable)`,
+            `Footer environment fact is not the current agent-bound readonly identity: ${environmentText}`,
+          )
+          assert(
+            await environment.getAttribute('title') === environmentText,
+            `Footer environment title must equal its visible fact: ${await environment.getAttribute('title')}`,
           )
           assert(
             (await footer.locator('.thread-status-usage').innerText()).includes('↑16')
@@ -343,7 +347,8 @@ export async function runWorkspaceContractMatrix(ui) {
               `edit streaming preview is not a five-line tail: ${JSON.stringify(streaming.previewLines)}`,
             )
             assert(
-              streaming.detail === fixture.path
+              // edit summary 必须同时投影显式 workdir 与长 path，二者共同触发换行。
+              streaming.detail === `${fixture.path} in ${fixture.workdir}`
               && streaming.detailWhiteSpace === 'normal'
               && streaming.detailHeight > streaming.detailLineHeight * 1.5,
               `long tool header did not wrap completely: ${JSON.stringify(streaming)}`,
@@ -693,7 +698,6 @@ async function waitForQueuedSettingsBatch(apiCtx, threadId, marker, timeoutMs = 
 async function createCompletedUsageFixture(apiCtx, stamp) {
   const suffix = cid().slice(0, 8)
   const mock = new CompletingOpenAiMock()
-  const workspacePath = 'projects/very-long-directory-name/packages/runtime/thread-panel'
   const state = {
     apiCtx,
     agent: null,
@@ -714,10 +718,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       environmentResponse.status === 201,
       `create usage environment: ${JSON.stringify(environmentResponse)}`,
     )
-    state.environment = {
-      ...envelopeData(environmentResponse.json),
-      workspacePath,
-    }
+    state.environment = envelopeData(environmentResponse.json)
 
     const providerResponse = await apiCtx.call('POST', '/api/ai/catalog/providers', {
       name: `e2e-ui-usage-provider-${suffix}`,
@@ -787,7 +788,30 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       timeoutMs: 30_000,
       intervalMs: 100,
     })
-    // 产品 HTTP 面不允许 SYSTEM CUSTOM_MESSAGE：环境切换经 SET_ENVIRONMENT + 用户消息表达。
+    // Environment 归属 Agent：切换只读 Footer 的 Environment 事实只能通过切换绑定不同 Card 的 Agent 表达。
+    const otherEnvironmentResponse = await apiCtx.call('POST', '/api/harness/environments', {
+      name: `offline-alt-${suffix}`,
+    })
+    assert(
+      otherEnvironmentResponse.status === 201,
+      `create alt usage environment: ${JSON.stringify(otherEnvironmentResponse)}`,
+    )
+    state.otherEnvironment = envelopeData(otherEnvironmentResponse.json)
+    const otherAgentResponse = await apiCtx.call('POST', '/api/ai/catalog/agents', {
+      name: `e2e-ui-usage-alt-agent-${suffix}`,
+      description: 'Second environment-bound agent for Footer projection tests.',
+      systemPrompt: 'Return the deterministic local response.',
+      model: `${state.model.providerName}/${state.model.name}`,
+      variant: 'default',
+      environmentId: state.otherEnvironment.id,
+      config: { toolIds: [], skills: [], subagents: [] },
+    })
+    assert(
+      otherAgentResponse.status === 201,
+      `create alt usage agent: ${JSON.stringify(otherAgentResponse)}`,
+    )
+    state.otherAgent = envelopeData(otherAgentResponse.json)
+
     const switched = await acceptCommandBatch(apiCtx, {
       owner,
       target: threadTarget({
@@ -796,11 +820,23 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
         expectedNextCommandSequence: completed.nextCommandSequence,
       }),
       commands: [
-        setEnvironmentCommand(workspacePath, cid()),
+        setAgentCommand(state.otherAgent.name, cid()),
+        setModelCommand(
+          {
+            providerName: state.model.providerName,
+            modelName: state.model.name,
+            variant: 'default',
+          },
+          cid(),
+        ),
         userMessageCommand(`footer environment ${stamp}`, cid()),
       ],
     })
-    assert(switched.acceptedCommands.at(-1).type === 'USER_MESSAGE', JSON.stringify(switched.acceptedCommands))
+    assert(
+      switched.acceptedCommands.map((command) => command.type).join(',')
+        === 'SET_AGENT,SET_MODEL,USER_MESSAGE',
+      JSON.stringify(switched.acceptedCommands),
+    )
     await waitForQuiescentThread(apiCtx, state.threadId, {
       timeoutMs: 30_000,
       intervalMs: 100,
@@ -960,12 +996,22 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     edit: `edit tool card ${stamp} ${suffix}`,
     write: `write tool card ${stamp} ${suffix}`,
   }
+  // 工具 arguments 必须显式携带目标 Daemon 上的绝对 workdir；Card 的 rootPath 就是该 Daemon 的 canonical root。
+  const environments = await listEnvironments(apiCtx)
+  const matchedEnv = environments.find((e) => e.name === daemonEnv)
+  assert(matchedEnv, `daemonEnv missing: ${daemonEnv}`)
+  assert(
+    typeof matchedEnv.rootPath === 'string' && matchedEnv.rootPath.startsWith('/'),
+    `daemonEnv '${daemonEnv}' must project an absolute rootPath for explicit workdir arguments: ${JSON.stringify(matchedEnv)}`,
+  )
+  const workdir = matchedEnv.rootPath
   const path =
-    `/workspace/${'very-long-directory-segment/'.repeat(12)}`
+    `${workdir}/${'very-long-directory-segment/'.repeat(12)}`
     + 'QuickSort.java'
   const mock = new ToolCardOpenAiMock({
     markers,
     path,
+    workdir,
     oldText: Array.from({ length: 8 }, (_, index) => `old-${index + 1}`).join('\n'),
     newText: Array.from({ length: 8 }, (_, index) => `new-${index + 1}`).join('\n'),
   })
@@ -980,6 +1026,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     provider: null,
     sessionId: null,
     threadId: null,
+    workdir,
   }
   try {
     await mock.start()
@@ -1013,9 +1060,6 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     assert(modelResponse.status === 201, `create tool-card model: ${JSON.stringify(modelResponse)}`)
     state.model = envelopeData(modelResponse.json)
 
-    const environments = await listEnvironments(apiCtx)
-    const matchedEnv = environments.find((e) => e.name === daemonEnv)
-    assert(matchedEnv, `daemonEnv missing: ${daemonEnv}`)
 
     const agentResponse = await apiCtx.call('POST', '/api/ai/catalog/agents', {
       name: `e2e-ui-tool-card-agent-${suffix}`,
@@ -1037,7 +1081,6 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
       title: `e2e-ui-tool-card-${stamp}-${suffix}`,
       agentName: state.agent.name,
       yoloEnabled: false,
-      workspacePath: '.',
     })
     const owner = chatOwner(state.chat.id)
     const sessionId = cid()
@@ -1047,13 +1090,14 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
       sessionId,
       threadId,
       rootSettings: branchSettingsOf(
+        // root settings 保持 canonical 但不存在的 Agent 名称：初始 USER_MESSAGE 必须确定性失败，
+        // 绝不消费 mock 的 tool-call 响应；真正的 Agent 由 start() 的 SET_AGENT 冻结。
         { name: `e2e-ui-tool-card-missing-${suffix}` },
         {
           providerName: state.model.providerName,
           modelName: state.model.name,
           variant: 'default',
         },
-        { workspacePath: '.' },
       ),
       yoloEnabled: false,
       commands: [userMessageCommand(`tool card materialize ${suffix}`, cid())],
@@ -1123,11 +1167,28 @@ async function cleanupCompletedUsageFixture(state) {
       )
     }
   })
+  // Alt Agent 必须先于其绑定的 Environment 删除，否则 Environment 处于 in-use 拒绝删除。
+  await cleanup('alt agent', errors, async () => {
+    if (state.otherAgent?.name) {
+      await state.apiCtx.call(
+        'DELETE',
+        `/api/ai/catalog/agents/${encodeURIComponent(state.otherAgent.name)}?expectedVersion=${encodeURIComponent(state.otherAgent.version)}`,
+      )
+    }
+  })
   await cleanup('environment', errors, async () => {
     if (state.environment?.id) {
       await state.apiCtx.call(
         'DELETE',
         `/api/harness/environments/${encodeURIComponent(state.environment.id)}?expectedVersion=${encodeURIComponent(state.environment.version)}`,
+      )
+    }
+  })
+  await cleanup('alt environment', errors, async () => {
+    if (state.otherEnvironment?.id) {
+      await state.apiCtx.call(
+        'DELETE',
+        `/api/harness/environments/${encodeURIComponent(state.otherEnvironment.id)}?expectedVersion=${encodeURIComponent(state.otherEnvironment.version)}`,
       )
     }
   })
@@ -1351,12 +1412,13 @@ class CompletingOpenAiMock {
 }
 
 class ToolCardOpenAiMock {
-  constructor({ markers, path, oldText, newText }) {
+  constructor({ markers, path, workdir, oldText, newText }) {
     this.calls = {
       bash: {
         marker: markers.bash,
         argumentsJson: JSON.stringify({
           command: 'printf "tool-card-bash-approval\\n"',
+          workdir,
         }),
       },
       edit: {
@@ -1365,6 +1427,7 @@ class ToolCardOpenAiMock {
           path,
           old_string: oldText,
           new_string: newText,
+          workdir,
         }),
       },
       write: {
@@ -1372,6 +1435,7 @@ class ToolCardOpenAiMock {
         argumentsJson: JSON.stringify({
           path,
           content: Array.from({ length: 8 }, (_, index) => `write-${index + 1}`).join('\n'),
+          workdir,
         }),
       },
     }

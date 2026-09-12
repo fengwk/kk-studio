@@ -274,8 +274,6 @@ class ToolExecutionGatewayEffectsTest {
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             resourceStore,
-            ToolGatewayTestSupport.WORKDIR,
-            ToolGatewayTestSupport.ENVIRONMENT_ROOT,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
@@ -365,8 +363,6 @@ class ToolExecutionGatewayEffectsTest {
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             resourceStore,
-            ToolGatewayTestSupport.WORKDIR,
-            ToolGatewayTestSupport.ENVIRONMENT_ROOT,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
@@ -464,8 +460,6 @@ class ToolExecutionGatewayEffectsTest {
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             resourceStore,
-            ToolGatewayTestSupport.WORKDIR,
-            ToolGatewayTestSupport.ENVIRONMENT_ROOT,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,

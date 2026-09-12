@@ -61,22 +61,22 @@ class FlywayAutoConfigurationIntegrationTest {
       try (ResultSet history =
           st.executeQuery(
               "select count(*) from flyway_schema_history"
-                  + " where success = true and ((version in ('1', '2'))"
+                  + " where success = true and ((version in ('1', '2', '3'))"
                   + " or (version is null and description = 'dev seed'))")) {
         assertTrue(history.next());
         assertEquals(
-            3L,
+            4L,
             history.getLong(1),
-            "baseline, model identity migration and dev seed must be recorded");
+            "baseline, model identity, workspace removal and dev seed must be recorded");
       }
-      try (ResultSet v2PlusShape =
+      try (ResultSet unexpectedMigration =
           st.executeQuery(
-              "select count(*) from flyway_schema_history where version is not null and version not in ('1', '2')")) {
-        assertTrue(v2PlusShape.next());
+              "select count(*) from flyway_schema_history where version is not null and version not in ('1', '2', '3')")) {
+        assertTrue(unexpectedMigration.next());
         assertEquals(
             0L,
-            v2PlusShape.getLong(1),
-            "only V1 baseline and V2 model identity migration are known");
+            unexpectedMigration.getLong(1),
+            "only V1 baseline, V2 model identity and V3 workspace removal migrations are known");
       }
       try (ResultSet modelIdColumn =
           st.executeQuery(

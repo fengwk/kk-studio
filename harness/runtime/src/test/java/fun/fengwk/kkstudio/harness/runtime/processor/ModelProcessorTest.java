@@ -14,8 +14,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
@@ -128,8 +127,8 @@ import java.util.function.Function;
  */
 class ModelProcessorTest {
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
-  private static final EnvironmentBinding ENV_ID =
-      EnvironmentBindings.binding("11111111-1111-1111-1111-111111111111");
+  private static final EnvironmentId ENV_ID =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
   private static final Duration FALLBACK_DELAY = Duration.ofSeconds(7);
@@ -3479,10 +3478,7 @@ class ModelProcessorTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings(
-        ENV_ID == null ? null : ENV_ID.workspacePath(),
-        "agent",
-        new ModelSelection("provider", "model", "v1"));
+    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
   }
 
   private static ProviderReplayState sampleReplayState() {

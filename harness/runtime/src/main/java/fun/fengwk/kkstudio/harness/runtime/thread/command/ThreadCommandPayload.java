@@ -9,8 +9,7 @@ public sealed interface ThreadCommandPayload
     permits UserMessageCommandPayload,
         CustomMessageCommandPayload,
         SetAgentCommandPayload,
-        SetModelCommandPayload,
-        SetEnvironmentCommandPayload {
+        SetModelCommandPayload {
 
   /** 返回该 payload 所代表的 command type。 */
   ThreadCommandType type();

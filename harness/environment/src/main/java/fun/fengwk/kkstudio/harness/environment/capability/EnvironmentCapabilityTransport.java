@@ -1,11 +1,15 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 /**
  * Environment Capability 的调用侧传输窄端口。
  *
- * <p>实现只负责向冻结的 {@link EnvironmentBinding} 发送 Capability Invocation 并透传异步事件，不拥有持久化 Invocation 状态机。
+ * <p>实现只负责向冻结的 {@link EnvironmentId} 发送 Capability Invocation 并透传异步事件，不拥有持久化 Invocation 状态机。
+ *
+ * <p>实现必须在发送前按目标 Daemon 冻结的 {@link
+ * fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem} 校验需要 workdir 的能力参数 ——
+ * 目录只存在于具体 arguments 中，传输外壳不携带第二份 workdir。
  */
 public interface EnvironmentCapabilityTransport {
 
@@ -32,7 +36,7 @@ public interface EnvironmentCapabilityTransport {
    *   <li>返回句柄的 cancel 请求必须透传为远程 cancel，partial 与 terminal 的事件顺序不得重排。
    * </ul>
    *
-   * @param binding 冻结的完整 Environment binding，不得为 null
+   * @param environmentId 冻结的 Environment 路由身份，不得为 null
    * @param request Capability execution request
    * @param listener 接收 partial 与唯一 terminal 事件的执行监听器
    * @return 可取消的 execution handle
@@ -41,7 +45,7 @@ public interface EnvironmentCapabilityTransport {
    * @throws EnvironmentCapabilitySendUncertainException 发送结果不确定，调用可能已被接受且不得重放
    */
   EnvironmentCapabilityExecutionHandle invoke(
-      EnvironmentBinding binding,
+      EnvironmentId environmentId,
       EnvironmentCapabilityExecutionRequest request,
       EnvironmentCapabilityExecutionListener listener);
 }

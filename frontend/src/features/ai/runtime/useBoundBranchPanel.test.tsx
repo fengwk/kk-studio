@@ -68,7 +68,6 @@ function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
 ): HarnessBranchSettingsDTO {
   return {
-    workspacePath: null,
     agentName: 'assistant',
     model: modelSelection(),
     ...overrides,
@@ -265,16 +264,14 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.dirty).toBe(false)
 
     act(() => {
-      // freeze 规则：采用新 agent 的 name，冻结的 model/workspacePath/yolo 保持快照值。
+      // freeze 规则：采用新 agent 的 name，冻结的 model/yolo 保持快照值。
       expect(result.current.selectAgent('coder')).toBe(true)
       expect(result.current.selectAgent('missing')).toBe(false)
-      result.current.selectWorkspacePath('.')
       result.current.setYoloEnabled(true)
       result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
     })
 
     expect(result.current.draft).toEqual({
-      workspacePath: '.',
       agentName: 'coder',
       model: { providerName: 'openai', modelName: 'GPT-5', variant: 'v2' },
       yoloEnabled: true,
@@ -286,14 +283,13 @@ describe('useBoundBranchPanel', () => {
     await send(result)
 
     const [batch] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
-    // buildBranchDiffCommands 的固定顺序：ENV/AGENT/MODEL + USER_MESSAGE；yolo 走直接控制面。
+    // buildBranchDiffCommands 的固定顺序：AGENT/MODEL + USER_MESSAGE；yolo 走直接控制面。
     expect(batch.commands.map((command) => command.type)).toEqual([
-      'SET_ENVIRONMENT',
       'SET_AGENT',
       'SET_MODEL',
       'USER_MESSAGE',
     ])
-    const setAgent = batch.commands[1]!
+    const setAgent = batch.commands[0]!
     expect(setAgent).toMatchObject({ agentName: 'coder' })
     // 直接控制面调用基于 snapshot version 的精确 CAS，绝不生成 SET_YOLO command。
     expect(harnessService.setThreadYolo).toHaveBeenCalledWith(THREAD_ID, {
@@ -660,7 +656,6 @@ describe('useBoundBranchPanel', () => {
     )
     // 旧 Thread 的 draft 编辑绝不泄漏：draft 完全来自新 snapshot，且恢复干净。
     expect(result.current.draft).toEqual({
-      workspacePath: null,
       agentName: 'assistant2',
       model: { providerName: 'anthropic', modelName: 'Claude', variant: 'v1' },
       yoloEnabled: true,
@@ -725,7 +720,6 @@ describe('useBoundBranchPanel', () => {
     })
     await waitFor(() => expect(result.current.draft?.agentName).toBe('assistant2'))
     expect(result.current.draft).toEqual({
-      workspacePath: null,
       agentName: 'assistant2',
       model: { providerName: 'anthropic', modelName: 'Claude', variant: 'v1' },
       yoloEnabled: true,
@@ -866,7 +860,6 @@ describe('useBoundBranchPanel', () => {
       )
     })
     expect(result.current.draft).toEqual({
-      workspacePath: null,
       agentName: 'fresh',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       yoloEnabled: true,

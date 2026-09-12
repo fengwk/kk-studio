@@ -62,23 +62,12 @@ public final class AgentPromptComposer {
   }
 
   /**
-   * Agent 正文只替换已知 {@code date}/{@code workspace}/{@code cwd}；其它 {@code ${...}} 与未闭合占位符保持原文，避免 把
-   * shell/文档示例打成规划失败。
+   * Agent 正文只替换已知 {@code date}；其它 {@code ${...}} 与未闭合占位符保持原文，避免把 shell/文档示例打成规划失败。
+   *
+   * <p>不再注入或替换 {@code workspace}/{@code cwd}：目录只由每次工具调用显式提供，Agent 之间也不做目录继承。
    */
   private static String renderAgentBody(String systemPrompt, CurrentEnvironmentContext context) {
-    String workspace = "";
-    if (context.binding() != null) {
-      String path = context.binding().workspacePath();
-      if (path != null && !path.isBlank() && !"none".equals(path)) {
-        workspace = path;
-      }
-    }
-    return substituteKnown(
-        systemPrompt,
-        Map.of(
-            "date", DATE_FORMAT.format(context.currentDate()),
-            "workspace", workspace,
-            "cwd", workspace));
+    return substituteKnown(systemPrompt, Map.of("date", DATE_FORMAT.format(context.currentDate())));
   }
 
   private static String substituteKnown(String raw, Map<String, String> known) {
@@ -108,9 +97,6 @@ public final class AgentPromptComposer {
 
   private static String currentEnvironment(CurrentEnvironmentContext context) {
     List<String> fields = new ArrayList<>();
-    if (context.binding() != null) {
-      addEnvironmentField(fields, "workspace", context.binding().workspacePath());
-    }
     if (context.operatingSystem() != null) {
       addEnvironmentField(fields, "system", context.operatingSystem().wireValue());
     }

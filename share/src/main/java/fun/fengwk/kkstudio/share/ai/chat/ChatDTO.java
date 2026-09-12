@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.chat;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.time.Instant;
@@ -18,10 +17,6 @@ public class ChatDTO {
 
   /** 必填可见 Agent 身份；Agent 删除后该值可能过期。 */
   private String agentName;
-
-  /** 可空的默认分支 workspace path。 */
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String workspacePath;
 
   /** 可见的发送权限模式。 */
   private boolean yoloEnabled;

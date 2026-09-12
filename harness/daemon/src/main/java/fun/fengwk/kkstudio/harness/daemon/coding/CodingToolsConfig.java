@@ -8,9 +8,8 @@ import java.util.Objects;
 /**
  * Daemon coding capabilities 共享的不可变本地执行配置。
  *
- * <p>默认 cwd 不是静态配置：每次 invocation 的 workspace 目录由 Daemon 从 INVOKE payload canonicalize 后写入 {@code
- * EnvironmentCapabilityExecutionRequest.workdir}，coding capabilities 以它为缺省 workdir；本配置只持有
- * environment root 与输出/进程参数。
+ * <p>工具目录不是静态配置：每次调用的显式 workdir 来自该调用自己的 arguments，本配置只持有 Daemon 资源存储根与输出/进程参数。 {@code
+ * environmentRoot} 仅用于 Daemon 资源存储与宿主 metadata，绝不参与工具路径解析或作为授权边界。
  */
 public record CodingToolsConfig(
     Path environmentRoot,

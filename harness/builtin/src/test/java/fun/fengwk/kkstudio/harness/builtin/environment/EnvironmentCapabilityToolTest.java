@@ -120,7 +120,9 @@ class EnvironmentCapabilityToolTest {
 
     ToolExecutionRequest requestWithoutContext =
         new ToolExecutionRequest(
-            descriptor, new ToolCall("call-1", "read", "{\"path\":\"demo.txt\"}"), Duration.ZERO);
+            descriptor,
+            new ToolCall("call-1", "read", "{\"workdir\":\"/srv/repo\",\"path\":\"demo.txt\"}"),
+            Duration.ZERO);
 
     ToolExecutionHandle handle = tool.execute(requestWithoutContext, listener);
     assertNotNull(handle);
@@ -158,7 +160,7 @@ class EnvironmentCapabilityToolTest {
     ToolExecutionRequest request =
         new ToolExecutionRequest(
             descriptor,
-            new ToolCall("call-2", "read", "{\"path\":\"demo.txt\"}"),
+            new ToolCall("call-2", "read", "{\"workdir\":\"/srv/repo\",\"path\":\"demo.txt\"}"),
             Duration.ZERO,
             context);
 

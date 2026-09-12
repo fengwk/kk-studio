@@ -43,6 +43,6 @@ public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSk
         .findFirst()
         .map(
             skill ->
-                new SelectedSkill(skill.name(), skill.description(), skill.sourceEnvironment()));
+                new SelectedSkill(skill.name(), skill.description(), skill.sourceEnvironmentId()));
   }
 }
