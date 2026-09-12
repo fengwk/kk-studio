@@ -262,6 +262,35 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
         CloudNodeKindConflictException.class,
         () -> fileSystemService.writeText(CloudPath.of("/somedir"), "content", 1L));
 
+    // Write to directory node with expectedRevision = 0 must throw CloudNodeKindConflictException
+    CloudNodeKindConflictException dirConflict =
+        assertThrows(
+            CloudNodeKindConflictException.class,
+            () -> fileSystemService.writeText(CloudPath.of("/somedir"), "content", 0L));
+    assertEquals(CloudNodeKind.TEXT, dirConflict.getExpectedKind());
+    assertEquals(CloudNodeKind.DIRECTORY, dirConflict.getActualKind());
+
+    // Write to blob node with expectedRevision = 0 must throw CloudNodeKindConflictException
+    UUID blobStorageId = seedActiveBlob("blob content");
+    CloudPath blobPath = CloudPath.of("/someblob.bin");
+    fileSystemService.createBlobNode(blobPath, blobStorageId);
+    CloudNodeKindConflictException blobConflict =
+        assertThrows(
+            CloudNodeKindConflictException.class,
+            () -> fileSystemService.writeText(blobPath, "content", 0L));
+    assertEquals(CloudNodeKind.TEXT, blobConflict.getExpectedKind());
+    assertEquals(CloudNodeKind.BLOB, blobConflict.getActualKind());
+
+    // Write to existing text node with expectedRevision = 0 must throw
+    // CloudRevisionConflictException
+    fileSystemService.writeText(CloudPath.of("/sometext.txt"), "first", 0L);
+    CloudRevisionConflictException revConflict =
+        assertThrows(
+            CloudRevisionConflictException.class,
+            () -> fileSystemService.writeText(CloudPath.of("/sometext.txt"), "second", 0L));
+    assertEquals(0L, revConflict.getExpectedRevision());
+    assertEquals(1L, revConflict.getCurrentRevision());
+
     // Intermediate segment is not a directory in writeText
     fileSystemService.writeText(path, "valid file", 0L);
     assertThrows(

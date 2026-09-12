@@ -189,14 +189,15 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
           nodeRepository.findByParentIdAndNameForUpdate(parentId, path.name());
       if (existing.isPresent()) {
         CloudNode existingNode = existing.get();
-        long curRev = 0L;
-        if (existingNode.isText()) {
-          Optional<CloudTextRevision> curRevOpt =
-              revisionRepository.findCurrentByNodeId(existingNode.getId());
-          if (curRevOpt.isPresent()) {
-            curRev = curRevOpt.get().getRevision();
-          }
+        if (!existingNode.isText()) {
+          throw new CloudNodeKindConflictException(
+              path, CloudNodeKind.TEXT, existingNode.getKind());
         }
+        long curRev =
+            revisionRepository
+                .findCurrentByNodeId(existingNode.getId())
+                .map(CloudTextRevision::getRevision)
+                .orElse(0L);
         throw new CloudRevisionConflictException(path, curRev, 0L);
       }
 
@@ -402,6 +403,8 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
     CloudNode sourceNode;
     UUID targetParentId = null;
 
+    // 行锁加锁保证：每条路径逐段 root-to-leaf 获取行锁；先解析两个 endpoint 中 canonical 较小者，
+    // 因此去重后的 cloud_node 锁顺序全局一致；祖先移动也被路径行锁覆盖。
     if (targetParentPath.isRoot()) {
       sourceNode = resolveExistingNodeForUpdate(sourcePath);
     } else {
