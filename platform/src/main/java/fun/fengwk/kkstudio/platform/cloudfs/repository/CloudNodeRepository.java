@@ -13,9 +13,6 @@ public interface CloudNodeRepository {
   /** 根据 ID 查询节点。 */
   Optional<CloudNode> findById(UUID id);
 
-  /** 根据 ID 悲观锁锁定并查询节点。 */
-  Optional<CloudNode> lockById(UUID id);
-
   /**
    * 根据父节点 ID 和名称查询唯一定位节点。
    *
@@ -61,11 +58,4 @@ public interface CloudNodeRepository {
    * @return 删除成功的行数（0 表示版本冲突或不存在）
    */
   int deleteByIdAndVersion(UUID id, long expectedVersion);
-
-  /**
-   * 根据 ID 直接删除节点。
-   *
-   * @return 删除成功的行数
-   */
-  int deleteById(UUID id);
 }

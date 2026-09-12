@@ -33,14 +33,6 @@ public class PostgresqlCloudNodeRepository implements CloudNodeRepository {
   }
 
   @Override
-  public Optional<CloudNode> lockById(UUID id) {
-    if (id == null) {
-      return Optional.empty();
-    }
-    return Optional.ofNullable(toDomain(mapper.lockById(id)));
-  }
-
-  @Override
   public Optional<CloudNode> findByParentIdAndName(UUID parentId, String name) {
     if (name == null || name.isEmpty()) {
       return Optional.empty();
@@ -100,14 +92,6 @@ public class PostgresqlCloudNodeRepository implements CloudNodeRepository {
       return 0;
     }
     return mapper.deleteByIdAndVersion(id, expectedVersion);
-  }
-
-  @Override
-  public int deleteById(UUID id) {
-    if (id == null) {
-      return 0;
-    }
-    return mapper.deleteById(id);
   }
 
   private CloudNode toDomain(CloudNodeDO nodeDO) {

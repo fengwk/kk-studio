@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeAlreadyExistsE
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeKindConflictException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeNotFoundException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudPathForbiddenException;
+import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudPathValidationException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudRevisionConflictException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudVersionConflictException;
 import fun.fengwk.kkstudio.platform.storage.S3PostgresSpringTestSupport;
@@ -100,8 +101,9 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
     }
   }
 
+  /** 验证预置根目录存在性，以及 listChildren 仅在根目录精确隐藏 .artifacts，而用户创建的根级与子级 dot 文件均正常暴露。 */
   @Test
-  void testPreseededDirectoriesAndListChildrenAtRoot() {
+  void testPreseededDirectoriesAndListChildrenWithDotFiles() {
     Optional<CloudNode> root = fileSystemService.findNode(CloudPath.of("/"));
     assertTrue(root.isPresent());
     assertTrue(root.get().isDirectory());
@@ -118,17 +120,32 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
     assertTrue(artifacts.isPresent());
     assertTrue(artifacts.get().isDirectory());
 
-    // listChildren on root excludes hidden .artifacts by default
-    List<CloudNode> defaultList = fileSystemService.listChildren(CloudPath.of("/"));
-    assertTrue(defaultList.stream().noneMatch(n -> n.getName().startsWith(".")));
-    assertTrue(defaultList.stream().anyMatch(n -> "knowledge".equals(n.getName())));
-    assertTrue(defaultList.stream().anyMatch(n -> "uploads".equals(n.getName())));
+    // Create user dot file at root
+    fileSystemService.writeText(CloudPath.of("/.gitignore"), "*.log\n", 0L);
 
-    // listChildren on root with includeHidden=true includes .artifacts
-    List<CloudNode> hiddenList = fileSystemService.listChildren(CloudPath.of("/"), true);
-    assertTrue(hiddenList.stream().anyMatch(n -> ".artifacts".equals(n.getName())));
+    // listChildren on root excludes EXACT .artifacts, but includes user dot files like .gitignore
+    List<CloudNode> rootList = fileSystemService.listChildren(CloudPath.of("/"));
+    assertTrue(rootList.stream().noneMatch(n -> ".artifacts".equals(n.getName())));
+    assertTrue(rootList.stream().anyMatch(n -> ".gitignore".equals(n.getName())));
+    assertTrue(rootList.stream().anyMatch(n -> "knowledge".equals(n.getName())));
+    assertTrue(rootList.stream().anyMatch(n -> "uploads".equals(n.getName())));
+
+    // Create nested dot file under workspace
+    fileSystemService.mkdir(CloudPath.of("/workspace"), true);
+    fileSystemService.writeText(CloudPath.of("/workspace/.env"), "KEY=VALUE\n", 0L);
+
+    // Nested listChildren includes dot files
+    List<CloudNode> workspaceList = fileSystemService.listChildren(CloudPath.of("/workspace"));
+    assertTrue(workspaceList.stream().anyMatch(n -> ".env".equals(n.getName())));
   }
 
+  /** 验证 findNode 对 null 路径参数进行严格的 Objects.requireNonNull 约束校验。 */
+  @Test
+  void testFindNodeRequiresNonNull() {
+    assertThrows(NullPointerException.class, () -> fileSystemService.findNode(null));
+  }
+
+  /** 验证递归与非递归创建目录，以及重复创建、缺失父目录和对保留目录写操作的校验拦截。 */
   @Test
   void testMkdirSuccessAndConflict() {
     CloudPath dirPath = CloudPath.of("/workspace/src");
@@ -154,6 +171,7 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
         () -> fileSystemService.mkdir(CloudPath.of("/.artifacts/forbidden"), true));
   }
 
+  /** 验证文本文件的 CAS 写入、历史版本不可变归档读取与保留目录写入拦截。 */
   @Test
   void testWriteAndReadCurrentAndHistoricalText() {
     CloudPath path = CloudPath.of("/docs/readme.md");
@@ -202,16 +220,38 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
         () -> fileSystemService.writeText(CloudPath.of("/.artifacts/readme.txt"), "forbidden", 0L));
   }
 
+  /** 验证文本内容中的孤立 surrogate 字符在写入和编辑时被快速失败拦截，杜绝编码损坏。 */
+  @Test
+  void testTextStrictSurrogateRejection() {
+    CloudPath path = CloudPath.of("/docs/surrogate.txt");
+
+    // Writing text containing lone high surrogate fails
+    assertThrows(
+        CloudPathValidationException.class,
+        () -> fileSystemService.writeText(path, "bad text \uD800 end", 0L));
+
+    // Writing valid text succeeds
+    fileSystemService.writeText(path, "good text prefix", 0L);
+
+    // Editing text with replacement containing lone low surrogate fails
+    assertThrows(
+        CloudPathValidationException.class,
+        () -> fileSystemService.editText(path, "prefix", "\uDC00", 1L, false));
+  }
+
+  /** 验证文本模式串替换编辑（单次匹配与全量匹配）、未命中异常信息固定且不回显原串、多重匹配歧义拦截与 CAS 版本控制。 */
   @Test
   void testEditText() {
     CloudPath path = CloudPath.of("/src/main.py");
     String initial = "count = 1\nprint(count)\ncount = 1\n";
     fileSystemService.writeText(path, initial, 0L);
 
-    // Old string not found
-    assertThrows(
-        CloudEditPatternNotFoundException.class,
-        () -> fileSystemService.editText(path, "missing_pattern", "foo", 1L, false));
+    // Old string not found: verify fixed message "Could not find old_string in <path>"
+    CloudEditPatternNotFoundException ex =
+        assertThrows(
+            CloudEditPatternNotFoundException.class,
+            () -> fileSystemService.editText(path, "missing_pattern", "foo", 1L, false));
+    assertEquals("Could not find old_string in " + path, ex.getMessage());
 
     // Ambiguous without replaceAll
     assertThrows(
@@ -235,6 +275,7 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
         () -> fileSystemService.editText(path, "done", "finished", 1L, false));
   }
 
+  /** 验证节点重命名与跨目录移动，断言仅目录移动触发子目录循环检查（CloudCycleException），以及目标已存在与 CAS 版本校验。 */
   @Test
   void testMoveNodeAndCycleDetection() {
     fileSystemService.mkdir(CloudPath.of("/tree/sub1/sub2"), true);
@@ -274,8 +315,9 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
                 99L));
   }
 
+  /** 验证删除非空目录被拦截、删除空目录成功，以及删除文本文件时清理其所有历史修订版本记录。 */
   @Test
-  void testDeleteNodeAndCascade() {
+  void testDeleteNodeAndRevisionCleanup() {
     fileSystemService.mkdir(CloudPath.of("/nested/dir"), true);
 
     // Non-empty directory delete fails
@@ -287,7 +329,7 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
     fileSystemService.deleteNode(CloudPath.of("/nested/dir"), 0L);
     assertFalse(fileSystemService.findNode(CloudPath.of("/nested/dir")).isPresent());
 
-    // Create text file and delete, cascading revisions
+    // Create text file and delete, cleaning up text revisions
     CloudPath filePath = CloudPath.of("/nested/sample.txt");
     fileSystemService.writeText(filePath, "hello", 0L);
     fileSystemService.writeText(filePath, "world", 1L);
@@ -316,6 +358,7 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
         () -> fileSystemService.deleteNode(CloudPath.of("/.artifacts"), 0L));
   }
 
+  /** 验证创建 BLOB 节点时递增底层 storage_blob 引用，删除 BLOB 节点时事务内释放引用。 */
   @Test
   void testBlobNodeCreationAndRelease() {
     UUID blobId = seedActiveBlob("binary blob data");
@@ -344,6 +387,7 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
     assertEquals(1L, releasedBlob.getRefCount());
   }
 
+  /** 验证在 TEXT 或 BLOB 节点下尝试创建子目录、文件或将其作为移动目标父节点时均被严格拒绝。 */
   @Test
   void testParentKindConflictWhenParentIsTextOrBlob() {
     UUID blobId = seedActiveBlob("sample blob");
@@ -402,6 +446,7 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
                 CloudPath.of("/src.txt"), CloudPath.of("/blob_parent/moved.txt"), 0L));
   }
 
+  /** 验证并发两个线程向相同路径以 expectedRevision=0 执行初次文本创建时，恰有一线程成功，败者收到领域版本冲突异常。 */
   @Test
   void testConcurrentCreateTextExpectedRevisionZero() throws Exception {
     CloudPath path = CloudPath.of("/concurrent/test.txt");
@@ -447,6 +492,7 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
     assertEquals(1L, current.getRevision());
   }
 
+  /** 验证多线程并发进行递归父目录自愈创建时安全收敛，不抛出唯一约束冲突或死锁。 */
   @Test
   void testConcurrentRecursiveEnsureDirectories() throws Exception {
     int threadCount = 4;

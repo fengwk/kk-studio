@@ -6,4 +6,8 @@ public class CloudPathValidationException extends CloudFileSystemException {
   public CloudPathValidationException(String message) {
     super(message);
   }
+
+  public CloudPathValidationException(String message, Throwable cause) {
+    super(message, cause);
+  }
 }

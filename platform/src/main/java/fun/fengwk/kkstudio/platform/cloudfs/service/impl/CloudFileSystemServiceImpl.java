@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNode;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNodeKind;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudTextRevision;
+import fun.fengwk.kkstudio.platform.cloudfs.domain.StrictUtf8;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudCycleException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudDirectoryNotEmptyException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudEditAmbiguousException;
@@ -28,7 +29,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -74,9 +74,7 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
 
   @Override
   public Optional<CloudNode> findNode(CloudPath path) {
-    if (path == null) {
-      return Optional.empty();
-    }
+    Objects.requireNonNull(path, "path");
     if (path.isRoot()) {
       return Optional.of(VIRTUAL_ROOT);
     }
@@ -105,29 +103,18 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
 
   @Override
   public List<CloudNode> listChildren(CloudPath directoryPath) {
-    return listChildren(directoryPath, false);
-  }
-
-  @Override
-  public List<CloudNode> listChildren(CloudPath directoryPath, boolean includeHidden) {
     Objects.requireNonNull(directoryPath, "directoryPath");
     if (directoryPath.isRoot()) {
-      List<CloudNode> nodes = nodeRepository.findByParentId(null);
-      if (!includeHidden) {
-        nodes = nodes.stream().filter(n -> !n.getName().startsWith(".")).toList();
-      }
-      return nodes;
+      return nodeRepository.findByParentId(null).stream()
+          .filter(n -> !CloudPath.ARTIFACTS_ROOT_SEGMENT.equals(n.getName()))
+          .toList();
     }
     CloudNode dir = getNode(directoryPath);
     if (!dir.isDirectory()) {
       throw new CloudNodeKindConflictException(
           directoryPath, CloudNodeKind.DIRECTORY, dir.getKind());
     }
-    List<CloudNode> nodes = nodeRepository.findByParentId(dir.getId());
-    if (!includeHidden) {
-      nodes = nodes.stream().filter(n -> !n.getName().startsWith(".")).toList();
-    }
-    return nodes;
+    return nodeRepository.findByParentId(dir.getId());
   }
 
   @Override
@@ -183,7 +170,7 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
     if (path.isArtifactPath()) {
       throw new CloudPathForbiddenException(path, "Public mutation forbidden under /.artifacts");
     }
-    byte[] utf8Bytes = content.getBytes(StandardCharsets.UTF_8);
+    byte[] utf8Bytes = StrictUtf8.encode(content, "text content");
     if (utf8Bytes.length > MAX_TEXT_BYTES) {
       throw new CloudPathValidationException(
           String.format(
@@ -322,7 +309,7 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
 
     int count = countOccurrences(content, oldString);
     if (count == 0) {
-      throw new CloudEditPatternNotFoundException(path, oldString);
+      throw new CloudEditPatternNotFoundException(path);
     }
     if (count > 1 && !replaceAll) {
       throw new CloudEditAmbiguousException(path, count);
@@ -337,7 +324,7 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
           content.substring(0, idx) + newString + content.substring(idx + oldString.length());
     }
 
-    byte[] utf8Bytes = newContent.getBytes(StandardCharsets.UTF_8);
+    byte[] utf8Bytes = StrictUtf8.encode(newContent, "edited text content");
     if (utf8Bytes.length > MAX_TEXT_BYTES) {
       throw new CloudPathValidationException(
           String.format(

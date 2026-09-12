@@ -7,7 +7,6 @@ import fun.fengwk.kkstudio.platform.cloudfs.repository.CloudTextRevisionReposito
 import fun.fengwk.kkstudio.platform.cloudfs.repository.postgresql.mapper.CloudTextRevisionMapper;
 import fun.fengwk.kkstudio.platform.cloudfs.repository.postgresql.model.CloudTextRevisionDO;
 
-import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,17 +35,6 @@ public class PostgresqlCloudTextRevisionRepository implements CloudTextRevisionR
       return Optional.empty();
     }
     return Optional.ofNullable(toDomain(mapper.getByNodeIdAndRevision(nodeId, revision)));
-  }
-
-  @Override
-  public List<CloudTextRevision> listByNodeId(UUID nodeId) {
-    if (nodeId == null) {
-      return List.of();
-    }
-    return mapper.listByNodeId(nodeId).stream()
-        .map(this::toDomain)
-        .filter(Objects::nonNull)
-        .toList();
   }
 
   @Override
