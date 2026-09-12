@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.environment.operation;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -18,12 +20,14 @@ import fun.fengwk.kkstudio.platform.environment.skill.repo.SkillSourceRepository
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 协调 Skill 操作执行结果并在全局锁与代际/租约围栏下原子持久化。
+ * 协调 Skill 操作执行结果并在全局锁与代际/租约围栏下原子持久化（包内私有）。
  *
  * <p>锁顺序：{@code environment} (key share) → {@code environment_connection} (for share) → {@code
  * environment_inventory} (for update) → {@code environment_skill_source} 全部行按 source_id 升序 (for
@@ -50,6 +54,7 @@ class EnvironmentOperationResultPublisher {
   private final EnvironmentOperationRepository environmentOperationRepository;
   private final JdbcTemplate jdbcTemplate;
   private final Clock clock;
+  private final ObjectMapper objectMapper;
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
 
   @Transactional
@@ -59,8 +64,7 @@ class EnvironmentOperationResultPublisher {
       UUID ownerNodeId,
       UUID leaseToken,
       long expectedSourceSetVersion,
-      DaemonSkillSourceSnapshot snapshot,
-      String resultSummaryJson) {
+      DaemonSkillSourceSnapshot snapshot) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(operationId, "operationId");
     Objects.requireNonNull(ownerNodeId, "ownerNodeId");
@@ -138,8 +142,7 @@ class EnvironmentOperationResultPublisher {
       throw new IllegalStateException("apply skill inventory report failed: " + environmentId);
     }
 
-    String summary =
-        (resultSummaryJson == null || resultSummaryJson.isBlank()) ? "{}" : resultSummaryJson;
+    String summary = buildSuccessSummary(snapshot);
     if (!environmentOperationRepository.markSucceeded(
         operationId, ownerNodeId, leaseToken, summary)) {
       throw new IllegalStateException(
@@ -149,7 +152,48 @@ class EnvironmentOperationResultPublisher {
   }
 
   @Transactional
-  OperationPublishOutcome publishOperationFailure(
+  OperationPublishOutcome publishExecutionFailure(
+      UUID environmentId,
+      UUID operationId,
+      UUID ownerNodeId,
+      UUID leaseToken,
+      long expectedSourceSetVersion,
+      UUID sourceId,
+      long expectedSourceVersion) {
+    return publishFailure(
+        environmentId,
+        operationId,
+        ownerNodeId,
+        leaseToken,
+        expectedSourceSetVersion,
+        sourceId,
+        expectedSourceVersion,
+        EnvironmentOperationFailureCodes.OPERATION_FAILED,
+        EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
+  }
+
+  @Transactional
+  OperationPublishOutcome publishInvalidResult(
+      UUID environmentId,
+      UUID operationId,
+      UUID ownerNodeId,
+      UUID leaseToken,
+      long expectedSourceSetVersion,
+      UUID sourceId,
+      long expectedSourceVersion) {
+    return publishFailure(
+        environmentId,
+        operationId,
+        ownerNodeId,
+        leaseToken,
+        expectedSourceSetVersion,
+        sourceId,
+        expectedSourceVersion,
+        EnvironmentOperationFailureCodes.INVALID_RESULT,
+        EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
+  }
+
+  private OperationPublishOutcome publishFailure(
       UUID environmentId,
       UUID operationId,
       UUID ownerNodeId,
@@ -207,26 +251,31 @@ class EnvironmentOperationResultPublisher {
       return OperationPublishOutcome.RESOURCE_CHANGED;
     }
 
-    String code =
-        (failureCode == null || failureCode.isBlank())
-            ? EnvironmentOperationFailureCodes.OPERATION_FAILED
-            : failureCode;
-    String message =
-        (failureMessage == null || failureMessage.isBlank())
-            ? EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE
-            : failureMessage;
-
     if (!skillSourceRepository.markSourceFailed(
-        environmentId, sourceId, expectedSourceVersion, code, message)) {
+        environmentId, sourceId, expectedSourceVersion, failureCode, failureMessage)) {
       throw new IllegalStateException("mark skill source FAILED failed: " + sourceId);
     }
 
     if (!environmentOperationRepository.markFailed(
-        operationId, ownerNodeId, leaseToken, code, message)) {
+        operationId, ownerNodeId, leaseToken, failureCode, failureMessage)) {
       throw new IllegalStateException(
           "failed to mark operation failed under valid claim fence: " + operationId);
     }
     return OperationPublishOutcome.APPLIED;
+  }
+
+  private String buildSuccessSummary(DaemonSkillSourceSnapshot snapshot) {
+    Map<String, Object> summary = new LinkedHashMap<>();
+    summary.put("skillCount", snapshot.skills().size());
+    summary.put("diagnosticCount", snapshot.diagnostics().size());
+    if (snapshot.sourceRevision() != null && !snapshot.sourceRevision().isBlank()) {
+      summary.put("sourceRevision", snapshot.sourceRevision());
+    }
+    try {
+      return objectMapper.writeValueAsString(summary);
+    } catch (JsonProcessingException e) {
+      return "{}";
+    }
   }
 
   private List<SkillInventoryEntry> toEntries(

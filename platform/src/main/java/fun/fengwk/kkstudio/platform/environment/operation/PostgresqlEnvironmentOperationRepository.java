@@ -184,13 +184,14 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
               failure_message, created_at, updated_at
       ),
       notify as (
-          select pg_notify('environment_operation_pending', id::text) as n, id
+          select pg_notify('%s', id::text) as n, id
           from inserted
       )
       select inserted.*
       from inserted
       left join notify on notify.id = inserted.id
-      """;
+      """
+          .formatted(EnvironmentOperationDispatcher.CHANNEL);
 
   private static final String CREATE_PENDING_TIMEOUT_SQL =
       """
@@ -229,13 +230,14 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
               failure_message, created_at, updated_at
       ),
       notify as (
-          select pg_notify('environment_operation_pending', id::text) as n, id
+          select pg_notify('%s', id::text) as n, id
           from inserted
       )
       select inserted.*
       from inserted
       left join notify on notify.id = inserted.id
-      """;
+      """
+          .formatted(EnvironmentOperationDispatcher.CHANNEL);
 
   private static final String FIND_BY_ID_SQL =
       """

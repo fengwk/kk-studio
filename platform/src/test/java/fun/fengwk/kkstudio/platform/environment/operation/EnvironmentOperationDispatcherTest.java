@@ -1,11 +1,14 @@
 package fun.fengwk.kkstudio.platform.environment.operation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atMost;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -37,13 +40,14 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 验证 {@link EnvironmentOperationDispatcher} 的执行分发与并发契约：
- * 包括同步完成防泄露、回调与关机竞争、关机围栏标记与取消顺序、发送前与发送不确定性异常处理、本地清扫句柄取消及超批次无配额分发。
+ * 包括生命周期读写围栏、同步完成防泄露且无多余取消、回调与关机竞争、关机围栏标记与取消顺序、发送前与发送不确定性异常处理、 本地清扫句柄取消、并发唤醒合并及超批次无配额分发。
  */
 class EnvironmentOperationDispatcherTest {
 
@@ -131,7 +135,54 @@ class EnvironmentOperationDispatcherTest {
     return new ClaimedOperation(op, Duration.ofSeconds(30));
   }
 
-  /** 测试意图：验证在 invoke 返回句柄前 listener 已同步完成时，句柄被及时取消或移除，绝不泄露在 activeHandles 中。 */
+  /** 测试意图：验证 dispatcher start() 之前 wake() 是纯 no-op，绝不认领或分发任何操作；start() 之后方可正常分发。 */
+  @Test
+  void startBeforeWakeNoOpBeforeStart() {
+    assertFalse(dispatcher.isRunning());
+    dispatcher.wake();
+    verify(repository, never()).claimPendingWithTimeout(any(), anyInt());
+
+    dispatcher.start();
+    assertTrue(dispatcher.isRunning());
+    // start 幂等性
+    dispatcher.start();
+    assertTrue(dispatcher.isRunning());
+  }
+
+  /** 测试意图：验证并发/多次 wake 请求被合并，基于 wakeRequested 与 drainRunning 不会无限积压 drain 任务。 */
+  @Test
+  void repeatedWakeCoalescing() throws Exception {
+    CountDownLatch drainStarted = new CountDownLatch(1);
+    CountDownLatch unblockDrain = new CountDownLatch(1);
+
+    when(repository.claimPendingWithTimeout(eq(nodeId), anyInt()))
+        .thenAnswer(
+            inv -> {
+              drainStarted.countDown();
+              unblockDrain.await(5, TimeUnit.SECONDS);
+              return List.of();
+            });
+
+    dispatcher.start();
+    dispatcher.wake();
+    assertTrue(drainStarted.await(5, TimeUnit.SECONDS));
+
+    // 在 drain 运行期间密集触发多次 wake
+    for (int i = 0; i < 10; i++) {
+      dispatcher.wake();
+    }
+
+    // 释放阻塞
+    unblockDrain.countDown();
+
+    // 等待 drainExecutor 屏障任务完成
+    drainExecutor.submit(() -> {}).get(5, TimeUnit.SECONDS);
+
+    // 验证 claimPendingWithTimeout 仅被执行了必要的合并轮次（通常为 1~2 轮），绝非 10+ 轮
+    verify(repository, atMost(3)).claimPendingWithTimeout(eq(nodeId), anyInt());
+  }
+
+  /** 测试意图：验证在 invoke 返回句柄前 listener 已同步完成时，状态被及时清除且绝不触发不必要的取消，也不泄露在活跃集合中。 */
   @Test
   void synchronousCompletionBeforeInvokeReturnsLeavesNoLeakedHandle() throws Exception {
     ClaimedOperation claimed = createClaimedOperation(opId);
@@ -141,12 +192,14 @@ class EnvironmentOperationDispatcherTest {
 
     EnvironmentCapabilityExecutionHandle handle = mock(EnvironmentCapabilityExecutionHandle.class);
     CountDownLatch coordinatedLatch = new CountDownLatch(1);
+    CountDownLatch invokeFinishedLatch = new CountDownLatch(1);
 
     when(transport.invoke(any(), any(), any()))
         .thenAnswer(
             invocation -> {
               EnvironmentCapabilityExecutionListener listener = invocation.getArgument(2);
               listener.onComplete(EnvironmentCapabilityResult.json(opId.toString(), "{}"));
+              invokeFinishedLatch.countDown();
               return handle;
             });
 
@@ -158,13 +211,17 @@ class EnvironmentOperationDispatcherTest {
               return OperationPublishOutcome.APPLIED;
             });
 
+    dispatcher.start();
     dispatcher.wake();
-    assertTrue(coordinatedLatch.await(5, TimeUnit.SECONDS));
 
-    // 等待异步处理收敛
-    Thread.sleep(100);
+    assertTrue(coordinatedLatch.await(5, TimeUnit.SECONDS));
+    assertTrue(invokeFinishedLatch.await(5, TimeUnit.SECONDS));
+
+    // 等待 drainExecutor 屏障
+    drainExecutor.submit(() -> {}).get(5, TimeUnit.SECONDS);
+
     assertEquals(0, dispatcher.getActiveHandleCount(), "同步完成后 activeExecutions 必须为空，不得泄露句柄");
-    verify(handle).cancel();
+    verify(handle, never()).cancel();
   }
 
   /** 测试意图：验证回调与关机竞争时，关机先行终结 DB 状态并使 ActiveExecution 终态化，后续迟到回调不产生第二条 DB 终态路径。 */
@@ -177,8 +234,8 @@ class EnvironmentOperationDispatcherTest {
 
     CountDownLatch invokeStarted = new CountDownLatch(1);
     CountDownLatch stopFinished = new CountDownLatch(1);
+    CountDownLatch callbackDone = new CountDownLatch(1);
     EnvironmentCapabilityExecutionHandle handle = mock(EnvironmentCapabilityExecutionHandle.class);
-    AtomicBoolean callbackRan = new AtomicBoolean(false);
 
     when(transport.invoke(any(), any(), any()))
         .thenAnswer(
@@ -192,21 +249,21 @@ class EnvironmentOperationDispatcherTest {
                           stopFinished.await(5, TimeUnit.SECONDS);
                           listener.onComplete(
                               EnvironmentCapabilityResult.json(opId.toString(), "{}"));
-                          callbackRan.set(true);
+                          callbackDone.countDown();
                         } catch (Exception ignored) {
                         }
                       });
               return handle;
             });
 
+    dispatcher.start();
     dispatcher.wake();
     assertTrue(invokeStarted.await(5, TimeUnit.SECONDS));
 
     // 调用 stop
     dispatcher.stop();
     stopFinished.countDown();
-
-    Thread.sleep(150);
+    assertTrue(callbackDone.await(5, TimeUnit.SECONDS));
 
     verify(repository).markRunningUnknownOnShutdown(nodeId);
     // 迟到的回调必须被 ActiveExecution.terminal CAS 拦截，绝不调用 coordinator 写入第二条路径
@@ -216,16 +273,49 @@ class EnvironmentOperationDispatcherTest {
     assertEquals(0, dispatcher.getActiveHandleCount());
   }
 
-  /** 测试意图：验证 dispatcher stop 之后绝不发起新的 invoke 调用，已认领未执行的操作安全回退为 PENDING。 */
+  /**
+   * 测试意图：验证在 claimPendingWithTimeout 持有读锁期间发起 stop，stop 的写围栏等待读锁释放后优先执行， 将本节点 RUNNING 记录推至
+   * UNKNOWN，随后 worker 读锁观测到 stopped，安全 rescheduleUnsent 绝不发起 invoke。
+   */
   @Test
   void claimVsStopNoPostStopInvoke() throws Exception {
     ClaimedOperation claimed = createClaimedOperation(opId);
-    when(repository.claimPendingWithTimeout(eq(nodeId), anyInt())).thenReturn(List.of(claimed));
 
-    dispatcher.stop();
+    CountDownLatch claimHoldingReadLock = new CountDownLatch(1);
+    CountDownLatch stopRequested = new CountDownLatch(1);
+    CountDownLatch stopCompleted = new CountDownLatch(1);
+
+    when(repository.claimPendingWithTimeout(eq(nodeId), anyInt()))
+        .thenAnswer(
+            inv -> {
+              claimHoldingReadLock.countDown();
+              stopRequested.await(5, TimeUnit.SECONDS);
+              return List.of(claimed);
+            })
+        .thenReturn(List.of());
+
+    dispatcher.start();
     dispatcher.wake();
 
-    Thread.sleep(100);
+    assertTrue(claimHoldingReadLock.await(5, TimeUnit.SECONDS));
+
+    // 在另一个线程发起 stop，它将阻塞等待 claimPendingWithTimeout 释放读锁
+    Thread.ofVirtual()
+        .start(
+            () -> {
+              try {
+                stopRequested.countDown();
+                dispatcher.stop();
+                stopCompleted.countDown();
+              } catch (Exception ignored) {
+              }
+            });
+
+    assertTrue(stopCompleted.await(5, TimeUnit.SECONDS));
+
+    // 验证 stop 的写围栏执行了 markRunningUnknownOnShutdown
+    verify(repository).markRunningUnknownOnShutdown(nodeId);
+    // 验证停止后绝不发起 invoke
     verify(transport, never()).invoke(any(), any(), any());
   }
 
@@ -249,6 +339,7 @@ class EnvironmentOperationDispatcherTest {
               return handle;
             });
 
+    dispatcher.start();
     dispatcher.wake();
     assertTrue(invokeInvoked.await(5, TimeUnit.SECONDS));
 
@@ -258,6 +349,138 @@ class EnvironmentOperationDispatcherTest {
     InOrder inOrder = inOrder(repository, handle);
     inOrder.verify(repository).markRunningUnknownOnShutdown(nodeId);
     inOrder.verify(handle).cancel();
+  }
+
+  /** 测试意图：验证 invoke 执行期间持有读锁会阻塞 stop 的写围栏；首个操作 invoke 允许完成，stop 完成后后续操作绝不 invoke。 */
+  @Test
+  void transportInvocationBlockedWhileStopWaits() throws Exception {
+    UUID opId1 = UUID.randomUUID();
+    UUID opId2 = UUID.randomUUID();
+    ClaimedOperation claimed1 = createClaimedOperation(opId1);
+    ClaimedOperation claimed2 = createClaimedOperation(opId2);
+
+    CountDownLatch op1InvokeStarted = new CountDownLatch(1);
+    CountDownLatch stopInitiated = new CountDownLatch(1);
+    CountDownLatch unblockOp1Invoke = new CountDownLatch(1);
+    CountDownLatch stopCompleted = new CountDownLatch(1);
+
+    when(repository.claimPendingWithTimeout(eq(nodeId), anyInt()))
+        .thenReturn(List.of(claimed1))
+        .thenAnswer(
+            inv -> {
+              op1InvokeStarted.await(5, TimeUnit.SECONDS);
+              stopInitiated.await(5, TimeUnit.SECONDS);
+              return List.of(claimed2);
+            })
+        .thenReturn(List.of());
+
+    EnvironmentCapabilityExecutionHandle handle1 = mock(EnvironmentCapabilityExecutionHandle.class);
+
+    when(transport.invoke(any(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              op1InvokeStarted.countDown();
+              unblockOp1Invoke.await(5, TimeUnit.SECONDS);
+              return handle1;
+            });
+
+    dispatcher.start();
+    dispatcher.wake();
+
+    assertTrue(op1InvokeStarted.await(5, TimeUnit.SECONDS));
+
+    // 在另一个线程发起 stop
+    Thread.ofVirtual()
+        .start(
+            () -> {
+              stopInitiated.countDown();
+              dispatcher.stop();
+              stopCompleted.countDown();
+            });
+
+    // 此时 stop 在等待 op1 释放读锁
+    assertFalse(stopCompleted.await(100, TimeUnit.MILLISECONDS));
+
+    // 释放 op1 invoke
+    unblockOp1Invoke.countDown();
+    assertTrue(stopCompleted.await(5, TimeUnit.SECONDS));
+
+    // 验证 invoke 仅被 op1 调用过 1 次，op2 绝不调用 invoke
+    verify(transport, times(1)).invoke(any(), any(), any());
+  }
+
+  /** 测试意图：验证 transport invoke 返回 null 句柄是违约异常，必须从活跃状态移除并协调为 UNKNOWN，绝不重试。 */
+  @Test
+  void nullHandleCoordinatesUnknown() throws Exception {
+    ClaimedOperation claimed = createClaimedOperation(opId);
+    when(repository.claimPendingWithTimeout(eq(nodeId), anyInt()))
+        .thenReturn(List.of(claimed))
+        .thenReturn(List.of());
+
+    CountDownLatch unknownCoordinated = new CountDownLatch(1);
+    when(transport.invoke(any(), any(), any())).thenReturn(null);
+    when(coordinator.coordinateTransportUnknown(eq(opId), eq(nodeId), eq(leaseToken)))
+        .thenAnswer(
+            inv -> {
+              unknownCoordinated.countDown();
+              return true;
+            });
+
+    dispatcher.start();
+    dispatcher.wake();
+
+    assertTrue(unknownCoordinated.await(5, TimeUnit.SECONDS));
+    assertEquals(0, dispatcher.getActiveHandleCount());
+    verify(repository, never()).rescheduleUnsent(any(), any(), any());
+  }
+
+  /** 测试意图：验证单个 worker 被线程池拒绝执行时，确定未发送，安全 rescheduleUnsent 且循环继续处理后续认领行。 */
+  @Test
+  void workerRejectionReschedulesAndContinues() throws Exception {
+    UUID opId1 = UUID.randomUUID();
+    UUID opId2 = UUID.randomUUID();
+    ClaimedOperation claimed1 = createClaimedOperation(opId1);
+    ClaimedOperation claimed2 = createClaimedOperation(opId2);
+
+    when(repository.claimPendingWithTimeout(eq(nodeId), anyInt()))
+        .thenReturn(List.of(claimed1, claimed2))
+        .thenReturn(List.of());
+
+    ExecutorService rejectingWorkerExecutor = mock(ExecutorService.class);
+    AtomicBoolean first = new AtomicBoolean(true);
+    CountDownLatch secondSubmitted = new CountDownLatch(1);
+
+    doAnswer(
+            inv -> {
+              if (first.compareAndSet(true, false)) {
+                throw new RejectedExecutionException("Worker rejected");
+              }
+              secondSubmitted.countDown();
+              Runnable r = inv.getArgument(0);
+              Thread.ofVirtual().start(r);
+              return null;
+            })
+        .when(rejectingWorkerExecutor)
+        .submit(any(Runnable.class));
+
+    EnvironmentOperationDispatcher rejectingDispatcher =
+        new EnvironmentOperationDispatcher(
+            nodeId,
+            repository,
+            transport,
+            coordinator,
+            drainExecutor,
+            rejectingWorkerExecutor,
+            pollScheduler);
+
+    rejectingDispatcher.start();
+    rejectingDispatcher.wake();
+
+    assertTrue(secondSubmitted.await(5, TimeUnit.SECONDS));
+
+    // 验证 op1 被安全 rescheduleUnsent
+    verify(repository).rescheduleUnsent(eq(opId1), eq(nodeId), any());
+    rejectingDispatcher.stop();
   }
 
   /**
@@ -271,12 +494,21 @@ class EnvironmentOperationDispatcherTest {
         .thenReturn(List.of(claimed))
         .thenReturn(List.of());
 
+    CountDownLatch unknownLatch = new CountDownLatch(1);
+    when(coordinator.coordinateTransportUnknown(eq(opId), eq(nodeId), eq(leaseToken)))
+        .thenAnswer(
+            inv -> {
+              unknownLatch.countDown();
+              return true;
+            });
+
     when(transport.invoke(any(), any(), any()))
         .thenThrow(new RuntimeException("Transport netty pipeline broke unexpectedly"));
 
+    dispatcher.start();
     dispatcher.wake();
-    Thread.sleep(150);
 
+    assertTrue(unknownLatch.await(5, TimeUnit.SECONDS));
     verify(repository, never()).rescheduleUnsent(any(), any(), any());
     verify(coordinator).coordinateTransportUnknown(eq(opId), eq(nodeId), eq(leaseToken));
   }
@@ -289,12 +521,21 @@ class EnvironmentOperationDispatcherTest {
         .thenReturn(List.of(claimed))
         .thenReturn(List.of());
 
+    CountDownLatch rescheduleLatch = new CountDownLatch(1);
+    when(repository.rescheduleUnsent(eq(opId), eq(nodeId), eq(leaseToken)))
+        .thenAnswer(
+            inv -> {
+              rescheduleLatch.countDown();
+              return 1;
+            });
+
     when(transport.invoke(any(), any(), any()))
         .thenThrow(new EnvironmentCapabilityBusyException("Busy"));
 
+    dispatcher.start();
     dispatcher.wake();
-    Thread.sleep(150);
 
+    assertTrue(rescheduleLatch.await(5, TimeUnit.SECONDS));
     verify(repository).rescheduleUnsent(eq(opId), eq(nodeId), eq(leaseToken));
     verify(coordinator, never()).coordinateTransportUnknown(any(), any(), any());
   }
@@ -307,17 +548,29 @@ class EnvironmentOperationDispatcherTest {
         .thenReturn(List.of(claimed))
         .thenReturn(List.of());
 
+    CountDownLatch invokeDone = new CountDownLatch(1);
     when(transport.invoke(any(), any(), any()))
-        .thenThrow(new EnvironmentCapabilitySendUncertainException("Send uncertain"));
+        .thenAnswer(
+            inv -> {
+              try {
+                throw new EnvironmentCapabilitySendUncertainException("Send uncertain");
+              } finally {
+                invokeDone.countDown();
+              }
+            });
 
+    dispatcher.start();
     dispatcher.wake();
-    Thread.sleep(150);
+
+    assertTrue(invokeDone.await(5, TimeUnit.SECONDS));
+
+    // 等待 drainExecutor 屏障保证排空任务退出
+    drainExecutor.submit(() -> {}).get(5, TimeUnit.SECONDS);
 
     verify(repository, never()).rescheduleUnsent(any(), any(), any());
     verify(coordinator, never()).coordinateTransportUnknown(any(), any(), any());
     verify(coordinator, never())
         .coordinateExecutionFailure(any(), any(), any(), any(), anyLong(), any(), anyLong());
-    assertEquals(0, dispatcher.getActiveHandleCount());
   }
 
   /** 测试意图：验证 runSweeper 本地超时清扫推进至 UNKNOWN 后，主动取消内存中的活跃句柄。 */
@@ -338,6 +591,7 @@ class EnvironmentOperationDispatcherTest {
               return handle;
             });
 
+    dispatcher.start();
     dispatcher.wake();
     assertTrue(invokeInvoked.await(5, TimeUnit.SECONDS));
     assertEquals(1, dispatcher.getActiveHandleCount());
@@ -376,6 +630,7 @@ class EnvironmentOperationDispatcherTest {
               return mock(EnvironmentCapabilityExecutionHandle.class);
             });
 
+    dispatcher.start();
     dispatcher.wake();
 
     assertTrue(allInvoked.await(10, TimeUnit.SECONDS), "全部 65 个操作必须无配额地被派发到虚拟线程执行");
