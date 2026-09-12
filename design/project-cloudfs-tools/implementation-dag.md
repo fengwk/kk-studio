@@ -109,7 +109,8 @@ harness/tool/**
 - 所有调用方编译；
 - alias 只对冻结的 built-in model names 生效；
 - canonical+alias、多 alias 和非 allowlist tool 均由 strict schema 拒绝；
-- durable ToolCall 只保存 canonical arguments。
+- durable assistant history 保留 Provider raw ToolCall；transient execution、审批和
+  renderer 只使用 canonical arguments。
 
 ### T1 — Environment Five Tools & Spool
 

@@ -99,7 +99,8 @@ AND file/filePath/file_path 恰好出现一个
 - `path` 已存在时不改写；残留 alias 由 additionalProperties 校验拒绝。
 - 多个 alias 同时出现时不猜测，严格拒绝。
 - alias value 不做类型转换，由 canonical schema 校验。
-- 执行、审批、renderer、durable invocation 和历史只保存归一化后的 `path`。
+- Provider 原始 ToolCall 继续原样进入 durable assistant history，以保证请求重放精确；
+  transient executable ToolCall、审批预览和 renderer 统一使用归一化后的 `path`。
 - alias 不出现在 schema、prompt 或文档示例中。
 
 实现落在 `harness/tool` 的 model Tool argument normalizer，由 `ToolCall.validateFor` 在通用数字/null normalization 之前调用。Environment 管理 capability、MCP 和非模型调用不使用该兼容层。
