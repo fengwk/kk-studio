@@ -164,5 +164,10 @@ public final class SkillSourceConfigValidator {
     static NormalizedConfig git(String gitUrl, String gitRef, String scanPath) {
       return new NormalizedConfig(DaemonSkillSourceType.GIT, null, gitUrl, gitRef, scanPath);
     }
+
+    @Override
+    public String toString() {
+      return "NormalizedConfig[type=" + type + "]";
+    }
   }
 }

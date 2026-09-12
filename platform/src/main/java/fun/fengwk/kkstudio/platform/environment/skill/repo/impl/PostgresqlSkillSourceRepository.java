@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.environment.skill.repo.impl;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResultCodes;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDiagnostic;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceType;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillDiagnosticsCodec;
@@ -21,7 +22,6 @@ import fun.fengwk.kkstudio.platform.environment.skill.repo.impl.model.Environmen
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /** 基于 PostgreSQL 的 Skill 来源配置与持久 inventory 仓库实现。 */
@@ -138,7 +138,6 @@ public class PostgresqlSkillSourceRepository implements SkillSourceRepository {
         == 1;
   }
 
-  private static final Pattern UPPER_SNAKE = Pattern.compile("^[A-Z][A-Z0-9_]{0,63}$");
   private static final int MAX_ERROR_MESSAGE_CHARS = 2048;
 
   @Override
@@ -156,13 +155,11 @@ public class PostgresqlSkillSourceRepository implements SkillSourceRepository {
   }
 
   private static String validateErrorCode(String code) {
-    if (code == null
-        || code.isBlank()
-        || !code.equals(code.strip())
-        || !UPPER_SNAKE.matcher(code).matches()) {
+    try {
+      return EnvironmentCapabilityResultCodes.requireCode(code);
+    } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException("invalid error code");
     }
-    return code;
   }
 
   private static String validateErrorMessage(String message) {
