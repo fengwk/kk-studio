@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshot;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -33,7 +34,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -56,6 +59,8 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
   private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
+  private static final UUID FAT_SOURCE_ID = UUID.fromString("99999999-9999-9999-9999-999999999999");
+  private static final String REVISION = "a".repeat(64);
 
   @LocalServerPort private int port;
 
@@ -155,18 +160,42 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
     return URI.create("ws://localhost:" + port + EnvironmentDaemonWebSocketHandler.PATH);
   }
 
+  /**
+   * 生成超过 {@code minBytes} 的合法 READY payload。
+   *
+   * <p>厚帧必须由真实来源快照构成：descriptor 要携带完整身份（sourceId/sourceVersion/baseDirectory/revision）， 否则严格 codec
+   * 会拒绝。单条 description 被限制在 {@link DaemonSkillDescriptor#MAX_DESCRIPTION_CHARS}，因此厚度来自多个合规
+   * Skill，而不是一条超长描述。
+   */
   private static String largeSkillsReadyPayload(int minBytes) {
-    StringBuilder description = new StringBuilder(minBytes + 256);
-    while (description.length() < minBytes) {
-      description.append("pad-");
+    for (int skillCount = 64; skillCount <= 4096; skillCount += 64) {
+      String payload = fatSkillsReadyPayload(skillCount);
+      if (payload.length() >= minBytes) {
+        return payload;
+      }
     }
-    DaemonSkillDescriptor fat = new DaemonSkillDescriptor("fat-skill", description.toString());
+    throw new IllegalStateException("cannot build a READY payload of " + minBytes + " bytes");
+  }
+
+  private static String fatSkillsReadyPayload(int skillCount) {
+    List<DaemonSkillDescriptor> skills = new ArrayList<>(skillCount);
+    for (int index = 0; index < skillCount; index++) {
+      skills.add(
+          new DaemonSkillDescriptor(
+              FAT_SOURCE_ID,
+              1,
+              "fat-skill-" + index,
+              "Fat skill " + index + " description.",
+              "/home/dev/skills/fat-" + index,
+              REVISION));
+    }
     return CAPABILITIES_CODEC.encode(
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
             new DaemonEnvironmentInfo(
                 DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"),
-            List.of(fat)));
+            1,
+            List.of(new DaemonSkillSourceSnapshot(FAT_SOURCE_ID, 1, REVISION, skills, List.of()))));
   }
 
   private static DaemonEnvelope helloEnvelope(long sequence) {

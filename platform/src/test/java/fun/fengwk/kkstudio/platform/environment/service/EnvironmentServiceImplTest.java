@@ -146,6 +146,7 @@ class EnvironmentServiceImplTest {
                 DaemonCapabilities.VERSION,
                 new DaemonEnvironmentInfo(
                     DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Note", "/home/dev"),
+                1,
                 List.of(
                     new DaemonSkillSourceSnapshot(
                         SKILL_SOURCE_ID,

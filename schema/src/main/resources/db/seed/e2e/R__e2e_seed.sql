@@ -165,6 +165,46 @@ on conflict (id) do update set
     registration_token = excluded.registration_token,
     updated_at = current_timestamp;
 
+-- V4 之后的 seed 插入发生在 migration 之后，因此这些 Environment 不会由 V4 回填获得
+-- inventory/default source；此处按与 V4 完全相同的确定性规则补齐，使 e2e 环境形状一致。
+--
+-- inventory 只建立缺失行：已存在的行由 Platform 围栏推进，seed 绝不回退 source_set_version。
+--
+-- default source 同样只补齐缺失者：
+--  * `on conflict (source_id) do nothing` 保证已存在的来源行（用户改过 path/version/status）绝不被覆盖；
+--  * `not exists` 保证用户已经配置了别的缺省来源时不再插入第二个，否则会撞上
+--    uk_environment_skill_source_default 并使整个 repeatable migration 失败。
+insert into environment_inventory (environment_id, source_set_version)
+select seeded.id, 0
+from environment as seeded
+where seeded.name in (
+    'tool-e2e', 'docker-reliability', 'distributed-a', 'distributed-b'
+)
+on conflict (environment_id) do nothing;
+
+insert into environment_skill_source (
+    source_id, environment_id, source_type, path, default_source, version, status
+)
+select
+    md5(seeded.id::text || ':default-skill-source')::uuid,
+    seeded.id,
+    'path',
+    '~/.agents/skills',
+    true,
+    0,
+    'UNAPPLIED'
+from environment as seeded
+where seeded.name in (
+    'tool-e2e', 'docker-reliability', 'distributed-a', 'distributed-b'
+)
+and not exists (
+    select 1
+    from environment_skill_source as existing
+    where existing.environment_id = seeded.id
+      and existing.default_source
+)
+on conflict (source_id) do nothing;
+
 -- Harness runtime policy rows are gone: retry and realtime stream policy are
 -- no longer database tables. The runtime owns execution state with
 -- application-generated UUID ids, so the business sequence needs no seed alignment.

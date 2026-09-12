@@ -114,7 +114,7 @@ lsp.goto-definition, lsp.workspace-symbols, lsp.java-decompile
 DISCONNECTED -> CONNECTING
   -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=2)
   <- WELCOME(environmentId)
-  -> READY(capabilities version=2, environment + skillSources)
+  -> READY(capabilities version=2, environment + sourceSetVersion + skillSources)
   -> READY + HEARTBEAT
 ```
 
@@ -175,6 +175,8 @@ staging/                              每次 GIT 操作的独立临时目录
 PATH 来源接受目标宿主绝对路径或 `~/`（仅在来源配置中按 Daemon HOME 展开）；默认来源目录不存在时发布空快照，显式来源不存在则失败。扫描以根 `SKILL.md` 表示单 Skill，否则递归发现；进入 Skill 根后停止下探，并跳过 `.git` 及常见依赖/缓存目录。单个坏 Skill 形成有界诊断，跨来源同名冲突、陈旧 `sourceVersion`/`sourceSetVersion` 或完整候选不合法则拒绝整个发布。
 
 发布在进程内串行完成：先验证 READY 规模、全局名称唯一性与 retained 一致性，再写不可变正文，最后以同目录原子 move 替换 manifest；文件系统不支持原子 move 时 fail-closed。每来源 publication ticket 只裁决同一 `sourceVersion` 的重叠操作，更高 `sourceVersion` 始终优先；全局 `sourceSetVersion` 防止延迟操作裁剪更新的来源集合。失败不会改变当前 READY 快照。启动从 manifest 恢复，并在任一 retained body 缺失或不可读时拒绝 READY。
+
+READY 读取 `DaemonSkillRegistry.inventory()`：它在发布锁内一次性取出集合版本与来源快照，因此报告中的 `sourceSetVersion` 与 `skillSources` 必然来自同一次发布，不会出现“新版本号配旧快照”的混配报告。
 
 `skill.load` 的 arguments 固定为 `{sourceId, name, revision}`，成功结果固定为 `{body, baseDirectory}`。正文按 SKILL.md 原始字节的 SHA-256 revision 保留；请求只精确匹配 frozen revision，不可用时返回 `RESOURCE_CHANGED`，绝不回退到同名当前版本。扫描前会验证成功结果能够落入通用 `JsonResultContent` 的 1 MiB wire 上限。Skill 加载与来源管理均不依赖会话目录。
 

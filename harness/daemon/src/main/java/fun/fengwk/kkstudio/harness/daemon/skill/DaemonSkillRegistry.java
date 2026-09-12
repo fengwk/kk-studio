@@ -109,9 +109,33 @@ public final class DaemonSkillRegistry {
 
   /** 当前已发布的来源快照，按 sourceId 稳定排序。 */
   public List<DaemonSkillSourceSnapshot> snapshots() {
-    List<DaemonSkillSourceSnapshot> result = new ArrayList<>(sources.values());
-    result.sort((left, right) -> left.sourceId().compareTo(right.sourceId()));
-    return List.copyOf(result);
+    return inventory().snapshots();
+  }
+
+  /**
+   * 当前已发布目录的一致视图：来源集合版本与快照来自同一次发布。
+   *
+   * <p>manifest 与内存快照是同一份已发布事实的两个视图，但替换发生在临界区内、并且不是原子的：分别读取会得到“新集合版本 + 旧快照”（或反之）的混配结果，让 READY
+   * 报告与围栏版本互相矛盾。因此读取整体在 {@link #publicationLock} 内完成，返回不可变视图。
+   */
+  public PublishedInventory inventory() {
+    synchronized (publicationLock) {
+      List<DaemonSkillSourceSnapshot> snapshots = new ArrayList<>(sources.values());
+      snapshots.sort((left, right) -> left.sourceId().compareTo(right.sourceId()));
+      return new PublishedInventory(manifest.sourceSetVersion(), List.copyOf(snapshots));
+    }
+  }
+
+  /** 一次发布的一致视图：来源集合版本与它精确描述的来源快照。 */
+  public record PublishedInventory(
+      long sourceSetVersion, List<DaemonSkillSourceSnapshot> snapshots) {
+
+    public PublishedInventory {
+      if (sourceSetVersion < 0) {
+        throw new IllegalArgumentException("sourceSetVersion must not be negative");
+      }
+      snapshots = List.copyOf(Objects.requireNonNull(snapshots, "snapshots"));
+    }
   }
 
   /** 展平当前快照中的全部 skill 描述，供 READY 与目录展示使用。 */

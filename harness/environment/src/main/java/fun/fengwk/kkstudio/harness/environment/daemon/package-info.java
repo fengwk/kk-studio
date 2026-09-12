@@ -6,7 +6,7 @@
  *
  * <p>当前 {@code READY} payload 由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec} 编解码，是版本化/类型化的能力对象： {@code
- * {"version":2,"environment":{"operatingSystem","timeZone","note","rootPath"},
+ * {"version":2,"environment":{"operatingSystem","timeZone","note","rootPath"},"sourceSetVersion":0,
  * "skillSources":[{"sourceId","sourceVersion","sourceRevision","skills":[{"sourceId","sourceVersion",
  * "name","description","baseDirectory","contentRevision"}],"diagnostics":[{location,message}]}]}}。旧顶层平铺
  * {@code skills} 形状被明确拒绝。

@@ -2361,7 +2361,8 @@ class DatabaseTurnResolverTest {
               UUID.randomUUID(),
               UUID.randomUUID(),
               LiveEnvironmentStatus.READY,
-              new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo, List.of(source)),
+              new DaemonCapabilities(
+                  DaemonCapabilities.VERSION, environmentInfo, 1, List.of(source)),
               lastSeenAt,
               lastSeenAt.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));

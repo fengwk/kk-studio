@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.UUID;
 
-/** READY capabilities v2 codec 的严格版本、来源快照、唯一性与 environment metadata 契约。 */
+/** READY capabilities v2 codec 的严格版本、来源集合版本、来源快照、唯一性与 environment metadata 契约。 */
 class DaemonCapabilitiesCodecTest {
 
   private static final DaemonEnvironmentInfo ENVIRONMENT =
@@ -23,12 +23,15 @@ class DaemonCapabilitiesCodecTest {
 
   private static final UUID SOURCE_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
 
+  /** 来源集合版本与行级 sourceVersion 是两个独立维度，测试用固定非零值区分二者。 */
+  private static final long SOURCE_SET_VERSION = 7L;
+
   private static final String REVISION = "a".repeat(64);
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   private final DaemonCapabilitiesCodec codec = new DaemonCapabilitiesCodec();
 
-  /** 完整来源快照必须精确往返，wire 只包含新形状（没有旧顶层 skills）。 */
+  /** 完整来源快照必须精确往返，wire 只包含新形状（没有旧顶层 skills），且集合版本位于 environment 与 skillSources 之间。 */
   @Test
   void roundTripsCapabilitiesWithSourceSnapshots() {
     DaemonSkillSourceSnapshot snapshot =
@@ -48,7 +51,8 @@ class DaemonCapabilitiesCodecTest {
                 new DaemonSkillDiagnostic(
                     "/home/dev/.agents/skills/broken", "missing front matter name")));
     DaemonCapabilities original =
-        new DaemonCapabilities(DaemonCapabilities.VERSION, ENVIRONMENT, List.of(snapshot));
+        new DaemonCapabilities(
+            DaemonCapabilities.VERSION, ENVIRONMENT, SOURCE_SET_VERSION, List.of(snapshot));
 
     String encoded = codec.encode(original);
 
@@ -56,7 +60,7 @@ class DaemonCapabilitiesCodecTest {
     assertEquals(
         "{\"version\":2,"
             + ENVIRONMENT_JSON
-            + ",\"skillSources\":[{\"sourceId\":\"11111111-1111-1111-1111-111111111111\","
+            + ",\"sourceSetVersion\":7,\"skillSources\":[{\"sourceId\":\"11111111-1111-1111-1111-111111111111\","
             + "\"sourceVersion\":3,\"sourceRevision\":\""
             + REVISION
             + "\",\"skills\":[{\"sourceId\":\"11111111-1111-1111-1111-111111111111\","
@@ -71,8 +75,65 @@ class DaemonCapabilitiesCodecTest {
   @Test
   void encodesEmptySkillSources() {
     assertEquals(
-        "{\"version\":2," + ENVIRONMENT_JSON + ",\"skillSources\":[]}",
-        codec.encode(new DaemonCapabilities(DaemonCapabilities.VERSION, ENVIRONMENT, List.of())));
+        "{\"version\":2," + ENVIRONMENT_JSON + ",\"sourceSetVersion\":0,\"skillSources\":[]}",
+        codec.encode(
+            new DaemonCapabilities(DaemonCapabilities.VERSION, ENVIRONMENT, 0, List.of())));
+  }
+
+  /** sourceSetVersion 是最终 v2 契约的必填字段：缺失、负数与错误类型都在 wire 边界拒绝，不做缺省推断。 */
+  @Test
+  void rejectsMissingOrInvalidSourceSetVersion() {
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode("{\"version\":2," + ENVIRONMENT_JSON + ",\"skillSources\":[]}"));
+    for (String invalid : new String[] {"-1", "1.5", "\"7\"", "null", "true", "{}", "[]"}) {
+      assertThrows(
+          DaemonProtocolException.class,
+          () ->
+              codec.decode(
+                  "{\"version\":2,"
+                      + ENVIRONMENT_JSON
+                      + ",\"sourceSetVersion\":"
+                      + invalid
+                      + ",\"skillSources\":[]}"),
+          invalid);
+    }
+    // 重复集合版本是自相矛盾的围栏事实，按重复键拒绝。
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                "{\"version\":2,"
+                    + ENVIRONMENT_JSON
+                    + ",\"sourceSetVersion\":0,\"sourceSetVersion\":1,\"skillSources\":[]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DaemonCapabilities(DaemonCapabilities.VERSION, ENVIRONMENT, -1, List.of()));
+  }
+
+  /** 边界集合版本必须原样往返：0 表示尚未接受任何集合事实，Long 上界不被截断。 */
+  @Test
+  void roundTripsSourceSetVersionBoundaries() {
+    assertEquals(
+        0L,
+        codec
+            .decode(
+                "{\"version\":2,"
+                    + ENVIRONMENT_JSON
+                    + ",\"sourceSetVersion\":0,\"skillSources\":[]}")
+            .sourceSetVersion());
+    assertEquals(
+        Long.MAX_VALUE,
+        codec
+            .decode(
+                "{\"version\":2,"
+                    + ENVIRONMENT_JSON
+                    + ",\"sourceSetVersion\":9223372036854775807,\"skillSources\":[]}")
+            .sourceSetVersion());
+    assertEquals(
+        "{\"version\":2," + ENVIRONMENT_JSON + ",\"sourceSetVersion\":7,\"skillSources\":[]}",
+        codec.encode(
+            new DaemonCapabilities(DaemonCapabilities.VERSION, ENVIRONMENT, 7, List.of())));
   }
 
   /** 旧顶层 skills 形状与所有非 v2 版本都必须被拒绝，不做双解码。 */
@@ -87,16 +148,31 @@ class DaemonCapabilitiesCodecTest {
                     + ",\"skills\":[{\"name\":\"dev\",\"description\":\"Developer rules\"}]}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":0," + ENVIRONMENT_JSON + ",\"skillSources\":[]}"));
+        () ->
+            codec.decode(
+                "{\"version\":0,"
+                    + ENVIRONMENT_JSON
+                    + ",\"sourceSetVersion\":0,\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":3," + ENVIRONMENT_JSON + ",\"skillSources\":[]}"));
+        () ->
+            codec.decode(
+                "{\"version\":3,"
+                    + ENVIRONMENT_JSON
+                    + ",\"sourceSetVersion\":0,\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":\"2\"," + ENVIRONMENT_JSON + ",\"skillSources\":[]}"));
+        () ->
+            codec.decode(
+                "{\"version\":\"2\","
+                    + ENVIRONMENT_JSON
+                    + ",\"sourceSetVersion\":0,\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":2,\"environment\":null,\"skillSources\":[]}"));
+        () ->
+            codec.decode(
+                "{\"version\":2,\"environment\":null,\"sourceSetVersion\":0,"
+                    + "\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () -> codec.decode("{\"version\":2," + ENVIRONMENT_JSON + ",\"skills\":[]}"));
@@ -113,7 +189,7 @@ class DaemonCapabilitiesCodecTest {
             codec.decode(
                 "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\",\"extra\":\"x\"},"
-                    + "\"skillSources\":[]}"));
+                    + "\"sourceSetVersion\":0,\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
@@ -121,21 +197,22 @@ class DaemonCapabilitiesCodecTest {
                 "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"workingDirectory\":\"/workspace\",\"timeZone\":\"UTC\","
                     + "\"note\":\"Linux environment.\",\"rootPath\":\"/home/dev\"},"
-                    + "\"skillSources\":[]}"));
+                    + "\"sourceSetVersion\":0,\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
                 "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"one\",\"note\":\"two\","
-                    + "\"rootPath\":\"/home/dev\"},\"skillSources\":[]}"));
+                    + "\"rootPath\":\"/home/dev\"},\"sourceSetVersion\":0,"
+                    + "\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
                 "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"n\",\"rootPath\":\"/home/dev\"},"
-                    + "\"skillSources\":[{\"sourceId\":\""
+                    + "\"sourceSetVersion\":0,\"skillSources\":[{\"sourceId\":\""
                     + SOURCE_ID
                     + "\",\"sourceVersion\":1,\"sourceRevision\":\""
                     + REVISION
@@ -150,27 +227,33 @@ class DaemonCapabilitiesCodecTest {
             codec.decode(
                 "{\"version\":2,\"environment\":{\"timeZone\":\"UTC\","
                     + "\"note\":\"Linux environment.\",\"rootPath\":\"/home/dev\"},"
-                    + "\"skillSources\":[]}"));
+                    + "\"sourceSetVersion\":0,\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
                 "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"note\":\"Linux environment.\",\"rootPath\":\"/home/dev\"},"
-                    + "\"skillSources\":[]}"));
+                    + "\"sourceSetVersion\":0,\"skillSources\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
                 "{\"version\":2,\"environment\":{\"operatingSystem\":\"linux\","
-                    + "\"timeZone\":\"UTC\",\"note\":\"n\"},\"skillSources\":[]}"));
+                    + "\"timeZone\":\"UTC\",\"note\":\"n\"},\"sourceSetVersion\":0,"
+                    + "\"skillSources\":[]}"));
   }
 
   @Test
   void rejectsInvalidNestedCapabilityShapes() {
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":2," + ENVIRONMENT_JSON + ",\"skillSources\":{}}"));
+        () ->
+            codec.decode(
+                "{\"version\":2,"
+                    + ENVIRONMENT_JSON
+                    + ",\"sourceSetVersion\":0,"
+                    + "\"skillSources\":{}}"));
     assertThrows(DaemonProtocolException.class, () -> codec.decode(payload("", "null")));
     assertThrows(
         DaemonProtocolException.class,
@@ -273,6 +356,7 @@ class DaemonCapabilitiesCodecTest {
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,
                 ENVIRONMENT,
+                SOURCE_SET_VERSION,
                 List.of(
                     new DaemonSkillSourceSnapshot(
                         SOURCE_ID, 1, REVISION, List.of(skill), List.of()),
@@ -294,6 +378,7 @@ class DaemonCapabilitiesCodecTest {
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,
                 ENVIRONMENT,
+                SOURCE_SET_VERSION,
                 List.of(
                     new DaemonSkillSourceSnapshot(SOURCE_ID, 1, REVISION, List.of(), List.of()),
                     new DaemonSkillSourceSnapshot(SOURCE_ID, 2, REVISION, List.of(), List.of()))));
@@ -321,6 +406,7 @@ class DaemonCapabilitiesCodecTest {
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
             ENVIRONMENT,
+            SOURCE_SET_VERSION,
             List.of(
                 new DaemonSkillSourceSnapshot(
                     SOURCE_ID,
@@ -371,6 +457,8 @@ class DaemonCapabilitiesCodecTest {
     return "{\"version\":2,"
         + prefix
         + ENVIRONMENT_JSON
+        + ",\"sourceSetVersion\":"
+        + SOURCE_SET_VERSION
         + ",\"skillSources\":"
         + skillSources
         + "}";
@@ -384,6 +472,7 @@ class DaemonCapabilitiesCodecTest {
     environment.put("timeZone", timeZone);
     environment.put("note", note);
     environment.put("rootPath", "/home/dev");
+    root.put("sourceSetVersion", SOURCE_SET_VERSION);
     root.putArray("skillSources");
     assertThrows(DaemonProtocolException.class, () -> codec.decode(root.toString()));
   }
@@ -396,6 +485,7 @@ class DaemonCapabilitiesCodecTest {
     environment.put("timeZone", "UTC");
     environment.put("note", "Linux environment.");
     environment.put("rootPath", rootPath);
+    root.put("sourceSetVersion", SOURCE_SET_VERSION);
     root.putArray("skillSources");
     assertThrows(DaemonProtocolException.class, () -> codec.decode(root.toString()));
   }

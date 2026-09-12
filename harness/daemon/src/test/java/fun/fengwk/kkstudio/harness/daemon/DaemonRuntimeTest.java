@@ -341,6 +341,8 @@ class DaemonRuntimeTest {
       DaemonCapabilities capabilities = capabilitiesCodec.decode(handshake.get(1).payloadJson());
 
       assertEquals(DaemonCapabilities.VERSION, capabilities.version());
+      // READY 必须携带已发布来源集合的生成版本，Platform 以它为该报告做持久围栏。
+      assertEquals(1L, capabilities.sourceSetVersion());
       assertEquals(ZoneId.systemDefault().getId(), capabilities.environment().timeZone());
       assertEquals(
           DaemonOperatingSystemDetector.detectCurrent(),
@@ -1523,6 +1525,8 @@ class DaemonRuntimeTest {
       JsonNode payload = codec.readPayload(handshake.get(1));
       assertFalse(payload.has("tools"));
       assertEquals(DaemonCapabilities.VERSION, payload.path("version").asInt());
+      // 顶层集合版本必须出现在 environment 与 skillSources 之间，缺省的旧形状不允许。
+      assertEquals(1L, payload.path("sourceSetVersion").asLong());
       assertTrue(payload.path("environment").path("workingDirectory").isMissingNode());
       assertTrue(payload.path("environment").path("note").isTextual());
       assertTrue(payload.path("environment").path("rootPath").isTextual());

@@ -180,13 +180,14 @@ Daemon -> CANCELLED | 已冻结 terminal replay
 ```text
 version=2
 environment: operatingSystem / timeZone / note / rootPath
+sourceSetVersion
 skillSources:
   sourceId / sourceVersion / sourceRevision
   skills: sourceId / sourceVersion / name / description / baseDirectory / contentRevision
   diagnostics: location / message
 ```
 
-READY 载荷公开操作系统类型、时区、可信操作者备注、Daemon 实际 canonical Environment root，以及按来源分组的成功 revision、Skill 描述和有界诊断。单 payload 最多 512 个来源、4096 个 Skill，每来源最多 256 条诊断；source ID 唯一，Skill name 跨来源唯一，descriptor 的 source 身份/版本必须与所在快照一致。`operatingSystem` 是发送前 workdir 词法校验的目标 OS 依据；`rootPath` 只展示。凭证、请求头、环境变量、命令、Git URL/ref 与 Skill 正文不进入 READY。旧 `version=1` 或顶层 `skills` 形状直接拒绝。
+READY 载荷公开操作系统类型、时区、可信操作者备注、Daemon 实际 canonical Environment root、已发布来源集合的生成版本，以及按来源分组的成功 revision、Skill 描述和有界诊断。单 payload 最多 512 个来源、4096 个 Skill，每来源最多 256 条诊断；source ID 唯一，Skill name 跨来源唯一，descriptor 的 source 身份/版本必须与所在快照一致。顶层 `sourceSetVersion` 是必填非负整数（与行级 `sourceVersion` 独立），缺失、负数或非整数一律协议错误：Platform 以它为该 READY 报告做持久围栏，缺失就无法判断该报告是否已被更新的集合超越。`operatingSystem` 是发送前 workdir 词法校验的目标 OS 依据；`rootPath` 只展示。凭证、请求头、环境变量、命令、Git URL/ref 与 Skill 正文不进入 READY。旧 `version=1`、顶层 `skills` 形状或缺省 `sourceSetVersion` 的 v2 形状直接拒绝。
 
 [`DaemonCapabilityInvokeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodec.java) 规范调用请求结构，固定包含以下字段：
 

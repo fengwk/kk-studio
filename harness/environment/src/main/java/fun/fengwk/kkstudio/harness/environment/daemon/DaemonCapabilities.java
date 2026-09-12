@@ -12,11 +12,18 @@ import java.util.UUID;
 /**
  * Daemon READY 上报的版本化/类型化能力摘要。
  *
- * <p>只包含可安全上报的短字段：environment metadata 与按来源分组的 skill 描述；完整 SKILL.md 正文不进入 READY wire。 每个来源的
+ * <p>只包含可安全上报的短字段：environment metadata、来源集合版本与按来源分组的 skill 描述；完整 SKILL.md 正文不进入 READY wire。 每个来源的
  * descriptor 只能属于该来源，来源 ID 全局唯一，且 skill 名称必须跨全部来源唯一 —— 同名冲突属于发现冲突， 不能靠优先级隐式覆盖。
+ *
+ * <p>{@code sourceSetVersion} 是本次 READY 所描述来源集合（{@code skillSources} 的 source ID 全集）的生成版本，与各来源自身的
+ * {@code sourceVersion} 是两个独立维度：Platform 以它做持久围栏，只有严格更新的集合版本才能覆盖已接受的 READY
+ * 事实，因此延迟到达的旧报告不能回退集合版本，也不能裁剪掉新来源。
  */
 public record DaemonCapabilities(
-    int version, DaemonEnvironmentInfo environment, List<DaemonSkillSourceSnapshot> skillSources) {
+    int version,
+    DaemonEnvironmentInfo environment,
+    long sourceSetVersion,
+    List<DaemonSkillSourceSnapshot> skillSources) {
 
   /** READY capabilities 协议版本；与 {@link DaemonCapabilitiesCodec} 共享。 */
   public static final int VERSION = 2;
@@ -32,6 +39,9 @@ public record DaemonCapabilities(
       throw new IllegalArgumentException("unsupported capabilities version: " + version);
     }
     environment = Objects.requireNonNull(environment, "environment");
+    if (sourceSetVersion < 0) {
+      throw new IllegalArgumentException("sourceSetVersion must not be negative");
+    }
     skillSources = List.copyOf(Objects.requireNonNull(skillSources, "skillSources"));
     // 构造与解码必须同构：上限只在解码侧检查会让本地编码产生对端必然拒绝的 payload。
     if (skillSources.size() > MAX_SOURCES) {
