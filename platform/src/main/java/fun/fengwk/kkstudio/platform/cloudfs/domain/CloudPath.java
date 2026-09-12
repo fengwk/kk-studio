@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.cloudfs.domain;
 
+import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudFileSystemValidationException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudPathValidationException;
 
 import java.text.Normalizer;
@@ -90,7 +91,12 @@ public final class CloudPath implements Comparable<CloudPath> {
           "Path must be normalized in Unicode NFC form: " + rawPath);
     }
 
-    byte[] utf8Bytes = StrictUtf8.encode(rawPath, "path");
+    byte[] utf8Bytes;
+    try {
+      utf8Bytes = StrictUtf8.encode(rawPath, "path");
+    } catch (CloudFileSystemValidationException e) {
+      throw new CloudPathValidationException(e.getMessage(), e);
+    }
     if (utf8Bytes.length > MAX_TOTAL_BYTES) {
       throw new CloudPathValidationException(
           String.format(
@@ -115,7 +121,12 @@ public final class CloudPath implements Comparable<CloudPath> {
         throw new CloudPathValidationException(
             "Path must not contain dot or dot-dot segment: " + rawPath);
       }
-      byte[] segBytes = StrictUtf8.encode(segment, "path segment '" + segment + "'");
+      byte[] segBytes;
+      try {
+        segBytes = StrictUtf8.encode(segment, "path segment '" + segment + "'");
+      } catch (CloudFileSystemValidationException e) {
+        throw new CloudPathValidationException(e.getMessage(), e);
+      }
       if (segBytes.length > MAX_SEGMENT_BYTES) {
         throw new CloudPathValidationException(
             String.format(

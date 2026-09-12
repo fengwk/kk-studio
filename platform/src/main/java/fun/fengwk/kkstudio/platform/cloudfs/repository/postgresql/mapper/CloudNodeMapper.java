@@ -43,9 +43,24 @@ public interface CloudNodeMapper extends BaseMapper {
   @ResultMap("cloudNodeResultMap")
   CloudNodeDO getByParentIdAndName(@Param("parentId") UUID parentId, @Param("name") String name);
 
+  @Select(
+      "select "
+          + COLUMNS
+          + " from cloud_node where parent_id = #{parentId} and name = #{name} for update")
+  @ResultMap("cloudNodeResultMap")
+  CloudNodeDO getByParentIdAndNameForUpdate(
+      @Param("parentId") UUID parentId, @Param("name") String name);
+
   @Select("select " + COLUMNS + " from cloud_node where parent_id is null and name = #{name}")
   @ResultMap("cloudNodeResultMap")
   CloudNodeDO getRootChildByName(@Param("name") String name);
+
+  @Select(
+      "select "
+          + COLUMNS
+          + " from cloud_node where parent_id is null and name = #{name} for update")
+  @ResultMap("cloudNodeResultMap")
+  CloudNodeDO getRootChildByNameForUpdate(@Param("name") String name);
 
   @Select("select " + COLUMNS + " from cloud_node where parent_id = #{parentId} order by name asc")
   @ResultMap("cloudNodeResultMap")

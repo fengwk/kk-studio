@@ -2,10 +2,12 @@ package fun.fengwk.kkstudio.platform.cloudfs.repository;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNode;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNodeKind;
@@ -21,8 +23,9 @@ class CloudNodeRepositoryTest extends PostgresSpringTestSupport {
 
   @Autowired private CloudNodeRepository repository;
 
+  /** 验证基本 CRUD、CAS 版本控制、排他锁查询以及非空断言。 */
   @Test
-  void testCrudAndCasVersioning() {
+  void testCrudAndCasVersioningAndLocking() {
     UUID rootChildId = UUID.randomUUID();
     CloudNode rootChild =
         CloudNode.builder()
@@ -48,6 +51,11 @@ class CloudNodeRepositoryTest extends PostgresSpringTestSupport {
     assertTrue(foundByName.isPresent());
     assertEquals(rootChildId, foundByName.get().getId());
 
+    // findByParentIdAndNameForUpdate for root child
+    Optional<CloudNode> lockedRoot = repository.findByParentIdAndNameForUpdate(null, "custom_root");
+    assertTrue(lockedRoot.isPresent());
+    assertEquals(rootChildId, lockedRoot.get().getId());
+
     // Insert child node under custom_root
     UUID childId = UUID.randomUUID();
     CloudNode child =
@@ -64,6 +72,12 @@ class CloudNodeRepositoryTest extends PostgresSpringTestSupport {
     List<CloudNode> children = repository.findByParentId(rootChildId);
     assertEquals(1, children.size());
     assertEquals("child_dir", children.get(0).getName());
+
+    // findByParentIdAndNameForUpdate for non-root child
+    Optional<CloudNode> lockedChild =
+        repository.findByParentIdAndNameForUpdate(rootChildId, "child_dir");
+    assertTrue(lockedChild.isPresent());
+    assertEquals(childId, lockedChild.get().getId());
 
     // CAS move / rename
     int updatedStale =
@@ -90,5 +104,45 @@ class CloudNodeRepositoryTest extends PostgresSpringTestSupport {
     int deletedSuccess = repository.deleteByIdAndVersion(childId, 1L);
     assertEquals(1, deletedSuccess);
     assertFalse(repository.findById(childId).isPresent());
+  }
+
+  /** 验证数据库层对节点名称 UTF-8 字节长度 <= 255 的约束强制检查。 */
+  @Test
+  void testSchemaCheckNameByteLengthLimit() {
+    // 256 bytes exceeds octet_length(name) <= 255 check constraint
+    String longName = "a".repeat(256);
+    CloudNode oversizedNode =
+        CloudNode.builder()
+            .id(UUID.randomUUID())
+            .parentId(null)
+            .name(longName)
+            .kind(CloudNodeKind.DIRECTORY)
+            .version(0L)
+            .build();
+
+    assertThrows(DataIntegrityViolationException.class, () -> repository.insert(oversizedNode));
+  }
+
+  /** 验证仓储接口对入参 null 的严格快速失败校验。 */
+  @Test
+  void testRepositoryRejectsNullInputs() {
+    assertThrows(NullPointerException.class, () -> repository.findById(null));
+    assertThrows(NullPointerException.class, () -> repository.findByParentIdAndName(null, null));
+    assertThrows(
+        NullPointerException.class, () -> repository.findByParentIdAndNameForUpdate(null, null));
+    assertThrows(NullPointerException.class, () -> repository.insert(null));
+    assertThrows(NullPointerException.class, () -> repository.insertIfAbsent(null));
+    assertThrows(
+        NullPointerException.class,
+        () -> repository.updateParentAndName(null, null, "a", 0L, Instant.now()));
+    assertThrows(
+        NullPointerException.class,
+        () -> repository.updateParentAndName(UUID.randomUUID(), null, null, 0L, Instant.now()));
+    assertThrows(
+        NullPointerException.class,
+        () -> repository.updateParentAndName(UUID.randomUUID(), null, "a", 0L, null));
+    assertThrows(NullPointerException.class, () -> repository.touch(null, Instant.now()));
+    assertThrows(NullPointerException.class, () -> repository.touch(UUID.randomUUID(), null));
+    assertThrows(NullPointerException.class, () -> repository.deleteByIdAndVersion(null, 0L));
   }
 }

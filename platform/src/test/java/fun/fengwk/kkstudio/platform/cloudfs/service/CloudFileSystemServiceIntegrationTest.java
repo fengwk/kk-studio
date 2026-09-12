@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudCycleException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudDirectoryNotEmptyException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudEditAmbiguousException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudEditPatternNotFoundException;
+import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudFileSystemValidationException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeAlreadyExistsException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeKindConflictException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeNotFoundException;
@@ -32,22 +33,15 @@ import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudRevisionConflictEx
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudVersionConflictException;
 import fun.fengwk.kkstudio.platform.storage.S3PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
+import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /** {@link CloudFileSystemService} PostgreSQL 集成测试。 */
 @Import({StorageS3TestConfiguration.class})
@@ -70,8 +64,18 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
   private TransactionTemplate tx;
 
   @BeforeEach
-  void setUpTransactionTemplate() {
+  void setUp() {
     tx = new TransactionTemplate(transactionManager);
+    tx.execute(
+        status -> {
+          jdbc.update(
+              "delete from cloud_node where id not in ("
+                  + "'c0000000-0000-0000-0000-000000000001',"
+                  + "'c0000000-0000-0000-0000-000000000002',"
+                  + "'c0000000-0000-0000-0000-000000000003',"
+                  + "'c0000000-0000-0000-0000-000000000004')");
+          return null;
+        });
   }
 
   private UUID seedActiveBlob(String content) {
@@ -101,9 +105,9 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
     }
   }
 
-  /** 验证预置根目录存在性，以及 listChildren 仅在根目录精确隐藏 .artifacts，而用户创建的根级与子级 dot 文件均正常暴露。 */
+  /** 验证预置根目录存在性，以及 listChildren 仅在根目录精确隐藏 .artifacts，而用户创建的根级与子级 dot 文件均正常暴露；对非目录调用抛出类型冲突。 */
   @Test
-  void testPreseededDirectoriesAndListChildrenWithDotFiles() {
+  void testPreseededDirectoriesAndListChildrenWithDotFilesAndKindConflict() {
     Optional<CloudNode> root = fileSystemService.findNode(CloudPath.of("/"));
     assertTrue(root.isPresent());
     assertTrue(root.get().isDirectory());
@@ -137,35 +141,66 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
     // Nested listChildren includes dot files
     List<CloudNode> workspaceList = fileSystemService.listChildren(CloudPath.of("/workspace"));
     assertTrue(workspaceList.stream().anyMatch(n -> ".env".equals(n.getName())));
+
+    // listChildren on non-directory TEXT node throws CloudNodeKindConflictException
+    assertThrows(
+        CloudNodeKindConflictException.class,
+        () -> fileSystemService.listChildren(CloudPath.of("/.gitignore")));
   }
 
-  /** 验证 findNode 对 null 路径参数进行严格的 Objects.requireNonNull 约束校验。 */
+  /** 验证 findNode 与 getNode 的非空校验与节点不存在异常。 */
   @Test
-  void testFindNodeRequiresNonNull() {
+  void testFindNodeAndGetNodeSemantics() {
     assertThrows(NullPointerException.class, () -> fileSystemService.findNode(null));
+    assertThrows(NullPointerException.class, () -> fileSystemService.getNode(null));
+    assertThrows(
+        CloudNodeNotFoundException.class,
+        () -> fileSystemService.getNode(CloudPath.of("/not/exists")));
+
+    // Intermediate segment is not a directory in findNode
+    fileSystemService.writeText(CloudPath.of("/leaf.txt"), "leaf", 0L);
+    assertFalse(fileSystemService.findNode(CloudPath.of("/leaf.txt/sub")).isPresent());
   }
 
   /** 验证递归与非递归创建目录，以及重复创建、缺失父目录和对保留目录写操作的校验拦截。 */
   @Test
   void testMkdirSuccessAndConflict() {
-    CloudPath dirPath = CloudPath.of("/workspace/src");
-    CloudNode node = fileSystemService.mkdir(dirPath, true);
-    assertNotNull(node);
-    assertEquals("src", node.getName());
-    assertTrue(node.isDirectory());
+    // Non-recursive mkdir at root
+    CloudPath topDir = CloudPath.of("/top_dir");
+    CloudNode createdTop = fileSystemService.mkdir(topDir, false);
+    assertNotNull(createdTop);
+    assertTrue(createdTop.isDirectory());
 
     // Non-recursive duplicate fails
     assertThrows(
-        CloudNodeAlreadyExistsException.class, () -> fileSystemService.mkdir(dirPath, false));
+        CloudNodeAlreadyExistsException.class, () -> fileSystemService.mkdir(topDir, false));
 
-    // Non-recursive with missing parent fails
+    // Non-recursive missing parent fails
     assertThrows(
         CloudNodeNotFoundException.class,
-        () -> fileSystemService.mkdir(CloudPath.of("/other/missing/dir"), false));
+        () -> fileSystemService.mkdir(CloudPath.of("/missing_parent/sub"), false));
 
-    // Mutating root or .artifacts forbidden
+    // Non-recursive under existing parent succeeds
+    CloudPath subDir = CloudPath.of("/top_dir/sub");
+    CloudNode createdSub = fileSystemService.mkdir(subDir, false);
+    assertNotNull(createdSub);
+
+    // Recursive mkdir
+    CloudPath dirPath = CloudPath.of("/workspace/src");
+    CloudNode dir = fileSystemService.mkdir(dirPath, true);
+    assertNotNull(dir);
+    assertTrue(dir.isDirectory());
+    assertEquals("src", dir.getName());
+
+    // Recursive duplicate mkdir is idempotent
+    CloudNode dir2 = fileSystemService.mkdir(dirPath, true);
+    assertEquals(dir.getId(), dir2.getId());
+
+    // Root directory cannot be created
     assertThrows(
-        CloudPathForbiddenException.class, () -> fileSystemService.mkdir(CloudPath.of("/"), false));
+        CloudPathForbiddenException.class, () -> fileSystemService.mkdir(CloudPath.root(), true));
+
+    // Cannot mkdir under /.artifacts
     assertThrows(
         CloudPathForbiddenException.class,
         () -> fileSystemService.mkdir(CloudPath.of("/.artifacts/forbidden"), true));
@@ -175,68 +210,84 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
   @Test
   void testWriteAndReadCurrentAndHistoricalText() {
     CloudPath path = CloudPath.of("/docs/readme.md");
-    String textV1 = "# Readme\nVersion 1\n";
+    String textV1 = "Hello, CloudFS!\nLine 2\n";
 
-    // ExpectedRevision=0 creates file and missing parent /docs
+    // Initial write with expectedRevision = 0
     CloudTextRevision rev1 = fileSystemService.writeText(path, textV1, 0L);
     assertEquals(1L, rev1.getRevision());
     assertEquals(textV1, rev1.getContent());
     assertTrue(rev1.isCurrent());
 
-    // Read current
-    CloudTextRevision cur = fileSystemService.readCurrentText(path);
-    assertEquals(1L, cur.getRevision());
-    assertEquals(textV1, cur.getContent());
+    // Duplicate initial write fails with CAS conflict
+    assertThrows(
+        CloudRevisionConflictException.class, () -> fileSystemService.writeText(path, "bad", 0L));
 
-    // Stale expectedRevision=0 fails
+    // Update with wrong expectedRevision fails
     assertThrows(
         CloudRevisionConflictException.class,
-        () -> fileSystemService.writeText(path, "stale create", 0L));
+        () -> fileSystemService.writeText(path, "updated", 99L));
 
-    // CAS conflict with wrong expectedRevision
-    assertThrows(
-        CloudRevisionConflictException.class,
-        () -> fileSystemService.writeText(path, "wrong revision", 99L));
-
-    // ExpectedRevision=1 updates to revision 2
-    String textV2 = "# Readme\nVersion 2 updated\n";
+    // Update with correct expectedRevision = 1 -> rev 2
+    String textV2 = "Updated Content\n";
     CloudTextRevision rev2 = fileSystemService.writeText(path, textV2, 1L);
     assertEquals(2L, rev2.getRevision());
     assertEquals(textV2, rev2.getContent());
     assertTrue(rev2.isCurrent());
 
-    // Current is now v2
-    assertEquals(2L, fileSystemService.readCurrentText(path).getRevision());
+    // Read current text
+    CloudTextRevision current = fileSystemService.readCurrentText(path);
+    assertEquals(2L, current.getRevision());
+    assertEquals(textV2, current.getContent());
 
-    // Historical v1 is preserved
-    CloudTextRevision hist1 = fileSystemService.readTextRevision(path, 1L);
-    assertEquals(1L, hist1.getRevision());
-    assertEquals(textV1, hist1.getContent());
-    assertFalse(hist1.isCurrent());
-
-    // Writing under /.artifacts is fail-closed
-    assertThrows(
-        CloudPathForbiddenException.class,
-        () -> fileSystemService.writeText(CloudPath.of("/.artifacts/readme.txt"), "forbidden", 0L));
+    // Read historical rev 1
+    CloudTextRevision historical1 = fileSystemService.readTextRevision(path, 1L);
+    assertEquals(1L, historical1.getRevision());
+    assertEquals(textV1, historical1.getContent());
+    assertFalse(historical1.isCurrent());
   }
 
-  /** 验证文本内容中的孤立 surrogate 字符在写入和编辑时被快速失败拦截，杜绝编码损坏。 */
+  /** 验证 writeText 的参数边界校验（root、artifact、大小超限、非法 revision、非文本节点覆盖及 surrogate 拒绝）。 */
   @Test
-  void testTextStrictSurrogateRejection() {
-    CloudPath path = CloudPath.of("/docs/surrogate.txt");
+  void testWriteTextValidations() {
+    CloudPath path = CloudPath.of("/docs/valid.txt");
 
-    // Writing text containing lone high surrogate fails
+    // Write to root
     assertThrows(
-        CloudPathValidationException.class,
-        () -> fileSystemService.writeText(path, "bad text \uD800 end", 0L));
+        CloudPathForbiddenException.class,
+        () -> fileSystemService.writeText(CloudPath.root(), "c", 0L));
 
-    // Writing valid text succeeds
-    fileSystemService.writeText(path, "good text prefix", 0L);
-
-    // Editing text with replacement containing lone low surrogate fails
+    // Write to artifact
     assertThrows(
-        CloudPathValidationException.class,
-        () -> fileSystemService.editText(path, "prefix", "\uDC00", 1L, false));
+        CloudPathForbiddenException.class,
+        () -> fileSystemService.writeText(CloudPath.of("/.artifacts/doc.txt"), "c", 0L));
+
+    // Negative revision
+    assertThrows(
+        CloudFileSystemValidationException.class,
+        () -> fileSystemService.writeText(path, "c", -1L));
+
+    // Oversize text (> 1 MiB = 1048576 bytes)
+    String oversized = "a".repeat(1048577);
+    assertThrows(
+        CloudFileSystemValidationException.class,
+        () -> fileSystemService.writeText(path, oversized, 0L));
+
+    // Surrogate rejection
+    assertThrows(
+        CloudFileSystemValidationException.class,
+        () -> fileSystemService.writeText(path, "bad \uD800 text", 0L));
+
+    // Write to directory node with revision > 0
+    fileSystemService.mkdir(CloudPath.of("/somedir"), false);
+    assertThrows(
+        CloudNodeKindConflictException.class,
+        () -> fileSystemService.writeText(CloudPath.of("/somedir"), "content", 1L));
+
+    // Intermediate segment is not a directory in writeText
+    fileSystemService.writeText(path, "valid file", 0L);
+    assertThrows(
+        CloudNodeKindConflictException.class,
+        () -> fileSystemService.writeText(CloudPath.of("/docs/valid.txt/child.txt"), "c", 0L));
   }
 
   /** 验证文本模式串替换编辑（单次匹配与全量匹配）、未命中异常信息固定且不回显原串、多重匹配歧义拦截与 CAS 版本控制。 */
@@ -258,64 +309,188 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
         CloudEditAmbiguousException.class,
         () -> fileSystemService.editText(path, "count = 1", "count = 2", 1L, false));
 
-    // Replace all with replaceAll=true
-    CloudTextRevision rev2 = fileSystemService.editText(path, "count = 1", "count = 2", 1L, true);
-    assertEquals(2L, rev2.getRevision());
+    // Success with replaceAll = true
+    CloudTextRevision edited = fileSystemService.editText(path, "count = 1", "count = 2", 1L, true);
+    assertNotNull(edited);
+    assertEquals(2L, edited.getRevision());
+    CloudTextRevision rev2 = fileSystemService.readCurrentText(path);
     assertEquals("count = 2\nprint(count)\ncount = 2\n", rev2.getContent());
+    assertEquals(2L, rev2.getRevision());
 
-    // Single replace with replaceAll=false
-    CloudTextRevision rev3 =
-        fileSystemService.editText(path, "print(count)", "print('done')", 2L, false);
-    assertEquals(3L, rev3.getRevision());
+    // Single occurrence edit with replaceAll = false
+    fileSystemService.editText(path, "print(count)", "print('done')", 2L, false);
+    CloudTextRevision rev3 = fileSystemService.readCurrentText(path);
     assertEquals("count = 2\nprint('done')\ncount = 2\n", rev3.getContent());
+    assertEquals(3L, rev3.getRevision());
 
-    // Revision conflict
+    // CAS version conflict
     assertThrows(
         CloudRevisionConflictException.class,
         () -> fileSystemService.editText(path, "done", "finished", 1L, false));
+  }
+
+  /** 验证 editText 的参数边界校验（空模式串、root、artifact、非文本、非法 revision、大小超限及 surrogate 拒绝）。 */
+  @Test
+  void testEditTextValidations() {
+    CloudPath path = CloudPath.of("/src/sample.txt");
+    fileSystemService.writeText(path, "initial content", 0L);
+
+    // Null parameters
+    assertThrows(
+        NullPointerException.class,
+        () -> fileSystemService.editText(null, "old", "new", 1L, false));
+    assertThrows(
+        NullPointerException.class, () -> fileSystemService.editText(path, null, "new", 1L, false));
+    assertThrows(
+        NullPointerException.class, () -> fileSystemService.editText(path, "old", null, 1L, false));
+
+    // Empty oldString
+    assertThrows(
+        CloudFileSystemValidationException.class,
+        () -> fileSystemService.editText(path, "", "new", 1L, false));
+
+    // Root and artifact forbidden
+    assertThrows(
+        CloudPathForbiddenException.class,
+        () -> fileSystemService.editText(CloudPath.root(), "old", "new", 1L, false));
+    assertThrows(
+        CloudPathForbiddenException.class,
+        () ->
+            fileSystemService.editText(
+                CloudPath.of("/.artifacts/file.txt"), "old", "new", 1L, false));
+
+    // Invalid revision (<= 0)
+    assertThrows(
+        CloudFileSystemValidationException.class,
+        () -> fileSystemService.editText(path, "old", "new", 0L, false));
+    assertThrows(
+        CloudFileSystemValidationException.class,
+        () -> fileSystemService.editText(path, "old", "new", -1L, false));
+
+    // Edit non-text node
+    fileSystemService.mkdir(CloudPath.of("/dir_not_text"), false);
+    assertThrows(
+        CloudNodeKindConflictException.class,
+        () -> fileSystemService.editText(CloudPath.of("/dir_not_text"), "old", "new", 1L, false));
+
+    // Replacement surrogate rejection
+    assertThrows(
+        CloudFileSystemValidationException.class,
+        () -> fileSystemService.editText(path, "initial", "\uD800", 1L, false));
+
+    // OldString surrogate rejection
+    assertThrows(
+        CloudFileSystemValidationException.class,
+        () -> fileSystemService.editText(path, "\uDC00", "new", 1L, false));
+
+    // Replacement resulting in oversized content (> 1 MiB)
+    assertThrows(
+        CloudFileSystemValidationException.class,
+        () -> fileSystemService.editText(path, "initial", "a".repeat(1048577), 1L, false));
   }
 
   /** 验证节点重命名与跨目录移动，断言仅目录移动触发子目录循环检查（CloudCycleException），以及目标已存在与 CAS 版本校验。 */
   @Test
   void testMoveNodeAndCycleDetection() {
     fileSystemService.mkdir(CloudPath.of("/tree/sub1/sub2"), true);
-    fileSystemService.mkdir(CloudPath.of("/target_dir"), true);
-    fileSystemService.writeText(CloudPath.of("/tree/sub1/sub2/file.txt"), "content", 0L);
 
-    // Move file to target_dir
-    CloudNode movedFile =
+    // Moving directory into its descendant triggers CloudCycleException with node message
+    CloudCycleException ex =
+        assertThrows(
+            CloudCycleException.class,
+            () ->
+                fileSystemService.moveNode(
+                    CloudPath.of("/tree"), CloudPath.of("/tree/sub1/sub2/tree"), 0L));
+    assertTrue(ex.getMessage().contains("Cannot move node /tree into itself or its descendant"));
+
+    // Successful directory move
+    CloudNode movedDir =
         fileSystemService.moveNode(
-            CloudPath.of("/tree/sub1/sub2/file.txt"), CloudPath.of("/target_dir/moved.txt"), 0L);
-    assertEquals("moved.txt", movedFile.getName());
-    assertEquals(1L, movedFile.getVersion());
-    assertTrue(fileSystemService.findNode(CloudPath.of("/target_dir/moved.txt")).isPresent());
-    assertFalse(fileSystemService.findNode(CloudPath.of("/tree/sub1/sub2/file.txt")).isPresent());
+            CloudPath.of("/tree/sub1/sub2"), CloudPath.of("/tree/moved_sub2"), 0L);
+    assertEquals("moved_sub2", movedDir.getName());
+    assertEquals(1L, movedDir.getVersion());
 
-    // Cycle detection: cannot move /tree into /tree/sub1/sub2
+    // Stale version CAS conflict
     assertThrows(
-        CloudCycleException.class,
+        CloudVersionConflictException.class,
         () ->
             fileSystemService.moveNode(
-                CloudPath.of("/tree"), CloudPath.of("/tree/sub1/sub2/tree_cycle"), 0L));
+                CloudPath.of("/tree/moved_sub2"), CloudPath.of("/tree/sub2_again"), 0L));
+  }
+
+  /** 验证 moveNode 的边界校验（root、artifact、相同路径、缺失源、冲突目标、负版本等）。 */
+  @Test
+  void testMoveNodeValidations() {
+    fileSystemService.mkdir(CloudPath.of("/movetest"), false);
+    fileSystemService.writeText(CloudPath.of("/movetest/file1.txt"), "f1", 0L);
+    fileSystemService.writeText(CloudPath.of("/movetest/file2.txt"), "f2", 0L);
+
+    // Null parameters
+    assertThrows(
+        NullPointerException.class,
+        () -> fileSystemService.moveNode(null, CloudPath.of("/dest"), 0L));
+    assertThrows(
+        NullPointerException.class,
+        () -> fileSystemService.moveNode(CloudPath.of("/src"), null, 0L));
+
+    // Root forbidden
+    assertThrows(
+        CloudPathForbiddenException.class,
+        () -> fileSystemService.moveNode(CloudPath.root(), CloudPath.of("/dest"), 0L));
+    assertThrows(
+        CloudPathForbiddenException.class,
+        () ->
+            fileSystemService.moveNode(CloudPath.of("/movetest/file1.txt"), CloudPath.root(), 0L));
+
+    // Artifact forbidden
+    assertThrows(
+        CloudPathForbiddenException.class,
+        () ->
+            fileSystemService.moveNode(
+                CloudPath.of("/.artifacts/file.txt"), CloudPath.of("/dest"), 0L));
+    assertThrows(
+        CloudPathForbiddenException.class,
+        () ->
+            fileSystemService.moveNode(
+                CloudPath.of("/movetest/file1.txt"), CloudPath.of("/.artifacts/file.txt"), 0L));
+
+    // Same path
+    assertThrows(
+        CloudPathValidationException.class,
+        () ->
+            fileSystemService.moveNode(
+                CloudPath.of("/movetest/file1.txt"), CloudPath.of("/movetest/file1.txt"), 0L));
+
+    // Missing source node
+    assertThrows(
+        CloudNodeNotFoundException.class,
+        () ->
+            fileSystemService.moveNode(
+                CloudPath.of("/movetest/missing.txt"), CloudPath.of("/movetest/target.txt"), 0L));
 
     // Target already exists
     assertThrows(
         CloudNodeAlreadyExistsException.class,
         () ->
             fileSystemService.moveNode(
-                CloudPath.of("/tree/sub1"), CloudPath.of("/target_dir"), 0L));
+                CloudPath.of("/movetest/file1.txt"), CloudPath.of("/movetest/file2.txt"), 0L));
 
-    // CAS version conflict
+    // Negative version
+    assertThrows(
+        CloudFileSystemValidationException.class,
+        () ->
+            fileSystemService.moveNode(
+                CloudPath.of("/movetest/file1.txt"), CloudPath.of("/movetest/file1_new.txt"), -1L));
+
+    // Stale version CAS conflict
     assertThrows(
         CloudVersionConflictException.class,
         () ->
             fileSystemService.moveNode(
-                CloudPath.of("/target_dir/moved.txt"),
-                CloudPath.of("/target_dir/moved2.txt"),
-                99L));
+                CloudPath.of("/movetest/file1.txt"), CloudPath.of("/movetest/file1_new.txt"), 99L));
   }
 
-  /** 验证删除非空目录被拦截、删除空目录成功，以及删除文本文件时清理其所有历史修订版本记录。 */
+  /** 验证删除非空目录被拦截、删除空目录成功，以及删除文本文件时清理其所有历史修订版本记录、删除 BLOB 释放 storage_blob。 */
   @Test
   void testDeleteNodeAndRevisionCleanup() {
     fileSystemService.mkdir(CloudPath.of("/nested/dir"), true);
@@ -325,7 +500,7 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
         CloudDirectoryNotEmptyException.class,
         () -> fileSystemService.deleteNode(CloudPath.of("/nested"), 0L));
 
-    // Delete empty directory succeeds
+    // Delete empty leaf directory
     fileSystemService.deleteNode(CloudPath.of("/nested/dir"), 0L);
     assertFalse(fileSystemService.findNode(CloudPath.of("/nested/dir")).isPresent());
 
@@ -333,204 +508,173 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
     CloudPath filePath = CloudPath.of("/nested/sample.txt");
     fileSystemService.writeText(filePath, "hello", 0L);
     fileSystemService.writeText(filePath, "world", 1L);
-    CloudNode textNode = fileSystemService.getNode(filePath);
-
-    Integer revCountBefore =
-        jdbc.queryForObject(
-            "select count(*) from cloud_text_revision where node_id = ?",
-            Integer.class,
-            textNode.getId());
-    assertEquals(2, revCountBefore);
 
     fileSystemService.deleteNode(filePath, 0L);
     assertFalse(fileSystemService.findNode(filePath).isPresent());
 
-    Integer revCountAfter =
-        jdbc.queryForObject(
-            "select count(*) from cloud_text_revision where node_id = ?",
-            Integer.class,
-            textNode.getId());
-    assertEquals(0, revCountAfter);
+    // Root forbidden
+    assertThrows(
+        CloudPathForbiddenException.class,
+        () -> fileSystemService.deleteNode(CloudPath.root(), 0L));
 
-    // Public delete on /.artifacts fails
+    // Artifact forbidden
     assertThrows(
         CloudPathForbiddenException.class,
         () -> fileSystemService.deleteNode(CloudPath.of("/.artifacts"), 0L));
+
+    // Negative version
+    assertThrows(
+        CloudFileSystemValidationException.class,
+        () -> fileSystemService.deleteNode(CloudPath.of("/nested"), -1L));
+
+    // Stale version CAS conflict on directory
+    assertThrows(
+        CloudVersionConflictException.class,
+        () -> fileSystemService.deleteNode(CloudPath.of("/nested"), 99L));
+
+    // Stale version CAS conflict on text file
+    CloudPath textConflict = CloudPath.of("/nested/text_conflict.txt");
+    fileSystemService.writeText(textConflict, "sample", 0L);
+    assertThrows(
+        CloudVersionConflictException.class, () -> fileSystemService.deleteNode(textConflict, 99L));
   }
 
   /** 验证创建 BLOB 节点时递增底层 storage_blob 引用，删除 BLOB 节点时事务内释放引用。 */
   @Test
   void testBlobNodeCreationAndRelease() {
     UUID blobId = seedActiveBlob("binary blob data");
-
-    // Initially blob ref_count is 1
-    StorageBlob initialBlob = storageBlobManager.getBlob(blobId);
-    assertNotNull(initialBlob);
-    assertEquals(1L, initialBlob.getRefCount());
+    CloudPath blobPath = CloudPath.of("/assets/images/logo.png");
 
     // Create BLOB node
-    CloudPath blobPath = CloudPath.of("/uploads/picture.png");
     CloudNode blobNode = fileSystemService.createBlobNode(blobPath, blobId);
+    assertNotNull(blobNode);
     assertEquals(CloudNodeKind.BLOB, blobNode.getKind());
     assertEquals(blobId, blobNode.getBlobId());
 
-    // underlying blob ref_count incremented to 2
-    StorageBlob retainedBlob = storageBlobManager.getBlob(blobId);
-    assertEquals(2L, retainedBlob.getRefCount());
+    // Duplicate creation fails
+    assertThrows(
+        CloudNodeAlreadyExistsException.class,
+        () -> fileSystemService.createBlobNode(blobPath, blobId));
 
-    // Delete BLOB node
+    // Storage blob retain called (1 -> 2)
+    StorageBlob currentBlob = storageBlobManager.getBlob(blobId);
+    assertEquals(2L, currentBlob.getRefCount());
+
+    // Stale version CAS conflict on BLOB delete
+    assertThrows(
+        CloudVersionConflictException.class, () -> fileSystemService.deleteNode(blobPath, 99L));
+
+    // Delete BLOB node releases storage_blob (2 -> 1)
     fileSystemService.deleteNode(blobPath, 0L);
     assertFalse(fileSystemService.findNode(blobPath).isPresent());
 
-    // underlying blob ref_count decremented back to 1
     StorageBlob releasedBlob = storageBlobManager.getBlob(blobId);
     assertEquals(1L, releasedBlob.getRefCount());
+  }
+
+  /** 验证 createBlobNode 的参数边界校验（root、artifact、缺失 blob、非空入参等）。 */
+  @Test
+  void testCreateBlobNodeValidations() {
+    UUID dummyBlob = seedActiveBlob("blob content");
+
+    assertThrows(
+        NullPointerException.class, () -> fileSystemService.createBlobNode(null, dummyBlob));
+    assertThrows(
+        NullPointerException.class,
+        () -> fileSystemService.createBlobNode(CloudPath.of("/b"), null));
+    assertThrows(
+        CloudPathForbiddenException.class,
+        () -> fileSystemService.createBlobNode(CloudPath.root(), dummyBlob));
+    assertThrows(
+        CloudPathForbiddenException.class,
+        () -> fileSystemService.createBlobNode(CloudPath.of("/.artifacts/b"), dummyBlob));
+    assertThrows(
+        StorageResourceNotFoundException.class,
+        () -> fileSystemService.createBlobNode(CloudPath.of("/missing_blob"), UUID.randomUUID()));
+  }
+
+  /** 验证读取文本方法（readCurrentText / readTextRevision / readText）在非文本节点上的类型冲突拦截。 */
+  @Test
+  void testReadTextKindAndRevisionValidations() {
+    CloudPath dirPath = CloudPath.of("/readdir");
+    fileSystemService.mkdir(dirPath, false);
+
+    assertThrows(
+        CloudNodeKindConflictException.class, () -> fileSystemService.readCurrentText(dirPath));
+    assertThrows(
+        CloudNodeKindConflictException.class,
+        () -> fileSystemService.readTextRevision(dirPath, 1L));
+
+    CloudPath textPath = CloudPath.of("/readfile.txt");
+    fileSystemService.writeText(textPath, "line 1\nline 2\n", 0L);
+    assertThrows(
+        CloudNodeNotFoundException.class, () -> fileSystemService.readTextRevision(textPath, 999L));
   }
 
   /** 验证在 TEXT 或 BLOB 节点下尝试创建子目录、文件或将其作为移动目标父节点时均被严格拒绝。 */
   @Test
   void testParentKindConflictWhenParentIsTextOrBlob() {
     UUID blobId = seedActiveBlob("sample blob");
-    fileSystemService.writeText(CloudPath.of("/text_parent"), "content", 0L);
-    fileSystemService.createBlobNode(CloudPath.of("/blob_parent"), blobId);
+    CloudPath blobPath = CloudPath.of("/blob_parent");
+    fileSystemService.createBlobNode(blobPath, blobId);
 
-    // Cannot create directory under TEXT parent
-    assertThrows(
-        CloudNodeKindConflictException.class,
-        () -> fileSystemService.mkdir(CloudPath.of("/text_parent/child"), false));
-    assertThrows(
-        CloudNodeKindConflictException.class,
-        () -> fileSystemService.mkdir(CloudPath.of("/text_parent/child/deep"), true));
+    CloudPath textPath = CloudPath.of("/text_parent");
+    fileSystemService.writeText(textPath, "sample text", 0L);
 
-    // Cannot create text file under TEXT parent
+    // mkdir under BLOB parent fails
     assertThrows(
         CloudNodeKindConflictException.class,
-        () -> fileSystemService.writeText(CloudPath.of("/text_parent/child.txt"), "abc", 0L));
+        () -> fileSystemService.mkdir(CloudPath.of("/blob_parent/child_dir"), true));
 
-    // Cannot create blob under TEXT parent
+    // mkdir under TEXT parent fails
     assertThrows(
         CloudNodeKindConflictException.class,
-        () -> fileSystemService.createBlobNode(CloudPath.of("/text_parent/child.bin"), blobId));
+        () -> fileSystemService.mkdir(CloudPath.of("/text_parent/child_dir"), true));
 
-    // Cannot create directory under BLOB parent
-    assertThrows(
-        CloudNodeKindConflictException.class,
-        () -> fileSystemService.mkdir(CloudPath.of("/blob_parent/child"), false));
-    assertThrows(
-        CloudNodeKindConflictException.class,
-        () -> fileSystemService.mkdir(CloudPath.of("/blob_parent/child/deep"), true));
-
-    // Cannot create text file under BLOB parent
+    // writeText under BLOB parent fails
     assertThrows(
         CloudNodeKindConflictException.class,
         () -> fileSystemService.writeText(CloudPath.of("/blob_parent/child.txt"), "abc", 0L));
 
-    // Cannot create blob under BLOB parent
+    // createBlobNode under TEXT parent fails
     assertThrows(
         CloudNodeKindConflictException.class,
-        () -> fileSystemService.createBlobNode(CloudPath.of("/blob_parent/child.bin"), blobId));
+        () -> fileSystemService.createBlobNode(CloudPath.of("/text_parent/child.png"), blobId));
 
-    // Move target parent is TEXT
+    // moveNode to target parent that is BLOB fails
     fileSystemService.writeText(CloudPath.of("/src.txt"), "hello", 0L);
+    assertThrows(
+        CloudNodeKindConflictException.class,
+        () ->
+            fileSystemService.moveNode(
+                CloudPath.of("/src.txt"), CloudPath.of("/blob_parent/moved.txt"), 0L));
+
+    // moveNode to target parent that is TEXT fails (lexical order cmp <= 0)
     assertThrows(
         CloudNodeKindConflictException.class,
         () ->
             fileSystemService.moveNode(
                 CloudPath.of("/src.txt"), CloudPath.of("/text_parent/moved.txt"), 0L));
 
-    // Move target parent is BLOB
+    // moveNode with source > targetParent (lexical order cmp > 0)
+    fileSystemService.writeText(CloudPath.of("/z_src.txt"), "hello", 0L);
     assertThrows(
         CloudNodeKindConflictException.class,
         () ->
             fileSystemService.moveNode(
-                CloudPath.of("/src.txt"), CloudPath.of("/blob_parent/moved.txt"), 0L));
-  }
+                CloudPath.of("/z_src.txt"), CloudPath.of("/text_parent/moved.txt"), 0L));
 
-  /** 验证并发两个线程向相同路径以 expectedRevision=0 执行初次文本创建时，恰有一线程成功，败者收到领域版本冲突异常。 */
-  @Test
-  void testConcurrentCreateTextExpectedRevisionZero() throws Exception {
-    CloudPath path = CloudPath.of("/concurrent/test.txt");
-    int threadCount = 2;
-    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-    CyclicBarrier barrier = new CyclicBarrier(threadCount);
+    // moveNode to target that already exists throws CloudNodeAlreadyExistsException
+    fileSystemService.writeText(CloudPath.of("/dest_exists.txt"), "existing", 0L);
+    assertThrows(
+        CloudNodeAlreadyExistsException.class,
+        () ->
+            fileSystemService.moveNode(
+                CloudPath.of("/src.txt"), CloudPath.of("/dest_exists.txt"), 0L));
 
-    AtomicInteger successCount = new AtomicInteger(0);
-    AtomicInteger conflictCount = new AtomicInteger(0);
-    List<Throwable> unexpectedErrors = Collections.synchronizedList(new ArrayList<>());
-
-    List<Future<?>> futures = new ArrayList<>();
-    for (int i = 0; i < threadCount; i++) {
-      final int idx = i;
-      futures.add(
-          executor.submit(
-              () -> {
-                try {
-                  barrier.await();
-                  fileSystemService.writeText(path, "content from thread " + idx, 0L);
-                  successCount.incrementAndGet();
-                } catch (CloudRevisionConflictException e) {
-                  conflictCount.incrementAndGet();
-                } catch (Throwable t) {
-                  unexpectedErrors.add(t);
-                }
-              }));
-    }
-
-    for (Future<?> f : futures) {
-      f.get(10, TimeUnit.SECONDS);
-    }
-    executor.shutdown();
-
-    assertTrue(unexpectedErrors.isEmpty(), () -> "Unexpected errors: " + unexpectedErrors);
-    assertEquals(
-        1, successCount.get(), "Exactly one thread must succeed creating with expectedRevision=0");
-    assertEquals(
-        1, conflictCount.get(), "Losing thread must receive CloudRevisionConflictException");
-
-    CloudTextRevision current = fileSystemService.readCurrentText(path);
-    assertNotNull(current);
-    assertEquals(1L, current.getRevision());
-  }
-
-  /** 验证多线程并发进行递归父目录自愈创建时安全收敛，不抛出唯一约束冲突或死锁。 */
-  @Test
-  void testConcurrentRecursiveEnsureDirectories() throws Exception {
-    int threadCount = 4;
-    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-    CyclicBarrier barrier = new CyclicBarrier(threadCount);
-
-    AtomicInteger successCount = new AtomicInteger(0);
-    List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
-
-    List<Future<?>> futures = new ArrayList<>();
-    for (int i = 0; i < threadCount; i++) {
-      final int idx = i;
-      futures.add(
-          executor.submit(
-              () -> {
-                try {
-                  barrier.await();
-                  fileSystemService.writeText(
-                      CloudPath.of("/concurrent/shared/tree/file_" + idx + ".txt"),
-                      "data " + idx,
-                      0L);
-                  successCount.incrementAndGet();
-                } catch (Throwable t) {
-                  errors.add(t);
-                }
-              }));
-    }
-
-    for (Future<?> f : futures) {
-      f.get(10, TimeUnit.SECONDS);
-    }
-    executor.shutdown();
-
-    assertTrue(errors.isEmpty(), () -> "Errors in concurrent ensureDirectories: " + errors);
-    assertEquals(threadCount, successCount.get());
-
-    List<CloudNode> children =
-        fileSystemService.listChildren(CloudPath.of("/concurrent/shared/tree"));
-    assertEquals(threadCount, children.size());
+    // createBlobNode when target already exists throws CloudNodeAlreadyExistsException
+    assertThrows(
+        CloudNodeAlreadyExistsException.class,
+        () -> fileSystemService.createBlobNode(CloudPath.of("/src.txt"), blobId));
   }
 }

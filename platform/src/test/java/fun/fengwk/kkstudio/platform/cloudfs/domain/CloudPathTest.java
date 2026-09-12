@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.cloudfs.domain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,6 +28,7 @@ class CloudPathTest {
     assertNull(root.parent());
     assertTrue(root.segments().isEmpty());
     assertFalse(root.isArtifactPath());
+    assertEquals(root, CloudPath.root());
   }
 
   /** 验证合法多级路径的解析、分段及父子层级计算。 */
@@ -39,6 +41,10 @@ class CloudPathTest {
     assertEquals(CloudPath.of("/workspace/src"), path.parent());
     assertEquals(List.of("workspace", "src", "App.java"), path.segments());
     assertFalse(path.isArtifactPath());
+
+    CloudPath singleLevel = CloudPath.of("/knowledge");
+    assertEquals(CloudPath.root(), singleLevel.parent());
+    assertEquals("knowledge", singleLevel.name());
   }
 
   /** 验证系统保留的 /.artifacts 路径树识别，且不误判同级其他 dot 路径。 */
@@ -75,12 +81,52 @@ class CloudPathTest {
     CloudPath parent = CloudPath.of("/a/b");
     CloudPath child = CloudPath.of("/a/b/c/d");
     CloudPath sibling = CloudPath.of("/a/b2");
+    CloudPath sameLenDiffSeg = CloudPath.of("/a/c");
 
     assertTrue(child.isDescendantOf(parent));
     assertTrue(child.isDescendantOf(root));
     assertFalse(parent.isDescendantOf(child));
     assertFalse(child.isDescendantOf(child));
     assertFalse(sibling.isDescendantOf(parent));
+    assertFalse(child.isDescendantOf(null));
+    assertFalse(root.isDescendantOf(root));
+    assertFalse(parent.isDescendantOf(sameLenDiffSeg));
+  }
+
+  /** 验证 child 方法在根路径与子路径下的派生及非法子分段拦截。 */
+  @Test
+  void testChildDerivationAndValidation() {
+    CloudPath root = CloudPath.root();
+    CloudPath workspace = root.child("workspace");
+    assertEquals("/workspace", workspace.value());
+
+    CloudPath subFile = workspace.child("file.txt");
+    assertEquals("/workspace/file.txt", subFile.value());
+
+    assertThrows(CloudPathValidationException.class, () -> workspace.child(null));
+    assertThrows(CloudPathValidationException.class, () -> workspace.child(""));
+    assertThrows(CloudPathValidationException.class, () -> workspace.child("sub/dir"));
+    assertThrows(CloudPathValidationException.class, () -> workspace.child("sub\\dir"));
+  }
+
+  /** 验证 equals、hashCode、toString 与 compareTo 的契约一致性。 */
+  @Test
+  void testEqualityAndComparisonContracts() {
+    CloudPath p1 = CloudPath.of("/workspace/file.txt");
+    CloudPath p2 = CloudPath.of("/workspace/file.txt");
+    CloudPath p3 = CloudPath.of("/workspace/other.txt");
+
+    assertEquals(p1, p1);
+    assertEquals(p1, p2);
+    assertNotEquals(p1, p3);
+    assertNotEquals(p1, null);
+    assertNotEquals(p1, "/workspace/file.txt");
+
+    assertEquals(p1.hashCode(), p2.hashCode());
+    assertEquals("/workspace/file.txt", p1.toString());
+
+    assertTrue(p1.compareTo(p3) < 0);
+    assertEquals(0, p1.compareTo(p2));
   }
 
   /** 验证孤立高/低半区代理对（unpaired surrogate）被严格拒绝，杜绝静默替换字符。 */

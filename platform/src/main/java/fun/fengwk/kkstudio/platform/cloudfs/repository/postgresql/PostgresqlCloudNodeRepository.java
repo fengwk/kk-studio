@@ -26,21 +26,27 @@ public class PostgresqlCloudNodeRepository implements CloudNodeRepository {
 
   @Override
   public Optional<CloudNode> findById(UUID id) {
-    if (id == null) {
-      return Optional.empty();
-    }
+    Objects.requireNonNull(id, "id");
     return Optional.ofNullable(toDomain(mapper.getById(id)));
   }
 
   @Override
   public Optional<CloudNode> findByParentIdAndName(UUID parentId, String name) {
-    if (name == null || name.isEmpty()) {
-      return Optional.empty();
-    }
+    Objects.requireNonNull(name, "name");
     CloudNodeDO nodeDO =
         parentId == null
             ? mapper.getRootChildByName(name)
             : mapper.getByParentIdAndName(parentId, name);
+    return Optional.ofNullable(toDomain(nodeDO));
+  }
+
+  @Override
+  public Optional<CloudNode> findByParentIdAndNameForUpdate(UUID parentId, String name) {
+    Objects.requireNonNull(name, "name");
+    CloudNodeDO nodeDO =
+        parentId == null
+            ? mapper.getRootChildByNameForUpdate(name)
+            : mapper.getByParentIdAndNameForUpdate(parentId, name);
     return Optional.ofNullable(toDomain(nodeDO));
   }
 
@@ -75,22 +81,20 @@ public class PostgresqlCloudNodeRepository implements CloudNodeRepository {
       UUID id, UUID newParentId, String newName, long expectedVersion, Instant updatedAt) {
     Objects.requireNonNull(id, "id");
     Objects.requireNonNull(newName, "newName");
-    Instant updateTime = updatedAt != null ? updatedAt : Instant.now();
-    return mapper.updateParentAndName(id, newParentId, newName, expectedVersion, updateTime);
+    Objects.requireNonNull(updatedAt, "updatedAt");
+    return mapper.updateParentAndName(id, newParentId, newName, expectedVersion, updatedAt);
   }
 
   @Override
   public int touch(UUID id, Instant updatedAt) {
     Objects.requireNonNull(id, "id");
-    Instant updateTime = updatedAt != null ? updatedAt : Instant.now();
-    return mapper.touch(id, updateTime);
+    Objects.requireNonNull(updatedAt, "updatedAt");
+    return mapper.touch(id, updatedAt);
   }
 
   @Override
   public int deleteByIdAndVersion(UUID id, long expectedVersion) {
-    if (id == null) {
-      return 0;
-    }
+    Objects.requireNonNull(id, "id");
     return mapper.deleteByIdAndVersion(id, expectedVersion);
   }
 
@@ -102,8 +106,8 @@ public class PostgresqlCloudNodeRepository implements CloudNodeRepository {
         .id(nodeDO.getId())
         .parentId(nodeDO.getParentId())
         .name(nodeDO.getName())
-        .kind(nodeDO.getKind() != null ? CloudNodeKind.valueOf(nodeDO.getKind()) : null)
-        .version(nodeDO.getVersion() != null ? nodeDO.getVersion() : 0L)
+        .kind(CloudNodeKind.valueOf(nodeDO.getKind()))
+        .version(nodeDO.getVersion())
         .blobId(nodeDO.getBlobId())
         .createdAt(nodeDO.getCreateTime())
         .updatedAt(nodeDO.getUpdateTime())
@@ -111,14 +115,12 @@ public class PostgresqlCloudNodeRepository implements CloudNodeRepository {
   }
 
   private CloudNodeDO toDO(CloudNode node) {
-    if (node == null) {
-      return null;
-    }
+    Objects.requireNonNull(node, "node");
     return CloudNodeDO.builder()
         .id(node.getId())
         .parentId(node.getParentId())
         .name(node.getName())
-        .kind(node.getKind() != null ? node.getKind().name() : null)
+        .kind(node.getKind().name())
         .version(node.getVersion())
         .blobId(node.getBlobId())
         .createTime(node.getCreatedAt())

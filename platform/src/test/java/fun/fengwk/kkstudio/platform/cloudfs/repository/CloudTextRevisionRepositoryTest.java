@@ -2,10 +2,12 @@ package fun.fengwk.kkstudio.platform.cloudfs.repository;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNode;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNodeKind;
@@ -21,6 +23,7 @@ class CloudTextRevisionRepositoryTest extends PostgresSpringTestSupport {
   @Autowired private CloudNodeRepository nodeRepository;
   @Autowired private CloudTextRevisionRepository revisionRepository;
 
+  /** 验证文本版本 CRUD、CAS 取消当前标记、历史版本读取及按节点级联清理。 */
   @Test
   void testRevisionsCrudAndCasUnsetCurrent() {
     UUID nodeId = UUID.randomUUID();
@@ -54,6 +57,10 @@ class CloudTextRevisionRepositoryTest extends PostgresSpringTestSupport {
     int unsetWrong = revisionRepository.unsetCurrent(nodeId, 99L);
     assertEquals(0, unsetWrong);
 
+    // CAS unsetCurrent: non-positive revision returns 0
+    assertEquals(0, revisionRepository.unsetCurrent(nodeId, 0L));
+    assertEquals(0, revisionRepository.unsetCurrent(nodeId, -1L));
+
     // CAS unsetCurrent: correct revision succeeds
     int unsetCorrect = revisionRepository.unsetCurrent(nodeId, 1L);
     assertEquals(1, unsetCorrect);
@@ -82,9 +89,52 @@ class CloudTextRevisionRepositoryTest extends PostgresSpringTestSupport {
     assertTrue(hist1Opt.isPresent());
     assertFalse(hist1Opt.get().isCurrent());
 
+    // Non-positive revision returns empty
+    assertTrue(revisionRepository.findByNodeIdAndRevision(nodeId, 0L).isEmpty());
+    assertTrue(revisionRepository.findByNodeIdAndRevision(nodeId, -1L).isEmpty());
+
     // Delete by nodeId
     int deleted = revisionRepository.deleteByNodeId(nodeId);
     assertEquals(2, deleted);
     assertFalse(revisionRepository.findCurrentByNodeId(nodeId).isPresent());
+  }
+
+  /** 验证数据库层对 size_bytes 必须严格等于 octet_length(content) 的约束检查。 */
+  @Test
+  void testSchemaCheckSizeBytesMatchesContentOctetLength() {
+    UUID nodeId = UUID.randomUUID();
+    CloudNode node =
+        CloudNode.builder()
+            .id(nodeId)
+            .parentId(null)
+            .name("size_mismatch.txt")
+            .kind(CloudNodeKind.TEXT)
+            .version(0L)
+            .build();
+    nodeRepository.insert(node);
+
+    // content has length 5, but sizeBytes specified as 99
+    CloudTextRevision mismatch =
+        CloudTextRevision.builder()
+            .nodeId(nodeId)
+            .revision(1L)
+            .content("hello")
+            .sizeBytes(99)
+            .sha256("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+            .current(true)
+            .build();
+
+    assertThrows(DataIntegrityViolationException.class, () -> revisionRepository.insert(mismatch));
+  }
+
+  /** 验证仓储接口对入参 null 的严格校验拦截。 */
+  @Test
+  void testRepositoryRejectsNullInputs() {
+    assertThrows(NullPointerException.class, () -> revisionRepository.findCurrentByNodeId(null));
+    assertThrows(
+        NullPointerException.class, () -> revisionRepository.findByNodeIdAndRevision(null, 1L));
+    assertThrows(NullPointerException.class, () -> revisionRepository.insert(null));
+    assertThrows(NullPointerException.class, () -> revisionRepository.unsetCurrent(null, 1L));
+    assertThrows(NullPointerException.class, () -> revisionRepository.deleteByNodeId(null));
   }
 }

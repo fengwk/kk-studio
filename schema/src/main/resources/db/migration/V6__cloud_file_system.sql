@@ -31,6 +31,7 @@ create table cloud_node (
         and position('/' in name) = 0
         and name !~ '[\r\n\t\x00-\x1f\x7f]'
         and name not in ('.', '..')
+        and octet_length(name) <= 255
     ),
     constraint uk_cloud_node_parent_name unique nulls not distinct (parent_id, name)
 );
@@ -44,9 +45,6 @@ comment on column cloud_node.version is '节点元数据 CAS 乐观锁版本：�
 comment on column cloud_node.blob_id is 'BLOB 类型对应的 storage_blob UUID；DIRECTORY 与 TEXT 必须为 NULL';
 comment on column cloud_node.created_at is '创建时间（毫秒精度）';
 comment on column cloud_node.updated_at is '更新时间（毫秒精度，应用侧维护）';
-
-create index idx_cloud_node_parent
-    on cloud_node (parent_id);
 
 create index idx_cloud_node_blob
     on cloud_node (blob_id)
@@ -65,6 +63,8 @@ create table cloud_text_revision (
         references cloud_node (id) on delete restrict,
     constraint ck_cloud_text_revision_revision_positive check (revision > 0),
     constraint ck_cloud_text_revision_size_nonneg check (size_bytes >= 0),
+    constraint ck_cloud_text_revision_size_match check (size_bytes = octet_length(content)),
+    constraint ck_cloud_text_revision_content_size check (octet_length(content) <= 1048576),
     constraint ck_cloud_text_revision_sha256 check (sha256 ~ '^[0-9a-f]{64}$')
 );
 

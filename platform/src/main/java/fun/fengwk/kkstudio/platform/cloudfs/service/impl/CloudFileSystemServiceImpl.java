@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.cloudfs.service.impl;
 
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +13,7 @@ import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudCycleException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudDirectoryNotEmptyException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudEditAmbiguousException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudEditPatternNotFoundException;
+import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudFileSystemValidationException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeAlreadyExistsException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeKindConflictException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeNotFoundException;
@@ -131,14 +131,11 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
       CloudPath parentPath = path.parent();
       UUID parentId = null;
       if (!parentPath.isRoot()) {
-        CloudNode parentNode = getNode(parentPath);
-        if (!parentNode.isDirectory()) {
-          throw new CloudNodeKindConflictException(
-              parentPath, CloudNodeKind.DIRECTORY, parentNode.getKind());
-        }
+        CloudNode parentNode = resolveExistingDirectoryForUpdate(parentPath);
         parentId = parentNode.getId();
       }
-      Optional<CloudNode> existing = nodeRepository.findByParentIdAndName(parentId, path.name());
+      Optional<CloudNode> existing =
+          nodeRepository.findByParentIdAndNameForUpdate(parentId, path.name());
       if (existing.isPresent()) {
         throw new CloudNodeAlreadyExistsException(path);
       }
@@ -150,10 +147,7 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
               .kind(CloudNodeKind.DIRECTORY)
               .version(0L)
               .build();
-      boolean inserted = nodeRepository.insertIfAbsent(dir);
-      if (!inserted) {
-        throw new CloudNodeAlreadyExistsException(path);
-      }
+      nodeRepository.insert(dir);
       return dir;
     }
     return ensureDirectories(path);
@@ -170,16 +164,25 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
     if (path.isArtifactPath()) {
       throw new CloudPathForbiddenException(path, "Public mutation forbidden under /.artifacts");
     }
+    if (expectedRevision < 0) {
+      throw new CloudFileSystemValidationException("expectedRevision must be non-negative");
+    }
     byte[] utf8Bytes = StrictUtf8.encode(content, "text content");
     if (utf8Bytes.length > MAX_TEXT_BYTES) {
-      throw new CloudPathValidationException(
+      throw new CloudFileSystemValidationException(
           String.format(
               "Text content size (%d bytes) exceeds maximum limit of %d bytes (1 MiB)",
               utf8Bytes.length, MAX_TEXT_BYTES));
     }
 
     if (expectedRevision == 0) {
-      Optional<CloudNode> existing = findNode(path);
+      UUID parentId = null;
+      if (!path.parent().isRoot()) {
+        CloudNode parentDir = ensureDirectories(path.parent());
+        parentId = parentDir.getId();
+      }
+      Optional<CloudNode> existing =
+          nodeRepository.findByParentIdAndNameForUpdate(parentId, path.name());
       if (existing.isPresent()) {
         CloudNode existingNode = existing.get();
         long curRev = 0L;
@@ -193,11 +196,6 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
         throw new CloudRevisionConflictException(path, curRev, 0L);
       }
 
-      UUID parentId = null;
-      if (!path.parent().isRoot()) {
-        CloudNode parentDir = ensureDirectories(path.parent());
-        parentId = parentDir.getId();
-      }
       UUID nodeId = UUID.randomUUID();
       CloudNode textNode =
           CloudNode.builder()
@@ -207,22 +205,7 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
               .kind(CloudNodeKind.TEXT)
               .version(0L)
               .build();
-      boolean inserted = nodeRepository.insertIfAbsent(textNode);
-      if (!inserted) {
-        CloudNode racedNode =
-            nodeRepository
-                .findByParentIdAndName(parentId, path.name())
-                .orElseThrow(() -> new CloudNodeAlreadyExistsException(path));
-        long curRev = 0L;
-        if (racedNode.isText()) {
-          curRev =
-              revisionRepository
-                  .findCurrentByNodeId(racedNode.getId())
-                  .map(CloudTextRevision::getRevision)
-                  .orElse(0L);
-        }
-        throw new CloudRevisionConflictException(path, curRev, 0L);
-      }
+      nodeRepository.insert(textNode);
 
       String sha256 = sha256Hex(utf8Bytes);
       CloudTextRevision rev =
@@ -238,39 +221,29 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
       return rev;
     }
 
-    if (expectedRevision > 0) {
-      CloudNode node = getNode(path);
-      if (!node.isText()) {
-        throw new CloudNodeKindConflictException(path, CloudNodeKind.TEXT, node.getKind());
-      }
-      Optional<CloudTextRevision> curOpt = revisionRepository.findCurrentByNodeId(node.getId());
-      long curRev = curOpt.map(CloudTextRevision::getRevision).orElse(0L);
-      if (curRev != expectedRevision) {
-        throw new CloudRevisionConflictException(path, curRev, expectedRevision);
-      }
-      int unset = revisionRepository.unsetCurrent(node.getId(), expectedRevision);
-      if (unset == 0) {
-        Optional<CloudTextRevision> latestOpt =
-            revisionRepository.findCurrentByNodeId(node.getId());
-        long latestRev = latestOpt.map(CloudTextRevision::getRevision).orElse(curRev);
-        throw new CloudRevisionConflictException(path, latestRev, expectedRevision);
-      }
-      String sha256 = sha256Hex(utf8Bytes);
-      CloudTextRevision newRev =
-          CloudTextRevision.builder()
-              .nodeId(node.getId())
-              .revision(expectedRevision + 1)
-              .content(content)
-              .sizeBytes(utf8Bytes.length)
-              .sha256(sha256)
-              .current(true)
-              .build();
-      revisionRepository.insert(newRev);
-      nodeRepository.touch(node.getId(), Instant.now());
-      return newRev;
+    CloudNode node = resolveExistingNodeForUpdate(path);
+    if (!node.isText()) {
+      throw new CloudNodeKindConflictException(path, CloudNodeKind.TEXT, node.getKind());
     }
-
-    throw new CloudRevisionConflictException(path, 0L, expectedRevision);
+    Optional<CloudTextRevision> curOpt = revisionRepository.findCurrentByNodeId(node.getId());
+    long curRev = curOpt.map(CloudTextRevision::getRevision).orElse(0L);
+    if (curRev != expectedRevision) {
+      throw new CloudRevisionConflictException(path, curRev, expectedRevision);
+    }
+    revisionRepository.unsetCurrent(node.getId(), expectedRevision);
+    String sha256 = sha256Hex(utf8Bytes);
+    CloudTextRevision newRev =
+        CloudTextRevision.builder()
+            .nodeId(node.getId())
+            .revision(expectedRevision + 1)
+            .content(content)
+            .sizeBytes(utf8Bytes.length)
+            .sha256(sha256)
+            .current(true)
+            .build();
+    revisionRepository.insert(newRev);
+    nodeRepository.touch(node.getId(), Instant.now());
+    return newRev;
   }
 
   @Override
@@ -282,31 +255,37 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
       long expectedRevision,
       boolean replaceAll) {
     Objects.requireNonNull(path, "path");
-    if (expectedRevision <= 0) {
-      throw new CloudRevisionConflictException(path, 0L, expectedRevision);
+    Objects.requireNonNull(oldString, "oldString");
+    Objects.requireNonNull(newString, "newString");
+    if (oldString.isEmpty()) {
+      throw new CloudFileSystemValidationException("oldString must not be empty");
     }
-    if (oldString == null || oldString.isEmpty()) {
-      throw new CloudPathValidationException("oldString must not be null or empty");
-    }
-    if (newString == null) {
-      throw new CloudPathValidationException("newString must not be null");
+    if (path.isRoot()) {
+      throw new CloudPathForbiddenException(path, "Cannot edit root directory");
     }
     if (path.isArtifactPath()) {
       throw new CloudPathForbiddenException(path, "Public mutation forbidden under /.artifacts");
     }
+    if (expectedRevision <= 0) {
+      throw new CloudFileSystemValidationException("expectedRevision must be positive for edit");
+    }
+    StrictUtf8.encode(oldString, "oldString");
+    StrictUtf8.encode(newString, "newString");
 
-    CloudNode node = getNode(path);
+    CloudNode node = resolveExistingNodeForUpdate(path);
     if (!node.isText()) {
       throw new CloudNodeKindConflictException(path, CloudNodeKind.TEXT, node.getKind());
     }
-    Optional<CloudTextRevision> curOpt = revisionRepository.findCurrentByNodeId(node.getId());
-    long curRev = curOpt.map(CloudTextRevision::getRevision).orElse(0L);
-    if (curRev != expectedRevision) {
-      throw new CloudRevisionConflictException(path, curRev, expectedRevision);
-    }
-    CloudTextRevision currentRevision = curOpt.get();
-    String content = currentRevision.getContent();
 
+    CloudTextRevision currentRev =
+        revisionRepository
+            .findCurrentByNodeId(node.getId())
+            .orElseThrow(() -> new CloudRevisionConflictException(path, 0L, expectedRevision));
+    if (currentRev.getRevision() != expectedRevision) {
+      throw new CloudRevisionConflictException(path, currentRev.getRevision(), expectedRevision);
+    }
+
+    String content = currentRev.getContent();
     int count = countOccurrences(content, oldString);
     if (count == 0) {
       throw new CloudEditPatternNotFoundException(path);
@@ -326,18 +305,14 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
 
     byte[] utf8Bytes = StrictUtf8.encode(newContent, "edited text content");
     if (utf8Bytes.length > MAX_TEXT_BYTES) {
-      throw new CloudPathValidationException(
+      throw new CloudFileSystemValidationException(
           String.format(
-              "Edited text content size (%d bytes) exceeds maximum limit of %d bytes (1 MiB)",
+              "Text content size (%d bytes) exceeds maximum limit of %d bytes (1 MiB)",
               utf8Bytes.length, MAX_TEXT_BYTES));
     }
 
-    int unset = revisionRepository.unsetCurrent(node.getId(), expectedRevision);
-    if (unset == 0) {
-      Optional<CloudTextRevision> latestOpt = revisionRepository.findCurrentByNodeId(node.getId());
-      long latestRev = latestOpt.map(CloudTextRevision::getRevision).orElse(curRev);
-      throw new CloudRevisionConflictException(path, latestRev, expectedRevision);
-    }
+    revisionRepository.unsetCurrent(node.getId(), expectedRevision);
+
     String sha256 = sha256Hex(utf8Bytes);
     CloudTextRevision newRev =
         CloudTextRevision.builder()
@@ -374,51 +349,42 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
     if (targetPath.isDescendantOf(sourcePath)) {
       throw new CloudCycleException(sourcePath, targetPath);
     }
+    if (expectedVersion < 0) {
+      throw new CloudFileSystemValidationException("expectedVersion must be non-negative");
+    }
 
-    CloudNode sourceNode = getNode(sourcePath);
+    CloudPath targetParentPath = targetPath.parent();
+    CloudNode sourceNode;
+    UUID targetParentId = null;
+
+    if (targetParentPath.isRoot()) {
+      sourceNode = resolveExistingNodeForUpdate(sourcePath);
+    } else {
+      int cmp = sourcePath.value().compareTo(targetParentPath.value());
+      CloudNode targetParent;
+      if (cmp <= 0) {
+        sourceNode = resolveExistingNodeForUpdate(sourcePath);
+        targetParent = resolveExistingDirectoryForUpdate(targetParentPath);
+      } else {
+        targetParent = resolveExistingDirectoryForUpdate(targetParentPath);
+        sourceNode = resolveExistingNodeForUpdate(sourcePath);
+      }
+      targetParentId = targetParent.getId();
+    }
+
     if (sourceNode.getVersion() != expectedVersion) {
       throw new CloudVersionConflictException(sourcePath, sourceNode.getVersion(), expectedVersion);
     }
 
-    UUID targetParentId = null;
-    CloudPath targetParentPath = targetPath.parent();
-    if (!targetParentPath.isRoot()) {
-      CloudNode targetParent = getNode(targetParentPath);
-      if (!targetParent.isDirectory()) {
-        throw new CloudNodeKindConflictException(
-            targetParentPath, CloudNodeKind.DIRECTORY, targetParent.getKind());
-      }
-      targetParentId = targetParent.getId();
-    }
-    if (findNode(targetPath).isPresent()) {
+    Optional<CloudNode> existingTarget =
+        nodeRepository.findByParentIdAndNameForUpdate(targetParentId, targetPath.name());
+    if (existingTarget.isPresent()) {
       throw new CloudNodeAlreadyExistsException(targetPath);
     }
 
-    int updated;
-    try {
-      updated =
-          nodeRepository.updateParentAndName(
-              sourceNode.getId(),
-              targetParentId,
-              targetPath.name(),
-              expectedVersion,
-              Instant.now());
-    } catch (DuplicateKeyException e) {
-      throw new CloudNodeAlreadyExistsException(targetPath);
-    }
-    if (updated == 0) {
-      long curVer =
-          nodeRepository
-              .findById(sourceNode.getId())
-              .map(CloudNode::getVersion)
-              .orElse(sourceNode.getVersion());
-      throw new CloudVersionConflictException(sourcePath, curVer, expectedVersion);
-    }
-    sourceNode.setParentId(targetParentId);
-    sourceNode.setName(targetPath.name());
-    sourceNode.setVersion(expectedVersion + 1);
-    sourceNode.setUpdatedAt(Instant.now());
-    return sourceNode;
+    nodeRepository.updateParentAndName(
+        sourceNode.getId(), targetParentId, targetPath.name(), expectedVersion, Instant.now());
+    return nodeRepository.findById(sourceNode.getId()).orElseThrow();
   }
 
   @Override
@@ -431,8 +397,11 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
     if (path.isArtifactPath()) {
       throw new CloudPathForbiddenException(path, "Public mutation forbidden under /.artifacts");
     }
+    if (expectedVersion < 0) {
+      throw new CloudFileSystemValidationException("expectedVersion must be non-negative");
+    }
 
-    CloudNode node = getNode(path);
+    CloudNode node = resolveExistingNodeForUpdate(path);
     if (node.getVersion() != expectedVersion) {
       throw new CloudVersionConflictException(path, node.getVersion(), expectedVersion);
     }
@@ -440,38 +409,14 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
     if (node.isDirectory()) {
       int childrenCount = nodeRepository.countByParentId(node.getId());
       if (childrenCount > 0) {
-        throw new CloudDirectoryNotEmptyException(path);
-      }
-      int deleted = nodeRepository.deleteByIdAndVersion(node.getId(), expectedVersion);
-      if (deleted == 0) {
-        long curVer =
-            nodeRepository
-                .findById(node.getId())
-                .map(CloudNode::getVersion)
-                .orElse(node.getVersion());
-        throw new CloudVersionConflictException(path, curVer, expectedVersion);
+        throw new CloudDirectoryNotEmptyException(path, childrenCount);
       }
     } else if (node.isText()) {
       revisionRepository.deleteByNodeId(node.getId());
-      int deleted = nodeRepository.deleteByIdAndVersion(node.getId(), expectedVersion);
-      if (deleted == 0) {
-        long curVer =
-            nodeRepository
-                .findById(node.getId())
-                .map(CloudNode::getVersion)
-                .orElse(node.getVersion());
-        throw new CloudVersionConflictException(path, curVer, expectedVersion);
-      }
-    } else if (node.isBlob()) {
-      int deleted = nodeRepository.deleteByIdAndVersion(node.getId(), expectedVersion);
-      if (deleted == 0) {
-        long curVer =
-            nodeRepository
-                .findById(node.getId())
-                .map(CloudNode::getVersion)
-                .orElse(node.getVersion());
-        throw new CloudVersionConflictException(path, curVer, expectedVersion);
-      }
+    }
+
+    nodeRepository.deleteByIdAndVersion(node.getId(), expectedVersion);
+    if (node.isBlob()) {
       requireBlobManager().release(node.getBlobId());
     }
   }
@@ -492,14 +437,16 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
     if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
       throw new StorageResourceNotFoundException("blob", blobId.toString());
     }
-    if (findNode(path).isPresent()) {
-      throw new CloudNodeAlreadyExistsException(path);
-    }
 
     UUID parentId = null;
     if (!path.parent().isRoot()) {
       CloudNode parentDir = ensureDirectories(path.parent());
       parentId = parentDir.getId();
+    }
+    Optional<CloudNode> existing =
+        nodeRepository.findByParentIdAndNameForUpdate(parentId, path.name());
+    if (existing.isPresent()) {
+      throw new CloudNodeAlreadyExistsException(path);
     }
 
     CloudNode node =
@@ -511,10 +458,7 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
             .version(0L)
             .blobId(blobId)
             .build();
-    boolean inserted = nodeRepository.insertIfAbsent(node);
-    if (!inserted) {
-      throw new CloudNodeAlreadyExistsException(path);
-    }
+    nodeRepository.insert(node);
     requireBlobManager().retain(blobId);
     return node;
   }
@@ -547,6 +491,45 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
                     String.format("Revision %d not found for %s", revision, path)));
   }
 
+  private Optional<CloudNode> resolvePathForUpdate(CloudPath path) {
+    Objects.requireNonNull(path, "path");
+    if (path.isRoot()) {
+      return Optional.of(VIRTUAL_ROOT);
+    }
+    UUID currentParentId = null;
+    CloudNode current = null;
+    List<String> segments = path.segments();
+    for (int i = 0; i < segments.size(); i++) {
+      String seg = segments.get(i);
+      Optional<CloudNode> opt = nodeRepository.findByParentIdAndNameForUpdate(currentParentId, seg);
+      if (opt.isEmpty()) {
+        return Optional.empty();
+      }
+      current = opt.get();
+      boolean isIntermediate = (i < segments.size() - 1);
+      if (isIntermediate && !current.isDirectory()) {
+        throw new CloudNodeKindConflictException(path, CloudNodeKind.DIRECTORY, current.getKind());
+      }
+      currentParentId = current.getId();
+    }
+    return Optional.ofNullable(current);
+  }
+
+  private CloudNode resolveExistingNodeForUpdate(CloudPath path) {
+    return resolvePathForUpdate(path).orElseThrow(() -> new CloudNodeNotFoundException(path));
+  }
+
+  private CloudNode resolveExistingDirectoryForUpdate(CloudPath path) {
+    if (path.isRoot()) {
+      return VIRTUAL_ROOT;
+    }
+    CloudNode node = resolveExistingNodeForUpdate(path);
+    if (!node.isDirectory()) {
+      throw new CloudNodeKindConflictException(path, CloudNodeKind.DIRECTORY, node.getKind());
+    }
+    return node;
+  }
+
   private CloudNode ensureDirectories(CloudPath path) {
     if (path.isRoot()) {
       return VIRTUAL_ROOT;
@@ -555,7 +538,7 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
     CloudNode current = null;
     List<String> segments = path.segments();
     for (String seg : segments) {
-      Optional<CloudNode> opt = nodeRepository.findByParentIdAndName(currentParentId, seg);
+      Optional<CloudNode> opt = nodeRepository.findByParentIdAndNameForUpdate(currentParentId, seg);
       if (opt.isEmpty()) {
         UUID newId = UUID.randomUUID();
         CloudNode newDir =
@@ -573,7 +556,7 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
         } else {
           current =
               nodeRepository
-                  .findByParentIdAndName(currentParentId, seg)
+                  .findByParentIdAndNameForUpdate(currentParentId, seg)
                   .orElseThrow(
                       () ->
                           new CloudNodeNotFoundException(
