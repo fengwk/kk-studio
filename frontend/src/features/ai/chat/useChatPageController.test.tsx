@@ -83,6 +83,46 @@ describe('useChatPageController', () => {
       }),
     )
   })
+
+  // 验证从 Chat 面板调用 onEdit 与 onDelete 可达并触发相应弹窗状态
+  it('wires onEdit and onDelete handlers from chatPanelProps to modals', async () => {
+    const { result } = renderHook(() => useChatPageController(), {
+      wrapper: queryWrapper(new QueryClient(queryClientOptions)),
+    })
+
+    await waitFor(() => expect(result.current.busy).toBe(false))
+
+    const testChat = {
+      id: 'chat-99',
+      title: 'Panel Chat',
+      agentName: 'default-assistant',
+      workspacePath: null,
+      yoloEnabled: false,
+      version: '1',
+      createTime: null,
+      updateTime: null,
+    }
+
+    // 触发编辑
+    act(() => result.current.chatPanelProps.onEdit(testChat))
+    expect(result.current.createChatModal.open).toBe(true)
+    expect(result.current.createChatModal.mode).toBe('edit')
+    expect(result.current.createChatModal.title).toBe('Panel Chat')
+
+    // 关闭编辑
+    act(() => result.current.createChatModal.onClose())
+    expect(result.current.createChatModal.open).toBe(false)
+
+    // 触发删除
+    act(() => result.current.chatPanelProps.onDelete(testChat))
+    expect(result.current.deleteConfirmModal.modal).not.toBeNull()
+    expect(result.current.deleteConfirmModal.modal?.title).toBe('删除 Chat')
+    expect(result.current.deleteConfirmModal.modal?.description).toContain('Panel Chat')
+
+    // 关闭删除
+    act(() => result.current.deleteConfirmModal.onClose())
+    expect(result.current.deleteConfirmModal.modal).toBeNull()
+  })
 })
 
 const queryClientOptions = {

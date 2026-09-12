@@ -758,6 +758,18 @@ export const aiCatalog = {
     'en-US': 'Create a persistent Chat workspace (an Agent is required)',
     'zh-CN': '创建持久 Chat 工作区（必须选择 Agent）',
   },
+  'ai.chat.edit': {
+    'en-US': 'Edit Chat',
+    'zh-CN': '编辑 Chat',
+  },
+  'ai.chat.deleteTitle': {
+    'en-US': 'Delete Chat',
+    'zh-CN': '删除 Chat',
+  },
+  'ai.chat.deleteDescription': {
+    'en-US': 'Are you sure you want to delete Chat "{{title}}"? This action cannot be undone.',
+    'zh-CN': '确定要删除 Chat“{{title}}”吗？删除后不可恢复。',
+  },
   'ai.chat.untitled': {
     'en-US': 'Untitled Chat',
     'zh-CN': 'Untitled Chat',

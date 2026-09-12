@@ -1,14 +1,16 @@
 import { useState, type FormEventHandler } from 'react'
 import { useNavigate } from 'react-router'
-import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
+import { toUserFacingErrorMessage } from '@/features/ai/ai-user-facing-error'
+import { mergeChatList } from '@/features/ai/chat/chat-utils'
+import { chatService } from '@/shared/api/chat-service'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
-import { chatService } from '@/shared/api/chat-service'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
-import { queryKeys } from '@/shared/lib/query-keys'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { mergeChatList } from '@/features/ai/chat/chat-utils'
 import { useI18n } from '@/shared/i18n'
+import { queryKeys } from '@/shared/lib/query-keys'
+import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
+import type { ConfirmModalState } from '@/shared/ui/console/confirm-modal'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 function resolveChatAgentName(
   agentName: string | undefined,
@@ -33,6 +35,9 @@ export function useChatListController(
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
+  const [mode, setMode] = useState<'create' | 'edit'>('create')
+  const [editingChat, setEditingChat] = useState<ChatDTO | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
   const [selectedAgentName, setSelectedAgentName] = useState('')
   const [selectedWorkspacePath, setSelectedWorkspacePath] = useState<string | null>(null)
   const [title, setTitle] = useState('')
@@ -66,7 +71,42 @@ export function useChatListController(
     },
   })
 
+  const updateChatMutation = useInvalidateMutation({
+    mutationFn: () => {
+      if (!editingChat) {
+        throw new Error('No chat being edited')
+      }
+      return chatService.updateChat(editingChat.id, {
+        title: title.trim(),
+        agentName: selectedAgentName,
+        workspacePath: selectedWorkspacePath,
+        expectedVersion: editingChat.version,
+      })
+    },
+    invalidateQueryKeys: [queryKeys.chats.list],
+    onSuccess: async () => {
+      setModalOpen(false)
+      setEditingChat(null)
+      setTitle('')
+      setFormError('')
+      setNameError('')
+    },
+  })
+
+  const deleteChatMutation = useInvalidateMutation({
+    mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: string }) =>
+      chatService.deleteChat(id, expectedVersion),
+    invalidateQueryKeys: [queryKeys.chats.list],
+    onSuccess: async () => {
+      setDeleteConfirm(null)
+    },
+  })
+
   function openCreateChat(agentName?: string) {
+    createChatMutation.reset()
+    updateChatMutation.reset()
+    setMode('create')
+    setEditingChat(null)
     const nextAgentName = resolveChatAgentName(agentName, selectedAgentName, agents)
     setSelectedAgentName(nextAgentName)
     setSelectedWorkspacePath(null)
@@ -76,12 +116,42 @@ export function useChatListController(
     setModalOpen(true)
   }
 
+  function openEditChat(chat: ChatDTO) {
+    createChatMutation.reset()
+    updateChatMutation.reset()
+    setMode('edit')
+    setEditingChat(chat)
+    setSelectedAgentName(chat.agentName || resolveChatAgentName(undefined, '', agents))
+    setSelectedWorkspacePath(chat.workspacePath ?? null)
+    setTitle(chat.title ?? '')
+    setFormError('')
+    setNameError('')
+    setModalOpen(true)
+  }
+
+  function openDeleteChat(chat: ChatDTO) {
+    deleteChatMutation.reset()
+    setDeleteConfirm({
+      title: t('ai.chat.deleteTitle'),
+      description: t('ai.chat.deleteDescription', { title: chat.title || chat.id }),
+      confirmLabel: t('ai.catalog.action.confirmDelete'),
+      tone: 'danger',
+      onConfirm: () =>
+        deleteChatMutation.mutate({
+          id: chat.id,
+          expectedVersion: chat.version,
+        }),
+    })
+  }
+
   function handleTitleChange(next: string) {
     setTitle(next)
     if (nameError || formError) {
       setNameError('')
       setFormError('')
     }
+    if (createChatMutation.error) createChatMutation.reset()
+    if (updateChatMutation.error) updateChatMutation.reset()
   }
 
   function handleSelectAgent(agentName: string) {
@@ -91,13 +161,27 @@ export function useChatListController(
       setSelectedWorkspacePath(null)
     }
     setSelectedAgentName(agentName)
+    if (createChatMutation.error) createChatMutation.reset()
+    if (updateChatMutation.error) updateChatMutation.reset()
   }
 
   function handleSelectWorkspacePath(workspacePath: string | null) {
     setSelectedWorkspacePath(workspacePath)
+    if (createChatMutation.error) createChatMutation.reset()
+    if (updateChatMutation.error) updateChatMutation.reset()
   }
 
-  const submitCreateChat: FormEventHandler<HTMLFormElement> = (event) => {
+  function closeModal() {
+    setModalOpen(false)
+    setEditingChat(null)
+    setTitle('')
+    setFormError('')
+    setNameError('')
+    createChatMutation.reset()
+    updateChatMutation.reset()
+  }
+
+  const submitChat: FormEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault()
     if (!title.trim()) {
       setFormError(t('ai.chat.nameRequired'))
@@ -110,33 +194,53 @@ export function useChatListController(
     }
     setFormError('')
     setNameError('')
-    createChatMutation.mutate(undefined)
+    if (mode === 'edit') {
+      updateChatMutation.mutate(undefined)
+    } else {
+      createChatMutation.mutate(undefined)
+    }
   }
+
+  const activeMutation = mode === 'edit' ? updateChatMutation : createChatMutation
+  const activeMutationError = activeMutation.error
+    ? toUserFacingErrorMessage(activeMutation.error)
+    : ''
+  const effectiveFormError = formError || activeMutationError
+  const anyMutationError =
+    createChatMutation.error || updateChatMutation.error || deleteChatMutation.error
 
   return {
     chatsQuery,
     chats: chatsQuery.data ?? [],
-    chatMutationError: modalOpen ? null : createChatMutation.error,
+    chatMutationError: modalOpen || deleteConfirm ? null : anyMutationError,
     openCreateChat,
+    openEditChat,
+    openDeleteChat,
     createChatModal: {
       open: modalOpen,
+      mode,
       agents,
       environments,
       selectedAgentName,
       selectedWorkspacePath,
       title,
-      pending: createChatMutation.isPending,
-      formError: formError || (createChatMutation.error ? String(createChatMutation.error.message || createChatMutation.error) : ''),
+      pending: activeMutation.isPending,
+      formError: effectiveFormError,
       nameError,
-      onClose: () => {
-        setModalOpen(false)
-        setFormError('')
-        setNameError('')
-      },
+      onClose: closeModal,
       onSelectAgent: handleSelectAgent,
       onSelectWorkspacePath: handleSelectWorkspacePath,
       onTitleChange: handleTitleChange,
-      onSubmit: submitCreateChat,
+      onSubmit: submitChat,
+    },
+    deleteConfirmModal: {
+      modal: deleteConfirm,
+      pending: deleteChatMutation.isPending,
+      error: deleteChatMutation.error ? toUserFacingErrorMessage(deleteChatMutation.error) : null,
+      onClose: () => {
+        setDeleteConfirm(null)
+        deleteChatMutation.reset()
+      },
     },
   }
 }

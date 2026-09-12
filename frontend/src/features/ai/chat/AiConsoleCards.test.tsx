@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ChatCard } from '@/features/ai/chat/ChatCard'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 
@@ -16,6 +16,54 @@ describe('ChatCard', () => {
     )
     await user.click(screen.getByRole('button', { name: '进入 Chat Draft' }))
     expect(screen.getByTestId('location')).toHaveTextContent('/chats/chat-1')
+  })
+
+  // 验证 ChatCard 支持编辑和删除动作，与现有资源卡风格和无障碍语义保持一致
+  it('supports edit and delete actions with accessible aria labels', async () => {
+    const user = userEvent.setup()
+    const onEdit = vi.fn()
+    const onDelete = vi.fn()
+    render(
+      <MemoryRouter>
+        <ChatCard
+          chat={chat()}
+          agents={[]}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          deletePending={false}
+        />
+      </MemoryRouter>,
+    )
+
+    const editBtn = screen.getByRole('button', { name: '编辑 Draft' })
+    const deleteBtn = screen.getByRole('button', { name: '删除 Draft' })
+
+    expect(editBtn).toBeInTheDocument()
+    expect(deleteBtn).toBeInTheDocument()
+    expect(deleteBtn).not.toBeDisabled()
+
+    await user.click(editBtn)
+    expect(onEdit).toHaveBeenCalledOnce()
+
+    await user.click(deleteBtn)
+    expect(onDelete).toHaveBeenCalledOnce()
+  })
+
+  // 验证删除处于 pending 状态时禁用删除按钮，防止重复提交
+  it('disables delete button when deletePending is true', () => {
+    render(
+      <MemoryRouter>
+        <ChatCard
+          chat={chat()}
+          agents={[]}
+          onEdit={() => undefined}
+          onDelete={() => undefined}
+          deletePending={true}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('button', { name: '删除 Draft' })).toBeDisabled()
   })
 
   it('uses the Chat id when the title is absent and marks a missing Agent', () => {
