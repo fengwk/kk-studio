@@ -219,28 +219,35 @@ public class EnvironmentOperationDispatcher {
   }
 
   private void runDrain() {
+    boolean workerRejected = false;
     try {
       do {
         wakeRequested.set(false);
-        drainPendingOperations();
+        if (!drainPendingOperations()) {
+          workerRejected = true;
+          break;
+        }
       } while (isRunning() && wakeRequested.get());
     } catch (RuntimeException error) {
       log.warn("Drain loop failed for node {}", nodeId);
     } finally {
       drainRunning.set(false);
-      if (isRunning() && wakeRequested.get() && drainRunning.compareAndSet(false, true)) {
+      if (!workerRejected
+          && isRunning()
+          && wakeRequested.get()
+          && drainRunning.compareAndSet(false, true)) {
         submitDrain();
       }
     }
   }
 
-  private void drainPendingOperations() {
+  private boolean drainPendingOperations() {
     while (isRunning()) {
       List<ClaimedOperation> claimed;
       lifecycleLock.readLock().lock();
       try {
         if (!isRunning()) {
-          return;
+          return true;
         }
         claimed = repository.claimPendingWithTimeout(nodeId, BATCH_SIZE);
       } finally {
@@ -251,23 +258,39 @@ public class EnvironmentOperationDispatcher {
         break;
       }
 
-      for (ClaimedOperation op : claimed) {
+      for (int i = 0; i < claimed.size(); i++) {
+        ClaimedOperation op = claimed.get(i);
         lifecycleLock.readLock().lock();
         try {
           if (!isRunning()) {
-            repository.rescheduleUnsent(op.operation().id(), nodeId, op.operation().leaseToken());
-            continue;
+            rescheduleRemaining(claimed, i);
+            return true;
           }
           try {
             workerExecutor.submit(() -> executeOperation(op));
           } catch (RuntimeException error) {
             log.warn(
                 "Worker executor rejected operation {} for node {}", op.operation().id(), nodeId);
-            repository.rescheduleUnsent(op.operation().id(), nodeId, op.operation().leaseToken());
+            rescheduleRemaining(claimed, i);
+            return false;
           }
         } finally {
           lifecycleLock.readLock().unlock();
         }
+      }
+    }
+    return true;
+  }
+
+  private void rescheduleRemaining(List<ClaimedOperation> claimed, int startIndex) {
+    for (int j = startIndex; j < claimed.size(); j++) {
+      ClaimedOperation remaining = claimed.get(j);
+      try {
+        repository.rescheduleUnsent(
+            remaining.operation().id(), nodeId, remaining.operation().leaseToken());
+      } catch (RuntimeException e) {
+        log.warn(
+            "Failed to reschedule operation {} for node {}", remaining.operation().id(), nodeId);
       }
     }
   }
