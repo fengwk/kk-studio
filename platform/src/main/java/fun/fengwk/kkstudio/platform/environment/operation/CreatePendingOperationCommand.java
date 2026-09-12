@@ -1,33 +1,97 @@
 package fun.fengwk.kkstudio.platform.environment.operation;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.EqualsAndHashCode;
+
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 创建 PENDING 操作的输入命令。
+ * 创建处于 PENDING 状态的操作信令命令（包内私有）。
  *
- * <p>注意：{@link #toString()} 严格排除私有 {@code arguments}。
+ * <p>内部持有用于执行的原始私有 {@code arguments}。该字段仅包内可见，且明确被 Jackson 忽略并从 {@link #toString()} 中排除，防止凭据泄露。
  */
-public record CreatePendingOperationCommand(
-    UUID id,
-    UUID environmentId,
-    UUID sourceId,
-    EnvironmentOperationType operationType,
-    long sourceVersion,
-    long sourceSetVersion,
-    String arguments,
-    String parameterSummary,
-    Instant deadlineAt) {
+@EqualsAndHashCode
+final class CreatePendingOperationCommand {
 
-  public CreatePendingOperationCommand {
-    Objects.requireNonNull(id, "id");
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(sourceId, "sourceId");
-    Objects.requireNonNull(operationType, "operationType");
-    Objects.requireNonNull(arguments, "arguments");
-    Objects.requireNonNull(parameterSummary, "parameterSummary");
-    Objects.requireNonNull(deadlineAt, "deadlineAt");
+  private final UUID id;
+  private final UUID environmentId;
+  private final UUID sourceId;
+  private final EnvironmentOperationType operationType;
+  private final long sourceVersion;
+  private final long sourceSetVersion;
+
+  @JsonIgnore private final String arguments;
+
+  private final String parameterSummary;
+  private final Instant deadlineAt;
+
+  CreatePendingOperationCommand(
+      UUID id,
+      UUID environmentId,
+      UUID sourceId,
+      EnvironmentOperationType operationType,
+      long sourceVersion,
+      long sourceSetVersion,
+      String arguments,
+      String parameterSummary,
+      Instant deadlineAt) {
+    this.id = Objects.requireNonNull(id, "id");
+    this.environmentId = Objects.requireNonNull(environmentId, "environmentId");
+    this.sourceId = Objects.requireNonNull(sourceId, "sourceId");
+    this.operationType = Objects.requireNonNull(operationType, "operationType");
+    this.sourceVersion = sourceVersion;
+    this.sourceSetVersion = sourceSetVersion;
+    this.arguments = Objects.requireNonNull(arguments, "arguments");
+    this.parameterSummary = Objects.requireNonNull(parameterSummary, "parameterSummary");
+    this.deadlineAt = Objects.requireNonNull(deadlineAt, "deadlineAt");
+  }
+
+  @JsonProperty
+  public UUID id() {
+    return id;
+  }
+
+  @JsonProperty
+  public UUID environmentId() {
+    return environmentId;
+  }
+
+  @JsonProperty
+  public UUID sourceId() {
+    return sourceId;
+  }
+
+  @JsonProperty
+  public EnvironmentOperationType operationType() {
+    return operationType;
+  }
+
+  @JsonProperty
+  public long sourceVersion() {
+    return sourceVersion;
+  }
+
+  @JsonProperty
+  public long sourceSetVersion() {
+    return sourceSetVersion;
+  }
+
+  @JsonIgnore
+  String arguments() {
+    return arguments;
+  }
+
+  @JsonProperty
+  public String parameterSummary() {
+    return parameterSummary;
+  }
+
+  @JsonProperty
+  public Instant deadlineAt() {
+    return deadlineAt;
   }
 
   @Override

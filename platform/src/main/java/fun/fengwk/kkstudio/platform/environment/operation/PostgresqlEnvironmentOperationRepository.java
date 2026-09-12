@@ -3,12 +3,15 @@ package fun.fengwk.kkstudio.platform.environment.operation;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.postgresql.util.PSQLException;
+import org.postgresql.util.ServerErrorMessage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResultCodes;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
@@ -18,21 +21,31 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * 基于 PostgreSQL 的 {@link EnvironmentOperationRepository} 实现。
+ * 基于 PostgreSQL 的 {@link EnvironmentOperationRepository} 实现（包内私有）。
  *
- * <p>所有状态转换与截止时间评估使用 PostgreSQL {@code statement_timestamp()}。 私有参数与凭据绝不在异常信息或日志中回显。
+ * <p>所有状态推进与截止时间评估使用 PostgreSQL {@code statement_timestamp()}。 私有参数与凭据绝不在异常信息或日志中回显，异常原因链绝不保留底层
+ * JDBC/SQL 详情。
  */
 @Repository
-public class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRepository {
+class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRepository {
 
   private static final int MAX_JSON_CHARS = 256 * 1024;
+  private static final int MAX_FAILURE_MESSAGE_CHARS = 1000;
   private static final int DEFAULT_LIST_LIMIT = 50;
   private static final int MAX_LIST_LIMIT = 500;
+
+  private static final Pattern CONSTRAINT_NAME_PATTERN =
+      Pattern.compile(
+          "(?:constraint|violates [^ ]+ constraint) [\"']?([^\"'\\s]+)[\"']?",
+          Pattern.CASE_INSENSITIVE);
 
   private static final RowMapper<EnvironmentOperation> ROW_MAPPER =
       (rs, rowNum) -> {
@@ -80,19 +93,73 @@ public class PostgresqlEnvironmentOperationRepository implements EnvironmentOper
             updatedAt);
       };
 
+  private static final RowMapper<SafeEnvironmentOperation> SAFE_ROW_MAPPER =
+      (rs, rowNum) -> {
+        UUID id = rs.getObject("id", UUID.class);
+        UUID environmentId = rs.getObject("environment_id", UUID.class);
+        UUID sourceId = rs.getObject("source_id", UUID.class);
+        EnvironmentOperationType operationType =
+            EnvironmentOperationType.valueOf(rs.getString("operation_type"));
+        EnvironmentOperationStatus status =
+            EnvironmentOperationStatus.valueOf(rs.getString("status"));
+        long sourceVersion = rs.getLong("source_version");
+        long sourceSetVersion = rs.getLong("source_set_version");
+        String parameterSummary = rs.getString("parameter_summary");
+        Instant deadlineAt = getInstant(rs, "deadline_at");
+        Instant startedAt = getInstant(rs, "started_at");
+        Instant finishedAt = getInstant(rs, "finished_at");
+        String resultSummary = rs.getString("result_summary");
+        String failureCode = rs.getString("failure_code");
+        String failureMessage = rs.getString("failure_message");
+        Instant createdAt = getInstant(rs, "created_at");
+        Instant updatedAt = getInstant(rs, "updated_at");
+
+        return new SafeEnvironmentOperation(
+            id,
+            environmentId,
+            sourceId,
+            operationType,
+            status,
+            sourceVersion,
+            sourceSetVersion,
+            parameterSummary,
+            deadlineAt,
+            startedAt,
+            finishedAt,
+            resultSummary,
+            failureCode,
+            failureMessage,
+            createdAt,
+            updatedAt);
+      };
+
   private static final String CREATE_PENDING_SQL =
       """
+      with candidate as (
+          select
+              ?::uuid as id,
+              ?::uuid as env_id,
+              ?::uuid as src_id,
+              ?::varchar as op_type,
+              ?::bigint as src_ver,
+              ?::bigint as src_set_ver,
+              ?::jsonb as args,
+              ?::jsonb as param_sum,
+              ?::timestamptz as dl
+      )
       insert into environment_operation (
           id, environment_id, source_id, operation_type,
           status, source_version, source_set_version,
           arguments, parameter_summary, deadline_at,
           created_at, updated_at
-      ) values (
-          ?, ?, ?, ?,
-          'PENDING', ?, ?,
-          ?::jsonb, ?::jsonb, ?,
-          statement_timestamp(), statement_timestamp()
       )
+      select
+          id, env_id, src_id, op_type,
+          'PENDING', src_ver, src_set_ver,
+          args, param_sum, dl,
+          statement_timestamp(), statement_timestamp()
+      from candidate
+      where dl >= statement_timestamp()
       returning
           id, environment_id, source_id, operation_type,
           status, source_version, source_set_version,
@@ -122,6 +189,20 @@ public class PostgresqlEnvironmentOperationRepository implements EnvironmentOper
           status, source_version, source_set_version,
           arguments, parameter_summary, deadline_at,
           owner_node_id, lease_token, started_at,
+          finished_at, result_summary, failure_code,
+          failure_message, created_at, updated_at
+      from environment_operation
+      where environment_id = ?
+      order by created_at desc, id desc
+      limit ?
+      """;
+
+  private static final String SAFE_LIST_SQL =
+      """
+      select
+          id, environment_id, source_id, operation_type,
+          status, source_version, source_set_version,
+          parameter_summary, deadline_at, started_at,
           finished_at, result_summary, failure_code,
           failure_message, created_at, updated_at
       from environment_operation
@@ -311,23 +392,31 @@ public class PostgresqlEnvironmentOperationRepository implements EnvironmentOper
     Objects.requireNonNull(command, "command");
     validateCommand(command);
 
+    List<EnvironmentOperation> results;
     try {
-      return jdbcTemplate.queryForObject(
-          CREATE_PENDING_SQL,
-          ROW_MAPPER,
-          command.id(),
-          command.environmentId(),
-          command.sourceId(),
-          command.operationType().name(),
-          command.sourceVersion(),
-          command.sourceSetVersion(),
-          command.arguments(),
-          command.parameterSummary(),
-          OffsetDateTime.ofInstant(command.deadlineAt(), ZoneOffset.UTC));
+      results =
+          jdbcTemplate.query(
+              CREATE_PENDING_SQL,
+              ROW_MAPPER,
+              command.id(),
+              command.environmentId(),
+              command.sourceId(),
+              command.operationType().name(),
+              command.sourceVersion(),
+              command.sourceSetVersion(),
+              command.arguments(),
+              command.parameterSummary(),
+              OffsetDateTime.ofInstant(command.deadlineAt(), ZoneOffset.UTC));
     } catch (DataAccessException error) {
-      classifyAndRethrow(error, command.environmentId(), command.sourceId());
-      throw error;
+      throw classifyCreateError(error, command);
     }
+
+    if (results.isEmpty()) {
+      throw new AiValidationException(
+          "environment_operation",
+          "deadlineAt must not be earlier than database current timestamp");
+    }
+    return results.getFirst();
   }
 
   @Override
@@ -355,9 +444,9 @@ public class PostgresqlEnvironmentOperationRepository implements EnvironmentOper
 
   @Override
   public List<SafeEnvironmentOperation> listSafeByEnvironment(UUID environmentId, int limit) {
-    return listByEnvironment(environmentId, limit).stream()
-        .map(EnvironmentOperation::toSafeProjection)
-        .toList();
+    Objects.requireNonNull(environmentId, "environmentId");
+    int boundedLimit = normalizeLimit(limit);
+    return jdbcTemplate.query(SAFE_LIST_SQL, SAFE_ROW_MAPPER, environmentId, boundedLimit);
   }
 
   @Override
@@ -476,51 +565,21 @@ public class PostgresqlEnvironmentOperationRepository implements EnvironmentOper
   }
 
   @Override
-  public int markRunningUnknownOnShutdown(
-      UUID ownerNodeId, String failureCode, String failureMessage) {
-    Objects.requireNonNull(ownerNodeId, "ownerNodeId");
-    validateFailureCodeAndMessage(failureCode, failureMessage);
-    return jdbcTemplate.update(
-        SHUTDOWN_RUNNING_UNKNOWN_SQL, failureCode, failureMessage, ownerNodeId);
-  }
-
-  @Override
   public int markRunningUnknownOnShutdown(UUID ownerNodeId) {
-    return markRunningUnknownOnShutdown(
-        ownerNodeId,
+    Objects.requireNonNull(ownerNodeId, "ownerNodeId");
+    return jdbcTemplate.update(
+        SHUTDOWN_RUNNING_UNKNOWN_SQL,
         EnvironmentOperationFailureCodes.DISPATCHER_SHUTDOWN,
-        EnvironmentOperationFailureCodes.DISPATCHER_SHUTDOWN_MESSAGE);
+        EnvironmentOperationFailureCodes.DISPATCHER_SHUTDOWN_MESSAGE,
+        ownerNodeId);
   }
 
   private void validateCommand(CreatePendingOperationCommand command) {
-    if (command.id() == null) {
-      throw new AiValidationException("environment_operation", "id must not be null");
-    }
-    if (command.environmentId() == null) {
-      throw new AiValidationException("environment_operation", "environmentId must not be null");
-    }
-    if (command.sourceId() == null) {
-      throw new AiValidationException("environment_operation", "sourceId must not be null");
-    }
-    if (command.operationType() == null) {
-      throw new AiValidationException("environment_operation", "operationType must not be null");
-    }
-    if (command.sourceVersion() < 0) {
-      throw new AiValidationException(
-          "environment_operation", "sourceVersion must be non-negative");
-    }
-    if (command.sourceSetVersion() < 0) {
-      throw new AiValidationException(
-          "environment_operation", "sourceSetVersion must be non-negative");
-    }
-    if (command.deadlineAt() == null) {
-      throw new AiValidationException("environment_operation", "deadlineAt must not be null");
-    }
-    // Validate deadline shape: deadline must not be before current wall clock with 1-minute grace
-    if (command.deadlineAt().isBefore(Instant.now().minusSeconds(60))) {
-      throw new AiValidationException(
-          "environment_operation", "deadlineAt must not be in the past");
-    }
+    Objects.requireNonNull(command.id(), "id");
+    Objects.requireNonNull(command.environmentId(), "environmentId");
+    Objects.requireNonNull(command.sourceId(), "sourceId");
+    Objects.requireNonNull(command.operationType(), "operationType");
+    Objects.requireNonNull(command.deadlineAt(), "deadlineAt");
     validateJsonObject("arguments", command.arguments(), true);
     validateJsonObject("parameterSummary", command.parameterSummary(), true);
   }
@@ -544,48 +603,94 @@ public class PostgresqlEnvironmentOperationRepository implements EnvironmentOper
             "environment_operation", fieldName + " must be a JSON object");
       }
     } catch (JsonProcessingException error) {
-      // 绝不回显 rawJson 内容，避免泄露可能包含在 arguments 中的凭证
       throw new AiValidationException(
           "environment_operation", fieldName + " must be a valid JSON object");
     }
   }
 
   private void validateFailureCodeAndMessage(String failureCode, String failureMessage) {
-    if (failureCode == null || failureCode.isBlank() || !failureCode.equals(failureCode.trim())) {
-      throw new AiValidationException(
-          "environment_operation", "failureCode must be non-blank and trimmed");
+    if (failureCode == null) {
+      throw new AiValidationException("environment_operation", "failureCode must not be null");
     }
-    if (failureCode.length() > 64) {
-      throw new AiValidationException(
-          "environment_operation", "failureCode must not exceed 64 characters");
+    try {
+      EnvironmentCapabilityResultCodes.requireCode(failureCode);
+    } catch (IllegalArgumentException ignored) {
+      throw new AiValidationException("environment_operation", "invalid failure code format");
     }
-    if (failureMessage == null
-        || failureMessage.isBlank()
-        || !failureMessage.equals(failureMessage.trim())) {
+
+    if (failureMessage == null || failureMessage.isBlank()) {
+      throw new AiValidationException("environment_operation", "failure message must not be blank");
+    }
+    if (!failureMessage.equals(failureMessage.trim())) {
       throw new AiValidationException(
-          "environment_operation", "failureMessage must be non-blank and trimmed");
+          "environment_operation",
+          "failure message must not contain leading or trailing whitespace");
+    }
+    if (failureMessage.length() > MAX_FAILURE_MESSAGE_CHARS) {
+      throw new AiValidationException(
+          "environment_operation",
+          "failure message exceeds maximum allowed length of " + MAX_FAILURE_MESSAGE_CHARS);
+    }
+    for (int i = 0; i < failureMessage.length(); i++) {
+      char ch = failureMessage.charAt(i);
+      if (Character.isISOControl(ch)) {
+        throw new AiValidationException(
+            "environment_operation", "failure message contains invalid control characters");
+      }
     }
   }
 
-  private void classifyAndRethrow(DataAccessException error, UUID environmentId, UUID sourceId) {
-    for (Throwable current = error; current != null; current = current.getCause()) {
+  private RuntimeException classifyCreateError(
+      DataAccessException error, CreatePendingOperationCommand command) {
+    SQLException sqlEx = extractSqlException(error);
+    String sqlState = sqlEx != null ? sqlEx.getSQLState() : null;
+    String constraint = extractConstraintName(sqlEx);
+
+    if ("23505".equals(sqlState)) {
+      if ("uk_environment_operation_active".equalsIgnoreCase(constraint)) {
+        return new DuplicateActiveOperationException(command.environmentId(), command.sourceId());
+      }
+      if ("environment_operation_pkey".equalsIgnoreCase(constraint)
+          || (constraint != null && constraint.toLowerCase(Locale.ROOT).contains("pkey"))) {
+        return new AiValidationException(
+            "environment_operation", "operation id already exists: " + command.id());
+      }
+      return new AiValidationException(
+          "environment_operation", "operation unique constraint violation");
+    }
+    if ("23503".equals(sqlState)) {
+      return new AiResourceNotFoundException(
+          "environment", "environment not found: " + command.environmentId());
+    }
+    if ("23514".equals(sqlState)) {
+      return new AiValidationException("environment_operation", "operation constraint violation");
+    }
+    return new AiValidationException("environment_operation", "failed to create pending operation");
+  }
+
+  private static SQLException extractSqlException(Throwable throwable) {
+    for (Throwable current = throwable; current != null; current = current.getCause()) {
       if (current instanceof SQLException sqlException) {
-        String sqlState = sqlException.getSQLState();
-        if ("23505".equals(sqlState)) {
-          throw new DuplicateActiveOperationException(environmentId, sourceId, error);
-        }
-        if ("23503".equals(sqlState)) {
-          throw new AiResourceNotFoundException(
-              "environment", "environment not found: " + environmentId, error);
-        }
-        if ("23514".equals(sqlState)) {
-          throw new AiValidationException(
-              "environment_operation", "operation constraint violation", error);
-        }
+        return sqlException;
       }
     }
-    throw new AiValidationException(
-        "environment_operation", "failed to create pending operation", error);
+    return null;
+  }
+
+  private static String extractConstraintName(SQLException sqlException) {
+    if (sqlException instanceof PSQLException psqlException) {
+      ServerErrorMessage serverErrorMessage = psqlException.getServerErrorMessage();
+      if (serverErrorMessage != null && serverErrorMessage.getConstraint() != null) {
+        return serverErrorMessage.getConstraint();
+      }
+    }
+    if (sqlException != null && sqlException.getMessage() != null) {
+      Matcher matcher = CONSTRAINT_NAME_PATTERN.matcher(sqlException.getMessage());
+      if (matcher.find()) {
+        return matcher.group(1);
+      }
+    }
+    return null;
   }
 
   private static Instant getInstant(ResultSet rs, String column) throws SQLException {

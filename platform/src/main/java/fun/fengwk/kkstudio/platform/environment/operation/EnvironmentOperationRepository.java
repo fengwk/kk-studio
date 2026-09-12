@@ -5,11 +5,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * environment_operation PostgreSQL 仓库与原子状态机契约。
+ * environment_operation PostgreSQL 仓库与原子状态机契约（包内私有）。
  *
- * <p>所有状态推进与截止时间比较均在 PostgreSQL 服务端以 {@code statement_timestamp()} 执行， 避免应用节点与数据库时钟偏差。
+ * <p>所有状态推进与截止时间比较均在 PostgreSQL 服务端以 {@code statement_timestamp()} 执行，避免应用节点与数据库时钟偏差。
  */
-public interface EnvironmentOperationRepository {
+interface EnvironmentOperationRepository {
 
   /**
    * 插入一条完整的 PENDING 行。
@@ -17,7 +17,7 @@ public interface EnvironmentOperationRepository {
    * @param command 创建参数
    * @return 创建成功的操作行
    * @throws DuplicateActiveOperationException 同一 (environment, source) 已存在活动操作 (PENDING/RUNNING)
-   * @throws fun.fengwk.kkstudio.platform.error.AiValidationException 参数形状或 JSON 非法
+   * @throws fun.fengwk.kkstudio.platform.error.AiValidationException 参数形状或 JSON 非法、或截止时间早于数据库当前时间
    * @throws fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException 目标环境不存在
    */
   EnvironmentOperation createPending(CreatePendingOperationCommand command);
@@ -31,7 +31,7 @@ public interface EnvironmentOperationRepository {
   Optional<EnvironmentOperation> findById(UUID id);
 
   /**
-   * 根据 ID 获取操作详情；若不存在抛出 {@link fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException}。
+   * 根据 ID 获取操作详情；若不存在抛出 404 异常。
    *
    * @param id 操作 ID
    * @return 操作详情
@@ -39,16 +39,16 @@ public interface EnvironmentOperationRepository {
   EnvironmentOperation getById(UUID id);
 
   /**
-   * 按 Environment 列出操作历史（created_at 降序，id 降序），受 limit 约束。
+   * 按 Environment 列出操作历史（created_at 降序，id 降序），受 limit 约束（内部使用，包含 arguments）。
    *
    * @param environmentId 目标环境 ID
    * @param limit 最大返回行数
-   * @return 操作历史列表（包含 arguments）
+   * @return 操作历史列表
    */
   List<EnvironmentOperation> listByEnvironment(UUID environmentId, int limit);
 
   /**
-   * 按 Environment 列出安全操作历史（created_at 降序，id 降序，严格不含 arguments），受 limit 约束。
+   * 按 Environment 列出安全操作历史（created_at 降序，id 降序，物理不含 arguments/leaseToken/ownerNodeId）。
    *
    * @param environmentId 目标环境 ID
    * @param limit 最大返回行数
@@ -59,9 +59,6 @@ public interface EnvironmentOperationRepository {
   /**
    * 原子认领当前节点合格的 PENDING 操作至 RUNNING 状态。
    *
-   * <p>使用单条 CTE 与 {@code FOR UPDATE OF operation SKIP LOCKED}，要求环境在 {@code environment_connection}
-   * 表中具有当前节点的 READY 且未过期租约。 绝不认领已超期的 PENDING 操作。
-   *
    * @param ownerNodeId 认领节点 ID
    * @param limit 最大认领条数
    * @return 本次成功认领并推进至 RUNNING 的操作列表
@@ -70,15 +67,6 @@ public interface EnvironmentOperationRepository {
 
   /**
    * 针对明确未发送的操作进行状态回滚或超时终结（由 operation id + RUNNING + ownerNodeId + leaseToken 围栏）。
-   *
-   * <ul>
-   *   <li>若 deadline 仍为未来时刻，重置为 PENDING 并清空认领元组 (owner/token/start)，返回 {@link
-   *       RescheduleOutcome#RESCHEDULED}；
-   *   <li>若 deadline 已到期，终结为 FAILED ({@link
-   *       EnvironmentOperationFailureCodes#ENVIRONMENT_UNAVAILABLE_TIMEOUT}) 并清空认领元组，返回 {@link
-   *       RescheduleOutcome#FAILED_TIMEOUT}；
-   *   <li>若当前行非 RUNNING 或认领元组不匹配，返回 {@link RescheduleOutcome#STALE}。
-   * </ul>
    *
    * @param id 操作 ID
    * @param ownerNodeId 认领节点 ID
@@ -94,7 +82,7 @@ public interface EnvironmentOperationRepository {
    * @param ownerNodeId 认领节点 ID
    * @param leaseToken 认领时的租约代币
    * @param resultSummaryJson 成功结果摘要 JSON 对象字符串（可空，空时存为 "{}"）
-   * @return 是否成功推进至 SUCCEEDED（若租约失效、路由丢失或状态已被接管/终结则返回 false）
+   * @return 是否成功推进至 SUCCEEDED
    */
   boolean markSucceeded(UUID id, UUID ownerNodeId, UUID leaseToken, String resultSummaryJson);
 
@@ -106,20 +94,20 @@ public interface EnvironmentOperationRepository {
    * @param leaseToken 认领时的租约代币
    * @param failureCode 失败分类码
    * @param failureMessage 失败描述
-   * @return 是否成功推进至 FAILED（若租约失效、路由丢失或状态已被接管/终结则返回 false）
+   * @return 是否成功推进至 FAILED
    */
   boolean markFailed(
       UUID id, UUID ownerNodeId, UUID leaseToken, String failureCode, String failureMessage);
 
   /**
-   * 路由断开或丢失后的状态推进为 UNKNOWN：仅需操作本身的 RUNNING 认领元组围栏（因为路由可能已经不存在）。 单终态。
+   * 路由断开或丢失后的状态推进为 UNKNOWN：仅需操作本身的 RUNNING 认领元组围栏。 单终态。
    *
    * @param id 操作 ID
    * @param ownerNodeId 认领节点 ID
    * @param leaseToken 认领时的租约代币
    * @param failureCode 失败分类码
    * @param failureMessage 失败描述
-   * @return 是否成功推进至 UNKNOWN（若状态已不是 RUNNING 或认领元组不匹配则返回 false）
+   * @return 是否成功推进至 UNKNOWN
    */
   boolean markUnknown(
       UUID id, UUID ownerNodeId, UUID leaseToken, String failureCode, String failureMessage);
@@ -154,19 +142,9 @@ public interface EnvironmentOperationRepository {
   DeadlineSweepResult sweepExpired();
 
   /**
-   * 节点优雅停机时将该节点持有的所有 RUNNING 操作标记为 UNKNOWN。
+   * 节点优雅停机时将该节点持有的所有 RUNNING 操作原子标记为 UNKNOWN（使用固定常量 DISPATCHER_SHUTDOWN）。
    *
-   * @param ownerNodeId 节点 ID
-   * @param failureCode 失败原因码
-   * @param failureMessage 失败描述
-   * @return 受影响条数
-   */
-  int markRunningUnknownOnShutdown(UUID ownerNodeId, String failureCode, String failureMessage);
-
-  /**
-   * 节点优雅停机时将该节点持有的所有 RUNNING 操作标记为 UNKNOWN（使用缺省常量）。
-   *
-   * @param ownerNodeId 节点 ID
+   * @param ownerNodeId 停机节点 ID
    * @return 受影响条数
    */
   int markRunningUnknownOnShutdown(UUID ownerNodeId);
