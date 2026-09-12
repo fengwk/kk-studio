@@ -16,8 +16,10 @@ create table cloud_node (
     blob_id     uuid,
     created_at  timestamptz(3) not null default current_timestamp,
     updated_at  timestamptz(3) not null default current_timestamp,
-    constraint fk_cloud_node_parent foreign key (parent_id)
-        references cloud_node (id) on delete restrict,
+    parent_kind varchar(16)    generated always as (case when parent_id is not null then 'DIRECTORY' else null end) stored,
+    constraint uk_cloud_node_id_kind unique (id, kind),
+    constraint fk_cloud_node_parent foreign key (parent_id, parent_kind)
+        references cloud_node (id, kind) on delete restrict,
     constraint fk_cloud_node_blob foreign key (blob_id)
         references storage_blob (id) on delete restrict,
     constraint ck_cloud_node_kind check (kind in ('DIRECTORY', 'TEXT', 'BLOB')),
@@ -45,6 +47,7 @@ comment on column cloud_node.version is '节点元数据 CAS 乐观锁版本：�
 comment on column cloud_node.blob_id is 'BLOB 类型对应的 storage_blob UUID；DIRECTORY 与 TEXT 必须为 NULL';
 comment on column cloud_node.created_at is '创建时间（毫秒精度）';
 comment on column cloud_node.updated_at is '更新时间（毫秒精度，应用侧维护）';
+comment on column cloud_node.parent_kind is '内部列（由 parent_id 生成）：用于通过复合外键保证非空 parent 必须为 DIRECTORY 节点';
 
 create index idx_cloud_node_blob
     on cloud_node (blob_id)
@@ -58,9 +61,10 @@ create table cloud_text_revision (
     sha256      char(64)       not null,
     is_current  boolean        not null,
     created_at  timestamptz(3) not null default current_timestamp,
+    node_kind   varchar(16)    not null generated always as ('TEXT') stored,
     constraint pk_cloud_text_revision primary key (node_id, revision),
-    constraint fk_cloud_text_revision_node foreign key (node_id)
-        references cloud_node (id) on delete restrict,
+    constraint fk_cloud_text_revision_node foreign key (node_id, node_kind)
+        references cloud_node (id, kind) on delete restrict,
     constraint ck_cloud_text_revision_revision_positive check (revision > 0),
     constraint ck_cloud_text_revision_size_nonneg check (size_bytes >= 0),
     constraint ck_cloud_text_revision_size_match check (size_bytes = octet_length(content)),
@@ -76,6 +80,7 @@ comment on column cloud_text_revision.size_bytes is '文本 UTF-8 严格字节�
 comment on column cloud_text_revision.sha256 is '文本 UTF-8 字节内容的 SHA-256 小写十六进制摘要（64 字符）';
 comment on column cloud_text_revision.is_current is '是否为该节点的当前活跃版本：每个 TEXT 节点至多一条为 true';
 comment on column cloud_text_revision.created_at is '版本创建时间（毫秒精度）';
+comment on column cloud_text_revision.node_kind is '内部列（常量 TEXT）：用于通过复合外键保证修订记录仅可引用 TEXT 节点';
 
 create unique index uk_cloud_text_revision_current
     on cloud_text_revision (node_id)

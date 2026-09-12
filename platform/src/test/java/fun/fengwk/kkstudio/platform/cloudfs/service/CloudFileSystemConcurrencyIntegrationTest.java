@@ -9,9 +9,11 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 
+import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNodeKind;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudDirectoryNotEmptyException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeAlreadyExistsException;
+import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeKindConflictException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeNotFoundException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudRevisionConflictException;
 import fun.fengwk.kkstudio.platform.storage.S3PostgresSpringTestSupport;
@@ -22,7 +24,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
@@ -486,6 +492,181 @@ class CloudFileSystemConcurrencyIntegrationTest extends S3PostgresSpringTestSupp
           1, existsCount.get(), "Losing thread must receive CloudNodeAlreadyExistsException");
     } finally {
       executor.shutdownNow();
+    }
+  }
+
+  /**
+   * 验证交叉祖先移动并发时（初始 /a/d 与 /c/b，并发尝试 /a -> /c/b/a 与 /c -> /a/d/c）， 依靠逐段 root-to-leaf 获取行锁与端点
+   * canonical 字典序比较，全局一致加锁杜绝死锁，且最终树不形成环并按串行化语义收敛。
+   */
+  @Test
+  void testConcurrentCrossAncestorMovesNoDeadlockAndNoCycle() throws Exception {
+    fileSystemService.mkdir(CloudPath.of("/a/d"), true);
+    fileSystemService.mkdir(CloudPath.of("/c/b"), true);
+
+    int threadCount = 2;
+    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+    try {
+      CyclicBarrier barrier = new CyclicBarrier(threadCount);
+      AtomicInteger successCount = new AtomicInteger(0);
+      AtomicInteger notFoundCount = new AtomicInteger(0);
+      List<Throwable> unexpectedErrors = Collections.synchronizedList(new ArrayList<>());
+
+      List<Future<?>> futures = new ArrayList<>();
+      // 线程 1 尝试 /a -> /c/b/a
+      futures.add(
+          executor.submit(
+              () -> {
+                try {
+                  barrier.await();
+                  fileSystemService.moveNode(CloudPath.of("/a"), CloudPath.of("/c/b/a"), 0L);
+                  successCount.incrementAndGet();
+                } catch (CloudNodeNotFoundException e) {
+                  notFoundCount.incrementAndGet();
+                } catch (Throwable t) {
+                  unexpectedErrors.add(t);
+                }
+              }));
+      // 线程 2 尝试 /c -> /a/d/c
+      futures.add(
+          executor.submit(
+              () -> {
+                try {
+                  barrier.await();
+                  fileSystemService.moveNode(CloudPath.of("/c"), CloudPath.of("/a/d/c"), 0L);
+                  successCount.incrementAndGet();
+                } catch (CloudNodeNotFoundException e) {
+                  notFoundCount.incrementAndGet();
+                } catch (Throwable t) {
+                  unexpectedErrors.add(t);
+                }
+              }));
+
+      for (Future<?> f : futures) {
+        f.get(10, TimeUnit.SECONDS);
+      }
+
+      assertTrue(unexpectedErrors.isEmpty(), () -> "Unexpected errors: " + unexpectedErrors);
+      assertEquals(1, successCount.get(), "Exactly one cross-ancestor move must succeed");
+      assertEquals(
+          1, notFoundCount.get(), "Losing thread must fail with CloudNodeNotFoundException");
+
+      // 树不变量断言：遍历 cloud_node 树全图，严格无环
+      assertTreeAcyclic();
+
+      // 串行化收敛断言：恰好收敛为一条合法链（/c/b/a/d 或 /a/d/c/b），另一根目录已被移走
+      boolean path1Exists = fileSystemService.findNode(CloudPath.of("/c/b/a/d")).isPresent();
+      boolean path2Exists = fileSystemService.findNode(CloudPath.of("/a/d/c/b")).isPresent();
+      assertTrue(
+          path1Exists ^ path2Exists, "Tree must converge to exactly one serialized linear chain");
+
+      if (path1Exists) {
+        assertTrue(
+            fileSystemService.findNode(CloudPath.of("/a")).isEmpty(),
+            "/a should no longer exist at root");
+        assertTrue(
+            fileSystemService.findNode(CloudPath.of("/c")).isPresent(), "/c must exist at root");
+      } else {
+        assertTrue(
+            fileSystemService.findNode(CloudPath.of("/c")).isEmpty(),
+            "/c should no longer exist at root");
+        assertTrue(
+            fileSystemService.findNode(CloudPath.of("/a")).isPresent(), "/a must exist at root");
+      }
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /**
+   * 验证并发创建文本（expectedRevision=0）与目录时，若目录创建成功，落败的文本创建稳定抛出 CloudNodeKindConflictException 而非 revision
+   * conflict。
+   */
+  @Test
+  void testConcurrentWriteTextExpectedRevisionZeroVsDirectoryCreate() throws Exception {
+    CloudPath path = CloudPath.of("/concurrent_node");
+
+    int threadCount = 2;
+    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+    try {
+      CyclicBarrier barrier = new CyclicBarrier(threadCount);
+      AtomicInteger dirSuccess = new AtomicInteger(0);
+      AtomicInteger textSuccess = new AtomicInteger(0);
+      AtomicInteger kindConflict = new AtomicInteger(0);
+      AtomicInteger alreadyExists = new AtomicInteger(0);
+      List<Throwable> unexpectedErrors = Collections.synchronizedList(new ArrayList<>());
+
+      List<Future<?>> futures = new ArrayList<>();
+      // Thread 1: mkdir
+      futures.add(
+          executor.submit(
+              () -> {
+                try {
+                  barrier.await();
+                  fileSystemService.mkdir(path, false);
+                  dirSuccess.incrementAndGet();
+                } catch (CloudNodeAlreadyExistsException e) {
+                  alreadyExists.incrementAndGet();
+                } catch (Throwable t) {
+                  unexpectedErrors.add(t);
+                }
+              }));
+      // Thread 2: writeText(expectedRevision=0)
+      futures.add(
+          executor.submit(
+              () -> {
+                try {
+                  barrier.await();
+                  fileSystemService.writeText(path, "text content", 0L);
+                  textSuccess.incrementAndGet();
+                } catch (CloudNodeKindConflictException e) {
+                  assertEquals(CloudNodeKind.TEXT, e.getExpectedKind());
+                  assertEquals(CloudNodeKind.DIRECTORY, e.getActualKind());
+                  kindConflict.incrementAndGet();
+                } catch (Throwable t) {
+                  unexpectedErrors.add(t);
+                }
+              }));
+
+      for (Future<?> f : futures) {
+        f.get(10, TimeUnit.SECONDS);
+      }
+
+      assertTrue(unexpectedErrors.isEmpty(), () -> "Unexpected errors: " + unexpectedErrors);
+      if (dirSuccess.get() == 1) {
+        assertEquals(
+            1,
+            kindConflict.get(),
+            "When directory wins, writeText(expectedRevision=0) must throw CloudNodeKindConflictException");
+      } else {
+        assertEquals(1, textSuccess.get(), "When writeText wins, textSuccess must be 1");
+        assertEquals(
+            1,
+            alreadyExists.get(),
+            "When writeText wins, mkdir must throw CloudNodeAlreadyExistsException");
+      }
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  private void assertTreeAcyclic() {
+    List<Map<String, Object>> rows = jdbc.queryForList("select id, parent_id from cloud_node");
+    Map<UUID, UUID> parentMap = new HashMap<>();
+    for (Map<String, Object> row : rows) {
+      UUID id = (UUID) row.get("id");
+      UUID parentId = (UUID) row.get("parent_id");
+      parentMap.put(id, parentId);
+    }
+
+    for (UUID id : parentMap.keySet()) {
+      Set<UUID> visited = new HashSet<>();
+      UUID curr = id;
+      while (curr != null) {
+        UUID node = curr;
+        assertTrue(visited.add(node), () -> "Detected cycle in cloud_node hierarchy at id " + node);
+        curr = parentMap.get(curr);
+      }
     }
   }
 }
