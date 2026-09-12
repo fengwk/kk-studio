@@ -9,7 +9,10 @@ import java.util.UUID;
  *
  * <p>所有状态推进与截止时间比较均在 PostgreSQL 服务端以 {@code statement_timestamp()} 执行，避免应用节点与数据库时钟偏差。
  */
-interface EnvironmentOperationRepository {
+public interface EnvironmentOperationRepository {
+
+  /** 稳定通知通道：每当成功插入 PENDING 操作时由 PostgreSQL 事务耦合发出通知。 */
+  String NOTIFY_CHANNEL = "environment_operation_pending";
 
   /**
    * 插入一条完整的 PENDING 行。
@@ -21,6 +24,17 @@ interface EnvironmentOperationRepository {
    * @throws fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException 目标环境不存在
    */
   EnvironmentOperation createPending(CreatePendingOperationCommand command);
+
+  /**
+   * 根据相对超时毫秒数插入一条完整的 PENDING 行；截止时间直接由 PostgreSQL statement_timestamp() 计算。
+   *
+   * @param command 相对超时创建参数
+   * @return 创建成功的操作行
+   * @throws DuplicateActiveOperationException 同一 (environment, source) 已存在活动操作 (PENDING/RUNNING)
+   * @throws fun.fengwk.kkstudio.platform.error.AiValidationException 参数形状或 JSON 非法、或超时时间非正数
+   * @throws fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException 目标环境不存在
+   */
+  EnvironmentOperation createPendingWithTimeout(CreatePendingOperationWithTimeoutCommand command);
 
   /**
    * 根据 ID 查询操作详情（内部使用，包含私有 arguments）。
@@ -37,6 +51,24 @@ interface EnvironmentOperationRepository {
    * @return 操作详情
    */
   EnvironmentOperation getById(UUID id);
+
+  /**
+   * 根据 (environmentId, operationId) 查询安全操作详情投影（物理不含 arguments/leaseToken/ownerNodeId）。
+   *
+   * @param environmentId 目标环境 ID
+   * @param operationId 操作 ID
+   * @return 安全投影（若不存在或所属环境不匹配返回 empty）
+   */
+  Optional<SafeEnvironmentOperation> findSafe(UUID environmentId, UUID operationId);
+
+  /**
+   * 根据 (environmentId, operationId) 获取安全操作详情投影；若不存在或环境不匹配抛出 404 异常。
+   *
+   * @param environmentId 目标环境 ID
+   * @param operationId 操作 ID
+   * @return 安全投影
+   */
+  SafeEnvironmentOperation getSafe(UUID environmentId, UUID operationId);
 
   /**
    * 按 Environment 列出操作历史（created_at 降序，id 降序），受 limit 约束（内部使用，包含 arguments）。
@@ -64,6 +96,15 @@ interface EnvironmentOperationRepository {
    * @return 本次成功认领并推进至 RUNNING 的操作列表
    */
   List<EnvironmentOperation> claimPending(UUID ownerNodeId, int limit);
+
+  /**
+   * 原子认领当前节点合格的 PENDING 操作至 RUNNING 状态，并返回在 PostgreSQL 语句时间内计算的严格正数剩余超时。
+   *
+   * @param ownerNodeId 认领节点 ID
+   * @param limit 最大认领条数
+   * @return 本次成功认领的操作及剩余超时列表
+   */
+  List<ClaimedOperation> claimPendingWithTimeout(UUID ownerNodeId, int limit);
 
   /**
    * 针对明确未发送的操作进行状态回滚或超时终结（由 operation id + RUNNING + ownerNodeId + leaseToken 围栏）。
@@ -133,6 +174,14 @@ interface EnvironmentOperationRepository {
    * @return 清扫条数
    */
   int sweepExpiredRunning();
+
+  /**
+   * 清扫当前节点持有的超期 RUNNING 操作 -> UNKNOWN (RESULT_TIMEOUT)，并返回操作 ID 与认领信息供取消内存句柄。
+   *
+   * @param ownerNodeId 认领节点 ID
+   * @return 被推进至 UNKNOWN 的本地操作信息列表
+   */
+  List<SweptOperationInfo> sweepLocalExpiredRunning(UUID ownerNodeId);
 
   /**
    * 清扫所有超期的 PENDING 与 RUNNING 操作。

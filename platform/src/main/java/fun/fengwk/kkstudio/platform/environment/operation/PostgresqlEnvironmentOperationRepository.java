@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -131,6 +132,21 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
             updatedAt);
       };
 
+  private static final RowMapper<ClaimedOperation> CLAIMED_ROW_MAPPER =
+      (rs, rowNum) -> {
+        EnvironmentOperation op = ROW_MAPPER.mapRow(rs, rowNum);
+        long remainingMillis = rs.getLong("remaining_millis");
+        return new ClaimedOperation(op, Duration.ofMillis(Math.max(1L, remainingMillis)));
+      };
+
+  private static final RowMapper<SweptOperationInfo> SWEPT_ROW_MAPPER =
+      (rs, rowNum) -> {
+        UUID id = rs.getObject("id", UUID.class);
+        UUID ownerNodeId = rs.getObject("owner_node_id", UUID.class);
+        UUID leaseToken = rs.getObject("lease_token", UUID.class);
+        return new SweptOperationInfo(id, ownerNodeId, leaseToken);
+      };
+
   private static final String CREATE_PENDING_SQL =
       """
       with candidate as (
@@ -144,27 +160,81 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
               ?::jsonb as args,
               ?::jsonb as param_sum,
               ?::timestamptz as dl
+      ),
+      inserted as (
+          insert into environment_operation (
+              id, environment_id, source_id, operation_type,
+              status, source_version, source_set_version,
+              arguments, parameter_summary, deadline_at,
+              created_at, updated_at
+          )
+          select
+              id, env_id, src_id, op_type,
+              'PENDING', src_ver, src_set_ver,
+              args, param_sum, dl,
+              statement_timestamp(), statement_timestamp()
+          from candidate
+          where dl >= statement_timestamp()
+          returning
+              id, environment_id, source_id, operation_type,
+              status, source_version, source_set_version,
+              arguments, parameter_summary, deadline_at,
+              owner_node_id, lease_token, started_at,
+              finished_at, result_summary, failure_code,
+              failure_message, created_at, updated_at
+      ),
+      notify as (
+          select pg_notify('environment_operation_pending', id::text) as n, id
+          from inserted
       )
-      insert into environment_operation (
-          id, environment_id, source_id, operation_type,
-          status, source_version, source_set_version,
-          arguments, parameter_summary, deadline_at,
-          created_at, updated_at
+      select inserted.*
+      from inserted
+      left join notify on notify.id = inserted.id
+      """;
+
+  private static final String CREATE_PENDING_TIMEOUT_SQL =
+      """
+      with candidate as (
+          select
+              ?::uuid as id,
+              ?::uuid as env_id,
+              ?::uuid as src_id,
+              ?::varchar as op_type,
+              ?::bigint as src_ver,
+              ?::bigint as src_set_ver,
+              ?::jsonb as args,
+              ?::jsonb as param_sum,
+              (?::bigint * interval '1 millisecond') as timeout_interval
+      ),
+      inserted as (
+          insert into environment_operation (
+              id, environment_id, source_id, operation_type,
+              status, source_version, source_set_version,
+              arguments, parameter_summary, deadline_at,
+              created_at, updated_at
+          )
+          select
+              id, env_id, src_id, op_type,
+              'PENDING', src_ver, src_set_ver,
+              args, param_sum, statement_timestamp() + timeout_interval,
+              statement_timestamp(), statement_timestamp()
+          from candidate
+          where timeout_interval > interval '0 millisecond'
+          returning
+              id, environment_id, source_id, operation_type,
+              status, source_version, source_set_version,
+              arguments, parameter_summary, deadline_at,
+              owner_node_id, lease_token, started_at,
+              finished_at, result_summary, failure_code,
+              failure_message, created_at, updated_at
+      ),
+      notify as (
+          select pg_notify('environment_operation_pending', id::text) as n, id
+          from inserted
       )
-      select
-          id, env_id, src_id, op_type,
-          'PENDING', src_ver, src_set_ver,
-          args, param_sum, dl,
-          statement_timestamp(), statement_timestamp()
-      from candidate
-      where dl >= statement_timestamp()
-      returning
-          id, environment_id, source_id, operation_type,
-          status, source_version, source_set_version,
-          arguments, parameter_summary, deadline_at,
-          owner_node_id, lease_token, started_at,
-          finished_at, result_summary, failure_code,
-          failure_message, created_at, updated_at
+      select inserted.*
+      from inserted
+      left join notify on notify.id = inserted.id
       """;
 
   private static final String FIND_BY_ID_SQL =
@@ -209,6 +279,19 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
       limit ?
       """;
 
+  private static final String FIND_SAFE_BY_ID_AND_ENV_SQL =
+      """
+      select
+          id, environment_id, source_id, operation_type,
+          status, source_version, source_set_version,
+          parameter_summary, deadline_at, started_at,
+          finished_at, result_summary, failure_code,
+          failure_message, created_at, updated_at
+      from environment_operation
+      where environment_id = ?
+        and id = ?
+      """;
+
   private static final String CLAIM_PENDING_SQL =
       """
       with eligible as (
@@ -240,6 +323,40 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
           target.owner_node_id, target.lease_token, target.started_at,
           target.finished_at, target.result_summary, target.failure_code,
           target.failure_message, target.created_at, target.updated_at
+      """;
+
+  private static final String CLAIM_PENDING_WITH_TIMEOUT_SQL =
+      """
+      with eligible as (
+          select op.id, conn.lease_token
+          from environment_operation op
+          join environment_connection conn
+            on conn.environment_id = op.environment_id
+          where op.status = 'PENDING'
+            and op.deadline_at > statement_timestamp()
+            and conn.owner_node_id = ?
+            and conn.status = 'READY'
+            and conn.lease_until > statement_timestamp()
+          order by op.deadline_at asc, op.created_at asc, op.id asc
+          limit ?
+          for update of op skip locked
+      )
+      update environment_operation target
+      set status = 'RUNNING',
+          owner_node_id = ?,
+          lease_token = eligible.lease_token,
+          started_at = statement_timestamp(),
+          updated_at = statement_timestamp()
+      from eligible
+      where target.id = eligible.id
+      returning
+          target.id, target.environment_id, target.source_id, target.operation_type,
+          target.status, target.source_version, target.source_set_version,
+          target.arguments, target.parameter_summary, target.deadline_at,
+          target.owner_node_id, target.lease_token, target.started_at,
+          target.finished_at, target.result_summary, target.failure_code,
+          target.failure_message, target.created_at, target.updated_at,
+          greatest(1::bigint, ceil(extract(epoch from (target.deadline_at - statement_timestamp())) * 1000)::bigint) as remaining_millis
       """;
 
   private static final String RESCHEDULE_UNSENT_SQL =
@@ -359,6 +476,20 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
         and deadline_at <= statement_timestamp()
       """;
 
+  private static final String SWEEP_LOCAL_EXPIRED_RUNNING_SQL =
+      """
+      update environment_operation
+      set status = 'UNKNOWN',
+          failure_code = 'RESULT_TIMEOUT',
+          failure_message = ?,
+          finished_at = statement_timestamp(),
+          updated_at = statement_timestamp()
+      where status = 'RUNNING'
+        and owner_node_id = ?
+        and deadline_at <= statement_timestamp()
+      returning id, owner_node_id, lease_token
+      """;
+
   private static final String SHUTDOWN_RUNNING_UNKNOWN_SQL =
       """
       update environment_operation
@@ -411,6 +542,38 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
   }
 
   @Override
+  public EnvironmentOperation createPendingWithTimeout(
+      CreatePendingOperationWithTimeoutCommand command) {
+    Objects.requireNonNull(command, "command");
+    validateCommandWithTimeout(command);
+
+    List<EnvironmentOperation> results;
+    try {
+      results =
+          jdbcTemplate.query(
+              CREATE_PENDING_TIMEOUT_SQL,
+              ROW_MAPPER,
+              command.id(),
+              command.environmentId(),
+              command.sourceId(),
+              command.operationType().name(),
+              command.sourceVersion(),
+              command.sourceSetVersion(),
+              command.arguments(),
+              command.parameterSummary(),
+              command.timeoutMillis());
+    } catch (DataAccessException error) {
+      throw classifyCreateTimeoutError(error, command);
+    }
+
+    if (results.isEmpty()) {
+      throw new AiValidationException(
+          "environment_operation", "timeoutMillis must be greater than zero");
+    }
+    return results.getFirst();
+  }
+
+  @Override
   public Optional<EnvironmentOperation> findById(UUID id) {
     Objects.requireNonNull(id, "id");
     List<EnvironmentOperation> results = jdbcTemplate.query(FIND_BY_ID_SQL, ROW_MAPPER, id);
@@ -424,6 +587,25 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
             () ->
                 new AiResourceNotFoundException(
                     "environment_operation", "operation not found: " + id));
+  }
+
+  @Override
+  public Optional<SafeEnvironmentOperation> findSafe(UUID environmentId, UUID operationId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(operationId, "operationId");
+    List<SafeEnvironmentOperation> results =
+        jdbcTemplate.query(
+            FIND_SAFE_BY_ID_AND_ENV_SQL, SAFE_ROW_MAPPER, environmentId, operationId);
+    return results.stream().findFirst();
+  }
+
+  @Override
+  public SafeEnvironmentOperation getSafe(UUID environmentId, UUID operationId) {
+    return findSafe(environmentId, operationId)
+        .orElseThrow(
+            () ->
+                new AiResourceNotFoundException(
+                    "environment_operation", "operation not found: " + operationId));
   }
 
   @Override
@@ -449,6 +631,17 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
     int boundedLimit = Math.min(limit, MAX_LIST_LIMIT);
     return jdbcTemplate.query(
         CLAIM_PENDING_SQL, ROW_MAPPER, ownerNodeId, boundedLimit, ownerNodeId);
+  }
+
+  @Override
+  public List<ClaimedOperation> claimPendingWithTimeout(UUID ownerNodeId, int limit) {
+    Objects.requireNonNull(ownerNodeId, "ownerNodeId");
+    if (limit <= 0) {
+      return List.of();
+    }
+    int boundedLimit = Math.min(limit, MAX_LIST_LIMIT);
+    return jdbcTemplate.query(
+        CLAIM_PENDING_WITH_TIMEOUT_SQL, CLAIMED_ROW_MAPPER, ownerNodeId, boundedLimit, ownerNodeId);
   }
 
   @Override
@@ -549,6 +742,16 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
   }
 
   @Override
+  public List<SweptOperationInfo> sweepLocalExpiredRunning(UUID ownerNodeId) {
+    Objects.requireNonNull(ownerNodeId, "ownerNodeId");
+    return jdbcTemplate.query(
+        SWEEP_LOCAL_EXPIRED_RUNNING_SQL,
+        SWEPT_ROW_MAPPER,
+        EnvironmentOperationFailureCodes.RESULT_TIMEOUT_MESSAGE,
+        ownerNodeId);
+  }
+
+  @Override
   public DeadlineSweepResult sweepExpired() {
     int expiredPending = sweepExpiredPending();
     int expiredRunning = sweepExpiredRunning();
@@ -571,6 +774,27 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
     Objects.requireNonNull(command.sourceId(), "sourceId");
     Objects.requireNonNull(command.operationType(), "operationType");
     Objects.requireNonNull(command.deadlineAt(), "deadlineAt");
+    if (command.sourceVersion() < 0) {
+      throw new AiValidationException(
+          "environment_operation", "sourceVersion must be non-negative");
+    }
+    if (command.sourceSetVersion() < 0) {
+      throw new AiValidationException(
+          "environment_operation", "sourceSetVersion must be non-negative");
+    }
+    validateJsonObject("arguments", command.arguments(), true);
+    validateJsonObject("parameterSummary", command.parameterSummary(), true);
+  }
+
+  private void validateCommandWithTimeout(CreatePendingOperationWithTimeoutCommand command) {
+    Objects.requireNonNull(command.id(), "id");
+    Objects.requireNonNull(command.environmentId(), "environmentId");
+    Objects.requireNonNull(command.sourceId(), "sourceId");
+    Objects.requireNonNull(command.operationType(), "operationType");
+    if (command.timeoutMillis() <= 0) {
+      throw new AiValidationException(
+          "environment_operation", "timeoutMillis must be greater than zero");
+    }
     if (command.sourceVersion() < 0) {
       throw new AiValidationException(
           "environment_operation", "sourceVersion must be non-negative");
@@ -640,6 +864,34 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
 
   private RuntimeException classifyCreateError(
       DataAccessException error, CreatePendingOperationCommand command) {
+    SQLException sqlEx = extractSqlException(error);
+    String sqlState = sqlEx != null ? sqlEx.getSQLState() : null;
+    String constraint = extractConstraintName(sqlEx);
+
+    if ("23505".equals(sqlState)) {
+      if ("uk_environment_operation_active".equalsIgnoreCase(constraint)) {
+        return new DuplicateActiveOperationException(command.environmentId(), command.sourceId());
+      }
+      if ("environment_operation_pkey".equalsIgnoreCase(constraint)
+          || (constraint != null && constraint.toLowerCase(Locale.ROOT).contains("pkey"))) {
+        return new AiValidationException(
+            "environment_operation", "operation id already exists: " + command.id());
+      }
+      return new AiValidationException(
+          "environment_operation", "operation unique constraint violation");
+    }
+    if ("23503".equals(sqlState)) {
+      return new AiResourceNotFoundException(
+          "environment", "environment not found: " + command.environmentId());
+    }
+    if ("23514".equals(sqlState)) {
+      return new AiValidationException("environment_operation", "operation constraint violation");
+    }
+    return new AiValidationException("environment_operation", "failed to create pending operation");
+  }
+
+  private RuntimeException classifyCreateTimeoutError(
+      DataAccessException error, CreatePendingOperationWithTimeoutCommand command) {
     SQLException sqlEx = extractSqlException(error);
     String sqlState = sqlEx != null ? sqlEx.getSQLState() : null;
     String constraint = extractConstraintName(sqlEx);
