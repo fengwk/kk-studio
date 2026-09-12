@@ -3,14 +3,11 @@ package fun.fengwk.kkstudio.platform.cloudfs.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudDirectoryNotEmptyException;
@@ -20,9 +17,13 @@ import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudRevisionConflictEx
 import fun.fengwk.kkstudio.platform.storage.S3PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -45,23 +46,32 @@ class CloudFileSystemConcurrencyIntegrationTest extends S3PostgresSpringTestSupp
 
   @Autowired private CloudFileSystemService fileSystemService;
   @Autowired private JdbcTemplate jdbc;
-  @Autowired private PlatformTransactionManager transactionManager;
 
-  private TransactionTemplate tx;
+  private UUID seedActiveBlob(String content) {
+    byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+    String sha256 = sha256Hex(bytes);
+    UUID blobId = UUID.randomUUID();
+    jdbc.update(
+        "insert into storage_blob (id, sha256, size_bytes, media_type, ref_count, state, created_at, updated_at) "
+            + "values (?, ?, ?, 'text/plain', 1, 'ACTIVE', current_timestamp, current_timestamp)",
+        blobId,
+        sha256,
+        bytes.length);
+    return blobId;
+  }
 
-  @BeforeEach
-  void setUp() {
-    tx = new TransactionTemplate(transactionManager);
-    tx.execute(
-        status -> {
-          jdbc.update(
-              "delete from cloud_node where id not in ("
-                  + "'c0000000-0000-0000-0000-000000000001',"
-                  + "'c0000000-0000-0000-0000-000000000002',"
-                  + "'c0000000-0000-0000-0000-000000000003',"
-                  + "'c0000000-0000-0000-0000-000000000004')");
-          return null;
-        });
+  private static String sha256Hex(byte[] bytes) {
+    try {
+      MessageDigest md = MessageDigest.getInstance("SHA-256");
+      byte[] digest = md.digest(bytes);
+      StringBuilder sb = new StringBuilder();
+      for (byte b : digest) {
+        sb.append(String.format("%02x", b));
+      }
+      return sb.toString();
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException(e);
+    }
   }
 
   /** 验证并发两个线程向相同路径以 expectedRevision=0 执行初次文本创建时，恰有一线程成功，败者收到领域版本冲突异常。 */
@@ -288,6 +298,192 @@ class CloudFileSystemConcurrencyIntegrationTest extends S3PostgresSpringTestSupp
                   deleteSuccess.get(),
                   notEmptyCount.get(),
                   notFoundCount.get()));
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /** 验证根级别并发两线程以 expectedRevision=0 创建相同文本节点时，恰有一线程成功，另一线程捕获领域版本冲突异常。 */
+  @Test
+  void testConcurrentRootCreateTextExpectedRevisionZero() throws Exception {
+    CloudPath path = CloudPath.of("/root_concurrent.txt");
+    int threadCount = 2;
+    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+    try {
+      CyclicBarrier barrier = new CyclicBarrier(threadCount);
+      AtomicInteger successCount = new AtomicInteger(0);
+      AtomicInteger conflictCount = new AtomicInteger(0);
+      List<Throwable> unexpectedErrors = Collections.synchronizedList(new ArrayList<>());
+
+      List<Future<?>> futures = new ArrayList<>();
+      for (int i = 0; i < threadCount; i++) {
+        final int idx = i;
+        futures.add(
+            executor.submit(
+                () -> {
+                  try {
+                    barrier.await();
+                    fileSystemService.writeText(path, "root content from thread " + idx, 0L);
+                    successCount.incrementAndGet();
+                  } catch (CloudRevisionConflictException e) {
+                    conflictCount.incrementAndGet();
+                  } catch (Throwable t) {
+                    unexpectedErrors.add(t);
+                  }
+                }));
+      }
+
+      for (Future<?> f : futures) {
+        f.get(10, TimeUnit.SECONDS);
+      }
+
+      assertTrue(unexpectedErrors.isEmpty(), () -> "Unexpected errors: " + unexpectedErrors);
+      assertEquals(1, successCount.get(), "Exactly one root text write should succeed");
+      assertEquals(
+          1, conflictCount.get(), "Losing thread must receive CloudRevisionConflictException");
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /** 验证根级别并发两线程创建同名目录时，恰有一线程成功，另一线程稳定抛出领域冲突异常 CloudNodeAlreadyExistsException。 */
+  @Test
+  void testConcurrentRootMkdirCollision() throws Exception {
+    CloudPath path = CloudPath.of("/root_concurrent_dir");
+    int threadCount = 2;
+    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+    try {
+      CyclicBarrier barrier = new CyclicBarrier(threadCount);
+      AtomicInteger successCount = new AtomicInteger(0);
+      AtomicInteger existsCount = new AtomicInteger(0);
+      List<Throwable> unexpectedErrors = Collections.synchronizedList(new ArrayList<>());
+
+      List<Future<?>> futures = new ArrayList<>();
+      for (int i = 0; i < threadCount; i++) {
+        futures.add(
+            executor.submit(
+                () -> {
+                  try {
+                    barrier.await();
+                    fileSystemService.mkdir(path, false);
+                    successCount.incrementAndGet();
+                  } catch (CloudNodeAlreadyExistsException e) {
+                    existsCount.incrementAndGet();
+                  } catch (Throwable t) {
+                    unexpectedErrors.add(t);
+                  }
+                }));
+      }
+
+      for (Future<?> f : futures) {
+        f.get(10, TimeUnit.SECONDS);
+      }
+
+      assertTrue(unexpectedErrors.isEmpty(), () -> "Unexpected errors: " + unexpectedErrors);
+      assertEquals(1, successCount.get(), "Exactly one root mkdir should succeed");
+      assertEquals(
+          1, existsCount.get(), "Losing thread must receive CloudNodeAlreadyExistsException");
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /** 验证根级别并发两线程创建同名 BLOB 节点时，恰有一线程成功，另一线程稳定抛出领域冲突异常 CloudNodeAlreadyExistsException。 */
+  @Test
+  void testConcurrentRootCreateBlobCollision() throws Exception {
+    UUID blobId = seedActiveBlob("root concurrent blob data");
+    CloudPath path = CloudPath.of("/root_concurrent_blob.png");
+    int threadCount = 2;
+    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+    try {
+      CyclicBarrier barrier = new CyclicBarrier(threadCount);
+      AtomicInteger successCount = new AtomicInteger(0);
+      AtomicInteger existsCount = new AtomicInteger(0);
+      List<Throwable> unexpectedErrors = Collections.synchronizedList(new ArrayList<>());
+
+      List<Future<?>> futures = new ArrayList<>();
+      for (int i = 0; i < threadCount; i++) {
+        futures.add(
+            executor.submit(
+                () -> {
+                  try {
+                    barrier.await();
+                    fileSystemService.createBlobNode(path, blobId);
+                    successCount.incrementAndGet();
+                  } catch (CloudNodeAlreadyExistsException e) {
+                    existsCount.incrementAndGet();
+                  } catch (Throwable t) {
+                    unexpectedErrors.add(t);
+                  }
+                }));
+      }
+
+      for (Future<?> f : futures) {
+        f.get(10, TimeUnit.SECONDS);
+      }
+
+      assertTrue(unexpectedErrors.isEmpty(), () -> "Unexpected errors: " + unexpectedErrors);
+      assertEquals(1, successCount.get(), "Exactly one root blob create should succeed");
+      assertEquals(
+          1, existsCount.get(), "Losing thread must receive CloudNodeAlreadyExistsException");
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /** 验证两个不同的根级别源节点并发移动到同一个根级别目标路径时，恰有一线程成功，另一线程稳定收到 CloudNodeAlreadyExistsException。 */
+  @Test
+  void testConcurrentRootMoveCollisionOnSameTarget() throws Exception {
+    CloudPath src1 = CloudPath.of("/root_src1.txt");
+    CloudPath src2 = CloudPath.of("/root_src2.txt");
+    CloudPath target = CloudPath.of("/root_target.txt");
+    fileSystemService.writeText(src1, "src1 content", 0L);
+    fileSystemService.writeText(src2, "src2 content", 0L);
+
+    int threadCount = 2;
+    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+    try {
+      CyclicBarrier barrier = new CyclicBarrier(threadCount);
+      AtomicInteger successCount = new AtomicInteger(0);
+      AtomicInteger existsCount = new AtomicInteger(0);
+      List<Throwable> unexpectedErrors = Collections.synchronizedList(new ArrayList<>());
+
+      List<Future<?>> futures = new ArrayList<>();
+      futures.add(
+          executor.submit(
+              () -> {
+                try {
+                  barrier.await();
+                  fileSystemService.moveNode(src1, target, 0L);
+                  successCount.incrementAndGet();
+                } catch (CloudNodeAlreadyExistsException e) {
+                  existsCount.incrementAndGet();
+                } catch (Throwable t) {
+                  unexpectedErrors.add(t);
+                }
+              }));
+      futures.add(
+          executor.submit(
+              () -> {
+                try {
+                  barrier.await();
+                  fileSystemService.moveNode(src2, target, 0L);
+                  successCount.incrementAndGet();
+                } catch (CloudNodeAlreadyExistsException e) {
+                  existsCount.incrementAndGet();
+                } catch (Throwable t) {
+                  unexpectedErrors.add(t);
+                }
+              }));
+
+      for (Future<?> f : futures) {
+        f.get(10, TimeUnit.SECONDS);
+      }
+
+      assertTrue(unexpectedErrors.isEmpty(), () -> "Unexpected errors: " + unexpectedErrors);
+      assertEquals(1, successCount.get(), "Exactly one root move should succeed");
+      assertEquals(
+          1, existsCount.get(), "Losing thread must receive CloudNodeAlreadyExistsException");
     } finally {
       executor.shutdownNow();
     }

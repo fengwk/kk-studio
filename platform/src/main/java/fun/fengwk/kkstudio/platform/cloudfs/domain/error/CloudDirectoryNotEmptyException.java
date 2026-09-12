@@ -7,11 +7,6 @@ public class CloudDirectoryNotEmptyException extends CloudFileSystemException {
 
   private final CloudPath path;
 
-  public CloudDirectoryNotEmptyException(CloudPath path) {
-    super("Cannot delete non-empty directory at path: " + path);
-    this.path = path;
-  }
-
   public CloudDirectoryNotEmptyException(CloudPath path, int childCount) {
     super(
         String.format(

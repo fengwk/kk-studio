@@ -6,14 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNode;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNodeKind;
@@ -59,24 +56,6 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
   @Autowired private CloudFileSystemService fileSystemService;
   @Autowired private StorageBlobManager storageBlobManager;
   @Autowired private JdbcTemplate jdbc;
-  @Autowired private PlatformTransactionManager transactionManager;
-
-  private TransactionTemplate tx;
-
-  @BeforeEach
-  void setUp() {
-    tx = new TransactionTemplate(transactionManager);
-    tx.execute(
-        status -> {
-          jdbc.update(
-              "delete from cloud_node where id not in ("
-                  + "'c0000000-0000-0000-0000-000000000001',"
-                  + "'c0000000-0000-0000-0000-000000000002',"
-                  + "'c0000000-0000-0000-0000-000000000003',"
-                  + "'c0000000-0000-0000-0000-000000000004')");
-          return null;
-        });
-  }
 
   private UUID seedActiveBlob(String content) {
     byte[] bytes = content.getBytes(StandardCharsets.UTF_8);

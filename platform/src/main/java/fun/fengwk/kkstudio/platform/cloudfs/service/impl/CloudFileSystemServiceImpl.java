@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.cloudfs.service.impl;
 
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -147,7 +148,10 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
               .kind(CloudNodeKind.DIRECTORY)
               .version(0L)
               .build();
-      nodeRepository.insert(dir);
+      boolean inserted = nodeRepository.insertIfAbsent(dir);
+      if (!inserted) {
+        throw new CloudNodeAlreadyExistsException(path);
+      }
       return dir;
     }
     return ensureDirectories(path);
@@ -205,7 +209,24 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
               .kind(CloudNodeKind.TEXT)
               .version(0L)
               .build();
-      nodeRepository.insert(textNode);
+      boolean inserted = nodeRepository.insertIfAbsent(textNode);
+      if (!inserted) {
+        Optional<CloudNode> winner =
+            nodeRepository.findByParentIdAndNameForUpdate(parentId, path.name());
+        long curRev = 0L;
+        if (winner.isPresent()) {
+          if (!winner.get().isText()) {
+            throw new CloudNodeKindConflictException(
+                path, CloudNodeKind.TEXT, winner.get().getKind());
+          }
+          curRev =
+              revisionRepository
+                  .findCurrentByNodeId(winner.get().getId())
+                  .map(CloudTextRevision::getRevision)
+                  .orElse(0L);
+        }
+        throw new CloudRevisionConflictException(path, curRev, 0L);
+      }
 
       String sha256 = sha256Hex(utf8Bytes);
       CloudTextRevision rev =
@@ -230,7 +251,15 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
     if (curRev != expectedRevision) {
       throw new CloudRevisionConflictException(path, curRev, expectedRevision);
     }
-    revisionRepository.unsetCurrent(node.getId(), expectedRevision);
+    int unset = revisionRepository.unsetCurrent(node.getId(), expectedRevision);
+    if (unset == 0) {
+      long latestRev =
+          revisionRepository
+              .findCurrentByNodeId(node.getId())
+              .map(CloudTextRevision::getRevision)
+              .orElse(curRev);
+      throw new CloudRevisionConflictException(path, latestRev, expectedRevision);
+    }
     String sha256 = sha256Hex(utf8Bytes);
     CloudTextRevision newRev =
         CloudTextRevision.builder()
@@ -242,7 +271,11 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
             .current(true)
             .build();
     revisionRepository.insert(newRev);
-    nodeRepository.touch(node.getId(), Instant.now());
+    int touched = nodeRepository.touch(node.getId(), Instant.now());
+    if (touched == 0) {
+      throw new IllegalStateException(
+          "Failed to touch node after revision insert: " + node.getId());
+    }
     return newRev;
   }
 
@@ -311,7 +344,15 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
               utf8Bytes.length, MAX_TEXT_BYTES));
     }
 
-    revisionRepository.unsetCurrent(node.getId(), expectedRevision);
+    int unset = revisionRepository.unsetCurrent(node.getId(), expectedRevision);
+    if (unset == 0) {
+      long latestRev =
+          revisionRepository
+              .findCurrentByNodeId(node.getId())
+              .map(CloudTextRevision::getRevision)
+              .orElse(currentRev.getRevision());
+      throw new CloudRevisionConflictException(path, latestRev, expectedRevision);
+    }
 
     String sha256 = sha256Hex(utf8Bytes);
     CloudTextRevision newRev =
@@ -324,7 +365,11 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
             .current(true)
             .build();
     revisionRepository.insert(newRev);
-    nodeRepository.touch(node.getId(), Instant.now());
+    int touched = nodeRepository.touch(node.getId(), Instant.now());
+    if (touched == 0) {
+      throw new IllegalStateException(
+          "Failed to touch node after revision insert: " + node.getId());
+    }
     return newRev;
   }
 
@@ -382,8 +427,26 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
       throw new CloudNodeAlreadyExistsException(targetPath);
     }
 
-    nodeRepository.updateParentAndName(
-        sourceNode.getId(), targetParentId, targetPath.name(), expectedVersion, Instant.now());
+    int updated;
+    try {
+      updated =
+          nodeRepository.updateParentAndName(
+              sourceNode.getId(),
+              targetParentId,
+              targetPath.name(),
+              expectedVersion,
+              Instant.now());
+    } catch (DuplicateKeyException e) {
+      throw new CloudNodeAlreadyExistsException(targetPath);
+    }
+    if (updated == 0) {
+      long curVer =
+          nodeRepository
+              .findById(sourceNode.getId())
+              .map(CloudNode::getVersion)
+              .orElse(sourceNode.getVersion());
+      throw new CloudVersionConflictException(sourcePath, curVer, expectedVersion);
+    }
     return nodeRepository.findById(sourceNode.getId()).orElseThrow();
   }
 
@@ -415,7 +478,16 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
       revisionRepository.deleteByNodeId(node.getId());
     }
 
-    nodeRepository.deleteByIdAndVersion(node.getId(), expectedVersion);
+    int deleted = nodeRepository.deleteByIdAndVersion(node.getId(), expectedVersion);
+    if (deleted == 0) {
+      long curVer =
+          nodeRepository
+              .findById(node.getId())
+              .map(CloudNode::getVersion)
+              .orElse(node.getVersion());
+      throw new CloudVersionConflictException(path, curVer, expectedVersion);
+    }
+
     if (node.isBlob()) {
       requireBlobManager().release(node.getBlobId());
     }
@@ -458,7 +530,10 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
             .version(0L)
             .blobId(blobId)
             .build();
-    nodeRepository.insert(node);
+    boolean inserted = nodeRepository.insertIfAbsent(node);
+    if (!inserted) {
+      throw new CloudNodeAlreadyExistsException(path);
+    }
     requireBlobManager().retain(blobId);
     return node;
   }

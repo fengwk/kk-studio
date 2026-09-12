@@ -200,7 +200,10 @@ class CloudArtifactServiceIntegrationTest extends S3PostgresSpringTestSupport {
         () -> artifactService.createToolArtifact(threadId, invocationId, "txt", blobId));
   }
 
-  /** 验证当 tool-results base 节点的属性被篡改（名称、父节点或类型非 DIRECTORY）时抛出 CloudNodeKindConflictException。 */
+  /**
+   * 验证当 tool-results base 节点的属性被篡改（名称或父节点不变量破坏抛 IllegalStateException，类型非 DIRECTORY 抛
+   * CloudNodeKindConflictException）。
+   */
   @Test
   void testCreateToolArtifactRejectsCorruptedToolResultsBase() {
     UUID threadId = UUID.randomUUID();
@@ -212,7 +215,7 @@ class CloudArtifactServiceIntegrationTest extends S3PostgresSpringTestSupport {
         "update cloud_node set name = 'corrupted-results' where id = ?",
         PRESEEDED_TOOL_RESULTS_DIR_ID);
     assertThrows(
-        CloudNodeKindConflictException.class,
+        IllegalStateException.class,
         () -> artifactService.createToolArtifact(threadId, invocationId, "txt", blobId));
 
     // Restore name, corrupt parent_id
@@ -220,7 +223,7 @@ class CloudArtifactServiceIntegrationTest extends S3PostgresSpringTestSupport {
         "update cloud_node set name = 'tool-results', parent_id = null where id = ?",
         PRESEEDED_TOOL_RESULTS_DIR_ID);
     assertThrows(
-        CloudNodeKindConflictException.class,
+        IllegalStateException.class,
         () -> artifactService.createToolArtifact(threadId, invocationId, "txt", blobId));
 
     // Restore parent_id, corrupt kind to BLOB
