@@ -11,8 +11,11 @@ public class AgentModelDTO {
   /** 所属 Provider 名（资源身份的一部分）。 */
   private String providerName;
 
-  /** 模型名（与 providerName 共同构成资源身份）。 */
+  /** 模型逻辑名（与 providerName 共同构成不可变资源身份）。 */
   private String name;
+
+  /** 发往上游 Provider 的真实模型标识；与 {@link #name} 独立且不唯一。 */
+  private String modelId;
 
   /** 可空描述（≤512 字符）。 */
   private String description;

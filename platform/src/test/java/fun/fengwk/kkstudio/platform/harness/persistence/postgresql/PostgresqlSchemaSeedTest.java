@@ -155,15 +155,11 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
             "the minimax-anthropic provider config must declare BUDGET thinking mode");
         assertEquals(
             "claude-fable-5-dd-3M-xaMiniM",
-            OBJECT_MAPPER
-                .readTree(
-                    singleString(
-                        st,
-                        "select config::text from agent_provider where name = 'minimax-anthropic'"))
-                .path("modelAliases")
-                .path("MiniMax-M3")
-                .asText(),
-            "the minimax-anthropic provider config must map MiniMax-M3 to wire alias");
+            singleString(
+                st,
+                "select model_id from agent_model"
+                    + " where provider_name = 'minimax-anthropic' and name = 'MiniMax-M3'"),
+            "minimax-anthropic/MiniMax-M3 must carry its real upstream wire model identity");
         assertEquals(
             "DEEPSEEK",
             OBJECT_MAPPER
@@ -173,6 +169,18 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 .path("openAiChatThinkingFormat")
                 .asText(),
             "the deepseek provider config must declare DEEPSEEK thinking format");
+
+        assertEquals(
+            "minimax-anthropic/MiniMax-M3",
+            singleString(
+                st,
+                "select string_agg(provider_name || '/' || name, ',' order by provider_name, name)"
+                    + " from agent_model where name <> model_id"),
+            "only minimax-anthropic/MiniMax-M3 may differ between logical name and wire modelId");
+        assertSingleLong(
+            conn,
+            "select count(*) from agent_provider where config::text like '%modelAliases%'",
+            0L);
 
         JsonNode geminiVariants =
             OBJECT_MAPPER.readTree(
@@ -251,10 +259,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     }
   }
 
-  /**
-   * 验证从空库执行 Flyway bootstrap 时，各 profile 仅应用 V1 baseline 与对应的 repeatable seeds， 且
-   * flyway_schema_history 中不存在任何 V2+ 历史记录。
-   */
+  /** 验证从空库执行 Flyway bootstrap 时，各 profile 应用全部 versioned migrations 与对应 repeatable seeds。 */
   @Test
   void cleanSlateBootstrapAcrossAllProfiles() throws Exception {
     // 1. 空库 bootstrap dev profile
@@ -266,10 +271,11 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           "select count(*) from flyway_schema_history where version = '1' and success = true",
           1L);
       assertRepeatableMigrationRecorded(conn, "dev seed");
-      assertSingleLong(
+      assertSingleString(
           conn,
-          "select count(*) from flyway_schema_history where version is not null and version != '1'",
-          0L);
+          "select string_agg(version, ',' order by installed_rank)"
+              + " from flyway_schema_history where version is not null",
+          "1,2");
       assertDevSeedPresent(conn);
     }
 
@@ -282,10 +288,11 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           "select count(*) from flyway_schema_history where version = '1' and success = true",
           1L);
       assertRepeatableMigrationRecorded(conn, "e2e seed");
-      assertSingleLong(
+      assertSingleString(
           conn,
-          "select count(*) from flyway_schema_history where version is not null and version != '1'",
-          0L);
+          "select string_agg(version, ',' order by installed_rank)"
+              + " from flyway_schema_history where version is not null",
+          "1,2");
       assertE2eSeedContent(conn);
     }
 
@@ -299,12 +306,91 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           1L);
       assertRepeatableMigrationRecorded(conn, "canvas test seed");
       assertRepeatableMigrationRecorded(conn, "dev seed");
-      assertSingleLong(
+      assertSingleString(
           conn,
-          "select count(*) from flyway_schema_history where version is not null and version != '1'",
-          0L);
+          "select string_agg(version, ',' order by installed_rank)"
+              + " from flyway_schema_history where version is not null",
+          "1,2");
       assertDevSeedPresent(conn);
       assertSingleLong(conn, "select count(*) from system_setting where id = 1", 1L);
+    }
+  }
+
+  /** 验证 V2 从真实 V1 数据提取 Anthropic alias，并把旧 Variant 收敛为 reasoning-only 结构；迁移后不保留第二模型映射源或已删除字段。 */
+  @Test
+  void modelIdentityMigrationConvergesLegacyAliasAndVariants() throws Exception {
+    Path tempDir = Files.createTempDirectory("flyway-model-identity-migration-test");
+    try {
+      Path migrationDir = Files.createDirectories(tempDir.resolve("migration"));
+      Path v1File = migrationDir.resolve("V1__schema.sql");
+      Path v2File = migrationDir.resolve("V2__model_identity_and_variant.sql");
+      Files.writeString(
+          v1File, readResource("db/migration/V1__schema.sql"), StandardCharsets.UTF_8);
+      String migrationLoc = "filesystem:" + migrationDir.toAbsolutePath();
+
+      try (Connection conn = newConnection()) {
+        resetDatabase(conn);
+        migrate(conn, migrationLoc);
+        try (Statement st = conn.createStatement()) {
+          st.executeUpdate(
+              """
+              insert into agent_provider (
+                  name, provider_type, config, connection_generation_id
+              ) values (
+                  'legacy-anthropic',
+                  'anthropic',
+                  '{"modelAliases":{"logical-model":"wire-model"}}'::jsonb,
+                  '00000000-0000-0000-0000-000000000099'::uuid
+              )
+              """);
+          st.executeUpdate(
+              """
+              insert into agent_model (provider_name, name, config)
+              values (
+                  'legacy-anthropic',
+                  'logical-model',
+                  '{
+                    "abilities":{"reasoning":true},
+                    "variants":[
+                      {"id":"default","temperature":0.2},
+                      {"id":"off","reasoningEffort":"none","maxOutputTokens":1024},
+                      {"id":"minimal","reasoningEffort":"minimal","topP":0.9},
+                      {"id":"max","reasoningEffort":"max","stopSequences":["END"]}
+                    ]
+                  }'::jsonb
+              )
+              """);
+        }
+
+        Files.writeString(
+            v2File,
+            readResource("db/migration/V2__model_identity_and_variant.sql"),
+            StandardCharsets.UTF_8);
+        migrate(conn, migrationLoc);
+
+        try (Statement st = conn.createStatement()) {
+          assertEquals(
+              "wire-model",
+              singleString(
+                  st,
+                  "select model_id from agent_model"
+                      + " where provider_name = 'legacy-anthropic' and name = 'logical-model'"));
+          assertEquals(
+              "{}",
+              singleString(
+                  st, "select config::text from agent_provider where name = 'legacy-anthropic'"));
+          assertEquals(
+              "[{\"id\": \"default\"}, {\"id\": \"off\", \"reasoningEffort\": \"off\"},"
+                  + " {\"id\": \"minimal\", \"reasoningEffort\": \"low\"},"
+                  + " {\"id\": \"max\", \"reasoningEffort\": \"high\"}]",
+              singleString(
+                  st,
+                  "select (config -> 'variants')::text from agent_model"
+                      + " where provider_name = 'legacy-anthropic' and name = 'logical-model'"));
+        }
+      }
+    } finally {
+      deleteRecursively(tempDir);
     }
   }
 
@@ -319,26 +405,15 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       Path migrationDir = Files.createDirectories(tempDir.resolve("migration"));
       Path seedDir = Files.createDirectories(tempDir.resolve("seed"));
 
-      String v1Content =
-          new String(
-              Objects.requireNonNull(
-                      PostgresqlSchemaSeedTest.class
-                          .getClassLoader()
-                          .getResourceAsStream("db/migration/V1__schema.sql"))
-                  .readAllBytes(),
-              StandardCharsets.UTF_8);
-      String rDevContent =
-          new String(
-              Objects.requireNonNull(
-                      PostgresqlSchemaSeedTest.class
-                          .getClassLoader()
-                          .getResourceAsStream("db/seed/dev/R__dev_seed.sql"))
-                  .readAllBytes(),
-              StandardCharsets.UTF_8);
+      String v1Content = readResource("db/migration/V1__schema.sql");
+      String v2Content = readResource("db/migration/V2__model_identity_and_variant.sql");
+      String rDevContent = readResource("db/seed/dev/R__dev_seed.sql");
 
       Path v1File = migrationDir.resolve("V1__schema.sql");
+      Path v2File = migrationDir.resolve("V2__model_identity_and_variant.sql");
       Path rDevFile = seedDir.resolve("R__dev_seed.sql");
       Files.writeString(v1File, v1Content, StandardCharsets.UTF_8);
+      Files.writeString(v2File, v2Content, StandardCharsets.UTF_8);
       Files.writeString(rDevFile, rDevContent, StandardCharsets.UTF_8);
 
       String migrationLoc = "filesystem:" + migrationDir.toAbsolutePath();
@@ -347,7 +422,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       try (Connection conn = newConnection()) {
         resetDatabase(conn);
 
-        // 1. 首次 migrate：应用 V1 baseline 与初始 R__dev_seed
+        // 1. 首次 migrate：应用 V1 baseline、V2 model 身份 migration 与初始 R__dev_seed
         migrate(conn, migrationLoc, seedLoc);
         assertSingleLong(
             conn,
@@ -368,8 +443,9 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
               "update agent_definition set system_prompt = 'tampered-prompt' where name ="
                   + " 'default-assistant'");
           st.executeUpdate(
-              "insert into agent_model (provider_name, name, description, config) "
-                  + "values ('stub', 'extraneous-stub-model', 'extraneous', '{}'::jsonb)");
+              "insert into agent_model (provider_name, name, model_id, description, config) "
+                  + "values ('stub', 'extraneous-stub-model', 'stub-wire-extra', 'extraneous',"
+                  + " '{}'::jsonb)");
         }
         assertSingleLong(
             conn,
@@ -500,6 +576,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                   "select jsonb_agg(jsonb_build_object("
                       + "'provider', p.name,"
                       + "'name', m.name,"
+                      + "'modelId', m.model_id,"
                       + "'description', m.description,"
                       + "'config', m.config"
                       + ") order by m.provider_name, m.name)::text"
@@ -608,6 +685,21 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       assertNotNull(value, "string aggregate unexpectedly null for " + sql);
       return value;
     }
+  }
+
+  private static void assertSingleString(Connection conn, String sql, String expected)
+      throws Exception {
+    try (Statement st = conn.createStatement()) {
+      assertEquals(expected, singleString(st, sql), sql);
+    }
+  }
+
+  private static String readResource(String path) throws Exception {
+    return new String(
+        Objects.requireNonNull(
+                PostgresqlSchemaSeedTest.class.getClassLoader().getResourceAsStream(path), path)
+            .readAllBytes(),
+        StandardCharsets.UTF_8);
   }
 
   private static void assertSingleLong(Connection conn, String sql, long expected)

@@ -16,9 +16,9 @@ import java.util.UUID;
  * Model 执行 admission / stream 端口：把一次冻结的 Model invocation 提交给外部 Gateway。
  *
  * <p>execution key 是 {@code (invocationId, proposedAttempt)}，{@code proposedAttempt}
- * 必须为正数；execution 携带冻结 {@link ProviderType} 与内存 {@link ProviderRequest}。{@link #start} 返回前不得同步调用任何
- * Listener 回调；回调可能因进程崩溃 / lease 恢复而重复或迟到，去重与所有权围栏 / 陈旧回调围栏由 Runtime（Processor）负责，Gateway 不保证
- * exactly-once。
+ * 必须为正数；execution 携带冻结 {@link ProviderType}、Provider connection generation 与内存 {@link
+ * ProviderRequest}。{@link #start} 返回前不得同步调用任何 Listener 回调；回调可能因进程崩溃 / lease 恢复而重复或迟到，去重与所有权围栏 /
+ * 陈旧回调围栏由 Runtime（Processor）负责，Gateway 不保证 exactly-once。
  *
  * <p>两阶段激活：{@link #start} 返回 {@link Started} 时不得打开任何回调门控（即便 Provider 同步回调也只能缓冲）， {@link
  * Handle#activate} 由 Processor 在 attach handle + 持久化 markRunning 之后、打开自身 Listener 回调门控之前调用，此时
@@ -38,11 +38,15 @@ public interface ModelGateway {
   StartResult start(Execution execution, Listener listener);
 
   /**
-   * 一次 Model execution 的不可变描述：key 为 {@code (invocationId, proposedAttempt)}，携带冻结协议类型与内存
-   * ProviderRequest。
+   * 一次 Model execution 的不可变描述：key 为 {@code (invocationId, proposedAttempt)}，携带冻结协议类型、Provider
+   * connection generation 与内存 ProviderRequest。
    */
   record Execution(
-      UUID invocationId, int proposedAttempt, ProviderType providerType, ProviderRequest request) {
+      UUID invocationId,
+      int proposedAttempt,
+      ProviderType providerType,
+      UUID providerConnectionGenerationId,
+      ProviderRequest request) {
 
     public Execution {
       Objects.requireNonNull(invocationId, "invocationId");
@@ -50,6 +54,8 @@ public interface ModelGateway {
         throw new IllegalArgumentException("proposedAttempt must be positive");
       }
       providerType = Objects.requireNonNull(providerType, "providerType");
+      providerConnectionGenerationId =
+          Objects.requireNonNull(providerConnectionGenerationId, "providerConnectionGenerationId");
       request = Objects.requireNonNull(request, "request");
     }
   }

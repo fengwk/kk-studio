@@ -75,9 +75,12 @@ public final class AgentModelTestData {
     }
   }
 
-  /** 应用规范化的可执行配置，使 CRUD/web 测试能使用有效载荷。 */
+  /** 应用规范化的可执行配置，使 CRUD/web 测试能使用有效载荷；modelId 与逻辑 name 独立。 */
   public static void executable(AgentModelEditablePropertiesDTO properties) {
     properties.setConfig(executableConfig());
+    if (properties.getModelId() == null || properties.getModelId().isBlank()) {
+      properties.setModelId("wire-model");
+    }
   }
 
   private AgentModelTestData() {}

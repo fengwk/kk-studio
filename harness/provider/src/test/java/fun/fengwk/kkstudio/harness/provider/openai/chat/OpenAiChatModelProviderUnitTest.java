@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.math.BigDecimal;
@@ -86,8 +87,8 @@ class OpenAiChatModelProviderUnitTest {
             new BigDecimal("10.00"));
     modelDesc =
         new ModelDescriptor(
-            "openai", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
-    defaultVariant = new ModelVariant("default", null, null, null, null, null, null, null, null);
+            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
+    defaultVariant = new ModelVariant("default");
   }
 
   @AfterEach
@@ -150,6 +151,7 @@ class OpenAiChatModelProviderUnitTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -181,17 +183,18 @@ class OpenAiChatModelProviderUnitTest {
     assertEquals(descriptor, ((OpenAiChatModelProvider) provider).descriptor());
     assertEquals("OpenAiChatModelProvider[]", provider.toString());
 
-    // 1. 编码异常进入 bridge.emitError（如包含不受支持的 topK）
-    ModelVariant invalidVariant =
-        new ModelVariant("inv", null, null, null, 10, null, null, null, null);
+    // 1. 编码异常进入 bridge.emitError（如工具 schema 非法）
+    ModelVariant invalidVariant = new ModelVariant("inv");
+    ProviderToolDefinition invalidTool = new ProviderToolDefinition("badTool", "desc", "not-json");
     ProviderRequest reqInvalid =
         new ProviderRequest(
             modelDesc,
             invalidVariant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
-            List.of(),
+            List.of(invalidTool),
             ProviderCacheControl.none());
     var errorRef = new AtomicReference<ProviderException>();
     provider.stream(
@@ -219,6 +222,7 @@ class OpenAiChatModelProviderUnitTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),

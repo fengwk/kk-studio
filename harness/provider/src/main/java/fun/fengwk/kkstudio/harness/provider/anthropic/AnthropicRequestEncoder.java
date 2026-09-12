@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -61,7 +60,6 @@ final class AnthropicRequestEncoder {
   private static final Set<String> ALLOWED_REPLAY_CONTENT_TYPES =
       Set.of("text", "thinking", "redacted_thinking", "tool_use");
 
-  private static final int DEFAULT_MAX_TOKENS = 1024;
   private static final int MAX_CACHE_BREAKPOINTS = 3;
   private static final int MAX_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
 
@@ -89,20 +87,15 @@ final class AnthropicRequestEncoder {
     Objects.requireNonNull(descriptor, "descriptor");
     Objects.requireNonNull(config, "config");
 
-    validatePenalties(request.variant());
     validateCacheControl(request.cacheControl());
 
     ObjectNode root = NODES.objectNode();
-    root.put("model", config.resolveModelName(request.model().modelName()));
+    root.put("model", request.model().modelId());
 
-    int maxTokens = DEFAULT_MAX_TOKENS;
-    if (request.variant() != null && request.variant().maxOutputTokens() != null) {
-      maxTokens = request.variant().maxOutputTokens();
-    }
+    int maxTokens = request.outputTokens();
     root.put("max_tokens", maxTokens);
     root.put("stream", true);
 
-    applySamplingParameters(root, request.variant());
     boolean requiresInterleavedThinkingBeta =
         applyReasoningParameters(root, request, config, maxTokens);
 
@@ -143,7 +136,7 @@ final class AnthropicRequestEncoder {
         String currentPrefixHash =
             AnthropicPrefixHasher.calculateHash(unmarkedSystemArray, toolsArray, wireMessagesArray);
         ObjectNode assistantWireMessage =
-            encodeAssistantMessage(msg, descriptor, request.model().modelName(), currentPrefixHash);
+            encodeAssistantMessage(msg, descriptor, request.model().modelId(), currentPrefixHash);
         wireMessagesArray.add(assistantWireMessage);
       } else if (msg.role() == ProviderMessageRole.USER) {
         wireMessagesArray.add(encodeUserMessage(msg));
@@ -188,17 +181,6 @@ final class AnthropicRequestEncoder {
         utf8Bytes, frozenSourcePrefixHash, requiresInterleavedThinkingBeta);
   }
 
-  private static void validatePenalties(ModelVariant variant) {
-    if (variant == null) {
-      return;
-    }
-    if (variant.frequencyPenalty() != null || variant.presencePenalty() != null) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "Anthropic does not support frequencyPenalty or presencePenalty");
-    }
-  }
-
   private static void validateCacheControl(ProviderCacheControl cacheControl) {
     if (cacheControl.retention() == PromptCacheRetention.NONE) {
       return;
@@ -210,27 +192,10 @@ final class AnthropicRequestEncoder {
     }
   }
 
-  private static void applySamplingParameters(ObjectNode root, ModelVariant variant) {
-    if (variant == null) {
-      return;
-    }
-    if (variant.temperature() != null) {
-      root.put("temperature", variant.temperature());
-    }
-    if (variant.topP() != null) {
-      root.put("top_p", variant.topP());
-    }
-    if (variant.topK() != null) {
-      root.put("top_k", variant.topK());
-    }
-    if (!variant.stopSequences().isEmpty()) {
-      ArrayNode stopSeqs = root.putArray("stop_sequences");
-      for (String seq : variant.stopSequences()) {
-        stopSeqs.add(seq);
-      }
-    }
-  }
-
+  /**
+   * reasoning effort 编码：{@code off} 显式关闭推理，发送 {@code thinking:{type:"disabled"}}；{@code
+   * high/medium/low} 按 配置模式映射为 adaptive 或 budget thinking；null 不声明推理字段，由服务端默认决定。
+   */
   private static boolean applyReasoningParameters(
       ObjectNode root, ProviderRequest request, AnthropicConfiguration config, int maxTokens) {
     if (!request.model().reasoning()
@@ -239,10 +204,13 @@ final class AnthropicRequestEncoder {
       return false;
     }
 
-    String effort = request.variant().reasoningEffort();
-    if (effort.isBlank() || "none".equals(effort.trim())) {
+    if (request.variant().reasoningOff()) {
+      ObjectNode thinking = root.putObject("thinking");
+      thinking.put("type", "disabled");
       return false;
     }
+
+    String effort = request.variant().reasoningEffort();
 
     AnthropicThinkingMode mode = config.anthropicThinkingMode();
     switch (mode) {
@@ -259,8 +227,7 @@ final class AnthropicRequestEncoder {
         int budgetTokens = mapBudgetTokens(effort);
         if (budgetTokens >= maxTokens) {
           throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "budget_tokens must be strictly lower than max_tokens");
+              ProviderErrorKind.INVALID_REQUEST, "budget_tokens must be lower than max_tokens");
         }
         ObjectNode thinking = root.putObject("thinking");
         thinking.put("type", "enabled");
@@ -278,7 +245,6 @@ final class AnthropicRequestEncoder {
           ProviderErrorKind.INVALID_REQUEST, "unsupported reasoning effort for budget thinking");
     }
     return switch (effort) {
-      case "minimal" -> 1024;
       case "low" -> 2048;
       case "medium" -> 8192;
       case "high" -> 16384;

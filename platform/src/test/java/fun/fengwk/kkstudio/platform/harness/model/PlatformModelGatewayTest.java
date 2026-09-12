@@ -69,8 +69,10 @@ class PlatformModelGatewayTest {
       new ModelCallTimeoutPolicy(Duration.ofSeconds(45), Duration.ofSeconds(3));
   private static final ProviderRequest PROVIDER_REQUEST = providerRequest();
   private static final UUID INVOCATION_ID = new UUID(0L, 42L);
+  private static final UUID CONNECTION_GENERATION_ID = new UUID(0L, 43L);
   private static final ModelGateway.Execution EXECUTION =
-      new ModelGateway.Execution(INVOCATION_ID, 1, ProviderType.OPENAI, PROVIDER_REQUEST);
+      new ModelGateway.Execution(
+          INVOCATION_ID, 1, ProviderType.OPENAI, CONNECTION_GENERATION_ID, PROVIDER_REQUEST);
 
   @Test
   void capacityExhaustionReturnsBusyBeforeProviderAndCancelReleasesPermit() throws Exception {
@@ -162,6 +164,7 @@ class PlatformModelGatewayTest {
         new ProviderRequest(
             PROVIDER_REQUEST.model(),
             PROVIDER_REQUEST.variant(),
+            1024,
             PROVIDER_REQUEST.messages(),
             PROVIDER_REQUEST.tools(),
             ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-effective-key"));
@@ -1027,11 +1030,11 @@ class PlatformModelGatewayTest {
   }
 
   private static ProviderRequest providerRequest() {
-    ModelVariant variant =
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
+    ModelVariant variant = new ModelVariant("default");
     ModelDescriptor descriptor =
         new ModelDescriptor(
             "provider",
+            "frozen-model",
             "frozen-model",
             Set.of(ModelInputModality.TEXT),
             true,
@@ -1049,7 +1052,7 @@ class PlatformModelGatewayTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO));
     return new ProviderRequest(
-        descriptor, variant, List.of(), List.of(), ProviderCacheControl.none());
+        descriptor, variant, 1024, List.of(), List.of(), ProviderCacheControl.none());
   }
 
   private static ProviderResponse response() {
@@ -1175,7 +1178,8 @@ class PlatformModelGatewayTest {
     }
 
     @Override
-    public ResolvedExecution resolve(ProviderType frozenType, ProviderRequest request) {
+    public ResolvedExecution resolve(
+        ProviderType frozenType, UUID frozenConnectionGenerationId, ProviderRequest request) {
       resolveCount.incrementAndGet();
       if (resolveFailure != null) {
         throw resolveFailure;

@@ -61,7 +61,7 @@ final class GeminiModelProvider implements ModelProvider {
     URI streamUri;
     try {
       streamUri =
-          GeminiEndpoints.resolveStreamUri(descriptor.endpoint(), request.model().modelName());
+          GeminiEndpoints.resolveStreamUri(descriptor.endpoint(), request.model().modelId());
     } catch (IllegalArgumentException ex) {
       bridge.emitError(
           new ProviderException(

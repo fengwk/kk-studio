@@ -19,7 +19,7 @@ import java.util.List;
 public interface AgentModelMapper extends BaseMapper {
 
   String COLUMNS =
-      "provider_name, name, description, config, version, "
+      "provider_name, name, model_id, description, config, version, "
           + "created_at as create_time, updated_at as update_time";
 
   @Select("select count(*) from agent_model")
@@ -35,6 +35,7 @@ public interface AgentModelMapper extends BaseMapper {
       value = {
         @Result(column = "provider_name", property = "providerName"),
         @Result(column = "name", property = "name"),
+        @Result(column = "model_id", property = "modelId"),
         @Result(column = "description", property = "description"),
         @Result(column = "config", property = "configJson"),
         @Result(column = "version", property = "version"),
@@ -63,10 +64,10 @@ public interface AgentModelMapper extends BaseMapper {
   @Insert(
       """
       insert into agent_model (
-          provider_name, name, description, config,
+          provider_name, name, model_id, description, config,
           created_at, updated_at, version
       ) values (
-          #{providerName}, #{name}, #{description}, cast(#{configJson} as jsonb),
+          #{providerName}, #{name}, #{modelId}, #{description}, cast(#{configJson} as jsonb),
           current_timestamp, current_timestamp, 0
       )
       """)
@@ -75,7 +76,8 @@ public interface AgentModelMapper extends BaseMapper {
   @Update(
       """
       update agent_model
-      set description = #{model.description}, config = cast(#{model.configJson} as jsonb),
+      set model_id = #{model.modelId}, description = #{model.description},
+          config = cast(#{model.configJson} as jsonb),
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where provider_name = #{model.providerName} and name = #{model.name}
         and version = #{expectedVersion}

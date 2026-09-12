@@ -27,7 +27,7 @@ export function baseModelConfig(overrides = {}) {
     },
     pricing: basePricing(),
     defaultVariant: 'default',
-    variants: [{ id: 'default', temperature: 0.2 }],
+    variants: [{ id: 'default' }],
     ...overrides,
   }
 }
@@ -60,28 +60,46 @@ export function modelConfigMatrix() {
           variants: [
             { id: 'off' },
             { id: 'low', reasoningEffort: 'low' },
-            { id: 'medium', reasoningEffort: 'medium', temperature: 0.1 },
-            { id: 'high', reasoningEffort: 'high', maxOutputTokens: 256 },
+            { id: 'medium', reasoningEffort: 'medium' },
+            { id: 'high', reasoningEffort: 'high' },
           ],
         }),
     },
     {
-      id: 'valid.sampling_fields',
+      id: 'valid.explicit_off_variant',
       ok: true,
-      title: '采样字段齐全',
+      title: '显式 off variant',
       build: () =>
         baseModelConfig({
+          abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },
+          defaultVariant: 'off',
           variants: [
-            {
-              id: 'default',
-              temperature: 0.7,
-              topP: 0.9,
-              topK: 40,
-              frequencyPenalty: 0.1,
-              presencePenalty: 0.2,
-              maxOutputTokens: 128,
-            },
+            { id: 'off', reasoningEffort: 'off' },
+            { id: 'high', reasoningEffort: 'high' },
           ],
+        }),
+    },
+    {
+      id: 'valid.null_effort_uses_protocol_default',
+      ok: true,
+      title: 'reasoning + 未声明 effort（协议默认）',
+      build: () =>
+        baseModelConfig({
+          abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },
+          defaultVariant: 'default',
+          variants: [{ id: 'default' }, { id: 'high', reasoningEffort: 'high' }],
+        }),
+    },
+    {
+      id: 'invalid.effort_without_reasoning_ability',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /reasoningEffort.*reasoning|reasoning.*false/i,
+      title: 'reasoning=false 但 variant 仍声明 effort',
+      build: () =>
+        baseModelConfig({
+          abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+          variants: [{ id: 'default', reasoningEffort: 'high' }],
         }),
     },
     {
@@ -145,7 +163,7 @@ export function modelConfigMatrix() {
         baseModelConfig({
           variants: [
             { id: 'default' },
-            { id: 'default', temperature: 0.5 },
+            { id: 'default', reasoningEffort: 'high' },
           ],
         }),
     },
@@ -170,14 +188,25 @@ export function modelConfigMatrix() {
         }),
     },
     {
-      id: 'invalid.negative_temperature',
+      id: 'invalid.unknown_variant_field',
       ok: false,
       expectStatus: 400,
-      messageIncludes: /temperature|variant|range|invalid/i,
-      title: 'temperature 越界',
+      messageIncludes: /Failed to read request|Bad Request|unknown/i,
+      title: '已删除的 variant 字段被拒绝',
       build: () =>
         baseModelConfig({
-          variants: [{ id: 'default', temperature: -1 }],
+          variants: [{ id: 'default', temperature: 0.5 }],
+        }),
+    },
+    {
+      id: 'invalid.unknown_reasoning_effort',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /reasoningEffort|variant/i,
+      title: 'reasoningEffort 非法取值',
+      build: () =>
+        baseModelConfig({
+          variants: [{ id: 'default', reasoningEffort: 'extreme' }],
         }),
     },
   ]

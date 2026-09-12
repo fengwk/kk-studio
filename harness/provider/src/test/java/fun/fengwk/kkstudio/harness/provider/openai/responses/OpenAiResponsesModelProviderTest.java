@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.math.BigDecimal;
@@ -163,13 +164,20 @@ class OpenAiResponsesModelProviderTest {
             BigDecimal.ZERO,
             BigDecimal.ONE);
     return new ModelDescriptor(
-        "openai_test", "gpt-5.4-mini", Set.of(ModelInputModality.TEXT), true, true, pricing);
+        "openai_test",
+        "gpt-5.4-mini",
+        "gpt-5.4-mini",
+        Set.of(ModelInputModality.TEXT),
+        true,
+        true,
+        pricing);
   }
 
   private ProviderRequest createRequest() {
     return new ProviderRequest(
         createModel(),
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
+        new ModelVariant("default"),
+        1024,
         List.of(
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
         List.of(),
@@ -351,23 +359,24 @@ class OpenAiResponsesModelProviderTest {
     assertThrows(NullPointerException.class, () -> provider.stream(createRequest(), null));
   }
 
-  /** 验证请求编码失败（如包含不受支持的 topK 参数）时，错误安全路由至 handler.onError 而不抛出未捕获异常。 */
+  /** 验证请求编码失败（如工具 schema 非法）时，错误安全路由至 handler.onError 而不抛出未捕获异常。 */
   @Test
   void test_encoderFailureRoutedToHandler() {
     OpenAiResponsesProviderAdapter adapter =
         new OpenAiResponsesProviderAdapter(stubTransport((req, cb) -> {}), "key");
     ModelProvider provider = adapter.create(createDescriptor());
 
-    ModelVariant invalidVariant =
-        new ModelVariant("invalid-variant", null, null, null, 40, null, null, List.of(), null);
+    ModelVariant invalidVariant = new ModelVariant("invalid-variant");
+    ProviderToolDefinition invalidTool = new ProviderToolDefinition("badTool", "desc", "not-json");
     ProviderRequest invalidRequest =
         new ProviderRequest(
             createModel(),
             invalidVariant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
-            List.of(),
+            List.of(invalidTool),
             ProviderCacheControl.none());
 
     RecordingHandler handler = new RecordingHandler();

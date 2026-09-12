@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
@@ -158,11 +159,13 @@ class AnthropicModelProviderIntegrationTest {
             new ModelDescriptor(
                 "anthropic-e2e",
                 "claude-3-5-sonnet",
+                "claude-3-5-sonnet",
                 Set.of(ModelInputModality.TEXT),
                 true,
                 false,
                 pricing()),
-            new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
+            new ModelVariant("default"),
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -238,11 +241,13 @@ class AnthropicModelProviderIntegrationTest {
             new ModelDescriptor(
                 "anthropic-auth-err",
                 "claude-3-5-sonnet",
+                "claude-3-5-sonnet",
                 Set.of(ModelInputModality.TEXT),
                 true,
                 false,
                 pricing()),
-            new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
+            new ModelVariant("default"),
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -323,11 +328,13 @@ class AnthropicModelProviderIntegrationTest {
             new ModelDescriptor(
                 "anthropic-cancel",
                 "claude-3-5-sonnet",
+                "claude-3-5-sonnet",
                 Set.of(ModelInputModality.TEXT),
                 true,
                 false,
                 pricing()),
-            new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
+            new ModelVariant("default"),
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -375,23 +382,26 @@ class AnthropicModelProviderIntegrationTest {
     assertEquals(descriptor, modelProvider.descriptor());
     assertTrue(modelProvider.toString().contains("AnthropicModelProvider"));
 
-    // 传入非法 variant (包含 frequencyPenalty) 触发 encode 阶段失败
-    ModelVariant badVariant =
-        new ModelVariant("bad", null, null, null, null, 0.5, null, List.of(), null);
+    // 传入非法工具 schema 触发 encode 阶段失败
+    ModelVariant badVariant = new ModelVariant("bad");
+    ProviderToolDefinition invalidTool =
+        new ProviderToolDefinition("bad_tool", "desc", "{invalid_json");
     ProviderRequest request =
         new ProviderRequest(
             new ModelDescriptor(
                 "anthropic-err",
+                "claude-3-5-sonnet",
                 "claude-3-5-sonnet",
                 Set.of(ModelInputModality.TEXT),
                 true,
                 false,
                 pricing()),
             badVariant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
-            List.of(),
+            List.of(invalidTool),
             ProviderCacheControl.none());
 
     AtomicReference<ProviderException> caughtError = new AtomicReference<>();
@@ -447,11 +457,13 @@ class AnthropicModelProviderIntegrationTest {
             new ModelDescriptor(
                 "anthropic-malformed",
                 "claude-3-5-sonnet",
+                "claude-3-5-sonnet",
                 Set.of(ModelInputModality.TEXT),
                 true,
                 false,
                 pricing()),
-            new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
+            new ModelVariant("default"),
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),

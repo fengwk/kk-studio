@@ -47,8 +47,7 @@ import java.util.UUID;
 class OpenAiResponsesDurableReplayTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
-  private static final ModelVariant DEFAULT_VARIANT =
-      new ModelVariant("default", 1024, null, null, null, null, null, List.of(), "medium");
+  private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default", "medium");
   private static final ProviderToolDefinition TOOL =
       new ProviderToolDefinition(
           "query",
@@ -83,9 +82,15 @@ class OpenAiResponsesDurableReplayTest {
             BigDecimal.ONE);
     ModelDescriptor model =
         new ModelDescriptor(
-            "openai_test", "gpt-5.4-mini", Set.of(ModelInputModality.TEXT), true, true, pricing);
+            "openai_test",
+            "gpt-5.4-mini",
+            "gpt-5.4-mini",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            pricing);
     return new ProviderRequest(
-        model, DEFAULT_VARIANT, messages, List.of(TOOL), ProviderCacheControl.none());
+        model, DEFAULT_VARIANT, 1024, messages, List.of(TOOL), ProviderCacheControl.none());
   }
 
   /**

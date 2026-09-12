@@ -90,12 +90,18 @@ class GeminiThinkingTest {
 
     ModelDescriptor model =
         new ModelDescriptor(
-            "google-test", "gemini-2.5-pro", Set.of(ModelInputModality.TEXT), true, true, pricing);
+            "google-test",
+            "gemini-2.5-pro",
+            "gemini-2.5-pro",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            pricing);
 
-    ModelVariant variant =
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
+    ModelVariant variant = new ModelVariant("default");
     request =
-        new ProviderRequest(model, variant, List.of(), List.of(), ProviderCacheControl.none());
+        new ProviderRequest(
+            model, variant, 1024, List.of(), List.of(), ProviderCacheControl.none());
 
     emittedEvents = new ArrayList<>();
     bridge = new GeminiStreamBridge(handler);
@@ -244,12 +250,12 @@ class GeminiThinkingTest {
   void preservesThoughtSignatureInReplayAcrossTurns() throws Exception {
     GeminiRequestEncoder encoder = new GeminiRequestEncoder();
 
-    ModelVariant variant =
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
+    ModelVariant variant = new ModelVariant("default");
     ProviderRequest req1 =
         new ProviderRequest(
             request.model(),
             variant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Round 1")))),
@@ -282,6 +288,7 @@ class GeminiThinkingTest {
         new ProviderRequest(
             request.model(),
             variant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Round 1"))),

@@ -344,7 +344,7 @@ final class AnthropicStreamAccumulator {
       replayState =
           new ProviderReplayState(
               ProviderReplayFormat.ANTHROPIC_MESSAGES,
-              descriptor.affinity(request.model().modelName()),
+              descriptor.affinity(request.model().modelId()),
               frozenSourcePrefixHash,
               payload);
     }

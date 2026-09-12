@@ -58,6 +58,7 @@ registerCase({
       .map((model) => ({
         provider: model.providerName,
         name: model.name,
+        modelId: model.modelId,
         description: model.description,
         config: model.config,
       }))
@@ -80,7 +81,7 @@ registerCase({
     for (const model of models) {
       assertExactFields(
         model,
-        ['providerName', 'name', 'description', 'config', 'version', 'createTime', 'updateTime'],
+        ['providerName', 'name', 'modelId', 'description', 'config', 'version', 'createTime', 'updateTime'],
         'AgentModelDTO',
       )
       assert(model.providerName && model.name, JSON.stringify(model))
@@ -1660,7 +1661,7 @@ registerCase({
     assert(model?.providerName && model?.name && model?.config?.defaultVariant, JSON.stringify(model))
     assertExactFields(
       model,
-      ['providerName', 'name', 'description', 'config', 'version', 'createTime', 'updateTime'],
+      ['providerName', 'name', 'modelId', 'description', 'config', 'version', 'createTime', 'updateTime'],
       'AgentModelDTO',
     )
   },

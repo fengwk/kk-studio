@@ -12,13 +12,6 @@ export function newVariantDraft(input?: Partial<Omit<VariantDraft, 'draftId'>>):
     draftId: nextDraftId('variant'),
     id: input?.id ?? 'medium',
     reasoningEffort: input?.reasoningEffort ?? '',
-    maxOutputTokens: input?.maxOutputTokens ?? '',
-    temperature: input?.temperature ?? '',
-    topP: input?.topP ?? '',
-    topK: input?.topK ?? '',
-    frequencyPenalty: input?.frequencyPenalty ?? '',
-    presencePenalty: input?.presencePenalty ?? '',
-    stopSequences: input?.stopSequences ?? '',
   }
 }
 
@@ -40,11 +33,4 @@ export function numberToNull(value: string | number | null | undefined): number 
   }
   const parsed = Number(trimmed)
   return Number.isFinite(parsed) ? parsed : null
-}
-
-export function splitCommaSeparatedValues(value: string): string[] {
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
 }

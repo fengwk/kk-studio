@@ -297,6 +297,7 @@ registerCase({
           await ctx.call('POST', '/api/ai/catalog/models', {
             providerName: provider.name,
             name: `e2e-model-image-${suffix}`,
+            modelId: `wire-image-${suffix}`,
             description: 'Local image-capable Responses model.',
             config: baseModelConfig({
               limit: { context: 4096, output: 128 },
@@ -305,7 +306,7 @@ registerCase({
                 reasoning: false,
                 inputModalities: ['TEXT', 'IMAGE'],
               },
-              variants: [{ id: 'default', temperature: 0 }],
+              variants: [{ id: 'default' }],
             }),
           })
         ).json,

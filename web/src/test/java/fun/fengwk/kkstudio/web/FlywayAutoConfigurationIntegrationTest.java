@@ -61,15 +61,31 @@ class FlywayAutoConfigurationIntegrationTest {
       try (ResultSet history =
           st.executeQuery(
               "select count(*) from flyway_schema_history"
-                  + " where success = true and (version = '1' or (version is null and description = 'dev seed'))")) {
+                  + " where success = true and ((version in ('1', '2'))"
+                  + " or (version is null and description = 'dev seed'))")) {
         assertTrue(history.next());
-        assertEquals(2L, history.getLong(1), "baseline and dev seed must be recorded");
+        assertEquals(
+            3L,
+            history.getLong(1),
+            "baseline, model identity migration and dev seed must be recorded");
       }
-      try (ResultSet noV2Plus =
+      try (ResultSet v2PlusShape =
           st.executeQuery(
-              "select count(*) from flyway_schema_history where version is not null and version != '1'")) {
-        assertTrue(noV2Plus.next());
-        assertEquals(0L, noV2Plus.getLong(1), "no versioned migration beyond V1 must exist");
+              "select count(*) from flyway_schema_history where version is not null and version not in ('1', '2')")) {
+        assertTrue(v2PlusShape.next());
+        assertEquals(
+            0L,
+            v2PlusShape.getLong(1),
+            "only V1 baseline and V2 model identity migration are known");
+      }
+      try (ResultSet modelIdColumn =
+          st.executeQuery(
+              "select count(*) from information_schema.columns"
+                  + " where table_schema = 'public'"
+                  + " and table_name = 'agent_model'"
+                  + " and column_name = 'model_id' and is_nullable = 'NO'")) {
+        assertTrue(modelIdColumn.next());
+        assertEquals(1L, modelIdColumn.getLong(1), "V2 must add the required model_id column");
       }
       try (ResultSet seed =
           st.executeQuery(

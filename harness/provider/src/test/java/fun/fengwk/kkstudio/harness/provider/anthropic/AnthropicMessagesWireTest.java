@@ -73,7 +73,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * Anthropic Messages 协议与流式传输线缆级（wire）行为综合验证套件。
  *
  * <p>本测试覆盖上游 LangChain4j 1.20.0 规范中针对 Anthropic Messages HTTP/SSE 线缆契约、
- * 消息结构编排、模型标识透传、采样与推理参数、多模态媒体、工具往返交互、提示缓存断点、 流式生命周期状态机与回调异常防护等所有可表达的原生协议行为。
+ * 消息结构编排、模型标识与输出预算透传、推理参数、多模态媒体、工具往返交互、提示缓存断点、 流式生命周期状态机与回调异常防护等所有可表达的原生协议行为。
  */
 class AnthropicMessagesWireTest {
 
@@ -316,12 +316,12 @@ class AnthropicMessagesWireTest {
     AnthropicModelProvider provider = (AnthropicModelProvider) budgetAdapter.create(descriptor);
 
     ModelDescriptor reasoningModel = createReasoningModelDescriptor("MiniMax-M3");
-    ModelVariant variant =
-        new ModelVariant("budget-v", 8192, null, null, null, null, null, List.of(), "low");
+    ModelVariant variant = new ModelVariant("budget-v", "low");
     ProviderRequest request =
         new ProviderRequest(
             reasoningModel,
             variant,
+            4096,
             List.of(userTextMsg("test")),
             List.of(),
             ProviderCacheControl.none());
@@ -365,12 +365,12 @@ class AnthropicMessagesWireTest {
     AnthropicModelProvider provider = (AnthropicModelProvider) adapter.create(descriptor);
 
     ModelDescriptor reasoningModel = createReasoningModelDescriptor("claude-3-7-sonnet");
-    ModelVariant variant =
-        new ModelVariant("adaptive-v", 8192, null, null, null, null, null, List.of(), "low");
+    ModelVariant variant = new ModelVariant("adaptive-v", "low");
     ProviderRequest request =
         new ProviderRequest(
             reasoningModel,
             variant,
+            1024,
             List.of(userTextMsg("test")),
             List.of(),
             ProviderCacheControl.none());
@@ -391,7 +391,10 @@ class AnthropicMessagesWireTest {
     assertEquals("low", bodyJson.path("output_config").path("effort").asText());
   }
 
-  /** 验证即使配置为 BUDGET 模式，当推理未实际启用（reasoningEffort 为 none）时，线缆请求不发送 anthropic-beta。 */
+  /**
+   * 验证即使配置为 BUDGET 模式，当推理显式关闭（reasoningEffort 为 off）时，线缆请求不发送 anthropic-beta 且发送
+   * thinking:{type:"disabled"}。
+   */
   @Test
   void should_not_send_anthropic_beta_header_when_budget_mode_but_reasoning_disabled()
       throws Exception {
@@ -413,12 +416,12 @@ class AnthropicMessagesWireTest {
     AnthropicModelProvider provider = (AnthropicModelProvider) budgetAdapter.create(descriptor);
 
     ModelDescriptor reasoningModel = createReasoningModelDescriptor("MiniMax-M3");
-    ModelVariant variantNone =
-        new ModelVariant("none-v", 8192, null, null, null, null, null, List.of(), "none");
+    ModelVariant variantNone = new ModelVariant("none-v", "off");
     ProviderRequest request =
         new ProviderRequest(
             reasoningModel,
             variantNone,
+            1024,
             List.of(userTextMsg("test")),
             List.of(),
             ProviderCacheControl.none());
@@ -431,11 +434,14 @@ class AnthropicMessagesWireTest {
     assertNotNull(req);
     assertNull(
         req.firstHeader("anthropic-beta"),
-        "BUDGET mode with reasoningEffort=none must omit anthropic-beta header");
+        "BUDGET mode with reasoningEffort=off must omit anthropic-beta header");
 
     JsonNode bodyJson = mapper.readTree(req.bodyBytes);
-    assertFalse(bodyJson.has("thinking"), "reasoningEffort=none must omit thinking object");
-    assertFalse(bodyJson.has("output_config"), "reasoningEffort=none must omit output_config");
+    assertEquals(
+        "disabled",
+        bodyJson.path("thinking").path("type").asText(),
+        "reasoningEffort=off must send thinking type disabled");
+    assertFalse(bodyJson.has("output_config"), "reasoningEffort=off must omit output_config");
   }
 
   // ==========================================
@@ -515,68 +521,26 @@ class AnthropicMessagesWireTest {
   }
 
   // ==========================================
-  // Group 3: Sampling Parameters & Stop Sequences
+  // Group 3: Output Budget & Protocol Defaults
   // ==========================================
 
-  /** 验证 max_tokens、temperature、top_p、top_k 及有序 stop_sequences 同时配置时正确序列化。 */
+  /** 验证请求 outputTokens 正确映射至原生 max_tokens 字段。 */
   @Test
-  void all_parameters() throws Exception {
-    ModelVariant variant =
-        new ModelVariant(
-            "custom-sampling", 2048, 0.7, 0.9, 40, null, null, List.of("STOP_A", "STOP_B"), null);
+  void encodesRequestOutputBudget() throws Exception {
+    ModelVariant variant = new ModelVariant("output-budget");
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
-        createRequest("claude-3-5-sonnet", variant, List.of(userTextMsg("hi")), null, null);
+        createRequest("claude-3-5-sonnet", variant, 2048, List.of(userTextMsg("hi")), null, null);
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
 
     assertEquals(2048, root.path("max_tokens").asInt());
-    assertEquals(0.7, root.path("temperature").asDouble(), 0.001);
-    assertEquals(0.9, root.path("top_p").asDouble(), 0.001);
-    assertEquals(40, root.path("top_k").asInt());
-    assertEquals(2, root.path("stop_sequences").size());
-    assertEquals("STOP_A", root.path("stop_sequences").get(0).asText());
-    assertEquals("STOP_B", root.path("stop_sequences").get(1).asText());
   }
 
-  /** 验证 stop_sequences 数组严格保持调用方指定的顺序。 */
+  /** 验证原生请求没有 stop-sequence 覆盖时省略 stop_sequences 字段。 */
   @Test
-  void should_respect_stop_sequences() throws Exception {
-    ModelVariant variant =
-        new ModelVariant(
-            "stops", null, null, null, null, null, null, List.of("FIRST", "SECOND", "THIRD"), null);
-    ProviderDescriptor descriptor = createDescriptor(null);
-    ProviderRequest request =
-        createRequest("claude-3-5-sonnet", variant, List.of(userTextMsg("hi")), null, null);
-
-    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
-    JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
-
-    JsonNode stops = root.path("stop_sequences");
-    assertEquals(3, stops.size());
-    assertEquals("FIRST", stops.get(0).asText());
-    assertEquals("SECOND", stops.get(1).asText());
-    assertEquals("THIRD", stops.get(2).asText());
-  }
-
-  /** 验证请求中设置的 stop_sequences 被传递到线缆。 */
-  @Test
-  void should_respect_stopSequences_in_chat_request() throws Exception {
-    ModelVariant variant =
-        new ModelVariant("v", null, null, null, null, null, null, List.of("END"), null);
-    ProviderDescriptor descriptor = createDescriptor(null);
-    ProviderRequest request =
-        createRequest("claude-3-5-sonnet", variant, List.of(userTextMsg("hi")), null, null);
-
-    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
-    JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
-    assertEquals("END", root.path("stop_sequences").get(0).asText());
-  }
-
-  /** 验证当 ModelVariant 未指定 stop_sequences 时线缆请求体省略 stop_sequences 字段。 */
-  @Test
-  void should_omit_stop_sequences_when_variant_has_none() throws Exception {
+  void omitsStopSequencesWithoutNativeOverride() throws Exception {
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("hi")), null, null);
@@ -586,23 +550,22 @@ class AnthropicMessagesWireTest {
     assertFalse(root.has("stop_sequences"), "stop_sequences field must be omitted when empty");
   }
 
-  /** 验证请求中的 maxOutputTokens 能够覆盖默认值并写入 max_tokens。 */
+  /** 验证请求中的 outputTokens 能够写入原生 max_tokens。 */
   @Test
   void should_respect_maxOutputTokens_in_chat_request() throws Exception {
-    ModelVariant variant =
-        new ModelVariant("v", 4096, null, null, null, null, null, List.of(), null);
+    ModelVariant variant = new ModelVariant("v");
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
-        createRequest("claude-3-5-sonnet", variant, List.of(userTextMsg("hi")), null, null);
+        createRequest("claude-3-5-sonnet", variant, 4096, List.of(userTextMsg("hi")), null, null);
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
     assertEquals(4096, root.path("max_tokens").asInt());
   }
 
-  /** 验证当 ModelVariant 未提供 maxOutputTokens 时原生线缆默认使用 1024。 */
+  /** 验证测试构造器提供的默认请求 outputTokens 原样写入原生线缆。 */
   @Test
-  void should_default_max_tokens_to_1024_when_variant_has_none() throws Exception {
+  void should_encode_default_request_output_tokens() throws Exception {
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("hi")), null, null);
@@ -612,9 +575,9 @@ class AnthropicMessagesWireTest {
     assertEquals(1024, root.path("max_tokens").asInt(), "default max_tokens must be 1024");
   }
 
-  /** 验证当可选的 ModelVariant 采样参数缺省时，线缆请求体中省略对应字段。 */
+  /** 验证没有可选覆盖项时请求仍可编码，并保持原生协议默认。 */
   @Test
-  void should_use_native_wire_defaults_when_optional_variant_fields_absent() throws Exception {
+  void encodesRequestWithoutOptionalOverrides() throws Exception {
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("hi")), null, null);
@@ -627,43 +590,22 @@ class AnthropicMessagesWireTest {
     assertFalse(root.has("stop_sequences"));
   }
 
-  /** 验证生效的 ModelVariant 采样与停止参数完整正确序列化至线缆请求负载。 */
+  /** 验证生效的请求 outputTokens 正确序列化至线缆请求负载中的 max_tokens。 */
   @Test
-  void should_encode_effective_variant_parameters() throws Exception {
-    ModelVariant variant =
-        new ModelVariant("override", 512, 0.2, 0.5, 20, null, null, List.of("DONE"), null);
+  void should_encode_effective_request_parameters() throws Exception {
+    ModelVariant variant = new ModelVariant("override");
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
-        createRequest("claude-3-5-sonnet", variant, List.of(userTextMsg("hi")), null, null);
+        createRequest("claude-3-5-sonnet", variant, 512, List.of(userTextMsg("hi")), null, null);
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
 
     assertEquals(512, root.path("max_tokens").asInt());
-    assertEquals(0.2, root.path("temperature").asDouble(), 0.001);
-    assertEquals(0.5, root.path("top_p").asDouble(), 0.001);
-    assertEquals(20, root.path("top_k").asInt());
-    assertEquals("DONE", root.path("stop_sequences").get(0).asText());
-  }
-
-  /** 验证当设置了 Anthropic 不支持的 frequencyPenalty 或 presencePenalty 时抛出 INVALID_REQUEST 异常。 */
-  @Test
-  void should_reject_unsupported_penalty_parameters() {
-    ModelVariant variantWithFrequencyPenalty =
-        new ModelVariant("penalty", null, null, null, null, 1.0, null, List.of(), null);
-    ProviderDescriptor descriptor = createDescriptor(null);
-    ProviderRequest request =
-        createRequest(
-            "claude-3-5-sonnet",
-            variantWithFrequencyPenalty,
-            List.of(userTextMsg("hi")),
-            null,
-            null);
-
-    ProviderException ex =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
-    assertTrue(ex.getMessage().contains("frequencyPenalty or presencePenalty"));
+    assertFalse(root.has("temperature"));
+    assertFalse(root.has("top_p"));
+    assertFalse(root.has("top_k"));
+    assertFalse(root.has("stop_sequences"));
   }
 
   /**
@@ -676,17 +618,18 @@ class AnthropicMessagesWireTest {
         new ModelDescriptor(
             "anthropic-reasoning",
             "claude-3-7-sonnet",
+            "claude-3-7-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
             true,
             defaultPricing());
-    ModelVariant variant =
-        new ModelVariant("reasoning-v", 4096, null, null, null, null, null, List.of(), "low");
+    ModelVariant variant = new ModelVariant("reasoning-v", "low");
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         new ProviderRequest(
             reasoningModel,
             variant,
+            1024,
             List.of(userTextMsg("solve this")),
             List.of(),
             ProviderCacheControl.none());
@@ -700,25 +643,22 @@ class AnthropicMessagesWireTest {
     assertFalse(encoded.requiresInterleavedThinkingBeta());
   }
 
-  /** 验证通用请求参数在 ModelVariant 中配置后能正常透传至线缆。 */
+  /** 验证通用请求参数中的 outputTokens 能够正常透传至线缆。 */
   @Test
   void should_respect_common_parameters_wrapped_in_integration_specific_class_in_chat_request()
       throws Exception {
-    ModelVariant variant =
-        new ModelVariant("common", 1500, 0.4, 0.8, null, null, null, List.of(), null);
+    ModelVariant variant = new ModelVariant("common");
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
-        createRequest("claude-3-5-sonnet", variant, List.of(userTextMsg("hi")), null, null);
+        createRequest("claude-3-5-sonnet", variant, 1500, List.of(userTextMsg("hi")), null, null);
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
 
     assertEquals(1500, root.path("max_tokens").asInt());
-    assertEquals(0.4, root.path("temperature").asDouble(), 0.001);
-    assertEquals(0.8, root.path("top_p").asDouble(), 0.001);
   }
 
-  /** 验证通用变体字段缺省时原生线缆默认填充基础必要字段。 */
+  /** 验证默认变体仍使用请求级输出预算填充原生必需字段。 */
   @Test
   void should_use_native_defaults_when_common_variant_fields_absent() throws Exception {
     ProviderDescriptor descriptor = createDescriptor(null);
@@ -1907,6 +1847,7 @@ class AnthropicMessagesWireTest {
     return new ModelDescriptor(
         "anthropic-wire-test",
         modelName,
+        modelName,
         Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
         true,
         false,
@@ -1916,6 +1857,7 @@ class AnthropicMessagesWireTest {
   private ModelDescriptor createReasoningModelDescriptor(String modelName) {
     return new ModelDescriptor(
         "anthropic-wire-test",
+        modelName,
         modelName,
         Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
         true,
@@ -1929,11 +1871,20 @@ class AnthropicMessagesWireTest {
       List<ProviderMessage> messages,
       List<ProviderToolDefinition> tools,
       ProviderCacheControl cacheControl) {
+    return createRequest(modelName, variant, 1024, messages, tools, cacheControl);
+  }
+
+  private ProviderRequest createRequest(
+      String modelName,
+      ModelVariant variant,
+      int outputTokens,
+      List<ProviderMessage> messages,
+      List<ProviderToolDefinition> tools,
+      ProviderCacheControl cacheControl) {
     return new ProviderRequest(
         createModelDescriptor(modelName),
-        variant != null
-            ? variant
-            : new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
+        variant != null ? variant : new ModelVariant("default"),
+        outputTokens,
         messages,
         tools != null ? tools : List.of(),
         cacheControl != null ? cacheControl : ProviderCacheControl.none());

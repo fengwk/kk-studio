@@ -81,14 +81,12 @@ final class OpenAiResponsesRequestEncoder {
     Objects.requireNonNull(descriptor, "descriptor");
     Objects.requireNonNull(config, "config");
 
-    validatePenalties(request.variant());
-
     ObjectNode root = NODES.objectNode();
-    root.put("model", request.model().modelName());
+    root.put("model", request.model().modelId());
     root.put("stream", true);
     root.put("store", false);
 
-    applySamplingParameters(root, request.variant());
+    applyOutputBudget(root, request.outputTokens());
     applyReasoningParameters(root, request.variant());
 
     ArrayNode toolsArray = encodeTools(request.tools());
@@ -133,64 +131,29 @@ final class OpenAiResponsesRequestEncoder {
     return new OpenAiResponsesEncodedRequest(utf8Bytes, sourcePrefixHash);
   }
 
-  private static void validatePenalties(ModelVariant variant) {
-    if (variant == null) {
-      return;
-    }
-    if (variant.frequencyPenalty() != null) {
+  /** 输出预算低于本 Provider 的协议下限 {@code 16} 时明确拒绝；合法预算原样编码，绝不擅自扩大冻结值。 */
+  private static void applyOutputBudget(ObjectNode root, int outputTokens) {
+    if (outputTokens < OPENAI_RESPONSES_MIN_OUTPUT_TOKENS) {
       throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "frequencyPenalty parameter is not supported by OpenAI Responses API");
+          ProviderErrorKind.INVALID_REQUEST, "max_output_tokens must be at least 16");
     }
-    if (variant.presencePenalty() != null) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "presencePenalty parameter is not supported by OpenAI Responses API");
-    }
-    if (variant.stopSequences() != null && !variant.stopSequences().isEmpty()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "stopSequences parameter is not supported by OpenAI Responses API");
-    }
-    if (variant.topK() != null) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "topK parameter is not supported by OpenAI Responses API");
-    }
+    root.put("max_output_tokens", outputTokens);
   }
 
-  private static void applySamplingParameters(ObjectNode root, ModelVariant variant) {
-    if (variant == null) {
-      return;
-    }
-    if (variant.temperature() != null) {
-      root.put("temperature", variant.temperature());
-    }
-    if (variant.topP() != null) {
-      root.put("top_p", variant.topP());
-    }
-    if (variant.maxOutputTokens() != null) {
-      root.put(
-          "max_output_tokens",
-          Math.max(variant.maxOutputTokens(), OPENAI_RESPONSES_MIN_OUTPUT_TOKENS));
-    }
-  }
-
+  /**
+   * reasoning effort 编码：{@code off} 映射为协议关闭值 {@code none}（仅发送 effort，不带 summary/encrypted content），
+   * {@code high/medium/low} 原样下发并请求摘要；null 不发送推理字段，由服务端默认决定。
+   */
   private static void applyReasoningParameters(ObjectNode root, ModelVariant variant) {
     if (variant == null || variant.reasoningEffort() == null) {
       return;
     }
-    String effort = variant.reasoningEffort();
-    if (effort.isBlank()) {
-      return;
-    }
-    if ("none".equals(effort.trim())) {
-      ObjectNode reasoning = root.putObject("reasoning");
+    ObjectNode reasoning = root.putObject("reasoning");
+    if (variant.reasoningOff()) {
       reasoning.put("effort", "none");
       return;
     }
-    ObjectNode reasoning = root.putObject("reasoning");
-    reasoning.put("effort", effort);
+    reasoning.put("effort", variant.reasoningEffort());
     reasoning.put("summary", "auto");
     ArrayNode include = root.putArray("include");
     include.add("reasoning.encrypted_content");
@@ -271,7 +234,7 @@ final class OpenAiResponsesRequestEncoder {
           String currentPrefixHash =
               OpenAiResponsesPrefixHasher.calculateHash(toolsArray, inputItems);
           if (canReplay(
-              replayState, descriptor, model.modelName(), currentPrefixHash, msg.contents())) {
+              replayState, descriptor, model.modelId(), currentPrefixHash, msg.contents())) {
             ArrayNode outputArray = extractOutputArray(replayState.payload());
             for (JsonNode item : outputArray) {
               inputItems.add(item.deepCopy());

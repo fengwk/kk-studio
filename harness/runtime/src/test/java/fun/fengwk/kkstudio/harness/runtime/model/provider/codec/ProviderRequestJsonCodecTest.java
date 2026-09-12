@@ -81,6 +81,8 @@ class ProviderRequestJsonCodecTest {
     assertEquals(encoded, codec.encode(decoded));
     assertEquals(request, codec.decodeNode(codec.encodeNode(request)));
     assertEquals("gpt-5-mini", canonicalNode().path("model").path("modelName").asText());
+    // catalog 逻辑名与上游 wire modelId 相互独立，两侧都必须被 canonical fixture 覆盖。
+    assertEquals("gpt-5-mini-2025-08-07", canonicalNode().path("model").path("modelId").asText());
     assertEquals(
         Set.of(
             ProviderTextBlock.class,
@@ -166,6 +168,7 @@ class ProviderRequestJsonCodecTest {
         new ProviderRequest(
             request.model(),
             request.variant(),
+            1024,
             request.messages(),
             List.of(invalidTool),
             request.cacheControl());
@@ -190,7 +193,19 @@ class ProviderRequestJsonCodecTest {
     assertStrictLayer(
         root -> variant(root).put("extra", true),
         root -> variant(root).remove("id"),
-        root -> variant(root).put("maxOutputTokens", "1024"));
+        root -> variant(root).put("reasoningEffort", 1));
+    // variant 只保留 id 与 reasoningEffort：已删除的采样/输出控制不得作为兼容字段被接受。
+    for (String removed :
+        List.of(
+            "maxOutputTokens",
+            "temperature",
+            "topP",
+            "topK",
+            "frequencyPenalty",
+            "presencePenalty",
+            "stopSequences")) {
+      assertRejected(root -> variant(root).put(removed, NODES.textNode("legacy")));
+    }
     assertStrictLayer(
         root -> pricing(root).put("extra", true),
         root -> pricing(root).remove("currency"),
@@ -254,12 +269,9 @@ class ProviderRequestJsonCodecTest {
         root ->
             model(root).set("providerName", NODES.numberNode(BigInteger.valueOf(Long.MAX_VALUE))));
     assertRejected(root -> ((ArrayNode) model(root).path("inputModalities")).removeAll());
-    assertRejected(root -> variant(root).put("temperature", Double.NaN));
-    assertRejected(root -> variant(root).put("temperature", "0.2"));
-    assertRejected(
-        root -> ((ArrayNode) variant(root).path("stopSequences")).set(0, NODES.numberNode(1)));
-    assertRejected(
-        root -> ((ArrayNode) variant(root).path("stopSequences")).set(0, NODES.textNode(" ")));
+    assertRejected(root -> variant(root).put("reasoningEffort", "extreme"));
+    assertRejected(root -> variant(root).put("reasoningEffort", 1));
+    assertRejected(root -> variant(root).put("reasoningEffort", " "));
     assertRejected(root -> pricing(root).put("serviceTierMultiplier", "bad"));
     assertRejected(root -> pricing(root).put("serviceTierMultiplier", "0"));
     assertRejected(root -> cacheControl(root).putNull("affinityKey"));
@@ -316,6 +328,7 @@ class ProviderRequestJsonCodecTest {
           new ProviderRequest(
               request.model(),
               request.variant(),
+              1024,
               List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(media))),
               request.tools(),
               request.cacheControl());
@@ -371,15 +384,13 @@ class ProviderRequestJsonCodecTest {
   }
 
   private static ProviderRequest canonicalRequest() {
-    ModelVariant defaultVariant =
-        new ModelVariant("default", null, 0.7, 0.9, null, null, null, List.of("STOP"), null);
-    ModelVariant selectedVariant =
-        new ModelVariant(
-            "balanced", 1024, 0.2, 0.8, 40, -0.1, 0.1, List.of("END", "STOP"), "medium");
+    ModelVariant defaultVariant = new ModelVariant("default");
+    ModelVariant selectedVariant = new ModelVariant("balanced", "medium");
     ModelDescriptor model =
         new ModelDescriptor(
             "openai",
             "gpt-5-mini",
+            "gpt-5-mini-2025-08-07",
             Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
             true,
             true,
@@ -388,6 +399,7 @@ class ProviderRequestJsonCodecTest {
     return new ProviderRequest(
         model,
         selectedVariant,
+        1024,
         List.of(
             new ProviderMessage(
                 ProviderMessageRole.SYSTEM,
@@ -444,7 +456,12 @@ class ProviderRequestJsonCodecTest {
   private static ProviderRequest requestWithCache(CacheCase cacheCase) {
     ProviderRequest source = canonicalRequest();
     return new ProviderRequest(
-        source.model(), source.variant(), source.messages(), source.tools(), cacheCase.control());
+        source.model(),
+        source.variant(),
+        1024,
+        source.messages(),
+        source.tools(),
+        cacheCase.control());
   }
 
   private static ObjectNode canonicalNode() {

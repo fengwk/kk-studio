@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.model;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 
 import java.math.BigDecimal;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 /** 模型描述、用量与成本公共契约测试。 */
@@ -30,28 +30,29 @@ class ModelContractTest {
         IllegalArgumentException.class,
         () ->
             new ModelDescriptor(
-                "", "model", Set.of(ModelInputModality.TEXT), true, false, pricing()));
+                "", "model", "model", Set.of(ModelInputModality.TEXT), true, false, pricing()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelDescriptor(
-                "provider", "", Set.of(ModelInputModality.TEXT), true, false, pricing()));
+                "provider", "", "", Set.of(ModelInputModality.TEXT), true, false, pricing()));
     assertThrows(
         NullPointerException.class,
-        () -> new ModelDescriptor("provider", "model", null, true, false, pricing()));
+        () -> new ModelDescriptor("provider", "model", "model", null, true, false, pricing()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelDescriptor("provider", "model", Set.of(), true, false, pricing()));
+        () -> new ModelDescriptor("provider", "model", "model", Set.of(), true, false, pricing()));
     assertThrows(
         NullPointerException.class,
         () ->
             new ModelDescriptor(
-                "provider", "model", Set.of(ModelInputModality.TEXT), true, false, null));
+                "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, false, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelDescriptor(
                 "\u2003provider",
+                "model",
                 "model",
                 Set.of(ModelInputModality.TEXT),
                 true,
@@ -63,6 +64,7 @@ class ModelContractTest {
             new ModelDescriptor(
                 "provider/alias",
                 "model",
+                "model",
                 Set.of(ModelInputModality.TEXT),
                 true,
                 false,
@@ -71,6 +73,7 @@ class ModelContractTest {
         () ->
             new ModelDescriptor(
                 "provider",
+                "model/with/slash",
                 "model/with/slash",
                 Set.of(ModelInputModality.TEXT),
                 true,
@@ -84,43 +87,32 @@ class ModelContractTest {
     Set<ModelInputModality> mutable = new HashSet<>();
     mutable.add(ModelInputModality.TEXT);
     ModelDescriptor descriptor =
-        new ModelDescriptor("provider", "model", mutable, true, false, pricing());
+        new ModelDescriptor("provider", "model", "model", mutable, true, false, pricing());
     mutable.add(ModelInputModality.IMAGE);
     assertEquals(Set.of(ModelInputModality.TEXT), descriptor.inputModalities());
   }
 
-  /** Variant 标识与数值必须可稳定下发；惩罚项允许厂商支持的负值，但拒绝非有限数。 */
+  /**
+   * Variant 只承载 id 与可空 reasoningEffort：id 必须无前后空白且非空；effort 仅接受 4 个规范值，大小写与空白被归一化； {@code off}
+   * 是显式关闭、{@code null} 是不声明，二者绝不互相静默映射。
+   */
   @Test
-  void enforcesVariantIdentityAndFiniteSamplingValues() {
-    ModelVariant variant =
-        new ModelVariant("default", null, 0.2, 0.9, null, -0.5, -1.0, List.of("END"), null);
-    assertEquals("default", variant.id());
-    assertEquals(-0.5, variant.frequencyPenalty());
-    assertEquals(-1.0, variant.presencePenalty());
+  void enforcesVariantIdentityAndReasoningEffort() {
+    assertEquals("default", new ModelVariant("default").id());
+    assertNull(new ModelVariant("default").reasoningEffort());
+    assertEquals("high", new ModelVariant("default", "high").reasoningEffort());
+    assertEquals("off", new ModelVariant("default", "off").reasoningEffort());
+    assertEquals("off", new ModelVariant("default", "  OFF ").reasoningEffort());
+    assertTrue(new ModelVariant("default", "off").reasoningOff());
+    assertFalse(new ModelVariant("default").reasoningOff());
+    assertFalse(new ModelVariant("default", "high").reasoningOff());
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ModelVariant(" default ", null, null, null, null, null, null, List.of(), null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelVariant("default", null, Double.NaN, null, null, null, null, List.of(), null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelVariant(
-                "default",
-                null,
-                null,
-                null,
-                null,
-                Double.POSITIVE_INFINITY,
-                null,
-                List.of(),
-                null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ModelVariant("default", null, null, null, null, null, null, List.of(" "), null));
+    assertThrows(IllegalArgumentException.class, () -> new ModelVariant(" default "));
+    assertThrows(IllegalArgumentException.class, () -> new ModelVariant(" "));
+    assertThrows(IllegalArgumentException.class, () -> new ModelVariant(null));
+    assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", "none"));
+    assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", "extreme"));
+    assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", " "));
   }
 
   /** 不同 Provider 用量类别必须分别按其适用单价计费。 */

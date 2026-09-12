@@ -355,8 +355,10 @@ class ResolvedRequestValidatorTest {
       ProviderCacheControl cacheControl) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         new ModelDescriptor(
             model.providerName(),
+            model.modelName(),
             model.modelName(),
             Set.of(ModelInputModality.TEXT),
             true,
@@ -373,7 +375,8 @@ class ResolvedRequestValidatorTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO)),
-        new ModelVariant(model.variant(), null, null, null, null, null, null, List.of(), null),
+        new ModelVariant(model.variant()),
+        1024,
         preamble,
         tools,
         skills,

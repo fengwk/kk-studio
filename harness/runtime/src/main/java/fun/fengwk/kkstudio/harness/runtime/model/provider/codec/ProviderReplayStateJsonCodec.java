@@ -38,7 +38,7 @@ public final class ProviderReplayStateJsonCodec {
   private static final Set<String> ROOT_FIELDS =
       orderedSet("format", "affinity", "sourcePrefixHash", "payload");
   private static final Set<String> AFFINITY_FIELDS =
-      orderedSet("providerType", "providerName", "connectionGenerationId", "modelName");
+      orderedSet("providerType", "providerName", "connectionGenerationId", "modelId");
 
   public String encode(ProviderReplayState state) {
     Objects.requireNonNull(state, "state");
@@ -85,7 +85,7 @@ public final class ProviderReplayStateJsonCodec {
     node.put("providerType", affinity.providerType().wireValue());
     node.put("providerName", affinity.providerName());
     node.put("connectionGenerationId", affinity.connectionGenerationId().toString());
-    node.put("modelName", affinity.modelName());
+    node.put("modelId", affinity.modelId());
     return node;
   }
 
@@ -106,10 +106,9 @@ public final class ProviderReplayStateJsonCodec {
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException("affinity.connectionGenerationId must be a valid UUID");
     }
-    String modelName = text(object, "modelName");
+    String modelId = text(object, "modelId");
 
-    return new ProviderReplayAffinity(
-        providerType, providerName, connectionGenerationId, modelName);
+    return new ProviderReplayAffinity(providerType, providerName, connectionGenerationId, modelId);
   }
 
   private static JsonNode parse(String json) {

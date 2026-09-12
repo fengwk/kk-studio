@@ -28,6 +28,7 @@ describe('ai-resource-editor-submit-plans', () => {
           ...emptyModelDraft({ name: 'unrelated-provider' }),
           providerName: 'unrelated-provider',
           name: 'unrelated-model',
+          modelId: 'unrelated-wire-model',
         },
       },
     )

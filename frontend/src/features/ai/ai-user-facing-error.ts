@@ -18,10 +18,7 @@ export function toUserFacingErrorMessage(error: unknown): string {
     { match: /contextWindow|limit\.context/i, key: 'ai.catalog.validation.contextWindow' },
     { match: /maxOutputTokens|limit\.output/i, key: 'ai.catalog.validation.maxOutput' },
     { match: /inputModalit|modality/i, key: 'ai.catalog.validation.inputModality' },
-    { match: /temperature/i, key: 'ai.catalog.validation.temperature' },
-    { match: /topP/i, key: 'ai.catalog.validation.topP' },
-    { match: /topK/i, key: 'ai.catalog.validation.topK' },
-    { match: /frequencyPenalty|presencePenalty/i, key: 'ai.catalog.validation.penalty' },
+    { match: /modelId/i, key: 'ai.catalog.validation.modelId' },
     { match: /providerType|provider type/i, key: 'ai.catalog.validation.providerType' },
     { match: /providerName|请选择 Provider/i, key: 'ai.catalog.validation.provider' },
     {

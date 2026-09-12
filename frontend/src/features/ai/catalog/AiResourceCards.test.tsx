@@ -11,6 +11,7 @@ function model(overrides: Partial<AgentModelView> = {}): AgentModelView {
   return {
     providerName: 'minimax',
     name: 'MiniMax',
+    modelId: 'minimax-upstream',
     description: 'model description',
     config: {
       limit: { context: 128000, output: 8192 },
@@ -88,7 +89,7 @@ describe('AI resource cards', () => {
       />,
     )
 
-    expect(screen.getByText('minimax/MiniMax')).toBeInTheDocument()
+    expect(screen.getByText(/minimax\/MiniMax · quality/)).toBeInTheDocument()
     // 卡片对 tools 和 skills 做截断展示；超出部分（3 个中的 2 个）折叠为 +1。
     expect(screen.getByText('+1')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '编辑 assistant' }))
@@ -143,6 +144,7 @@ describe('AI resource cards', () => {
         agent={agent({
           description: null,
           model: 'missing-model',
+          variant: null,
           config: {
             toolIds: [],
             skills: [],
@@ -156,7 +158,7 @@ describe('AI resource cards', () => {
       />,
     )
 
-    expect(screen.getByText('missing-model')).toBeInTheDocument()
+    expect(screen.getByText(/missing-model · (未解析|unresolved)/)).toBeInTheDocument()
     expect(screen.getByText('prompt')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除 assistant' })).toBeDisabled()
 
@@ -169,7 +171,7 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText('minimax/MiniMax')).toBeInTheDocument()
+    expect(screen.getByText(/minimax\/MiniMax · quality/)).toBeInTheDocument()
     expect(screen.getAllByText('assistant')).toHaveLength(2)
   })
 

@@ -347,6 +347,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
   }
 
   private static void configureExecutableModel(AgentModelCreateDTO model) {
+    model.setModelId(model.getName());
     AgentModelConfigDTO config = new AgentModelConfigDTO();
     AgentModelLimitDTO limit = new AgentModelLimitDTO();
     limit.setContext(32768);

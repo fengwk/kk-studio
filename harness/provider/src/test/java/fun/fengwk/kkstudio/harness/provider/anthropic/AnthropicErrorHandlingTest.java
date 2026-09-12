@@ -470,6 +470,7 @@ class AnthropicErrorHandlingTest {
         new ModelDescriptor(
             providerName,
             modelName,
+            modelName,
             Set.of(ModelInputModality.TEXT),
             true,
             false,
@@ -488,7 +489,8 @@ class AnthropicErrorHandlingTest {
 
     return new ProviderRequest(
         model,
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
+        new ModelVariant("default"),
+        1024,
         List.of(
             new ProviderMessage(
                 ProviderMessageRole.USER, List.of(new ProviderTextBlock("Test ping")))),

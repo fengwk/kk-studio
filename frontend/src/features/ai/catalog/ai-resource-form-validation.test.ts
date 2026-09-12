@@ -22,6 +22,7 @@ function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
     ...emptyModelDraft(),
     providerName: 'provider-1',
     name: 'model',
+    modelId: 'wire-model',
     ...overrides,
   }
 }
@@ -90,25 +91,11 @@ describe('ai-resource-form-validation', () => {
               draftId: 'variant-default',
               id: 'fast',
               reasoningEffort: '',
-              maxOutputTokens: '',
-              temperature: '',
-              topP: '',
-              topK: '',
-              frequencyPenalty: '',
-              presencePenalty: '',
-              stopSequences: '',
             },
             {
               draftId: 'variant-2',
               id: 'creative',
               reasoningEffort: '',
-              maxOutputTokens: '',
-              temperature: '',
-              topP: '',
-              topK: '',
-              frequencyPenalty: '',
-              presencePenalty: '',
-              stopSequences: '',
             },
           ],
         }),
@@ -119,7 +106,8 @@ describe('ai-resource-form-validation', () => {
     expect(result.fields.defaultVariant).toBeDefined()
   })
 
-  it('rejects when reasoning is enabled but every variant lacks effort', () => {
+  /** Reasoning 开启时全部 variant 的空思考强度仍然合法：空值表示不覆盖协议默认。 */
+  it('accepts empty reasoning effort as the protocol default when reasoning is enabled', () => {
     const result = validateResourceDraft(
       { kind: 'model', mode: 'create' },
       {
@@ -131,13 +119,6 @@ describe('ai-resource-form-validation', () => {
               draftId: 'variant-x',
               id: 'medium',
               reasoningEffort: '',
-              maxOutputTokens: '',
-              temperature: '',
-              topP: '',
-              topK: '',
-              frequencyPenalty: '',
-              presencePenalty: '',
-              stopSequences: '',
             },
           ],
         }),
@@ -145,7 +126,26 @@ describe('ai-resource-form-validation', () => {
       },
     )
     expect(result.ok).toBe(true)
-    // Reasoning effort 必须用 variant id 自动补全；不应报错。
+    expect(result.fields).toEqual({})
+  })
+
+  /** 校验不得写回或补全 reasoningEffort：draft 必须保持用户输入的原样。 */
+  it('does not mutate the model draft while validating', () => {
+    const modelDraft = draft({
+      reasoning: true,
+      variants: [{ draftId: 'variant-x', id: 'medium', reasoningEffort: '' }],
+    })
+    const snapshot = JSON.stringify(modelDraft)
+    const result = validateResourceDraft(
+      { kind: 'model', mode: 'create' },
+      {
+        providerDraft: providerDraft(),
+        modelDraft,
+        agentDraft: { ...EMPTY_AGENT_DRAFT },
+      },
+    )
+    expect(result.ok).toBe(true)
+    expect(JSON.stringify(modelDraft)).toBe(snapshot)
   })
 
   it('translates known backend errors into user-facing Chinese', () => {
@@ -163,10 +163,10 @@ describe('ai-resource-form-validation', () => {
     expect(toUserFacingErrorMessage(new Error('已开启 Reasoning'))).toMatch(/Reasoning/)
   })
 
-  it('maps sampling and agent variant errors to their fields', () => {
+  it('maps reasoning effort and agent variant errors to their fields', () => {
     expect(
-      toUserFacingErrorMessage(new Error('variant medium temperature must not be negative')),
-    ).toMatch(/Temperature/)
+      toUserFacingErrorMessage(new Error('variant medium reasoningEffort must be one of high/medium/low/off')),
+    ).toMatch(/思考强度|Reasoning/)
     expect(toUserFacingErrorMessage(new Error('variant must not be blank'))).toMatch(/Variant/)
     expect(toUserFacingErrorMessage(new Error('unsupported provider type wire value: OPENAI'))).toMatch(
       /Provider Type/,

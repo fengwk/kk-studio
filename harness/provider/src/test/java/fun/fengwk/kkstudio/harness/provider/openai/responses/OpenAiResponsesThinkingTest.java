@@ -40,8 +40,7 @@ class OpenAiResponsesThinkingTest {
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final String VALID_PREFIX_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-  private static final ModelVariant DEFAULT_VARIANT =
-      new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
+  private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
 
   private ProviderDescriptor createDescriptor() {
     return new ProviderDescriptor(
@@ -67,13 +66,20 @@ class OpenAiResponsesThinkingTest {
             BigDecimal.ZERO,
             BigDecimal.ONE);
     return new ModelDescriptor(
-        "openai_test", "gpt-5.4-mini", Set.of(ModelInputModality.TEXT), true, true, pricing);
+        "openai_test",
+        "gpt-5.4-mini",
+        "gpt-5.4-mini",
+        Set.of(ModelInputModality.TEXT),
+        true,
+        true,
+        pricing);
   }
 
   private ProviderRequest request(List<ProviderMessage> messages) {
     return new ProviderRequest(
         createModel(),
         DEFAULT_VARIANT,
+        1024,
         messages != null ? messages : List.of(),
         List.of(),
         ProviderCacheControl.none());

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,9 +46,9 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 基于 PostgreSQL 的 attempt-time Provider 解析证据：同一个持久 {@link ProviderRequest} 在 Provider 更新 / 删除 / 同名
- * 重建后，下一次 {@code resolve/start} 始终使用 {@code agent_provider} 当前行的 credential/endpoint/timeout 与当前
- * {@link ProviderFactory}；冻结 {@link ProviderType} 与当前行不一致时确定性拒绝协议漂移。
+ * 基于 PostgreSQL 的 attempt-time Provider 解析证据：冻结 Provider type 与 connection generation 必须和当前 {@code
+ * agent_provider} 行一致；连接配置更新、删除或同名重建后，旧 invocation 确定性拒绝，重新规划的 invocation 才能使用当前
+ * credential/endpoint/timeout 与 {@link ProviderFactory}。
  */
 class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTestSupport {
 
@@ -58,7 +57,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
   @Autowired private AgentProviderConfigurationCodec configurationCodec;
 
   @Test
-  void resolveUsesLatestProviderRowAndFactoryAfterUpdate() {
+  void resolveRejectsStaleGenerationAndAcceptsReplannedRequestAfterConnectionUpdate() {
     String name = "latest-provider-" + System.nanoTime();
     CapturingFactory openAi = new CapturingFactory(ProviderType.OPENAI);
     CapturingFactory openAiResponses = new CapturingFactory(ProviderType.OPENAI_RESPONSES);
@@ -66,30 +65,21 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
 
     AgentProviderDTO created =
         createProvider(name, "openai", "https://original.example/v1", "original-secret", 12_000L);
+    UUID firstGen = connectionGenerationId(name);
     ProviderRequest request =
         request(name, ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-stable"));
 
-    // 第一次 resolve：使用创建行的 openai factory 与连接事实。
     ProviderResolutionService.ResolvedExecution first =
-        resolution.resolve(ProviderType.OPENAI, request);
+        resolution.resolve(ProviderType.OPENAI, firstGen, request);
     assertEquals(
         ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-stable"),
-        first.effectiveRequest().cacheControl(),
-        "openai affinity capability 与持久 hint 匹配，retention 沿用 SHORT");
-    assertEquals(
-        Duration.ofSeconds(12), first.timeoutPolicy().modelCallTimeout(), "超时策略来自当前行 config");
+        first.effectiveRequest().cacheControl());
+    assertEquals(Duration.ofSeconds(12), first.timeoutPolicy().modelCallTimeout());
     first.openProvider(first.timeoutPolicy());
-    assertEquals("original-secret", openAi.credential, "adapter 使用创建行 credential");
-    assertEquals(
-        "https://original.example/v1", openAi.descriptor.endpoint(), "adapter 使用创建行 baseUrl");
-    assertNotNull(openAi.descriptor.connectionGenerationId());
-    UUID firstGen = openAi.descriptor.connectionGenerationId();
-    assertEquals(
-        Duration.ofSeconds(12),
-        configurationCodec.readTimeoutPolicy(openAi.configJson).modelCallTimeout(),
-        "adapter 使用创建行 config");
+    assertEquals("original-secret", openAi.credential);
+    assertEquals("https://original.example/v1", openAi.descriptor.endpoint());
+    assertEquals(firstGen, openAi.descriptor.connectionGenerationId());
 
-    // 同类型下更新 credential/baseUrl/timeout：下一 attempt 使用最新连接事实。
     AgentProviderUpdateDTO liveUpdate = new AgentProviderUpdateDTO();
     liveUpdate.setProviderType("openai");
     liveUpdate.setBaseUrl("https://updated.example/v2");
@@ -98,26 +88,33 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     liveUpdate.setExpectedVersion(created.getVersion());
     AgentProviderDTO updated = providerService.updateProvider(name, liveUpdate);
 
-    ProviderResolutionService.ResolvedExecution second =
-        resolution.resolve(ProviderType.OPENAI, request);
-    assertEquals(Duration.ofSeconds(60), second.timeoutPolicy().modelCallTimeout(), "超时策略来自更新后的行");
-    second.openProvider(second.timeoutPolicy());
-    assertEquals("updated-secret", openAi.credential, "adapter 使用更新行 credential");
-    assertEquals(
-        "https://updated.example/v2", openAi.descriptor.endpoint(), "adapter 使用更新行 baseUrl");
-    assertNotEquals(
-        firstGen, openAi.descriptor.connectionGenerationId(), "凭据与 endpoint 更新轮换 generationId");
-    assertEquals(2, openAi.openCount, "同类型更新后继续使用冻结 providerType 的 factory");
+    IllegalArgumentException generationDrift =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> resolution.resolve(ProviderType.OPENAI, firstGen, request));
+    assertTrue(generationDrift.getMessage().contains("provider connection generation drift"));
+    assertEquals(1, openAi.openCount, "generation 漂移不得打开新 Provider");
 
-    // 同名更新协议类型：既有 invocation 的冻结类型必须确定性拒绝漂移。
+    UUID secondGen = connectionGenerationId(name);
+    ProviderResolutionService.ResolvedExecution second =
+        resolution.resolve(ProviderType.OPENAI, secondGen, request);
+    assertEquals(Duration.ofSeconds(60), second.timeoutPolicy().modelCallTimeout());
+    second.openProvider(second.timeoutPolicy());
+    assertEquals("updated-secret", openAi.credential);
+    assertEquals("https://updated.example/v2", openAi.descriptor.endpoint());
+    assertNotEquals(firstGen, secondGen, "凭据与 endpoint 更新必须轮换 generationId");
+    assertEquals(secondGen, openAi.descriptor.connectionGenerationId());
+
     AgentProviderUpdateDTO typeUpdate = new AgentProviderUpdateDTO();
     typeUpdate.setProviderType("openai_response");
     typeUpdate.setExpectedVersion(updated.getVersion());
     providerService.updateProvider(name, typeUpdate);
-    IllegalArgumentException drift =
+    IllegalArgumentException typeDrift =
         assertThrows(
-            IllegalArgumentException.class, () -> resolution.resolve(ProviderType.OPENAI, request));
-    assertEquals("provider type drift: frozen=OPENAI current=OPENAI_RESPONSES", drift.getMessage());
+            IllegalArgumentException.class,
+            () -> resolution.resolve(ProviderType.OPENAI, secondGen, request));
+    assertEquals(
+        "provider type drift: frozen=OPENAI current=OPENAI_RESPONSES", typeDrift.getMessage());
     assertEquals(0, openAiResponses.openCount, "协议漂移不得打开新 factory");
   }
 
@@ -129,34 +126,44 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
 
     AgentProviderDTO created =
         createProvider(name, "openai", "https://original.example/v1", "secret", 12_000L);
+    UUID generationId = connectionGenerationId(name);
     providerService.deleteProvider(name, created.getVersion());
 
     ProviderRequest request =
         request(name, ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"));
     IllegalArgumentException failure =
         assertThrows(
-            IllegalArgumentException.class, () -> resolution.resolve(ProviderType.OPENAI, request));
+            IllegalArgumentException.class,
+            () -> resolution.resolve(ProviderType.OPENAI, generationId, request));
     assertTrue(
         failure.getMessage().contains("provider not found: " + name),
         "当前行删除后必须确定性 not found，不得使用其他连接配置");
   }
 
   @Test
-  void sameNameRecreateResolvesToTheNewRow() {
+  void sameNameRecreateRejectsOldGenerationAndAcceptsReplannedRequest() {
     String name = "recreated-provider-" + System.nanoTime();
     CapturingFactory openAi = new CapturingFactory(ProviderType.OPENAI);
     DatabaseProviderResolutionService resolution = resolution(openAi);
 
     AgentProviderDTO created =
         createProvider(name, "openai", "https://first.example/v1", "first-secret", 12_000L);
+    UUID firstGenerationId = connectionGenerationId(name);
     providerService.deleteProvider(name, created.getVersion());
 
     AgentProviderDTO recreated =
         createProvider(name, "openai", "https://second.example/v1", "second-secret", 30_000L);
     ProviderRequest request = request(name, ProviderCacheControl.none());
 
+    IllegalArgumentException generationDrift =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> resolution.resolve(ProviderType.OPENAI, firstGenerationId, request));
+    assertTrue(generationDrift.getMessage().contains("provider connection generation drift"));
+
+    UUID recreatedGenerationId = connectionGenerationId(name);
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(ProviderType.OPENAI, request);
+        resolution.resolve(ProviderType.OPENAI, recreatedGenerationId, request);
     resolved.openProvider(resolved.timeoutPolicy());
     assertEquals("second-secret", openAi.credential, "同名重建后解析到新行 credential");
     assertEquals("https://second.example/v1", openAi.descriptor.endpoint(), "同名重建后解析到新行 baseUrl");
@@ -175,10 +182,12 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     // 持久 request 携带 AFFINITY hint；当前 anthropic capability 会按请求内容重建 BREAKPOINTS 形态。
     AgentProviderDTO created =
         createProvider(name, "anthropic", "https://anthropic.example/v1", "secret", 12_000L);
+    UUID generationId = connectionGenerationId(name);
     ProviderRequest request =
         new ProviderRequest(
             descriptor(name),
-            new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
+            new ModelVariant("default"),
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("leading system")))),
@@ -187,7 +196,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
 
     // 当前 capability 是 BREAKPOINTS：affinity hint 被改写为按请求实际内容求交集的 breakpoints。
     ProviderResolutionService.ResolvedExecution first =
-        resolution.resolve(ProviderType.ANTHROPIC, request);
+        resolution.resolve(ProviderType.ANTHROPIC, generationId, request);
     assertEquals(
         ProviderCacheControl.breakpoints(
             PromptCacheRetention.SHORT, "pc1-key", EnumSet.of(PromptCacheBreakpoint.SYSTEM)),
@@ -204,7 +213,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     IllegalArgumentException drift =
         assertThrows(
             IllegalArgumentException.class,
-            () -> resolution.resolve(ProviderType.ANTHROPIC, request));
+            () -> resolution.resolve(ProviderType.ANTHROPIC, generationId, request));
     assertEquals("provider type drift: frozen=ANTHROPIC current=GOOGLE", drift.getMessage());
     assertEquals(0, google.openCount, "协议漂移不得打开新 factory");
   }
@@ -225,24 +234,29 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
             (cred, cfg) -> new CapturingFactory(ProviderType.OPENAI).create(cred, cfg));
     DatabaseProviderResolutionService resolution = resolution(dynamicFactory);
 
-    AgentProviderDTO created =
-        createProvider(name, "openai", "https://example.com/v1", "secret", 10_000L);
+    createProvider(name, "openai", "https://example.com/v1", "secret", 10_000L);
+    UUID firstGenerationId = connectionGenerationId(name);
     ProviderRequest request =
         request(name, ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"));
 
     // 默认配置下能力为 AUTOMATIC，无法表达显式 AFFINITY，故规范化降级为 none()
     ProviderResolutionService.ResolvedExecution first =
-        resolution.resolve(ProviderType.OPENAI, request);
+        resolution.resolve(ProviderType.OPENAI, firstGenerationId, request);
     assertEquals(ProviderCacheControl.none(), first.effectiveRequest().cacheControl());
 
     // 更新 provider 配置为 LEGACY 缓存模式
     AgentProvider provider = providerRepository.getByName(name);
     provider.setConfigJson("{\"openAiPromptCacheMode\":\"LEGACY\"}");
+    provider.setConnectionGenerationId(UUID.randomUUID());
     providerRepository.updateByName(provider, provider.getVersion());
 
-    // 更新后下一次 attempt 解析：动态能力变为 AFFINITY，有效请求成功保留 AFFINITY 缓存控制
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> resolution.resolve(ProviderType.OPENAI, firstGenerationId, request));
+
+    // 重新规划后按新 generation 解析：动态能力变为 AFFINITY，有效请求成功保留 AFFINITY 缓存控制
     ProviderResolutionService.ResolvedExecution second =
-        resolution.resolve(ProviderType.OPENAI, request);
+        resolution.resolve(ProviderType.OPENAI, connectionGenerationId(name), request);
     assertEquals(
         ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"),
         second.effectiveRequest().cacheControl());
@@ -289,10 +303,15 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     return providerService.createProvider(create);
   }
 
+  private UUID connectionGenerationId(String providerName) {
+    return providerRepository.getByName(providerName).getConnectionGenerationId();
+  }
+
   private static ProviderRequest request(String providerName, ProviderCacheControl cacheControl) {
     return new ProviderRequest(
         descriptor(providerName),
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
+        new ModelVariant("default"),
+        1024,
         List.of(),
         List.of(),
         cacheControl);
@@ -301,6 +320,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
   private static ModelDescriptor descriptor(String providerName) {
     return new ModelDescriptor(
         providerName,
+        "model",
         "model",
         Set.of(ModelInputModality.TEXT),
         false,

@@ -41,6 +41,9 @@ import java.util.List;
 @AutoConfigureMockMvc
 public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
+  /** 用于证明 wire modelId 与逻辑 name 相互独立的固定值。 */
+  private static final String WIRE_MODEL_ID = "wire-model-id";
+
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
 
@@ -106,14 +109,14 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .andExpect(jsonPath("$.data.name").value(modelName))
                 .andExpect(jsonPath("$.data.id").doesNotExist())
                 .andExpect(jsonPath("$.data.providerId").doesNotExist())
-                .andExpect(jsonPath("$.data.modelId").doesNotExist())
+                .andExpect(jsonPath("$.data.modelId").value(WIRE_MODEL_ID))
                 .andExpect(jsonPath("$.data.version").value("0"))
                 .andReturn());
     assertEquals(providerName, modelData.path("providerName").asText());
     assertEquals(modelName, modelData.path("name").asText());
+    assertEquals(WIRE_MODEL_ID, modelData.path("modelId").asText());
     assertFalse(modelData.has("id"));
     assertFalse(modelData.has("providerId"));
-    assertFalse(modelData.has("modelId"));
 
     AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     agentConfig.setToolIds(List.of());
@@ -162,9 +165,9 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         data(mockMvc.perform(get("/api/ai/catalog/models")).andExpect(status().isOk()).andReturn());
     JsonNode listedModel = findResult(modelPage, modelName);
     assertEquals(providerName, listedModel.path("providerName").asText());
+    assertEquals(WIRE_MODEL_ID, listedModel.path("modelId").asText());
     assertFalse(listedModel.has("id"));
     assertFalse(listedModel.has("providerId"));
-    assertFalse(listedModel.has("modelId"));
 
     JsonNode agentPage =
         data(mockMvc.perform(get("/api/ai/catalog/agents")).andExpect(status().isOk()).andReturn());
@@ -217,6 +220,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.actualVersion").value("1"));
 
     AgentModelUpdateDTO modelUpdate = new AgentModelUpdateDTO();
+    modelUpdate.setModelId(WIRE_MODEL_ID);
     modelUpdate.setDescription("updated model");
     modelUpdate.setConfig(model.getConfig());
     modelUpdate.setExpectedVersion("0");
@@ -246,11 +250,12 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .andExpect(jsonPath("$.data.description").value("updated model"))
                 .andExpect(jsonPath("$.data.id").doesNotExist())
                 .andExpect(jsonPath("$.data.providerId").doesNotExist())
-                .andExpect(jsonPath("$.data.modelId").doesNotExist())
+                .andExpect(jsonPath("$.data.modelId").value(WIRE_MODEL_ID))
                 .andExpect(jsonPath("$.data.version").value("1"))
                 .andReturn());
     assertEquals(providerName, updatedModel.path("providerName").asText());
     assertEquals(modelName, updatedModel.path("name").asText());
+    assertEquals(WIRE_MODEL_ID, updatedModel.path("modelId").asText());
 
     // 测试意图：验证 PUT /api/ai/catalog/models/{providerName}/{modelName} 在 expectedVersion 过期时触发 CAS
     // 版本冲突，返回 409 Conflict。
@@ -445,6 +450,8 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
   }
 
   private static void configureExecutableModel(AgentModelCreateDTO model) {
+    // wire 模型标识与逻辑 name 独立：这里刻意取不同值，证明 API 契约同时暴露二者。
+    model.setModelId(WIRE_MODEL_ID);
     AgentModelConfigDTO config = new AgentModelConfigDTO();
     AgentModelLimitDTO limit = new AgentModelLimitDTO();
     limit.setContext(32768);

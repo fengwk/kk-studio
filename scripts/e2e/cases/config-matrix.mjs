@@ -39,10 +39,16 @@ for (const row of modelConfigMatrix()) {
     async run(ctx) {
       assert(sharedProviderName, 'matrix provider missing; ensure matrix.model.setup_provider runs first')
       const body = row.rawBody
-        ? { providerName: sharedProviderName, name: `mx-${row.id}-${cid().slice(0, 4)}`, description: row.title }
+        ? {
+            providerName: sharedProviderName,
+            name: `mx-${row.id}-${cid().slice(0, 4)}`,
+            modelId: `wire-${row.id}`,
+            description: row.title,
+          }
         : {
             providerName: sharedProviderName,
             name: `mx-${row.id}-${cid().slice(0, 4)}`,
+            modelId: `wire-${row.id}`,
             description: row.title,
             config: row.build(),
           }
@@ -103,6 +109,7 @@ registerCase({
     const { json: mCreate } = await ctx.call('POST', '/api/ai/catalog/models', {
       providerName,
       name: `agent-matrix-model-${cid().slice(0, 4)}`,
+      modelId: 'wire-agent-matrix',
       description: 'for agent matrix',
       config: baseModelConfig(),
     })

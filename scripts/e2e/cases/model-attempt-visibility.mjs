@@ -72,6 +72,7 @@ registerCase({
       const modelResponse = await ctx.call('POST', '/api/ai/catalog/models', {
         providerName: provider.name,
         name: `e2e-model-attempt-${suffix}`,
+        modelId: `wire-attempt-${suffix}`,
         description: 'Local model attempt visibility E2E model.',
         config: baseModelConfig({
           limit: { context: 4096, output: 128 },
@@ -80,7 +81,7 @@ registerCase({
             reasoning: false,
             inputModalities: ['TEXT'],
           },
-          variants: [{ id: 'default', temperature: 0 }],
+          variants: [{ id: 'default' }],
         }),
       })
       model = envelopeData(modelResponse.json)

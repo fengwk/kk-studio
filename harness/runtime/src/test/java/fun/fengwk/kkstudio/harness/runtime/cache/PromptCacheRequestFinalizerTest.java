@@ -31,23 +31,30 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 覆盖：构造期绑定 sessionId 与正整数校验；policy 由调用方显式传入（null 拒绝），disabled/UNKNOWN/UNSUPPORTED/AUTOMATIC/NONE
- * 全部归一为 none()；AFFINITY 即使无 system/tools 也派生 affinity key；BREAKPOINTS 求 capability 支持 breakpoints
- * 与请求实际内容交集；最终 finalizer 始终覆盖伪造 control；返回 ProviderRequest 其它字段内容不变。
+ * 覆盖：构造期绑定 sessionId 与 provider 连接代际；policy 由调用方显式传入（null 拒绝），
+ * disabled/UNKNOWN/UNSUPPORTED/AUTOMATIC/NONE 全部归一为 none()；AFFINITY 即使无 system/tools 也派生 affinity
+ * key；BREAKPOINTS 求 capability 支持 breakpoints 与请求实际内容交集；最终 finalizer 始终覆盖伪造 control；返回
+ * ProviderRequest 其它字段内容不变。
  */
 class PromptCacheRequestFinalizerTest {
 
   private static final UUID SESSION_ID = UUID.fromString("00000000-0000-0000-0000-000000000063");
+  private static final UUID PROVIDER_CONNECTION_GENERATION_ID =
+      UUID.fromString("00000000-0000-0000-0000-000000000163");
 
   @Test
   void bindsSessionIdAndRejectsInvalid() {
-    assertThrows(NullPointerException.class, () -> new PromptCacheRequestFinalizer(null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new PromptCacheRequestFinalizer(null, PROVIDER_CONNECTION_GENERATION_ID));
+    assertThrows(
+        NullPointerException.class, () -> new PromptCacheRequestFinalizer(SESSION_ID, null));
     // 验证构造期 sessionId 绑定：两个不同 sessionId 的 finalizer 必须在同一 request 上产生不同 affinity key。
     ProviderRequest request = requestWith(ProviderCacheControl.none(), List.of(), List.of());
     PromptCacheRequestFinalizer a =
-        new PromptCacheRequestFinalizer(UUID.fromString("00000000-0000-0000-0000-000000000065"));
+        finalizer(UUID.fromString("00000000-0000-0000-0000-000000000065"));
     PromptCacheRequestFinalizer b =
-        new PromptCacheRequestFinalizer(UUID.fromString("00000000-0000-0000-0000-0000000000ca"));
+        finalizer(UUID.fromString("00000000-0000-0000-0000-0000000000ca"));
     assertNotEquals(
         a.apply(request, affinityPolicy()).cacheControl().affinityKey(),
         b.apply(request, affinityPolicy()).cacheControl().affinityKey());
@@ -56,9 +63,7 @@ class PromptCacheRequestFinalizerTest {
   @Test
   void rejectsNullPolicy() {
     ProviderRequest request = requestWith(ProviderCacheControl.none(), List.of(), List.of());
-    assertThrows(
-        NullPointerException.class,
-        () -> new PromptCacheRequestFinalizer(SESSION_ID).apply(request, null));
+    assertThrows(NullPointerException.class, () -> finalizer(SESSION_ID).apply(request, null));
   }
 
   @Test
@@ -70,7 +75,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(systemText("S1")),
             List.of());
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).apply(forged, disabledPolicy()).cacheControl();
+        finalizer(SESSION_ID).apply(forged, disabledPolicy()).cacheControl();
     assertEquals(PromptCacheRetention.NONE, resolved.retention());
     assertTrue(resolved.breakpoints().isEmpty());
     assertNull(resolved.affinityKey());
@@ -86,7 +91,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(systemText("S1")),
             List.of());
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).apply(forged, disabledPolicy()).cacheControl();
+        finalizer(SESSION_ID).apply(forged, disabledPolicy()).cacheControl();
     assertEquals(PromptCacheRetention.NONE, resolved.retention());
   }
 
@@ -99,7 +104,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(systemText("S1")),
             List.of());
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).apply(forged, automaticPolicy()).cacheControl();
+        finalizer(SESSION_ID).apply(forged, automaticPolicy()).cacheControl();
     assertEquals(PromptCacheRetention.NONE, resolved.retention());
   }
 
@@ -111,7 +116,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(systemText("S1")),
             List.of());
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).apply(forged, disabledPolicy()).cacheControl();
+        finalizer(SESSION_ID).apply(forged, disabledPolicy()).cacheControl();
     assertEquals(PromptCacheRetention.NONE, resolved.retention());
   }
 
@@ -119,17 +124,32 @@ class PromptCacheRequestFinalizerTest {
   void affinityAlwaysGeneratesKeyEvenWithoutSystemOrTools() {
     ProviderRequest empty = requestWith(ProviderCacheControl.none(), List.of(), List.of());
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID).apply(empty, affinityPolicy()).cacheControl();
+        finalizer(SESSION_ID).apply(empty, affinityPolicy()).cacheControl();
     assertEquals(PromptCacheRetention.SHORT, resolved.retention());
-    assertTrue(resolved.affinityKey().startsWith("pc1-"));
+    assertTrue(resolved.affinityKey().startsWith("pc2-"));
   }
 
   @Test
   void affinityDifferentSessionYieldsDifferentKey() {
     PromptCacheRequestFinalizer a =
-        new PromptCacheRequestFinalizer(UUID.fromString("00000000-0000-0000-0000-000000000065"));
+        finalizer(UUID.fromString("00000000-0000-0000-0000-000000000065"));
     PromptCacheRequestFinalizer b =
-        new PromptCacheRequestFinalizer(UUID.fromString("00000000-0000-0000-0000-0000000000ca"));
+        finalizer(UUID.fromString("00000000-0000-0000-0000-0000000000ca"));
+    ProviderRequest request =
+        requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of(tool("alpha")));
+    String keyA = a.apply(request, affinityPolicy()).cacheControl().affinityKey();
+    String keyB = b.apply(request, affinityPolicy()).cacheControl().affinityKey();
+    assertNotEquals(keyA, keyB);
+  }
+
+  @Test
+  void affinityDifferentProviderConnectionGenerationYieldsDifferentKey() {
+    PromptCacheRequestFinalizer a =
+        new PromptCacheRequestFinalizer(
+            SESSION_ID, UUID.fromString("00000000-0000-0000-0000-000000000001"));
+    PromptCacheRequestFinalizer b =
+        new PromptCacheRequestFinalizer(
+            SESSION_ID, UUID.fromString("00000000-0000-0000-0000-000000000002"));
     ProviderRequest request =
         requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of(tool("alpha")));
     String keyA = a.apply(request, affinityPolicy()).cacheControl().affinityKey();
@@ -142,7 +162,7 @@ class PromptCacheRequestFinalizerTest {
   void explicitPolicyDrivesResolution() {
     ProviderRequest request =
         requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of(tool("alpha")));
-    PromptCacheRequestFinalizer finalizer = new PromptCacheRequestFinalizer(SESSION_ID);
+    PromptCacheRequestFinalizer finalizer = finalizer(SESSION_ID);
     ProviderCacheControl disabled = finalizer.apply(request, disabledPolicy()).cacheControl();
     ProviderCacheControl affinity = finalizer.apply(request, affinityPolicy()).cacheControl();
     ProviderCacheControl breakpoints =
@@ -165,7 +185,7 @@ class PromptCacheRequestFinalizerTest {
     ProviderRequest onlySystem =
         requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of());
     ProviderCacheControl onlySystemResolved =
-        new PromptCacheRequestFinalizer(SESSION_ID)
+        finalizer(SESSION_ID)
             .apply(
                 onlySystem,
                 breakpointsPolicy(
@@ -178,7 +198,7 @@ class PromptCacheRequestFinalizerTest {
     ProviderRequest onlyTools =
         requestWith(ProviderCacheControl.none(), List.of(), List.of(tool("alpha")));
     ProviderCacheControl onlyToolsResolved =
-        new PromptCacheRequestFinalizer(SESSION_ID)
+        finalizer(SESSION_ID)
             .apply(
                 onlyTools,
                 breakpointsPolicy(
@@ -190,7 +210,7 @@ class PromptCacheRequestFinalizerTest {
     ProviderRequest both =
         requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of(tool("alpha")));
     ProviderCacheControl bothResolved =
-        new PromptCacheRequestFinalizer(SESSION_ID)
+        finalizer(SESSION_ID)
             .apply(
                 both,
                 breakpointsPolicy(
@@ -203,7 +223,7 @@ class PromptCacheRequestFinalizerTest {
     // 请求既无 system 也无 tools => 无有效 breakpoint，降级 none()。
     ProviderRequest empty = requestWith(ProviderCacheControl.none(), List.of(), List.of());
     ProviderCacheControl emptyResolved =
-        new PromptCacheRequestFinalizer(SESSION_ID)
+        finalizer(SESSION_ID)
             .apply(
                 empty,
                 breakpointsPolicy(
@@ -218,7 +238,7 @@ class PromptCacheRequestFinalizerTest {
     ProviderRequest request =
         requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of(tool("alpha")));
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID)
+        finalizer(SESSION_ID)
             .apply(request, breakpointsPolicy(EnumSet.of(PromptCacheBreakpoint.SYSTEM)))
             .cacheControl();
     assertEquals(EnumSet.of(PromptCacheBreakpoint.SYSTEM), resolved.breakpoints());
@@ -234,8 +254,7 @@ class PromptCacheRequestFinalizerTest {
                 EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
             List.of(systemText("S1")),
             List.of(tool("alpha")));
-    ProviderRequest after =
-        new PromptCacheRequestFinalizer(SESSION_ID).apply(forged, affinityPolicy());
+    ProviderRequest after = finalizer(SESSION_ID).apply(forged, affinityPolicy());
     assertSame(forged.model(), after.model());
     assertSame(forged.variant(), after.variant());
     assertEquals(forged.messages(), after.messages());
@@ -249,7 +268,7 @@ class PromptCacheRequestFinalizerTest {
     ProviderRequest conversationOnly =
         requestWith(ProviderCacheControl.none(), List.of(userMsg), List.of());
     ProviderCacheControl resolved =
-        new PromptCacheRequestFinalizer(SESSION_ID)
+        finalizer(SESSION_ID)
             .apply(
                 conversationOnly,
                 breakpointsPolicy(
@@ -267,7 +286,7 @@ class PromptCacheRequestFinalizerTest {
             List.of(systemText("S1"), userMsg),
             List.of(tool("alpha")));
     ProviderCacheControl allResolved =
-        new PromptCacheRequestFinalizer(SESSION_ID)
+        finalizer(SESSION_ID)
             .apply(
                 allThree,
                 breakpointsPolicy(
@@ -290,6 +309,10 @@ class PromptCacheRequestFinalizerTest {
 
   private static ProviderToolDefinition tool(String name) {
     return new ProviderToolDefinition(name, "desc-" + name, "{\"type\":\"object\"}");
+  }
+
+  private static PromptCacheRequestFinalizer finalizer(UUID sessionId) {
+    return new PromptCacheRequestFinalizer(sessionId, PROVIDER_CONNECTION_GENERATION_ID);
   }
 
   private static PromptCachePolicy disabledPolicy() {
@@ -335,9 +358,8 @@ class PromptCacheRequestFinalizerTest {
       List<ProviderToolDefinition> tools) {
     ModelDescriptor model =
         new ModelDescriptor(
-            "provider", "m1", Set.of(ModelInputModality.TEXT), true, false, pricing());
-    ModelVariant variant =
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
-    return new ProviderRequest(model, variant, messages, tools, forged);
+            "provider", "m1", "m1", Set.of(ModelInputModality.TEXT), true, false, pricing());
+    ModelVariant variant = new ModelVariant("default");
+    return new ProviderRequest(model, variant, 1024, messages, tools, forged);
   }
 }

@@ -58,6 +58,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
         () -> agentProviderService.deleteProvider(provider.getName(), provider.getVersion()));
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
+    update.setModelId(model.getModelId());
     update.setDescription("updated");
     update.setConfig(model.getConfig());
     update.setExpectedVersion(model.getVersion());
@@ -72,6 +73,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
                         && candidate.getName().equals(modelName)));
 
     AgentModelUpdateDTO stale = new AgentModelUpdateDTO();
+    stale.setModelId(model.getModelId());
     stale.setDescription("stale");
     stale.setConfig(model.getConfig());
     stale.setExpectedVersion(model.getVersion());

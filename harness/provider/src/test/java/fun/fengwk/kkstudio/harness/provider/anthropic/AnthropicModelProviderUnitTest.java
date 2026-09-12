@@ -73,6 +73,7 @@ class AnthropicModelProviderUnitTest {
         new ModelDescriptor(
             "anthropic-unit",
             "claude-3-5-sonnet",
+            "claude-3-5-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
             false,
@@ -92,7 +93,8 @@ class AnthropicModelProviderUnitTest {
     request =
         new ProviderRequest(
             model,
-            new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
+            new ModelVariant("default"),
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")))),
@@ -590,6 +592,7 @@ class AnthropicModelProviderUnitTest {
         new ModelDescriptor(
             "anthropic-unit",
             "claude-3-7-sonnet",
+            "claude-3-7-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
             true,
@@ -606,11 +609,12 @@ class AnthropicModelProviderUnitTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO));
 
-    // 缺省 max_tokens 为 1024，minimal 为 1024：1024 >= 1024 触发校验失败
+    // 当 outputTokens 为 1 时，budgetTokens = min(2048, 1 - 1) = 0 <= 0 触发校验失败
     ProviderRequest violatingReq =
         new ProviderRequest(
             reasoningModel,
-            new ModelVariant("default", null, null, null, null, null, null, List.of(), "minimal"),
+            new ModelVariant("default", "low"),
+            1,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")))),
@@ -637,7 +641,6 @@ class AnthropicModelProviderUnitTest {
         transportInvoked.get(), "Transport must not be invoked on request encoding failure");
     assertNotNull(caughtError.get());
     assertEquals(ProviderErrorKind.INVALID_REQUEST, caughtError.get().kind());
-    assertEquals(
-        "budget_tokens must be strictly lower than max_tokens", caughtError.get().getMessage());
+    assertEquals("budget_tokens must be lower than max_tokens", caughtError.get().getMessage());
   }
 }

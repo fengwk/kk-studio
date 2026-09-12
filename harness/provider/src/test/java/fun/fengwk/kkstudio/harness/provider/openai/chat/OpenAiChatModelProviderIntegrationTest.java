@@ -101,8 +101,8 @@ class OpenAiChatModelProviderIntegrationTest {
             new BigDecimal("10.00"));
     modelDesc =
         new ModelDescriptor(
-            "openai", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
-    defaultVariant = new ModelVariant("default", null, null, null, null, null, null, null, null);
+            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
+    defaultVariant = new ModelVariant("default");
   }
 
   @AfterEach
@@ -165,6 +165,7 @@ class OpenAiChatModelProviderIntegrationTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(userMsg1),
             List.of(tool),
             ProviderCacheControl.none());
@@ -215,6 +216,7 @@ class OpenAiChatModelProviderIntegrationTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(userMsg1, asstMsg, toolMsg),
             List.of(tool),
             ProviderCacheControl.none());
@@ -271,6 +273,7 @@ class OpenAiChatModelProviderIntegrationTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),

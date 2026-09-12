@@ -627,8 +627,10 @@ final class DispatcherTestSupport {
   private static ModelRequestSpec modelRequest() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         modelDescriptor(),
-        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        new ModelVariant("v1"),
+        1024,
         List.of(),
         List.of(),
         List.of(),
@@ -641,8 +643,10 @@ final class DispatcherTestSupport {
     ModelRequestSpec base = modelRequest();
     return new ModelRequestSpec(
         base.providerType(),
+        base.providerConnectionGenerationId(),
         base.model(),
         base.variant(),
+        1024,
         base.preambleMessages(),
         List.of(toolRequest().binding()),
         List.of(),
@@ -674,6 +678,7 @@ final class DispatcherTestSupport {
   private static ModelDescriptor modelDescriptor() {
     return new ModelDescriptor(
         "provider",
+        "model",
         "model",
         Set.of(ModelInputModality.TEXT),
         true,

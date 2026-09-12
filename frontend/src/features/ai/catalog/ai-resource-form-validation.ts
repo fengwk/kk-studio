@@ -12,13 +12,13 @@ import { translate } from '@/shared/i18n'
 
 export type ResourceFieldKey =
   | 'name'
+  | 'modelId'
   | 'providerName'
   | 'baseUrl'
   | 'contextWindow'
   | 'maxOutputTokens'
   | 'inputModalities'
   | 'variants'
-  | 'reasoningEffort'
   | 'defaultVariant'
   | 'pricing'
   | 'model'
@@ -39,17 +39,13 @@ function mapError(error: unknown): ResourceFormValidationResult {
   const raw = error instanceof Error ? error.message : String(error ?? '')
 
   if (/reasoningEffort|思考强度/i.test(raw) || /思考强度/.test(message)) {
-    return {
-      ok: false,
-      message,
-      fields: { reasoningEffort: translate('ai.catalog.form.reasoningEffortError'), variants: message },
-    }
+    return { ok: false, message, fields: { variants: message } }
   }
   if (/^variant must not be blank$/i.test(raw)) {
     return { ok: false, message, fields: { variant: message } }
   }
-  if (/temperature|topP|topK|frequencyPenalty|presencePenalty/i.test(raw)) {
-    return { ok: false, message, fields: { variants: message } }
+  if (/modelId/i.test(raw)) {
+    return { ok: false, message, fields: { modelId: message } }
   }
   if (/variant|defaultVariant/i.test(raw)) {
     return { ok: false, message, fields: { variants: message, defaultVariant: message } }
@@ -118,25 +114,7 @@ export function validateResourceDraft(
     }
 
     if (modal.kind === 'model') {
-      // Reasoning 开启时，空思考强度用 Variant ID / medium 补全（用户常只改当前行）。
-      const modelDraft: ModelDraft = {
-        ...drafts.modelDraft,
-        inputModalities: [...drafts.modelDraft.inputModalities],
-        variants: drafts.modelDraft.variants.map((variant) => {
-          const id = variant.id.trim()
-          if (!drafts.modelDraft.reasoning) {
-            return variant
-          }
-          const effort = variant.reasoningEffort.trim()
-          if (effort) {
-            return variant
-          }
-          return {
-            ...variant,
-            reasoningEffort: id || 'medium',
-          }
-        }),
-      }
+      const modelDraft = drafts.modelDraft
       const ids = modelDraft.variants.map((variant) => variant.id.trim()).filter(Boolean)
       if (ids.length === 0) {
         return {
@@ -174,8 +152,6 @@ export function validateResourceDraft(
           fields: { inputModalities: translate('ai.catalog.validation.inputModality') },
         }
       }
-      // 写回 Reasoning effort 补全结果，供后续 submit 使用。
-      drafts.modelDraft = modelDraft
 
       if (modal.mode === 'edit') {
         toEditableModelUpdate(modelDraft)
