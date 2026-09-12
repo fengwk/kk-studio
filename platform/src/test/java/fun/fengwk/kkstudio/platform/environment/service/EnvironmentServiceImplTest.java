@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.environment.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -9,12 +10,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -29,6 +32,10 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSourceInitializer;
+import fun.fengwk.kkstudio.platform.environment.skill.model.EnvironmentInventory;
+import fun.fengwk.kkstudio.platform.environment.skill.model.SkillInventoryEntry;
+import fun.fengwk.kkstudio.platform.environment.skill.repo.SkillSourceRepository;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -59,6 +66,20 @@ class EnvironmentServiceImplTest {
         SKILL_SOURCE_ID, 1, name, description, "/home/dev/skills/" + name, CONTENT_REVISION);
   }
 
+  /** 构造一条当前可用的持久 inventory fixture（来源 READY、applied 与行版本都等于当前配置版本）。 */
+  private static SkillInventoryEntry usableSkill(String name) {
+    SkillInventoryEntry entry = new SkillInventoryEntry();
+    entry.setEnvironmentId(ENV_ID);
+    entry.setSourceId(SKILL_SOURCE_ID);
+    entry.setName(name);
+    entry.setSourceVersion(1L);
+    entry.setDescription(name + " skill");
+    entry.setBaseDirectory("/home/dev/skills/" + name);
+    entry.setContentRevision(CONTENT_REVISION);
+    entry.setDiscoveredAt(NOW);
+    return entry;
+  }
+
   private static final Instant NOW = Instant.parse("2026-07-26T00:00:00Z");
   private static final Clock CLOCK =
       new Clock() {
@@ -78,6 +99,88 @@ class EnvironmentServiceImplTest {
         }
       };
 
+  /** 测试意图：Environment 创建必须在同一事务内委托初始化器补齐 inventory 与缺省 PATH 来源。 */
+  @Test
+  void createInitializesInventoryAndDefaultSourceInSameTransaction() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
+    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
+    SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
+
+    when(repo.existsByName("local-env")).thenReturn(false);
+    when(repo.create(any())).thenReturn(true);
+    when(repo.getById(any()))
+        .thenAnswer(
+            invocation -> {
+              Environment env = new Environment();
+              env.setId(invocation.getArgument(0));
+              env.setName("local-env");
+              env.setRegistrationToken("secret-token");
+              env.setVersion(0L);
+              env.setCreateTime(NOW);
+              env.setUpdateTime(NOW);
+              return env;
+            });
+    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
+
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+
+    EnvironmentCreateDTO create = new EnvironmentCreateDTO();
+    create.setName("local-env");
+    service.create(create);
+
+    ArgumentCaptor<UUID> environmentIdCaptor = ArgumentCaptor.forClass(UUID.class);
+    ArgumentCaptor<UUID> sourceIdCaptor = ArgumentCaptor.forClass(UUID.class);
+    verify(initializer).initialize(environmentIdCaptor.capture(), sourceIdCaptor.capture());
+    assertNotNull(environmentIdCaptor.getValue());
+    assertNotNull(sourceIdCaptor.getValue());
+  }
+
+  /** 测试意图：初始化器失败必须向上冒泡，使 Environment 创建整体回滚而不是留下半成品。 */
+  @Test
+  void createPropagatesInitializerFailure() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
+    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
+    SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
+
+    when(repo.existsByName("local-env")).thenReturn(false);
+    when(repo.create(any())).thenReturn(true);
+    when(repo.getById(any()))
+        .thenAnswer(
+            invocation -> {
+              Environment env = new Environment();
+              env.setId(invocation.getArgument(0));
+              env.setName("local-env");
+              env.setRegistrationToken("token");
+              env.setVersion(0L);
+              return env;
+            });
+    doThrow(new IllegalStateException("create environment inventory failed"))
+        .when(initializer)
+        .initialize(any(), any());
+
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+
+    EnvironmentCreateDTO create = new EnvironmentCreateDTO();
+    create.setName("local-env");
+    IllegalStateException error =
+        assertThrows(IllegalStateException.class, () -> service.create(create));
+    assertTrue(error.getMessage().contains("inventory"), error.getMessage());
+  }
+
   @Test
   void createExposesRegistrationTokenOnce() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
@@ -86,6 +189,9 @@ class EnvironmentServiceImplTest {
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
+    SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
+    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
 
     when(repo.existsByName("local-env")).thenReturn(false);
     when(repo.create(any())).thenReturn(true);
@@ -104,7 +210,8 @@ class EnvironmentServiceImplTest {
             });
 
     EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, agents, jdbc, snapshot, CLOCK);
+        new EnvironmentServiceImpl(
+            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName("local-env");
@@ -124,6 +231,9 @@ class EnvironmentServiceImplTest {
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
+    SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
+    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -158,9 +268,11 @@ class EnvironmentServiceImplTest {
             NOW.plusSeconds(60));
 
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(conn));
+    when(skillSources.listUsableSkills(ENV_ID)).thenReturn(List.of(usableSkill("dev")));
 
     EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, agents, jdbc, snapshot, CLOCK);
+        new EnvironmentServiceImpl(
+            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     EnvironmentCardDTO single = service.get(EnvironmentId.of(ENV_ID));
     assertNull(single.getRegistrationToken());
@@ -176,6 +288,103 @@ class EnvironmentServiceImplTest {
     assertEquals("READY", list.get(0).getStatus());
   }
 
+  /** 测试意图：Environment 离线时卡片仍投影持久 inventory 的可用 Skill 与最近一次被接受报告的 root，而不是清空成空列表/空路径。 */
+  @Test
+  void offlineCardProjectsDurableInventory() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
+    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
+    SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
+
+    Environment env = new Environment();
+    env.setId(ENV_ID);
+    env.setName("local-env");
+    env.setRegistrationToken("secret-token");
+    env.setVersion(0L);
+    env.setCreateTime(NOW);
+    env.setUpdateTime(NOW);
+    when(repo.getById(ENV_ID)).thenReturn(env);
+
+    EnvironmentInventory inventory = new EnvironmentInventory();
+    inventory.setEnvironmentId(ENV_ID);
+    inventory.setSourceSetVersion(2L);
+    inventory.setAppliedSourceSetVersion(2L);
+    inventory.setRootPath("/home/dev");
+    when(skillSources.getInventory(ENV_ID)).thenReturn(inventory);
+    when(skillSources.listUsableSkills(ENV_ID)).thenReturn(List.of(usableSkill("dev")));
+    // 没有任何连接行：Environment 离线。
+    when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.empty());
+
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+
+    EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
+
+    assertEquals("OFFLINE", card.getStatus());
+    assertFalse(card.isReady());
+    assertEquals("/home/dev", card.getRootPath(), "离线仍展示最近一次报告的宿主 root");
+    assertEquals(1, card.getSkills().size(), "离线仍展示持久 inventory 的可用 Skill");
+    assertEquals("dev", card.getSkills().get(0).getName());
+    assertTrue(card.getCapabilities().isEmpty());
+  }
+
+  /** 测试意图：在线但未 READY 时 Skill 投影仍来自持久 inventory（连接状态与 Skill 事实解耦），root 走持久报告而不是空值。 */
+  @Test
+  void connectingConnectionStillProjectsDurableInventory() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
+    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
+    SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
+
+    Environment env = new Environment();
+    env.setId(ENV_ID);
+    env.setName("local-env");
+    env.setRegistrationToken("secret-token");
+    env.setVersion(0L);
+    env.setCreateTime(NOW);
+    env.setUpdateTime(NOW);
+    when(repo.getById(ENV_ID)).thenReturn(env);
+
+    EnvironmentInventory inventory = new EnvironmentInventory();
+    inventory.setEnvironmentId(ENV_ID);
+    inventory.setSourceSetVersion(1L);
+    inventory.setAppliedSourceSetVersion(1L);
+    inventory.setRootPath("/home/dev");
+    when(skillSources.getInventory(ENV_ID)).thenReturn(inventory);
+    when(skillSources.listUsableSkills(ENV_ID)).thenReturn(List.of(usableSkill("dev")));
+
+    EnvironmentConnection conn =
+        new EnvironmentConnection(
+            EnvironmentId.of(ENV_ID),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            LiveEnvironmentStatus.CONNECTING,
+            null,
+            NOW,
+            NOW.plusSeconds(60));
+    when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(conn));
+
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+
+    EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
+
+    assertEquals("CONNECTING", card.getStatus());
+    assertFalse(card.isReady());
+    assertEquals("/home/dev", card.getRootPath());
+    assertEquals(1, card.getSkills().size());
+  }
+
   /** 测试意图：registrationToken 只读端点幂等——连续读取返回同一 token，且不推进 version / updateTime（不轮换、不写库）。 */
   @Test
   void getRegistrationTokenReturnsStableValueWithoutRotating() {
@@ -185,6 +394,9 @@ class EnvironmentServiceImplTest {
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
+    SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
+    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -196,7 +408,8 @@ class EnvironmentServiceImplTest {
     when(repo.getById(ENV_ID)).thenReturn(env);
 
     EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, agents, jdbc, snapshot, CLOCK);
+        new EnvironmentServiceImpl(
+            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     EnvironmentRegistrationTokenDTO first = service.getRegistrationToken(EnvironmentId.of(ENV_ID));
     EnvironmentRegistrationTokenDTO second = service.getRegistrationToken(EnvironmentId.of(ENV_ID));
@@ -222,10 +435,14 @@ class EnvironmentServiceImplTest {
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
+    SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
+    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
     when(repo.getById(ENV_ID)).thenReturn(null);
 
     EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, agents, jdbc, snapshot, CLOCK);
+        new EnvironmentServiceImpl(
+            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     assertThrows(
         AiResourceNotFoundException.class,
@@ -241,6 +458,9 @@ class EnvironmentServiceImplTest {
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
+    SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
+    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -257,7 +477,8 @@ class EnvironmentServiceImplTest {
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
 
     EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, agents, jdbc, snapshot, CLOCK);
+        new EnvironmentServiceImpl(
+            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     EnvironmentCardDTO rotated = service.rotateToken(EnvironmentId.of(ENV_ID), "0");
 
@@ -275,6 +496,9 @@ class EnvironmentServiceImplTest {
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
+    SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
+    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -286,7 +510,8 @@ class EnvironmentServiceImplTest {
     when(repo.deleteById(ENV_ID, 0L)).thenReturn(true);
 
     EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, agents, jdbc, snapshot, CLOCK);
+        new EnvironmentServiceImpl(
+            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     // 1. Active lease in DB -> rejects
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
