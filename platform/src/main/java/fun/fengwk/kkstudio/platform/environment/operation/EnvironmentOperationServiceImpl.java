@@ -100,17 +100,31 @@ public class EnvironmentOperationServiceImpl implements EnvironmentOperationServ
     if (inventory == null) {
       throw new AiResourceNotFoundException("environment", envId.toString());
     }
-    SkillSource source = skillSourceRepository.lockSource(envId, sourceId);
-    if (source == null) {
-      throw new AiResourceNotFoundException("skill_source", sourceId.toString());
-    }
+    List<SkillSource> lockedSources = skillSourceRepository.lockAllSources(envId);
+    SkillSource source =
+        lockedSources.stream()
+            .filter(s -> s.getSourceId().equals(sourceId))
+            .findFirst()
+            .orElseThrow(
+                () -> new AiResourceNotFoundException("skill_source", sourceId.toString()));
 
     validateOperationSemantics(source, operationType);
 
-    List<SkillSource> allSources = skillSourceRepository.listSources(envId);
     Set<UUID> activeSourceIds =
-        allSources.stream().map(SkillSource::getSourceId).collect(Collectors.toSet());
-    activeSourceIds.add(sourceId);
+        lockedSources.stream().map(SkillSource::getSourceId).collect(Collectors.toSet());
+
+    String currentlyAppliedRevision;
+    if (source.getType() == DaemonSkillSourceType.PATH) {
+      currentlyAppliedRevision = null;
+    } else if (source.getType() == DaemonSkillSourceType.GIT) {
+      if (source.getAppliedVersion() != null && source.getAppliedVersion() == source.getVersion()) {
+        currentlyAppliedRevision = source.getAppliedRevision();
+      } else {
+        currentlyAppliedRevision = null;
+      }
+    } else {
+      currentlyAppliedRevision = null;
+    }
 
     DaemonSkillSourceConfig config =
         new DaemonSkillSourceConfig(
@@ -123,7 +137,7 @@ public class EnvironmentOperationServiceImpl implements EnvironmentOperationServ
             source.getGitUrl(),
             source.getGitRef(),
             source.getScanPath(),
-            source.getAppliedRevision(),
+            currentlyAppliedRevision,
             activeSourceIds);
 
     String arguments = configCodec.encode(config);
@@ -154,6 +168,22 @@ public class EnvironmentOperationServiceImpl implements EnvironmentOperationServ
     SafeEnvironmentOperation safe =
         environmentOperationRepository.getSafe(environmentId.value(), operationId);
     return toDto(safe);
+  }
+
+  @Override
+  public List<EnvironmentOperationDTO> list(EnvironmentId environmentId, int limit) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    if (limit <= 0) {
+      throw new AiValidationException(RESOURCE, "limit must be positive");
+    }
+    int boundedLimit = Math.min(limit, 100);
+    UUID envId = environmentId.value();
+    if (environmentRepository.getById(envId) == null) {
+      throw new AiResourceNotFoundException("environment", envId.toString());
+    }
+    List<SafeEnvironmentOperation> safeList =
+        environmentOperationRepository.listSafeByEnvironment(envId, boundedLimit);
+    return safeList.stream().map(this::toDto).toList();
   }
 
   @Override
@@ -192,10 +222,15 @@ public class EnvironmentOperationServiceImpl implements EnvironmentOperationServ
       throw new AiValidationException(RESOURCE, "operation UPDATE is only valid for GIT sources");
     }
     if (operationType == EnvironmentOperationType.SKILL_REFRESH
-        && source.getType() == DaemonSkillSourceType.GIT
-        && (source.getAppliedRevision() == null || source.getAppliedRevision().isBlank())) {
-      throw new AiValidationException(
-          RESOURCE, "git skill source has no applied revision; install is required before refresh");
+        && source.getType() == DaemonSkillSourceType.GIT) {
+      if (source.getAppliedVersion() == null
+          || source.getAppliedVersion() != source.getVersion()
+          || source.getAppliedRevision() == null
+          || source.getAppliedRevision().isBlank()) {
+        throw new AiValidationException(
+            RESOURCE,
+            "git skill source has no applied revision matching current version; install is required before refresh");
+      }
     }
   }
 

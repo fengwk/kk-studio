@@ -8,11 +8,8 @@ import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResultCodes;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshot;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshotCodec;
-import fun.fengwk.kkstudio.platform.environment.skill.OperationPublishOutcome;
-import fun.fengwk.kkstudio.platform.environment.skill.SkillInventoryPublisher;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -20,22 +17,22 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * {@link EnvironmentOperationCompletionCoordinator} 默认实现。
+ * {@link EnvironmentOperationCompletionCoordinator} 默认实现（包内私有）。
  *
  * <p>安全边界：绝不将 Daemon 原始 stdout/stderr、错误文本或异常栈记录至日志或持久化至数据库。
  */
 @Slf4j
 @Service
-public class EnvironmentOperationCompletionCoordinatorImpl
+class EnvironmentOperationCompletionCoordinatorImpl
     implements EnvironmentOperationCompletionCoordinator {
 
-  private final SkillInventoryPublisher publisher;
+  private final EnvironmentOperationResultPublisher publisher;
   private final EnvironmentOperationRepository repository;
   private final ObjectMapper objectMapper;
   private final DaemonSkillSourceSnapshotCodec snapshotCodec;
 
-  public EnvironmentOperationCompletionCoordinatorImpl(
-      SkillInventoryPublisher publisher,
+  EnvironmentOperationCompletionCoordinatorImpl(
+      EnvironmentOperationResultPublisher publisher,
       EnvironmentOperationRepository repository,
       ObjectMapper objectMapper) {
     this.publisher = Objects.requireNonNull(publisher, "publisher");
@@ -57,7 +54,6 @@ public class EnvironmentOperationCompletionCoordinatorImpl
     Objects.requireNonNull(result, "result");
 
     if (result.error()) {
-      String code = extractErrorCode(result.detailsJson());
       log.info("Capability returned error for operation {}", operationId);
       return publisher.publishOperationFailure(
           environmentId,
@@ -67,9 +63,22 @@ public class EnvironmentOperationCompletionCoordinatorImpl
           sourceSetVersion,
           sourceId,
           sourceVersion,
-          code,
-          EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE,
-          "{}");
+          EnvironmentOperationFailureCodes.OPERATION_FAILED,
+          EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
+    }
+
+    if (result.callId() == null || !result.callId().equals(operationId.toString())) {
+      log.warn("Capability result callId mismatch for operation {}", operationId);
+      return publisher.publishOperationFailure(
+          environmentId,
+          operationId,
+          ownerNodeId,
+          leaseToken,
+          sourceSetVersion,
+          sourceId,
+          sourceVersion,
+          EnvironmentOperationFailureCodes.INVALID_RESULT,
+          EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
     }
 
     if (result.contents().size() != 1
@@ -84,8 +93,7 @@ public class EnvironmentOperationCompletionCoordinatorImpl
           sourceId,
           sourceVersion,
           EnvironmentOperationFailureCodes.INVALID_RESULT,
-          EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE,
-          "{}");
+          EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
     }
 
     DaemonSkillSourceSnapshot snapshot;
@@ -103,8 +111,7 @@ public class EnvironmentOperationCompletionCoordinatorImpl
           sourceId,
           sourceVersion,
           EnvironmentOperationFailureCodes.INVALID_RESULT,
-          EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE,
-          "{}");
+          EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
     }
 
     if (!sourceId.equals(snapshot.sourceId()) || sourceVersion != snapshot.sourceVersion()) {
@@ -118,8 +125,7 @@ public class EnvironmentOperationCompletionCoordinatorImpl
           sourceId,
           sourceVersion,
           EnvironmentOperationFailureCodes.INVALID_RESULT,
-          EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE,
-          "{}");
+          EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
     }
 
     String resultSummaryJson = buildSuccessSummary(snapshot);
@@ -135,25 +141,15 @@ public class EnvironmentOperationCompletionCoordinatorImpl
   }
 
   @Override
-  public OperationPublishOutcome coordinateFailure(
+  public OperationPublishOutcome coordinateExecutionFailure(
       UUID environmentId,
       UUID operationId,
       UUID ownerNodeId,
       UUID leaseToken,
       long sourceSetVersion,
       UUID sourceId,
-      long sourceVersion,
-      String failureCode,
-      String failureMessage) {
-    String code =
-        (failureCode == null || failureCode.isBlank())
-            ? EnvironmentOperationFailureCodes.OPERATION_FAILED
-            : failureCode;
-    String message =
-        (failureMessage == null || failureMessage.isBlank())
-            ? EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE
-            : failureMessage;
-    log.info("Coordinating failure for operation {}", operationId);
+      long sourceVersion) {
+    log.info("Coordinating execution failure for operation {}", operationId);
     return publisher.publishOperationFailure(
         environmentId,
         operationId,
@@ -162,46 +158,19 @@ public class EnvironmentOperationCompletionCoordinatorImpl
         sourceSetVersion,
         sourceId,
         sourceVersion,
-        code,
-        message,
-        "{}");
+        EnvironmentOperationFailureCodes.OPERATION_FAILED,
+        EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
   }
 
   @Override
-  public boolean coordinateUnknown(
-      UUID operationId,
-      UUID ownerNodeId,
-      UUID leaseToken,
-      String failureCode,
-      String failureMessage) {
-    String code =
-        (failureCode == null || failureCode.isBlank())
-            ? EnvironmentOperationFailureCodes.TRANSPORT_ERROR
-            : failureCode;
-    String message =
-        (failureMessage == null || failureMessage.isBlank())
-            ? EnvironmentOperationFailureCodes.TRANSPORT_ERROR_MESSAGE
-            : failureMessage;
-    log.info("Coordinating unknown state for operation {}", operationId);
-    return repository.markUnknown(operationId, ownerNodeId, leaseToken, code, message);
-  }
-
-  private String extractErrorCode(String detailsJson) {
-    if (detailsJson == null || detailsJson.isBlank() || "{}".equals(detailsJson.trim())) {
-      return EnvironmentOperationFailureCodes.OPERATION_FAILED;
-    }
-    try {
-      JsonNode node = objectMapper.readTree(detailsJson);
-      if (node != null && node.isObject() && node.has("code")) {
-        JsonNode codeNode = node.get("code");
-        if (codeNode.isTextual() && !codeNode.asText().isBlank()) {
-          return EnvironmentCapabilityResultCodes.requireCode(codeNode.asText());
-        }
-      }
-    } catch (RuntimeException | JsonProcessingException e) {
-      // 忽略解析错误，回退到标准码
-    }
-    return EnvironmentOperationFailureCodes.OPERATION_FAILED;
+  public boolean coordinateTransportUnknown(UUID operationId, UUID ownerNodeId, UUID leaseToken) {
+    log.info("Coordinating transport unknown state for operation {}", operationId);
+    return repository.markUnknown(
+        operationId,
+        ownerNodeId,
+        leaseToken,
+        EnvironmentOperationFailureCodes.TRANSPORT_ERROR,
+        EnvironmentOperationFailureCodes.TRANSPORT_ERROR_MESSAGE);
   }
 
   private String buildSuccessSummary(DaemonSkillSourceSnapshot snapshot) {

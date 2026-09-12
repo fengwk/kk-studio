@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.environment.operation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,8 +11,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceConfig;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceConfigCodec;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSourceService;
+import fun.fengwk.kkstudio.platform.environment.skill.model.SkillSource;
+import fun.fengwk.kkstudio.platform.environment.skill.repo.SkillSourceRepository;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -23,15 +28,19 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillSourceCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillSourceDTO;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
-/** 验证 {@link EnvironmentOperationService} 的语义校验、全局锁调用、冻结配置及取消边界契约。 */
+/** 验证 {@link EnvironmentOperationService} 的语义校验、全局锁调用、冻结配置及取消与历史列表契约。 */
 class EnvironmentOperationServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private EnvironmentService environmentService;
   @Autowired private EnvironmentSkillSourceService sourceService;
+  @Autowired private SkillSourceRepository skillSourceRepository;
   @Autowired private EnvironmentOperationService operationService;
   @Autowired private EnvironmentOperationRepository operationRepository;
+
+  private final DaemonSkillSourceConfigCodec configCodec = new DaemonSkillSourceConfigCodec();
 
   private EnvironmentId environmentId;
   private UUID pathSourceId;
@@ -118,6 +127,107 @@ class EnvironmentOperationServiceTest extends PostgresSpringTestSupport {
                 operationService.create(
                     environmentId, gitSourceId, EnvironmentOperationType.SKILL_REFRESH, validDto));
     assertTrue(ex3.getMessage().contains("install is required before refresh"));
+  }
+
+  /**
+   * 测试意图：验证冻结参数解码：PATH 刷新始终传递 null；完全匹配的 GIT 传递 revision；修改陈旧的 GIT 刷新被拒且 update 冻结 null；活跃 ID
+   * 来自全部加锁来源。
+   */
+  @Test
+  void frozenArgumentsDecodeExactRevisionsAndAllActiveSourceIds() {
+    EnvironmentOperationCreateDTO validDto = new EnvironmentOperationCreateDTO();
+    validDto.setTimeoutMillis(60000L);
+
+    // 1. PATH 来源即便已有 appliedRevision，REFRESH 也必须传递 null
+    String pathRev = "a".repeat(64);
+    skillSourceRepository.markSourceReady(
+        environmentId.value(), pathSourceId, 0L, pathRev, List.of());
+    EnvironmentOperationDTO pathOpDto =
+        operationService.create(
+            environmentId, pathSourceId, EnvironmentOperationType.SKILL_REFRESH, validDto);
+    EnvironmentOperation pathOp = operationRepository.getById(UUID.fromString(pathOpDto.getId()));
+    DaemonSkillSourceConfig pathConfig = configCodec.decode(pathOp.arguments());
+    assertNull(pathConfig.currentlyAppliedRevision(), "PATH refresh 必须冻结 null 目前版本");
+    assertEquals(Set.of(pathSourceId, gitSourceId), pathConfig.activeSourceIds());
+
+    // 取消 PATH 操作避免并发冲突
+    operationService.cancel(environmentId, UUID.fromString(pathOpDto.getId()));
+
+    // 2. GIT 来源在 appliedVersion == version 时 REFRESH 必须携带 revision
+    String gitRev = "b".repeat(40);
+    skillSourceRepository.markSourceReady(
+        environmentId.value(), gitSourceId, 0L, gitRev, List.of());
+    EnvironmentOperationDTO gitRefreshDto =
+        operationService.create(
+            environmentId, gitSourceId, EnvironmentOperationType.SKILL_REFRESH, validDto);
+    EnvironmentOperation gitOp =
+        operationRepository.getById(UUID.fromString(gitRefreshDto.getId()));
+    DaemonSkillSourceConfig gitRefreshConfig = configCodec.decode(gitOp.arguments());
+    assertEquals(gitRev, gitRefreshConfig.currentlyAppliedRevision());
+    assertEquals(Set.of(pathSourceId, gitSourceId), gitRefreshConfig.activeSourceIds());
+
+    operationService.cancel(environmentId, UUID.fromString(gitRefreshDto.getId()));
+
+    // 3. 修改 GIT 来源配置使 version = 1，而 appliedVersion 保持为 0（陈旧）
+    SkillSource gitSource = skillSourceRepository.getSource(environmentId.value(), gitSourceId);
+    gitSource.setGitRef("feature/new-branch");
+    skillSourceRepository.updateSourceByVersion(gitSource, 0L);
+
+    // 陈旧版本 GIT REFRESH 必须被拒绝
+    AiValidationException staleEx =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                operationService.create(
+                    environmentId, gitSourceId, EnvironmentOperationType.SKILL_REFRESH, validDto));
+    assertTrue(staleEx.getMessage().contains("install is required before refresh"));
+
+    // 但是 GIT UPDATE 允许执行，且冻结的 currentlyAppliedRevision 必须为 null
+    EnvironmentOperationDTO gitUpdateDto =
+        operationService.create(
+            environmentId, gitSourceId, EnvironmentOperationType.SKILL_UPDATE, validDto);
+    EnvironmentOperation gitUpdateOp =
+        operationRepository.getById(UUID.fromString(gitUpdateDto.getId()));
+    DaemonSkillSourceConfig gitUpdateConfig = configCodec.decode(gitUpdateOp.arguments());
+    assertNull(gitUpdateConfig.currentlyAppliedRevision(), "配置已修改的 GIT UPDATE 必须冻结 null");
+  }
+
+  /** 测试意图：验证 list 历史列表：非正 limit 抛出校验异常，不存在环境抛出 404，正常返回倒序安全投影列表并受 limit 约束。 */
+  @Test
+  void listEnforcesValidationAndBoundsHistory() {
+    EnvironmentOperationCreateDTO validDto = new EnvironmentOperationCreateDTO();
+    validDto.setTimeoutMillis(60000L);
+
+    // limit 非正数抛出异常
+    assertThrows(AiValidationException.class, () -> operationService.list(environmentId, 0));
+    assertThrows(AiValidationException.class, () -> operationService.list(environmentId, -1));
+
+    // 环境不存在抛出 404
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> operationService.list(EnvironmentId.of(UUID.randomUUID()), 10));
+
+    // 创建并取消一个操作
+    EnvironmentOperationDTO op1 =
+        operationService.create(
+            environmentId, pathSourceId, EnvironmentOperationType.SKILL_REFRESH, validDto);
+    operationService.cancel(environmentId, UUID.fromString(op1.getId()));
+
+    // 再创建一个操作
+    EnvironmentOperationDTO op2 =
+        operationService.create(
+            environmentId, pathSourceId, EnvironmentOperationType.SKILL_REFRESH, validDto);
+
+    List<EnvironmentOperationDTO> list = operationService.list(environmentId, 10);
+    assertEquals(2, list.size());
+    // 验证倒序
+    assertEquals(op2.getId(), list.get(0).getId());
+    assertEquals(op1.getId(), list.get(1).getId());
+
+    // 验证 limit 约束
+    List<EnvironmentOperationDTO> boundedList = operationService.list(environmentId, 1);
+    assertEquals(1, boundedList.size());
+    assertEquals(op2.getId(), boundedList.getFirst().getId());
   }
 
   /** 测试意图：验证合法创建操作成功生成处于 PENDING 状态的安全 DTO，并在同一来源已有活跃操作时拒绝重复并发。 */

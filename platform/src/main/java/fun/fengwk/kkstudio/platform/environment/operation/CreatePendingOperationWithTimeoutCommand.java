@@ -14,7 +14,7 @@ import java.util.UUID;
  * 与数据库的时钟竞争。私有执行参数 {@code arguments} 被 Jackson 忽略并从 {@link #toString()} 中物理排除。
  */
 @EqualsAndHashCode
-public final class CreatePendingOperationWithTimeoutCommand {
+final class CreatePendingOperationWithTimeoutCommand {
 
   private final UUID id;
   private final UUID environmentId;
@@ -28,7 +28,7 @@ public final class CreatePendingOperationWithTimeoutCommand {
   private final String parameterSummary;
   private final long timeoutMillis;
 
-  public CreatePendingOperationWithTimeoutCommand(
+  CreatePendingOperationWithTimeoutCommand(
       UUID id,
       UUID environmentId,
       UUID sourceId,

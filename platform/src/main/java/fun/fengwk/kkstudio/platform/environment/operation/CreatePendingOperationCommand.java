@@ -14,7 +14,7 @@ import java.util.UUID;
  * <p>内部持有用于执行的原始私有 {@code arguments}。该字段仅包内可见，且明确被 Jackson 忽略并从 {@link #toString()} 中排除，防止凭据泄露。
  */
 @EqualsAndHashCode
-public final class CreatePendingOperationCommand {
+final class CreatePendingOperationCommand {
 
   private final UUID id;
   private final UUID environmentId;

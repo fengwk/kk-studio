@@ -136,7 +136,7 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
       (rs, rowNum) -> {
         EnvironmentOperation op = ROW_MAPPER.mapRow(rs, rowNum);
         long remainingMillis = rs.getLong("remaining_millis");
-        return new ClaimedOperation(op, Duration.ofMillis(Math.max(1L, remainingMillis)));
+        return new ClaimedOperation(op, Duration.ofMillis(remainingMillis));
       };
 
   private static final RowMapper<SweptOperationInfo> SWEPT_ROW_MAPPER =

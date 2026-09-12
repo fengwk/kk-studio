@@ -9,8 +9,6 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshot;
-import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationFailureCodes;
-import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
@@ -60,7 +58,6 @@ public class SkillInventoryPublisher {
 
   private final EnvironmentRepository environmentRepository;
   private final SkillSourceRepository skillSourceRepository;
-  private final EnvironmentOperationRepository environmentOperationRepository;
   private final JdbcTemplate jdbcTemplate;
   private final Clock clock;
 
@@ -157,174 +154,6 @@ public class SkillInventoryPublisher {
       throw new IllegalStateException("apply skill inventory report failed: " + environmentId);
     }
     return Outcome.APPLIED;
-  }
-
-  /**
-   * 在全局锁顺序与连接/代际围栏下原子持久化 Skill 操作成功结果并终结操作记录。
-   *
-   * <p>锁顺序：{@code environment} (key share) → {@code environment_connection} (for share) → {@code
-   * environment_inventory} (for update) → {@code environment_skill_source} (for update) → {@code
-   * environment_operation} (update)。
-   *
-   * @return {@link OperationPublishOutcome#APPLIED} 成功持久化并终结； {@link
-   *     OperationPublishOutcome#RESOURCE_CHANGED} 租约有效但配置代际已变化，操作已推进至 FAILED (RESOURCE_CHANGED)；
-   *     {@link OperationPublishOutcome#LEASE_LOST} 租约已丢失或过期，无操作并保持 claim 不动以便 UNKNOWN/timeout 收敛。
-   */
-  @Transactional
-  public OperationPublishOutcome publishOperationSuccess(
-      UUID environmentId,
-      UUID operationId,
-      UUID ownerNodeId,
-      UUID leaseToken,
-      long expectedSourceSetVersion,
-      DaemonSkillSourceSnapshot snapshot,
-      String resultSummaryJson) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(operationId, "operationId");
-    Objects.requireNonNull(ownerNodeId, "ownerNodeId");
-    Objects.requireNonNull(leaseToken, "leaseToken");
-    Objects.requireNonNull(snapshot, "snapshot");
-
-    if (environmentRepository.lockForKeyShare(environmentId) == null) {
-      return OperationPublishOutcome.LEASE_LOST;
-    }
-
-    UUID fenced =
-        jdbcTemplate
-            .query(
-                FENCE_SQL,
-                (rs, rowNum) -> (UUID) rs.getObject("environment_id"),
-                environmentId,
-                ownerNodeId,
-                leaseToken)
-            .stream()
-            .findFirst()
-            .orElse(null);
-    if (fenced == null) {
-      return OperationPublishOutcome.LEASE_LOST;
-    }
-
-    EnvironmentInventory inventory = skillSourceRepository.lockInventory(environmentId);
-    if (inventory == null || inventory.getSourceSetVersion() != expectedSourceSetVersion) {
-      environmentOperationRepository.markFailed(
-          operationId,
-          ownerNodeId,
-          leaseToken,
-          EnvironmentOperationFailureCodes.RESOURCE_CHANGED,
-          EnvironmentOperationFailureCodes.RESOURCE_CHANGED_MESSAGE);
-      return OperationPublishOutcome.RESOURCE_CHANGED;
-    }
-
-    SkillSource source = skillSourceRepository.lockSource(environmentId, snapshot.sourceId());
-    if (source == null || source.getVersion() != snapshot.sourceVersion()) {
-      environmentOperationRepository.markFailed(
-          operationId,
-          ownerNodeId,
-          leaseToken,
-          EnvironmentOperationFailureCodes.RESOURCE_CHANGED,
-          EnvironmentOperationFailureCodes.RESOURCE_CHANGED_MESSAGE);
-      return OperationPublishOutcome.RESOURCE_CHANGED;
-    }
-
-    skillSourceRepository.deleteSourceSkills(environmentId, snapshot.sourceId());
-    List<SkillInventoryEntry> entries = toEntries(environmentId, snapshot);
-    skillSourceRepository.insertSkills(entries);
-    if (!skillSourceRepository.markSourceReady(
-        environmentId,
-        snapshot.sourceId(),
-        snapshot.sourceVersion(),
-        snapshot.sourceRevision(),
-        snapshot.diagnostics())) {
-      throw new IllegalStateException("mark skill source READY failed: " + snapshot.sourceId());
-    }
-
-    String summary =
-        (resultSummaryJson == null || resultSummaryJson.isBlank()) ? "{}" : resultSummaryJson;
-    if (!environmentOperationRepository.markSucceeded(
-        operationId, ownerNodeId, leaseToken, summary)) {
-      throw new IllegalStateException(
-          "failed to mark operation succeeded under valid claim fence: " + operationId);
-    }
-    return OperationPublishOutcome.APPLIED;
-  }
-
-  /** 在全局锁顺序与连接/代际围栏下原子持久化 Skill 操作失败结果并终结操作记录。 */
-  @Transactional
-  public OperationPublishOutcome publishOperationFailure(
-      UUID environmentId,
-      UUID operationId,
-      UUID ownerNodeId,
-      UUID leaseToken,
-      long expectedSourceSetVersion,
-      UUID sourceId,
-      long expectedSourceVersion,
-      String failureCode,
-      String failureMessage,
-      String resultSummaryJson) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(operationId, "operationId");
-    Objects.requireNonNull(ownerNodeId, "ownerNodeId");
-    Objects.requireNonNull(leaseToken, "leaseToken");
-    Objects.requireNonNull(sourceId, "sourceId");
-
-    if (environmentRepository.lockForKeyShare(environmentId) == null) {
-      return OperationPublishOutcome.LEASE_LOST;
-    }
-
-    UUID fenced =
-        jdbcTemplate
-            .query(
-                FENCE_SQL,
-                (rs, rowNum) -> (UUID) rs.getObject("environment_id"),
-                environmentId,
-                ownerNodeId,
-                leaseToken)
-            .stream()
-            .findFirst()
-            .orElse(null);
-    if (fenced == null) {
-      return OperationPublishOutcome.LEASE_LOST;
-    }
-
-    EnvironmentInventory inventory = skillSourceRepository.lockInventory(environmentId);
-    if (inventory == null || inventory.getSourceSetVersion() != expectedSourceSetVersion) {
-      environmentOperationRepository.markFailed(
-          operationId,
-          ownerNodeId,
-          leaseToken,
-          EnvironmentOperationFailureCodes.RESOURCE_CHANGED,
-          EnvironmentOperationFailureCodes.RESOURCE_CHANGED_MESSAGE);
-      return OperationPublishOutcome.RESOURCE_CHANGED;
-    }
-
-    SkillSource source = skillSourceRepository.lockSource(environmentId, sourceId);
-    if (source == null || source.getVersion() != expectedSourceVersion) {
-      environmentOperationRepository.markFailed(
-          operationId,
-          ownerNodeId,
-          leaseToken,
-          EnvironmentOperationFailureCodes.RESOURCE_CHANGED,
-          EnvironmentOperationFailureCodes.RESOURCE_CHANGED_MESSAGE);
-      return OperationPublishOutcome.RESOURCE_CHANGED;
-    }
-
-    String code =
-        (failureCode == null || failureCode.isBlank())
-            ? EnvironmentOperationFailureCodes.OPERATION_FAILED
-            : failureCode;
-    String message =
-        (failureMessage == null || failureMessage.isBlank())
-            ? EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE
-            : failureMessage;
-
-    skillSourceRepository.markSourceFailed(
-        environmentId, sourceId, expectedSourceVersion, code, message);
-    if (!environmentOperationRepository.markFailed(
-        operationId, ownerNodeId, leaseToken, code, message)) {
-      throw new IllegalStateException(
-          "failed to mark operation failed under valid claim fence: " + operationId);
-    }
-    return OperationPublishOutcome.APPLIED;
   }
 
   /** 全部候选检查：未知来源与被新配置超越的快照都让整份报告无效，绝不部分接受。 */
