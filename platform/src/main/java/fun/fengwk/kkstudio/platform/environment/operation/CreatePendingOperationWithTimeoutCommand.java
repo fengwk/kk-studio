@@ -4,17 +4,17 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.EqualsAndHashCode;
 
-import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 创建处于 PENDING 状态的操作信令命令（包内私有）。
+ * 以相对超时毫秒数创建 PENDING 状态操作信令的命令（包内私有）。
  *
- * <p>内部持有用于执行的原始私有 {@code arguments}。该字段仅包内可见，且明确被 Jackson 忽略并从 {@link #toString()} 中排除，防止凭据泄露。
+ * <p>底层 SQL 在插入时由 PostgreSQL {@code statement_timestamp()} 计算绝对截止时间 {@code deadline_at}，杜绝 JVM
+ * 与数据库的时钟竞争。私有执行参数 {@code arguments} 被 Jackson 忽略并从 {@link #toString()} 中物理排除。
  */
 @EqualsAndHashCode
-public final class CreatePendingOperationCommand {
+public final class CreatePendingOperationWithTimeoutCommand {
 
   private final UUID id;
   private final UUID environmentId;
@@ -26,9 +26,9 @@ public final class CreatePendingOperationCommand {
   @JsonIgnore private final String arguments;
 
   private final String parameterSummary;
-  private final Instant deadlineAt;
+  private final long timeoutMillis;
 
-  CreatePendingOperationCommand(
+  public CreatePendingOperationWithTimeoutCommand(
       UUID id,
       UUID environmentId,
       UUID sourceId,
@@ -37,7 +37,7 @@ public final class CreatePendingOperationCommand {
       long sourceSetVersion,
       String arguments,
       String parameterSummary,
-      Instant deadlineAt) {
+      long timeoutMillis) {
     this.id = Objects.requireNonNull(id, "id");
     this.environmentId = Objects.requireNonNull(environmentId, "environmentId");
     this.sourceId = Objects.requireNonNull(sourceId, "sourceId");
@@ -46,7 +46,7 @@ public final class CreatePendingOperationCommand {
     this.sourceSetVersion = sourceSetVersion;
     this.arguments = Objects.requireNonNull(arguments, "arguments");
     this.parameterSummary = Objects.requireNonNull(parameterSummary, "parameterSummary");
-    this.deadlineAt = Objects.requireNonNull(deadlineAt, "deadlineAt");
+    this.timeoutMillis = timeoutMillis;
   }
 
   @JsonProperty
@@ -90,13 +90,13 @@ public final class CreatePendingOperationCommand {
   }
 
   @JsonProperty
-  public Instant deadlineAt() {
-    return deadlineAt;
+  public long timeoutMillis() {
+    return timeoutMillis;
   }
 
   @Override
   public String toString() {
-    return "CreatePendingOperationCommand["
+    return "CreatePendingOperationWithTimeoutCommand["
         + "id="
         + id
         + ", environmentId="
@@ -111,8 +111,8 @@ public final class CreatePendingOperationCommand {
         + sourceSetVersion
         + ", parameterSummary="
         + parameterSummary
-        + ", deadlineAt="
-        + deadlineAt
+        + ", timeoutMillis="
+        + timeoutMillis
         + "]";
   }
 }

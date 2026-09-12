@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.postgresql.PGConnection;
+import org.postgresql.PGNotification;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
@@ -22,6 +24,7 @@ import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchem
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
@@ -1267,6 +1270,191 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     // rescheduleUnsent 不存在的操作返回 STALE
     assertEquals(
         RescheduleOutcome.STALE, repository.rescheduleUnsent(nonExistentId, node, leaseToken));
+  }
+
+  /** 测试意图：验证基于相对超时毫秒数创建 PENDING 操作时，截止时间由 PostgreSQL 服务端计算，且事务提交时发出 pg_notify 通知。 */
+  @Test
+  void createPendingWithTimeoutCalculatesDeadlineAndEmitsPgNotify() throws Exception {
+    UUID envId = createEnvironment();
+    UUID sourceId = uuid();
+    UUID opId = uuid();
+
+    try (Connection listenConn = newConnection();
+        Statement stmt = listenConn.createStatement()) {
+      listenConn.setAutoCommit(true);
+      stmt.execute("LISTEN " + EnvironmentOperationRepository.NOTIFY_CHANNEL);
+      PGConnection pgConnection = listenConn.unwrap(PGConnection.class);
+
+      CreatePendingOperationWithTimeoutCommand command =
+          new CreatePendingOperationWithTimeoutCommand(
+              opId,
+              envId,
+              sourceId,
+              EnvironmentOperationType.SKILL_REFRESH,
+              1L,
+              2L,
+              "{\"url\":\"https://example.com/repo.git\"}",
+              "{\"sourceType\":\"git\"}",
+              60000L);
+
+      EnvironmentOperation created = repository.createPendingWithTimeout(command);
+      assertNotNull(created);
+      assertEquals(opId, created.id());
+      assertEquals(EnvironmentOperationStatus.PENDING, created.status());
+      assertTrue(created.deadlineAt().isAfter(Instant.now().plusSeconds(50)));
+
+      // 验证收到了 pg_notify 通知
+      PGNotification[] notifications = pgConnection.getNotifications(5000);
+      assertNotNull(notifications, "必须收到 pg_notify 通知");
+      assertTrue(notifications.length > 0);
+      boolean found = false;
+      for (PGNotification n : notifications) {
+        if (EnvironmentOperationRepository.NOTIFY_CHANNEL.equals(n.getName())
+            && opId.toString().equals(n.getParameter())) {
+          found = true;
+          break;
+        }
+      }
+      assertTrue(found, "通知负载必须是 operationId 字符串");
+    }
+  }
+
+  /** 测试意图：验证 claimPendingWithTimeout 成功推进为 RUNNING 并返回 PostgreSQL 服务端计算的剩余超时（严格正数）。 */
+  @Test
+  void claimPendingWithTimeoutReturnsPositiveRemainingDuration() throws Exception {
+    UUID envId = createEnvironment();
+    UUID sourceId = uuid();
+    UUID opId = uuid();
+    UUID node = uuid();
+    UUID leaseToken = uuid();
+
+    insertConnection(envId, node, leaseToken, "READY", 300);
+
+    CreatePendingOperationWithTimeoutCommand command =
+        new CreatePendingOperationWithTimeoutCommand(
+            opId,
+            envId,
+            sourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            1L,
+            2L,
+            "{\"type\":\"git\"}",
+            "{\"sourceType\":\"git\"}",
+            30000L);
+    repository.createPendingWithTimeout(command);
+
+    List<ClaimedOperation> claimed = repository.claimPendingWithTimeout(node, 10);
+    assertEquals(1, claimed.size());
+    ClaimedOperation first = claimed.getFirst();
+    assertEquals(opId, first.operation().id());
+    assertEquals(EnvironmentOperationStatus.RUNNING, first.operation().status());
+    assertEquals(node, first.operation().ownerNodeId());
+    assertFalse(first.remainingTimeout().isZero());
+    assertFalse(first.remainingTimeout().isNegative());
+    assertTrue(first.remainingTimeout().toMillis() > 0);
+    assertTrue(first.remainingTimeout().toMillis() <= 30000L);
+  }
+
+  /** 测试意图：验证 sweepLocalExpiredRunning 仅清扫当前节点的超期 RUNNING 行，并返回 SweptOperationInfo。 */
+  @Test
+  void sweepLocalExpiredRunningOnlySweepsTargetOwner() throws Exception {
+    UUID envId = createEnvironment();
+    UUID sourceId1 = uuid();
+    UUID sourceId2 = uuid();
+    UUID opId1 = uuid();
+    UUID opId2 = uuid();
+    UUID nodeA = uuid();
+    UUID nodeB = uuid();
+    UUID leaseTokenA = uuid();
+    UUID leaseTokenB = uuid();
+
+    insertConnection(envId, nodeA, leaseTokenA, "READY", 300);
+
+    // 插入已过期的 RUNNING 操作 1 (属于 nodeA)
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "insert into environment_operation (id, environment_id, source_id, operation_type,"
+                    + " status, source_version, source_set_version, arguments, parameter_summary,"
+                    + " deadline_at, owner_node_id, lease_token, started_at, created_at, updated_at)"
+                    + " values (?, ?, ?, 'SKILL_REFRESH', 'RUNNING', 1, 1, '{}'::jsonb, '{}'::jsonb,"
+                    + " statement_timestamp() - interval '10 second', ?, ?, statement_timestamp() - interval '20 second',"
+                    + " statement_timestamp() - interval '30 second', statement_timestamp() - interval '20 second')")) {
+      ps.setObject(1, opId1);
+      ps.setObject(2, envId);
+      ps.setObject(3, sourceId1);
+      ps.setObject(4, nodeA);
+      ps.setObject(5, leaseTokenA);
+      ps.executeUpdate();
+    }
+
+    // 插入已过期的 RUNNING 操作 2 (属于 nodeB)
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "insert into environment_operation (id, environment_id, source_id, operation_type,"
+                    + " status, source_version, source_set_version, arguments, parameter_summary,"
+                    + " deadline_at, owner_node_id, lease_token, started_at, created_at, updated_at)"
+                    + " values (?, ?, ?, 'SKILL_REFRESH', 'RUNNING', 1, 1, '{}'::jsonb, '{}'::jsonb,"
+                    + " statement_timestamp() - interval '10 second', ?, ?, statement_timestamp() - interval '20 second',"
+                    + " statement_timestamp() - interval '30 second', statement_timestamp() - interval '20 second')")) {
+      ps.setObject(1, opId2);
+      ps.setObject(2, envId);
+      ps.setObject(3, sourceId2);
+      ps.setObject(4, nodeB);
+      ps.setObject(5, leaseTokenB);
+      ps.executeUpdate();
+    }
+
+    // 执行 nodeA 的局部清扫
+    List<SweptOperationInfo> swept = repository.sweepLocalExpiredRunning(nodeA);
+    assertEquals(1, swept.size());
+    assertEquals(opId1, swept.getFirst().id());
+    assertEquals(nodeA, swept.getFirst().ownerNodeId());
+    assertEquals(leaseTokenA, swept.getFirst().leaseToken());
+
+    // 验证 opId1 变为 UNKNOWN，opId2 仍为 RUNNING
+    assertEquals(EnvironmentOperationStatus.UNKNOWN, repository.getById(opId1).status());
+    assertEquals(EnvironmentOperationStatus.RUNNING, repository.getById(opId2).status());
+  }
+
+  /** 测试意图：验证 findSafe 与 getSafe 安全投影，当环境不匹配或记录不存在时返回 empty 或抛出 404。 */
+  @Test
+  void findSafeAndGetSafeProjections() throws Exception {
+    UUID envId = createEnvironment();
+    UUID sourceId = uuid();
+    UUID opId = uuid();
+
+    CreatePendingOperationWithTimeoutCommand command =
+        new CreatePendingOperationWithTimeoutCommand(
+            opId,
+            envId,
+            sourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            1L,
+            2L,
+            "{\"secretArg\":\"value\"}",
+            "{\"sourceType\":\"git\"}",
+            30000L);
+    repository.createPendingWithTimeout(command);
+
+    SafeEnvironmentOperation safe = repository.getSafe(envId, opId);
+    assertNotNull(safe);
+    assertEquals(opId, safe.id());
+    assertEquals(envId, safe.environmentId());
+    assertEquals(
+        objectMapper.readTree("{\"sourceType\":\"git\"}"),
+        objectMapper.readTree(safe.parameterSummary()));
+
+    // 环境 ID 不匹配返回 empty
+    UUID otherEnvId = createEnvironment();
+    assertTrue(repository.findSafe(otherEnvId, opId).isEmpty());
+    assertThrows(AiResourceNotFoundException.class, () -> repository.getSafe(otherEnvId, opId));
+
+    // 不存在的 operationId
+    UUID nonExistentOp = uuid();
+    assertTrue(repository.findSafe(envId, nonExistentOp).isEmpty());
+    assertThrows(AiResourceNotFoundException.class, () -> repository.getSafe(envId, nonExistentOp));
   }
 
   private UUID createEnvironment() throws SQLException {
