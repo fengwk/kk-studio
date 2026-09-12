@@ -342,7 +342,7 @@ version source。建立上游时先注册 consumer 再读取 cursor；fan-out �
 1. 在 Spring WebSocket 和 native JSR-356 session 两侧设置 `max-message-bytes`；
 2. 创建 `SpringWebSocketConnection`和每连接 `DaemonOutboundSender`；
 3. 把 open/receive/close 委托给会话核心的 `DaemonEndpoint`（`harness/environment-server` 的 `EnvironmentDaemonServer`）；
-4. 会话核心只接受 protocol v2 HELLO 及严格的 `capabilityCatalogVersion`，并负责校验通用 capability INVOKE payload；
+4. 会话核心只接受 protocol v3 HELLO、capability catalog `"2"` 与 READY capabilities v2，并负责校验通用 capability INVOKE payload；
 5. 会话核心先解绑 registry、在途 invocation 和 pending request，再关闭 sender。
 
 `SpringWebSocketConnection`只实现核心的 `DaemonChannel`；web 层不解释协议，也不保存任何会话状态。

@@ -595,7 +595,7 @@ class EnvironmentDaemonServerTest {
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
   }
 
-  /** 测试意图：skill.load 不属于 workdir 能力，缺少 workdir 也必须照常发送 INVOKE。 */
+  /** 测试意图：skill.load 不属于 workdir 能力，缺少 workdir 也必须照常发送 INVOKE（身份三字段仍需齐全）。 */
   @Test
   void skillLoadDoesNotRequireWorkdir() {
     Fixture fixture = new Fixture();
@@ -607,7 +607,11 @@ class EnvironmentDaemonServerTest {
         ENVIRONMENT_ID,
         new EnvironmentCapabilityExecutionRequest(
             skillLoad,
-            new EnvironmentCapabilityCall(CALL_ONE.toString(), "{\"name\":\"dev\"}"),
+            new EnvironmentCapabilityCall(
+                CALL_ONE.toString(),
+                "{\"sourceId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\","
+                    + "\"name\":\"dev\",\"revision\":\""
+                    + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}"),
             Duration.ofSeconds(5)),
         new RecordingListener());
 

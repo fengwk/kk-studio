@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshot;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
@@ -151,6 +152,16 @@ class DatabaseTurnResolverTest {
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
   private static final EnvironmentId ENV_MISSING =
       EnvironmentId.parse("33333333-3333-3333-3333-333333333333");
+  private static final UUID SKILL_SOURCE_ID =
+      UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  private static final String CONTENT_REVISION =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+  private static DaemonSkillDescriptor descriptor(
+      UUID sourceId, long sourceVersion, String name, String description) {
+    return new DaemonSkillDescriptor(
+        sourceId, sourceVersion, name, description, "/home/dev/skills/" + name, CONTENT_REVISION);
+  }
 
   @Test
   void resolvesExactBranchModelReferencesWithoutFallback() {
@@ -541,7 +552,14 @@ class DatabaseTurnResolverTest {
     assertEquals(ENV_B, boundRoutes.get(0));
     assertNull(boundRoutes.get(1));
     assertEquals(
-        List.of(new SkillBinding("dev-b", "dev-b description", ENV_B)),
+        List.of(
+            new SkillBinding(
+                ENV_B,
+                SKILL_SOURCE_ID,
+                "dev-b",
+                "dev-b description",
+                "/home/dev/skills/dev-b",
+                CONTENT_REVISION)),
         requestSpec.skillBindings());
   }
 
@@ -628,7 +646,15 @@ class DatabaseTurnResolverTest {
         List.of("load_skill"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(
-        List.of(new SkillBinding("dev", "dev description", ENV_A)), requestSpec.skillBindings());
+        List.of(
+            new SkillBinding(
+                ENV_A,
+                SKILL_SOURCE_ID,
+                "dev",
+                "dev description",
+                "/home/dev/skills/dev",
+                CONTENT_REVISION)),
+        requestSpec.skillBindings());
   }
 
   @Test
@@ -643,7 +669,15 @@ class DatabaseTurnResolverTest {
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertFalse(requestSpec.toolBindings().getFirst().environmentRequired());
     assertEquals(
-        List.of(new SkillBinding("dev", "dev description", ENV_A)), requestSpec.skillBindings());
+        List.of(
+            new SkillBinding(
+                ENV_A,
+                SKILL_SOURCE_ID,
+                "dev",
+                "dev description",
+                "/home/dev/skills/dev",
+                CONTENT_REVISION)),
+        requestSpec.skillBindings());
 
     // Environment 缺少该 skill：不静默丢弃，typed 拒绝。
     fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
@@ -941,7 +975,8 @@ class DatabaseTurnResolverTest {
   void escapesXmlInAvailableSkillsSection() {
     Fixture fixture =
         new Fixture(List.of(), List.of("a&b<c>"), List.of(hostDescriptor("load_skill")));
-    fixture.readyEnvironmentWithSkills(ENV_A, List.of(new DaemonSkillDescriptor("a&b<c>", "d&e")));
+    fixture.readyEnvironmentWithSkills(
+        ENV_A, List.of(descriptor(SKILL_SOURCE_ID, 1, "a&b<c>", "d&e")));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
@@ -2288,12 +2323,7 @@ class DatabaseTurnResolverTest {
     private void readyEnvironment(
         EnvironmentId environmentId, List<String> skills, DaemonEnvironmentInfo environmentInfo) {
       readyEnvironmentWithSkills(
-          environmentId,
-          skills.stream()
-              .map(name -> new DaemonSkillDescriptor(name, name + " description"))
-              .toList(),
-          environmentInfo,
-          NOW);
+          environmentId, skills.stream().map(this::skillDescriptor).toList(), environmentInfo, NOW);
     }
 
     private void readyEnvironmentWithSkills(
@@ -2304,6 +2334,11 @@ class DatabaseTurnResolverTest {
           new DaemonEnvironmentInfo(
               DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"),
           NOW);
+    }
+
+    /** 冻结的六字段 skill descriptor fixture：来源、描述、宿主目录与内容 revision 全部必填。 */
+    private DaemonSkillDescriptor skillDescriptor(String name) {
+      return descriptor(SKILL_SOURCE_ID, 1, name, name + " description");
     }
 
     private void staleEnvironment(
@@ -2318,13 +2353,15 @@ class DatabaseTurnResolverTest {
         List<DaemonSkillDescriptor> skills,
         DaemonEnvironmentInfo environmentInfo,
         Instant lastSeenAt) {
+      DaemonSkillSourceSnapshot source =
+          new DaemonSkillSourceSnapshot(SKILL_SOURCE_ID, 1, CONTENT_REVISION, skills, List.of());
       EnvironmentConnection env =
           new EnvironmentConnection(
               environmentId,
               UUID.randomUUID(),
               UUID.randomUUID(),
               LiveEnvironmentStatus.READY,
-              new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo, skills),
+              new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo, List.of(source)),
               lastSeenAt,
               lastSeenAt.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));

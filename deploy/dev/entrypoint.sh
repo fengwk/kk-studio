@@ -49,6 +49,7 @@ CONTROL_PLANE_BASE_URL=${KK_STUDIO_CONTROL_PLANE_BASE_URL:-}
 DAEMON_GATEWAY_PATH=/api/harness/environment-daemon/v1
 DAEMON_GATEWAY_URI=
 DAEMON_NOTE=${KK_STUDIO_DAEMON_NOTE:-kk-studio dev node}
+DAEMON_DATA_DIR=${KK_STUDIO_DAEMON_DATA_DIR:-$WORKSPACE_ROOT/.kkstudio/daemon}
 DAEMON_JAR=/opt/kk-studio/daemon.jar
 DAEMON_LIB=/opt/kk-studio/lib
 
@@ -234,7 +235,8 @@ run_daemon() {
     --gateway-uri "$DAEMON_GATEWAY_URI" \
     --registration-token "$registration_token" \
     --note "$DAEMON_NOTE" \
-    --environment-root "$WORKSPACE_ROOT"
+    --environment-root "$WORKSPACE_ROOT" \
+    --data-dir "$DAEMON_DATA_DIR"
 }
 
 main() {

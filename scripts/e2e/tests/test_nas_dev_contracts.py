@@ -412,6 +412,12 @@ class TestNasDevImageContracts(unittest.TestCase):
         self.assertIn('"$REPOSITORY_DIR/scripts/dev.sh" start', entrypoint)
         self.assertIn('--registration-token "$registration_token"', entrypoint)
         self.assertIn('--environment-root "$WORKSPACE_ROOT"', entrypoint)
+        self.assertIn(
+            "DAEMON_DATA_DIR=${KK_STUDIO_DAEMON_DATA_DIR:-$WORKSPACE_ROOT/.kkstudio/daemon}",
+            entrypoint,
+        )
+        self.assertIn('--data-dir "$DAEMON_DATA_DIR"', entrypoint)
+        self.assertNotIn("--skill-dir", entrypoint)
         self.assertIn("exec java", entrypoint)
         # The Daemon binary always comes from the image, never from the mutable workspace.
         self.assertNotIn("$REPOSITORY_DIR/harness/daemon", entrypoint)

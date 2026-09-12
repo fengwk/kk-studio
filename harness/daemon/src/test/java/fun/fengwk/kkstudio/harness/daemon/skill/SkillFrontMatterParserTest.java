@@ -175,7 +175,7 @@ class SkillFrontMatterParserTest {
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class, () -> SkillFrontMatterParser.parse(tempDir, "test"));
-    assertTrue(error.getMessage().contains("duplicate front matter field 'name'"));
+    assertEquals("duplicate front matter field", error.getMessage());
   }
 
   @Test
@@ -186,7 +186,7 @@ class SkillFrontMatterParserTest {
     IllegalArgumentException errorName =
         assertThrows(
             IllegalArgumentException.class, () -> SkillFrontMatterParser.parse(tempDir, "test"));
-    assertTrue(errorName.getMessage().contains("missing non-blank name"));
+    assertTrue(errorName.getMessage().contains("missing non-blank front matter name"));
 
     // 缺少 description
     String contentMissingDesc = "---\nname: valid-name\n---\nBody\n";
@@ -194,7 +194,7 @@ class SkillFrontMatterParserTest {
     IllegalArgumentException errorDesc =
         assertThrows(
             IllegalArgumentException.class, () -> SkillFrontMatterParser.parse(tempDir, "test"));
-    assertTrue(errorDesc.getMessage().contains("missing non-blank description"));
+    assertTrue(errorDesc.getMessage().contains("missing non-blank front matter description"));
   }
 
   @Test
@@ -206,7 +206,7 @@ class SkillFrontMatterParserTest {
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class, () -> SkillFrontMatterParser.parse(tempDir, "test"));
-    assertTrue(error.getMessage().contains("invalid UTF-8 encoding"));
+    assertTrue(error.getMessage().contains("not valid UTF-8"));
     assertFalse(error.getMessage().contains("\uFFFD"));
   }
 

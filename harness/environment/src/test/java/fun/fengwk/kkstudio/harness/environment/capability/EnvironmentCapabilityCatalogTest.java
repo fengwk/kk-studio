@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Stream;
 
 /** 固定 atomic capability ID、descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
@@ -29,7 +31,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
             EnvironmentCapabilityIds.SKILL_LOAD);
 
-    assertEquals("1", EnvironmentCapabilityCatalog.version());
+    assertEquals("2", EnvironmentCapabilityCatalog.version());
     assertEquals(
         List.of(
             "fs.read",
@@ -56,12 +58,13 @@ class EnvironmentCapabilityCatalogTest {
             .count());
     assertEquals(
         expected.size(), EnvironmentCapabilityCatalog.descriptors().stream().distinct().count());
-    assertTrue(
-        EnvironmentCapabilityCatalog.descriptors().stream()
-            .allMatch(
-                descriptor ->
-                    EnvironmentCapabilityCatalog.WORKDIR_VERSION.equals(descriptor.version())
-                        || EnvironmentCapabilityCatalog.VERSION.equals(descriptor.version())));
+    for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
+      String expectedVersion =
+          descriptor.id().equals(EnvironmentCapabilityIds.SKILL_LOAD)
+              ? EnvironmentCapabilityCatalog.SKILL_LOAD_VERSION
+              : EnvironmentCapabilityCatalog.WORKDIR_VERSION;
+      assertEquals(expectedVersion, descriptor.version(), descriptor.id().value());
+    }
     // workdir 语义由 capability ID 决定，不能从可能被其它能力独立使用的版本号推断。
     assertEquals(
         expected.subList(0, 9),
@@ -70,6 +73,44 @@ class EnvironmentCapabilityCatalogTest {
             .filter(EnvironmentCapabilityCatalog::requiresWorkdir)
             .toList());
     assertFalse(EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.SKILL_LOAD));
+  }
+
+  /**
+   * 管理专用能力必须在固定顺序中注册、与模型可见能力分离、无需 workdir，且仍能被 find 解析。
+   *
+   * <p>它们复用 INVOKE/CANCEL/结果通道，但绝不进入模型工具目录，因此 descriptor 列表与 management 列表必须严格区分。
+   */
+  @Test
+  void exposesManagementOnlySkillSourceCapabilities() {
+    List<EnvironmentCapabilityId> expected =
+        List.of(
+            EnvironmentCapabilityIds.SKILL_SOURCE_REFRESH,
+            EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL,
+            EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE);
+
+    assertEquals(
+        expected,
+        EnvironmentCapabilityCatalog.managementDescriptors().stream()
+            .map(EnvironmentCapabilityDescriptor::id)
+            .toList());
+    assertEquals(EnvironmentCapabilityIds.MANAGEMENT_ONLY, Set.copyOf(expected));
+    for (EnvironmentCapabilityId id : expected) {
+      assertTrue(EnvironmentCapabilityCatalog.find(id).isPresent(), id.value());
+      assertFalse(EnvironmentCapabilityCatalog.requiresWorkdir(id), id.value());
+      assertTrue(
+          EnvironmentCapabilityCatalog.descriptors().stream()
+              .noneMatch(descriptor -> descriptor.id().equals(id)),
+          id.value());
+    }
+    // 管理能力与模型可见能力共享同一份冻结来源配置 schema，禁止出现第二份 wire 形状。
+    assertEquals(
+        1,
+        Stream.concat(
+                EnvironmentCapabilityCatalog.managementDescriptors().stream(),
+                EnvironmentCapabilityCatalog.managementDescriptors().stream())
+            .map(EnvironmentCapabilityDescriptor::inputSchema)
+            .distinct()
+            .count());
   }
 
   /** descriptor 是 execution 的唯一事实源；可通过 find 与 require 查询。 */

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -50,6 +51,36 @@ class LoadSkillToolTest {
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final EnvironmentId LOCAL_DEV =
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
+  private static final UUID PLATFORM_SOURCE_ID =
+      UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  private static final UUID LOCAL_SOURCE_ID =
+      UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+  private static final String PLATFORM_REVISION =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  private static final String LOCAL_REVISION =
+      "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+
+  /** 冻结的 dev skill：平台来源 + 平台正文目录 + 固定 revision。 */
+  private static SelectedSkill platformDevSkill() {
+    return new SelectedSkill(
+        PLATFORM,
+        PLATFORM_SOURCE_ID,
+        "dev",
+        "Developer rules",
+        "/host/skills/dev",
+        PLATFORM_REVISION);
+  }
+
+  /** 冻结的 project skill：本地来源，用于验证来源环境必须匹配。 */
+  private static SelectedSkill localProjectSkill() {
+    return new SelectedSkill(
+        LOCAL_DEV,
+        LOCAL_SOURCE_ID,
+        "project",
+        "Project skill",
+        "/host/skills/project",
+        LOCAL_REVISION);
+  }
 
   /** descriptor 的 name/version/renderer/side-effect/timeout 与单参数 schema 声明及 environment 要求。 */
   @Test
@@ -79,7 +110,7 @@ class LoadSkillToolTest {
     ThreadSelectedSkillLookup lookup =
         (invocationId, threadId, skillName) -> {
           if ("dev".equals(skillName)) {
-            return Optional.of(new SelectedSkill("dev", "Developer rules", PLATFORM));
+            return Optional.of(platformDevSkill());
           }
           return Optional.empty();
         };
@@ -96,7 +127,14 @@ class LoadSkillToolTest {
     assertEquals(
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_LOAD), env.capability);
     assertNotNull(env.request);
-    assertEquals("{\"name\":\"dev\"}", env.request.call().argumentsJson());
+    // 转发给 skill.load 的必须是冻结的全部身份字段：按名称回退到同名新版本是被禁止的。
+    assertEquals(
+        "{\"sourceId\":\""
+            + PLATFORM_SOURCE_ID
+            + "\",\"name\":\"dev\",\"revision\":\""
+            + PLATFORM_REVISION
+            + "\"}",
+        env.request.call().argumentsJson());
     assertEquals(Duration.ofSeconds(2), env.timeout);
   }
 
@@ -104,8 +142,7 @@ class LoadSkillToolTest {
   @Test
   void rejectsSkillSourceEnvironmentMismatch() throws Exception {
     ThreadSelectedSkillLookup lookup =
-        (invocationId, threadId, skillName) ->
-            Optional.of(new SelectedSkill("project", "Project skill", LOCAL_DEV));
+        (invocationId, threadId, skillName) -> Optional.of(localProjectSkill());
     RecordingBoundEnvironment env = new RecordingBoundEnvironment(PLATFORM);
     LoadSkillTool tool = new LoadSkillTool(lookup, Duration.ofSeconds(2));
 
@@ -119,8 +156,7 @@ class LoadSkillToolTest {
   @Test
   void usesLiveLoadTimeoutSupplierOnEachExecute() throws Exception {
     ThreadSelectedSkillLookup lookup =
-        (invocationId, threadId, skillName) ->
-            Optional.of(new SelectedSkill("dev", "Developer rules", PLATFORM));
+        (invocationId, threadId, skillName) -> Optional.of(platformDevSkill());
     RecordingBoundEnvironment env = new RecordingBoundEnvironment(PLATFORM);
     env.result = new ToolResult("c1", List.of(new TextResultContent("# Skill\n")), false, "{}");
     AtomicReference<Duration> timeout = new AtomicReference<>(Duration.ofSeconds(2));
@@ -140,7 +176,7 @@ class LoadSkillToolTest {
     ThreadSelectedSkillLookup lookup =
         (invocationId, threadId, skillName) -> {
           if ("dev".equals(skillName)) {
-            return Optional.of(new SelectedSkill("dev", "Developer rules", PLATFORM));
+            return Optional.of(platformDevSkill());
           }
           return Optional.empty();
         };
@@ -164,19 +200,50 @@ class LoadSkillToolTest {
     assertNotNull(env.request);
   }
 
-  /** Skill 声明没有 Environment 正文来源时拒绝加载且不调用 BoundEnvironment。 */
+  /** SelectedSkill 的冻结身份是必填事实：缺少来源环境、来源 ID 或 revision 在冻结时即失败。 */
   @Test
-  void rejectsSelectedSkillWithoutAnEnvironmentBody() throws Exception {
-    ThreadSelectedSkillLookup lookup =
-        (invocationId, threadId, skillName) ->
-            Optional.of(new SelectedSkill("platform-only", "Already provided", null));
-    RecordingBoundEnvironment env = new RecordingBoundEnvironment(PLATFORM);
-    LoadSkillTool tool = new LoadSkillTool(lookup, Duration.ofSeconds(2));
-
-    ToolResult result = execute(tool, env, "{\"name\":\"platform-only\"}");
-    assertTrue(result.error());
-    assertTrue(text(result).contains("has no Environment body"));
-    assertNull(env.request);
+  void selectedSkillRequiresCompleteFrozenIdentity() {
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new SelectedSkill(
+                null, PLATFORM_SOURCE_ID, "dev", "Developer rules", "/s", PLATFORM_REVISION));
+    assertThrows(
+        NullPointerException.class,
+        () -> new SelectedSkill(PLATFORM, null, "dev", "Developer rules", "/s", PLATFORM_REVISION));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SelectedSkill(PLATFORM, PLATFORM_SOURCE_ID, "dev", "Developer rules", "/s", null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SelectedSkill(
+                PLATFORM, PLATFORM_SOURCE_ID, "dev", "Developer rules", null, PLATFORM_REVISION));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SelectedSkill(PLATFORM, PLATFORM_SOURCE_ID, "dev", null, "/s", PLATFORM_REVISION));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SelectedSkill(
+                PLATFORM,
+                PLATFORM_SOURCE_ID,
+                "bad\nname",
+                "Developer rules",
+                "/s",
+                PLATFORM_REVISION));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SelectedSkill(
+                PLATFORM,
+                PLATFORM_SOURCE_ID,
+                "dev",
+                "Developer rules",
+                "relative",
+                PLATFORM_REVISION));
   }
 
   /** 缺少执行上下文或环境绑定时安全处理，且要求合法的 skill 名称。 */
@@ -228,8 +295,7 @@ class LoadSkillToolTest {
   void cancellationCancelsThePendingLoadAndCompletesExactlyOnce() throws Exception {
     LoadSkillTool tool =
         new LoadSkillTool(
-            (invocationId, threadId, skillName) ->
-                Optional.of(new SelectedSkill("dev", "Developer rules", PLATFORM)),
+            (invocationId, threadId, skillName) -> Optional.of(platformDevSkill()),
             Duration.ofSeconds(2));
     AtomicReference<ToolResult> result = new AtomicReference<>();
     AtomicInteger terminalCount = new AtomicInteger();

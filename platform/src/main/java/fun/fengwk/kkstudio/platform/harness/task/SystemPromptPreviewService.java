@@ -126,7 +126,14 @@ public final class SystemPromptPreviewService {
               .findFirst()
               .orElse(null);
       if (skill != null) {
-        bindings.add(new SkillBinding(skill.name(), skill.description(), environmentId));
+        bindings.add(
+            new SkillBinding(
+                environmentId,
+                skill.sourceId(),
+                skill.name(),
+                skill.description(),
+                skill.baseDirectory(),
+                skill.contentRevision()));
       }
     }
     return List.copyOf(bindings);

@@ -8,18 +8,19 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 
 /**
  * Daemon 独立进程的连接与执行配置。
  *
- * <p>连接、身份、说明、environment root 与 skill 的唯一配置来源是 CLI：{@code --registration-token}、gateway 连接参数、可选且唯一
- * {@code --note}、唯一 {@code --environment-root} 与可重复 {@code --skill-dir}。{@code
- * --registration-token} 是该 Environment 颁发的 HELLO 注册凭证。Daemon 不配置也不持有 Environment UUID，连接建立后由
- * Gateway 在 WELCOME 消息中下发。environment root 默认启动用户 canonical HOME；skill 路径不使用服务端托管配置。{@code --note}
- * 会进入受信任的模型 SYSTEM Prompt，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。
+ * <p>连接、身份、说明、environment root 与本地数据目录的唯一配置来源是 CLI：{@code --registration-token}、gateway 连接参数、可选且唯一
+ * {@code --note}、唯一 {@code --environment-root} 与唯一必填绝对 {@code --data-dir}。{@code --data-dir} 承载受管
+ * Git checkout、不可变 skill 正文与 manifest；它由 Daemon 自行创建。{@code --registration-token} 是该 Environment
+ * 颁发的 HELLO 注册凭证。Daemon 不配置也不持有 Environment UUID，连接建立后由 Gateway 在 WELCOME 消息中下发。environment root
+ * 默认启动用户 canonical HOME，只是宿主展示元数据，不构成任何工具的默认目录。
+ *
+ * <p>不存在的 Skill 来源不再由 CLI 覆盖：来源是 Platform 的受管配置，Daemon 只按请求扫描。{@code --note} 会进入受信任的模型 SYSTEM
+ * Prompt，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。
  */
 public record DaemonConfig(
     URI gatewayUri,
@@ -30,7 +31,7 @@ public record DaemonConfig(
     Duration defaultToolTimeout,
     String note,
     Path environmentRoot,
-    List<Path> skillDirs) {
+    Path dataDir) {
 
   public DaemonConfig {
     gatewayUri = Objects.requireNonNull(gatewayUri, "gatewayUri");
@@ -47,15 +48,10 @@ public record DaemonConfig(
     defaultToolTimeout = requirePositive(defaultToolTimeout, "defaultToolTimeout");
     note = note == null ? null : DaemonEnvironmentInfo.validateNote(note);
     environmentRoot = canonicalDirectory(environmentRoot, "environmentRoot");
-    skillDirs =
-        List.copyOf(Objects.requireNonNull(skillDirs, "skillDirs")).stream()
-            .map(
-                path ->
-                    Objects.requireNonNull(path, "skillDirs element").toAbsolutePath().normalize())
-            .toList();
+    dataDir = requireAbsoluteDirectory(dataDir);
   }
 
-  /** 解析 CLI 参数。未给出 {@code --skill-dir} 时默认 {@code ~/.agents/skills}（仅当该目录存在时纳入）。 */
+  /** 解析 CLI 参数。{@code --data-dir} 必须显式给出且为绝对路径；已删除 {@code --skill-dir} 及其默认目录回退。 */
   public static DaemonConfig fromArgs(String[] args) {
     Objects.requireNonNull(args, "args");
     String gatewayUri = null;
@@ -66,8 +62,7 @@ public record DaemonConfig(
     String toolTimeout = null;
     String environmentRoot = null;
     String note = null;
-    List<Path> skillDirs = new ArrayList<>();
-    boolean skillDirExplicit = false;
+    String dataDir = null;
 
     for (int index = 0; index < args.length; index++) {
       String arg = args[index];
@@ -90,18 +85,13 @@ public record DaemonConfig(
           }
           environmentRoot = requireArgValue(args, ++index, arg);
         }
-        case "--skill-dir" -> {
-          skillDirExplicit = true;
-          skillDirs.add(Path.of(requireArgValue(args, ++index, arg)));
+        case "--data-dir" -> {
+          if (dataDir != null) {
+            throw new IllegalArgumentException("--data-dir may only be specified once");
+          }
+          dataDir = requireArgValue(args, ++index, arg);
         }
         default -> throw new IllegalArgumentException("unknown argument: " + arg);
-      }
-    }
-
-    if (!skillDirExplicit) {
-      Path defaultSkillDir = defaultSkillDir();
-      if (Files.isDirectory(defaultSkillDir)) {
-        skillDirs.add(defaultSkillDir);
       }
     }
 
@@ -114,12 +104,7 @@ public record DaemonConfig(
         parseDuration(toolTimeout, Duration.ofMinutes(5)),
         note,
         environmentRoot == null ? defaultEnvironmentRoot() : Path.of(environmentRoot),
-        skillDirs);
-  }
-
-  /** 默认本地 skill 根目录：{@code ~/.agents/skills}。 */
-  public static Path defaultSkillDir() {
-    return Path.of(System.getProperty("user.home"), ".agents", "skills");
+        Path.of(requirePresent(dataDir, "data-dir")));
   }
 
   /** 默认 Environment Root：启动用户 HOME 的 canonical 目录。 */
@@ -200,5 +185,14 @@ public record DaemonConfig(
     } catch (IOException error) {
       throw new IllegalArgumentException(name + " must be an existing directory", error);
     }
+  }
+
+  /** 数据目录必须显式绝对；不必预先存在，Daemon 会创建它。 */
+  private static Path requireAbsoluteDirectory(Path value) {
+    Path path = Objects.requireNonNull(value, "dataDir");
+    if (!path.isAbsolute()) {
+      throw new IllegalArgumentException("dataDir must be an absolute path");
+    }
+    return path.normalize();
   }
 }

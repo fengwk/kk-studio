@@ -216,7 +216,7 @@ skill 正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.lo
 也不存在环境级容量或排队。唯一拒绝重复的规则是同一 Environment 内重用相同的活动 `invocationId`（调用方错误）。发送前按该连接
 READY 中冻结的目标 Daemon OS 对 `arguments.workdir` 做纯词法校验；真实存在性、目录类型与可访问性由 Daemon 判定。
 
-会话核心只接受 protocol v2 HELLO 和严格的 `capabilityCatalogVersion`。INVOKE payload 使用
+会话核心只接受 protocol v3 HELLO、capability catalog `"2"` 与 READY capabilities v2。INVOKE payload 使用
 `capabilityId`、`capabilityVersion`、`arguments`、`timeoutMillis`，不携带 model
 Tool name，也不携带第二份目录字段；所有结果通过通用 `STARTED/PARTIAL/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
 `invocationId` 关联。发送不确定时关闭连接并把在途 invocation 收敛为 uncertain，不重发可能已经产生副作用的请求。

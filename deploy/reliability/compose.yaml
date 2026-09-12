@@ -76,6 +76,8 @@ services:
       - Isolated Docker reliability environment.
       - --environment-root
       - /workspace
+      - --data-dir
+      - /workspace/.kkstudio/daemon
     volumes:
       - daemon-workspace:/workspace
     networks:

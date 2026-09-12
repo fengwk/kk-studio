@@ -40,8 +40,11 @@ class ModelRequestSpecJsonCodecTest {
             + requestSpec.outputTokens()
             + ",\"preambleMessages\":[],\"toolBindings\":["
             + bindingCodec.encode(requestSpec.toolBindings().getFirst())
-            + "],\"skillBindings\":[{\"name\":\"review\",\"description\":\"Review code\","
-            + "\"sourceEnvironmentId\":\"123e4567-e89b-12d3-a456-426614174000\"}],"
+            + "],\"skillBindings\":[{\"sourceEnvironmentId\":\"123e4567-e89b-12d3-a456-426614174000\","
+            + "\"sourceId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\","
+            + "\"name\":\"review\",\"description\":\"Review code\","
+            + "\"baseDirectory\":\"/home/dev/.agents/skills/review\","
+            + "\"contentRevision\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}],"
             + "\"subagentBindings\":[],\"cacheControl\":"
             + providerCodec.encodeCacheControlNode(requestSpec.cacheControl())
             + "}";
@@ -119,6 +122,14 @@ class ModelRequestSpecJsonCodecTest {
     ObjectNode toolsType = encodedNode();
     toolsType.putObject("toolBindings");
     assertInvalid(toolsType);
+
+    // skill binding 六字段全部必填：缺少新身份字段的旧形状必须被拒绝，而不是 tolerant 解码。
+    for (String field : List.of("sourceId", "baseDirectory", "contentRevision")) {
+      ObjectNode missingSkillField = encodedNode();
+      ObjectNode skill = (ObjectNode) missingSkillField.path("skillBindings").get(0);
+      skill.remove(field);
+      assertInvalid(missingSkillField);
+    }
   }
 
   @Test

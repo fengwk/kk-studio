@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTes
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.environment;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.host;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.modelDescriptor;
+import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.skill;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -42,7 +43,7 @@ class ModelRequestSpecTest {
     ModelRequestSpec spec =
         spec(
             List.of(host("bash"), environment("fs")),
-            List.of(new SkillBinding("web", "Web search", ENV_ID)),
+            List.of(skill("web", "Web search", ENV_ID)),
             List.of(new SubagentBinding("reviewer", "Review changes")));
 
     assertEquals(ProviderType.OPENAI, spec.providerType());
@@ -59,8 +60,7 @@ class ModelRequestSpecTest {
   void defensivelyCopiesFrozenLists() {
     // 修改调用方列表不能改变 durable request，返回列表也不可变。
     List<ToolBinding> tools = new ArrayList<>(List.of(host("bash")));
-    List<SkillBinding> skills =
-        new ArrayList<>(List.of(new SkillBinding("web", "Web search", null)));
+    List<SkillBinding> skills = new ArrayList<>(List.of(skill("web", "Web search", ENV_ID)));
     List<SubagentBinding> subagents =
         new ArrayList<>(List.of(new SubagentBinding("reviewer", "Review changes")));
     List<AgentMessage> preamble = new ArrayList<>(List.of(AgentMessage.system("sys")));
@@ -78,7 +78,7 @@ class ModelRequestSpecTest {
             ProviderCacheControl.none());
 
     tools.add(host("extra"));
-    skills.add(new SkillBinding("extra", "Extra", null));
+    skills.add(skill("extra", "Extra", ENV_ID));
     subagents.add(new SubagentBinding("extra", "Extra"));
     preamble.add(AgentMessage.system("more"));
 
@@ -139,9 +139,7 @@ class ModelRequestSpecTest {
         () ->
             spec(
                 List.of(),
-                List.of(
-                    new SkillBinding("web", "first", null),
-                    new SkillBinding("web", "second", null)),
+                List.of(skill("web", "first", ENV_ID), skill("web", "second", ENV_ID)),
                 List.of()));
     assertThrows(
         IllegalArgumentException.class,
@@ -169,9 +167,7 @@ class ModelRequestSpecTest {
         IllegalArgumentException.class,
         () ->
             spec(
-                List.of(environment("fs")),
-                List.of(new SkillBinding("web", "Web search", other)),
-                List.of()));
+                List.of(environment("fs")), List.of(skill("web", "Web search", other)), List.of()));
   }
 
   @Test
@@ -180,7 +176,7 @@ class ModelRequestSpecTest {
     ModelRequestSpec spec =
         spec(
             List.of(host("bash"), environment("fs", ENV_ID)),
-            List.of(new SkillBinding("web", "Web search", ENV_ID)),
+            List.of(skill("web", "Web search", ENV_ID)),
             List.of());
     assertEquals(2, spec.toolBindings().size());
     assertEquals(1, spec.skillBindings().size());

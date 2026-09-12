@@ -15,14 +15,13 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.List;
 
-/** 配置契约用于阻止生产 Daemon 在缺少身份或 gateway 凭证时接入。 */
+/** 配置契约用于阻止生产 Daemon 在缺少身份、gateway 凭证或本地数据目录时接入。 */
 class DaemonConfigTest {
 
   /** 所有显式连接输入，包括 registration token，都是必填且有界的。 */
   @Test
-  void validatesExplicitConnectionConfiguration() {
+  void validatesExplicitConnectionConfiguration(@TempDir Path dataDir) {
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -33,7 +32,7 @@ class DaemonConfigTest {
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(1),
                 "token",
-                List.of()));
+                dataDir));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -44,7 +43,7 @@ class DaemonConfigTest {
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(1),
                 " ",
-                List.of()));
+                dataDir));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -55,12 +54,14 @@ class DaemonConfigTest {
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(1),
                 "token",
-                List.of()));
+                dataDir));
   }
 
-  /** CLI 是 daemon 连接、身份、超时与 skill roots 的唯一配置来源。 */
+  /** CLI 是 daemon 连接、身份、超时、environment root 与本地数据目录的唯一配置来源。 */
   @Test
-  void readsCliArguments(@TempDir Path skillDir) throws Exception {
+  void readsCliArguments(@TempDir Path root) throws Exception {
+    Path environmentRoot = Files.createDirectories(root.resolve("home"));
+    Path dataDir = root.resolve("data");
     DaemonConfig config =
         DaemonConfig.fromArgs(
             new String[] {
@@ -79,9 +80,9 @@ class DaemonConfigTest {
               "--note",
               "Custom local environment.",
               "--environment-root",
-              skillDir.toString(),
-              "--skill-dir",
-              skillDir.toString()
+              environmentRoot.toString(),
+              "--data-dir",
+              dataDir.toString()
             });
 
     assertEquals(URI.create("wss://gateway.example/daemon"), config.gatewayUri());
@@ -91,8 +92,98 @@ class DaemonConfigTest {
     assertEquals(Duration.ofSeconds(3), config.maxReconnectDelay());
     assertEquals(Duration.ofSeconds(4), config.defaultToolTimeout());
     assertEquals("Custom local environment.", config.note());
-    assertEquals(skillDir.toRealPath(), config.environmentRoot());
-    assertEquals(List.of(skillDir.toAbsolutePath().normalize()), config.skillDirs());
+    assertEquals(environmentRoot.toRealPath(), config.environmentRoot());
+    assertEquals(dataDir.toAbsolutePath().normalize(), config.dataDir());
+  }
+
+  /** {@code --data-dir} 必填：缺失时启动失败关闭，而不是回退到任何默认 skill 目录。 */
+  @Test
+  void requiresExplicitDataDir() {
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                DaemonConfig.fromArgs(
+                    new String[] {
+                      "--gateway-uri", "ws://gateway.example/daemon",
+                      "--registration-token", "secret"
+                    }));
+    assertTrue(error.getMessage().contains("data-dir"));
+  }
+
+  /** {@code --data-dir} 必须是绝对路径：相对路径会被解析为进程当前目录下的位置，因此明确拒绝。 */
+  @Test
+  void rejectsRelativeDataDir() {
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                DaemonConfig.fromArgs(
+                    new String[] {
+                      "--gateway-uri", "ws://gateway.example/daemon",
+                      "--registration-token", "secret",
+                      "--data-dir", "relative/data"
+                    }));
+    assertTrue(error.getMessage().contains("absolute"));
+  }
+
+  /** {@code --data-dir} 只能出现一次，重复配置是操作者错误。 */
+  @Test
+  void rejectsRepeatedDataDir(@TempDir Path root) {
+    String first = root.resolve("first").toString();
+    String second = root.resolve("second").toString();
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                DaemonConfig.fromArgs(
+                    new String[] {
+                      "--gateway-uri",
+                      "ws://gateway.example/daemon",
+                      "--registration-token",
+                      "secret",
+                      "--data-dir",
+                      first,
+                      "--data-dir",
+                      second
+                    }));
+    assertTrue(error.getMessage().contains("only be specified once"));
+  }
+
+  /** 已删除的 {@code --skill-dir} 必须作为未知参数失败，避免操作者以为来源仍由 CLI 配置。 */
+  @Test
+  void rejectsRemovedSkillDirArgument(@TempDir Path dataDir) {
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                DaemonConfig.fromArgs(
+                    new String[] {
+                      "--gateway-uri",
+                      "ws://gateway.example/daemon",
+                      "--registration-token",
+                      "secret",
+                      "--data-dir",
+                      dataDir.toString(),
+                      "--skill-dir",
+                      dataDir.toString()
+                    }));
+    assertTrue(error.getMessage().contains("unknown argument"));
+  }
+
+  /** 数据目录不必预先存在（Daemon 会创建它），但显式数据目录会被规范化。 */
+  @Test
+  void acceptsNotYetExistingDataDir(@TempDir Path root) {
+    Path dataDir = root.resolve("nested/data");
+    DaemonConfig config =
+        DaemonConfig.fromArgs(
+            new String[] {
+              "--gateway-uri", "ws://gateway.example/daemon",
+              "--registration-token", "secret",
+              "--data-dir", dataDir.toString()
+            });
+
+    assertEquals(dataDir.toAbsolutePath().normalize(), config.dataDir());
   }
 
   /** 未显式配置时，Environment Root 使用启动用户 HOME 的 canonical 目录。 */
@@ -105,7 +196,8 @@ class DaemonConfigTest {
           DaemonConfig.fromArgs(
               new String[] {
                 "--gateway-uri", "ws://gateway.example/daemon",
-                "--registration-token", "secret"
+                "--registration-token", "secret",
+                "--data-dir", home.resolve("data").toString()
               });
 
       assertEquals(home.toRealPath(), config.environmentRoot());
@@ -118,14 +210,20 @@ class DaemonConfigTest {
   @Test
   void validatesExplicitEnvironmentRoot(@TempDir Path root) throws Exception {
     Path file = Files.writeString(root.resolve("file.txt"), "x");
+    String dataDir = root.resolve("data").toString();
     assertThrows(
         IllegalArgumentException.class,
         () ->
             DaemonConfig.fromArgs(
                 new String[] {
-                  "--gateway-uri", "ws://gateway.example/daemon",
-                  "--registration-token", "secret",
-                  "--environment-root", file.toString()
+                  "--gateway-uri",
+                  "ws://gateway.example/daemon",
+                  "--registration-token",
+                  "secret",
+                  "--data-dir",
+                  dataDir,
+                  "--environment-root",
+                  file.toString()
                 }));
     assertThrows(
         IllegalArgumentException.class,
@@ -136,6 +234,8 @@ class DaemonConfigTest {
                   "ws://gateway.example/daemon",
                   "--registration-token",
                   "secret",
+                  "--data-dir",
+                  dataDir,
                   "--environment-root",
                   root.toString(),
                   "--environment-root",
@@ -145,43 +245,50 @@ class DaemonConfigTest {
 
   /** {@code --note} 可省略或显式覆盖默认值，但显式值必须唯一、单行、无控制、无首尾空白且有界。 */
   @Test
-  void validatesOptionalNoteCli() {
+  void validatesOptionalNoteCli(@TempDir Path dataDir) {
     DaemonConfig omitted =
         DaemonConfig.fromArgs(
             new String[] {
               "--gateway-uri", "ws://gateway.example/daemon",
-              "--registration-token", "secret"
+              "--registration-token", "secret",
+              "--data-dir", dataDir.toString()
             });
     assertNull(omitted.note());
 
-    assertInvalidNoteArgs("--note", "first", "--note", "second");
-    assertInvalidNoteArgs("--note", "");
-    assertInvalidNoteArgs("--note", " ");
-    assertInvalidNoteArgs("--note", " leading");
-    assertInvalidNoteArgs("--note", "trailing ");
-    assertInvalidNoteArgs("--note", "first\nsecond");
-    assertInvalidNoteArgs("--note", "first\u2028second");
-    assertInvalidNoteArgs("--note", "control\u0007value");
-    assertInvalidNoteArgs("--note", "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS + 1));
+    assertInvalidNoteArgs(dataDir, "--note", "first", "--note", "second");
+    assertInvalidNoteArgs(dataDir, "--note", "");
+    assertInvalidNoteArgs(dataDir, "--note", " ");
+    assertInvalidNoteArgs(dataDir, "--note", " leading");
+    assertInvalidNoteArgs(dataDir, "--note", "trailing ");
+    assertInvalidNoteArgs(dataDir, "--note", "first\nsecond");
+    assertInvalidNoteArgs(dataDir, "--note", "first\u2028second");
+    assertInvalidNoteArgs(dataDir, "--note", "control\u0007value");
+    assertInvalidNoteArgs(dataDir, "--note", "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS + 1));
 
     DaemonConfig maxLength =
         DaemonConfig.fromArgs(
             new String[] {
-              "--gateway-uri", "ws://gateway.example/daemon",
-              "--registration-token", "secret",
-              "--note", "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS)
+              "--gateway-uri",
+              "ws://gateway.example/daemon",
+              "--registration-token",
+              "secret",
+              "--data-dir",
+              dataDir.toString(),
+              "--note",
+              "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS)
             });
     assertEquals(DaemonEnvironmentInfo.MAX_NOTE_CHARS, maxLength.note().length());
   }
 
   /** 省略 note 时按实测 OS 生成固定说明，显式值对所有 OS 都优先。 */
   @Test
-  void resolvesExactDefaultNotesForEveryOperatingSystem() {
+  void resolvesExactDefaultNotesForEveryOperatingSystem(@TempDir Path dataDir) {
     DaemonConfig defaults =
         DaemonConfig.fromArgs(
             new String[] {
               "--gateway-uri", "ws://gateway.example/daemon",
-              "--registration-token", "secret"
+              "--registration-token", "secret",
+              "--data-dir", dataDir.toString()
             });
     assertEquals("Windows environment.", defaults.effectiveNote(DaemonOperatingSystem.WINDOWS));
     assertEquals(
@@ -196,6 +303,7 @@ class DaemonConfigTest {
             new String[] {
               "--gateway-uri", "ws://gateway.example/daemon",
               "--registration-token", "secret",
+              "--data-dir", dataDir.toString(),
               "--note", "Explicit environment."
             });
     for (DaemonOperatingSystem operatingSystem : DaemonOperatingSystem.values()) {
@@ -203,38 +311,21 @@ class DaemonConfigTest {
     }
   }
 
-  /** 显式 skill dirs 会替换默认的发现根目录。 */
-  @Test
-  void acceptsRepeatableSkillDirs(@TempDir Path first, @TempDir Path second) {
-    DaemonConfig config =
-        DaemonConfig.fromArgs(
-            new String[] {
-              "--gateway-uri",
-              "ws://gateway.example/daemon",
-              "--registration-token",
-              "secret",
-              "--skill-dir",
-              first.toString(),
-              "--skill-dir",
-              second.toString()
-            });
-
-    assertEquals(
-        List.of(first.toAbsolutePath().normalize(), second.toAbsolutePath().normalize()),
-        config.skillDirs());
-  }
-
   /** 当部署缺少 gateway 所需的密钥时，启动失败关闭。 */
   @Test
-  void rejectsMissingRegistrationToken() {
+  void rejectsMissingRegistrationToken(@TempDir Path dataDir) {
     assertThrows(
         IllegalArgumentException.class,
-        () -> DaemonConfig.fromArgs(new String[] {"--gateway-uri", "ws://gateway.example/daemon"}));
+        () ->
+            DaemonConfig.fromArgs(
+                new String[] {
+                  "--gateway-uri", "ws://gateway.example/daemon", "--data-dir", dataDir.toString()
+                }));
   }
 
   /** 未知的 CLI 参数立即失败，而不是被静默忽略。 */
   @Test
-  void rejectsUnknownCliArgument() {
+  void rejectsUnknownCliArgument(@TempDir Path dataDir) {
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -242,13 +333,27 @@ class DaemonConfigTest {
                 new String[] {
                   "--gateway-uri", "ws://gateway.example/daemon",
                   "--registration-token", "secret",
+                  "--data-dir", dataDir.toString(),
                   "--unexpected", "x"
                 }));
   }
 
+  /** 缺少 flag 取值（其后直接是下一个 flag 或参数结束）失败，避免把 flag 名当值。 */
   @Test
-  void defaultSkillDirPointsAtUserAgentsSkills() {
-    assertTrue(DaemonConfig.defaultSkillDir().endsWith(Path.of(".agents", "skills")));
+  void rejectsMissingArgumentValue(@TempDir Path dataDir) {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            DaemonConfig.fromArgs(
+                new String[] {
+                  "--gateway-uri",
+                  "ws://gateway.example/daemon",
+                  "--registration-token",
+                  "secret",
+                  "--data-dir",
+                  dataDir.toString(),
+                  "--note"
+                }));
   }
 
   private DaemonConfig config(
@@ -258,7 +363,7 @@ class DaemonConfigTest {
       Duration maxReconnectDelay,
       Duration defaultToolTimeout,
       String registrationToken,
-      List<Path> skillDirs) {
+      Path dataDir) {
     return new DaemonConfig(
         gatewayUri,
         registrationToken,
@@ -268,16 +373,19 @@ class DaemonConfigTest {
         defaultToolTimeout,
         null,
         DaemonConfig.defaultEnvironmentRoot(),
-        skillDirs);
+        dataDir);
   }
 
-  private static void assertInvalidNoteArgs(String... noteArgs) {
-    String[] args = new String[4 + noteArgs.length];
+  /** 构造携带合法必填参数的参数数组，仅让 note 相关参数成为失败原因。 */
+  private static void assertInvalidNoteArgs(Path dataDir, String... noteArgs) {
+    String[] args = new String[6 + noteArgs.length];
     args[0] = "--gateway-uri";
     args[1] = "ws://gateway.example/daemon";
     args[2] = "--registration-token";
     args[3] = "secret";
-    System.arraycopy(noteArgs, 0, args, 4, noteArgs.length);
+    args[4] = "--data-dir";
+    args[5] = dataDir.toString();
+    System.arraycopy(noteArgs, 0, args, 6, noteArgs.length);
     assertThrows(IllegalArgumentException.class, () -> DaemonConfig.fromArgs(args));
   }
 }

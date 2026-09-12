@@ -46,7 +46,7 @@ import java.util.function.Supplier;
 /**
  * Environment daemon 的服务端会话核心：唯一拥有连接代际的握手、sequence、lease、pending invocation 与终态状态。
  *
- * <p>协议为当前 daemon wire v2：HELLO scope 为 null 且 payload 携带 {@code registrationToken}；核心通过 {@link
+ * <p>协议为当前 daemon wire v3：HELLO scope 为 null 且 payload 携带 {@code registrationToken}；核心通过 {@link
  * DaemonRegistrationDirectory} 解析环境身份，通过 {@link DaemonLeaseStore} 以 {@code (environment_id,
  * owner_node_id, lease_token)} 围栏原子抢占路由（已有活跃路由返回 RETRY_LATER），成功后下发 WELCOME。READY、HEARTBEAT
  * 与断开连接同样以围栏推进状态； 租约存储不可用时 fail-closed。

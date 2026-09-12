@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshot;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -47,6 +48,17 @@ import java.util.UUID;
 class EnvironmentServiceImplTest {
 
   private static final UUID ENV_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+  private static final UUID SKILL_SOURCE_ID =
+      UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  private static final String CONTENT_REVISION =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+  /** 冻结的六字段 skill descriptor fixture。 */
+  private static DaemonSkillDescriptor skillDescriptor(String name, String description) {
+    return new DaemonSkillDescriptor(
+        SKILL_SOURCE_ID, 1, name, description, "/home/dev/skills/" + name, CONTENT_REVISION);
+  }
+
   private static final Instant NOW = Instant.parse("2026-07-26T00:00:00Z");
   private static final Clock CLOCK =
       new Clock() {
@@ -134,7 +146,13 @@ class EnvironmentServiceImplTest {
                 DaemonCapabilities.VERSION,
                 new DaemonEnvironmentInfo(
                     DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Note", "/home/dev"),
-                List.of(new DaemonSkillDescriptor("dev", "dev skill"))),
+                List.of(
+                    new DaemonSkillSourceSnapshot(
+                        SKILL_SOURCE_ID,
+                        1,
+                        CONTENT_REVISION,
+                        List.of(skillDescriptor("dev", "dev skill")),
+                        List.of()))),
             NOW,
             NOW.plusSeconds(60));
 
