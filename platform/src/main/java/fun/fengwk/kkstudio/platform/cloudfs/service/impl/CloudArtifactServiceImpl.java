@@ -69,11 +69,14 @@ public class CloudArtifactServiceImpl implements CloudArtifactService {
         nodeRepository
             .findById(PRESEEDED_TOOL_RESULTS_DIR_ID)
             .orElseThrow(() -> new CloudNodeNotFoundException(TOOL_RESULTS_DIR_PATH));
-    if (!toolResultsDir.isDirectory()
-        || !TOOL_RESULTS_DIR_NAME.equals(toolResultsDir.getName())
-        || !PRESEEDED_ARTIFACTS_DIR_ID.equals(toolResultsDir.getParentId())) {
+    if (!toolResultsDir.isDirectory()) {
       throw new CloudNodeKindConflictException(
           TOOL_RESULTS_DIR_PATH, CloudNodeKind.DIRECTORY, toolResultsDir.getKind());
+    }
+    if (!TOOL_RESULTS_DIR_NAME.equals(toolResultsDir.getName())
+        || !PRESEEDED_ARTIFACTS_DIR_ID.equals(toolResultsDir.getParentId())) {
+      throw new IllegalStateException(
+          "Corrupt artifact storage root invariant: " + TOOL_RESULTS_DIR_PATH);
     }
 
     String threadDirName = threadId.toString();
