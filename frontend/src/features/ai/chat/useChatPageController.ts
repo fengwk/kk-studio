@@ -47,8 +47,12 @@ export function useChatPageController() {
       chats,
       agents,
       onCreate: chatController.openCreateChat,
+      onEdit: chatController.openEditChat,
+      onDelete: chatController.openDeleteChat,
+      deletePending: chatController.deleteConfirmModal.pending,
     },
     createChatModal: chatController.createChatModal,
+    deleteConfirmModal: chatController.deleteConfirmModal,
   }
 }
 

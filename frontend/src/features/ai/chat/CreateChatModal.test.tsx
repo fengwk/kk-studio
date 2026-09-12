@@ -170,4 +170,41 @@ describe('CreateChatModal', () => {
     expect(envButton).toBeDisabled()
     expect(screen.getByText('当前 Agent 未绑定环境，无法选择工作区路径。')).toBeInTheDocument()
   })
+
+  // 验证编辑模式下共用表单布局与字段，展示编辑标题、保存按钮和取消动作
+  it('renders edit mode with shared layout, edit title, save button and cancel action', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    const onSubmit = vi.fn((event) => event.preventDefault())
+    const onTitleChange = vi.fn()
+
+    render(
+      <CreateChatModal
+        open
+        mode="edit"
+        agents={[agentWithEnv]}
+        selectedAgentName="assistant"
+        title="Existing Chat"
+        pending={false}
+        onClose={onClose}
+        onSelectAgent={() => undefined}
+        onTitleChange={onTitleChange}
+        onSubmit={onSubmit}
+      />,
+    )
+
+    expect(screen.getByRole('form', { name: '编辑 Chat' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '编辑 Chat' })).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Existing Chat')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存修改' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(onClose).toHaveBeenCalledOnce()
+
+    await user.type(screen.getByDisplayValue('Existing Chat'), ' Updated')
+    expect(onTitleChange).toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: '保存修改' }))
+    expect(onSubmit).toHaveBeenCalledOnce()
+  })
 })
