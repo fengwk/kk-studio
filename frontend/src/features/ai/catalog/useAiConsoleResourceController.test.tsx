@@ -145,10 +145,11 @@ describe('useAiConsoleResourceController', () => {
 
     await user.click(screen.getByRole('button', { name: 'create-model' }))
     await user.type(screen.getByTestId('model-name'), 'new-model')
+    await user.type(screen.getByTestId('model-id'), 'new-wire-id')
     await user.click(screen.getByRole('button', { name: 'submit' }))
     await waitFor(() => {
       expect(agentService.createModel).toHaveBeenCalledWith(
-        expect.objectContaining({ providerName: 'stub', name: 'new-model' }),
+        expect.objectContaining({ providerName: 'stub', name: 'new-model', modelId: 'new-wire-id' }),
       )
       expect(screen.getByTestId('modal-open')).toHaveTextContent('closed')
     })
@@ -377,6 +378,16 @@ function ResourceControllerHarness() {
               })
             }
           />
+          <input
+            data-testid="model-id"
+            value={editor.modelDraft.modelId}
+            onChange={(event) =>
+              editor.onModelDraftChange({
+                ...editor.modelDraft,
+                modelId: event.target.value,
+              })
+            }
+          />
         </>
       )}
 
@@ -480,6 +491,7 @@ function model() {
   return {
     providerName: 'stub',
     name: 'acceptance-stub',
+    modelId: 'acceptance-wire-id',
     description: 'Acceptance model',
     config: {
       limit: { context: 128000, output: 8192 },

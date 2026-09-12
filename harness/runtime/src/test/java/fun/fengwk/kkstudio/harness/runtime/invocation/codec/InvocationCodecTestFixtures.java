@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** 严格 Invocation codec 测试间共享的小型完整测试值。 */
 final class InvocationCodecTestFixtures {
@@ -99,11 +100,13 @@ final class InvocationCodecTestFixtures {
         new ModelDescriptor(
             "provider",
             "model",
+            "model",
             Set.of(ModelInputModality.TEXT),
             tools.length > 0,
             true,
             pricing()),
-        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        new ModelVariant("v1"),
+        1024,
         List.of(),
         definitions,
         ProviderCacheControl.none());
@@ -114,8 +117,10 @@ final class InvocationCodecTestFixtures {
     ProviderRequest provider = providerRequest(binding.descriptor());
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         provider.model(),
         provider.variant(),
+        1024,
         List.of(),
         List.of(binding),
         List.of(new SkillBinding("review", "Review code", ENVIRONMENT_ID)),
@@ -128,8 +133,10 @@ final class InvocationCodecTestFixtures {
     ProviderRequest provider = providerRequest(binding.descriptor());
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         provider.model(),
         provider.variant(),
+        1024,
         List.of(),
         List.of(binding),
         List.of(new SkillBinding("review", "Review code", null)),

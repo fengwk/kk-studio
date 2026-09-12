@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -40,11 +39,11 @@ import java.util.Set;
  *   <li>对象字段按声明顺序写入。
  *   <li>enum {@code Set} 字段（{@code inputModalities}）按 enum name 排序，使输出在跨 JVM 时保持 deterministic。
  *   <li>{@link BigDecimal} 字段以 {@code toPlainString()} 文本输出。
- *   <li>{@code ModelVariant} 的 nullable 字段（{@code maxOutputTokens} / {@code temperature} 等）显式输出
- *       {@code null} 而非省略，便于 schema 对照。
+ *   <li>{@code ModelVariant} 的 nullable 字段 {@code reasoningEffort} 显式输出 {@code null} 而非省略，便于 schema
+ *       对照。
  * </ul>
  *
- * <p>durable descriptor 固定六个字段（含 {@code inputModalities}），codec 严格要求完整且精确的字段集合。
+ * <p>durable descriptor 固定七个字段（含 {@code modelId} 与 {@code inputModalities}），codec 严格要求完整且精确的字段集合。
  */
 public final class ModelDescriptorJsonCodec {
 
@@ -53,20 +52,17 @@ public final class ModelDescriptorJsonCodec {
 
   /** descriptor 字段顺序。 */
   private static final Set<String> DESCRIPTOR_FIELDS =
-      orderedSet("providerName", "modelName", "inputModalities", "tools", "reasoning", "pricing");
+      orderedSet(
+          "providerName",
+          "modelName",
+          "modelId",
+          "inputModalities",
+          "tools",
+          "reasoning",
+          "pricing");
 
   /** variant 字段顺序。 */
-  private static final Set<String> VARIANT_FIELDS =
-      orderedSet(
-          "id",
-          "maxOutputTokens",
-          "temperature",
-          "topP",
-          "topK",
-          "frequencyPenalty",
-          "presencePenalty",
-          "stopSequences",
-          "reasoningEffort");
+  private static final Set<String> VARIANT_FIELDS = orderedSet("id", "reasoningEffort");
 
   private static final Set<String> PRICING_FIELDS =
       orderedSet(
@@ -151,6 +147,7 @@ public final class ModelDescriptorJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("providerName", descriptor.providerName());
     node.put("modelName", descriptor.modelName());
+    node.put("modelId", descriptor.modelId());
     ArrayNode inputModalities = node.putArray("inputModalities");
     for (ModelInputModality modality :
         sorted(descriptor.inputModalities(), Comparator.comparing(Enum::name))) {
@@ -166,11 +163,13 @@ public final class ModelDescriptorJsonCodec {
     requireFields(node, DESCRIPTOR_FIELDS, "model");
     String providerName = text(node, "providerName");
     String modelName = text(node, "modelName");
+    String modelId = text(node, "modelId");
     Set<ModelInputModality> inputModalities = readInputModalities(node);
     boolean tools = bool(node, "tools");
     boolean reasoning = bool(node, "reasoning");
     ModelPricing pricing = readPricing(node.get("pricing"));
-    return new ModelDescriptor(providerName, modelName, inputModalities, tools, reasoning, pricing);
+    return new ModelDescriptor(
+        providerName, modelName, modelId, inputModalities, tools, reasoning, pricing);
   }
 
   private static Set<ModelInputModality> readInputModalities(ObjectNode node) {
@@ -202,16 +201,6 @@ public final class ModelDescriptorJsonCodec {
   private static ObjectNode writeVariant(ModelVariant variant) {
     ObjectNode node = NODES.objectNode();
     node.put("id", variant.id());
-    encodeNullableInt(node, "maxOutputTokens", variant.maxOutputTokens());
-    encodeNullableDouble(node, "temperature", variant.temperature());
-    encodeNullableDouble(node, "topP", variant.topP());
-    encodeNullableInt(node, "topK", variant.topK());
-    encodeNullableDouble(node, "frequencyPenalty", variant.frequencyPenalty());
-    encodeNullableDouble(node, "presencePenalty", variant.presencePenalty());
-    ArrayNode stopSequences = node.putArray("stopSequences");
-    for (String stop : variant.stopSequences()) {
-      stopSequences.add(stop);
-    }
     if (variant.reasoningEffort() == null) {
       node.putNull("reasoningEffort");
     } else {
@@ -222,31 +211,12 @@ public final class ModelDescriptorJsonCodec {
 
   private static ModelVariant readVariant(ObjectNode node) {
     requireFields(node, VARIANT_FIELDS, "variant");
-    Integer maxOutputTokens = decodeNullableInt(node, "maxOutputTokens");
-    Double temperature = decodeNullableDouble(node, "temperature");
-    Double topP = decodeNullableDouble(node, "topP");
-    Integer topK = decodeNullableInt(node, "topK");
-    Double frequencyPenalty = decodeNullableDouble(node, "frequencyPenalty");
-    Double presencePenalty = decodeNullableDouble(node, "presencePenalty");
-    ArrayNode stopSequences = array(node.get("stopSequences"), "stopSequences");
-    List<String> stopList = new ArrayList<>(stopSequences.size());
-    for (JsonNode item : stopSequences) {
-      if (!item.isTextual() || item.textValue().isBlank()) {
-        throw new IllegalArgumentException("stopSequences must contain non-blank strings");
-      }
-      stopList.add(item.textValue());
-    }
     String reasoningEffort = decodeNullableText(node, "reasoningEffort");
-    return new ModelVariant(
-        text(node, "id"),
-        maxOutputTokens,
-        temperature,
-        topP,
-        topK,
-        frequencyPenalty,
-        presencePenalty,
-        stopList,
-        reasoningEffort);
+    try {
+      return new ModelVariant(text(node, "id"), reasoningEffort);
+    } catch (IllegalArgumentException exception) {
+      throw new IllegalArgumentException("invalid variant: " + exception.getMessage(), exception);
+    }
   }
 
   // ---------- ModelPricing ----------
@@ -330,48 +300,6 @@ public final class ModelDescriptorJsonCodec {
       throw new IllegalArgumentException(field + " must be boolean");
     }
     return value.booleanValue();
-  }
-
-  static void encodeNullableInt(ObjectNode node, String field, Integer value) {
-    if (value == null) {
-      node.putNull(field);
-    } else {
-      node.put(field, value);
-    }
-  }
-
-  static void encodeNullableDouble(ObjectNode node, String field, Double value) {
-    if (value == null) {
-      node.putNull(field);
-    } else {
-      node.put(field, value);
-    }
-  }
-
-  static Integer decodeNullableInt(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (value.isNull()) {
-      return null;
-    }
-    if (!value.isIntegralNumber() || !value.canConvertToInt()) {
-      throw new IllegalArgumentException(field + " must be integer or null");
-    }
-    return value.intValue();
-  }
-
-  static Double decodeNullableDouble(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (value.isNull()) {
-      return null;
-    }
-    if (!value.isNumber()) {
-      throw new IllegalArgumentException(field + " must be number or null");
-    }
-    double parsed = value.doubleValue();
-    if (!Double.isFinite(parsed)) {
-      throw new IllegalArgumentException(field + " must be finite");
-    }
-    return parsed;
   }
 
   static BigDecimal decimal(ObjectNode node, String field) {

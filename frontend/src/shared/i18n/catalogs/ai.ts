@@ -173,17 +173,17 @@ export const aiCatalog = {
     'en-US': 'Delete',
     'zh-CN': '确认删除',
   },
-  'ai.catalog.card.defaultModel': {
-    'en-US': 'Default Model',
-    'zh-CN': 'Default Model',
+  'ai.catalog.card.effectiveModel': {
+    'en-US': 'Effective Model',
+    'zh-CN': '生效 Model',
   },
-  'ai.catalog.card.variant': {
-    'en-US': 'Variant',
-    'zh-CN': 'Variant',
+  'ai.catalog.card.modelDefaultSuffix': {
+    'en-US': ' (model default)',
+    'zh-CN': '（模型默认）',
   },
-  'ai.catalog.card.modelDefault': {
-    'en-US': 'Model default',
-    'zh-CN': '模型默认',
+  'ai.catalog.card.unknownVariant': {
+    'en-US': 'unresolved',
+    'zh-CN': '未解析',
   },
   'ai.catalog.card.tools': {
     'en-US': 'Tools',
@@ -200,6 +200,10 @@ export const aiCatalog = {
   'ai.catalog.card.ref': {
     'en-US': 'Ref',
     'zh-CN': 'Ref',
+  },
+  'ai.catalog.card.modelId': {
+    'en-US': 'Model ID',
+    'zh-CN': 'Model ID',
   },
   'ai.catalog.card.limit': {
     'en-US': 'Limit',
@@ -280,6 +284,18 @@ export const aiCatalog = {
   'ai.catalog.form.name': {
     'en-US': 'Name',
     'zh-CN': 'Name',
+  },
+  'ai.catalog.form.nameHint': {
+    'en-US': 'Immutable logical identity used by Agents and branch settings.',
+    'zh-CN': '不可变逻辑身份，供 Agent 与 branch settings 引用。',
+  },
+  'ai.catalog.form.modelId': {
+    'en-US': 'Model ID',
+    'zh-CN': 'Model ID',
+  },
+  'ai.catalog.form.modelIdHint': {
+    'en-US': 'Real upstream wire model id sent to the Provider; may differ from Name.',
+    'zh-CN': '发往 Provider 的真实 wire 模型标识；可与 Name 不同。',
   },
   'ai.catalog.form.description': {
     'en-US': 'Description',
@@ -409,42 +425,6 @@ export const aiCatalog = {
     'en-US': 'Reasoning Effort',
     'zh-CN': 'Reasoning Effort',
   },
-  'ai.catalog.form.maxOutput': {
-    'en-US': 'Max Output',
-    'zh-CN': 'Max Output',
-  },
-  'ai.catalog.form.maxOutputAria': {
-    'en-US': 'Variant Max Output Tokens',
-    'zh-CN': 'Variant Max Output Tokens',
-  },
-  'ai.catalog.form.temperature': {
-    'en-US': 'Temperature',
-    'zh-CN': 'Temperature',
-  },
-  'ai.catalog.form.topP': {
-    'en-US': 'Top P',
-    'zh-CN': 'Top P',
-  },
-  'ai.catalog.form.topK': {
-    'en-US': 'Top K',
-    'zh-CN': 'Top K',
-  },
-  'ai.catalog.form.frequencyPenalty': {
-    'en-US': 'Freq Penalty',
-    'zh-CN': 'Freq Penalty',
-  },
-  'ai.catalog.form.presencePenalty': {
-    'en-US': 'Pres Penalty',
-    'zh-CN': 'Pres Penalty',
-  },
-  'ai.catalog.form.stop': {
-    'en-US': 'Stop',
-    'zh-CN': 'Stop',
-  },
-  'ai.catalog.form.stopAria': {
-    'en-US': 'Stop Sequences',
-    'zh-CN': 'Stop Sequences',
-  },
   'ai.catalog.form.useModelDefault': {
     'en-US': '(Use model default)',
     'zh-CN': '（使用模型默认）',
@@ -515,32 +495,22 @@ export const aiCatalog = {
     'zh-CN': 'offline',
   },
   'ai.catalog.form.variantHint': {
-    'en-US': 'A Variant is a named parameter preset; IDs must be unique, and Default Variant must point to one of them.',
-    'zh-CN': 'Variant 是命名参数预设；id 唯一，Default Variant 必须指向其中一项。',
+    'en-US': 'A Variant carries only reasoning effort; IDs must be unique, and Default Variant must point to one of them.',
+    'zh-CN': 'Variant 只承载思考强度；id 唯一，Default Variant 必须指向其中一项。',
   },
   'ai.catalog.form.reasoningHint': {
-    'en-US': ' Reasoning effort is free-form (written to reasoning_effort).',
-    'zh-CN': ' 思考强度为自由字符串（写入 reasoning_effort）。',
+    'en-US':
+      ' Leave empty to keep the provider protocol default; off = explicitly disable reasoning; high/medium/low map to the provider levels.',
+    'zh-CN':
+      ' 留空表示不覆盖 Provider 协议默认；off=显式关闭推理；high/medium/low 映射到厂商级别。',
   },
   'ai.catalog.form.reasoningDisabledHint': {
     'en-US': ' To configure reasoning effort, enable Reasoning above first.',
     'zh-CN': ' 若需配置思考强度，请先勾选上方 Reasoning。',
   },
-  'ai.catalog.form.reasoningEffortError': {
-    'en-US': 'Enter a reasoning effort',
-    'zh-CN': '请填写思考强度',
-  },
-  'ai.catalog.form.maxOutputPlaceholder': {
-    'en-US': 'Empty = model limit',
-    'zh-CN': '空=模型上限',
-  },
-  'ai.catalog.form.advancedOptions': {
-    'en-US': 'Advanced options',
-    'zh-CN': '高级选项',
-  },
-  'ai.catalog.form.advancedHint': {
-    'en-US': 'Usually unnecessary; empty means provider default.',
-    'zh-CN': '一般无需配置，留空=厂商默认。',
+  'ai.catalog.form.maxOutputLimitHint': {
+    'en-US': 'Model-level output budget; each request also narrows it by the remaining context.',
+    'zh-CN': '模型级输出预算；每次请求还会按剩余上下文收敛。',
   },
   'ai.catalog.form.emptyPlaceholder': {
     'en-US': 'Empty',
@@ -569,10 +539,6 @@ export const aiCatalog = {
   'ai.catalog.form.addVariant': {
     'en-US': 'Add Variant',
     'zh-CN': '添加 Variant',
-  },
-  'ai.catalog.form.stopPlaceholder': {
-    'en-US': 'END,STOP',
-    'zh-CN': 'END,STOP',
   },
   'ai.catalog.deleteProviderTitle': {
     'en-US': 'Delete Provider',
@@ -607,8 +573,9 @@ export const aiCatalog = {
     'zh-CN': '保存失败，请检查必填项后重试',
   },
   'ai.catalog.validation.reasoningEnabled': {
-    'en-US': 'Reasoning is enabled. Enter a reasoning effort for each configuration (for example, low / medium / high).',
-    'zh-CN': '已开启 Reasoning，请为每个配置填写思考强度（如 low / medium / high）',
+    'en-US':
+      'Reasoning effort must be high / medium / low / off; leave it empty to keep the provider default.',
+    'zh-CN': '思考强度只能为 high / medium / low / off；留空表示不覆盖 Provider 协议默认。',
   },
   'ai.catalog.validation.variantRequired': {
     'en-US': 'Select a valid Variant',
@@ -642,21 +609,9 @@ export const aiCatalog = {
     'en-US': 'Select at least one input type (TEXT is recommended)',
     'zh-CN': '请至少选择一种输入类型（建议保留 TEXT）',
   },
-  'ai.catalog.validation.temperature': {
-    'en-US': 'Temperature must be 0 or greater',
-    'zh-CN': 'Temperature 必须为 0 或正数',
-  },
-  'ai.catalog.validation.topP': {
-    'en-US': 'Top P must be greater than 0 and no more than 1',
-    'zh-CN': 'Top P 必须大于 0 且不超过 1',
-  },
-  'ai.catalog.validation.topK': {
-    'en-US': 'Top K must be a positive integer',
-    'zh-CN': 'Top K 必须为正整数',
-  },
-  'ai.catalog.validation.penalty': {
-    'en-US': 'Penalty must be a valid number',
-    'zh-CN': 'Penalty 必须为有效数字',
+  'ai.catalog.validation.modelId': {
+    'en-US': 'Enter a Model ID',
+    'zh-CN': '请填写 Model ID',
   },
   'ai.catalog.validation.pricing': {
     'en-US': 'Check pricing; use zero or a positive number.',

@@ -49,8 +49,7 @@ class OpenAiResponsesWireTest {
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final String VALID_PREFIX_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-  private static final ModelVariant DEFAULT_VARIANT =
-      new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
+  private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
 
   private ProviderDescriptor createDescriptor() {
     return new ProviderDescriptor(
@@ -76,7 +75,13 @@ class OpenAiResponsesWireTest {
             BigDecimal.ZERO,
             BigDecimal.ONE);
     return new ModelDescriptor(
-        "openai_test", "gpt-5.4-mini", Set.of(ModelInputModality.TEXT), true, true, pricing);
+        "openai_test",
+        "gpt-5.4-mini",
+        "gpt-5.4-mini",
+        Set.of(ModelInputModality.TEXT),
+        true,
+        true,
+        pricing);
   }
 
   private ProviderRequest request(
@@ -87,6 +92,7 @@ class OpenAiResponsesWireTest {
     return new ProviderRequest(
         createModel(),
         variant != null ? variant : DEFAULT_VARIANT,
+        1024,
         messages != null ? messages : List.of(),
         tools != null ? tools : List.of(),
         cacheControl != null ? cacheControl : ProviderCacheControl.none());
@@ -182,8 +188,10 @@ class OpenAiResponsesWireTest {
   @Test
   void test_streamingChatModelPayload() throws Exception {
     ProviderRequest req =
-        request(
-            new ModelVariant("v1", 100, 0.7, 0.9, null, null, null, List.of(), "medium"),
+        new ProviderRequest(
+            createModel(),
+            new ModelVariant("v1", "medium"),
+            100,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("You are helpful."))),
@@ -200,8 +208,6 @@ class OpenAiResponsesWireTest {
     assertEquals("gpt-5.4-mini", root.path("model").asText());
     assertTrue(root.path("stream").asBoolean());
     assertEquals(100, root.path("max_output_tokens").asInt());
-    assertEquals(0.7, root.path("temperature").asDouble());
-    assertEquals(0.9, root.path("top_p").asDouble());
     assertEquals("medium", root.path("reasoning").path("effort").asText());
     assertEquals("auto", root.path("reasoning").path("summary").asText());
     assertEquals("reasoning.encrypted_content", root.path("include").get(0).asText());
@@ -296,7 +302,7 @@ class OpenAiResponsesWireTest {
   void test_offReasoningWirePayload() throws Exception {
     ProviderRequest req =
         request(
-            new ModelVariant("v1", 100, 0.7, 0.9, null, null, null, List.of(), "none"),
+            new ModelVariant("v1", "off"),
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Count to three.")))),
@@ -320,7 +326,7 @@ class OpenAiResponsesWireTest {
         new ProviderToolDefinition("get_time", "get current time", "{\"type\":\"object\"}");
     ProviderRequest req =
         request(
-            new ModelVariant("v1", 100, 0.7, 0.9, null, null, null, List.of(), "high"),
+            new ModelVariant("v1", "high"),
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("What time is it?")))),
@@ -362,12 +368,11 @@ class OpenAiResponsesWireTest {
                 ProviderMessageRole.USER, List.of(new ProviderTextBlock("Weather in Paris?"))));
     ProviderRequest base =
         request(
-            new ModelVariant("v1", 8, null, null, null, null, null, List.of(), "medium"),
-            messages,
-            List.of(tool),
-            ProviderCacheControl.none());
+            new ModelVariant("v1", "medium"), messages, List.of(tool), ProviderCacheControl.none());
     ProviderCacheControl cacheControl =
-        new PromptCacheRequestFinalizer(UUID.fromString("55555555-5555-5555-5555-555555555555"))
+        new PromptCacheRequestFinalizer(
+                UUID.fromString("55555555-5555-5555-5555-555555555555"),
+                UUID.fromString("66666666-6666-6666-6666-666666666666"))
             .apply(
                 base,
                 PromptCachePolicy.affinityShort(
@@ -375,7 +380,7 @@ class OpenAiResponsesWireTest {
             .cacheControl();
     ProviderRequest req =
         new ProviderRequest(
-            base.model(), base.variant(), base.messages(), base.tools(), cacheControl);
+            base.model(), base.variant(), 16, base.messages(), base.tools(), cacheControl);
 
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
     JsonNode root =
@@ -387,7 +392,7 @@ class OpenAiResponsesWireTest {
                     new OpenAiResponsesConfig(OpenAiPromptCacheMode.LEGACY))
                 .bodyUtf8Bytes());
 
-    // 8 < 16：OpenAI Responses 只接受 >= 16 的输出上限。
+    // OpenAI Responses 只接受 >= 16 的输出上限，合法冻结预算必须原样编码。
     assertEquals(16, root.path("max_output_tokens").asInt());
     assertEquals("developer", root.get("input").get(0).path("role").asText());
     assertEquals(cacheControl.affinityKey(), root.path("prompt_cache_key").asText());

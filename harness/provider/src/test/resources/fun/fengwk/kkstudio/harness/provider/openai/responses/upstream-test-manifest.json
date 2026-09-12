@@ -20,9 +20,9 @@
     "totalSourceFiles": 15,
     "totalMethods": 165,
     "totalInvocations": 165,
-    "portedInvocations": 53,
+    "portedInvocations": 45,
     "inScopePendingInvocations": 0,
-    "outOfScopeInvocations": 112,
+    "outOfScopeInvocations": 120,
     "realCredentialInvocations": 93
   },
   "methods": [
@@ -115,14 +115,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Request Parameters",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesRequestEncoderTest#test_rejectsUnsupportedParameters",
-          "fixture": "openai/responses/fixtures/request-mapping.json",
-          "validationLayer": "request/validation",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "Unsupported parameters are rejected early to prevent silent misconfiguration."
+          "capabilityMismatch": "OpenAI server-managed tools such as web_search and file_search, including their SDK storage/override/equality/default-model facade, are not represented by native ProviderRequest client function tools.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -140,14 +140,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Request Parameters",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesRequestEncoderTest#test_rejectsUnsupportedParameters",
-          "fixture": "openai/responses/fixtures/request-mapping.json",
-          "validationLayer": "request/validation",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "Unsupported parameters are rejected early to prevent silent misconfiguration."
+          "capabilityMismatch": "OpenAI server-managed tools such as web_search and file_search, including their SDK storage/override/equality/default-model facade, are not represented by native ProviderRequest client function tools.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -165,14 +165,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Request Parameters",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesRequestEncoderTest#test_rejectsUnsupportedParameters",
-          "fixture": "openai/responses/fixtures/request-mapping.json",
-          "validationLayer": "request/validation",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "Unsupported parameters are rejected early to prevent silent misconfiguration."
+          "capabilityMismatch": "OpenAI server-managed tools such as web_search and file_search, including their SDK storage/override/equality/default-model facade, are not represented by native ProviderRequest client function tools.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -190,14 +190,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Request Parameters",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesRequestEncoderTest#test_rejectsUnsupportedParameters",
-          "fixture": "openai/responses/fixtures/request-mapping.json",
-          "validationLayer": "request/validation",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "Unsupported parameters are rejected early to prevent silent misconfiguration."
+          "capabilityMismatch": "OpenAI server-managed tools such as web_search and file_search, including their SDK storage/override/equality/default-model facade, are not represented by native ProviderRequest client function tools.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -215,14 +215,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Request Parameters",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesRequestEncoderTest#test_rejectsUnsupportedParameters",
-          "fixture": "openai/responses/fixtures/request-mapping.json",
-          "validationLayer": "request/validation",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "Unsupported parameters are rejected early to prevent silent misconfiguration."
+          "capabilityMismatch": "OpenAI server-managed tools such as web_search and file_search, including their SDK storage/override/equality/default-model facade, are not represented by native ProviderRequest client function tools.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -515,14 +515,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Request Payload Encoding",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesWireTest#test_streamingChatModelPayload",
-          "fixture": "openai/responses/fixtures/request-mapping.json",
-          "validationLayer": "request/payload",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "Payload serialization enforces store:false and scrubs sensitive credentials."
+          "capabilityMismatch": "OpenAI server-managed tools such as web_search and file_search are not represented by native ProviderRequest client function tools; a function-tool payload test is not equivalent.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -540,14 +540,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Request Payload Encoding",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesWireTest#test_streamingChatModelPayload",
-          "fixture": "openai/responses/fixtures/request-mapping.json",
-          "validationLayer": "request/payload",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "Payload serialization enforces store:false and scrubs sensitive credentials."
+          "capabilityMismatch": "OpenAI server-managed tools such as web_search and file_search are not represented by native ProviderRequest client function tools; a function-tool payload test is not equivalent.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -565,14 +565,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Request Payload Encoding",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesWireTest#test_streamingChatModelPayload",
-          "fixture": "openai/responses/fixtures/request-mapping.json",
-          "validationLayer": "request/payload",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "Payload serialization enforces store:false and scrubs sensitive credentials."
+          "capabilityMismatch": "OpenAI server-managed tools such as web_search and file_search are not represented by native ProviderRequest client function tools; a function-tool payload test is not equivalent.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -2121,7 +2121,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Live integration test requiring external OpenAI API key; protocol serialization and response decoding covered by unit wire tests.",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]
@@ -2146,7 +2146,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Live integration test requiring external OpenAI API key; protocol serialization and response decoding covered by unit wire tests.",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]
@@ -2171,7 +2171,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Live integration test requiring external OpenAI API key; protocol serialization and response decoding covered by unit wire tests.",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]
@@ -3196,7 +3196,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Live integration test requiring external OpenAI API key; protocol serialization and response decoding covered by unit wire tests.",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]
@@ -3446,7 +3446,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Live integration test requiring external OpenAI API key; protocol serialization and response decoding covered by unit wire tests.",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]
@@ -3471,7 +3471,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Live integration test requiring external OpenAI API key; protocol serialization and response decoding covered by unit wire tests.",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]

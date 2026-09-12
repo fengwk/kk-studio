@@ -69,17 +69,16 @@ final class OpenAiChatRequestEncoder {
     Objects.requireNonNull(descriptor, "descriptor");
     Objects.requireNonNull(config, "config");
 
-    validateSamplingParameters(request.variant());
-
     ObjectNode root = NODES.objectNode();
-    root.put("model", request.model().modelName());
+    root.put("model", request.model().modelId());
     root.put("stream", true);
 
     ObjectNode streamOptions = root.putObject("stream_options");
     streamOptions.put("include_usage", config.includeUsage());
 
     applyReasoningParameters(root, request.model(), request.variant(), config);
-    applySamplingParameters(root, request.variant());
+    // 输出预算只来自 Model 级 limit.output（普通请求再按剩余上下文收敛），不来自 variant。
+    root.put("max_tokens", request.outputTokens());
 
     ArrayNode toolsArray = encodeTools(request.tools());
     if (toolsArray != null && !toolsArray.isEmpty()) {
@@ -94,7 +93,7 @@ final class OpenAiChatRequestEncoder {
             OpenAiChatPrefixHasher.calculateHash(toolsArray, wireMessagesArray);
         wireMessagesArray.add(
             encodeAssistantMessage(
-                message, descriptor, request.model().modelName(), currentPrefixHash));
+                message, descriptor, request.model().modelId(), currentPrefixHash));
       } else {
         wireMessagesArray.add(encodeMessage(message, config));
       }
@@ -119,68 +118,35 @@ final class OpenAiChatRequestEncoder {
     return new OpenAiChatEncodedRequest(bodyUtf8Bytes, sourcePrefixHash);
   }
 
-  private static void validateSamplingParameters(ModelVariant variant) {
-    if (variant == null) {
-      return;
-    }
-    if (variant.topK() != null) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "OpenAI chat does not support top_k");
-    }
-  }
-
+  /**
+   * reasoning effort 编码：未声明（null）表示不覆盖服务端默认，不发送任何推理字段；{@code off} 表示显式关闭推理，{@code high/medium/low}
+   * 表示对应强度。STANDARD 格式下显式关闭映射为本协议关闭值 {@code none}；DEEPSEEK 格式改用显式 {@code thinking} 开关，且仅在启用推理时附带
+   * {@code reasoning_effort}。非 reasoning 模型不发送推理字段。
+   */
   private static void applyReasoningParameters(
       ObjectNode root,
       ModelDescriptor model,
       ModelVariant variant,
       OpenAiChatConfiguration config) {
+    if (!model.reasoning()) {
+      return;
+    }
+    String effort = variant == null ? null : variant.reasoningEffort();
+    if (effort == null) {
+      return;
+    }
+    boolean off = variant.reasoningOff();
     if (config.thinkingFormat() == OpenAiChatConfiguration.ThinkingFormat.DEEPSEEK) {
-      if (!model.reasoning()) {
-        return;
-      }
-      String effort = variant != null ? variant.reasoningEffort() : null;
-      if (effort == null || effort.isBlank() || "none".equals(effort.trim())) {
-        ObjectNode thinking = root.putObject("thinking");
+      ObjectNode thinking = root.putObject("thinking");
+      if (off) {
         thinking.put("type", "disabled");
       } else {
-        ObjectNode thinking = root.putObject("thinking");
         thinking.put("type", "enabled");
         root.put("reasoning_effort", effort);
       }
-    } else {
-      if (variant != null
-          && variant.reasoningEffort() != null
-          && !variant.reasoningEffort().isBlank()) {
-        root.put("reasoning_effort", variant.reasoningEffort());
-      }
-    }
-  }
-
-  private static void applySamplingParameters(ObjectNode root, ModelVariant variant) {
-    if (variant == null) {
       return;
     }
-    if (variant.temperature() != null) {
-      root.put("temperature", variant.temperature());
-    }
-    if (variant.topP() != null) {
-      root.put("top_p", variant.topP());
-    }
-    if (variant.maxOutputTokens() != null) {
-      root.put("max_tokens", variant.maxOutputTokens());
-    }
-    if (variant.frequencyPenalty() != null) {
-      root.put("frequency_penalty", variant.frequencyPenalty());
-    }
-    if (variant.presencePenalty() != null) {
-      root.put("presence_penalty", variant.presencePenalty());
-    }
-    if (variant.stopSequences() != null && !variant.stopSequences().isEmpty()) {
-      ArrayNode stopArray = root.putArray("stop");
-      for (String stop : variant.stopSequences()) {
-        stopArray.add(stop);
-      }
-    }
+    root.put("reasoning_effort", off ? "none" : effort);
   }
 
   private static ArrayNode encodeTools(List<ProviderToolDefinition> tools) {

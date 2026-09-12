@@ -81,6 +81,7 @@ public final class ModelRequestMaterializer {
     return new ProviderRequest(
         spec.model(),
         spec.variant(),
+        spec.outputTokens(),
         messageProjector.projectSources(projectedMessages),
         providerTools(spec.toolBindings()),
         spec.cacheControl());
@@ -101,6 +102,7 @@ public final class ModelRequestMaterializer {
     return new ProviderRequest(
         spec.model(),
         spec.variant(),
+        spec.outputTokens(),
         messageProjector.project(semanticMessages),
         List.of(),
         spec.cacheControl());

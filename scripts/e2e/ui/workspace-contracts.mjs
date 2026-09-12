@@ -734,6 +734,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     const modelResponse = await apiCtx.call('POST', '/api/ai/catalog/models', {
       providerName: state.provider.name,
       name: `e2e-ui-usage-model-${suffix}`,
+      modelId: `wire-ui-usage-${suffix}`,
       description: 'Local completion model for free Footer usage tests.',
       config: baseModelConfig({
         limit: { context: 4096, output: 128 },
@@ -742,10 +743,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
           reasoning: false,
           inputModalities: ['TEXT'],
         },
-        variants: [
-          { id: 'default', temperature: 0 },
-          { id: 'review', temperature: 0 },
-        ],
+        variants: [{ id: 'default' }, { id: 'review' }],
       }),
     })
     assert(modelResponse.status === 201, `create usage model: ${JSON.stringify(modelResponse)}`)
@@ -850,6 +848,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     const modelResponse = await apiCtx.call('POST', '/api/ai/catalog/models', {
       providerName: state.provider.name,
       name: `e2e-ui-task-model-${suffix}`,
+      modelId: `wire-ui-task-${suffix}`,
       description: 'Local task model for free TaskStatus UI tests.',
       config: baseModelConfig({
         limit: { context: 4096, output: 128 },
@@ -858,7 +857,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
           reasoning: false,
           inputModalities: ['TEXT'],
         },
-        variants: [{ id: 'default', temperature: 0 }],
+        variants: [{ id: 'default' }],
       }),
     })
     assert(modelResponse.status === 201, `create task model: ${JSON.stringify(modelResponse)}`)
@@ -999,6 +998,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     const modelResponse = await apiCtx.call('POST', '/api/ai/catalog/models', {
       providerName: state.provider.name,
       name: `e2e-ui-tool-card-model-${suffix}`,
+      modelId: `wire-ui-tool-card-${suffix}`,
       description: 'Local streaming model for Tool card browser contracts.',
       config: baseModelConfig({
         limit: { context: 4096, output: 256 },
@@ -1007,7 +1007,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
           reasoning: false,
           inputModalities: ['TEXT'],
         },
-        variants: [{ id: 'default', temperature: 0 }],
+        variants: [{ id: 'default' }],
       }),
     })
     assert(modelResponse.status === 201, `create tool-card model: ${JSON.stringify(modelResponse)}`)

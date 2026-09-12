@@ -270,6 +270,7 @@ public final class ModelProcessor implements AutoCloseable {
                   invocationId,
                   proposedAttempt,
                   dispatched.request().providerType(),
+                  dispatched.request().providerConnectionGenerationId(),
                   providerRequest),
               execution);
     } catch (RuntimeException failure) {

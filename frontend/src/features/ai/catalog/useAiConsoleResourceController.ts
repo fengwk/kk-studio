@@ -122,10 +122,6 @@ export function useAiConsoleResourceController(
       })
       return
     }
-    // 校验阶段可能归一化了 modelDraft（补全思考强度 / 默认 variant），写回 UI 状态
-    if (editorState.resourceModal.kind === 'model') {
-      editorState.onModelDraftChange(drafts.modelDraft)
-    }
     setFormError('')
     setFieldErrors({})
 

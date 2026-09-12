@@ -123,8 +123,7 @@ class AnthropicThinkingTest {
   void should_return_and_send_thinking(String modelName) throws IOException {
     // 1. 首轮请求构建与编码断言
     ModelDescriptor modelDesc = createReasoningModel(modelName);
-    ModelVariant variant =
-        new ModelVariant("default", 2048, null, null, null, null, null, List.of(), "high");
+    ModelVariant variant = new ModelVariant("default", "high");
     ProviderMessage userMsg1 =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -132,7 +131,7 @@ class AnthropicThinkingTest {
 
     ProviderRequest turn1Request =
         new ProviderRequest(
-            modelDesc, variant, List.of(userMsg1), List.of(), ProviderCacheControl.none());
+            modelDesc, variant, 1024, List.of(userMsg1), List.of(), ProviderCacheControl.none());
 
     AnthropicEncodedRequest encodedTurn1 = encoder.encode(turn1Request, descriptor);
     JsonNode turn1WireRoot = MAPPER.readTree(encodedTurn1.bodyUtf8Bytes());
@@ -229,6 +228,7 @@ class AnthropicThinkingTest {
         new ProviderRequest(
             modelDesc,
             variant,
+            1024,
             List.of(userMsg1, asstMsg1, userMsg2),
             List.of(),
             ProviderCacheControl.none());
@@ -265,8 +265,7 @@ class AnthropicThinkingTest {
   @MethodSource("upstreamModels")
   void should_return_and_send_thinking_with_tools(String modelName) throws IOException {
     ModelDescriptor modelDesc = createReasoningModel(modelName);
-    ModelVariant variant =
-        new ModelVariant("default", 2048, null, null, null, null, null, List.of(), "medium");
+    ModelVariant variant = new ModelVariant("default", "medium");
     ProviderToolDefinition tool =
         new ProviderToolDefinition(
             "getWeather",
@@ -280,7 +279,12 @@ class AnthropicThinkingTest {
 
     ProviderRequest turn1Request =
         new ProviderRequest(
-            modelDesc, variant, List.of(userMsg1), List.of(tool), ProviderCacheControl.none());
+            modelDesc,
+            variant,
+            1024,
+            List.of(userMsg1),
+            List.of(tool),
+            ProviderCacheControl.none());
 
     AnthropicEncodedRequest encodedTurn1 = encoder.encode(turn1Request, descriptor);
     String frozenPrefixHash = encodedTurn1.sourcePrefixHash();
@@ -380,6 +384,7 @@ class AnthropicThinkingTest {
         new ProviderRequest(
             modelDesc,
             variant,
+            1024,
             List.of(userMsg1, asstMsg, toolResultMsg),
             List.of(tool),
             ProviderCacheControl.none());
@@ -423,15 +428,14 @@ class AnthropicThinkingTest {
   @MethodSource("upstreamModels")
   void should_support_and_replay_redacted_thinking(String modelName) throws IOException {
     ModelDescriptor modelDesc = createReasoningModel(modelName);
-    ModelVariant variant =
-        new ModelVariant("default", 2048, null, null, null, null, null, List.of(), "high");
+    ModelVariant variant = new ModelVariant("default", "high");
     ProviderMessage userMsg =
         new ProviderMessage(
             ProviderMessageRole.USER, List.of(new ProviderTextBlock("Explain quantum mechanics")));
 
     ProviderRequest req =
         new ProviderRequest(
-            modelDesc, variant, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc, variant, 1024, List.of(userMsg), List.of(), ProviderCacheControl.none());
     String hash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
@@ -478,6 +482,7 @@ class AnthropicThinkingTest {
         new ProviderRequest(
             modelDesc,
             variant,
+            1024,
             List.of(userMsg, asstMsg, nextUser),
             List.of(),
             ProviderCacheControl.none());
@@ -501,13 +506,12 @@ class AnthropicThinkingTest {
   @Test
   void should_disable_replay_when_signature_is_missing() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-sonnet-4-6");
-    ModelVariant variant =
-        new ModelVariant("default", 2048, null, null, null, null, null, List.of(), "high");
+    ModelVariant variant = new ModelVariant("default", "high");
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest req =
         new ProviderRequest(
-            modelDesc, variant, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc, variant, 1024, List.of(userMsg), List.of(), ProviderCacheControl.none());
     String hash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
@@ -549,6 +553,7 @@ class AnthropicThinkingTest {
         new ProviderRequest(
             modelDesc,
             variant,
+            1024,
             List.of(userMsg, asstMsg, userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -571,13 +576,12 @@ class AnthropicThinkingTest {
   @Test
   void should_disable_replay_when_affinity_mismatches() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-opus-4-8");
-    ModelVariant variant =
-        new ModelVariant("default", 2048, null, null, null, null, null, List.of(), "high");
+    ModelVariant variant = new ModelVariant("default", "high");
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest req =
         new ProviderRequest(
-            modelDesc, variant, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc, variant, 1024, List.of(userMsg), List.of(), ProviderCacheControl.none());
     String currentHash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     // 构造模型不一致的 affinity (例如来自 claude-haiku-4-5-20251001)
@@ -612,6 +616,7 @@ class AnthropicThinkingTest {
         new ProviderRequest(
             modelDesc,
             variant,
+            1024,
             List.of(userMsg, asstMsg, userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -634,8 +639,7 @@ class AnthropicThinkingTest {
   @Test
   void should_disable_replay_when_source_prefix_hash_mismatches() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-sonnet-4-6");
-    ModelVariant variant =
-        new ModelVariant("default", 2048, null, null, null, null, null, List.of(), "high");
+    ModelVariant variant = new ModelVariant("default", "high");
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
 
@@ -669,6 +673,7 @@ class AnthropicThinkingTest {
         new ProviderRequest(
             modelDesc,
             variant,
+            1024,
             List.of(userMsg, asstMsg, userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -690,13 +695,12 @@ class AnthropicThinkingTest {
   @Test
   void should_disable_replay_when_payload_durable_contents_mismatch() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-sonnet-4-6");
-    ModelVariant variant =
-        new ModelVariant("default", 2048, null, null, null, null, null, List.of(), "high");
+    ModelVariant variant = new ModelVariant("default", "high");
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest req =
         new ProviderRequest(
-            modelDesc, variant, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc, variant, 1024, List.of(userMsg), List.of(), ProviderCacheControl.none());
     String currentHash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     ObjectNode payload = NODES.objectNode();
@@ -729,6 +733,7 @@ class AnthropicThinkingTest {
         new ProviderRequest(
             modelDesc,
             variant,
+            1024,
             List.of(userMsg, tamperedMsg, userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -751,17 +756,18 @@ class AnthropicThinkingTest {
         new ModelDescriptor(
             "anthropic-thinking",
             "claude-3-5-sonnet",
+            "claude-3-5-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
             false, // disabled
             pricing());
-    ModelVariant variantWithEffort =
-        new ModelVariant("default", 2048, null, null, null, null, null, List.of(), "high");
+    ModelVariant variantWithEffort = new ModelVariant("default", "high");
 
     ProviderRequest req1 =
         new ProviderRequest(
             nonReasoningModel,
             variantWithEffort,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")))),
@@ -775,13 +781,13 @@ class AnthropicThinkingTest {
 
     // 情况 2: model.reasoning = true, 但 variant.reasoningEffort = null
     ModelDescriptor reasoningModel = createReasoningModel("claude-sonnet-4-6");
-    ModelVariant variantWithoutEffort =
-        new ModelVariant("default", 2048, null, null, null, null, null, List.of(), null);
+    ModelVariant variantWithoutEffort = new ModelVariant("default");
 
     ProviderRequest req2 =
         new ProviderRequest(
             reasoningModel,
             variantWithoutEffort,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")))),
@@ -810,12 +816,12 @@ class AnthropicThinkingTest {
     assertTrue(fixtureArray.isArray());
 
     ModelDescriptor modelDesc = createReasoningModel("claude-sonnet-4-5-20250929");
-    ModelVariant variant =
-        new ModelVariant("default", 2048, null, null, null, null, null, List.of(), "high");
+    ModelVariant variant = new ModelVariant("default", "high");
     ProviderRequest req =
         new ProviderRequest(
             modelDesc,
             variant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Ping")))),
@@ -854,15 +860,14 @@ class AnthropicThinkingTest {
         new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
 
     ModelDescriptor modelDesc = createReasoningModel("MiniMax-M3");
-    ModelVariant variant =
-        new ModelVariant("default", 16384, null, null, null, null, null, List.of(), "medium");
+    ModelVariant variant = new ModelVariant("default", "medium");
     ProviderMessage userMsg =
         new ProviderMessage(
             ProviderMessageRole.USER,
             List.of(new ProviderTextBlock("Explain quantum superposition.")));
     ProviderRequest turn1Request =
         new ProviderRequest(
-            modelDesc, variant, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc, variant, 16384, List.of(userMsg), List.of(), ProviderCacheControl.none());
 
     AnthropicEncodedRequest encodedTurn1 = budgetEncoder.encode(turn1Request, descriptor);
     JsonNode turn1WireRoot = MAPPER.readTree(encodedTurn1.bodyUtf8Bytes());
@@ -934,6 +939,7 @@ class AnthropicThinkingTest {
         new ProviderRequest(
             modelDesc,
             variant,
+            16384,
             List.of(userMsg, assistantMsg, userMsg2),
             List.of(),
             ProviderCacheControl.none());
@@ -951,6 +957,7 @@ class AnthropicThinkingTest {
   private static ModelDescriptor createReasoningModel(String modelName) {
     return new ModelDescriptor(
         "anthropic-thinking",
+        modelName,
         modelName,
         Set.of(ModelInputModality.TEXT),
         true,

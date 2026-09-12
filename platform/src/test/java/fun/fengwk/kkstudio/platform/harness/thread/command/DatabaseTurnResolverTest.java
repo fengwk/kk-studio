@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
@@ -167,12 +168,16 @@ class DatabaseTurnResolverTest {
 
     assertEquals("provider", requestSpec.model().providerName());
     assertEquals("model", requestSpec.model().modelName());
+    assertEquals(new UUID(0L, 42L), requestSpec.providerConnectionGenerationId());
+    // 上游 wire 标识来自 AgentModel.modelId，与 catalog 逻辑名相互独立。
+    assertEquals("wire-model", requestSpec.model().modelId());
     assertEquals(Set.of(ModelInputModality.TEXT), requestSpec.model().inputModalities());
     assertEquals("custom", requestSpec.variant().id());
-    assertEquals(0.5, requestSpec.variant().temperature());
-    assertEquals(2048, requestSpec.variant().maxOutputTokens());
+    assertEquals("medium", requestSpec.variant().reasoningEffort());
     assertEquals(4096, resolved.contextWindow());
-    assertEquals(2048, resolved.maxOutputTokens());
+    // 输出预算只来自 model 级 limit.output 与剩余上下文；variant 不再携带任何输出控制。
+    assertEquals(1024, resolved.maxOutputTokens());
+    assertEquals(resolved.maxOutputTokens(), requestSpec.outputTokens());
   }
 
   @Test
@@ -228,6 +233,12 @@ class DatabaseTurnResolverTest {
     fixture.provider.setProviderType(null);
     assertEquals(
         "provider type must not be null",
+        fixture.rejected(fixture.path(settings(null, "default"))).error().message());
+
+    fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.provider.setConnectionGenerationId(null);
+    assertEquals(
+        "provider connection generation id must not be null",
         fixture.rejected(fixture.path(settings(null, "default"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
@@ -791,10 +802,8 @@ class DatabaseTurnResolverTest {
     assertEquals("custom", requestSpec.variant().id());
     // 所选 catalog variant 的 reasoningEffort 原样生效，不存在运行时 override。
     assertEquals("medium", requestSpec.variant().reasoningEffort());
-    // 其余 variant 字段原样保留。
-    assertEquals(2048, requestSpec.variant().maxOutputTokens());
-    assertEquals(0.5, requestSpec.variant().temperature());
-    assertEquals(List.of("END"), requestSpec.variant().stopSequences());
+    // variant 只承载 reasoning effort：输出预算由 model 级 limit.output 决定。
+    assertEquals(1024, requestSpec.outputTokens());
 
     requestSpec = fixture.resolved(fixture.path(settings(null, "default")));
     assertNull(requestSpec.variant().reasoningEffort());
@@ -975,7 +984,7 @@ class DatabaseTurnResolverTest {
             true);
     ModelRequestSpec affinity = fixture.resolved(fixture.path(settings(null, "default")));
     assertEquals(PromptCacheRetention.SHORT, affinity.cacheControl().retention());
-    assertTrue(affinity.cacheControl().affinityKey().startsWith("pc1-"));
+    assertTrue(affinity.cacheControl().affinityKey().startsWith("pc2-"));
 
     fixture =
         new Fixture(
@@ -1018,7 +1027,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec first = fixture.resolved(path);
     ModelRequestSpec sameSessionAgain = fixture.resolved(fixture.path(settings(null, "default")));
     assertEquals(PromptCacheRetention.SHORT, first.cacheControl().retention());
-    assertTrue(first.cacheControl().affinityKey().startsWith("pc1-"));
+    assertTrue(first.cacheControl().affinityKey().startsWith("pc2-"));
     assertEquals(first.cacheControl().affinityKey(), sameSessionAgain.cacheControl().affinityKey());
 
     // 同前缀但不同 session 必须派生出不同 key，避免跨会话缓存串扰
@@ -1034,6 +1043,13 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec otherSession = fixture.resolved(otherSessionPath);
     assertEquals(PromptCacheRetention.SHORT, otherSession.cacheControl().retention());
     assertNotEquals(first.cacheControl().affinityKey(), otherSession.cacheControl().affinityKey());
+
+    // 同 session 切换 provider 连接代际也必须切 key，避免 endpoint/credential 更新后复用旧身份。
+    fixture.provider.setConnectionGenerationId(new UUID(0L, 997L));
+    ModelRequestSpec otherConnectionGeneration =
+        fixture.resolved(fixture.path(settings(null, "default")));
+    assertNotEquals(
+        first.cacheControl().affinityKey(), otherConnectionGeneration.cacheControl().affinityKey());
   }
 
   /** 意图：验证 live turn 规划会正确传递当前 provider 的 configJson 解析动态 promptCacheCapability。 */
@@ -1059,7 +1075,7 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec spec = fixture.resolved(fixture.path(settings(null, "default")));
     assertEquals(PromptCacheRetention.SHORT, spec.cacheControl().retention());
-    assertTrue(spec.cacheControl().affinityKey().startsWith("pc1-"));
+    assertTrue(spec.cacheControl().affinityKey().startsWith("pc2-"));
   }
 
   /** 意图：当 provider 配置导致 PromptCacheCapability 解析抛出异常或返回 null 时，Turn planning 确定性拒绝且不泄漏 config。 */
@@ -1459,7 +1475,8 @@ class DatabaseTurnResolverTest {
     assertEquals(Set.of(ModelInputModality.TEXT), requestSpec.model().inputModalities());
     assertEquals(4096, resolved.contextWindow());
     assertEquals(123, resolved.maxOutputTokens());
-    assertEquals(123, requestSpec.variant().maxOutputTokens());
+    // 压缩预算写入 spec.outputTokens，variant 不再承载输出上限。
+    assertEquals(123, requestSpec.outputTokens());
     assertEquals(List.of(), requestSpec.preambleMessages());
     assertEquals(List.of(), requestSpec.toolBindings());
     assertEquals(List.of(), requestSpec.skillBindings());
@@ -1477,27 +1494,40 @@ class DatabaseTurnResolverTest {
     // FULL 预算为 min(1024, floor(0.8 * 1024) = 819, removedPrefixTokens=123) = 123。
   }
 
-  /** variant 未声明输出上限时，冻结的 spec 必须已经带上 model 全局 limit.output；显式声明时原样保留，绝不回退到其他数值。 */
+  /** 输出预算只来自 model 级 limit.output 与剩余上下文：variant 不参与，也不存在任何 variant 级回退。 */
   @Test
-  void frozenSpecResolvesNullVariantOutputLimitFromModelLimit() {
+  void outputBudgetComesFromModelLimitAndRemainingContext() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.modelGlobalOutputLimit(600);
+    EntryPath path = fixture.path(settings(null, "default"));
 
-    TurnResolver.Resolved resolved =
-        fixture.resolvedResult(fixture.path(settings(null, "default")), null);
+    TurnResolver.Resolved resolved = fixture.resolvedResult(path, null);
 
-    // variant 的 maxOutputTokens 在冻结前已被 model limit.output 补齐，请求侧不再是 null。
-    assertEquals(600, resolved.spec().variant().maxOutputTokens());
+    // model 全局 limit.output=600 且剩余上下文充足时，预算为 600。
     assertEquals(600, resolved.maxOutputTokens());
+    assertEquals(600, resolved.spec().outputTokens());
 
-    // 显式声明 variant 上限的模型继续使用自己的值（1024），不被 model 全局值改写。
+    // 上下文只剩 37 token 时严格取 remaining，不应用正数钳位或 variant 回退。
+    long estimatedInputTokens =
+        CompactionPlanner.estimateRequestTokens(path, resolved.spec().preambleMessages());
+    fixture.modelLimits(estimatedInputTokens + 37, 600);
+    resolved = fixture.resolvedResult(path, null);
+    assertEquals(37, resolved.maxOutputTokens());
+    assertEquals(37, resolved.spec().outputTokens());
+
+    // 上下文已耗尽时必须明确拒绝，不能伪造 1-token 请求。
+    fixture.modelLimits(estimatedInputTokens, 600);
+    assertEquals(
+        "remaining context leaves no positive output budget: contextWindow="
+            + estimatedInputTokens
+            + ", estimatedInputTokens="
+            + estimatedInputTokens,
+        fixture.rejected(path).error().message());
+
+    // 未改写 model limit 时取该 model 自己的 limit.output（1024），与所选 variant 无关。
     Fixture explicit = new Fixture(List.of(), List.of(), List.of());
-    assertEquals(
-        1024,
-        explicit.resolved(explicit.path(settings(null, "default"))).variant().maxOutputTokens());
-    assertEquals(
-        2048,
-        explicit.resolved(explicit.path(settings(null, "custom"))).variant().maxOutputTokens());
+    assertEquals(1024, explicit.resolved(explicit.path(settings(null, "default"))).outputTokens());
+    assertEquals(1024, explicit.resolved(explicit.path(settings(null, "custom"))).outputTokens());
   }
 
   @Test
@@ -1541,7 +1571,7 @@ class DatabaseTurnResolverTest {
             messages,
             50_000L);
 
-    // 未显式设置 variant 上限时先取实际 model 全局 600，再由 outputBudget 阶段公式裁剪。
+    // 预算先取实际 model 全局 600，再由 outputBudget 阶段公式裁剪；spec.outputTokens 与 Resolved 一致。
     assertEquals(
         123,
         fixture
@@ -1556,17 +1586,9 @@ class DatabaseTurnResolverTest {
         300,
         fixture.resolvedResult(fixture.path(settings(null, "default")), prefix).maxOutputTokens());
     assertEquals(
-        480,
-        fixture
-            .resolved(fixture.path(settings(null, "default")), fullLarge)
-            .variant()
-            .maxOutputTokens());
+        480, fixture.resolved(fixture.path(settings(null, "default")), fullLarge).outputTokens());
     assertEquals(
-        300,
-        fixture
-            .resolved(fixture.path(settings(null, "default")), prefix)
-            .variant()
-            .maxOutputTokens());
+        300, fixture.resolved(fixture.path(settings(null, "default")), prefix).outputTokens());
   }
 
   /** 逆证：fallback executionModel 必须改变 resolver 的 catalog 解析目标，而不是继续读取 branch settings.model。 */
@@ -1582,8 +1604,7 @@ class DatabaseTurnResolverTest {
             Set.of(ModelInputModality.TEXT),
             true,
             true,
-            List.of(
-                new ModelVariant("fallback", 1500, 0.2, null, null, null, null, List.of(), null)),
+            List.of(new ModelVariant("fallback")),
             "fallback",
             pricing()));
     when(fixture.providers.getByName("provider"))
@@ -1610,11 +1631,13 @@ class DatabaseTurnResolverTest {
 
     assertEquals("fallback-provider", resolved.spec().model().providerName());
     assertEquals("fallback-model", resolved.spec().model().modelName());
+    assertEquals("fallback-model", resolved.spec().model().modelId());
+    assertEquals(new UUID(0L, 43L), resolved.spec().providerConnectionGenerationId());
     assertEquals("fallback", resolved.spec().variant().id());
     assertEquals(8192, resolved.contextWindow());
-    // fallback variant 的实际上限 1500 经 FULL 预算公式裁剪为 1200。
-    assertEquals(1200, resolved.maxOutputTokens());
-    assertEquals(1200, resolved.spec().variant().maxOutputTokens());
+    // fallback model 的 limit.output = 4096 经 FULL 预算公式 floor(0.8 * 4096) = 3276 裁剪。
+    assertEquals(3276, resolved.maxOutputTokens());
+    assertEquals(3276, resolved.spec().outputTokens());
   }
 
   /** CompactionPreparation 保持最小，派生 token/window 与 compaction metadata 不进入 ModelRequestSpec。 */
@@ -1670,14 +1693,14 @@ class DatabaseTurnResolverTest {
     assertEquals("second reply", textOf(messages.get(4)));
   }
 
+  /** 损坏的压缩引用必须 fail closed：解析阶段（输出预算需要投影 cut）即确定性抛错，绝不产出静默降级的请求。 */
   @Test
   void corruptCompactionReferencesFailClosedInProjection() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     BranchSettings settings = settings(ENV_A, "default");
     // cut 不在当前路径。
     EntryPath missingCut = projectionPath(settings, "summary", id(999));
-    ModelRequestSpec missingSpec = fixture.resolved(missingCut);
-    assertThrows(IllegalStateException.class, () -> materialized(missingCut, missingSpec));
+    assertThrows(IllegalStateException.class, () -> fixture.resolved(missingCut));
   }
 
   @Test
@@ -2008,12 +2031,14 @@ class DatabaseTurnResolverTest {
 
       provider.setName("provider");
       provider.setProviderType(persistedProviderType);
+      provider.setConnectionGenerationId(new UUID(0L, 42L));
       provider.setVersion(0L);
       when(providers.getByName("provider")).thenReturn(provider);
 
       AgentModel model = new AgentModel();
       model.setProviderName("provider");
       model.setName("model");
+      model.setModelId("wire-model");
       model.setConfigJson("model-config");
       when(models.getByProviderNameAndName("provider", "model")).thenReturn(model);
 
@@ -2109,6 +2134,7 @@ class DatabaseTurnResolverTest {
       AgentProvider fallbackProvider = new AgentProvider();
       fallbackProvider.setName(selection.providerName());
       fallbackProvider.setProviderType(ProviderType.OPENAI);
+      fallbackProvider.setConnectionGenerationId(new UUID(0L, 43L));
       fallbackProvider.setVersion(0L);
       when(providers.getByName(selection.providerName())).thenReturn(fallbackProvider);
 
@@ -2116,6 +2142,7 @@ class DatabaseTurnResolverTest {
       AgentModel fallbackModel = new AgentModel();
       fallbackModel.setProviderName(selection.providerName());
       fallbackModel.setName(selection.modelName());
+      fallbackModel.setModelId(selection.modelName());
       fallbackModel.setConfigJson(configJson);
       when(models.getByProviderNameAndName(selection.providerName(), selection.modelName()))
           .thenReturn(fallbackModel);
@@ -2176,20 +2203,22 @@ class DatabaseTurnResolverTest {
                   parsed.pricing()));
     }
 
-    /** variant.maxOutputTokens 全部置 null，模型全局 limit.output 固定为 {@code maxOutputTokens}。 */
+    /** model 级 limit.output 固定为 {@code maxOutputTokens}；variant 只保留 id。 */
     private void modelGlobalOutputLimit(long maxOutputTokens) {
+      modelLimits(parsedModel().contextWindow(), maxOutputTokens);
+    }
+
+    private void modelLimits(long contextWindow, long maxOutputTokens) {
       ParsedAgentModelConfig parsed = parsedModel();
       when(modelConfigParser.parse("model-config"))
           .thenReturn(
               new ParsedAgentModelConfig(
-                  parsed.contextWindow(),
+                  contextWindow,
                   maxOutputTokens,
                   parsed.inputModalities(),
                   parsed.tools(),
                   parsed.reasoning(),
-                  List.of(
-                      new ModelVariant(
-                          "default", null, 0.7, null, null, null, null, List.of(), null)),
+                  List.of(new ModelVariant("default")),
                   parsed.defaultVariant(),
                   parsed.pricing()));
     }
@@ -2210,10 +2239,8 @@ class DatabaseTurnResolverTest {
     }
 
     private static ParsedAgentModelConfig parsedModel() {
-      ModelVariant defaultVariant =
-          new ModelVariant("default", 1024, 0.7, null, null, null, null, List.of(), null);
-      ModelVariant customVariant =
-          new ModelVariant("custom", 2048, 0.5, null, null, null, null, List.of("END"), "medium");
+      ModelVariant defaultVariant = new ModelVariant("default");
+      ModelVariant customVariant = new ModelVariant("custom", "medium");
       return new ParsedAgentModelConfig(
           4096,
           1024,

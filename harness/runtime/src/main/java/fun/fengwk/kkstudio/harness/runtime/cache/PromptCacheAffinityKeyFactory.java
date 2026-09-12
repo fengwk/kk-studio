@@ -24,45 +24,49 @@ import java.util.UUID;
 /**
  * 派生稳定的 Prompt Cache affinity key。
  *
- * <p>finalizer 唯一可信派生点；同一 session + provider/model + 稳定 system/tool 前缀的请求始终命中同一 key， 动态
- * USER/ASSISTANT/TOOL history 与 sampling 参数绝不进入 key。
+ * <p>finalizer 唯一可信派生点；同一 session + provider connection generation/model + 稳定 system/tool
+ * 前缀的请求始终命中同一 key，动态 USER/ASSISTANT/TOOL history 绝不进入 key。
  *
  * <p>实现要点：
  *
  * <ul>
- *   <li>格式固定为 {@code pc1-} 前缀 + SHA-256 Base64URL 无 padding（43 字符）。
+ *   <li>格式固定为 {@code pc2-} 前缀 + SHA-256 Base64URL 无 padding（43 字符）。
  *   <li>digest 输入采用 {@code (type, nameLen:4B, name, valueLen:4B, value)} 的长度前缀帧； 每个复合对象的每个
  *       字段必须单独成帧，绝不依赖分隔字符或 NUL 拼接，因此字段值包含 NUL 也不会与跨字段拼接碰撞。
  *   <li>版本字段独立标记，用于将来在不破坏旧 key 的前提下增量调整算法。
- *   <li>输入：版本、sessionId、providerName、modelName、连续 leading SYSTEM messages 的完整合法 typed contents（每个
- *       content 独立成帧），以及按请求顺序的 tool name/description/inputSchemaJson。 Provider 类型与 capability 由
- *       调用方显式解析、不随请求持久化，因此也不进入 key。
+ *   <li>输入：版本、sessionId、providerName、providerConnectionGenerationId、modelId（真实 wire 模型标识）、连续
+ *       leading SYSTEM messages 的完整合法 typed contents（每个 content 独立成帧），以及按请求顺序的 tool
+ *       name/description/inputSchemaJson。Provider 类型与 capability 由调用方显式解析、不随请求持久化，因此也不进入 key。
  * </ul>
  */
 public final class PromptCacheAffinityKeyFactory {
 
-  private static final String VERSION = "pc1";
+  private static final String VERSION = "pc2";
 
   /**
    * 为单次请求派生 affinity key。
    *
    * @param sessionId durable session UUID
+   * @param providerConnectionGenerationId provider 连接代际 UUID
    * @param request 不可为 null，且其 model 不能为空
-   * @return 形如 {@code pc1-<Base64URL-无padding>} 的字符串
+   * @return 形如 {@code pc2-<Base64URL-无padding>} 的字符串
    */
-  public String create(UUID sessionId, ProviderRequest request) {
+  public String create(
+      UUID sessionId, UUID providerConnectionGenerationId, ProviderRequest request) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(sessionId, "sessionId");
+    Objects.requireNonNull(providerConnectionGenerationId, "providerConnectionGenerationId");
     ModelDescriptor model = Objects.requireNonNull(request.model(), "request.model()");
     List<ProviderMessage> messages =
         Objects.requireNonNull(request.messages(), "request.messages()");
     List<ProviderToolDefinition> tools = Objects.requireNonNull(request.tools(), "request.tools()");
-    byte[] digest = digest(sessionId, model, messages, tools);
+    byte[] digest = digest(sessionId, providerConnectionGenerationId, model, messages, tools);
     return VERSION + "-" + encode(digest);
   }
 
   private static byte[] digest(
       UUID sessionId,
+      UUID providerConnectionGenerationId,
       ModelDescriptor model,
       List<ProviderMessage> messages,
       List<ProviderToolDefinition> tools) {
@@ -70,7 +74,9 @@ public final class PromptCacheAffinityKeyFactory {
     writeField(md, 'V', "version", VERSION);
     writeField(md, 'S', "sessionId", sessionId.toString());
     writeField(md, 'P', "providerName", model.providerName());
-    writeField(md, 'M', "modelName", model.modelName());
+    writeField(
+        md, 'G', "providerConnectionGenerationId", providerConnectionGenerationId.toString());
+    writeField(md, 'M', "modelId", model.modelId());
     writeLeadingSystemMessages(md, messages);
     writeTools(md, tools);
     return md.digest();

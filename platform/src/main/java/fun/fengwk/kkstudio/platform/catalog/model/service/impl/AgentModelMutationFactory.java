@@ -15,6 +15,7 @@ final class AgentModelMutationFactory {
 
   private static final String RESOURCE = "agent_model";
   private static final int NAME_MAX_LENGTH = 128;
+  private static final int MODEL_ID_MAX_LENGTH = 256;
   private static final int DESCRIPTION_MAX_LENGTH = 512;
 
   private final AgentEditableSupport editableSupport;
@@ -44,6 +45,7 @@ final class AgentModelMutationFactory {
 
   private void apply(AgentModel model, Mutation mutation) {
     model.setName(mutation.name());
+    model.setModelId(mutation.modelId());
     model.setDescription(mutation.description());
     model.setConfigJson(mutation.configJson());
   }
@@ -64,7 +66,16 @@ final class AgentModelMutationFactory {
           RESOURCE, RESOURCE + " name must not contain surrounding whitespace");
     }
     String description = editableSupport.trimToNull(properties.getDescription());
+    String modelId = editableSupport.trimToNull(properties.getModelId());
+    if (modelId == null) {
+      throw new AiValidationException(RESOURCE, RESOURCE + " modelId must not be blank");
+    }
+    if (!properties.getModelId().equals(modelId)) {
+      throw new AiValidationException(
+          RESOURCE, RESOURCE + " modelId must not contain surrounding whitespace");
+    }
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
+    editableSupport.validateMaxLength(RESOURCE, "modelId", modelId, MODEL_ID_MAX_LENGTH);
     editableSupport.validateMaxLength(RESOURCE, "description", description, DESCRIPTION_MAX_LENGTH);
     AgentModelConfigDTO config = properties.getConfig();
     if (config == null) {
@@ -76,8 +87,8 @@ final class AgentModelMutationFactory {
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
-    return new Mutation(normalizedName, description, configJson);
+    return new Mutation(normalizedName, modelId, description, configJson);
   }
 
-  record Mutation(String name, String description, String configJson) {}
+  record Mutation(String name, String modelId, String description, String configJson) {}
 }

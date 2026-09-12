@@ -9,7 +9,7 @@
     "license": "Apache License 2.0",
     "adaptationPrinciples": [
       "1. Comprehensive Inventory: 100% covers all 51 test files in langchain4j-google-ai-gemini/src/test/java and tracked inherited base classes with 676 real test methods expanded to 676 invocations.",
-      "2. Honest Status & No False Equivalence Policy: Exactly 190 applicable invocations are PORTED and PASSED, validated via reflection-backed target existence and test-annotation checks against declared local test methods; exactly 0 pending invocations remain; all 486 non-applicable invocations are classified OUT_OF_SCOPE with precise capabilityMismatch reasons.",
+      "2. Honest Status & No False Equivalence Policy: Exactly 145 applicable invocations are PORTED and PASSED, validated via reflection-backed target existence and test-annotation checks against declared local test methods; exactly 0 pending invocations remain; all 531 non-applicable invocations are classified OUT_OF_SCOPE with precise capabilityMismatch reasons.",
       "3. Native Thinking Adaptation: Native provider adapts thinkingConfig and reasoning effort to thinkingLevel and includeThoughts while strictly preserving output and deterministic replay semantics.",
       "4. Precise Capability Mismatch: OUT_OF_SCOPE items strictly document the specific architectural mismatch (e.g., Caching API, Files upload API, Embedding models, Batch API, Imagen models, AiServices facade, Model catalog, countTokens, listener, proprietary Grounding tools).",
       "5. Orthogonal Credential Invariant: 281 credential-bound integration tests maintain their independent realInteropStatus marker of NOT_EXECUTED_REQUIRES_CREDENTIAL orthogonally to mappingStatus.",
@@ -20,9 +20,9 @@
     "totalSourceFiles": 51,
     "totalMethods": 676,
     "totalInvocations": 676,
-    "portedInvocations": 190,
+    "portedInvocations": 145,
     "inScopePendingInvocations": 0,
-    "outOfScopeInvocations": 486,
+    "outOfScopeInvocations": 531,
     "realCredentialInvocations": 281
   },
   "methods": [
@@ -2240,14 +2240,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Native model configuration does not expose Gemini seed; request encoding deliberately uses the provider default.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -2265,14 +2265,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "LangChain4j GeminiGenerationConfig builder/default serialization is an SDK facade with no native counterpart; native generationConfig is derived only from output budget and reasoning effort.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -2290,14 +2290,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Native model configuration does not expose responseLogprobs or enableEnhancedCivicAnswers; those Gemini SDK builder fields are outside the request contract.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -2315,14 +2315,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini mediaResolution is not exposed by the native chat request contract; media-generation configuration is outside this provider adapter.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -2340,14 +2340,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini mediaResolution is not exposed by the native chat request contract; media-generation configuration is outside this provider adapter.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -2365,14 +2365,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini mediaResolution is not exposed by the native chat request contract; media-generation configuration is outside this provider adapter.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -2390,14 +2390,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini mediaResolution is not exposed by the native chat request contract; media-generation configuration is outside this provider adapter.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -2415,14 +2415,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini mediaResolution is not exposed by the native chat request contract; media-generation configuration is outside this provider adapter.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8165,9 +8165,9 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiModelProviderIntegrationTest#streamsRealSseResponseOverLocalHttpServer",
           "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
+          "validationLayer": "integration",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": null,
@@ -8190,9 +8190,9 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiWireTest#parsesIncrementalSseFixture",
           "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
+          "validationLayer": "wire/protocol",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": null,
@@ -8215,14 +8215,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "The upstream request asserts configurable sampling, penalties, seed, stop sequences, or other arbitrary generation parameters removed from the native reasoning-only variant contract.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8240,7 +8240,7 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesMultiTurnTextConversation",
           "fixture": "gemini/fixtures/stream-incremental.sse",
           "validationLayer": "unit",
           "mappingStatus": "PORTED",
@@ -8265,14 +8265,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "LangChain4j synchronous AiMessage null-normalization for an empty response is not part of the native streaming ProviderResponse contract.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8290,9 +8290,9 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulatorTest#normalizesUsageMetadata_promptOrdinaryAndCached_mutuallyExclusive",
           "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
+          "validationLayer": "stream/decoder",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": null,
@@ -8315,9 +8315,9 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulatorTest#normalizesUsageMetadata_promptOrdinaryAndCached_mutuallyExclusive",
+          "fixture": "gemini/fixtures/stream-thinking.sse",
+          "validationLayer": "stream/decoder",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": null,
@@ -8340,7 +8340,7 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestMapperTest#mapsFinishReasonsCorrectly",
           "fixture": "gemini/fixtures/stream-incremental.sse",
           "validationLayer": "unit",
           "mappingStatus": "PORTED",
@@ -8365,7 +8365,7 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestMapperTest#mapsFinishReasonsCorrectly",
           "fixture": "gemini/fixtures/stream-incremental.sse",
           "validationLayer": "unit",
           "mappingStatus": "PORTED",
@@ -8390,14 +8390,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "The upstream request asserts configurable sampling, penalties, seed, stop sequences, or other arbitrary generation parameters removed from the native reasoning-only variant contract.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8415,14 +8415,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini imageConfig aspect-ratio/image-size generation controls are not part of the native chat provider request contract.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8440,14 +8440,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini imageConfig aspect-ratio/image-size generation controls are not part of the native chat provider request contract.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8465,14 +8465,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini imageConfig aspect-ratio/image-size generation controls are not part of the native chat provider request contract.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8490,14 +8490,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini structured responseSchema/responseJsonSchema controls are not part of the native chat provider request contract.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8515,14 +8515,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini structured responseSchema/responseJsonSchema controls are not part of the native chat provider request contract.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8540,14 +8540,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini structured responseSchema/responseJsonSchema controls are not part of the native chat provider request contract.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8565,14 +8565,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini SDK function-calling mode and allowedFunctionNames controls are not represented by native function tool definitions.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8590,14 +8590,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini SDK function-calling mode and allowedFunctionNames controls are not represented by native function tool definitions.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8615,14 +8615,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini SDK function-calling mode and allowedFunctionNames controls are not represented by native function tool definitions.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8640,14 +8640,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini SDK function-calling mode and allowedFunctionNames controls are not represented by native function tool definitions.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8665,14 +8665,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini SDK function-calling mode and allowedFunctionNames controls are not represented by native function tool definitions.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8790,14 +8790,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "LangChain4j GoogleAiGeminiChatRequestParameters builder, merge, alias, and equality semantics for aspectRatio, imageSize, and cachedContentName have no native request-parameter facade.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8815,14 +8815,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "LangChain4j GoogleAiGeminiChatRequestParameters builder, merge, alias, and equality semantics for aspectRatio, imageSize, and cachedContentName have no native request-parameter facade.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8840,14 +8840,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "LangChain4j GoogleAiGeminiChatRequestParameters builder, merge, alias, and equality semantics for aspectRatio, imageSize, and cachedContentName have no native request-parameter facade.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8865,14 +8865,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "LangChain4j GoogleAiGeminiChatRequestParameters builder, merge, alias, and equality semantics for aspectRatio, imageSize, and cachedContentName have no native request-parameter facade.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8890,14 +8890,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "LangChain4j GoogleAiGeminiChatRequestParameters builder, merge, alias, and equality semantics for aspectRatio, imageSize, and cachedContentName have no native request-parameter facade.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8915,14 +8915,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "LangChain4j GoogleAiGeminiChatRequestParameters builder, merge, alias, and equality semantics for aspectRatio, imageSize, and cachedContentName have no native request-parameter facade.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8940,14 +8940,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "LangChain4j GoogleAiGeminiChatRequestParameters builder, merge, alias, and equality semantics for aspectRatio, imageSize, and cachedContentName have no native request-parameter facade.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8965,14 +8965,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "LangChain4j GoogleAiGeminiChatRequestParameters builder, merge, alias, and equality semantics for aspectRatio, imageSize, and cachedContentName have no native request-parameter facade.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -10190,7 +10190,7 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulatorTest#handlesPureIncrementalTextStream",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#rejectsEmptyMessages",
           "fixture": "gemini/fixtures/stream-incremental.sse",
           "validationLayer": "unit",
           "mappingStatus": "PORTED",
@@ -10215,14 +10215,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulatorTest#handlesPureIncrementalTextStream",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Native ProviderRequest and ModelVariant do not expose Gemini seed; streaming response handling is not equivalent to asserting request seed propagation.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -10240,14 +10240,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulatorTest#handlesPureIncrementalTextStream",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Native ProviderRequest and ModelVariant do not expose Gemini seed; streaming response handling is not equivalent to asserting request seed propagation.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -10265,14 +10265,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulatorTest#handlesPureIncrementalTextStream",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini imageConfig aspect-ratio/image-size generation controls are not part of the native chat provider request contract; a text streaming test cannot cover them.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -10290,14 +10290,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulatorTest#handlesPureIncrementalTextStream",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini imageConfig aspect-ratio/image-size generation controls are not part of the native chat provider request contract; a text streaming test cannot cover them.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -10315,14 +10315,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulatorTest#handlesPureIncrementalTextStream",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Explicit Gemini cachedContentName selection is not part of the native request contract; the native adapter supports only implicit provider-managed prompt caching.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -10340,14 +10340,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulatorTest#handlesPureIncrementalTextStream",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Explicit Gemini cachedContentName selection is not part of the native request contract; the native adapter supports only implicit provider-managed prompt caching.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -10365,14 +10365,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulatorTest#handlesPureIncrementalTextStream",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Explicit Gemini cachedContentName selection is not part of the native request contract; the native adapter supports only implicit provider-managed prompt caching.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -10415,14 +10415,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulatorTest#handlesPureIncrementalTextStream",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini responseLogprobs is not exposed by the native request or response contract; generic text stream accumulation is not equivalent coverage.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -10440,14 +10440,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulatorTest#handlesPureIncrementalTextStream",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Gemini responseLogprobs is not exposed by the native request or response contract; generic text stream accumulation is not equivalent coverage.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -11790,7 +11790,7 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestMapperTest#mapsUserContentAndPartsCorrectly",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesDataUriMediaWithMimeTypes",
           "fixture": "gemini/fixtures/stream-incremental.sse",
           "validationLayer": "unit",
           "mappingStatus": "PORTED",
@@ -11815,7 +11815,7 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestMapperTest#mapsUserContentAndPartsCorrectly",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesDataUriMediaWithMimeTypes",
           "fixture": "gemini/fixtures/stream-incremental.sse",
           "validationLayer": "unit",
           "mappingStatus": "PORTED",
@@ -11840,7 +11840,7 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestMapperTest#mapsUserContentAndPartsCorrectly",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesDataUriMediaWithMimeTypes",
           "fixture": "gemini/fixtures/stream-incremental.sse",
           "validationLayer": "unit",
           "mappingStatus": "PORTED",
@@ -11865,14 +11865,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestMapperTest#mapsUserContentAndPartsCorrectly",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Per-part Gemini mediaResolution derived from SDK ImageContent.DetailLevel is not represented by native media blocks.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -11890,14 +11890,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestMapperTest#mapsUserContentAndPartsCorrectly",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Per-part Gemini mediaResolution derived from SDK ImageContent.DetailLevel is not represented by native media blocks.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -11915,14 +11915,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestMapperTest#mapsUserContentAndPartsCorrectly",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Per-part Gemini mediaResolution derived from SDK ImageContent.DetailLevel is not represented by native media blocks.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -11940,14 +11940,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestMapperTest#mapsUserContentAndPartsCorrectly",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "unit",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Per-part Gemini mediaResolution derived from SDK ImageContent.DetailLevel is not represented by native media blocks.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -14965,9 +14965,9 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"GOOGLE_AI_GEMINI_API_KEY\", matches = \".+\")",
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfigWithRequestOutputBudgetOnly",
           "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "integration",
+          "validationLayer": "wire/protocol",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
@@ -15040,14 +15040,14 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"GOOGLE_AI_GEMINI_API_KEY\", matches = \".+\")",
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "integration",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -15071,7 +15071,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Capability is outside kk-studio native Gemini GenerateContent streaming provider scope (LangChain4j SDK framework facade or incompatible sub-protocol).",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]
@@ -15096,7 +15096,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Capability is outside kk-studio native Gemini GenerateContent streaming provider scope (LangChain4j SDK framework facade or incompatible sub-protocol).",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]
@@ -15896,7 +15896,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Capability is outside kk-studio native Gemini GenerateContent streaming provider scope (LangChain4j SDK framework facade or incompatible sub-protocol).",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]
@@ -16065,9 +16065,9 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"GOOGLE_AI_GEMINI_API_KEY\", matches = \".+\")",
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfigWithRequestOutputBudgetOnly",
           "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "integration",
+          "validationLayer": "wire/protocol",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
@@ -16140,14 +16140,14 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"GOOGLE_AI_GEMINI_API_KEY\", matches = \".+\")",
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoderTest#encodesGenerationConfig_variantParameters",
-          "fixture": "gemini/fixtures/stream-incremental.sse",
-          "validationLayer": "integration",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": null,
-          "securityAdaptation": "API key passed via x-goog-api-key header, sanitized from logs, URI and error envelopes"
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -16171,7 +16171,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Capability is outside kk-studio native Gemini GenerateContent streaming provider scope (LangChain4j SDK framework facade or incompatible sub-protocol).",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]
@@ -16196,7 +16196,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Capability is outside kk-studio native Gemini GenerateContent streaming provider scope (LangChain4j SDK framework facade or incompatible sub-protocol).",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]

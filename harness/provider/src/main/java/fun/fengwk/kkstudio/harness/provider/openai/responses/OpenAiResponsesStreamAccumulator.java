@@ -694,7 +694,7 @@ final class OpenAiResponsesStreamAccumulator {
         replayState =
             new ProviderReplayState(
                 ProviderReplayFormat.OPENAI_RESPONSES,
-                descriptor.affinity(request.model().modelName()),
+                descriptor.affinity(request.model().modelId()),
                 frozenSourcePrefixHash,
                 payload);
       }

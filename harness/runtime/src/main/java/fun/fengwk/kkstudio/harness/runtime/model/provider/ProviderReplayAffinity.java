@@ -3,9 +3,13 @@ package fun.fengwk.kkstudio.harness.runtime.model.provider;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Provider terminal replay 的亲和性元数据。 */
+/**
+ * Provider terminal replay 的亲和性元数据。
+ *
+ * <p>{@code modelId} 是发往上游的真实 wire 模型标识：native replay state 只对同一 wire 模型有效，逻辑模型名的变更不构成亲和性差异。
+ */
 public record ProviderReplayAffinity(
-    ProviderType providerType, String providerName, UUID connectionGenerationId, String modelName) {
+    ProviderType providerType, String providerName, UUID connectionGenerationId, String modelId) {
 
   public ProviderReplayAffinity {
     providerType = Objects.requireNonNull(providerType, "providerType");
@@ -17,11 +21,11 @@ public record ProviderReplayAffinity(
     }
     connectionGenerationId =
         Objects.requireNonNull(connectionGenerationId, "connectionGenerationId");
-    if (modelName == null || modelName.isBlank()) {
-      throw new IllegalArgumentException("modelName must not be blank");
+    if (modelId == null || modelId.isBlank()) {
+      throw new IllegalArgumentException("modelId must not be blank");
     }
-    if (!modelName.equals(modelName.trim())) {
-      throw new IllegalArgumentException("modelName must not contain surrounding whitespace");
+    if (!modelId.equals(modelId.trim())) {
+      throw new IllegalArgumentException("modelId must not contain surrounding whitespace");
     }
   }
 

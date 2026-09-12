@@ -402,10 +402,12 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   private void insertModel(Connection conn, String providerName, String name) throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into agent_model (provider_name, name, config)"
-                + " values (?, ?, '{}'::jsonb)")) {
+            "insert into agent_model (provider_name, name, model_id, config)"
+                + " values (?, ?, ?, '{}'::jsonb)")) {
       ps.setString(1, providerName);
       ps.setString(2, name);
+      // modelId 与逻辑 name 独立：使用独立的 wire 序号，既不复制 name，也不受 name 的空白边界影响。
+      ps.setString(3, "wire-" + FIXTURE_IDS.incrementAndGet());
       assertEquals(1, ps.executeUpdate());
     }
   }

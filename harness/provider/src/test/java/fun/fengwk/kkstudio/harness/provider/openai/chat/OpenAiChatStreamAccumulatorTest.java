@@ -75,14 +75,18 @@ class OpenAiChatStreamAccumulatorTest {
             new BigDecimal("10.00"));
     modelDesc =
         new ModelDescriptor(
-            "openai", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
+            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")));
-    ModelVariant defaultVariant =
-        new ModelVariant("default", null, null, null, null, null, null, null, null);
+    ModelVariant defaultVariant = new ModelVariant("default");
     request =
         new ProviderRequest(
-            modelDesc, defaultVariant, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
 
     recordedEvents = new ArrayList<>();
     ProviderStreamHandler handler =

@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Function;
 
 /**
@@ -13,14 +14,16 @@ import java.util.function.Function;
  * 与最终有效 {@link ProviderRequest}。
  *
  * <p>实现必须在每次 Model attempt 开始时按 {@code request.model().providerName()} 读取当前 {@code agent_provider}
- * 行，校验该行当前 {@code ProviderType} 等于冻结类型，确认有对应的 Harness {@code ProviderFactory} 注册，并冻结一个短生命周期
- * Provider adapter 资源。credential / base URL / timeout 与 Resource URL 保持 attempt-time live。有效
- * request 按当前 factory capability 重新派生 {@code ProviderCacheControl}；adapter 只在 Provider I/O executor
- * 上、持久 deadline 封顶传输超时之后创建 SDK 绑定的 {@link ModelProvider}。
+ * 行，校验当前 {@code ProviderType} 与 connection generation 等于冻结值，确认有对应的 Harness {@code ProviderFactory}
+ * 注册，并冻结一个短生命周期 Provider adapter 资源。generation 漂移必须在 Provider I/O 前确定性拒绝；不触发 generation 轮换的 timeout
+ * 与 Resource URL 保持 attempt-time live。有效 request 按当前 factory capability 重新派生 {@code
+ * ProviderCacheControl}；adapter 只在 Provider I/O executor 上、持久 deadline 封顶传输超时之后创建 SDK 绑定的 {@link
+ * ModelProvider}。
  */
 public interface ProviderResolutionService {
 
-  ResolvedExecution resolve(ProviderType frozenType, ProviderRequest request);
+  ResolvedExecution resolve(
+      ProviderType frozenType, UUID frozenConnectionGenerationId, ProviderRequest request);
 
   /** 冻结的解析结果：包含最终有效 {@link ProviderRequest}、私有的 Provider opener 与非敏感的 timeout policy。 */
   final class ResolvedExecution {

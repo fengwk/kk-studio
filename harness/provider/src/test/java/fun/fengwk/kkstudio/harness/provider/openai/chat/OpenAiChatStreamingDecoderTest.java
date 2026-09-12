@@ -101,8 +101,8 @@ class OpenAiChatStreamingDecoderTest {
             new BigDecimal("10.00"));
     modelDesc =
         new ModelDescriptor(
-            "openai", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
-    defaultVariant = new ModelVariant("default", null, null, null, null, null, null, null, null);
+            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
+    defaultVariant = new ModelVariant("default");
   }
 
   @AfterEach
@@ -155,6 +155,7 @@ class OpenAiChatStreamingDecoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -226,6 +227,7 @@ class OpenAiChatStreamingDecoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -289,6 +291,7 @@ class OpenAiChatStreamingDecoderTest {
         new ProviderRequest(
             modelDesc,
             defaultVariant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
