@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.cloudfs.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,7 +16,9 @@ import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNodeKind;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.ToolArtifactPath;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudArtifactConflictException;
+import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeKindConflictException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudPathForbiddenException;
+import fun.fengwk.kkstudio.platform.cloudfs.repository.CloudNodeRepository;
 import fun.fengwk.kkstudio.platform.storage.S3PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
@@ -53,6 +54,7 @@ class CloudArtifactServiceIntegrationTest extends S3PostgresSpringTestSupport {
 
   @Autowired private CloudArtifactService artifactService;
   @Autowired private CloudFileSystemService fileSystemService;
+  @Autowired private CloudNodeRepository nodeRepository;
   @Autowired private StorageBlobManager storageBlobManager;
   @Autowired private JdbcTemplate jdbc;
 
@@ -83,11 +85,12 @@ class CloudArtifactServiceIntegrationTest extends S3PostgresSpringTestSupport {
     }
   }
 
+  /** 验证创建工具产物并进行相同内容的幂等重放，断言 storage_blob 的 retain 引用计数仅递增一次。 */
   @Test
   void testCreateToolArtifactSuccessAndIdempotentReplay() {
     UUID threadId = UUID.randomUUID();
     UUID invocationId = UUID.randomUUID();
-    UUID blobId = seedActiveBlob("Artifact tool output payload");
+    UUID blobId = seedActiveBlob("Tool execution output payload");
 
     CloudNode node = artifactService.createToolArtifact(threadId, invocationId, "txt", blobId);
     assertNotNull(node);
@@ -112,6 +115,7 @@ class CloudArtifactServiceIntegrationTest extends S3PostgresSpringTestSupport {
     assertEquals(2L, blobAfterReplay.getRefCount());
   }
 
+  /** 验证同一产物路径在遇到内容不一致（哈希或大小不同）的重新提交时，稳定抛出业务冲突异常。 */
   @Test
   void testCreateToolArtifactConflictWithMismatchedContent() {
     UUID threadId = UUID.randomUUID();
@@ -131,6 +135,7 @@ class CloudArtifactServiceIntegrationTest extends S3PostgresSpringTestSupport {
     assertEquals(1L, blob2State.getRefCount());
   }
 
+  /** 验证引用不存在或非 ACTIVE 状态的 storage_blob 时快速失败，抛出资源未找到异常。 */
   @Test
   void testCreateToolArtifactWithInactiveOrMissingBlob() {
     UUID threadId = UUID.randomUUID();
@@ -142,16 +147,11 @@ class CloudArtifactServiceIntegrationTest extends S3PostgresSpringTestSupport {
         () -> artifactService.createToolArtifact(threadId, invocationId, "txt", missingBlobId));
   }
 
+  /** 验证公开 CloudFileSystemService 对 /.artifacts 路径树的写操作一律 Fail-Closed 拦截。 */
   @Test
-  void testReservedPathAndFailClosedPublicMutations() {
+  void testFailClosedPublicMutationsOnArtifactPath() {
     CloudPath artifactPath = ToolArtifactPath.format(UUID.randomUUID(), UUID.randomUUID(), "txt");
-
-    assertTrue(artifactService.isReservedPath(artifactPath));
-    assertTrue(artifactService.isReservedPath(CloudPath.of("/.artifacts")));
-    assertTrue(artifactService.isReservedPath(CloudPath.of("/.artifacts/tool-results")));
-    assertFalse(artifactService.isReservedPath(CloudPath.of("/workspace/doc.txt")));
-    assertFalse(artifactService.isReservedPath(CloudPath.of("/")));
-    assertFalse(artifactService.isReservedPath(null));
+    assertTrue(artifactPath.isArtifactPath());
 
     // Public CFS service rejects mutations on /.artifacts
     assertThrows(
@@ -164,6 +164,39 @@ class CloudArtifactServiceIntegrationTest extends S3PostgresSpringTestSupport {
         CloudPathForbiddenException.class, () -> fileSystemService.deleteNode(artifactPath, 0L));
   }
 
+  /** 验证当父节点被篡改为非 DIRECTORY（如 BLOB）时，产物创建快速失败并抛出类型冲突异常，杜绝挂载到非目录节点。 */
+  @Test
+  void testCreateToolArtifactRejectsCorruptedParentKind() {
+    UUID threadId = UUID.randomUUID();
+    UUID invocationId = UUID.randomUUID();
+    UUID dummyBlobId = seedActiveBlob("corrupted blob as parent");
+    UUID targetBlobId = seedActiveBlob("actual artifact content");
+
+    CloudNode toolResultsDir =
+        nodeRepository
+            .findById(UUID.fromString("c0000000-0000-0000-0000-000000000004"))
+            .orElseThrow();
+
+    // Corrupt thread node by creating it as a BLOB instead of DIRECTORY under tool-results
+    CloudNode corruptedThreadNode =
+        CloudNode.builder()
+            .id(UUID.randomUUID())
+            .parentId(toolResultsDir.getId())
+            .name(threadId.toString().toLowerCase())
+            .kind(CloudNodeKind.BLOB)
+            .blobId(dummyBlobId)
+            .version(0L)
+            .build();
+    nodeRepository.insert(corruptedThreadNode);
+
+    // Creating artifact under this corrupted thread node must fail with
+    // CloudNodeKindConflictException
+    assertThrows(
+        CloudNodeKindConflictException.class,
+        () -> artifactService.createToolArtifact(threadId, invocationId, "txt", targetBlobId));
+  }
+
+  /** 验证多线程并发创建相同内容的工具产物时正常收敛，仅创建单个节点且底层 blob 仅递增一次引用。 */
   @Test
   void testConcurrentCreateToolArtifactSamePayload() throws Exception {
     UUID threadId = UUID.randomUUID();
@@ -198,21 +231,23 @@ class CloudArtifactServiceIntegrationTest extends S3PostgresSpringTestSupport {
     }
     executor.shutdown();
 
-    assertTrue(errors.isEmpty(), () -> "Unexpected errors: " + errors);
-    assertEquals(2, results.size());
+    assertTrue(errors.isEmpty(), () -> "Concurrent artifact creation failed: " + errors);
+    assertEquals(threadCount, results.size());
+    // Both return the exact same node ID
     assertEquals(results.get(0).getId(), results.get(1).getId());
 
-    // Storage blob retain must only be called once (ref_count was 1 initially, now 2)
+    // Storage blob retain was called exactly once for the node
     StorageBlob blob = storageBlobManager.getBlob(blobId);
     assertEquals(2L, blob.getRefCount());
   }
 
+  /** 验证两个线程并发向相同产物路径提交不同内容时，仅一人成功，另一人稳定收到领域冲突异常。 */
   @Test
-  void testConcurrentCreateToolArtifactDifferingPayload() throws Exception {
+  void testConcurrentCreateToolArtifactDifferentPayload() throws Exception {
     UUID threadId = UUID.randomUUID();
     UUID invocationId = UUID.randomUUID();
-    UUID blob1 = seedActiveBlob("Payload A");
-    UUID blob2 = seedActiveBlob("Payload B");
+    UUID blobId1 = seedActiveBlob("Payload one");
+    UUID blobId2 = seedActiveBlob("Payload two different");
 
     int threadCount = 2;
     ExecutorService executor = Executors.newFixedThreadPool(threadCount);
@@ -220,44 +255,35 @@ class CloudArtifactServiceIntegrationTest extends S3PostgresSpringTestSupport {
 
     AtomicInteger successCount = new AtomicInteger(0);
     AtomicInteger conflictCount = new AtomicInteger(0);
-    List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
+    List<Throwable> unexpectedErrors = Collections.synchronizedList(new ArrayList<>());
 
+    List<UUID> blobs = List.of(blobId1, blobId2);
     List<Future<?>> futures = new ArrayList<>();
-    futures.add(
-        executor.submit(
-            () -> {
-              try {
-                barrier.await();
-                artifactService.createToolArtifact(threadId, invocationId, "txt", blob1);
-                successCount.incrementAndGet();
-              } catch (CloudArtifactConflictException e) {
-                conflictCount.incrementAndGet();
-              } catch (Throwable t) {
-                errors.add(t);
-              }
-            }));
-    futures.add(
-        executor.submit(
-            () -> {
-              try {
-                barrier.await();
-                artifactService.createToolArtifact(threadId, invocationId, "txt", blob2);
-                successCount.incrementAndGet();
-              } catch (CloudArtifactConflictException e) {
-                conflictCount.incrementAndGet();
-              } catch (Throwable t) {
-                errors.add(t);
-              }
-            }));
+    for (int i = 0; i < threadCount; i++) {
+      final int idx = i;
+      futures.add(
+          executor.submit(
+              () -> {
+                try {
+                  barrier.await();
+                  artifactService.createToolArtifact(threadId, invocationId, "txt", blobs.get(idx));
+                  successCount.incrementAndGet();
+                } catch (CloudArtifactConflictException e) {
+                  conflictCount.incrementAndGet();
+                } catch (Throwable t) {
+                  unexpectedErrors.add(t);
+                }
+              }));
+    }
 
     for (Future<?> f : futures) {
       f.get(10, TimeUnit.SECONDS);
     }
     executor.shutdown();
 
-    assertTrue(errors.isEmpty(), () -> "Unexpected errors: " + errors);
-    assertEquals(1, successCount.get(), "Exactly one payload should succeed");
+    assertTrue(unexpectedErrors.isEmpty(), () -> "Unexpected errors: " + unexpectedErrors);
+    assertEquals(1, successCount.get(), "Exactly one artifact creation should succeed");
     assertEquals(
-        1, conflictCount.get(), "Conflicting payload should throw CloudArtifactConflictException");
+        1, conflictCount.get(), "Losing thread must receive CloudArtifactConflictException");
   }
 }

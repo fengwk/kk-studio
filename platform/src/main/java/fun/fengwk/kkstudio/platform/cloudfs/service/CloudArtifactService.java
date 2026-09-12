@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.cloudfs.service;
 
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNode;
-import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
 
 import java.util.UUID;
 
@@ -26,12 +25,9 @@ public interface CloudArtifactService {
    *
    * @param threadId 会话线程 UUID
    * @param invocationId 工具调用 UUID
-   * @param extension 文件扩展名（如 txt, json）
+   * @param extension 文件扩展名，仅接受精确 txt 或 json
    * @param blobId 完整内容的 storage_blob UUID
    * @return Artifact BLOB 节点
    */
   CloudNode createToolArtifact(UUID threadId, UUID invocationId, String extension, UUID blobId);
-
-  /** 检查指定路径是否属于系统保留的 Tool Artifact 路径树。 */
-  boolean isReservedPath(CloudPath path);
 }

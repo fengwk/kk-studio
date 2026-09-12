@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.cloudfs.repository;
 
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudTextRevision;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -14,9 +13,6 @@ public interface CloudTextRevisionRepository {
 
   /** 查询指定节点的指定版本。 */
   Optional<CloudTextRevision> findByNodeIdAndRevision(UUID nodeId, long revision);
-
-  /** 查询指定节点的所有历史版本列表（按 revision 升序）。 */
-  List<CloudTextRevision> listByNodeId(UUID nodeId);
 
   /** 插入新文本版本。 */
   void insert(CloudTextRevision revision);

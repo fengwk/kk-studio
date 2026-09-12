@@ -33,21 +33,12 @@ public interface CloudFileSystemService {
   CloudNode getNode(CloudPath path);
 
   /**
-   * 列出指定目录下的直接子节点，默认隐藏 {@code .} 开头的隐藏/系统节点（如 {@code /.artifacts}）。
+   * 列出指定目录下的直接子节点。根目录下精确隐藏系统目录 {@code .artifacts}，用户创建的 dot 文件及嵌套 dot 文件均正常返回。
    *
    * @param directoryPath 目录绝对路径
    * @return 直接子节点列表（按名称升序）
    */
   List<CloudNode> listChildren(CloudPath directoryPath);
-
-  /**
-   * 列出指定目录下的直接子节点。
-   *
-   * @param directoryPath 目录绝对路径
-   * @param includeHidden 是否包含隐藏/系统节点
-   * @return 直接子节点列表（按名称升序）
-   */
-  List<CloudNode> listChildren(CloudPath directoryPath, boolean includeHidden);
 
   /**
    * 创建目录。

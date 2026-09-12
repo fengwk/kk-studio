@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNodeKind;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.ToolArtifactPath;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudArtifactConflictException;
+import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeKindConflictException;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudNodeNotFoundException;
 import fun.fengwk.kkstudio.platform.cloudfs.repository.CloudNodeRepository;
 import fun.fengwk.kkstudio.platform.cloudfs.service.CloudArtifactService;
@@ -39,12 +40,11 @@ public class CloudArtifactServiceImpl implements CloudArtifactService {
   }
 
   private StorageBlobManager requireBlobManager() {
-    StorageBlobManager manager = blobManagerProvider.getIfAvailable();
-    if (manager == null) {
-      throw new IllegalStateException(
-          "StorageBlobManager is not available (S3 storage is not enabled)");
+    StorageBlobManager mgr = blobManagerProvider.getIfAvailable();
+    if (mgr == null) {
+      throw new IllegalStateException("StorageBlobManager is not available in current context");
     }
-    return manager;
+    return mgr;
   }
 
   @Override
@@ -70,6 +70,10 @@ public class CloudArtifactServiceImpl implements CloudArtifactService {
                 () ->
                     new CloudNodeNotFoundException(
                         "Tool results base directory missing: " + TOOL_RESULTS_DIR_PATH));
+    if (!toolResultsDir.isDirectory()) {
+      throw new CloudNodeKindConflictException(
+          TOOL_RESULTS_DIR_PATH, CloudNodeKind.DIRECTORY, toolResultsDir.getKind());
+    }
 
     String threadDirName = threadId.toString().toLowerCase();
     Optional<CloudNode> threadDirOpt =
@@ -99,6 +103,11 @@ public class CloudArtifactServiceImpl implements CloudArtifactService {
       }
     } else {
       threadDir = threadDirOpt.get();
+    }
+
+    if (!threadDir.isDirectory()) {
+      throw new CloudNodeKindConflictException(
+          path.parent(), CloudNodeKind.DIRECTORY, threadDir.getKind());
     }
 
     Optional<CloudNode> existingOpt =
@@ -151,11 +160,6 @@ public class CloudArtifactServiceImpl implements CloudArtifactService {
         String.format(
             "Artifact conflict at %s: existing artifact blob content does not match new content",
             path));
-  }
-
-  @Override
-  public boolean isReservedPath(CloudPath path) {
-    return path != null && path.isArtifactPath();
   }
 
   private Optional<CloudNode> resolvePath(CloudPath path) {

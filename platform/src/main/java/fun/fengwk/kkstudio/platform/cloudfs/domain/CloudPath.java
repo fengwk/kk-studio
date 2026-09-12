@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.cloudfs.domain;
 
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudPathValidationException;
 
-import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -19,8 +18,9 @@ import java.util.Objects;
  *   <li>唯一分隔符为 {@code /}，大小写敏感；
  *   <li>输入必须为 Unicode NFC 规范格式，非 NFC 格式直接拒绝；
  *   <li>禁止空 segment（如 {@code //}）、禁止 {@code .} 或 {@code ..}、非根路径禁止尾随 {@code /}；
- *   <li>禁止反斜杠 {@code \} 与 ASCII 控制字符；
- *   <li>单个 segment UTF-8 字节长度至多 255 字节，完整路径至多 2048 字节；
+ *   <li>禁止反斜杠 {@code \} 与 ISO 控制字符（C0 与 C1，如 U+0000..U+001F、U+007F..U+009F）；
+ *   <li>禁止未配对 surrogate；
+ *   <li>使用严格 UTF-8 编码，单个 segment UTF-8 字节长度至多 255 字节，完整路径至多 2048 字节；
  *   <li>不得使用宿主 {@link java.nio.file.Path} 进行解释。
  * </ul>
  */
@@ -67,19 +67,30 @@ public final class CloudPath implements Comparable<CloudPath> {
     if (rawPath.indexOf('\\') >= 0) {
       throw new CloudPathValidationException("Path must not contain backslash: " + rawPath);
     }
-    for (int i = 0; i < rawPath.length(); i++) {
+
+    for (int i = 0; i < rawPath.length(); ) {
       char c = rawPath.charAt(i);
-      if (c < 0x20 || c == 0x7F) {
-        throw new CloudPathValidationException(
-            String.format(
-                "Path must not contain control characters (at index %d): %s", i, rawPath));
+      if (Character.isSurrogate(c)) {
+        if (!Character.isHighSurrogate(c)
+            || i + 1 >= rawPath.length()
+            || !Character.isLowSurrogate(rawPath.charAt(i + 1))) {
+          throw new CloudPathValidationException("Path contains unpaired surrogate: " + rawPath);
+        }
       }
+      int cp = rawPath.codePointAt(i);
+      if (Character.isISOControl(cp)) {
+        throw new CloudPathValidationException(
+            String.format("Path must not contain ISO control character U+%04X: %s", cp, rawPath));
+      }
+      i += Character.charCount(cp);
     }
+
     if (!Normalizer.isNormalized(rawPath, Normalizer.Form.NFC)) {
       throw new CloudPathValidationException(
           "Path must be normalized in Unicode NFC form: " + rawPath);
     }
-    byte[] utf8Bytes = rawPath.getBytes(StandardCharsets.UTF_8);
+
+    byte[] utf8Bytes = StrictUtf8.encode(rawPath, "path");
     if (utf8Bytes.length > MAX_TOTAL_BYTES) {
       throw new CloudPathValidationException(
           String.format(
@@ -104,7 +115,7 @@ public final class CloudPath implements Comparable<CloudPath> {
         throw new CloudPathValidationException(
             "Path must not contain dot or dot-dot segment: " + rawPath);
       }
-      byte[] segBytes = segment.getBytes(StandardCharsets.UTF_8);
+      byte[] segBytes = StrictUtf8.encode(segment, "path segment '" + segment + "'");
       if (segBytes.length > MAX_SEGMENT_BYTES) {
         throw new CloudPathValidationException(
             String.format(
@@ -118,11 +129,6 @@ public final class CloudPath implements Comparable<CloudPath> {
 
   /** 返回标准化绝对路径字符串。 */
   public String value() {
-    return canonicalPath;
-  }
-
-  /** 返回标准化绝对路径字符串。 */
-  public String canonicalPath() {
     return canonicalPath;
   }
 
@@ -196,22 +202,6 @@ public final class CloudPath implements Comparable<CloudPath> {
       }
     }
     return true;
-  }
-
-  /** 判断当前路径是否是指定后代路径的严格祖先。 */
-  public boolean isAncestorOf(CloudPath descendant) {
-    return descendant != null && descendant.isDescendantOf(this);
-  }
-
-  /** 判断当前路径是否等于指定前缀或以其为祖先。 */
-  public boolean startsWith(CloudPath prefix) {
-    if (prefix == null) {
-      return false;
-    }
-    if (this.equals(prefix)) {
-      return true;
-    }
-    return isDescendantOf(prefix);
   }
 
   /** 判断当前路径是否属于系统保留的 Tool Artifact 路径树（即 {@code /.artifacts} 及其子路径）。 */

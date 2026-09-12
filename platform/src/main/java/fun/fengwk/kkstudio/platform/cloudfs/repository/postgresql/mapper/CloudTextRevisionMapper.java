@@ -13,7 +13,6 @@ import org.apache.ibatis.annotations.Update;
 
 import fun.fengwk.kkstudio.platform.cloudfs.repository.postgresql.model.CloudTextRevisionDO;
 
-import java.util.List;
 import java.util.UUID;
 
 /** {@code cloud_text_revision} 的 MyBatis Mapper 接口。 */
@@ -47,13 +46,6 @@ public interface CloudTextRevisionMapper extends BaseMapper {
   @ResultMap("cloudTextRevisionResultMap")
   CloudTextRevisionDO getByNodeIdAndRevision(
       @Param("nodeId") UUID nodeId, @Param("revision") long revision);
-
-  @Select(
-      "select "
-          + COLUMNS
-          + " from cloud_text_revision where node_id = #{nodeId} order by revision asc")
-  @ResultMap("cloudTextRevisionResultMap")
-  List<CloudTextRevisionDO> listByNodeId(@Param("nodeId") UUID nodeId);
 
   @Insert(
       """

@@ -39,10 +39,6 @@ public interface CloudNodeMapper extends BaseMapper {
   @Select("select " + COLUMNS + " from cloud_node where id = #{id}")
   CloudNodeDO getById(@Param("id") UUID id);
 
-  @Select("select " + COLUMNS + " from cloud_node where id = #{id} for update")
-  @ResultMap("cloudNodeResultMap")
-  CloudNodeDO lockById(@Param("id") UUID id);
-
   @Select("select " + COLUMNS + " from cloud_node where parent_id = #{parentId} and name = #{name}")
   @ResultMap("cloudNodeResultMap")
   CloudNodeDO getByParentIdAndName(@Param("parentId") UUID parentId, @Param("name") String name);
@@ -109,7 +105,4 @@ public interface CloudNodeMapper extends BaseMapper {
 
   @Delete("delete from cloud_node where id = #{id} and version = #{expectedVersion}")
   int deleteByIdAndVersion(@Param("id") UUID id, @Param("expectedVersion") long expectedVersion);
-
-  @Delete("delete from cloud_node where id = #{id}")
-  int deleteById(@Param("id") UUID id);
 }
