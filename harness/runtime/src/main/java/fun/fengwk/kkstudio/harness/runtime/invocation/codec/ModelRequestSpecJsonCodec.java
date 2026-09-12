@@ -35,8 +35,10 @@ public final class ModelRequestSpecJsonCodec {
     Objects.requireNonNull(spec, "spec");
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.put("providerType", spec.providerType().name());
+    node.put("providerConnectionGenerationId", spec.providerConnectionGenerationId().toString());
     node.set("model", MODEL_CODEC.encodeDescriptorNode(spec.model()));
     node.set("variant", MODEL_CODEC.encodeVariantNode(spec.variant()));
+    node.put("outputTokens", spec.outputTokens());
     ArrayNode preamble = node.putArray("preambleMessages");
     for (AgentMessage message : spec.preambleMessages()) {
       preamble.add(MESSAGE_CODEC.encodeNode(message));
@@ -67,8 +69,10 @@ public final class ModelRequestSpecJsonCodec {
         node,
         CONTEXT,
         "providerType",
+        "providerConnectionGenerationId",
         "model",
         "variant",
+        "outputTokens",
         "preambleMessages",
         "toolBindings",
         "skillBindings",
@@ -104,8 +108,10 @@ public final class ModelRequestSpecJsonCodec {
     }
     return new ModelRequestSpec(
         InvocationJsonSupport.requiredEnum(node, "providerType", ProviderType.class, CONTEXT),
+        InvocationJsonSupport.requiredUuid(node, "providerConnectionGenerationId", CONTEXT),
         MODEL_CODEC.decodeDescriptorNode(InvocationJsonSupport.required(node, "model", CONTEXT)),
         MODEL_CODEC.decodeVariantNode(InvocationJsonSupport.required(node, "variant", CONTEXT)),
+        InvocationJsonSupport.positiveInt(node, "outputTokens", CONTEXT),
         preambleMessages,
         toolBindings,
         skillBindings,

@@ -70,16 +70,10 @@ export interface AgentModelPricingDTO {
   reasoningPerMillionTokens: number | string
 }
 
+/** Variant 只表达 reasoning effort；`off` 为显式关闭，缺省表示协议默认。 */
 export interface AgentModelVariantDTO {
   id: string
   reasoningEffort?: string | null
-  maxOutputTokens?: number | null
-  temperature?: number | null
-  topP?: number | null
-  topK?: number | null
-  frequencyPenalty?: number | null
-  presencePenalty?: number | null
-  stopSequences?: string[] | null
 }
 
 /**
@@ -97,7 +91,10 @@ export interface AgentModelConfigDTO {
 /** 携带单一结构化可执行配置的公开 Agent model 资源。 */
 export interface AgentModelDTO {
   providerName: string
+  /** 模型逻辑名（与 providerName 共同构成不可变资源身份）。 */
   name: string
+  /** 发往上游 Provider 的真实模型标识；与 name 独立且不唯一。 */
+  modelId: string
   description: string | null
   config: AgentModelConfigDTO
   version: CatalogVersion
@@ -110,6 +107,8 @@ export interface AgentModelDTO {
  * {@code description} 与 {@code config} 均为必需字段。
  */
 export interface AgentModelEditablePropertiesDTO {
+  /** 发往上游 Provider 的真实模型标识。 */
+  modelId: string
   description: string | null
   config: AgentModelConfigDTO
 }

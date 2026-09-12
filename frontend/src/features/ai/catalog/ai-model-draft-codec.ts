@@ -2,7 +2,6 @@ import type { ModelDraft, ModelPricingDraft, VariantDraft } from '@/features/ai/
 import {
   newVariantDraft,
   numberToNull,
-  splitCommaSeparatedValues,
   trimToNull,
 } from '@/features/ai/catalog/ai-resource-draft-primitives'
 import type {
@@ -23,6 +22,10 @@ const AGENT_MODEL_MODALITIES: AgentModelInputModality[] = [
   'DOCUMENT',
 ]
 const AGENT_MODEL_MODALITY_SET = new Set<string>(AGENT_MODEL_MODALITIES)
+
+/** 与后端 `ModelVariant.REASONING_EFFORTS` 一致的合法 reasoning effort 取值。 */
+export const REASONING_EFFORT_VALUES = ['high', 'medium', 'low', 'off'] as const
+const REASONING_EFFORTS = new Set<string>(REASONING_EFFORT_VALUES)
 
 /**
  * 新建 model 的默认 pricing 元数据。表单不展示这些字段；
@@ -50,6 +53,7 @@ export function emptyModelDraft(
   return {
     providerName: provider?.name ?? '',
     name: '',
+    modelId: '',
     description: '',
     contextWindow: '128000',
     maxOutputTokens: '8192',
@@ -66,15 +70,6 @@ function parseVariant(variant: AgentModelVariantDTO): VariantDraft {
   return newVariantDraft({
     id: variant.id,
     reasoningEffort: variant.reasoningEffort == null ? '' : String(variant.reasoningEffort),
-    maxOutputTokens: variant.maxOutputTokens == null ? '' : String(variant.maxOutputTokens),
-    temperature: variant.temperature == null ? '' : String(variant.temperature),
-    topP: variant.topP == null ? '' : String(variant.topP),
-    topK: variant.topK == null ? '' : String(variant.topK),
-    frequencyPenalty:
-      variant.frequencyPenalty == null ? '' : String(variant.frequencyPenalty),
-    presencePenalty:
-      variant.presencePenalty == null ? '' : String(variant.presencePenalty),
-    stopSequences: (variant.stopSequences ?? []).join(', '),
   })
 }
 
@@ -100,6 +95,7 @@ export function toModelDraft(model: AgentModelDTO): ModelDraft {
   return {
     providerName: model.providerName,
     name: model.name,
+    modelId: model.modelId,
     description: model.description || '',
     contextWindow: String(config.limit.context),
     maxOutputTokens: String(config.limit.output),
@@ -136,20 +132,6 @@ function requireNonNegativeNumber(value: string, field: string): number {
   return parsed
 }
 
-function optionalNumber(value: string, field: string): number | null {
-  if (!value.trim()) {
-    return null
-  }
-  return requireNumber(value, field)
-}
-
-function optionalPositiveInt(value: string, field: string): number | null {
-  if (!value.trim()) {
-    return null
-  }
-  return requirePositiveInt(value, field)
-}
-
 function normalizeModalities(
   values: ReadonlyArray<AgentModelInputModality>,
   field: string,
@@ -172,7 +154,7 @@ function normalizeModalities(
 
 function serializeVariants(
   variants: VariantDraft[],
-  reasoning: boolean,
+  reasoningEnabled = true,
 ): AgentModelVariantDTO[] {
   if (variants.length === 0) {
     throw new Error('at least one variant is required')
@@ -189,62 +171,14 @@ function serializeVariants(
     ids.add(id)
 
     const payload: AgentModelVariantDTO = { id }
-    const reasoningEffort = variant.reasoningEffort.trim()
-    if (reasoning) {
-      if (!reasoningEffort) {
+    const reasoningEffort = variant.reasoningEffort.trim().toLowerCase()
+    if (reasoningEnabled && reasoningEffort) {
+      if (!REASONING_EFFORTS.has(reasoningEffort)) {
         throw new Error(
-          `variant ${id} reasoningEffort is required when reasoning is enabled`,
+          `variant ${id} reasoningEffort must be one of ${REASONING_EFFORT_VALUES.join('/')}`,
         )
       }
-      if (reasoningEffort.toLowerCase() !== 'off') {
-        payload.reasoningEffort = reasoningEffort
-      }
-    }
-
-    const maxOutputTokens = optionalPositiveInt(
-      variant.maxOutputTokens,
-      `variant ${id} maxOutputTokens`,
-    )
-    if (maxOutputTokens !== null) {
-      payload.maxOutputTokens = maxOutputTokens
-    }
-
-    const temperature = optionalNumber(variant.temperature, `variant ${id} temperature`)
-    if (temperature !== null) {
-      if (temperature < 0) {
-        throw new Error(`variant ${id} temperature must not be negative`)
-      }
-      payload.temperature = temperature
-    }
-    const topP = optionalNumber(variant.topP, `variant ${id} topP`)
-    if (topP !== null) {
-      if (topP <= 0 || topP > 1) {
-        throw new Error(`variant ${id} topP must be in (0, 1]`)
-      }
-      payload.topP = topP
-    }
-    const frequencyPenalty = optionalNumber(
-      variant.frequencyPenalty,
-      `variant ${id} frequencyPenalty`,
-    )
-    if (frequencyPenalty !== null) {
-      payload.frequencyPenalty = frequencyPenalty
-    }
-    const presencePenalty = optionalNumber(
-      variant.presencePenalty,
-      `variant ${id} presencePenalty`,
-    )
-    if (presencePenalty !== null) {
-      payload.presencePenalty = presencePenalty
-    }
-
-    const topK = optionalPositiveInt(variant.topK, `variant ${id} topK`)
-    if (topK !== null) {
-      payload.topK = topK
-    }
-    const stopSequences = splitCommaSeparatedValues(variant.stopSequences)
-    if (stopSequences.length > 0) {
-      payload.stopSequences = stopSequences
+      payload.reasoningEffort = reasoningEffort
     }
     return payload
   })
@@ -262,14 +196,6 @@ function buildModelConfig(draft: ModelDraft): AgentModelConfigDTO {
   const modalities = normalizeModalities(draft.inputModalities, 'config.abilities.inputModalities')
 
   const variants = serializeVariants(draft.variants, draft.reasoning)
-  for (const variant of variants) {
-    if (
-      typeof variant.maxOutputTokens === 'number' &&
-      variant.maxOutputTokens > maxOutputTokens
-    ) {
-      throw new Error(`variant ${variant.id} maxOutputTokens exceeds model maxOutputTokens`)
-    }
-  }
   const defaultVariant = draft.defaultVariant.trim()
   if (!defaultVariant || !variants.some((variant) => variant.id === defaultVariant)) {
     throw new Error('config.defaultVariant must match a variant id')
@@ -354,6 +280,7 @@ export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
   return {
     providerName,
     name,
+    modelId: requireNonBlank(draft.modelId, 'modelId'),
     description: trimToNull(draft.description),
     config: buildModelConfig(draft),
   }
@@ -361,6 +288,7 @@ export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
 
 export function toEditableModelUpdate(draft: ModelDraft): AgentModelEditablePropertiesDTO {
   return {
+    modelId: requireNonBlank(draft.modelId, 'modelId'),
     description: trimToNull(draft.description),
     config: buildModelConfig(draft),
   }

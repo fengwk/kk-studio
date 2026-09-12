@@ -50,6 +50,7 @@ class AgentBranchSettingsMaterializerTest {
     AgentModel model = new AgentModel();
     model.setProviderName("openai");
     model.setName("gpt-x");
+    model.setModelId("gpt-x-wire");
     model.setConfigJson(modelConfigJson);
     when(modelRepository.getByProviderNameAndName("openai", "gpt-x")).thenReturn(model);
   }
@@ -126,12 +127,8 @@ class AgentBranchSettingsMaterializerTest {
         + "\"abilities\":{\"tools\":true,\"reasoning\":true,"
         + "\"inputModalities\":[\"TEXT\",\"IMAGE\"]},"
         + "\"defaultVariant\":\"quality\","
-        + "\"variants\":[{\"id\":\"quality\",\"maxOutputTokens\":4096,"
-        + "\"temperature\":0.4,\"topP\":0.8,\"topK\":20,"
-        + "\"frequencyPenalty\":0.1,\"presencePenalty\":0.2,"
-        + "\"stopSequences\":[\"done\"],\"reasoningEffort\":\"high\"},"
-        + "{\"id\":\"fast\",\"maxOutputTokens\":2048,"
-        + "\"temperature\":0.8,\"reasoningEffort\":\"off\"}],"
+        + "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\"},"
+        + "{\"id\":\"fast\",\"reasoningEffort\":\"off\"}],"
         + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"batch\","
         + "\"serviceTier\":\"priority\",\"serviceTierMultiplier\":1.25,"
         + "\"version\":\"2026-07-16\",\"inputPerMillionTokens\":1.1,"

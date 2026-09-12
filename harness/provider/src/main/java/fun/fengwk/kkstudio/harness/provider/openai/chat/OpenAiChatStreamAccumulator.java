@@ -467,7 +467,7 @@ final class OpenAiChatStreamAccumulator {
       replayState =
           new ProviderReplayState(
               ProviderReplayFormat.OPENAI_CHAT,
-              descriptor.affinity(request.model().modelName()),
+              descriptor.affinity(request.model().modelId()),
               frozenSourcePrefixHash,
               payload);
     }

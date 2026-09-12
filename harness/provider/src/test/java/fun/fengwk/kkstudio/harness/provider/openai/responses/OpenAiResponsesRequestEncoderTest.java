@@ -57,8 +57,7 @@ import java.util.UUID;
 class OpenAiResponsesRequestEncoderTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
-  private static final ModelVariant DEFAULT_VARIANT =
-      new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
+  private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
 
   private final OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 
@@ -73,13 +72,25 @@ class OpenAiResponsesRequestEncoderTest {
 
   private ModelDescriptor createModel() {
     return new ModelDescriptor(
-        "openai_test", "gpt-5.4-mini", Set.of(ModelInputModality.TEXT), true, true, pricing());
+        "openai_test",
+        "gpt-5.4-mini",
+        "gpt-5.4-mini",
+        Set.of(ModelInputModality.TEXT),
+        true,
+        true,
+        pricing());
   }
 
   /** 非推理模型：保留既有 system message 行为。 */
   private ModelDescriptor nonReasoningModel() {
     return new ModelDescriptor(
-        "openai_test", "gpt-4.1", Set.of(ModelInputModality.TEXT), true, false, pricing());
+        "openai_test",
+        "gpt-4.1",
+        "gpt-4.1",
+        Set.of(ModelInputModality.TEXT),
+        true,
+        false,
+        pricing());
   }
 
   private static ModelPricing pricing() {
@@ -111,9 +122,20 @@ class OpenAiResponsesRequestEncoderTest {
       List<ProviderMessage> messages,
       List<ProviderToolDefinition> tools,
       ProviderCacheControl cacheControl) {
+    return request(model, variant, 1024, messages, tools, cacheControl);
+  }
+
+  private static ProviderRequest request(
+      ModelDescriptor model,
+      ModelVariant variant,
+      int outputTokens,
+      List<ProviderMessage> messages,
+      List<ProviderToolDefinition> tools,
+      ProviderCacheControl cacheControl) {
     return new ProviderRequest(
         model,
         variant != null ? variant : DEFAULT_VARIANT,
+        outputTokens,
         messages != null ? messages : List.of(),
         tools != null ? tools : List.of(),
         cacheControl != null ? cacheControl : ProviderCacheControl.none());
@@ -142,7 +164,7 @@ class OpenAiResponsesRequestEncoderTest {
   void test_basicFieldsAndNoPreviousResponseId() throws Exception {
     ProviderRequest request =
         request(
-            new ModelVariant("v1", 200, 0.5, 0.8, null, null, null, List.of(), "low"),
+            new ModelVariant("v1", "low"),
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")))),
@@ -157,9 +179,11 @@ class OpenAiResponsesRequestEncoderTest {
     assertTrue(root.path("stream").asBoolean());
     assertFalse(root.path("store").asBoolean());
     assertFalse(root.has("previous_response_id"));
-    assertEquals(0.5, root.path("temperature").asDouble());
-    assertEquals(0.8, root.path("top_p").asDouble());
-    assertEquals(200, root.path("max_output_tokens").asInt());
+    assertEquals(1024, root.path("max_output_tokens").asInt());
+    assertFalse(root.has("temperature"));
+    assertFalse(root.has("top_p"));
+    assertFalse(root.has("top_k"));
+    assertFalse(root.has("stop_sequences"));
     assertEquals("low", root.path("reasoning").path("effort").asText());
     assertEquals("auto", root.path("reasoning").path("summary").asText());
     assertEquals("reasoning.encrypted_content", root.path("include").get(0).asText());
@@ -168,8 +192,7 @@ class OpenAiResponsesRequestEncoderTest {
   @Test
   void test_reasoningEffortOffAndEnabledEncodings() throws Exception {
     // 1. effort = "none" -> emit reasoning:{effort:"none"} only; omit summary and omit include
-    ProviderRequest reqOff =
-        request(new ModelVariant("v1", 200, 0.5, 0.8, null, null, null, List.of(), "none"));
+    ProviderRequest reqOff = request(new ModelVariant("v1", "off"));
     JsonNode rootOff =
         MAPPER.readTree(
             encoder
@@ -181,8 +204,7 @@ class OpenAiResponsesRequestEncoderTest {
 
     // 2. effort = "high" -> emit reasoning:{effort:"high", summary:"auto"} and
     // include:["reasoning.encrypted_content"]
-    ProviderRequest reqEnabled =
-        request(new ModelVariant("v1", 200, 0.5, 0.8, null, null, null, List.of(), "high"));
+    ProviderRequest reqEnabled = request(new ModelVariant("v1", "high"));
     JsonNode rootEnabled =
         MAPPER.readTree(
             encoder
@@ -194,8 +216,7 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("reasoning.encrypted_content", rootEnabled.path("include").get(0).asText());
 
     // 3. effort = null -> omit reasoning and include
-    ProviderRequest reqNull =
-        request(new ModelVariant("v1", 200, 0.5, 0.8, null, null, null, List.of(), null));
+    ProviderRequest reqNull = request(new ModelVariant("v1"));
     JsonNode rootNull =
         MAPPER.readTree(
             encoder
@@ -204,56 +225,34 @@ class OpenAiResponsesRequestEncoderTest {
     assertFalse(rootNull.has("reasoning"));
     assertFalse(rootNull.has("include"));
 
-    // 4. effort = "   " -> omit reasoning and include
-    ProviderRequest reqBlank =
-        request(new ModelVariant("v1", 200, 0.5, 0.8, null, null, null, List.of(), "   "));
-    JsonNode rootBlank =
-        MAPPER.readTree(
-            encoder
-                .encode(reqBlank, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
-                .bodyUtf8Bytes());
-    assertFalse(rootBlank.has("reasoning"));
-    assertFalse(rootBlank.has("include"));
+    // 4. 4 态之外的 effort 在构造期即被拒绝，不可能到达编码器
+    for (String unsupported : List.of("none", "minimal", "xhigh", "")) {
+      assertThrows(IllegalArgumentException.class, () -> new ModelVariant("v1", unsupported));
+    }
   }
 
-  /** 验证严格拒绝 unsupported penalties 和 stopSequences 与 topK。 */
+  /** wire 根字段 model 始终取 ModelDescriptor.modelId，与逻辑名相互独立。 */
   @Test
-  void test_rejectsUnsupportedParameters() {
-    // frequencyPenalty
-    ProviderRequest req1 =
-        request(new ModelVariant("v1", null, null, null, null, 0.5, null, List.of(), null));
-    ProviderException ex1 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(req1, createDescriptor(), OpenAiResponsesConfig.defaultConfig()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
+  void test_wireModelUsesDescriptorModelId() throws Exception {
+    ModelDescriptor logicalModel =
+        new ModelDescriptor(
+            "openai_test",
+            "logical-name",
+            "wire-model-id",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            pricing());
+    ProviderRequest request = request(logicalModel, DEFAULT_VARIANT, List.of(), List.of(), null);
 
-    // presencePenalty
-    ProviderRequest req2 =
-        request(new ModelVariant("v1", null, null, null, null, null, 0.5, List.of(), null));
-    ProviderException ex2 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(req2, createDescriptor(), OpenAiResponsesConfig.defaultConfig()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
+    JsonNode root =
+        MAPPER.readTree(
+            encoder
+                .encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
+                .bodyUtf8Bytes());
 
-    // stopSequences
-    ProviderRequest req3 =
-        request(new ModelVariant("v1", null, null, null, null, null, null, List.of("STOP"), null));
-    ProviderException ex3 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(req3, createDescriptor(), OpenAiResponsesConfig.defaultConfig()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
-
-    // topK
-    ProviderRequest req4 =
-        request(new ModelVariant("v1", null, null, null, 40, null, null, List.of(), null));
-    ProviderException ex4 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(req4, createDescriptor(), OpenAiResponsesConfig.defaultConfig()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex4.kind());
+    assertEquals("wire-model-id", root.path("model").asText());
+    assertFalse(root.toString().contains("logical-name"));
   }
 
   /** 验证工具声明映射：strict 工具携带归一化参数与解析后的 JSON schema。 */
@@ -312,19 +311,17 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("system", plainRoot.get("input").get(0).path("role").asText());
   }
 
-  /** 验证 max_output_tokens 下限：显式更小值被提升到 16，显式更大值原样保留，未声明时不发送该字段。 */
+  /** 验证 max_output_tokens 下限：过小的冻结预算明确拒绝，合法预算原样下发。 */
   @Test
-  void test_maxOutputTokensMinimumClamp() throws Exception {
-    assertEquals(16, encodedMaxOutputTokens(1));
-    assertEquals(16, encodedMaxOutputTokens(15));
+  void test_maxOutputTokensMinimumValidation() throws Exception {
+    ProviderException one = assertThrows(ProviderException.class, () -> encodedMaxOutputTokens(1));
+    ProviderException fifteen =
+        assertThrows(ProviderException.class, () -> encodedMaxOutputTokens(15));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, one.kind());
+    assertEquals("max_output_tokens must be at least 16", one.getMessage());
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, fifteen.kind());
     assertEquals(16, encodedMaxOutputTokens(16));
     assertEquals(1000, encodedMaxOutputTokens(1000));
-
-    // 编码器保留 null 语义；运行时的 null limit 由 TurnResolver 在冻结前解析，这里绝不合成默认值。
-    JsonNode rootNull =
-        encodedRoot(
-            request(new ModelVariant("v1", null, null, null, null, null, null, List.of(), null)));
-    assertFalse(rootNull.has("max_output_tokens"));
   }
 
   /**
@@ -409,10 +406,11 @@ class OpenAiResponsesRequestEncoderTest {
             new ProviderMessage(
                 ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt"))));
     ProviderCacheControl cacheControl = runtimeAffinityCacheControl(sessionId, request(messages));
-    assertTrue(cacheControl.affinityKey().startsWith("pc1-"));
+    assertTrue(cacheControl.affinityKey().startsWith("pc2-"));
 
     ProviderRequest cachedRequest =
-        new ProviderRequest(createModel(), DEFAULT_VARIANT, messages, List.of(), cacheControl);
+        new ProviderRequest(
+            createModel(), DEFAULT_VARIANT, 1024, messages, List.of(), cacheControl);
     JsonNode first =
         MAPPER.readTree(
             encoder
@@ -457,7 +455,8 @@ class OpenAiResponsesRequestEncoderTest {
     PromptCacheCapability capability =
         PromptCacheCapability.affinity(
             Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG));
-    return new PromptCacheRequestFinalizer(sessionId)
+    return new PromptCacheRequestFinalizer(
+            sessionId, UUID.fromString("33333333-3333-3333-3333-333333333333"))
         .apply(base, PromptCachePolicy.affinityShort(capability))
         .cacheControl();
   }
@@ -469,12 +468,9 @@ class OpenAiResponsesRequestEncoderTest {
             .bodyUtf8Bytes());
   }
 
-  private int encodedMaxOutputTokens(Integer maxOutputTokens) throws Exception {
+  private int encodedMaxOutputTokens(int maxOutputTokens) throws Exception {
     JsonNode root =
-        encodedRoot(
-            request(
-                new ModelVariant(
-                    "v1", maxOutputTokens, null, null, null, null, null, List.of(), null)));
+        encodedRoot(request(createModel(), DEFAULT_VARIANT, maxOutputTokens, null, null, null));
     return root.path("max_output_tokens").asInt();
   }
 

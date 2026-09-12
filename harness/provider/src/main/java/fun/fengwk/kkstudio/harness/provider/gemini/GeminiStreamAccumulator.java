@@ -507,7 +507,7 @@ final class GeminiStreamAccumulator {
 
     return new ProviderReplayState(
         ProviderReplayFormat.GEMINI_CONTENT,
-        descriptor.affinity(request.model().modelName()),
+        descriptor.affinity(request.model().modelId()),
         frozenSourcePrefixHash,
         payload);
   }

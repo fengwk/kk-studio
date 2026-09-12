@@ -21,7 +21,8 @@ import java.util.UUID;
  * <p>行为契约：
  *
  * <ul>
- *   <li>构造时绑定 sessionId，永远覆盖请求中已有的 {@link ProviderCacheControl}；不存在执行时 hook 重写路径。
+ *   <li>构造时绑定 sessionId 与 providerConnectionGenerationId，永远覆盖请求中已有的 {@link
+ *       ProviderCacheControl}；不存在执行时 hook 重写路径。
  *   <li>{@link PromptCachePolicy} 由调用方显式传入且不随 {@link ProviderRequest} 或 ModelDescriptor 持久化；具体解析与
  *       调用时点由调用方（Core）决定。
  *   <li>{@link PromptCacheRetention#NONE} 一律输出 {@link ProviderCacheControl#none()}。
@@ -37,15 +38,21 @@ import java.util.UUID;
 public final class PromptCacheRequestFinalizer {
 
   private final UUID sessionId;
+  private final UUID providerConnectionGenerationId;
   private final PromptCacheAffinityKeyFactory keyFactory;
 
-  public PromptCacheRequestFinalizer(UUID sessionId, PromptCacheAffinityKeyFactory keyFactory) {
+  public PromptCacheRequestFinalizer(
+      UUID sessionId,
+      UUID providerConnectionGenerationId,
+      PromptCacheAffinityKeyFactory keyFactory) {
     this.sessionId = Objects.requireNonNull(sessionId, "sessionId");
+    this.providerConnectionGenerationId =
+        Objects.requireNonNull(providerConnectionGenerationId, "providerConnectionGenerationId");
     this.keyFactory = Objects.requireNonNull(keyFactory, "keyFactory");
   }
 
-  public PromptCacheRequestFinalizer(UUID sessionId) {
-    this(sessionId, new PromptCacheAffinityKeyFactory());
+  public PromptCacheRequestFinalizer(UUID sessionId, UUID providerConnectionGenerationId) {
+    this(sessionId, providerConnectionGenerationId, new PromptCacheAffinityKeyFactory());
   }
 
   public ProviderRequest apply(ProviderRequest request, PromptCachePolicy policy) {
@@ -54,7 +61,12 @@ public final class PromptCacheRequestFinalizer {
     Objects.requireNonNull(policy, "policy");
     ProviderCacheControl resolved = resolve(request, policy);
     return new ProviderRequest(
-        request.model(), request.variant(), request.messages(), request.tools(), resolved);
+        request.model(),
+        request.variant(),
+        request.outputTokens(),
+        request.messages(),
+        request.tools(),
+        resolved);
   }
 
   private ProviderCacheControl resolve(ProviderRequest request, PromptCachePolicy policy) {
@@ -66,7 +78,8 @@ public final class PromptCacheRequestFinalizer {
       return ProviderCacheControl.none();
     }
     if (capability.mode() == PromptCacheMode.AFFINITY) {
-      return ProviderCacheControl.affinity(retention, keyFactory.create(sessionId, request));
+      return ProviderCacheControl.affinity(
+          retention, keyFactory.create(sessionId, providerConnectionGenerationId, request));
     }
     return breakpointControl(request, capability, retention);
   }
@@ -88,7 +101,7 @@ public final class PromptCacheRequestFinalizer {
       return ProviderCacheControl.none();
     }
     return ProviderCacheControl.breakpoints(
-        retention, keyFactory.create(sessionId, request), resolved);
+        retention, keyFactory.create(sessionId, providerConnectionGenerationId, request), resolved);
   }
 
   private static boolean hasLeadingSystem(ProviderRequest request) {

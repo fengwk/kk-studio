@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 
+import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicConfiguration;
 import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicThinkingMode;
 import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
@@ -239,17 +240,13 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
     assertEquals(AnthropicThinkingMode.BUDGET, adapter.configuration().anthropicThinkingMode());
   }
 
-  /** 意图：验证 Anthropic 工厂将配置中的 modelAliases 传递给适配器并能正确解析别名。 */
+  /** 意图：验证 Anthropic 工厂只解析 thinking mode，已被删除的 modelAliases 字段不再保留任何状态。 */
   @Test
-  void anthropicFactoryAppliesConfiguredModelAliases() {
-    AnthropicProviderAdapter adapter =
-        (AnthropicProviderAdapter)
-            anthropicProviderFactory.create(
-                "credential",
-                "{\"modelAliases\":{\"MiniMax-M3\":\"claude-fable-5-dd-3M-xaMiniM\"}}");
+  void anthropicFactoryIgnoresRemovedModelAliasConfiguration() {
+    // 别名映射不再是配置能力：解析成功后配置对象与默认值完全相等，不保留任何别名状态。
     assertEquals(
-        "claude-fable-5-dd-3M-xaMiniM", adapter.configuration().resolveModelName("MiniMax-M3"));
-    assertEquals("other-model", adapter.configuration().resolveModelName("other-model"));
+        AnthropicConfiguration.defaults(),
+        AnthropicConfiguration.parse("{\"modelAliases\":{\"MiniMax-M3\":\"wire-name\"}}"));
   }
 
   /** 意图：验证 Anthropic 工厂拒绝非法配置且不回显配置内容与敏感信息，因果链无暴露。 */
@@ -272,32 +269,20 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exMalformed.kind());
     assertNull(exMalformed.getCause());
 
-    String sensitiveAliasType = "{\"modelAliases\":\"SUPER_SECRET_PAYLOAD\"}";
-    ProviderException exAliasType =
-        assertThrows(
-            ProviderException.class,
-            () -> anthropicProviderFactory.create("credential", sensitiveAliasType));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exAliasType.kind());
-    assertFalse(exAliasType.getMessage().contains("SUPER_SECRET_PAYLOAD"));
-    assertNull(exAliasType.getCause());
+    // 未知 provider 配置字段（含已删除的 modelAliases）必须被忽略，且配置对象绝不回显原始 payload。
+    AnthropicConfiguration aliasIgnored =
+        AnthropicConfiguration.parse("{\"modelAliases\":{\"key\":\" SUPER_SECRET_PAYLOAD \"}}");
+    assertEquals(AnthropicConfiguration.defaults(), aliasIgnored);
+    assertFalse(aliasIgnored.toString().contains("SUPER_SECRET_PAYLOAD"));
 
-    String sensitiveAliasKey = "{\"modelAliases\":{\" SENSITIVE_KEY \":\"val\"}}";
-    ProviderException exAliasKey =
+    String sensitiveValue = "{\"anthropicThinkingMode\":\" SENSITIVE_VALUE \"}";
+    ProviderException exValue =
         assertThrows(
             ProviderException.class,
-            () -> anthropicProviderFactory.create("credential", sensitiveAliasKey));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exAliasKey.kind());
-    assertFalse(exAliasKey.getMessage().contains("SENSITIVE_KEY"));
-    assertNull(exAliasKey.getCause());
-
-    String sensitiveAliasVal = "{\"modelAliases\":{\"key\":\" SENSITIVE_VAL \"}}";
-    ProviderException exAliasVal =
-        assertThrows(
-            ProviderException.class,
-            () -> anthropicProviderFactory.create("credential", sensitiveAliasVal));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exAliasVal.kind());
-    assertFalse(exAliasVal.getMessage().contains("SENSITIVE_VAL"));
-    assertNull(exAliasVal.getCause());
+            () -> anthropicProviderFactory.create("credential", sensitiveValue));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exValue.kind());
+    assertFalse(exValue.getMessage().contains("SENSITIVE_VALUE"));
+    assertNull(exValue.getCause());
   }
 
   private static void assertNativeModelProvider(

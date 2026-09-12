@@ -34,27 +34,31 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 关注：固定 pc1- 前缀、43 字符 Base64URL 无 padding 输出；动态 USER/ASSISTANT/TOOL history 不影响 key；资源标识或 stable
- * prefix 一旦变化即切换 key；任意 typed content 块都能进入 digest 且字段边界不碰撞。
+ * 关注：固定 pc2- 前缀、43 字符 Base64URL 无 padding 输出；动态 USER/ASSISTANT/TOOL history 不影响 key；资源标识、 provider
+ * 连接代际或 stable prefix 一旦变化即切换 key；任意 typed content 块都能进入 digest 且字段边界不碰撞。
  */
 class PromptCacheAffinityKeyFactoryTest {
 
   private static final UUID SESSION_ID = UUID.fromString("00000000-0000-0000-0000-00000000002a");
+  private static final UUID PROVIDER_CONNECTION_GENERATION_ID =
+      UUID.fromString("00000000-0000-0000-0000-00000000012a");
 
-  private final PromptCacheAffinityKeyFactory factory = new PromptCacheAffinityKeyFactory();
+  private final TestKeyFactory factory = new TestKeyFactory();
 
   @Test
   void rejectsInvalidArguments() {
     ProviderRequest request = baseRequest();
     assertThrows(NullPointerException.class, () -> factory.create(null, request));
     assertThrows(NullPointerException.class, () -> factory.create(SESSION_ID, null));
+    assertThrows(
+        NullPointerException.class, () -> factory.delegate.create(SESSION_ID, null, request));
   }
 
   @Test
   void keyFormatIsFixedPrefixPlusBase64UrlNoPadding() {
     String key = factory.create(SESSION_ID, baseRequest());
-    assertTrue(key.startsWith("pc1-"), key);
-    String encoded = key.substring("pc1-".length());
+    assertTrue(key.startsWith("pc2-"), key);
+    String encoded = key.substring("pc2-".length());
     assertEquals(43, encoded.length(), encoded);
     assertTrue(encoded.matches("^[A-Za-z0-9_-]+$"), "Base64URL chars only: " + encoded);
     assertTrue(encoded.chars().noneMatch(ch -> ch == '='), "no padding allowed");
@@ -128,10 +132,10 @@ class PromptCacheAffinityKeyFactoryTest {
     String baseJson = factory.create(SESSION_ID, withJson);
     String baseMixed = factory.create(SESSION_ID, withMixed);
 
-    assertTrue(baseText.startsWith("pc1-"));
-    assertTrue(baseThinking.startsWith("pc1-"));
-    assertTrue(baseJson.startsWith("pc1-"));
-    assertTrue(baseMixed.startsWith("pc1-"));
+    assertTrue(baseText.startsWith("pc2-"));
+    assertTrue(baseThinking.startsWith("pc2-"));
+    assertTrue(baseJson.startsWith("pc2-"));
+    assertTrue(baseMixed.startsWith("pc2-"));
     // 任何分支之间必须互不相同。
     assertNotEquals(baseText, baseThinking);
     assertNotEquals(baseText, baseJson);
@@ -282,6 +286,16 @@ class PromptCacheAffinityKeyFactoryTest {
   }
 
   @Test
+  void providerConnectionGenerationIdChangeChangesKey() {
+    ProviderRequest request = baseRequest();
+    assertNotEquals(
+        factory.createWithGeneration(
+            SESSION_ID, UUID.fromString("00000000-0000-0000-0000-000000000001"), request),
+        factory.createWithGeneration(
+            SESSION_ID, UUID.fromString("00000000-0000-0000-0000-000000000002"), request));
+  }
+
+  @Test
   void providerNameChangeChangesKey() {
     assertNotEquals(
         factory.create(SESSION_ID, baseRequestWithModel(model("provider-a", "m1"))),
@@ -289,19 +303,20 @@ class PromptCacheAffinityKeyFactoryTest {
   }
 
   @Test
-  void modelNameChangeChangesKey() {
+  void modelIdChangeChangesKey() {
     assertNotEquals(
         factory.create(SESSION_ID, baseRequestWithModel(model("provider", "m1"))),
         factory.create(SESSION_ID, baseRequestWithModel(model("provider", "m2"))));
   }
 
-  /** providerType 已不再是 descriptor/digest 输入；除 providerName/modelName 外的 descriptor 内容不得影响 key。 */
+  /** 逻辑模型名及能力、价格不进入 digest；wire modelId 才是模型侧缓存身份。 */
   @Test
-  void descriptorIdentityIsOnlyProviderNameAndModelName() {
+  void logicalModelNameAndDescriptorMetadataDoNotAffectKey() {
     ModelDescriptor identity = model("provider", "m1");
     ModelDescriptor sameIdentityDifferentFlags =
         new ModelDescriptor(
             "provider",
+            "different-logical-name",
             "m1",
             Set.of(ModelInputModality.IMAGE),
             !identity.tools(),
@@ -324,7 +339,7 @@ class PromptCacheAffinityKeyFactoryTest {
   }
 
   @Test
-  void modelNameChangeAlsoChangesKeyWhenProviderStaysTheSame() {
+  void modelIdChangeAlsoChangesKeyWhenProviderStaysTheSame() {
     assertNotEquals(
         factory.create(SESSION_ID, baseRequestWithModel(model("provider", "model-a"))),
         factory.create(SESSION_ID, baseRequestWithModel(model("provider", "model-b"))));
@@ -339,7 +354,7 @@ class PromptCacheAffinityKeyFactoryTest {
     // 修改 sessionId 让该差异出现在 digest 而不是 cacheControl。
     assertNotEquals(
         baseKey, factory.create(UUID.fromString("00000000-0000-0000-0000-00000000002b"), base));
-    // 修改 modelName 后缀（"m1" -> "m1x"）必须切 key。
+    // 修改 modelId 后缀（"m1" -> "m1x"）必须切 key。
     assertNotEquals(
         baseKey, factory.create(SESSION_ID, baseRequestWithModel(model("provider", "m1x"))));
     // providerName 跨长度边界也必须切 key。
@@ -405,12 +420,12 @@ class PromptCacheAffinityKeyFactoryTest {
         factory.create(
             SESSION_ID, baseRequestWithSystemMessage(new ProviderJsonBlock("{\"k\":1}")));
 
-    assertTrue(textKey.startsWith("pc1-"));
-    assertTrue(imageKey.startsWith("pc1-"));
-    assertTrue(audioKey.startsWith("pc1-"));
-    assertTrue(videoKey.startsWith("pc1-"));
-    assertTrue(thinkingKey.startsWith("pc1-"));
-    assertTrue(jsonKey.startsWith("pc1-"));
+    assertTrue(textKey.startsWith("pc2-"));
+    assertTrue(imageKey.startsWith("pc2-"));
+    assertTrue(audioKey.startsWith("pc2-"));
+    assertTrue(videoKey.startsWith("pc2-"));
+    assertTrue(thinkingKey.startsWith("pc2-"));
+    assertTrue(jsonKey.startsWith("pc2-"));
     // 不同类型之间互不相同，证明每条分支都进入 digest。
     assertNotEquals(textKey, imageKey);
     assertNotEquals(textKey, audioKey);
@@ -428,22 +443,26 @@ class PromptCacheAffinityKeyFactoryTest {
 
   private static ProviderRequest baseRequest(ProviderToolDefinition... tools) {
     ModelDescriptor m = model("provider", "m1");
-    ModelVariant variant =
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
-    return new ProviderRequest(m, variant, List.of(), List.of(tools), ProviderCacheControl.none());
+    ModelVariant variant = new ModelVariant("default");
+    return new ProviderRequest(
+        m, variant, 1024, List.of(), List.of(tools), ProviderCacheControl.none());
   }
 
   private static ProviderRequest baseRequestWithModel(ModelDescriptor descriptor) {
-    ModelVariant variant =
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
+    ModelVariant variant = new ModelVariant("default");
     return new ProviderRequest(
-        descriptor, variant, List.of(), List.of(), ProviderCacheControl.none());
+        descriptor, variant, 1024, List.of(), List.of(), ProviderCacheControl.none());
   }
 
   private static ProviderRequest withMessages(
       ProviderRequest template, List<ProviderMessage> messages) {
     return new ProviderRequest(
-        template.model(), template.variant(), messages, template.tools(), template.cacheControl());
+        template.model(),
+        template.variant(),
+        1024,
+        messages,
+        template.tools(),
+        template.cacheControl());
   }
 
   private static ProviderMessage systemText(String text) {
@@ -486,6 +505,7 @@ class PromptCacheAffinityKeyFactoryTest {
     return new ProviderRequest(
         template.model(),
         template.variant(),
+        1024,
         List.of(new ProviderMessage(ProviderMessageRole.SYSTEM, leadingSystemContents)),
         template.tools(),
         template.cacheControl());
@@ -514,6 +534,7 @@ class PromptCacheAffinityKeyFactoryTest {
     return new ModelDescriptor(
         provider,
         model,
+        model,
         Set.of(ModelInputModality.TEXT),
         true,
         false,
@@ -529,5 +550,19 @@ class PromptCacheAffinityKeyFactoryTest {
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO));
+  }
+
+  private static final class TestKeyFactory {
+
+    private final PromptCacheAffinityKeyFactory delegate = new PromptCacheAffinityKeyFactory();
+
+    private String create(UUID sessionId, ProviderRequest request) {
+      return delegate.create(sessionId, PROVIDER_CONNECTION_GENERATION_ID, request);
+    }
+
+    private String createWithGeneration(
+        UUID sessionId, UUID providerConnectionGenerationId, ProviderRequest request) {
+      return delegate.create(sessionId, providerConnectionGenerationId, request);
+    }
   }
 }

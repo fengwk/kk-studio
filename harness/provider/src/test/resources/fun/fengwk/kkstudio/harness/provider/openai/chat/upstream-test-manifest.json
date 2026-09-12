@@ -7,9 +7,9 @@
     "totalSourceFiles": 70,
     "totalMethods": 502,
     "totalInvocations": 659,
-    "portedInvocations": 247,
+    "portedInvocations": 238,
     "inScopePendingInvocations": 0,
-    "outOfScopeInvocations": 412,
+    "outOfScopeInvocations": 421,
     "realCredentialInvocations": 390
   },
   "methods": [
@@ -514,9 +514,9 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Sampling Parameters",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testSamplingParameters",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testOutputBudgetParameter",
           "fixture": "openai/chat/fixtures/create-chat-completion.json",
-          "validationLayer": "wire/request",
+          "validationLayer": "wire/protocol",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
@@ -539,14 +539,14 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Sampling Parameters",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testSamplingParameters",
-          "fixture": "openai/chat/fixtures/create-chat-completion.json",
-          "validationLayer": "wire/request",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": null,
-          "securityAdaptation": "Error and credential details are sanitized to prevent secret and payload leakage."
+          "capabilityMismatch": "LangChain4j maxCompletionTokens specifically exercises the OpenAI max_completion_tokens field; the native adapter exposes one frozen output budget encoded as max_tokens, so max_tokens coverage is not equivalent.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -5071,9 +5071,9 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Streaming SSE",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatStreamingDecoderTest#testEndToEndHttpStreaming",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testOutputBudgetParameter",
           "fixture": "openai/chat/fixtures/streaming-chat.sse",
-          "validationLayer": "stream/sse",
+          "validationLayer": "wire/protocol",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
@@ -5096,14 +5096,14 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Streaming SSE",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatStreamingDecoderTest#testEndToEndHttpStreaming",
-          "fixture": "openai/chat/fixtures/streaming-chat.sse",
-          "validationLayer": "stream/sse",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": null,
-          "securityAdaptation": "Error and credential details are sanitized to prevent secret and payload leakage."
+          "capabilityMismatch": "LangChain4j maxCompletionTokens specifically exercises the OpenAI max_completion_tokens field; the native adapter exposes one frozen output budget encoded as max_tokens, so max_tokens coverage is not equivalent.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -6918,14 +6918,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Streaming SSE",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatStreamingDecoderTest#testEndToEndHttpStreaming",
-          "fixture": "openai/chat/fixtures/streaming-chat.sse",
-          "validationLayer": "stream/sse",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "Error and credential details are sanitized to prevent secret and payload leakage."
+          "capabilityMismatch": "OpenAI logprobs are not exposed by the native ProviderRequest or ProviderResponse contracts; generic SSE text decoding is not equivalent to logprob accumulation/null semantics.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -7068,14 +7068,14 @@
           "upstreamStatus": "ACTIVE",
           "condition": null,
           "capability": "Streaming SSE",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatStreamingDecoderTest#testEndToEndHttpStreaming",
-          "fixture": "openai/chat/fixtures/streaming-chat.sse",
-          "validationLayer": "stream/sse",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": null,
-          "securityAdaptation": "Error and credential details are sanitized to prevent secret and payload leakage."
+          "capabilityMismatch": "OpenAI logprobs are not exposed by the native ProviderRequest or ProviderResponse contracts; generic SSE text decoding is not equivalent to logprob accumulation/null semantics.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8199,7 +8199,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Upstream negative capability check or advanced tool_choice constraint is not applicable to native kk-studio runtime execution pipeline.",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]
@@ -8543,9 +8543,9 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Sampling Parameters",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testSamplingParameters",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testOutputBudgetParameter",
           "fixture": "openai/chat/fixtures/create-chat-completion.json",
-          "validationLayer": "wire/request",
+          "validationLayer": "wire/protocol",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
@@ -8568,9 +8568,9 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Sampling Parameters",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testSamplingParameters",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testOutputBudgetParameter",
           "fixture": "openai/chat/fixtures/create-chat-completion.json",
-          "validationLayer": "wire/request",
+          "validationLayer": "wire/protocol",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
@@ -8693,14 +8693,14 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Sampling Parameters",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testSamplingParameters",
-          "fixture": "openai/chat/fixtures/create-chat-completion.json",
-          "validationLayer": "wire/request",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": null,
-          "securityAdaptation": "Error and credential details are sanitized to prevent secret and payload leakage."
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -8718,14 +8718,14 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Sampling Parameters",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testSamplingParameters",
-          "fixture": "openai/chat/fixtures/create-chat-completion.json",
-          "validationLayer": "wire/request",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": null,
-          "securityAdaptation": "Error and credential details are sanitized to prevent secret and payload leakage."
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -9994,7 +9994,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Upstream negative capability check or advanced tool_choice constraint is not applicable to native kk-studio runtime execution pipeline.",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         },
         {
@@ -10012,7 +10012,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Upstream negative capability check or advanced tool_choice constraint is not applicable to native kk-studio runtime execution pipeline.",
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
           "securityAdaptation": null
         }
       ]
@@ -10475,9 +10475,9 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Streaming SSE",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatStreamingDecoderTest#testEndToEndHttpStreaming",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testOutputBudgetParameter",
           "fixture": "openai/chat/fixtures/streaming-chat.sse",
-          "validationLayer": "stream/sse",
+          "validationLayer": "wire/protocol",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
@@ -10493,9 +10493,9 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Streaming SSE",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatStreamingDecoderTest#testEndToEndHttpStreaming",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testOutputBudgetParameter",
           "fixture": "openai/chat/fixtures/streaming-chat.sse",
-          "validationLayer": "stream/sse",
+          "validationLayer": "wire/protocol",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
@@ -10518,9 +10518,9 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Streaming SSE",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatStreamingDecoderTest#testEndToEndHttpStreaming",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoderTest#testOutputBudgetParameter",
           "fixture": "openai/chat/fixtures/streaming-chat.sse",
-          "validationLayer": "stream/sse",
+          "validationLayer": "wire/protocol",
           "mappingStatus": "PORTED",
           "executionStatus": "PASSED",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
@@ -10654,14 +10654,14 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Streaming SSE",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatStreamingDecoderTest#testEndToEndHttpStreaming",
-          "fixture": "openai/chat/fixtures/streaming-chat.sse",
-          "validationLayer": "stream/sse",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": null,
-          "securityAdaptation": "Error and credential details are sanitized to prevent secret and payload leakage."
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
+          "securityAdaptation": null
         },
         {
           "invocationId": "openaistreamingchatmodelit-should_respect_stopsequences_in_chat_request-streamingmode-publisher",
@@ -10672,14 +10672,14 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Streaming SSE",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatStreamingDecoderTest#testEndToEndHttpStreaming",
-          "fixture": "openai/chat/fixtures/streaming-chat.sse",
-          "validationLayer": "stream/sse",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": null,
-          "securityAdaptation": "Error and credential details are sanitized to prevent secret and payload leakage."
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
+          "securityAdaptation": null
         }
       ]
     },
@@ -10697,14 +10697,14 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"OPENAI_API_KEY\", matches = \".+\")",
           "capability": "Streaming SSE",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatStreamingDecoderTest#testEndToEndHttpStreaming",
-          "fixture": "openai/chat/fixtures/streaming-chat.sse",
-          "validationLayer": "stream/sse",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": null,
-          "securityAdaptation": "Error and credential details are sanitized to prevent secret and payload leakage."
+          "capabilityMismatch": "Configurable stop sequences are absent from the native ModelVariant and ProviderRequest contracts; LangChain4j per-request/default stop-sequence and negative-capability facades are not applicable.",
+          "securityAdaptation": null
         }
       ]
     },

@@ -92,7 +92,11 @@ public final class PlatformModelGateway implements ModelGateway {
     Objects.requireNonNull(listener, "listener");
     ProviderResolutionService.ResolvedExecution resolved;
     try {
-      resolved = providerResolution.resolve(execution.providerType(), execution.request());
+      resolved =
+          providerResolution.resolve(
+              execution.providerType(),
+              execution.providerConnectionGenerationId(),
+              execution.request());
     } catch (IllegalArgumentException setupFailure) {
       // 提交前的确定性装配失败：终止 invocation，绝不重试。
       return new Rejected(

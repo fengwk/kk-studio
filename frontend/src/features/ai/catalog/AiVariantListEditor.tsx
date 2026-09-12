@@ -1,7 +1,7 @@
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/ai/catalog/ai-console-types'
-import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/shared/lib/numeric-input'
+import { REASONING_EFFORT_VALUES } from '@/features/ai/catalog/ai-model-draft-codec'
 import { blankVariant } from '@/features/ai/catalog/ai-resource-form-drafts'
 import { useI18n } from '@/shared/i18n'
 
@@ -10,15 +10,12 @@ export function VariantListEditor({
   variants,
   defaultVariant,
   reasoning,
-  effortError = false,
   onChange,
 }: {
   label: string
   variants: VariantDraft[]
   defaultVariant: string
   reasoning: boolean
-  /** 开启 Reasoning 但未填思考强度时标红 */
-  effortError?: boolean
   onChange: (variants: VariantDraft[], preferredDefaultVariant?: string) => void
 }) {
   const { t } = useI18n()
@@ -43,7 +40,7 @@ export function VariantListEditor({
       suffix += 1
       id = `variant-${suffix}`
     }
-    onChange([...variants, blankVariant(id, reasoning ? 'medium' : '')])
+    onChange([...variants, blankVariant(id)])
   }
 
   function removeVariant(index: number) {
@@ -70,7 +67,7 @@ export function VariantListEditor({
       <div className="variant-stack">
         {variants.map((variant, index) => (
           <div className="variant-editor" key={variant.draftId}>
-            <div className={`editor-grid${reasoning ? ' editor-grid-3' : ' editor-grid-2'}`}>
+            <div className={`editor-grid${reasoning ? ' editor-grid-2' : ''}`}>
               <label className="form-group">
                 <FieldLabel required>{t('ai.catalog.form.variantId')}</FieldLabel>
                 <input
@@ -82,141 +79,26 @@ export function VariantListEditor({
                 />
               </label>
               {reasoning ? (
-                <label
-                  className={`form-group${
-                    effortError && !variant.reasoningEffort.trim() ? ' is-error' : ''
-                  }`}
-                >
-                  <FieldLabel required>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
-                  <input
+                <label className="form-group">
+                  <FieldLabel>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
+                  <select
                     aria-label={`${t('ai.catalog.form.reasoningEffortAria')} ${index + 1}`}
                     value={variant.reasoningEffort}
                     onChange={(event) =>
                       updateVariant(index, { reasoningEffort: event.target.value })
                     }
-                    placeholder=""
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  {effortError && !variant.reasoningEffort.trim() ? (
-                    <span className="field-error">{t('ai.catalog.form.reasoningEffortError')}</span>
-                  ) : null}
+                  >
+                    {/* 空值表示不覆盖协议默认；off 才是显式关闭推理 */}
+                    <option value="">{t('ai.catalog.form.useModelDefault')}</option>
+                    {REASONING_EFFORT_VALUES.map((effort) => (
+                      <option key={effort} value={effort}>
+                        {effort}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               ) : null}
-              <label className="form-group">
-                <FieldLabel>{t('ai.catalog.form.maxOutput')}</FieldLabel>
-                <input
-                  aria-label={`${t('ai.catalog.form.maxOutputAria')} ${index + 1}`}
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  step={1}
-                  value={variant.maxOutputTokens}
-                  onChange={(event) =>
-                    updateVariant(index, {
-                      maxOutputTokens: sanitizeIntegerInput(event.target.value),
-                    })
-                  }
-                  placeholder={t('ai.catalog.form.maxOutputPlaceholder')}
-                />
-              </label>
             </div>
-
-            <details className="variant-advanced-options">
-              <summary>{t('ai.catalog.form.advancedOptions')}</summary>
-              <p className="inline-hint">{t('ai.catalog.form.advancedHint')}</p>
-              <div className="editor-grid editor-grid-3">
-                <label className="form-group">
-                  <FieldLabel>{t('ai.catalog.form.temperature')}</FieldLabel>
-                  <input
-                    aria-label={`${t('ai.catalog.form.temperature')} ${index + 1}`}
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    step="any"
-                    value={variant.temperature}
-                    onChange={(event) =>
-                      updateVariant(index, {
-                        temperature: sanitizeDecimalInput(event.target.value),
-                      })
-                    }
-                    placeholder={t('ai.catalog.form.emptyPlaceholder')}
-                  />
-                </label>
-                <label className="form-group">
-                  <FieldLabel>{t('ai.catalog.form.topP')}</FieldLabel>
-                  <input
-                    aria-label={`${t('ai.catalog.form.topP')} ${index + 1}`}
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    max={1}
-                    step="any"
-                    value={variant.topP}
-                    onChange={(event) =>
-                      updateVariant(index, { topP: sanitizeDecimalInput(event.target.value) })
-                    }
-                    placeholder={t('ai.catalog.form.emptyPlaceholder')}
-                  />
-                </label>
-                <label className="form-group">
-                  <FieldLabel>{t('ai.catalog.form.topK')}</FieldLabel>
-                  <input
-                    aria-label={`${t('ai.catalog.form.topK')} ${index + 1}`}
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    step={1}
-                    value={variant.topK}
-                    onChange={(event) =>
-                      updateVariant(index, { topK: sanitizeIntegerInput(event.target.value) })
-                    }
-                    placeholder={t('ai.catalog.form.emptyPlaceholder')}
-                  />
-                </label>
-                <label className="form-group">
-                  <FieldLabel>{t('ai.catalog.form.frequencyPenalty')}</FieldLabel>
-                  <input
-                    aria-label={`${t('ai.catalog.form.frequencyPenalty')} ${index + 1}`}
-                    type="number"
-                    inputMode="decimal"
-                    step="any"
-                    value={variant.frequencyPenalty}
-                    onChange={(event) =>
-                      updateVariant(index, {
-                        frequencyPenalty: sanitizeDecimalInput(event.target.value),
-                      })
-                    }
-                    placeholder={t('ai.catalog.form.emptyPlaceholder')}
-                  />
-                </label>
-                <label className="form-group">
-                  <FieldLabel>{t('ai.catalog.form.presencePenalty')}</FieldLabel>
-                  <input
-                    aria-label={`${t('ai.catalog.form.presencePenalty')} ${index + 1}`}
-                    type="number"
-                    inputMode="decimal"
-                    step="any"
-                    value={variant.presencePenalty}
-                    onChange={(event) =>
-                      updateVariant(index, {
-                        presencePenalty: sanitizeDecimalInput(event.target.value),
-                      })
-                    }
-                    placeholder={t('ai.catalog.form.emptyPlaceholder')}
-                  />
-                </label>
-                <label className="form-group">
-                  <FieldLabel>{t('ai.catalog.form.stop')}</FieldLabel>
-                  <input
-                    aria-label={`${t('ai.catalog.form.stopAria')} ${index + 1}`}
-                    value={variant.stopSequences}
-                    onChange={(event) => updateVariant(index, { stopSequences: event.target.value })}
-                    placeholder={t('ai.catalog.form.stopPlaceholder')}
-                  />
-                </label>
-              </div>
-            </details>
 
             <div className="variant-editor-actions">
               <button

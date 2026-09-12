@@ -54,17 +54,18 @@ class GeminiStreamingDecoderTest {
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO);
-    ModelVariant variant =
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
+    ModelVariant variant = new ModelVariant("default");
     return new ProviderRequest(
         new ModelDescriptor(
             "google-test",
+            "gemini-2.5-flash",
             "gemini-2.5-flash",
             Set.of(ModelInputModality.TEXT),
             true,
             false,
             pricing),
         variant,
+        1024,
         List.of(),
         List.of(),
         ProviderCacheControl.none());

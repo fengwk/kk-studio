@@ -205,8 +205,10 @@ class ProviderReplayStateJsonCodecTest {
             UUID.randomUUID(),
             new ModelRequestSpec(
                 ProviderType.OPENAI,
+                new UUID(0L, 1L),
                 new ModelDescriptor(
                     "provider",
+                    "model",
                     "model",
                     Set.of(ModelInputModality.TEXT),
                     true,
@@ -223,7 +225,8 @@ class ProviderReplayStateJsonCodecTest {
                         BigDecimal.ZERO,
                         BigDecimal.ZERO,
                         BigDecimal.ZERO)),
-                new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+                new ModelVariant("v1"),
+                1024,
                 List.of(),
                 List.of(),
                 List.of(),
@@ -279,7 +282,7 @@ class ProviderReplayStateJsonCodecTest {
             "providerType": "anthropic",
             "providerName": "anthropic",
             "connectionGenerationId": "00000000-0000-0000-0000-000000000001",
-            "modelName": "claude-3-5"
+            "modelId": "claude-3-5"
           },
           "sourcePrefixHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
           "payload": {"key":"val"},
@@ -324,7 +327,7 @@ class ProviderReplayStateJsonCodecTest {
   @Test
   void rejectsMissingAffinityFields() {
     for (String field :
-        List.of("providerType", "providerName", "connectionGenerationId", "modelName")) {
+        List.of("providerType", "providerName", "connectionGenerationId", "modelId")) {
       ObjectNode node = (ObjectNode) codec.encodeNode(sampleState());
       ((ObjectNode) node.get("affinity")).remove(field);
       assertThrows(IllegalArgumentException.class, () -> codec.decode(node.toString()));
@@ -381,7 +384,7 @@ class ProviderReplayStateJsonCodecTest {
     assertEquals(ProviderType.OPENAI, affinity.providerType());
     assertEquals("p", affinity.providerName());
     assertEquals(genId, affinity.connectionGenerationId());
-    assertEquals("m", affinity.modelName());
+    assertEquals("m", affinity.modelId());
 
     assertThrows(
         NullPointerException.class, () -> new ProviderReplayAffinity(null, "p", genId, "m"));

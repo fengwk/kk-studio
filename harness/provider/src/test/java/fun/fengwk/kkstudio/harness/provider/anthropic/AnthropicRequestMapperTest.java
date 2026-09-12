@@ -52,8 +52,8 @@ import java.util.stream.Stream;
 /**
  * 适配 LangChain4j Anthropic Mapper、Schema 与 Cache 测试到 kk-studio 原生请求编码器的端到端映射套件。
  *
- * <p>直接针对 {@link AnthropicRequestEncoder} 进行断言，覆盖消息矩阵、工具定义映射、 JSON Schema 透传、缓存断点注入、诊断隔离、采样惩罚校验、会话中
- * SYSTEM 拦截与非法结构拒绝。
+ * <p>直接针对 {@link AnthropicRequestEncoder} 进行断言，覆盖消息矩阵、工具定义映射、 JSON Schema 透传、缓存断点注入、诊断隔离、会话中 SYSTEM
+ * 拦截与非法结构拒绝。
  */
 class AnthropicRequestMapperTest {
 
@@ -1416,14 +1416,13 @@ class AnthropicRequestMapperTest {
   }
 
   // =========================================================================================
-  // 6. 不支持的采样惩罚参数校验
+  // 6. 基础请求编码校验
   // =========================================================================================
 
-  /** 测试意图：常规采样参数（温度、top_p、top_k）正常通过校验并不抛出异常。 */
+  /** 测试意图：合法的请求正常通过校验并不抛出异常。 */
   @Test
   void validate_WithNoUnsupportedFeatures_ShouldNotThrowException() {
-    ModelVariant variant =
-        new ModelVariant("normal", 1024, 0.7, 0.9, 40, null, null, List.of(), null);
+    ModelVariant variant = new ModelVariant("normal");
     ProviderRequest request =
         request(
             variant,
@@ -1433,67 +1432,6 @@ class AnthropicRequestMapperTest {
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     assertNotNull(encoded);
-  }
-
-  /** 测试意图：当设置 frequencyPenalty 时，AnthropicRequestEncoder 必须以 INVALID_REQUEST 确定性拒绝。 */
-  @Test
-  void validate_WithFrequencyPenalty_ShouldThrowException() {
-    ModelVariant variant =
-        new ModelVariant("freq", null, null, null, null, 0.5, null, List.of(), null);
-    ProviderRequest request =
-        request(
-            variant,
-            List.of(userMsg(new ProviderTextBlock("hi"))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    ProviderException exception =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exception.kind());
-    assertTrue(
-        exception
-            .getMessage()
-            .contains("Anthropic does not support frequencyPenalty or presencePenalty"));
-  }
-
-  /** 测试意图：当设置 presencePenalty 时，AnthropicRequestEncoder 必须以 INVALID_REQUEST 确定性拒绝。 */
-  @Test
-  void validate_WithPresencePenalty_ShouldThrowException() {
-    ModelVariant variant =
-        new ModelVariant("pres", null, null, null, null, null, 0.5, List.of(), null);
-    ProviderRequest request =
-        request(
-            variant,
-            List.of(userMsg(new ProviderTextBlock("hi"))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    ProviderException exception =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exception.kind());
-    assertTrue(
-        exception
-            .getMessage()
-            .contains("Anthropic does not support frequencyPenalty or presencePenalty"));
-  }
-
-  /** 测试意图：当 frequencyPenalty 与 presencePenalty 同时设置时，抛出包含两者不支持说明的 INVALID_REQUEST。 */
-  @Test
-  void validate_WithTwoUnsupportedFeatures_ShouldThrowExceptionWithCombinedMessage() {
-    ModelVariant variant =
-        new ModelVariant("both", null, null, null, null, 0.5, 0.5, List.of(), null);
-    ProviderRequest request =
-        request(
-            variant,
-            List.of(userMsg(new ProviderTextBlock("hi"))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    ProviderException exception =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exception.kind());
-    assertEquals(
-        "Anthropic does not support frequencyPenalty or presencePenalty", exception.getMessage());
   }
 
   // =========================================================================================
@@ -1873,7 +1811,7 @@ class AnthropicRequestMapperTest {
   }
 
   private static ModelVariant defaultVariant() {
-    return new ModelVariant("default", 1024, null, null, null, null, null, List.of(), null);
+    return new ModelVariant("default");
   }
 
   private static ProviderRequest request(
@@ -1885,11 +1823,12 @@ class AnthropicRequestMapperTest {
         new ModelDescriptor(
             "test-anthropic",
             "claude-3-5-sonnet",
+            "claude-3-5-sonnet",
             Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
             true,
             false,
             pricing());
-    return new ProviderRequest(model, variant, messages, tools, cacheControl);
+    return new ProviderRequest(model, variant, 1024, messages, tools, cacheControl);
   }
 
   private static ModelPricing pricing() {

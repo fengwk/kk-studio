@@ -336,8 +336,10 @@ class ModelRequestMaterializerTest {
   private static ModelRequestSpec liveSpec(List<AgentMessage> preamble, ToolBinding binding) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         descriptor(),
         variant(),
+        1024,
         preamble,
         List.of(binding),
         List.of(),
@@ -348,8 +350,10 @@ class ModelRequestMaterializerTest {
   private static ModelRequestSpec compactionSpec() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         descriptor(),
         variant(),
+        1024,
         List.of(),
         List.of(),
         List.of(),
@@ -384,6 +388,7 @@ class ModelRequestMaterializerTest {
     return new ModelDescriptor(
         "provider",
         "model",
+        "model",
         Set.of(ModelInputModality.TEXT),
         true,
         true,
@@ -402,7 +407,7 @@ class ModelRequestMaterializerTest {
   }
 
   private static ModelVariant variant() {
-    return new ModelVariant("v1", null, null, null, null, null, null, List.of(), null);
+    return new ModelVariant("v1");
   }
 
   private static Entry entry(long id, long parent, EntryPayload payload) {

@@ -2121,8 +2121,10 @@ class ModelExecutionStreamFlushTest {
   private static ModelRequestSpec spec(List<ToolBinding> bindings) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         modelDescriptor(),
-        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        new ModelVariant("v1"),
+        1024,
         List.of(),
         bindings,
         List.of(),
@@ -2133,6 +2135,7 @@ class ModelExecutionStreamFlushTest {
   private static ModelDescriptor modelDescriptor() {
     return new ModelDescriptor(
         "provider",
+        "model",
         "model",
         Set.of(ModelInputModality.TEXT),
         true,

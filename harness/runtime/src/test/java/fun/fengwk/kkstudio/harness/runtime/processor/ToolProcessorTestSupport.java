@@ -459,8 +459,10 @@ final class ToolProcessorTestSupport {
     ProviderRequest provider = providerRequest();
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         provider.model(),
         provider.variant(),
+        1024,
         List.of(),
         List.of(hostBinding(ToolSideEffect.READ_ONLY)),
         List.of(),
@@ -471,7 +473,8 @@ final class ToolProcessorTestSupport {
   private static ProviderRequest providerRequest() {
     return new ProviderRequest(
         modelDescriptor(),
-        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        new ModelVariant("v1"),
+        1024,
         List.of(),
         List.of(),
         ProviderCacheControl.none());
@@ -480,6 +483,7 @@ final class ToolProcessorTestSupport {
   private static ModelDescriptor modelDescriptor() {
     return new ModelDescriptor(
         "provider",
+        "model",
         "model",
         Set.of(ModelInputModality.TEXT),
         true,

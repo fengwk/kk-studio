@@ -79,6 +79,7 @@ class AnthropicStreamAccumulatorTest {
         new ModelDescriptor(
             "test-anthropic",
             "claude-3-5-sonnet",
+            "claude-3-5-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
             false,
@@ -94,12 +95,12 @@ class AnthropicStreamAccumulatorTest {
                 BigDecimal.valueOf(3.75),
                 BigDecimal.valueOf(6.0),
                 BigDecimal.ZERO));
-    ModelVariant variant =
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
+    ModelVariant variant = new ModelVariant("default");
     request =
         new ProviderRequest(
             model,
             variant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")))),

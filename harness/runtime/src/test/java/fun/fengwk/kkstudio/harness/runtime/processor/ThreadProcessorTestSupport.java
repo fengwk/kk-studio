@@ -807,8 +807,10 @@ final class ThreadProcessorTestSupport {
   static ModelRequestSpec requestWithBindings(List<ToolBinding> bindings) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         modelDescriptor("provider", "model"),
-        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        new ModelVariant("v1"),
+        1024,
         List.of(),
         bindings,
         List.of(),
@@ -820,9 +822,10 @@ final class ThreadProcessorTestSupport {
   static ModelRequestSpec requestFor(BranchSettings settings) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         modelDescriptor(settings.model().providerName(), settings.model().modelName()),
-        new ModelVariant(
-            settings.model().variant(), null, null, null, null, null, null, List.of(), null),
+        new ModelVariant(settings.model().variant()),
+        1024,
         List.of(),
         List.of(),
         List.of(),
@@ -838,18 +841,11 @@ final class ThreadProcessorTestSupport {
   static ModelRequestSpec compactionRequest(CompactionPreparation preparation) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         modelDescriptor(
             preparation.executionModel().providerName(), preparation.executionModel().modelName()),
-        new ModelVariant(
-            preparation.executionModel().variant(),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            List.of(),
-            null),
+        new ModelVariant(preparation.executionModel().variant()),
+        1024,
         List.of(),
         List.of(),
         List.of(),
@@ -1039,7 +1035,8 @@ final class ThreadProcessorTestSupport {
   private static ProviderRequest providerRequest(List<ProviderToolDefinition> tools) {
     return new ProviderRequest(
         modelDescriptor(),
-        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        new ModelVariant("v1"),
+        1024,
         List.of(),
         tools,
         ProviderCacheControl.none());
@@ -1052,6 +1049,7 @@ final class ThreadProcessorTestSupport {
   private static ModelDescriptor modelDescriptor(String providerName, String modelName) {
     return new ModelDescriptor(
         providerName,
+        modelName,
         modelName,
         Set.of(ModelInputModality.TEXT),
         true,

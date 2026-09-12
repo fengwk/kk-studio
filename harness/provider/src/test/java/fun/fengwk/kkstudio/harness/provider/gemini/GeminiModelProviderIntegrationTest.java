@@ -120,15 +120,16 @@ class GeminiModelProviderIntegrationTest {
         new ModelDescriptor(
             "google-test",
             "gemini-2.5-flash",
+            "gemini-2.5-flash",
             Set.of(ModelInputModality.TEXT),
             true,
             false,
             pricing);
-    ModelVariant variant =
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
+    ModelVariant variant = new ModelVariant("default");
     return new ProviderRequest(
         model,
         variant,
+        1024,
         List.of(
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")))),
         List.of(),

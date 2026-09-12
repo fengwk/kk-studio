@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -74,7 +75,7 @@ import java.util.UUID;
 
 /**
  * 生产 Platform 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的
- * {@link ModelRequestSpec}、contextWindow 与 maxOutputTokens。
+ * {@link ModelRequestSpec}、contextWindow 与 outputTokens。
  *
  * <p>输入事实只有 candidate path 的 {@link BranchSettings}（workspacePath / agentName / {@link
  * ModelSelection}）；实现按这些精确引用读取最新 {@link RuntimeToolCatalog} / environment 事实，Agent 的
@@ -176,6 +177,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (providerType == null) {
       throw rejection("provider type must not be null");
     }
+    UUID providerConnectionGenerationId =
+        require(
+            provider.getConnectionGenerationId(),
+            "provider connection generation id must not be null");
     AgentModel model =
         require(
             modelRepository.getByProviderNameAndName(
@@ -192,8 +197,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
               + " variant="
               + selection.variant());
     }
-    // 冻结前把“未显式声明的 variant 输出上限”解析为模型全局 limit.output，request spec 里不再存 null。
-    variant = withResolvedOutputLimit(parsedModel, variant);
     ProviderFactory providerFactory =
         require(
             providerFactories.lookup(providerType).orElse(null),
@@ -231,6 +234,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
         new ModelDescriptor(
             selection.providerName(),
             selection.modelName(),
+            model.getModelId(),
             parsedModel.inputModalities(),
             parsedModel.tools(),
             parsedModel.reasoning(),
@@ -238,26 +242,35 @@ public final class DatabaseTurnResolver implements TurnResolver {
     List<AgentMessage> preamble =
         preambleMessages(
             agent.getSystemPrompt(), currentEnvironment, skillBindings, subagentBindings, path);
+    int outputTokens =
+        outputTokens(
+            parsedModel,
+            contextWindow(parsedModel),
+            CompactionPlanner.estimateRequestTokens(path, preamble));
     ProviderCacheControl cacheControl =
         cacheControl(
             descriptor,
             variant,
+            outputTokens,
             preamble,
             toolBindings,
             sessionId,
+            providerConnectionGenerationId,
             cachePolicy(providerFactory, provider.getConfigJson(), selection.providerName()));
     return new TurnResolver.Resolved(
         new ModelRequestSpec(
             providerType,
+            providerConnectionGenerationId,
             descriptor,
             variant,
+            outputTokens,
             preamble,
             toolBindings,
             skillBindings,
             subagentBindings,
             cacheControl),
         contextWindow(parsedModel),
-        maxOutputTokens(parsedModel, variant));
+        outputTokens);
   }
 
   private static EnvironmentBinding resolveEnvironmentBinding(
@@ -284,6 +297,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (providerType == null) {
       throw rejection("provider type must not be null");
     }
+    UUID providerConnectionGenerationId =
+        require(
+            provider.getConnectionGenerationId(),
+            "provider connection generation id must not be null");
     AgentModel model =
         require(
             modelRepository.getByProviderNameAndName(
@@ -307,38 +324,29 @@ public final class DatabaseTurnResolver implements TurnResolver {
               + "/"
               + selection.modelName());
     }
-    int actualModelMaxOutput = maxOutputTokens(parsedModel, variant);
     long budget =
         compactionConfigProvider
             .compactionConfig()
             .outputBudget(
-                preparation.phase(), actualModelMaxOutput, preparation.removedPrefixTokens());
+                preparation.phase(), outputTokens(parsedModel), preparation.removedPrefixTokens());
     if (budget <= 0 || budget > Integer.MAX_VALUE) {
       throw rejection("compaction output budget must be a positive int, got " + budget);
     }
     int maxOutput = (int) budget;
-    ModelVariant compactionVariant =
-        new ModelVariant(
-            variant.id(),
-            maxOutput,
-            variant.temperature(),
-            variant.topP(),
-            variant.topK(),
-            variant.frequencyPenalty(),
-            variant.presencePenalty(),
-            variant.stopSequences(),
-            variant.reasoningEffort());
     return new TurnResolver.Resolved(
         new ModelRequestSpec(
             providerType,
+            providerConnectionGenerationId,
             new ModelDescriptor(
                 selection.providerName(),
                 selection.modelName(),
+                model.getModelId(),
                 parsedModel.inputModalities(),
                 parsedModel.tools(),
                 parsedModel.reasoning(),
                 parsedModel.pricing()),
-            compactionVariant,
+            variant,
+            maxOutput,
             List.of(),
             List.of(),
             List.of(),
@@ -357,34 +365,35 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return (int) contextWindow;
   }
 
-  /** variant 显式上限优先，否则使用 model 全局 limit.output；结果必须是正 int。 */
-  private static int maxOutputTokens(ParsedAgentModelConfig parsedModel, ModelVariant variant) {
-    long maxOutputTokens =
-        variant.maxOutputTokens() == null
-            ? parsedModel.maxOutputTokens()
-            : variant.maxOutputTokens();
-    if (maxOutputTokens <= 0 || maxOutputTokens > Integer.MAX_VALUE) {
-      throw rejection("model limit.output must be a positive int, got " + maxOutputTokens);
+  /**
+   * 普通请求输出预算：严格取 model 级 {@code limit.output} 与剩余上下文（{@code contextWindow -
+   * 估算输入}）的较小者。剩余上下文无法提供正预算时 明确拒绝，绝不伪造一个可执行预算，也不回落到 variant 或请求体的自定义字段。
+   */
+  private static int outputTokens(
+      ParsedAgentModelConfig parsedModel, int contextWindow, long estimatedInputTokens) {
+    long limit = parsedModel.maxOutputTokens();
+    if (limit <= 0 || limit > Integer.MAX_VALUE) {
+      throw rejection("model limit.output must be a positive int, got " + limit);
     }
-    return (int) maxOutputTokens;
+    long remaining = contextWindow - estimatedInputTokens;
+    long outputTokens = Math.min(limit, remaining);
+    if (outputTokens <= 0) {
+      throw rejection(
+          "remaining context leaves no positive output budget: contextWindow="
+              + contextWindow
+              + ", estimatedInputTokens="
+              + estimatedInputTokens);
+    }
+    return (int) outputTokens;
   }
 
-  /** 冻结前补齐 variant 的输出上限：未显式声明时解析为 model 全局 limit.output，其他字段原样保留。 */
-  private static ModelVariant withResolvedOutputLimit(
-      ParsedAgentModelConfig parsedModel, ModelVariant variant) {
-    if (variant.maxOutputTokens() != null) {
-      return variant;
+  /** 压缩阶段预算上限：model 级 {@code limit.output}，必须是可表示的正 int。 */
+  private static int outputTokens(ParsedAgentModelConfig parsedModel) {
+    long outputTokens = parsedModel.maxOutputTokens();
+    if (outputTokens <= 0 || outputTokens > Integer.MAX_VALUE) {
+      throw rejection("model limit.output must be a positive int, got " + outputTokens);
     }
-    return new ModelVariant(
-        variant.id(),
-        maxOutputTokens(parsedModel, variant),
-        variant.temperature(),
-        variant.topP(),
-        variant.topK(),
-        variant.frequencyPenalty(),
-        variant.presencePenalty(),
-        variant.stopSequences(),
-        variant.reasoningEffort());
+    return (int) outputTokens;
   }
 
   private AgentDefinitionConfigDTO decodeAgentConfig(AgentDefinition agent) {
@@ -613,9 +622,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private ProviderCacheControl cacheControl(
       ModelDescriptor descriptor,
       ModelVariant variant,
+      int outputTokens,
       List<AgentMessage> preamble,
       List<ToolBinding> toolBindings,
       UUID sessionId,
+      UUID providerConnectionGenerationId,
       PromptCachePolicy cachePolicy) {
     List<ProviderToolDefinition> providerTools = new ArrayList<>(toolBindings.size());
     for (ToolBinding binding : toolBindings) {
@@ -628,10 +639,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
         new ProviderRequest(
             descriptor,
             variant,
+            outputTokens,
             messageProjector.project(preamble),
             providerTools,
             ProviderCacheControl.none());
-    return new PromptCacheRequestFinalizer(sessionId, cacheKeyFactory)
+    return new PromptCacheRequestFinalizer(
+            sessionId, providerConnectionGenerationId, cacheKeyFactory)
         .apply(stub, cachePolicy)
         .cacheControl();
   }

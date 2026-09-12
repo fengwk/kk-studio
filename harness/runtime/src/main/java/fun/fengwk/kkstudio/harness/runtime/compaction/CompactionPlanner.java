@@ -327,6 +327,14 @@ public final class CompactionPlanner {
     return new CompactionSummaryInput(messages, previousSummary);
   }
 
+  /**
+   * 估算一次普通请求的输入 token：调用方准备好的 preamble 语义消息与当前 path 的可见对话投影之和。供 Resolver 计算 “剩余上下文”输出预算，不参与压缩切分。
+   */
+  public static long estimateRequestTokens(EntryPath path, List<AgentMessage> preamble) {
+    Objects.requireNonNull(preamble, "preamble");
+    return Math.addExact(estimateMessages(preamble), estimateProjectionTokens(path));
+  }
+
   /** 以最新 complete 压缩 projection 估算当前 provider 上下文 token（wrapper summary + cut 后保留段）。 */
   public static long estimateProjectionTokens(EntryPath path) {
     Objects.requireNonNull(path, "path");

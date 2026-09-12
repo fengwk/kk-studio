@@ -36,9 +36,9 @@ class UpstreamTestManifestTest {
   private static final int EXPECTED_TOTAL_SOURCES = 70;
   private static final int EXPECTED_TOTAL_METHODS = 502;
   private static final int EXPECTED_TOTAL_INVOCATIONS = 659;
-  private static final int EXPECTED_PORTED_INVOCATIONS = 247;
+  private static final int EXPECTED_PORTED_INVOCATIONS = 238;
   private static final int EXPECTED_IN_SCOPE_PENDING_INVOCATIONS = 0;
-  private static final int EXPECTED_OUT_OF_SCOPE_INVOCATIONS = 412;
+  private static final int EXPECTED_OUT_OF_SCOPE_INVOCATIONS = 421;
   private static final int EXPECTED_REAL_CREDENTIAL_INVOCATIONS = 390;
 
   private static final ObjectMapper MAPPER = new ObjectMapper();

@@ -55,7 +55,7 @@ describe('AiResourceForms', () => {
     expect(labels[1]).toBe('API Key（可选）')
   })
 
-  it('edits the new model abilities, pricing, variants, and collapsed advanced options', async () => {
+  it('edits the new model abilities, pricing, variants, and wire modelId', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
@@ -69,24 +69,20 @@ describe('AiResourceForms', () => {
     expect(screen.getByText(/币种固定 USD/)).toBeInTheDocument()
     expect(screen.getByLabelText('Reasoning Effort 1')).toBeInTheDocument()
     expect(screen.getByText('思考强度')).toBeInTheDocument()
+    // 空值即协议默认：思考强度不强必填，默认空
+    expect(screen.getByLabelText('Reasoning Effort 1')).toHaveValue('')
+    expect(screen.getByLabelText('Reasoning Effort 1')).not.toBeRequired()
 
-    const firstAdvanced = screen.getAllByText('高级选项')[0].closest('details')
-    expect(firstAdvanced).not.toHaveAttribute('open')
+    await user.type(screen.getByLabelText('Model ID'), 'upstream-claude-3')
+    expect(screen.getByDisplayValue('upstream-claude-3')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '添加 Variant' }))
     const secondNameInput = screen.getByLabelText('Variant ID 2')
     expect(secondNameInput).toHaveValue('variant-2')
     await user.clear(secondNameInput)
     await user.type(secondNameInput, 'creative')
-    await user.clear(screen.getByLabelText('Reasoning Effort 2'))
-    await user.type(screen.getByLabelText('Reasoning Effort 2'), 'high')
-    await user.type(screen.getByLabelText('Variant Max Output Tokens 2'), '512')
-
-    await user.click(screen.getAllByText('高级选项')[1])
-    await user.type(screen.getByLabelText('Temperature 2'), '0.8')
-    await user.type(screen.getByLabelText('Top P 2'), '0.9')
-    await user.type(screen.getByLabelText('Top K 2'), '32')
-    await user.type(screen.getByLabelText('Stop Sequences 2'), 'END,STOP')
+    await user.selectOptions(screen.getByLabelText('Reasoning Effort 2'), 'high')
+    expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('high')
     expect(screen.getByDisplayValue('creative')).toBeInTheDocument()
 
     await selectFormOption(user, 'Default Variant', 'creative')
@@ -173,23 +169,24 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('IMAGE')).not.toBeChecked()
   })
 
-  it('prefills reasoning effort with the variant id and restores effort inputs on re-enable', async () => {
+  /** 空思考强度表示不覆盖协议默认：开启/重新开启 Reasoning 都不得自动补全。 */
+  it('keeps an empty reasoning effort as the protocol default and restores effort inputs on re-enable', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
-    // 开启 Reasoning 时新增的 variant 预填 medium 思考强度
+    // 新增 variant 的思考强度默认为空（协议默认），且提示文案说明空值语义
     await user.click(screen.getByRole('button', { name: '添加 Variant' }))
-    expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('medium')
-    expect(screen.getByText(/思考强度为自由字符串/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('')
+    expect(screen.getByText(/留空表示不覆盖 Provider 协议默认/)).toBeInTheDocument()
 
     await user.click(screen.getByLabelText('Reasoning'))
     expect(screen.queryByLabelText('Reasoning Effort 1')).not.toBeInTheDocument()
     expect(screen.getByText(/请先勾选上方 Reasoning/)).toBeInTheDocument()
 
-    // 重新开启后，空思考强度用 variant id 预填
+    // 重新开启后仍然是空值，不得被 variant id / medium 补全
     await user.click(screen.getByLabelText('Reasoning'))
-    expect(screen.getByLabelText('Reasoning Effort 1')).toHaveValue('medium')
-    expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('medium')
+    expect(screen.getByLabelText('Reasoning Effort 1')).toHaveValue('')
+    expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('')
   })
 
   it('sanitizes integer limits and decimal pricing while editing', async () => {
@@ -206,15 +203,15 @@ describe('AiResourceForms', () => {
     await user.type(maxOutputInput, '7.5')
     expect(maxOutputInput).toHaveValue(75)
 
-    const variantMaxOutput = screen.getByLabelText('Variant Max Output Tokens 1')
-    await user.clear(variantMaxOutput)
-    await user.type(variantMaxOutput, '5a1b2')
-    expect(variantMaxOutput).toHaveValue(512)
-
     const inputPrice = screen.getByLabelText('Input USD per million tokens')
     await user.clear(inputPrice)
     await user.type(inputPrice, '1.2.3')
     expect(inputPrice).toHaveValue(1.23)
+
+    const outputPrice = screen.getByLabelText('Output USD per million tokens')
+    await user.clear(outputPrice)
+    await user.type(outputPrice, '4.5.6')
+    expect(outputPrice).toHaveValue(4.56)
   })
 
   it('keeps the default variant unchanged when renaming a non-default variant', async () => {

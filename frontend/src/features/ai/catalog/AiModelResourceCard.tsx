@@ -61,6 +61,7 @@ export function ModelResourceCard({
       subtitle={model.description || ref}
       rows={[
         [t('ai.catalog.card.ref'), ref],
+        [t('ai.catalog.card.modelId'), model.modelId],
         [t('ai.catalog.card.limit'), formatLimit(model)],
         [t('ai.catalog.card.ability'), formatAbilities(model)],
         [t('ai.catalog.card.default'), defaultVariant || t('ai.catalog.card.emptyValue')],

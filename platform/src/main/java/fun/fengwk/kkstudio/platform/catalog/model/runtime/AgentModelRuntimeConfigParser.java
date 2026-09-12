@@ -24,11 +24,15 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
 /**
  * Agent model 配置的唯一类型化 codec/parser。
+ *
+ * <p>variant 只承载 reasoning effort（high/medium/low/off，off 为显式关闭、null 为协议默认）；输出预算由 {@code
+ * limit.output} 承担，采样参数与单次上限不属于本 schema。
  *
  * <p>本类独占对持久化 {@code config} JSONB 列的所有读写。变更与读取都必须经过 {@link #decode(String)} / {@link
  * #encode(AgentModelConfigDTO)}；任何自行执行 ObjectMapper 映射的其他路径都会与规范漂移。 校验针对类型化 DTO 进行；持久化 JSON
@@ -189,47 +193,11 @@ public final class AgentModelRuntimeConfigParser {
       if (!ids.add(variant.getId())) {
         throw invalid("config.variants contains duplicate id: " + variant.getId());
       }
-      Integer maxOutputTokens = variant.getMaxOutputTokens();
-      if (maxOutputTokens != null && maxOutputTokens <= 0) {
-        throw invalid(path + ".maxOutputTokens must be positive");
-      }
-      if (maxOutputTokens != null && maxOutputTokens > limit.getOutput()) {
-        throw invalid(path + ".maxOutputTokens must not exceed model limit.output");
-      }
-      Double temperature = variant.getTemperature();
-      if (temperature != null) {
-        requireFinite(temperature, path + ".temperature");
-        if (temperature < 0) {
-          throw invalid(path + ".temperature must not be negative");
-        }
-      }
-      Double topP = variant.getTopP();
-      if (topP != null) {
-        requireFinite(topP, path + ".topP");
-        if (topP <= 0 || topP > 1) {
-          throw invalid(path + ".topP must be in (0, 1]");
-        }
-      }
-      Integer topK = variant.getTopK();
-      if (topK != null && topK <= 0) {
-        throw invalid(path + ".topK must be positive");
-      }
-      Double frequencyPenalty = variant.getFrequencyPenalty();
-      if (frequencyPenalty != null) {
-        requireFinite(frequencyPenalty, path + ".frequencyPenalty");
-      }
-      Double presencePenalty = variant.getPresencePenalty();
-      if (presencePenalty != null) {
-        requireFinite(presencePenalty, path + ".presencePenalty");
-      }
-      List<String> stopSequences = variant.getStopSequences();
-      if (stopSequences != null) {
-        for (int s = 0; s < stopSequences.size(); s++) {
-          String value = stopSequences.get(s);
-          if (value == null || value.isBlank()) {
-            throw invalid(path + ".stopSequences[" + s + "] must be a non-blank string");
-          }
-        }
+      validateReasoningEffort(variant.getReasoningEffort(), path);
+      // reasoning 关闭时任何非 null reasoningEffort 都是自相矛盾配置；null（协议默认）仍然合法。
+      if (Boolean.FALSE.equals(abilities.getReasoning()) && variant.getReasoningEffort() != null) {
+        throw invalid(
+            path + ".reasoningEffort must be null when config.abilities.reasoning is false");
       }
     }
     String defaultVariant = config.getDefaultVariant();
@@ -271,6 +239,15 @@ public final class AgentModelRuntimeConfigParser {
         pricing.getReasoningPerMillionTokens(), path + ".reasoningPerMillionTokens");
   }
 
+  private void validateReasoningEffort(String reasoningEffort, String path) {
+    if (reasoningEffort == null) {
+      return;
+    }
+    if (!ModelVariant.REASONING_EFFORTS.contains(reasoningEffort.trim().toLowerCase(Locale.ROOT))) {
+      throw invalid(path + ".reasoningEffort must be one of " + ModelVariant.REASONING_EFFORTS);
+    }
+  }
+
   private static void requireNonBlank(String value, String path) {
     if (value == null || value.isBlank()) {
       throw invalid(path + " must be a non-blank string");
@@ -292,12 +269,6 @@ public final class AgentModelRuntimeConfigParser {
     }
     if (value.signum() < 0) {
       throw invalid(path + " must not be negative");
-    }
-  }
-
-  private static void requireFinite(Double value, String path) {
-    if (!Double.isFinite(value)) {
-      throw invalid(path + " must be finite");
     }
   }
 
@@ -324,16 +295,7 @@ public final class AgentModelRuntimeConfigParser {
 
   private static ModelVariant toModelVariant(AgentModelVariantDTO variant) {
     try {
-      return new ModelVariant(
-          variant.getId(),
-          variant.getMaxOutputTokens(),
-          variant.getTemperature(),
-          variant.getTopP(),
-          variant.getTopK(),
-          variant.getFrequencyPenalty(),
-          variant.getPresencePenalty(),
-          variant.getStopSequences(),
-          variant.getReasoningEffort());
+      return new ModelVariant(variant.getId(), variant.getReasoningEffort());
     } catch (IllegalArgumentException error) {
       throw invalid(
           "config.variants[" + variant.getId() + "] is invalid: " + error.getMessage(), error);

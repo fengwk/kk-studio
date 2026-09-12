@@ -56,8 +56,7 @@ class ModelDescriptorJsonCodecTest {
   /** variant 完整字段 + nullable 字段必须按 wire 输出，且 decode 后保留 null。 */
   @Test
   void roundTripsVariantWithAllNullables() {
-    ModelVariant variant =
-        new ModelVariant("id", null, null, null, null, null, null, List.of(), null);
+    ModelVariant variant = new ModelVariant("id");
     String json = codec.encodeVariant(variant);
     ModelVariant decoded = codec.decodeVariant(json);
     assertEquals(variant, decoded);
@@ -66,8 +65,7 @@ class ModelDescriptorJsonCodecTest {
   /** Variant 含全 nullable 字段填充。 */
   @Test
   void roundTripsVariantWithFilledNullables() {
-    ModelVariant variant =
-        new ModelVariant("id", 100, 0.5, 0.9, 40, -0.1, 0.2, List.of("STOP", "END"), "high");
+    ModelVariant variant = new ModelVariant("id", "high");
     String json = codec.encodeVariant(variant);
     ModelVariant decoded = codec.decodeVariant(json);
     assertEquals(variant, decoded);
@@ -91,14 +89,22 @@ class ModelDescriptorJsonCodecTest {
     ArrayNode names = NODES.arrayNode();
     root.fieldNames().forEachRemaining(names::add);
     assertEquals(
-        List.of("providerName", "modelName", "inputModalities", "tools", "reasoning", "pricing"),
+        List.of(
+            "providerName",
+            "modelName",
+            "modelId",
+            "inputModalities",
+            "tools",
+            "reasoning",
+            "pricing"),
         List.of(
             names.get(0).asText(),
             names.get(1).asText(),
             names.get(2).asText(),
             names.get(3).asText(),
             names.get(4).asText(),
-            names.get(5).asText()));
+            names.get(5).asText(),
+            names.get(6).asText()));
   }
 
   /** BigDecimal 字段以 plain 字符串输出。 */
@@ -268,13 +274,12 @@ class ModelDescriptorJsonCodecTest {
   @Test
   void providerRequestModelAndVariantMatchSharedCodec() {
     ModelDescriptor model = canonicalDescriptor();
-    ModelVariant variant =
-        new ModelVariant(
-            "balanced", 1024, 0.2, 0.8, 40, -0.1, 0.1, List.of("END", "STOP"), "medium");
+    ModelVariant variant = new ModelVariant("balanced", "medium");
     ProviderRequest request =
         new ProviderRequest(
             model,
             variant,
+            1024,
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("hello")))),
@@ -325,6 +330,7 @@ class ModelDescriptorJsonCodecTest {
     return new ModelDescriptor(
         "openai",
         "gpt-5-mini",
+        "gpt-5-mini",
         Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
         true,
         true,
@@ -362,12 +368,11 @@ class ModelDescriptorJsonCodecTest {
    */
   private static ProviderRequest canonicalProviderRequest() {
     ModelDescriptor model = canonicalDescriptor();
-    ModelVariant variant =
-        new ModelVariant(
-            "balanced", 1024, 0.2, 0.8, 40, -0.1, 0.1, List.of("END", "STOP"), "medium");
+    ModelVariant variant = new ModelVariant("balanced", "medium");
     return new ProviderRequest(
         model,
         variant,
+        1024,
         new ArrayList<>(),
         List.of(new ProviderToolDefinition("lookup", "Look up facts", "{}")),
         ProviderCacheControl.none());

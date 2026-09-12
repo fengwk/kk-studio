@@ -902,8 +902,10 @@ class ModelAttemptMaterializationTest {
   private static ModelRequestSpec requestSpec() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         modelDescriptor(),
-        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        new ModelVariant("v1"),
+        1024,
         List.of(),
         List.of(),
         List.of(),
@@ -914,6 +916,7 @@ class ModelAttemptMaterializationTest {
   private static ModelDescriptor modelDescriptor() {
     return new ModelDescriptor(
         "provider",
+        "model",
         "model",
         Set.of(ModelInputModality.TEXT),
         true,
@@ -979,8 +982,10 @@ class ModelAttemptMaterializationTest {
             null);
     return new ModelRequestSpec(
         ProviderType.OPENAI,
+        new UUID(0L, 1L),
         modelDescriptor(),
-        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        new ModelVariant("v1"),
+        1024,
         List.of(),
         List.of(binding),
         List.of(),

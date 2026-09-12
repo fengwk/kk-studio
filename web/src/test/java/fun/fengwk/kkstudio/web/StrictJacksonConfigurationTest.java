@@ -111,6 +111,21 @@ class StrictJacksonConfigurationTest {
         });
   }
 
+  /** 测试意图：验证 HTTP DTO 边界拒绝已从 Model Variant 契约删除的字段，而不是静默丢弃。 */
+  @Test
+  void shouldRejectUnknownAgentModelVariantFields() {
+    runner.run(
+        context -> {
+          JsonMapper mapper = context.getBean(JsonMapper.class);
+
+          assertThrows(
+              JacksonException.class,
+              () ->
+                  mapper.readValue(
+                      "{\"id\":\"default\",\"temperature\":0.5}", AgentModelVariantDTO.class));
+        });
+  }
+
   /** 测试意图：验证 Long/long 序列化为字符串且 Date 输出为数值时间戳。 */
   @Test
   void shouldPreserveLongToStringAndDateTimestampFeatures() {

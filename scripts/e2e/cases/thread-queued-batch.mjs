@@ -96,11 +96,12 @@ registerCase({
       const modelResponse = await ctx.call('POST', '/api/ai/catalog/models', {
         providerName: provider.name,
         name: `e2e-model-queue-${suffix}`,
+        modelId: `wire-queue-${suffix}`,
         description: 'Local queued command batch E2E model.',
         config: baseModelConfig({
           limit: { context: 4096, output: 128 },
           abilities: { tools: false, reasoning: false, inputModalities: ['TEXT'] },
-          variants: [{ id: 'default', temperature: 0 }],
+          variants: [{ id: 'default' }],
         }),
       })
       model = envelopeData(modelResponse.json)
