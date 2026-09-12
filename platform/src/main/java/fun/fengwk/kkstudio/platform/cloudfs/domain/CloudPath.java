@@ -220,9 +220,36 @@ public final class CloudPath implements Comparable<CloudPath> {
     return !segments.isEmpty() && ARTIFACTS_ROOT_SEGMENT.equals(segments.get(0));
   }
 
+  /**
+   * 按分段序列的层级全序比较路径：
+   *
+   * <ul>
+   *   <li>逐个分段依次比较；在首个不相同的分段处，按分段字符串字典序决出先后；
+   *   <li>若一方分段列表是另一方的前缀（即祖先与后代关系），则分段数较少者（祖先）排在前面；
+   *   <li>两路径分段序列完全相同当且仅当 compareTo 返回 0，与 equals 保持严格一致。
+   * </ul>
+   *
+   * <p>该全序确保任意从根到叶的路径（root-to-leaf）上的所有祖先节点均严格小于其后代节点，
+   * 从而支撑并发移动操作（moveNode）中统一按此全序逐段获取悲观行锁，彻底杜绝死锁与成环风险。 例如：{@code /a < /a/b < /a!}（避免标准 canonical
+   * 字符串字典序中由于 {@code '!' < '/'} 导致的 {@code /a! < /a/b} 错误逆序）。
+   *
+   * @param other 待比较的另一路径对象
+   * @return 负整数、零或正整数，分别表示当前路径小于、等于或大于指定路径
+   */
   @Override
   public int compareTo(CloudPath other) {
-    return this.canonicalPath.compareTo(other.canonicalPath);
+    Objects.requireNonNull(other, "other");
+    if (this == other) {
+      return 0;
+    }
+    int minLen = Math.min(this.segments.size(), other.segments.size());
+    for (int i = 0; i < minLen; i++) {
+      int cmp = this.segments.get(i).compareTo(other.segments.get(i));
+      if (cmp != 0) {
+        return cmp;
+      }
+    }
+    return Integer.compare(this.segments.size(), other.segments.size());
   }
 
   @Override

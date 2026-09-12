@@ -403,12 +403,25 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
     CloudNode sourceNode;
     UUID targetParentId = null;
 
-    // 行锁加锁保证：每条路径逐段 root-to-leaf 获取行锁；先解析两个 endpoint 中 canonical 较小者，
-    // 因此去重后的 cloud_node 锁顺序全局一致；祖先移动也被路径行锁覆盖。
+    // 行锁加锁顺序证明：
+    // 1. 采用 CloudPath 基于分段序列的层级全序（hierarchical segment order，见 CloudPath.compareTo）：
+    //    共同前缀后按 segment 字典序比较；一方为前缀时祖先（分段数较少者）排在前面。
+    //    因此对任意单一路径，从根到叶 root-to-leaf 访问的所有祖先节点序列严格单调递增。
+    // 2. 对于 sourcePath 与 targetParentPath 两个 endpoint：
+    //    令 A = min(sourcePath, targetParentPath), B = max(sourcePath, targetParentPath)（由 compareTo
+    // 判定）。
+    //    - 若 A 是 B 的祖先，则 A 的所有节点是 B 的前缀；先解析 A 再解析 B，B 遇到 A 的节点时已持有行锁，
+    //      新加锁节点为 B 独有且为 A 的后代，严格满足加锁顺序单调递增。
+    //      （注：sourcePath 为 targetParentPath 的祖先已在入口处由 isDescendantOf 检测并抛出 CloudCycleException）。
+    //    - 若 A 与 B 无祖先后代关系，设其在第 r+1 个分段首次分叉，A 的分段为 a_{r+1}，B 为 b_{r+1}，
+    //      由 A < B 知 a_{r+1} < b_{r+1}。因此 A 的独有后代路径（均以 a_{r+1} 为前缀）在全序中严格小于
+    //      B 的独有后代路径（均以 b_{r+1} 为前缀）。先解析 A 再解析 B，去重后的行锁获取序列为：
+    //      公共祖先序列 -> A 独有祖先/节点序列 -> B 独有祖先/节点序列，全局严格单调递增。
+    // 3. 全局任意并发操作中涉及的节点行锁获取均严格服从该层级全序，彻底消除 AB-BA 死锁环。
     if (targetParentPath.isRoot()) {
       sourceNode = resolveExistingNodeForUpdate(sourcePath);
     } else {
-      int cmp = sourcePath.value().compareTo(targetParentPath.value());
+      int cmp = sourcePath.compareTo(targetParentPath);
       CloudNode targetParent;
       if (cmp <= 0) {
         sourceNode = resolveExistingNodeForUpdate(sourcePath);
