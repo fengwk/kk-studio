@@ -952,52 +952,57 @@ class EnvironmentOperationDispatcherTest {
     assertTrue(capIds.contains(EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE));
   }
 
-  /**
-   * 测试意图：验证 MCP_SERVER_DISCOVER 在 harness capability catalog 尚未注册 mcp.local.discover descriptor 时
-   * fail closed：绝不向 Daemon 发起分发，而是安全收敛至 coordinateExecutionFailure。
-   */
+  /** 测试意图：验证 MCP_SERVER_DISCOVER 使用已注册的管理专用 descriptor 分发给 Daemon。 */
   @Test
-  void executeOperation_mcpServerDiscoverUnregisteredCapability_failsClosed() throws Exception {
-    CountDownLatch coordinated = new CountDownLatch(1);
+  void executeOperation_mcpServerDiscover_dispatchesRegisteredCapability() throws Exception {
+    CountDownLatch invoked = new CountDownLatch(1);
+    ArgumentCaptor<EnvironmentCapabilityExecutionRequest> requestCaptor =
+        ArgumentCaptor.forClass(EnvironmentCapabilityExecutionRequest.class);
 
     UUID mcpResourceId = UUID.randomUUID();
+    String arguments =
+        """
+        {
+          "serverId": "%s",
+          "configVersion": 1,
+          "config": {
+            "type": "local",
+            "environmentId": "%s",
+            "command": ["node", "server.js"],
+            "cwd": "/tmp"
+          }
+        }
+        """
+            .formatted(mcpResourceId, envId);
     ClaimedOperation discoverOp =
         createClaimedOperation(
             UUID.randomUUID(),
             EnvironmentOperationType.MCP_SERVER_DISCOVER,
             mcpResourceId,
-            "{\"customParam\":\"val\"}",
+            arguments,
             Duration.ofSeconds(30));
 
     when(repository.claimPendingWithTimeout(eq(nodeId), eq(50)))
         .thenReturn(List.of(discoverOp))
         .thenReturn(List.of());
 
-    when(coordinator.coordinateExecutionFailure(
-            any(), any(), any(), any(), any(), any(), any(), anyLong(), any()))
+    when(transport.invoke(any(), requestCaptor.capture(), any()))
         .thenAnswer(
             invocation -> {
-              coordinated.countDown();
-              return OperationPublishOutcome.APPLIED;
+              invoked.countDown();
+              return mock(EnvironmentCapabilityExecutionHandle.class);
             });
 
     dispatcher.start();
     dispatcher.wake();
-    assertTrue(coordinated.await(5, TimeUnit.SECONDS));
+    assertTrue(invoked.await(5, TimeUnit.SECONDS));
 
-    // 未注册能力绝不发起 transport.invoke
-    verify(transport, never()).invoke(any(), any(), any());
-    verify(coordinator)
+    assertEquals(
+        EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER, requestCaptor.getValue().descriptor().id());
+    assertEquals(discoverOp.operation().id().toString(), requestCaptor.getValue().call().id());
+    verify(coordinator, never())
         .coordinateExecutionFailure(
-            eq(envId),
-            eq(discoverOp.operation().id()),
-            eq(nodeId),
-            eq(leaseToken),
-            eq(EnvironmentOperationType.MCP_SERVER_DISCOVER),
-            eq(EnvironmentOperationResourceType.MCP_SERVER),
-            eq(mcpResourceId),
-            eq(1L),
-            eq("{\"customParam\":\"val\"}"));
+            any(), any(), any(), any(), any(), any(), any(), anyLong(), any());
   }
 
   /** 测试意图：验证操作参数确定性构建失败时，安全推进至 coordinateExecutionFailure。 */

@@ -341,27 +341,40 @@ class EnvironmentOperationServiceTest extends PostgresSpringTestSupport {
                 60000L));
   }
 
-  /**
-   * 测试意图：验证通用 createOperation 对未在 harness capability catalog 注册 descriptor 的操作类型 fail
-   * closed，绝不产生无法分发/无法终结的悬挂操作（MCP 目录切片注册 mcp.local.discover 后自动放开）。
-   */
+  /** 测试意图：验证已注册的 MCP discovery 管理能力可通过通用入口创建并持久化资源身份。 */
   @Test
-  void createGenericOperationUnregisteredCapabilityFailsClosed() {
+  void createGenericMcpDiscoveryOperation() {
     UUID mcpResourceId = UUID.randomUUID();
-    AiValidationException ex =
-        assertThrows(
-            AiValidationException.class,
-            () ->
-                operationService.createOperation(
-                    environmentId,
-                    EnvironmentOperationType.MCP_SERVER_DISCOVER,
-                    EnvironmentOperationResourceType.MCP_SERVER,
-                    mcpResourceId,
-                    0L,
-                    "{\"url\":\"http://localhost:8080\"}",
-                    "{\"type\":\"mcp\"}",
-                    60000L));
-    assertTrue(ex.getMessage().contains("is not registered"));
+    String arguments =
+        """
+        {
+          "serverId": "%s",
+          "configVersion": 0,
+          "config": {
+            "type": "local",
+            "environmentId": "%s",
+            "command": ["node", "server.js"],
+            "cwd": "/tmp"
+          }
+        }
+        """
+            .formatted(mcpResourceId, environmentId);
+
+    EnvironmentOperationDTO created =
+        operationService.createOperation(
+            environmentId,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
+            EnvironmentOperationResourceType.MCP_SERVER,
+            mcpResourceId,
+            0L,
+            arguments,
+            "{\"type\":\"local\"}",
+            60000L);
+
+    assertEquals("MCP_SERVER", created.getResourceType());
+    assertEquals(mcpResourceId.toString(), created.getResourceId());
+    assertEquals("MCP_SERVER_DISCOVER", created.getOperationType());
+    assertEquals("PENDING", created.getStatus());
   }
 
   /** 测试意图：验证通用 createOperation 拒绝 operationType 与 resourceType 不匹配的组合。 */
