@@ -36,6 +36,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * BuiltinHarnessContributor 的全面目录冻结与完整能力清单测试。
@@ -251,6 +252,111 @@ class BuiltinHarnessContributorTest {
       assertTrue(agentToolIds.add(toolContribution.definition().id()));
       assertTrue(contributionIds.add(toolContribution.id()));
     }
+  }
+
+  /**
+   * 验证动态 MCP 能力（mcp.local.call / mcp.local.discover）绝不会自动注册为模型工具。
+   *
+   * <p>即使 EnvironmentCapabilityCatalog.descriptors() 包含 mcp.local.call， BuiltinHarnessContributor
+   * 也严格只注册固定的 9 个环境能力工具， 确保动态 MCP 工具家族或管理能力绝不会被自动注册泄漏到模型工具目录。
+   */
+  @Test
+  void dynamicMcpCapabilitiesAreNeverAutoRegisteredAsModelTools() {
+    // 前置断言：确认 EnvironmentCapabilityCatalog.descriptors() 中确实包含 MCP_LOCAL_CALL，
+    // managementDescriptors() 中确实包含 MCP_LOCAL_DISCOVER。
+    assertTrue(
+        EnvironmentCapabilityCatalog.descriptors().stream()
+            .anyMatch(
+                descriptor -> descriptor.id().equals(EnvironmentCapabilityIds.MCP_LOCAL_CALL)),
+        "Precondition: EnvironmentCapabilityCatalog.descriptors() must contain MCP_LOCAL_CALL");
+    assertTrue(
+        EnvironmentCapabilityCatalog.managementDescriptors().stream()
+            .anyMatch(
+                descriptor -> descriptor.id().equals(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER)),
+        "Precondition: EnvironmentCapabilityCatalog.managementDescriptors() must contain MCP_LOCAL_DISCOVER");
+
+    Tool loadSkill = stubTool("load_skill", ToolRequirements.environment());
+    Tool task = stubTool("task", ToolRequirements.none());
+    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(loadSkill, task);
+
+    HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
+
+    // 1. 断言没有任何已注册工具绑定到 MCP_LOCAL_CALL 或 MCP_LOCAL_DISCOVER
+    for (ToolContribution tool : catalog.tools()) {
+      ToolDescriptor descriptor = tool.definition().descriptor();
+      assertFalse(
+          descriptor.name().toLowerCase().contains("mcp"),
+          "Registered tool name must not contain mcp: " + descriptor.name());
+      assertFalse(
+          descriptor.rendererKey().toLowerCase().contains("mcp"),
+          "Registered tool rendererKey must not contain mcp: " + descriptor.rendererKey());
+
+      if (tool.tool() instanceof EnvironmentCapabilityTool envTool) {
+        EnvironmentCapabilityId capId = envTool.capability().id();
+        assertFalse(
+            capId.equals(EnvironmentCapabilityIds.MCP_LOCAL_CALL),
+            "Registered tool must not be bound to mcp.local.call");
+        assertFalse(
+            capId.equals(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER),
+            "Registered tool must not be bound to mcp.local.discover");
+      }
+    }
+
+    // 2. 确认通过模型名称无法查找到任何 MCP 相关工具
+    assertTrue(catalog.findTool("mcp.local.call").isEmpty());
+    assertTrue(catalog.findTool("mcp_local_call").isEmpty());
+    assertTrue(catalog.findTool("mcp.local.discover").isEmpty());
+    assertTrue(catalog.findTool("mcp_local_discover").isEmpty());
+
+    // 3. 收集所有由 EnvironmentCapabilityTool 支持的工具能力 ID，断言恰好等于 9 个固定能力
+    Set<EnvironmentCapabilityId> expectedCapabilityIds =
+        Set.of(
+            EnvironmentCapabilityIds.FS_READ,
+            EnvironmentCapabilityIds.FS_WRITE,
+            EnvironmentCapabilityIds.FS_APPLY_EDIT,
+            EnvironmentCapabilityIds.PROCESS_EXEC,
+            EnvironmentCapabilityIds.FS_SEARCH,
+            EnvironmentCapabilityIds.FS_FIND,
+            EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
+            EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
+            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
+
+    List<EnvironmentCapabilityTool> envTools =
+        catalog.tools().stream()
+            .map(ToolContribution::tool)
+            .filter(EnvironmentCapabilityTool.class::isInstance)
+            .map(EnvironmentCapabilityTool.class::cast)
+            .toList();
+
+    assertEquals(9, envTools.size(), "Environment capability backed tools count must be exactly 9");
+
+    Set<EnvironmentCapabilityId> registeredCapabilityIds =
+        envTools.stream().map(tool -> tool.capability().id()).collect(Collectors.toSet());
+
+    assertEquals(expectedCapabilityIds, registeredCapabilityIds);
+    assertFalse(registeredCapabilityIds.contains(EnvironmentCapabilityIds.MCP_LOCAL_CALL));
+    assertFalse(registeredCapabilityIds.contains(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER));
+
+    // 4. 断言已注册的环境工具 AgentToolId 集合恰好等于固定的 9 个内置环境工具 ID
+    Set<AgentToolId> expectedAgentToolIds =
+        Set.of(
+            BuiltinToolIds.READ,
+            BuiltinToolIds.WRITE,
+            BuiltinToolIds.EDIT,
+            BuiltinToolIds.BASH,
+            BuiltinToolIds.GREP,
+            BuiltinToolIds.FIND,
+            BuiltinToolIds.LSP_GOTO_DEFINITION,
+            BuiltinToolIds.LSP_WORKSPACE_SYMBOLS,
+            BuiltinToolIds.LSP_JAVA_DECOMPILE);
+
+    Set<AgentToolId> registeredAgentToolIds =
+        catalog.tools().stream()
+            .filter(t -> t.tool() instanceof EnvironmentCapabilityTool)
+            .map(t -> t.definition().id())
+            .collect(Collectors.toSet());
+
+    assertEquals(expectedAgentToolIds, registeredAgentToolIds);
   }
 
   private static void assertEnvironmentTool(

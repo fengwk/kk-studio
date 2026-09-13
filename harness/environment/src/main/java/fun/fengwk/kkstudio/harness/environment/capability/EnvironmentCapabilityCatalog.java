@@ -26,8 +26,8 @@ import java.util.Set;
  */
 public final class EnvironmentCapabilityCatalog {
 
-  /** capability catalog 版本：v2 新增管理专用 Skill 来源操作能力。 */
-  public static final String CATALOG_VERSION = "2";
+  /** capability catalog 版本：v3 新增 local MCP 执行与发现能力。 */
+  public static final String CATALOG_VERSION = "3";
 
   /** 基础 capability 版本；当前三个来源管理能力使用该版本。 */
   public static final String VERSION = "1";
@@ -104,7 +104,8 @@ public final class EnvironmentCapabilityCatalog {
             EnvironmentCapabilityIds.SKILL_LOAD,
             SKILL_LOAD_VERSION,
             loadSchema(EnvironmentCapabilityIds.SKILL_LOAD),
-            Duration.ofMinutes(1)));
+            Duration.ofMinutes(1)),
+        descriptor(EnvironmentCapabilityIds.MCP_LOCAL_CALL, Duration.ofHours(1)));
   }
 
   /**
@@ -116,7 +117,8 @@ public final class EnvironmentCapabilityCatalog {
     return List.of(
         descriptor(EnvironmentCapabilityIds.SKILL_SOURCE_REFRESH, Duration.ofMinutes(5)),
         descriptor(EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL, Duration.ofMinutes(30)),
-        descriptor(EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE, Duration.ofMinutes(30)));
+        descriptor(EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE, Duration.ofMinutes(30)),
+        descriptor(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER, Duration.ofMinutes(5)));
   }
 
   /** 全部已注册 descriptor：模型可见能力在前，管理专用能力在后。 */
@@ -165,9 +167,11 @@ public final class EnvironmentCapabilityCatalog {
   }
 
   private static InputSchema loadSchema(EnvironmentCapabilityId id) {
-    // 三个管理能力共用同一份冻结来源配置 arguments schema：它们只差执行语义，不差 wire 形状。
+    // 三个 skill.source 管理能力共用同一份冻结来源配置 arguments schema：它们只差执行语义，不差 wire 形状。
     String fileName =
-        EnvironmentCapabilityIds.MANAGEMENT_ONLY.contains(id)
+        (id.equals(EnvironmentCapabilityIds.SKILL_SOURCE_REFRESH)
+                || id.equals(EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL)
+                || id.equals(EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE))
             ? SHARED_SOURCE_SCHEMA
             : id.value() + ".schema.json";
     return CODEC.decode(loadText(fileName));
