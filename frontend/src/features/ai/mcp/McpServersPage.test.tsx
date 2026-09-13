@@ -782,8 +782,60 @@ describe('McpServersPage', () => {
     expect(envSelect).toBeDisabled()
     expect(submitBtn).toBeDisabled()
 
+    // backdrop 也不能绕过 pending 状态关闭弹窗，否则请求完成后的结果与错误将失去归属
+    const backdrop = dialog.parentElement
+    expect(backdrop).toHaveClass('modal-backdrop')
+    fireEvent.mouseDown(backdrop!)
+    expect(screen.getByRole('dialog', { name: /编辑 MCP 服务/ })).toBeInTheDocument()
+
     // 结束 update
     resolveUpdate()
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /编辑 MCP 服务/ })).toBeNull()
+    })
+  })
+
+  /**
+   * 测试意图：验证 MCP 发现请求挂起时 backdrop 不能绕过禁用按钮关闭编辑弹窗。
+   */
+  it('keeps the edit modal open when its backdrop is clicked during pending discovery', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 100,
+      totalCount: 1,
+      results: [server({ id: 'srv-1', name: 'filesystem', version: '1' })],
+    })
+    vi.mocked(mcpServerService.getServerConfig).mockResolvedValue({
+      id: 'srv-1',
+      name: 'filesystem',
+      version: '1',
+      configJson: '{"type":"remote","url":"https://example.com/mcp"}',
+    })
+
+    let resolveDiscovery!: () => void
+    vi.mocked(mcpServerService.discoverServer).mockReturnValue(
+      new Promise((resolve) => {
+        resolveDiscovery = () =>
+          resolve({
+            server: server({ id: 'srv-1', name: 'filesystem', version: '1' }),
+            operation: null,
+          })
+      }),
+    )
+
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /编辑 MCP 服务/ }))
+
+    const dialog = await screen.findByRole('dialog', { name: /编辑 MCP 服务/ })
+    await user.click(await within(dialog).findByRole('button', { name: '发现工具' }))
+
+    const backdrop = dialog.parentElement
+    expect(backdrop).toHaveClass('modal-backdrop')
+    fireEvent.mouseDown(backdrop!)
+    expect(screen.getByRole('dialog', { name: /编辑 MCP 服务/ })).toBeInTheDocument()
+
+    resolveDiscovery()
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: /编辑 MCP 服务/ })).toBeNull()
     })
