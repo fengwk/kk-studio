@@ -321,15 +321,24 @@ public class EnvironmentOperationDispatcher {
           opId,
           nodeId,
           leaseToken,
-          op.sourceSetVersion(),
-          op.sourceId(),
-          op.sourceVersion());
+          op.operationType(),
+          op.resourceType(),
+          op.resourceId(),
+          op.resourceVersion(),
+          op.arguments());
       return;
     }
 
     ActiveExecution execution =
         new ActiveExecution(
-            opId, envId, leaseToken, op.sourceSetVersion(), op.sourceId(), op.sourceVersion());
+            opId,
+            envId,
+            leaseToken,
+            op.operationType(),
+            op.resourceType(),
+            op.resourceId(),
+            op.resourceVersion(),
+            op.arguments());
 
     EnvironmentCapabilityExecutionListener listener =
         new EnvironmentCapabilityExecutionListener() {
@@ -347,9 +356,11 @@ public class EnvironmentOperationDispatcher {
                   opId,
                   nodeId,
                   leaseToken,
-                  execution.sourceSetVersion,
-                  execution.sourceId,
-                  execution.sourceVersion,
+                  execution.operationType,
+                  execution.resourceType,
+                  execution.resourceId,
+                  execution.resourceVersion,
+                  execution.arguments,
                   result);
             }
           }
@@ -366,9 +377,11 @@ public class EnvironmentOperationDispatcher {
                     opId,
                     nodeId,
                     leaseToken,
-                    execution.sourceSetVersion,
-                    execution.sourceId,
-                    execution.sourceVersion);
+                    execution.operationType,
+                    execution.resourceType,
+                    execution.resourceId,
+                    execution.resourceVersion,
+                    execution.arguments);
               }
             }
           }
@@ -393,6 +406,7 @@ public class EnvironmentOperationDispatcher {
       } catch (EnvironmentCapabilitySendUncertainException e) {
         if (execution.terminal.compareAndSet(false, true)) {
           activeExecutions.remove(opId);
+          coordinator.coordinateTransportUnknown(opId, nodeId, leaseToken);
         }
         return;
       } catch (RuntimeException e) {
@@ -433,6 +447,7 @@ public class EnvironmentOperationDispatcher {
       case SKILL_REFRESH -> EnvironmentCapabilityIds.SKILL_SOURCE_REFRESH;
       case SKILL_INSTALL -> EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL;
       case SKILL_UPDATE -> EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE;
+      case MCP_SERVER_DISCOVER -> new EnvironmentCapabilityId("mcp.local.discover");
     };
   }
 
@@ -440,9 +455,11 @@ public class EnvironmentOperationDispatcher {
     final UUID operationId;
     final UUID environmentId;
     final UUID leaseToken;
-    final long sourceSetVersion;
-    final UUID sourceId;
-    final long sourceVersion;
+    final EnvironmentOperationType operationType;
+    final EnvironmentOperationResourceType resourceType;
+    final UUID resourceId;
+    final long resourceVersion;
+    final String arguments;
     final AtomicBoolean terminal = new AtomicBoolean(false);
     volatile boolean abandoned = false;
     volatile EnvironmentCapabilityExecutionHandle handle;
@@ -451,15 +468,19 @@ public class EnvironmentOperationDispatcher {
         UUID operationId,
         UUID environmentId,
         UUID leaseToken,
-        long sourceSetVersion,
-        UUID sourceId,
-        long sourceVersion) {
+        EnvironmentOperationType operationType,
+        EnvironmentOperationResourceType resourceType,
+        UUID resourceId,
+        long resourceVersion,
+        String arguments) {
       this.operationId = operationId;
       this.environmentId = environmentId;
       this.leaseToken = leaseToken;
-      this.sourceSetVersion = sourceSetVersion;
-      this.sourceId = sourceId;
-      this.sourceVersion = sourceVersion;
+      this.operationType = operationType;
+      this.resourceType = resourceType;
+      this.resourceId = resourceId;
+      this.resourceVersion = resourceVersion;
+      this.arguments = arguments;
     }
   }
 }

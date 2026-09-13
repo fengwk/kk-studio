@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * Environment Skill 来源操作公开安全响应 DTO。
+ * Environment 管理操作公开安全响应 DTO。
  *
  * <p>安全边界：物理移除了私有执行参数 {@code arguments}、内部认领代币 {@code leaseToken} 与内部执行节点标识 {@code
  * ownerNodeId}。版本字段均以 canonical 非负十进制字符串表示；摘要字段均为安全结构化 JSON 对象。
@@ -21,20 +21,20 @@ public class EnvironmentOperationDTO {
   /** 所属 Environment UUID。 */
   private String environmentId;
 
-  /** 目标来源 UUID。 */
-  private String sourceId;
+  /** 目标资源类型：SKILL_SOURCE / MCP_SERVER。 */
+  private String resourceType;
 
-  /** 操作类型：SKILL_REFRESH / SKILL_INSTALL / SKILL_UPDATE。 */
+  /** 目标资源 UUID。 */
+  private String resourceId;
+
+  /** 操作类型：SKILL_REFRESH / SKILL_INSTALL / SKILL_UPDATE / MCP_SERVER_DISCOVER。 */
   private String operationType;
 
   /** 生命周期状态：PENDING / RUNNING / SUCCEEDED / FAILED / UNKNOWN / CANCELLED。 */
   private String status;
 
-  /** 冻结的来源配置版本（canonical 非负十进制字符串）。 */
-  private String sourceVersion;
-
-  /** 冻结的来源集合代际版本（canonical 非负十进制字符串）。 */
-  private String sourceSetVersion;
+  /** 冻结的目标资源版本（canonical 非负十进制字符串）。 */
+  private String resourceVersion;
 
   /** 操作参数的安全结构化摘要（仅含来源类型等结构属性，绝不回显 URL、凭证或文件路径）。 */
   private Map<String, Object> parameterSummary;

@@ -111,6 +111,27 @@ class EnvironmentOperationDispatcherTest {
       EnvironmentOperationType type,
       String customArguments,
       Duration remainingTimeout) {
+    return createClaimedOperation(
+        specificOpId, type, type.resourceType(), sourceId, customArguments, remainingTimeout);
+  }
+
+  private ClaimedOperation createClaimedOperation(
+      UUID specificOpId,
+      EnvironmentOperationType type,
+      UUID resourceId,
+      String customArguments,
+      Duration remainingTimeout) {
+    return createClaimedOperation(
+        specificOpId, type, type.resourceType(), resourceId, customArguments, remainingTimeout);
+  }
+
+  private ClaimedOperation createClaimedOperation(
+      UUID specificOpId,
+      EnvironmentOperationType type,
+      EnvironmentOperationResourceType resourceType,
+      UUID resourceId,
+      String customArguments,
+      Duration remainingTimeout) {
     String arguments = customArguments;
     if (arguments == null) {
       DaemonSkillSourceConfig config =
@@ -134,11 +155,11 @@ class EnvironmentOperationDispatcherTest {
         new EnvironmentOperation(
             specificOpId,
             envId,
-            sourceId,
+            resourceType,
+            resourceId,
             type,
             EnvironmentOperationStatus.RUNNING,
             1L,
-            2L,
             arguments,
             "{\"type\":\"PATH\"}",
             Instant.now().plusSeconds(60),
@@ -223,7 +244,7 @@ class EnvironmentOperationDispatcherTest {
             });
 
     when(coordinator.coordinateResult(
-            any(), any(), any(), any(), anyLong(), any(), anyLong(), any()))
+            any(), any(), any(), any(), any(), any(), any(), anyLong(), any(), any()))
         .thenAnswer(
             invocation -> {
               coordinatedLatch.countDown();
@@ -287,7 +308,7 @@ class EnvironmentOperationDispatcherTest {
     verify(repository).markRunningUnknownOnShutdown(nodeId);
     // 迟到的回调必须被 ActiveExecution.terminal CAS 拦截，绝不调用 coordinator 写入第二条路径
     verify(coordinator, never())
-        .coordinateResult(any(), any(), any(), any(), anyLong(), any(), anyLong(), any());
+        .coordinateResult(any(), any(), any(), any(), any(), any(), any(), anyLong(), any(), any());
     verify(handle).cancel();
     assertEquals(0, dispatcher.getActiveHandleCount());
   }
@@ -556,37 +577,37 @@ class EnvironmentOperationDispatcherTest {
     verify(coordinator, never()).coordinateTransportUnknown(any(), any(), any());
   }
 
-  /** 测试意图：验证同步抛出 SendUncertainException 时，可能已发送，绝不重试，操作保持 RUNNING 等待超时清扫。 */
+  /** 测试意图：同步发送结果不确定时调用可能已经执行，必须立即标记 UNKNOWN，且绝不能重新调度。 */
   @Test
-  void sendUncertainRemainsRunning() throws Exception {
+  void sendUncertainCoordinatesUnknown() throws Exception {
     ClaimedOperation claimed = createClaimedOperation(opId);
     when(repository.claimPendingWithTimeout(eq(nodeId), anyInt()))
         .thenReturn(List.of(claimed))
         .thenReturn(List.of());
 
-    CountDownLatch invokeDone = new CountDownLatch(1);
+    CountDownLatch unknownLatch = new CountDownLatch(1);
     when(transport.invoke(any(), any(), any()))
+        .thenThrow(new EnvironmentCapabilitySendUncertainException("Send uncertain"));
+    when(coordinator.coordinateTransportUnknown(eq(opId), eq(nodeId), eq(leaseToken)))
         .thenAnswer(
             inv -> {
-              try {
-                throw new EnvironmentCapabilitySendUncertainException("Send uncertain");
-              } finally {
-                invokeDone.countDown();
-              }
+              unknownLatch.countDown();
+              return true;
             });
 
     dispatcher.start();
     dispatcher.wake();
 
-    assertTrue(invokeDone.await(5, TimeUnit.SECONDS));
+    assertTrue(unknownLatch.await(5, TimeUnit.SECONDS));
 
     // 等待 drainExecutor 屏障保证排空任务退出
     drainExecutor.submit(() -> {}).get(5, TimeUnit.SECONDS);
 
     verify(repository, never()).rescheduleUnsent(any(), any(), any());
-    verify(coordinator, never()).coordinateTransportUnknown(any(), any(), any());
+    verify(coordinator).coordinateTransportUnknown(eq(opId), eq(nodeId), eq(leaseToken));
     verify(coordinator, never())
-        .coordinateExecutionFailure(any(), any(), any(), any(), anyLong(), any(), anyLong());
+        .coordinateExecutionFailure(
+            any(), any(), any(), any(), any(), any(), any(), anyLong(), any());
   }
 
   /** 测试意图：验证 runSweeper 本地超时清扫推进至 UNKNOWN 后，主动取消内存中的活跃句柄。 */
@@ -931,6 +952,54 @@ class EnvironmentOperationDispatcherTest {
     assertTrue(capIds.contains(EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE));
   }
 
+  /**
+   * 测试意图：验证 MCP_SERVER_DISCOVER 在 harness capability catalog 尚未注册 mcp.local.discover descriptor 时
+   * fail closed：绝不向 Daemon 发起分发，而是安全收敛至 coordinateExecutionFailure。
+   */
+  @Test
+  void executeOperation_mcpServerDiscoverUnregisteredCapability_failsClosed() throws Exception {
+    CountDownLatch coordinated = new CountDownLatch(1);
+
+    UUID mcpResourceId = UUID.randomUUID();
+    ClaimedOperation discoverOp =
+        createClaimedOperation(
+            UUID.randomUUID(),
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
+            mcpResourceId,
+            "{\"customParam\":\"val\"}",
+            Duration.ofSeconds(30));
+
+    when(repository.claimPendingWithTimeout(eq(nodeId), eq(50)))
+        .thenReturn(List.of(discoverOp))
+        .thenReturn(List.of());
+
+    when(coordinator.coordinateExecutionFailure(
+            any(), any(), any(), any(), any(), any(), any(), anyLong(), any()))
+        .thenAnswer(
+            invocation -> {
+              coordinated.countDown();
+              return OperationPublishOutcome.APPLIED;
+            });
+
+    dispatcher.start();
+    dispatcher.wake();
+    assertTrue(coordinated.await(5, TimeUnit.SECONDS));
+
+    // 未注册能力绝不发起 transport.invoke
+    verify(transport, never()).invoke(any(), any(), any());
+    verify(coordinator)
+        .coordinateExecutionFailure(
+            eq(envId),
+            eq(discoverOp.operation().id()),
+            eq(nodeId),
+            eq(leaseToken),
+            eq(EnvironmentOperationType.MCP_SERVER_DISCOVER),
+            eq(EnvironmentOperationResourceType.MCP_SERVER),
+            eq(mcpResourceId),
+            eq(1L),
+            eq("{\"customParam\":\"val\"}"));
+  }
+
   /** 测试意图：验证操作参数确定性构建失败时，安全推进至 coordinateExecutionFailure。 */
   @Test
   void executeOperation_argumentsMalformed_coordinatesExecutionFailure() throws Exception {
@@ -945,7 +1014,7 @@ class EnvironmentOperationDispatcherTest {
         .thenReturn(List.of());
 
     when(coordinator.coordinateExecutionFailure(
-            any(), any(), any(), any(), anyLong(), any(), anyLong()))
+            any(), any(), any(), any(), any(), any(), any(), anyLong(), any()))
         .thenAnswer(
             invocation -> {
               coordinated.countDown();
@@ -958,7 +1027,15 @@ class EnvironmentOperationDispatcherTest {
 
     verify(coordinator)
         .coordinateExecutionFailure(
-            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), anyLong(), eq(sourceId), anyLong());
+            eq(envId),
+            eq(opId),
+            eq(nodeId),
+            eq(leaseToken),
+            eq(EnvironmentOperationType.SKILL_REFRESH),
+            eq(EnvironmentOperationResourceType.SKILL_SOURCE),
+            eq(sourceId),
+            eq(1L),
+            eq("not-valid-json"));
   }
 
   /** 测试意图：验证 listener.onPartial 对管理操作为 safe no-op，不影响执行状态与协调器。 */
@@ -988,9 +1065,10 @@ class EnvironmentOperationDispatcherTest {
     listener.onPartial(mock(EnvironmentCapabilityResult.class));
 
     verify(coordinator, never())
-        .coordinateResult(any(), any(), any(), any(), anyLong(), any(), anyLong(), any());
+        .coordinateResult(any(), any(), any(), any(), any(), any(), any(), anyLong(), any(), any());
     verify(coordinator, never())
-        .coordinateExecutionFailure(any(), any(), any(), any(), anyLong(), any(), anyLong());
+        .coordinateExecutionFailure(
+            any(), any(), any(), any(), any(), any(), any(), anyLong(), any());
   }
 
   /**
@@ -1051,7 +1129,15 @@ class EnvironmentOperationDispatcherTest {
 
     verify(coordinator)
         .coordinateExecutionFailure(
-            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), anyLong(), eq(sourceId), anyLong());
+            eq(envId),
+            eq(opId),
+            eq(nodeId),
+            eq(leaseToken),
+            eq(EnvironmentOperationType.SKILL_REFRESH),
+            eq(EnvironmentOperationResourceType.SKILL_SOURCE),
+            eq(sourceId),
+            eq(1L),
+            any());
   }
 
   /** 测试意图：验证 transport.invoke 抛出 EnvironmentCapabilityUnavailableException 时安全重新调度操作。 */
@@ -1081,30 +1167,6 @@ class EnvironmentOperationDispatcherTest {
     assertTrue(rescheduled.await(5, TimeUnit.SECONDS));
 
     verify(repository).rescheduleUnsent(eq(opId), eq(nodeId), eq(leaseToken));
-  }
-
-  /** 测试意图：验证 transport.invoke 抛出 EnvironmentCapabilitySendUncertainException 时不重新调度（静默保留）。 */
-  @Test
-  void invoke_environmentCapabilitySendUncertainException_leavesUntouched() throws Exception {
-    CountDownLatch invoked = new CountDownLatch(1);
-
-    when(repository.claimPendingWithTimeout(eq(nodeId), eq(50)))
-        .thenReturn(List.of(createClaimedOperation(opId)))
-        .thenReturn(List.of());
-
-    when(transport.invoke(any(), any(), any()))
-        .thenAnswer(
-            invocation -> {
-              invoked.countDown();
-              throw new EnvironmentCapabilitySendUncertainException("send uncertain");
-            });
-
-    dispatcher.start();
-    dispatcher.wake();
-    assertTrue(invoked.await(5, TimeUnit.SECONDS));
-
-    verify(repository, never()).rescheduleUnsent(any(), any(), any());
-    verify(coordinator, never()).coordinateTransportUnknown(any(), any(), any());
   }
 
   /** 测试意图：验证 transport.invoke 抛出常规 RuntimeException 时协调为 UNKNOWN。 */

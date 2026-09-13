@@ -68,6 +68,76 @@ public class EnvironmentOperationServiceImpl implements EnvironmentOperationServ
 
   @Override
   @Transactional
+  public EnvironmentOperationDTO createOperation(
+      EnvironmentId environmentId,
+      EnvironmentOperationType operationType,
+      EnvironmentOperationResourceType resourceType,
+      UUID resourceId,
+      long resourceVersion,
+      String arguments,
+      String parameterSummary,
+      long timeoutMillis) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(operationType, "operationType");
+    Objects.requireNonNull(resourceType, "resourceType");
+    Objects.requireNonNull(resourceId, "resourceId");
+    if (operationType.resourceType() != resourceType) {
+      throw new AiValidationException(
+          RESOURCE,
+          "operationType " + operationType + " is incompatible with resourceType " + resourceType);
+    }
+    if (resourceVersion < 0) {
+      throw new AiValidationException(RESOURCE, "resourceVersion must be non-negative");
+    }
+    if (timeoutMillis <= 0) {
+      throw new AiValidationException(RESOURCE, "timeoutMillis must be strictly positive");
+    }
+
+    EnvironmentCapabilityId capId = capabilityIdFor(operationType);
+    // fail closed：只有已在 harness capability catalog 注册 descriptor 的操作类型才允许创建，
+    // 避免产生永远无法被分发、或结果无法被原子消费的悬挂操作（MCP 目录切片注册 mcp.local.discover 后自动放开）。
+    EnvironmentCapabilityDescriptor descriptor =
+        EnvironmentCapabilityCatalog.find(capId)
+            .orElseThrow(
+                () ->
+                    new AiValidationException(
+                        RESOURCE,
+                        "capability descriptor for operationType "
+                            + operationType
+                            + " is not registered"));
+    long maxTimeoutMillis = descriptor.timeout().toMillis();
+    if (timeoutMillis > maxTimeoutMillis) {
+      throw new AiValidationException(
+          RESOURCE, "timeoutMillis must not exceed " + maxTimeoutMillis + " ms");
+    }
+
+    UUID envId = environmentId.value();
+    if (environmentRepository.lockForKeyShare(envId) == null) {
+      throw new AiResourceNotFoundException("environment", envId.toString());
+    }
+
+    String safeSummary =
+        (parameterSummary != null && !parameterSummary.isBlank()) ? parameterSummary : "{}";
+    UUID operationId = UUID.randomUUID();
+    CreatePendingOperationWithTimeoutCommand command =
+        new CreatePendingOperationWithTimeoutCommand(
+            operationId,
+            envId,
+            resourceType,
+            resourceId,
+            operationType,
+            resourceVersion,
+            arguments,
+            safeSummary,
+            timeoutMillis);
+
+    environmentOperationRepository.createPendingWithTimeout(command);
+    log.info("Created pending operation {} for environment {}", operationId, envId);
+    return toDto(environmentOperationRepository.getSafe(envId, operationId));
+  }
+
+  @Override
+  @Transactional
   public EnvironmentOperationDTO create(
       EnvironmentId environmentId,
       UUID sourceId,
@@ -76,6 +146,10 @@ public class EnvironmentOperationServiceImpl implements EnvironmentOperationServ
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(sourceId, "sourceId");
     Objects.requireNonNull(operationType, "operationType");
+    if (operationType.resourceType() != EnvironmentOperationResourceType.SKILL_SOURCE) {
+      throw new AiValidationException(
+          RESOURCE, "operationType " + operationType + " is not a skill source operation");
+    }
     if (request == null || request.getTimeoutMillis() == null) {
       throw new AiValidationException(RESOURCE, "timeoutMillis must not be null");
     }
@@ -148,10 +222,10 @@ public class EnvironmentOperationServiceImpl implements EnvironmentOperationServ
         new CreatePendingOperationWithTimeoutCommand(
             operationId,
             envId,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
             sourceId,
             operationType,
             source.getVersion(),
-            inventory.getSourceSetVersion(),
             arguments,
             parameterSummary,
             timeoutMillis);
@@ -249,11 +323,11 @@ public class EnvironmentOperationServiceImpl implements EnvironmentOperationServ
     EnvironmentOperationDTO dto = new EnvironmentOperationDTO();
     dto.setId(safe.id().toString());
     dto.setEnvironmentId(safe.environmentId().toString());
-    dto.setSourceId(safe.sourceId().toString());
+    dto.setResourceType(safe.resourceType().name());
+    dto.setResourceId(safe.resourceId().toString());
     dto.setOperationType(safe.operationType().name());
     dto.setStatus(safe.status().name());
-    dto.setSourceVersion(CatalogVersions.format(safe.sourceVersion()));
-    dto.setSourceSetVersion(CatalogVersions.format(safe.sourceSetVersion()));
+    dto.setResourceVersion(CatalogVersions.format(safe.resourceVersion()));
     dto.setParameterSummary(parseJsonObject(safe.parameterSummary()));
     dto.setDeadlineAt(safe.deadlineAt());
     dto.setStartedAt(safe.startedAt());
@@ -282,6 +356,7 @@ public class EnvironmentOperationServiceImpl implements EnvironmentOperationServ
       case SKILL_REFRESH -> EnvironmentCapabilityIds.SKILL_SOURCE_REFRESH;
       case SKILL_INSTALL -> EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL;
       case SKILL_UPDATE -> EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE;
+      case MCP_SERVER_DISCOVER -> new EnvironmentCapabilityId("mcp.local.discover");
     };
   }
 }

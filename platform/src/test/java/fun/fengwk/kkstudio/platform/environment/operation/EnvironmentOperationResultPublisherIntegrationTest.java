@@ -106,6 +106,20 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
         runtimeInfoJson);
   }
 
+  private CreatePendingOperationWithTimeoutCommand createSkillPendingCommand(
+      UUID opId, UUID sourceId, EnvironmentOperationType type, long resourceVersion) {
+    return new CreatePendingOperationWithTimeoutCommand(
+        opId,
+        environmentId.value(),
+        EnvironmentOperationResourceType.SKILL_SOURCE,
+        sourceId,
+        type,
+        resourceVersion,
+        "{}",
+        "{\"type\":\"path\"}",
+        60000L);
+  }
+
   /**
    * 测试意图：验证操作成功时将 applied_source_set_version 推进至操作预期的最新 desired 代际（2L）， 而非 runtime_info
    * 中记录的陈旧代际（0L），并使用宿主连接元数据刷新库存。
@@ -125,16 +139,7 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
 
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            secondSourceId,
-            EnvironmentOperationType.SKILL_INSTALL,
-            0L,
-            desiredVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(opId, secondSourceId, EnvironmentOperationType.SKILL_INSTALL, 0L);
     operationRepository.createPendingWithTimeout(cmd);
 
     List<ClaimedOperation> claimed = operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
@@ -185,16 +190,8 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
   void publishOperationSuccess_rollsBackAllChangesOnTerminalFenceFailure() {
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            defaultSourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            defaultSourceSetVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(
+            opId, defaultSourceId, EnvironmentOperationType.SKILL_REFRESH, 0L);
     operationRepository.createPendingWithTimeout(cmd);
 
     List<ClaimedOperation> claimed = operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
@@ -237,16 +234,8 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
   void publishOperationSuccess_staleSourceSetVersion_marksResourceChanged() {
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            defaultSourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            defaultSourceSetVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(
+            opId, defaultSourceId, EnvironmentOperationType.SKILL_REFRESH, 0L);
     operationRepository.createPendingWithTimeout(cmd);
     operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
 
@@ -270,16 +259,8 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
   void publishOperationSuccess_lostLease_returnsLeaseLostAndLeavesClaimUntouched() {
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            defaultSourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            defaultSourceSetVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(
+            opId, defaultSourceId, EnvironmentOperationType.SKILL_REFRESH, 0L);
     operationRepository.createPendingWithTimeout(cmd);
     operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
 
@@ -307,16 +288,8 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
   void publishExecutionFailure_marksSourceAndOperationFailed() {
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            defaultSourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            defaultSourceSetVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(
+            opId, defaultSourceId, EnvironmentOperationType.SKILL_REFRESH, 0L);
     operationRepository.createPendingWithTimeout(cmd);
     operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
 
@@ -350,16 +323,8 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
   void publishInvalidResult_marksSourceAndOperationFailed() {
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            defaultSourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            defaultSourceSetVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(
+            opId, defaultSourceId, EnvironmentOperationType.SKILL_REFRESH, 0L);
     operationRepository.createPendingWithTimeout(cmd);
     operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
 
@@ -393,16 +358,8 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
   void publishOperationSuccess_staleSourceVersion_marksResourceChanged() {
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            defaultSourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            defaultSourceSetVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(
+            opId, defaultSourceId, EnvironmentOperationType.SKILL_REFRESH, 0L);
     operationRepository.createPendingWithTimeout(cmd);
     operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
 
@@ -431,16 +388,8 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
   void publishOperationSuccess_missingSource_marksResourceChanged() {
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            defaultSourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            defaultSourceSetVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(
+            opId, defaultSourceId, EnvironmentOperationType.SKILL_REFRESH, 0L);
     operationRepository.createPendingWithTimeout(cmd);
     operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
 
@@ -503,16 +452,8 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
   void publishFailure_lostLease_returnsLeaseLostAndLeavesClaimUntouched() {
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            defaultSourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            defaultSourceSetVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(
+            opId, defaultSourceId, EnvironmentOperationType.SKILL_REFRESH, 0L);
     operationRepository.createPendingWithTimeout(cmd);
     operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
 
@@ -538,16 +479,8 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
   void publishFailure_staleSourceSetVersion_marksResourceChanged() {
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            defaultSourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            defaultSourceSetVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(
+            opId, defaultSourceId, EnvironmentOperationType.SKILL_REFRESH, 0L);
     operationRepository.createPendingWithTimeout(cmd);
     operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
 
@@ -568,16 +501,8 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
   void publishFailure_missingSource_marksResourceChanged() {
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            defaultSourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            defaultSourceSetVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(
+            opId, defaultSourceId, EnvironmentOperationType.SKILL_REFRESH, 0L);
     operationRepository.createPendingWithTimeout(cmd);
     operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
 
@@ -604,16 +529,8 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
   void publishFailure_staleSourceVersion_marksResourceChanged() {
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            defaultSourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            defaultSourceSetVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(
+            opId, defaultSourceId, EnvironmentOperationType.SKILL_REFRESH, 0L);
     operationRepository.createPendingWithTimeout(cmd);
     operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
 
@@ -640,16 +557,8 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
   void publishFailure_rollsBackOnOperationMarkFailedFailure() {
     UUID opId = UUID.randomUUID();
     CreatePendingOperationWithTimeoutCommand cmd =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            environmentId.value(),
-            defaultSourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            defaultSourceSetVersion,
-            "{}",
-            "{\"type\":\"path\"}",
-            60000L);
+        createSkillPendingCommand(
+            opId, defaultSourceId, EnvironmentOperationType.SKILL_REFRESH, 0L);
     operationRepository.createPendingWithTimeout(cmd);
     operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
 

@@ -27,6 +27,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.operation.DuplicateActiveOperationException;
+import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationResourceType;
 import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationService;
 import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationType;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
@@ -490,7 +491,9 @@ class StudioEnvironmentControllerTest {
             eq(SOURCE_ID),
             eq(EnvironmentOperationType.SKILL_REFRESH),
             any()))
-        .thenThrow(new DuplicateActiveOperationException(ENV_ID, SOURCE_ID));
+        .thenThrow(
+            new DuplicateActiveOperationException(
+                ENV_ID, EnvironmentOperationResourceType.SKILL_SOURCE, SOURCE_ID));
 
     mockMvc
         .perform(

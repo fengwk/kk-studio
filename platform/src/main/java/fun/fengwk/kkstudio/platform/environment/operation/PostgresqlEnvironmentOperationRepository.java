@@ -50,13 +50,14 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
       (rs, rowNum) -> {
         UUID id = rs.getObject("id", UUID.class);
         UUID environmentId = rs.getObject("environment_id", UUID.class);
-        UUID sourceId = rs.getObject("source_id", UUID.class);
+        EnvironmentOperationResourceType resourceType =
+            EnvironmentOperationResourceType.valueOf(rs.getString("resource_type"));
+        UUID resourceId = rs.getObject("resource_id", UUID.class);
         EnvironmentOperationType operationType =
             EnvironmentOperationType.valueOf(rs.getString("operation_type"));
         EnvironmentOperationStatus status =
             EnvironmentOperationStatus.valueOf(rs.getString("status"));
-        long sourceVersion = rs.getLong("source_version");
-        long sourceSetVersion = rs.getLong("source_set_version");
+        long resourceVersion = rs.getLong("resource_version");
         String arguments = rs.getString("arguments");
         String parameterSummary = rs.getString("parameter_summary");
         Instant deadlineAt = getInstant(rs, "deadline_at");
@@ -73,11 +74,11 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
         return new EnvironmentOperation(
             id,
             environmentId,
-            sourceId,
+            resourceType,
+            resourceId,
             operationType,
             status,
-            sourceVersion,
-            sourceSetVersion,
+            resourceVersion,
             arguments,
             parameterSummary,
             deadlineAt,
@@ -96,13 +97,14 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
       (rs, rowNum) -> {
         UUID id = rs.getObject("id", UUID.class);
         UUID environmentId = rs.getObject("environment_id", UUID.class);
-        UUID sourceId = rs.getObject("source_id", UUID.class);
+        EnvironmentOperationResourceType resourceType =
+            EnvironmentOperationResourceType.valueOf(rs.getString("resource_type"));
+        UUID resourceId = rs.getObject("resource_id", UUID.class);
         EnvironmentOperationType operationType =
             EnvironmentOperationType.valueOf(rs.getString("operation_type"));
         EnvironmentOperationStatus status =
             EnvironmentOperationStatus.valueOf(rs.getString("status"));
-        long sourceVersion = rs.getLong("source_version");
-        long sourceSetVersion = rs.getLong("source_set_version");
+        long resourceVersion = rs.getLong("resource_version");
         String parameterSummary = rs.getString("parameter_summary");
         Instant deadlineAt = getInstant(rs, "deadline_at");
         Instant startedAt = getInstant(rs, "started_at");
@@ -116,11 +118,11 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
         return new SafeEnvironmentOperation(
             id,
             environmentId,
-            sourceId,
+            resourceType,
+            resourceId,
             operationType,
             status,
-            sourceVersion,
-            sourceSetVersion,
+            resourceVersion,
             parameterSummary,
             deadlineAt,
             startedAt,
@@ -153,31 +155,31 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
           select
               ?::uuid as id,
               ?::uuid as env_id,
-              ?::uuid as src_id,
+              ?::varchar as res_type,
+              ?::uuid as res_id,
               ?::varchar as op_type,
-              ?::bigint as src_ver,
-              ?::bigint as src_set_ver,
+              ?::bigint as res_ver,
               ?::jsonb as args,
               ?::jsonb as param_sum,
               ?::timestamptz as dl
       ),
       inserted as (
           insert into environment_operation (
-              id, environment_id, source_id, operation_type,
-              status, source_version, source_set_version,
+              id, environment_id, resource_type, resource_id, operation_type,
+              status, resource_version,
               arguments, parameter_summary, deadline_at,
               created_at, updated_at
           )
           select
-              id, env_id, src_id, op_type,
-              'PENDING', src_ver, src_set_ver,
+              id, env_id, res_type, res_id, op_type,
+              'PENDING', res_ver,
               args, param_sum, dl,
               statement_timestamp(), statement_timestamp()
           from candidate
           where dl >= statement_timestamp()
           returning
-              id, environment_id, source_id, operation_type,
-              status, source_version, source_set_version,
+              id, environment_id, resource_type, resource_id, operation_type,
+              status, resource_version,
               arguments, parameter_summary, deadline_at,
               owner_node_id, lease_token, started_at,
               finished_at, result_summary, failure_code,
@@ -199,31 +201,31 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
           select
               ?::uuid as id,
               ?::uuid as env_id,
-              ?::uuid as src_id,
+              ?::varchar as res_type,
+              ?::uuid as res_id,
               ?::varchar as op_type,
-              ?::bigint as src_ver,
-              ?::bigint as src_set_ver,
+              ?::bigint as res_ver,
               ?::jsonb as args,
               ?::jsonb as param_sum,
               (?::bigint * interval '1 millisecond') as timeout_interval
       ),
       inserted as (
           insert into environment_operation (
-              id, environment_id, source_id, operation_type,
-              status, source_version, source_set_version,
+              id, environment_id, resource_type, resource_id, operation_type,
+              status, resource_version,
               arguments, parameter_summary, deadline_at,
               created_at, updated_at
           )
           select
-              id, env_id, src_id, op_type,
-              'PENDING', src_ver, src_set_ver,
+              id, env_id, res_type, res_id, op_type,
+              'PENDING', res_ver,
               args, param_sum, statement_timestamp() + timeout_interval,
               statement_timestamp(), statement_timestamp()
           from candidate
           where timeout_interval > interval '0 millisecond'
           returning
-              id, environment_id, source_id, operation_type,
-              status, source_version, source_set_version,
+              id, environment_id, resource_type, resource_id, operation_type,
+              status, resource_version,
               arguments, parameter_summary, deadline_at,
               owner_node_id, lease_token, started_at,
               finished_at, result_summary, failure_code,
@@ -242,8 +244,8 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
   private static final String FIND_BY_ID_SQL =
       """
       select
-          id, environment_id, source_id, operation_type,
-          status, source_version, source_set_version,
+          id, environment_id, resource_type, resource_id, operation_type,
+          status, resource_version,
           arguments, parameter_summary, deadline_at,
           owner_node_id, lease_token, started_at,
           finished_at, result_summary, failure_code,
@@ -255,8 +257,8 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
   private static final String LIST_BY_ENVIRONMENT_SQL =
       """
       select
-          id, environment_id, source_id, operation_type,
-          status, source_version, source_set_version,
+          id, environment_id, resource_type, resource_id, operation_type,
+          status, resource_version,
           arguments, parameter_summary, deadline_at,
           owner_node_id, lease_token, started_at,
           finished_at, result_summary, failure_code,
@@ -270,8 +272,8 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
   private static final String SAFE_LIST_SQL =
       """
       select
-          id, environment_id, source_id, operation_type,
-          status, source_version, source_set_version,
+          id, environment_id, resource_type, resource_id, operation_type,
+          status, resource_version,
           parameter_summary, deadline_at, started_at,
           finished_at, result_summary, failure_code,
           failure_message, created_at, updated_at
@@ -284,8 +286,8 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
   private static final String FIND_SAFE_BY_ID_AND_ENV_SQL =
       """
       select
-          id, environment_id, source_id, operation_type,
-          status, source_version, source_set_version,
+          id, environment_id, resource_type, resource_id, operation_type,
+          status, resource_version,
           parameter_summary, deadline_at, started_at,
           finished_at, result_summary, failure_code,
           failure_message, created_at, updated_at
@@ -319,8 +321,8 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
       from eligible
       where target.id = eligible.id
       returning
-          target.id, target.environment_id, target.source_id, target.operation_type,
-          target.status, target.source_version, target.source_set_version,
+          target.id, target.environment_id, target.resource_type, target.resource_id, target.operation_type,
+          target.status, target.resource_version,
           target.arguments, target.parameter_summary, target.deadline_at,
           target.owner_node_id, target.lease_token, target.started_at,
           target.finished_at, target.result_summary, target.failure_code,
@@ -352,8 +354,8 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
       from eligible
       where target.id = eligible.id
       returning
-          target.id, target.environment_id, target.source_id, target.operation_type,
-          target.status, target.source_version, target.source_set_version,
+          target.id, target.environment_id, target.resource_type, target.resource_id, target.operation_type,
+          target.status, target.resource_version,
           target.arguments, target.parameter_summary, target.deadline_at,
           target.owner_node_id, target.lease_token, target.started_at,
           target.finished_at, target.result_summary, target.failure_code,
@@ -408,6 +410,7 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
         and conn.lease_token = ?
         and conn.status = 'READY'
         and conn.lease_until > statement_timestamp()
+        and op.deadline_at > statement_timestamp()
       """;
 
   private static final String MARK_FAILED_SQL =
@@ -428,6 +431,7 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
         and conn.lease_token = ?
         and conn.status = 'READY'
         and conn.lease_until > statement_timestamp()
+        and op.deadline_at > statement_timestamp()
       """;
 
   private static final String MARK_UNKNOWN_SQL =
@@ -524,10 +528,10 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
               ROW_MAPPER,
               command.id(),
               command.environmentId(),
-              command.sourceId(),
+              command.resourceType().name(),
+              command.resourceId(),
               command.operationType().name(),
-              command.sourceVersion(),
-              command.sourceSetVersion(),
+              command.resourceVersion(),
               command.arguments(),
               command.parameterSummary(),
               OffsetDateTime.ofInstant(command.deadlineAt(), ZoneOffset.UTC));
@@ -557,10 +561,10 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
               ROW_MAPPER,
               command.id(),
               command.environmentId(),
-              command.sourceId(),
+              command.resourceType().name(),
+              command.resourceId(),
               command.operationType().name(),
-              command.sourceVersion(),
-              command.sourceSetVersion(),
+              command.resourceVersion(),
               command.arguments(),
               command.parameterSummary(),
               command.timeoutMillis());
@@ -773,16 +777,21 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
   private void validateCommand(CreatePendingOperationCommand command) {
     Objects.requireNonNull(command.id(), "id");
     Objects.requireNonNull(command.environmentId(), "environmentId");
-    Objects.requireNonNull(command.sourceId(), "sourceId");
+    Objects.requireNonNull(command.resourceType(), "resourceType");
+    Objects.requireNonNull(command.resourceId(), "resourceId");
     Objects.requireNonNull(command.operationType(), "operationType");
     Objects.requireNonNull(command.deadlineAt(), "deadlineAt");
-    if (command.sourceVersion() < 0) {
+    if (command.resourceType() != command.operationType().resourceType()) {
       throw new AiValidationException(
-          "environment_operation", "sourceVersion must be non-negative");
+          "environment_operation",
+          "operationType "
+              + command.operationType()
+              + " is incompatible with resourceType "
+              + command.resourceType());
     }
-    if (command.sourceSetVersion() < 0) {
+    if (command.resourceVersion() < 0) {
       throw new AiValidationException(
-          "environment_operation", "sourceSetVersion must be non-negative");
+          "environment_operation", "resourceVersion must be non-negative");
     }
     validateJsonObject("arguments", command.arguments(), true);
     validateJsonObject("parameterSummary", command.parameterSummary(), true);
@@ -791,19 +800,24 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
   private void validateCommandWithTimeout(CreatePendingOperationWithTimeoutCommand command) {
     Objects.requireNonNull(command.id(), "id");
     Objects.requireNonNull(command.environmentId(), "environmentId");
-    Objects.requireNonNull(command.sourceId(), "sourceId");
+    Objects.requireNonNull(command.resourceType(), "resourceType");
+    Objects.requireNonNull(command.resourceId(), "resourceId");
     Objects.requireNonNull(command.operationType(), "operationType");
+    if (command.resourceType() != command.operationType().resourceType()) {
+      throw new AiValidationException(
+          "environment_operation",
+          "operationType "
+              + command.operationType()
+              + " is incompatible with resourceType "
+              + command.resourceType());
+    }
     if (command.timeoutMillis() <= 0) {
       throw new AiValidationException(
           "environment_operation", "timeoutMillis must be greater than zero");
     }
-    if (command.sourceVersion() < 0) {
+    if (command.resourceVersion() < 0) {
       throw new AiValidationException(
-          "environment_operation", "sourceVersion must be non-negative");
-    }
-    if (command.sourceSetVersion() < 0) {
-      throw new AiValidationException(
-          "environment_operation", "sourceSetVersion must be non-negative");
+          "environment_operation", "resourceVersion must be non-negative");
     }
     validateJsonObject("arguments", command.arguments(), true);
     validateJsonObject("parameterSummary", command.parameterSummary(), true);
@@ -872,7 +886,8 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
 
     if ("23505".equals(sqlState)) {
       if ("uk_environment_operation_active".equalsIgnoreCase(constraint)) {
-        return new DuplicateActiveOperationException(command.environmentId(), command.sourceId());
+        return new DuplicateActiveOperationException(
+            command.environmentId(), command.resourceType(), command.resourceId());
       }
       if ("environment_operation_pkey".equalsIgnoreCase(constraint)
           || (constraint != null && constraint.toLowerCase(Locale.ROOT).contains("pkey"))) {
@@ -900,7 +915,8 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
 
     if ("23505".equals(sqlState)) {
       if ("uk_environment_operation_active".equalsIgnoreCase(constraint)) {
-        return new DuplicateActiveOperationException(command.environmentId(), command.sourceId());
+        return new DuplicateActiveOperationException(
+            command.environmentId(), command.resourceType(), command.resourceId());
       }
       if ("environment_operation_pkey".equalsIgnoreCase(constraint)
           || (constraint != null && constraint.toLowerCase(Locale.ROOT).contains("pkey"))) {
