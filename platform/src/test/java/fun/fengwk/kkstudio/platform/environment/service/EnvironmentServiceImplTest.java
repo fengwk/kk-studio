@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSourceInitializer;
 import fun.fengwk.kkstudio.platform.environment.skill.model.EnvironmentInventory;
-import fun.fengwk.kkstudio.platform.environment.skill.model.SkillInventoryEntry;
 import fun.fengwk.kkstudio.platform.environment.skill.repo.SkillSourceRepository;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -64,20 +63,6 @@ class EnvironmentServiceImplTest {
   private static DaemonSkillDescriptor skillDescriptor(String name, String description) {
     return new DaemonSkillDescriptor(
         SKILL_SOURCE_ID, 1, name, description, "/home/dev/skills/" + name, CONTENT_REVISION);
-  }
-
-  /** 构造一条当前可用的持久 inventory fixture（来源 READY、applied 与行版本都等于当前配置版本）。 */
-  private static SkillInventoryEntry usableSkill(String name) {
-    SkillInventoryEntry entry = new SkillInventoryEntry();
-    entry.setEnvironmentId(ENV_ID);
-    entry.setSourceId(SKILL_SOURCE_ID);
-    entry.setName(name);
-    entry.setSourceVersion(1L);
-    entry.setDescription(name + " skill");
-    entry.setBaseDirectory("/home/dev/skills/" + name);
-    entry.setContentRevision(CONTENT_REVISION);
-    entry.setDiscoveredAt(NOW);
-    return entry;
   }
 
   private static final Instant NOW = Instant.parse("2026-07-26T00:00:00Z");
@@ -125,7 +110,6 @@ class EnvironmentServiceImplTest {
               env.setUpdateTime(NOW);
               return env;
             });
-    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
@@ -191,7 +175,6 @@ class EnvironmentServiceImplTest {
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
     EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
     SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
-    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
 
     when(repo.existsByName("local-env")).thenReturn(false);
     when(repo.create(any())).thenReturn(true);
@@ -233,7 +216,6 @@ class EnvironmentServiceImplTest {
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
     EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
     SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
-    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -268,7 +250,6 @@ class EnvironmentServiceImplTest {
             NOW.plusSeconds(60));
 
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(conn));
-    when(skillSources.listUsableSkills(ENV_ID)).thenReturn(List.of(usableSkill("dev")));
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
@@ -279,8 +260,7 @@ class EnvironmentServiceImplTest {
     assertEquals("READY", single.getStatus());
     assertTrue(single.isReady());
     assertEquals("/home/dev", single.getRootPath());
-    assertEquals(1, single.getSkills().size());
-    assertEquals("dev", single.getSkills().get(0).getName());
+    verify(skillSources, never()).listUsableSkills(any());
 
     List<EnvironmentCardDTO> list = service.list();
     assertEquals(1, list.size());
@@ -288,7 +268,7 @@ class EnvironmentServiceImplTest {
     assertEquals("READY", list.get(0).getStatus());
   }
 
-  /** 测试意图：Environment 离线时卡片仍投影持久 inventory 的可用 Skill 与最近一次被接受报告的 root，而不是清空成空列表/空路径。 */
+  /** 测试意图：Environment 离线时卡片仍投影持久 inventory 最近一次被接受报告的 root，而不是清空成空路径。 */
   @Test
   void offlineCardProjectsDurableInventory() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
@@ -315,7 +295,6 @@ class EnvironmentServiceImplTest {
     inventory.setAppliedSourceSetVersion(2L);
     inventory.setRootPath("/home/dev");
     when(skillSources.getInventory(ENV_ID)).thenReturn(inventory);
-    when(skillSources.listUsableSkills(ENV_ID)).thenReturn(List.of(usableSkill("dev")));
     // 没有任何连接行：Environment 离线。
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.empty());
 
@@ -328,12 +307,11 @@ class EnvironmentServiceImplTest {
     assertEquals("OFFLINE", card.getStatus());
     assertFalse(card.isReady());
     assertEquals("/home/dev", card.getRootPath(), "离线仍展示最近一次报告的宿主 root");
-    assertEquals(1, card.getSkills().size(), "离线仍展示持久 inventory 的可用 Skill");
-    assertEquals("dev", card.getSkills().get(0).getName());
     assertTrue(card.getCapabilities().isEmpty());
+    verify(skillSources, never()).listUsableSkills(any());
   }
 
-  /** 测试意图：在线但未 READY 时 Skill 投影仍来自持久 inventory（连接状态与 Skill 事实解耦），root 走持久报告而不是空值。 */
+  /** 测试意图：在线但未 READY 时卡片 root 走持久报告而不是空值，且不再查询或投影 flat skills。 */
   @Test
   void connectingConnectionStillProjectsDurableInventory() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
@@ -360,7 +338,6 @@ class EnvironmentServiceImplTest {
     inventory.setAppliedSourceSetVersion(1L);
     inventory.setRootPath("/home/dev");
     when(skillSources.getInventory(ENV_ID)).thenReturn(inventory);
-    when(skillSources.listUsableSkills(ENV_ID)).thenReturn(List.of(usableSkill("dev")));
 
     EnvironmentConnection conn =
         new EnvironmentConnection(
@@ -382,7 +359,7 @@ class EnvironmentServiceImplTest {
     assertEquals("CONNECTING", card.getStatus());
     assertFalse(card.isReady());
     assertEquals("/home/dev", card.getRootPath());
-    assertEquals(1, card.getSkills().size());
+    verify(skillSources, never()).listUsableSkills(any());
   }
 
   /** 测试意图：registrationToken 只读端点幂等——连续读取返回同一 token，且不推进 version / updateTime（不轮换、不写库）。 */
@@ -396,7 +373,6 @@ class EnvironmentServiceImplTest {
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
     EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
     SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
-    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -437,7 +413,6 @@ class EnvironmentServiceImplTest {
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
     EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
     SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
-    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
     when(repo.getById(ENV_ID)).thenReturn(null);
 
     EnvironmentServiceImpl service =
@@ -460,7 +435,6 @@ class EnvironmentServiceImplTest {
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
     EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
     SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
-    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -498,7 +472,6 @@ class EnvironmentServiceImplTest {
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
     EnvironmentSkillSourceInitializer initializer = mock(EnvironmentSkillSourceInitializer.class);
     SkillSourceRepository skillSources = mock(SkillSourceRepository.class);
-    when(skillSources.listUsableSkills(any())).thenReturn(List.of());
 
     Environment env = new Environment();
     env.setId(ENV_ID);
