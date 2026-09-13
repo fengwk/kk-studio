@@ -2,11 +2,13 @@ package fun.fengwk.kkstudio.platform.environment.operation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -210,5 +212,122 @@ class EnvironmentOperationCompletionCoordinatorTest {
             leaseToken,
             EnvironmentOperationFailureCodes.TRANSPORT_ERROR,
             EnvironmentOperationFailureCodes.TRANSPORT_ERROR_MESSAGE);
+  }
+
+  /** 测试意图：验证返回结果 callId 为 null 时（如第三方实现或 mock），直接收敛为 INVALID_RESULT。 */
+  @Test
+  void coordinateResultWithNullCallIdCallsPublisherInvalidResult() {
+    EnvironmentCapabilityResult result = mock(EnvironmentCapabilityResult.class);
+    when(result.callId()).thenReturn(null);
+
+    when(publisher.publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L)))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(publisher)
+        .publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L));
+  }
+
+  /** 测试意图：验证返回的 JSON 无法解析（抛出 JsonProcessingException）时，捕获异常并收敛为 INVALID_RESULT。 */
+  @Test
+  void coordinateResultWithMalformedJsonCallsPublisherInvalidResult() throws Exception {
+    ObjectMapper failingMapper = mock(ObjectMapper.class);
+    when(failingMapper.readTree(any(String.class)))
+        .thenThrow(new JsonParseException(null, "invalid json"));
+    EnvironmentOperationCompletionCoordinator coord =
+        new EnvironmentOperationCompletionCoordinatorImpl(publisher, repository, failingMapper);
+
+    EnvironmentCapabilityResult result =
+        EnvironmentCapabilityResult.json(opId.toString(), "{\"raw\":\"json\"}");
+
+    when(publisher.publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L)))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coord.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(publisher)
+        .publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L));
+  }
+
+  /** 测试意图：验证返回的 JSON 结构不符合 Snapshot 契约（缺少必填字段）时，捕获异常并收敛为 INVALID_RESULT。 */
+  @Test
+  void coordinateResultWithNonSnapshotJsonCallsPublisherInvalidResult() {
+    EnvironmentCapabilityResult result =
+        EnvironmentCapabilityResult.json(opId.toString(), "{\"unrelated\":\"content\"}");
+
+    when(publisher.publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L)))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(publisher)
+        .publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L));
+  }
+
+  /** 测试意图：验证返回的快照中 sourceId 与操作所属来源标识不符时，识别身份不一致并收敛为 INVALID_RESULT。 */
+  @Test
+  void coordinateResultWithSourceIdMismatchCallsPublisherInvalidResult() {
+    UUID differentSourceId = UUID.randomUUID();
+    DaemonSkillSourceSnapshot snapshot =
+        new DaemonSkillSourceSnapshot(
+            differentSourceId,
+            2L,
+            "0123456789abcdef0123456789abcdef01234567",
+            List.of(),
+            List.of());
+    String json = new DaemonSkillSourceSnapshotCodec().encodeNode(snapshot).toString();
+    EnvironmentCapabilityResult result = EnvironmentCapabilityResult.json(opId.toString(), json);
+
+    when(publisher.publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L)))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(publisher)
+        .publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L));
+  }
+
+  /** 测试意图：验证返回的快照中 sourceVersion 与操作版本不匹配时，识别版本不一致并收敛为 INVALID_RESULT。 */
+  @Test
+  void coordinateResultWithSourceVersionMismatchCallsPublisherInvalidResult() {
+    long differentSourceVersion = 999L;
+    DaemonSkillSourceSnapshot snapshot =
+        new DaemonSkillSourceSnapshot(
+            sourceId,
+            differentSourceVersion,
+            "0123456789abcdef0123456789abcdef01234567",
+            List.of(),
+            List.of());
+    String json = new DaemonSkillSourceSnapshotCodec().encodeNode(snapshot).toString();
+    EnvironmentCapabilityResult result = EnvironmentCapabilityResult.json(opId.toString(), json);
+
+    when(publisher.publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L)))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(publisher)
+        .publishInvalidResult(
+            eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L));
   }
 }

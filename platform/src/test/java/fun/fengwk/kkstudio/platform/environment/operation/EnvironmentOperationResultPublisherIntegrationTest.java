@@ -387,4 +387,289 @@ class EnvironmentOperationResultPublisherIntegrationTest extends PostgresSpringT
     assertEquals(EnvironmentOperationFailureCodes.INVALID_RESULT, op.failureCode());
     assertEquals(EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE, op.failureMessage());
   }
+
+  /** 测试意图：验证操作成功时若来源版本与快照版本不一致，原子推进操作至 FAILED (RESOURCE_CHANGED)。 */
+  @Test
+  void publishOperationSuccess_staleSourceVersion_marksResourceChanged() {
+    UUID opId = UUID.randomUUID();
+    CreatePendingOperationWithTimeoutCommand cmd =
+        new CreatePendingOperationWithTimeoutCommand(
+            opId,
+            environmentId.value(),
+            defaultSourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            defaultSourceSetVersion,
+            "{}",
+            "{\"type\":\"path\"}",
+            60000L);
+    operationRepository.createPendingWithTimeout(cmd);
+    operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
+
+    // 来源版本是 999L，而当前来源版本是 0L
+    DaemonSkillSourceSnapshot snapshot =
+        new DaemonSkillSourceSnapshot(defaultSourceId, 999L, REVISION_A, List.of(), List.of());
+
+    OperationPublishOutcome outcome =
+        publisher.publishOperationSuccess(
+            environmentId.value(),
+            opId,
+            ownerNodeId,
+            leaseToken,
+            defaultSourceSetVersion,
+            snapshot);
+
+    assertEquals(OperationPublishOutcome.RESOURCE_CHANGED, outcome);
+
+    EnvironmentOperation op = operationRepository.getById(opId);
+    assertEquals(EnvironmentOperationStatus.FAILED, op.status());
+    assertEquals(EnvironmentOperationFailureCodes.RESOURCE_CHANGED, op.failureCode());
+  }
+
+  /** 测试意图：验证操作成功时若快照来源标识不存在于环境中，原子推进操作至 FAILED (RESOURCE_CHANGED)。 */
+  @Test
+  void publishOperationSuccess_missingSource_marksResourceChanged() {
+    UUID opId = UUID.randomUUID();
+    CreatePendingOperationWithTimeoutCommand cmd =
+        new CreatePendingOperationWithTimeoutCommand(
+            opId,
+            environmentId.value(),
+            defaultSourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            defaultSourceSetVersion,
+            "{}",
+            "{\"type\":\"path\"}",
+            60000L);
+    operationRepository.createPendingWithTimeout(cmd);
+    operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
+
+    UUID nonExistentSourceId = UUID.randomUUID();
+    DaemonSkillSourceSnapshot snapshot =
+        new DaemonSkillSourceSnapshot(nonExistentSourceId, 0L, REVISION_A, List.of(), List.of());
+
+    OperationPublishOutcome outcome =
+        publisher.publishOperationSuccess(
+            environmentId.value(),
+            opId,
+            ownerNodeId,
+            leaseToken,
+            defaultSourceSetVersion,
+            snapshot);
+
+    assertEquals(OperationPublishOutcome.RESOURCE_CHANGED, outcome);
+
+    EnvironmentOperation op = operationRepository.getById(opId);
+    assertEquals(EnvironmentOperationStatus.FAILED, op.status());
+    assertEquals(EnvironmentOperationFailureCodes.RESOURCE_CHANGED, op.failureCode());
+  }
+
+  /** 测试意图：验证操作成功发布时若环境不存在，返回 LEASE_LOST。 */
+  @Test
+  void publishOperationSuccess_nonExistentEnvironment_returnsLeaseLost() {
+    UUID opId = UUID.randomUUID();
+    UUID nonExistentEnvId = UUID.randomUUID();
+    DaemonSkillSourceSnapshot snapshot =
+        new DaemonSkillSourceSnapshot(defaultSourceId, 0L, REVISION_A, List.of(), List.of());
+
+    OperationPublishOutcome outcome =
+        publisher.publishOperationSuccess(
+            nonExistentEnvId, opId, ownerNodeId, leaseToken, defaultSourceSetVersion, snapshot);
+
+    assertEquals(OperationPublishOutcome.LEASE_LOST, outcome);
+  }
+
+  /** 测试意图：验证失败终结发布时若环境不存在，返回 LEASE_LOST。 */
+  @Test
+  void publishFailure_nonExistentEnvironment_returnsLeaseLost() {
+    UUID opId = UUID.randomUUID();
+    UUID nonExistentEnvId = UUID.randomUUID();
+
+    OperationPublishOutcome outcome =
+        publisher.publishExecutionFailure(
+            nonExistentEnvId,
+            opId,
+            ownerNodeId,
+            leaseToken,
+            defaultSourceSetVersion,
+            defaultSourceId,
+            0L);
+
+    assertEquals(OperationPublishOutcome.LEASE_LOST, outcome);
+  }
+
+  /** 测试意图：验证失败终结发布时若连接租约丢失（如节点或代币不符），返回 LEASE_LOST。 */
+  @Test
+  void publishFailure_lostLease_returnsLeaseLostAndLeavesClaimUntouched() {
+    UUID opId = UUID.randomUUID();
+    CreatePendingOperationWithTimeoutCommand cmd =
+        new CreatePendingOperationWithTimeoutCommand(
+            opId,
+            environmentId.value(),
+            defaultSourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            defaultSourceSetVersion,
+            "{}",
+            "{\"type\":\"path\"}",
+            60000L);
+    operationRepository.createPendingWithTimeout(cmd);
+    operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
+
+    // 错误的 leaseToken
+    OperationPublishOutcome outcome =
+        publisher.publishExecutionFailure(
+            environmentId.value(),
+            opId,
+            ownerNodeId,
+            UUID.randomUUID(),
+            defaultSourceSetVersion,
+            defaultSourceId,
+            0L);
+
+    assertEquals(OperationPublishOutcome.LEASE_LOST, outcome);
+
+    EnvironmentOperation op = operationRepository.getById(opId);
+    assertEquals(EnvironmentOperationStatus.RUNNING, op.status(), "租约丢失时保持 RUNNING 状态以待超时清扫");
+  }
+
+  /** 测试意图：验证失败终结发布时若代际期望不匹配，原子推进操作至 FAILED (RESOURCE_CHANGED)。 */
+  @Test
+  void publishFailure_staleSourceSetVersion_marksResourceChanged() {
+    UUID opId = UUID.randomUUID();
+    CreatePendingOperationWithTimeoutCommand cmd =
+        new CreatePendingOperationWithTimeoutCommand(
+            opId,
+            environmentId.value(),
+            defaultSourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            defaultSourceSetVersion,
+            "{}",
+            "{\"type\":\"path\"}",
+            60000L);
+    operationRepository.createPendingWithTimeout(cmd);
+    operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
+
+    // 期望代际是 999L（陈旧）
+    OperationPublishOutcome outcome =
+        publisher.publishExecutionFailure(
+            environmentId.value(), opId, ownerNodeId, leaseToken, 999L, defaultSourceId, 0L);
+
+    assertEquals(OperationPublishOutcome.RESOURCE_CHANGED, outcome);
+
+    EnvironmentOperation op = operationRepository.getById(opId);
+    assertEquals(EnvironmentOperationStatus.FAILED, op.status());
+    assertEquals(EnvironmentOperationFailureCodes.RESOURCE_CHANGED, op.failureCode());
+  }
+
+  /** 测试意图：验证失败终结发布时若目标来源不存在，原子推进操作至 FAILED (RESOURCE_CHANGED)。 */
+  @Test
+  void publishFailure_missingSource_marksResourceChanged() {
+    UUID opId = UUID.randomUUID();
+    CreatePendingOperationWithTimeoutCommand cmd =
+        new CreatePendingOperationWithTimeoutCommand(
+            opId,
+            environmentId.value(),
+            defaultSourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            defaultSourceSetVersion,
+            "{}",
+            "{\"type\":\"path\"}",
+            60000L);
+    operationRepository.createPendingWithTimeout(cmd);
+    operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
+
+    UUID nonExistentSourceId = UUID.randomUUID();
+    OperationPublishOutcome outcome =
+        publisher.publishExecutionFailure(
+            environmentId.value(),
+            opId,
+            ownerNodeId,
+            leaseToken,
+            defaultSourceSetVersion,
+            nonExistentSourceId,
+            0L);
+
+    assertEquals(OperationPublishOutcome.RESOURCE_CHANGED, outcome);
+
+    EnvironmentOperation op = operationRepository.getById(opId);
+    assertEquals(EnvironmentOperationStatus.FAILED, op.status());
+    assertEquals(EnvironmentOperationFailureCodes.RESOURCE_CHANGED, op.failureCode());
+  }
+
+  /** 测试意图：验证失败终结发布时若来源期望版本不符，原子推进操作至 FAILED (RESOURCE_CHANGED)。 */
+  @Test
+  void publishFailure_staleSourceVersion_marksResourceChanged() {
+    UUID opId = UUID.randomUUID();
+    CreatePendingOperationWithTimeoutCommand cmd =
+        new CreatePendingOperationWithTimeoutCommand(
+            opId,
+            environmentId.value(),
+            defaultSourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            defaultSourceSetVersion,
+            "{}",
+            "{\"type\":\"path\"}",
+            60000L);
+    operationRepository.createPendingWithTimeout(cmd);
+    operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
+
+    // 来源期望版本是 999L（当前为 0L）
+    OperationPublishOutcome outcome =
+        publisher.publishExecutionFailure(
+            environmentId.value(),
+            opId,
+            ownerNodeId,
+            leaseToken,
+            defaultSourceSetVersion,
+            defaultSourceId,
+            999L);
+
+    assertEquals(OperationPublishOutcome.RESOURCE_CHANGED, outcome);
+
+    EnvironmentOperation op = operationRepository.getById(opId);
+    assertEquals(EnvironmentOperationStatus.FAILED, op.status());
+    assertEquals(EnvironmentOperationFailureCodes.RESOURCE_CHANGED, op.failureCode());
+  }
+
+  /** 测试意图：验证失败终结时操作围栏校验失败（如操作已终结），抛出 IllegalStateException 回滚来源状态。 */
+  @Test
+  void publishFailure_rollsBackOnOperationMarkFailedFailure() {
+    UUID opId = UUID.randomUUID();
+    CreatePendingOperationWithTimeoutCommand cmd =
+        new CreatePendingOperationWithTimeoutCommand(
+            opId,
+            environmentId.value(),
+            defaultSourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            defaultSourceSetVersion,
+            "{}",
+            "{\"type\":\"path\"}",
+            60000L);
+    operationRepository.createPendingWithTimeout(cmd);
+    operationRepository.claimPendingWithTimeout(ownerNodeId, 10);
+
+    // 预先将操作置为 UNKNOWN，导致后续 markFailed 影响 0 行
+    operationRepository.markUnknown(opId, ownerNodeId, leaseToken, "TIMEOUT", "Timeout elapsed");
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            publisher.publishExecutionFailure(
+                environmentId.value(),
+                opId,
+                ownerNodeId,
+                leaseToken,
+                defaultSourceSetVersion,
+                defaultSourceId,
+                0L));
+
+    // 来源状态应在异常回滚后不保持 FAILED
+    SkillSource src = skillSourceRepository.getSource(environmentId.value(), defaultSourceId);
+    assertFalse(src.getStatus() == SkillSourceStatus.FAILED, "事务回滚后来源状态不得为 FAILED");
+  }
 }
