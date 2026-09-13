@@ -669,6 +669,12 @@ public class IssueServiceImpl implements IssueService {
   }
 
   @Override
+  public List<IssueDependency> listProjectDependencies(UUID projectId) {
+    Objects.requireNonNull(projectId, "projectId");
+    return issueDependencyRepository.listByProjectId(projectId);
+  }
+
+  @Override
   public List<IssueInput> listInputs(UUID issueId) {
     Objects.requireNonNull(issueId, "issueId");
     return issueInputRepository.listByIssueId(issueId);

@@ -88,4 +88,7 @@ public interface IssueDependencyMapper extends BaseMapper {
       )
       """)
   boolean checkHasPath(@Param("fromIssueId") UUID fromIssueId, @Param("toIssueId") UUID toIssueId);
+
+  @Delete("delete from issue_dependency where project_id = #{projectId}")
+  int deleteByProjectId(@Param("projectId") UUID projectId);
 }

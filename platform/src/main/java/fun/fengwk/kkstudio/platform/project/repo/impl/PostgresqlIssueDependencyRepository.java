@@ -54,6 +54,11 @@ public class PostgresqlIssueDependencyRepository implements IssueDependencyRepos
     return issueDependencyMapper.checkHasPath(fromIssueId, toIssueId);
   }
 
+  @Override
+  public int deleteByProjectId(UUID projectId) {
+    return issueDependencyMapper.deleteByProjectId(projectId);
+  }
+
   private IssueDependencyDO toDO(IssueDependency dependency) {
     if (dependency == null) {
       return null;

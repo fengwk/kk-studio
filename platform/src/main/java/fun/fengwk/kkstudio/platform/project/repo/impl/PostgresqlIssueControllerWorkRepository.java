@@ -60,6 +60,11 @@ public class PostgresqlIssueControllerWorkRepository implements IssueControllerW
     return mapper.reschedule(issueId, leaseToken, claimedWakeVersion, now, requestedAt) == 1;
   }
 
+  @Override
+  public int deleteByIssueId(UUID issueId) {
+    return mapper.deleteByIssueId(issueId);
+  }
+
   private IssueControllerWork toModel(IssueControllerWorkDO row) {
     if (row == null) {
       return null;

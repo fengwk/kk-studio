@@ -18,4 +18,6 @@ public interface IssueDependencyRepository {
   List<IssueDependency> listByProjectId(UUID projectId);
 
   boolean checkHasPath(UUID fromIssueId, UUID toIssueId);
+
+  int deleteByProjectId(UUID projectId);
 }
