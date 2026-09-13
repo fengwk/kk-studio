@@ -170,7 +170,7 @@ Profile locations 是：
 | Canvas Function | `/api/canvas-function-models`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel` | model catalog、run、query、cancel |
 | Storage | `/api/storage` | upload reserve/complete/delete、`POST /api/storage/blobs/{blobId}/download-url|preview-url` |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
-| Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token` | Environment Card CRUD、rotate-token、只读 token、live projection；无目录浏览端点 |
+| Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token`、`/{id}/skill-sources`、`/{id}/skill-sources/{srcId}`、`/{id}/skill-sources/{srcId}/refresh\|install\|update`、`/{id}/inventory`、`/{id}/inventory/skills`、`/{id}/operations`、`/{id}/operations/{opId}`、`/{id}/operations/{opId}/cancel` | Environment Card CRUD、rotate-token、只读 token、live projection；Skill 来源 CRUD、持久清单与技能查询、异步操作提交（202）、操作查询与取消（200）；无目录浏览端点 |
 | ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |
 | ComfyUI runtime | `POST /api/comfyui/workflows/{workflowId}/runs`、`/api/comfyui/runs/{runId}` | stateless 202 run、job/cancel/output download，文件输入使用 blobId |
 
@@ -358,7 +358,14 @@ send timeout，超时/异常会关闭入队围栏、通知会话核心进行 unc
 
 ### Environment 端点与 async 边界
 
-Environment 的 HTTP surface 只有 Card CRUD、registration token 与 live projection；
+Environment 的 HTTP surface 包含 Card CRUD、registration token 与 live projection，以及 W2-B 引入的 Skill 来源配置、持久化清单查询与持久异步管理操作：
+- Skill 来源管理：`GET/POST /api/harness/environments/{envId}/skill-sources`、`GET/PUT/DELETE /api/harness/environments/{envId}/skill-sources/{srcId}`。
+- 持久化清单查询：`GET /api/harness/environments/{envId}/inventory`（清单头信息）、`GET /api/harness/environments/{envId}/inventory/skills?usableOnly={boolean}`（技能列表查询）。
+- 异步操作管理：`POST /api/harness/environments/{envId}/skill-sources/{srcId}/refresh|install|update`（202 Accepted 返回 `EnvironmentOperationDTO`）、`GET /api/harness/environments/{envId}/operations?limit=50`、`GET /api/harness/environments/{envId}/operations/{opId}`、`POST /api/harness/environments/{envId}/operations/{opId}/cancel`（200 OK 同步取消返回终态 CANCELLED）。
+- 缓存控制语义：`Cache-Control: no-store` 严格保留给承载 registrationToken 敏感凭据的环境端点；普通 Skill 来源、清单与操作端点不附加 no-store 响应头。
+- 调度与生命周期装配：`EnvironmentOperationDispatcher` 独立装配为 `EnvironmentOperationDispatcherLifecycle`（Phase 为 `Integer.MAX_VALUE - 1`，自动启动且独立于 `workers-enabled` 开关）。在 Dev 节点（`workers-enabled=false`），应用节点作为提交与查询控制面运行；调度器在每个应用节点均启动运行，但依赖 SQL 层的 owner-node 与租约隔离防护（`conn.owner_node_id = ? AND conn.status = 'READY' AND conn.lease_until > statement_timestamp()`），因此仅当前持有 Daemon 租约的节点（在 NAS 拓扑中通常为 Main 节点）才会真正抢占并执行操作排空。
+- 组合会话事件监听：`HarnessRuntimeConfiguration` 声明组合 `EnvironmentSessionListener`，通过 `ObjectProvider` 弱引用同时触发 `EnvironmentOperationDispatcher` 与 `HarnessWorkDispatcher` 的 `wake()`，解除与 `EnvironmentDaemonServer` 的循环依赖，并对两方异常完全隔离。
+- 通知循环：共享 PostgreSQL 通知循环通过注册 `EnvironmentOperationDispatcher.CHANNEL`（`environment_operation_pending`），在接收到通知与重连同步（resync）时可靠触发调度器排空唤醒。
 每个文件、进程、检索与 LSP 调用都由模型在 arguments 中显式给出目标 OS 的绝对 `workdir`，由 Daemon 校验真实存在性、
 目录类型与可访问性。Web 层不承载目录查询，也没有对应的 `CompletionStage` 分支：异步 boundary 只保留
 Application Event WebSocket 的订阅与 `DaemonOutboundSender`。
@@ -510,6 +517,10 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 - `web/src/test/java/fun/fengwk/kkstudio/web/environment/EnvironmentDaemonWebSocketEndpointTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/environment/EnvironmentDaemonWebSocketHandlerTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/environment/EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest.java`
+- `web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioEnvironmentOfflineIntegrationTest.java`
+- `web/src/test/java/fun/fengwk/kkstudio/web/runtime/EnvironmentOperationDispatcherLifecycleTest.java`
+- `web/src/test/java/fun/fengwk/kkstudio/web/runtime/CompositeEnvironmentSessionListenerTest.java`
+- `web/src/test/java/fun/fengwk/kkstudio/web/runtime/EnvironmentOperationPostgresCompositionIntegrationTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/SpaFallbackTest.java`
 
 这些测试覆盖 Web composition 的真实风险：唯一 root 与依赖方向、Flyway single baseline、PostgreSQL notification
