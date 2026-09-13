@@ -161,10 +161,10 @@ class DaemonSkillStoreTest {
     Files.createDirectory(dirTarget);
     assertFalse(store.isBodyReadable(revisionDir));
 
-    // 不可读常规文件（若 OS 支持权限设置）
+    // 不可读常规文件（若 OS 支持权限设置且对当前进程生效）
     Path unreadableFile = dataDir.resolve("skills/bodies/" + revisionUnreadable + ".md");
     Files.writeString(unreadableFile, "secret");
-    if (unreadableFile.toFile().setReadable(false)) {
+    if (unreadableFile.toFile().setReadable(false) && !Files.isReadable(unreadableFile)) {
       try {
         assertFalse(store.isBodyReadable(revisionUnreadable));
         assertEquals(Optional.empty(), store.readBody(revisionUnreadable));
