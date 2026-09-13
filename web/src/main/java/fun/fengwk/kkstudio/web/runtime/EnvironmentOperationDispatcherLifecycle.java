@@ -10,8 +10,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Environment Skill 来源异步管理操作分发器的 Web 层生命周期。
  *
- * <p>始终自动启动（不受 workers-enabled 控制，Dev 节点仍可拥有宿主 lease 并派发管理操作）； 重复 start / stop 幂等。start 失败会尝试回滚
- * dispatcher，且 running 状态在任何失败路径都正确复位。
+ * <p>始终自动启动（独立于 {@code workers-enabled}）。在 {@code workers-enabled=false} 的 Dev 节点，应用作为提交与查询控制面运行；
+ * 分发器在所有节点均自启动运行，但依赖 SQL 层的 Daemon 租约防护，仅当前持有该 Daemon 租约的节点（NAS 拓扑中通常为 Main 节点）才会真正抢占并派发执行。 重复
+ * start / stop 保持幂等。start 失败会尝试回滚 dispatcher，且 running 状态在任何失败路径都正确复位。
  */
 final class EnvironmentOperationDispatcherLifecycle implements SmartLifecycle {
 

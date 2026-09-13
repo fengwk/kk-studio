@@ -41,8 +41,9 @@ import java.util.UUID;
 /**
  * 稳定 Environment Card、Skill 来源配置、持久化库存与异步管理操作 REST API。
  *
- * <p>{@code registrationToken} 只出现在 create 响应与显式只读 token 端点；两者都返回 {@code Cache-Control: no-store}，
- * 避免凭据进入 HTTP 缓存。列表与普通详情永不返回 token。
+ * <p>{@code registrationToken} 仅出现在 create、显式只读 token 以及 rotate-token 响应中；三者均返回 {@code
+ * Cache-Control: no-store}， 避免敏感凭据进入 HTTP 缓存。列表与普通详情永不返回 token。普通 Skill
+ * 来源配置、持久化清单与异步管理操作端点保持常规缓存语义（不附加 no-store 头）。
  */
 @AllArgsConstructor
 @RequestMapping("/api/harness/environments")
