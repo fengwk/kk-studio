@@ -307,7 +307,7 @@ Tool 的 `AppendCustomEntry` intent 必须属于自身 Contributor、命中已�
 4. skills、subagents 和内部 `load_skill` / `task`；
 5. Contributor context projector、system prompt、cache control、context window 和 output budget。
 
-Agent 配置有 skills 时按稳定 ID 追加 `LoadSkillTool`；subagents 非空且 Session depth 小于 `SubagentConfig.maxDepth` 时按稳定 ID 追加 `TaskTool`。每个 tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor；Environment tool 使用当前 Agent definition 选定的 Environment。Skill 必须由当前选中的 live Environment 提供，且 Environment 必须 READY；缺失、未 READY、能力或 Model 不支持时返回统一 `AssistantError.code=PLANNING_FAILED`。Repository/catalog 基础设施异常向上抛出，由 ThreadProcessor 按 runtime policy reschedule。
+Agent 配置有 skills 时按稳定 ID 追加 `LoadSkillTool`；subagents 非空且 Session depth 小于 `SubagentConfig.maxDepth` 时按稳定 ID 追加 `TaskTool`。每个 tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor；Environment tool 使用当前 Agent definition 选定的 Environment。Skill 严格按 `(sourceId, name)` 从该 Environment 的持久可用 inventory 解析并冻结来源、描述、基目录与内容 revision；Daemon 离线不阻止规划，缺失或陈旧引用返回 `AssistantError.code=PLANNING_FAILED`。当前 Environment 的系统与时区信息优先使用 live READY，离线时回退到持久 inventory。Repository/catalog 基础设施异常向上抛出，由 ThreadProcessor 按 runtime policy reschedule。
 
 system prompt 由 `AgentPromptComposer` 拼接正文、当前 Environment、skill 和 subagent sections，并只替换已知的 `${date}` placeholder；其余 `${...}` 占位符与未闭合形式的原文保持不变。Contributor context projector 以 `BranchView` 追加 preamble。`DatabaseThreadSelectedSkillLookup` 从冻结 ModelRequestSpec 读取 skill binding，正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.load` 能力读取；不会用当前 Agent 配置扩张已冻结调用。
 

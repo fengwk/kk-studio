@@ -138,7 +138,7 @@ WorkbenchShell 的顺序是 `AppShell`、`header` slot、动态 `StudioRoutes` �
 | AI | `/chats` | Chat 列表、创建 Chat、搜索 |
 | AI | `/chats/:chatId` | Chat Workspace 和 Pane |
 | AI | `/agents`、`/models`、`/providers` | Catalog CRUD |
-| AI | `/environments` | Environment 注册与 live 状态 |
+| AI | `/environments` | Environment 注册、live 状态、Skill 来源、持久 inventory 与异步管理操作 |
 | Canvas | `/canvas` | Canvas Library |
 | Canvas | `/canvas/:canvasId` | canonical UUID Canvas Editor |
 | ComfyUI | `/comfyui` | Workflow 列表、编辑、运行 |
@@ -193,7 +193,7 @@ errors；`409` 由 `isConflictError` 识别，只有 `errors.reason` 精确匹�
 | [base.ts](../../frontend/src/shared/api/contracts/base.ts) | `ResultEnvelope`、分页、时间、canonical decimal、`CatalogVersion`、`CanvasVersion` |
 | [ai-runtime.ts](../../frontend/src/shared/api/contracts/ai-runtime.ts) | Session/Entry/Thread、branch settings、command、stop、approval、model/tool invocation、snapshot、command batch |
 | [ai-catalog.ts](../../frontend/src/shared/api/contracts/ai-catalog.ts) | Provider、Model、Agent、Tool catalog 与 config |
-| [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | READY Environment、Capability/Skill 与 Card CRUD |
+| [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | Environment Card/live Capability、Skill 来源、持久 inventory 与异步操作 |
 | [studio.ts](../../frontend/src/shared/api/contracts/studio.ts) | Canvas document、node/resource/group/link、snapshot、patch、version event、typed command |
 | [storage.ts](../../frontend/src/shared/api/contracts/storage.ts) | PENDING/READY upload、presigned PUT、render-time presigned URL |
 | [comfyui.ts](../../frontend/src/shared/api/contracts/comfyui.ts) | Workflow、input binding、run、job、cancel |
@@ -210,7 +210,7 @@ errors；`409` 由 `isConflictError` 识别，只有 `errors.reason` 精确匹�
 | [agent-service.ts](../../frontend/src/shared/api/agent-service.ts) | `/ai/catalog/providers|models|agents|tools` | Provider/Model/Agent CRUD，删除使用 `expectedVersion` CAS |
 | [chat-service.ts](../../frontend/src/shared/api/chat-service.ts) | `/ai/chats` | Chat list/create/get/update/delete 与 owner Session 查询 |
 | [mcp-server-service.ts](../../frontend/src/shared/api/mcp-server-service.ts) | `/ai/mcp-servers` | MCP Server CRUD、refresh 与 `expectedVersion` CAS |
-| [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/harness/environments`、`/{id}/token` | Environment Card CRUD、rotate-token 与按需只读 token；无目录查询 |
+| [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/harness/environments`、`/{id}/token`、`/{id}/skill-sources`、`/{id}/inventory`、`/{id}/operations` | Environment Card CRUD、token、Skill 来源、持久 inventory 与异步管理操作；无目录查询 |
 | [harness-service.ts](../../frontend/src/shared/api/harness-service.ts) | `/harness/command-batches|sessions|threads` | Harness command、Session 查询、Thread 快照与运行控制 |
 | [studio-service.ts](../../frontend/src/shared/api/studio-service.ts) | `/canvases` | Canvas CRUD/命令/资源/Function Run 与 owner Session 查询；自有 `canvasRequest`、strict envelope、AbortSignal、ApiError |
 | [storage-service.ts](../../frontend/src/shared/api/storage-service.ts) | `/storage/uploads`、blob presigned URL | upload handle 生命周期和浏览器安全 header |
@@ -245,14 +245,21 @@ props。
 AI feature 由 `CatalogRuntime`、`ChatRuntime` 和 `AgentPane` 组成：
 
 - Catalog 页面分别渲染 Provider、Model、Agent cards/forms；structured config
-  使用 Model variant、limits、modalities、pricing，Agent 的 `toolIds`、
-  `skills`、`subagents` 使用 catalog candidate 校验。CRUD mutation 统一
-  在成功后失效对应 query，冲突沿用 ConflictPresenter。
+  使用 Model variant、limits、modalities、pricing。Agent 的 `toolIds` 和
+  `subagents` 使用 catalog candidate 校验；`skills` 使用显式
+  `{sourceId, name}` 引用，并从绑定 Environment 的可用持久 inventory 构建候选，
+  Environment 离线时仍可选择。切换或解绑 Environment 会显式清空 Skill 选择，
+  inventory 中缺失的已保存引用保持可见且可移除。CRUD mutation 统一在成功后
+  失效对应 query，冲突沿用 ConflictPresenter。
 - Chat list 使用 `ChatRuntime` + `ChatCardsPanel`；Environment 归属完全由 Agent definition 的 `environmentId` 决定，
   Chat 只持久化 title、agentName 与 YOLO 开关，不持有目录。
-- Environment 页面读取 live Environment、原子 Capability 与 Skill；Capability 只展示
-  canonical `id`，不把 capability ID 当作 model Tool name。不存在目录浏览器：工具调用的目标目录由模型在
-  arguments 中显式给出，前端不注入默认目录。
+- Environment 卡片读取 live 状态与原子 Capability，只展示 Capability 的
+  canonical `id`，不平铺 Skill，也不把 capability ID 当作 model Tool name。
+  管理弹窗提供 PATH/GIT 来源的 CAS CRUD、持久 inventory/诊断，以及带显式
+  `timeoutMillis` 的 refresh/install/update。操作只在 `PENDING/RUNNING` 时每
+  2 秒轮询，进入终态后停止并刷新来源与 inventory；只有 `PENDING` 操作可取消。
+  持久 inventory 不依赖 live 连接。不存在目录浏览器：工具调用的目标目录由模型
+  在 arguments 中显式给出，前端不注入默认目录。
 - `builtin.ai` 的 `task` renderer 只展示宿主投影的 message；approval 和
   状态机操作仍由宿主 controller 负责。
 
