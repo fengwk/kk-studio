@@ -62,7 +62,7 @@ export async function httpJson(
       }
     }
     if (!res.ok) throw new HttpError(res.status, text, requestPath)
-    return { status: res.status, json }
+    return { status: res.status, json, headers: res.headers }
   } catch (err) {
     if (err instanceof HttpError) throw err
     if (err?.name === 'AbortError') throw new Error(`timeout ${method} ${requestPath}`)
