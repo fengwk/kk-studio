@@ -19,7 +19,8 @@ interface EnvironmentOperationRepository {
    *
    * @param command 创建参数
    * @return 创建成功的操作行
-   * @throws DuplicateActiveOperationException 同一 (environment, source) 已存在活动操作 (PENDING/RUNNING)
+   * @throws DuplicateActiveOperationException 同一 (environment, resource_type, resource_id) 已存在活动操作
+   *     (PENDING/RUNNING)
    * @throws fun.fengwk.kkstudio.platform.error.AiValidationException 参数形状或 JSON 非法、或截止时间早于数据库当前时间
    * @throws fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException 目标环境不存在
    */
@@ -30,7 +31,8 @@ interface EnvironmentOperationRepository {
    *
    * @param command 相对超时创建参数
    * @return 创建成功的操作行
-   * @throws DuplicateActiveOperationException 同一 (environment, source) 已存在活动操作 (PENDING/RUNNING)
+   * @throws DuplicateActiveOperationException 同一 (environment, resource_type, resource_id) 已存在活动操作
+   *     (PENDING/RUNNING)
    * @throws fun.fengwk.kkstudio.platform.error.AiValidationException 参数形状或 JSON 非法、或超时时间非正数
    * @throws fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException 目标环境不存在
    */
@@ -117,7 +119,7 @@ interface EnvironmentOperationRepository {
   RescheduleOutcome rescheduleUnsent(UUID id, UUID ownerNodeId, UUID leaseToken);
 
   /**
-   * 权威 daemon 成功完成状态推进：由操作 RUNNING 认领元组与数据库中当前环境 READY 活跃连接共同围栏。 单终态。
+   * 权威 daemon 成功完成状态推进：由操作 RUNNING 认领元组、未过期 deadline 与数据库中当前环境 READY 活跃连接共同围栏。 单终态。
    *
    * @param id 操作 ID
    * @param ownerNodeId 认领节点 ID
@@ -128,7 +130,7 @@ interface EnvironmentOperationRepository {
   boolean markSucceeded(UUID id, UUID ownerNodeId, UUID leaseToken, String resultSummaryJson);
 
   /**
-   * 权威 daemon 失败状态推进：由操作 RUNNING 认领元组与数据库中当前环境 READY 活跃连接共同围栏。 单终态。
+   * 权威 daemon 失败状态推进：由操作 RUNNING 认领元组、未过期 deadline 与数据库中当前环境 READY 活跃连接共同围栏。 单终态。
    *
    * @param id 操作 ID
    * @param ownerNodeId 认领节点 ID

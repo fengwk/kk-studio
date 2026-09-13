@@ -18,10 +18,10 @@ final class CreatePendingOperationCommand {
 
   private final UUID id;
   private final UUID environmentId;
-  private final UUID sourceId;
+  private final EnvironmentOperationResourceType resourceType;
+  private final UUID resourceId;
   private final EnvironmentOperationType operationType;
-  private final long sourceVersion;
-  private final long sourceSetVersion;
+  private final long resourceVersion;
 
   @JsonIgnore private final String arguments;
 
@@ -31,19 +31,19 @@ final class CreatePendingOperationCommand {
   CreatePendingOperationCommand(
       UUID id,
       UUID environmentId,
-      UUID sourceId,
+      EnvironmentOperationResourceType resourceType,
+      UUID resourceId,
       EnvironmentOperationType operationType,
-      long sourceVersion,
-      long sourceSetVersion,
+      long resourceVersion,
       String arguments,
       String parameterSummary,
       Instant deadlineAt) {
     this.id = Objects.requireNonNull(id, "id");
     this.environmentId = Objects.requireNonNull(environmentId, "environmentId");
-    this.sourceId = Objects.requireNonNull(sourceId, "sourceId");
+    this.resourceType = Objects.requireNonNull(resourceType, "resourceType");
+    this.resourceId = Objects.requireNonNull(resourceId, "resourceId");
     this.operationType = Objects.requireNonNull(operationType, "operationType");
-    this.sourceVersion = sourceVersion;
-    this.sourceSetVersion = sourceSetVersion;
+    this.resourceVersion = resourceVersion;
     this.arguments = Objects.requireNonNull(arguments, "arguments");
     this.parameterSummary = Objects.requireNonNull(parameterSummary, "parameterSummary");
     this.deadlineAt = Objects.requireNonNull(deadlineAt, "deadlineAt");
@@ -60,8 +60,13 @@ final class CreatePendingOperationCommand {
   }
 
   @JsonProperty
-  public UUID sourceId() {
-    return sourceId;
+  public EnvironmentOperationResourceType resourceType() {
+    return resourceType;
+  }
+
+  @JsonProperty
+  public UUID resourceId() {
+    return resourceId;
   }
 
   @JsonProperty
@@ -70,13 +75,8 @@ final class CreatePendingOperationCommand {
   }
 
   @JsonProperty
-  public long sourceVersion() {
-    return sourceVersion;
-  }
-
-  @JsonProperty
-  public long sourceSetVersion() {
-    return sourceSetVersion;
+  public long resourceVersion() {
+    return resourceVersion;
   }
 
   @JsonIgnore
@@ -101,14 +101,14 @@ final class CreatePendingOperationCommand {
         + id
         + ", environmentId="
         + environmentId
-        + ", sourceId="
-        + sourceId
+        + ", resourceType="
+        + resourceType
+        + ", resourceId="
+        + resourceId
         + ", operationType="
         + operationType
-        + ", sourceVersion="
-        + sourceVersion
-        + ", sourceSetVersion="
-        + sourceSetVersion
+        + ", resourceVersion="
+        + resourceVersion
         + ", parameterSummary="
         + parameterSummary
         + ", deadlineAt="

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
@@ -61,6 +62,58 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     repository = new PostgresqlEnvironmentOperationRepository(jdbcTemplate);
   }
 
+  private CreatePendingOperationCommand pendingCmd(
+      UUID id,
+      UUID envId,
+      UUID resourceId,
+      EnvironmentOperationType type,
+      long version,
+      String arguments,
+      String parameterSummary,
+      Instant deadlineAt) {
+    return new CreatePendingOperationCommand(
+        id,
+        envId,
+        type.resourceType(),
+        resourceId,
+        type,
+        version,
+        arguments,
+        parameterSummary,
+        deadlineAt);
+  }
+
+  private CreatePendingOperationCommand pendingCmd(
+      UUID id,
+      UUID envId,
+      UUID resourceId,
+      EnvironmentOperationType type,
+      long version,
+      Instant deadlineAt) {
+    return pendingCmd(id, envId, resourceId, type, version, "{}", "{}", deadlineAt);
+  }
+
+  private CreatePendingOperationWithTimeoutCommand timeoutCmd(
+      UUID id,
+      UUID envId,
+      UUID resourceId,
+      EnvironmentOperationType type,
+      long version,
+      String arguments,
+      String parameterSummary,
+      long timeoutMillis) {
+    return new CreatePendingOperationWithTimeoutCommand(
+        id,
+        envId,
+        type.resourceType(),
+        resourceId,
+        type,
+        version,
+        arguments,
+        parameterSummary,
+        timeoutMillis);
+  }
+
   /** 测试意图：验证完整的创建与读取闭环，确保私有 arguments 与 leaseToken 绝不泄露到 toString、Jackson 序列化或公开投影中。 */
   @Test
   void roundTripWithoutToStringOrSerializationLeak() throws Exception {
@@ -73,13 +126,12 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
     CreatePendingOperationCommand command =
-        new CreatePendingOperationCommand(
+        pendingCmd(
             opId,
             envId,
             sourceId,
             EnvironmentOperationType.SKILL_INSTALL,
             1L,
-            0L,
             arguments,
             parameterSummary,
             deadlineAt);
@@ -162,16 +214,8 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     // 1. 过去时间边界：早于 DB statement_timestamp 1 秒 -> 拒绝并返回安全验证错误
     Instant pastDeadline = dbInstant.minusSeconds(1);
     CreatePendingOperationCommand pastCommand =
-        new CreatePendingOperationCommand(
-            uuid(),
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            pastDeadline);
+        pendingCmd(
+            uuid(), envId, sourceId, EnvironmentOperationType.SKILL_REFRESH, 0L, pastDeadline);
     AiValidationException pastEx =
         assertThrows(AiValidationException.class, () -> repository.createPending(pastCommand));
     assertTrue(pastEx.getMessage().contains("database current timestamp"));
@@ -180,16 +224,8 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     // 2. 未来时间边界：晚于 DB statement_timestamp 30 秒 -> 正常接受并创建
     Instant futureDeadline = dbInstant.plusSeconds(30);
     CreatePendingOperationCommand futureCommand =
-        new CreatePendingOperationCommand(
-            uuid(),
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            futureDeadline);
+        pendingCmd(
+            uuid(), envId, sourceId, EnvironmentOperationType.SKILL_REFRESH, 0L, futureDeadline);
     EnvironmentOperation created = repository.createPending(futureCommand);
     assertNotNull(created);
     assertEquals(futureCommand.id(), created.id());
@@ -207,12 +243,11 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
 
     UUID firstOpId = uuid();
     CreatePendingOperationCommand cmd1 =
-        new CreatePendingOperationCommand(
+        pendingCmd(
             firstOpId,
             envId,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
-            0L,
             0L,
             sensitiveArguments,
             "{}",
@@ -221,12 +256,11 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
 
     // 1. 活动冲突分支：uk_environment_operation_active -> DuplicateActiveOperationException
     CreatePendingOperationCommand cmdDuplicateActive =
-        new CreatePendingOperationCommand(
+        pendingCmd(
             uuid(),
             envId,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
-            0L,
             0L,
             sensitiveArguments,
             "{}",
@@ -239,12 +273,11 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
 
     // 2. 主键重复分支：environment_operation_pkey -> AiValidationException
     CreatePendingOperationCommand cmdDuplicatePk =
-        new CreatePendingOperationCommand(
+        pendingCmd(
             firstOpId,
             envId,
             uuid(),
             EnvironmentOperationType.SKILL_REFRESH,
-            0L,
             0L,
             sensitiveArguments,
             "{}",
@@ -257,12 +290,11 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     // 3. 外键缺失分支：fk_environment_operation_environment -> AiResourceNotFoundException
     UUID nonExistentEnvId = uuid();
     CreatePendingOperationCommand cmdFkViolation =
-        new CreatePendingOperationCommand(
+        pendingCmd(
             uuid(),
             nonExistentEnvId,
             uuid(),
             EnvironmentOperationType.SKILL_REFRESH,
-            0L,
             0L,
             sensitiveArguments,
             "{}",
@@ -297,16 +329,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     UUID opId = uuid();
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opId,
-            envId,
-            uuid(),
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opId, envId, uuid(), EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
 
     repository.claimPending(node, 1);
 
@@ -392,12 +415,11 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
     CreatePendingOperationCommand cmd1 =
-        new CreatePendingOperationCommand(
+        pendingCmd(
             uuid(),
             envId,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
-            0L,
             0L,
             arguments,
             "{}",
@@ -405,12 +427,11 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     repository.createPending(cmd1);
 
     CreatePendingOperationCommand cmd2 =
-        new CreatePendingOperationCommand(
+        pendingCmd(
             uuid(),
             envId,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
-            0L,
             0L,
             arguments,
             "{}",
@@ -419,7 +440,8 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     DuplicateActiveOperationException thrown =
         assertThrows(DuplicateActiveOperationException.class, () -> repository.createPending(cmd2));
     assertEquals(envId, thrown.getEnvironmentId());
-    assertEquals(sourceId, thrown.getSourceId());
+    assertEquals(sourceId, thrown.getResourceId());
+    assertEquals(EnvironmentOperationResourceType.SKILL_SOURCE, thrown.getResourceType());
     assertFalse(thrown.getMessage().contains(sensitiveSecret));
     assertTrue(thrown instanceof AiDuplicateException);
     assertNull(thrown.getCause());
@@ -443,16 +465,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opId,
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opId, envId, sourceId, EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
 
     // 1. 无连接：无法认领
     assertTrue(repository.claimPending(nodeA, 10).isEmpty());
@@ -502,16 +515,8 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
       opIds.add(opId);
       insertConnection(envId, node, uuid(), "READY", 60);
       repository.createPending(
-          new CreatePendingOperationCommand(
-              opId,
-              envId,
-              sourceId,
-              EnvironmentOperationType.SKILL_REFRESH,
-              0L,
-              0L,
-              "{}",
-              "{}",
-              deadlineAt));
+          pendingCmd(
+              opId, envId, sourceId, EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
     }
 
     int threads = 4;
@@ -545,16 +550,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opId,
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opId, envId, sourceId, EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
 
     insertConnection(envId, node, uuid(), "READY", 60);
 
@@ -579,16 +575,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opId,
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opId, envId, sourceId, EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
 
     insertConnection(envId, node, leaseToken, "READY", 60);
     repository.claimPending(node, 10);
@@ -645,16 +632,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opId,
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opId, envId, sourceId, EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
 
     insertConnection(envId, nodeA, leaseToken, "READY", 60);
     repository.claimPending(nodeA, 10);
@@ -682,6 +660,41 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     assertNotNull(op.finishedAt());
   }
 
+  /** 测试意图：数据库 deadline 是硬围栏；清扫前到达的迟到成功或失败结果都不得抢先终结 RUNNING 操作。 */
+  @Test
+  void expiredRunningOperationRejectsAuthoritativeTerminalResult() throws Exception {
+    UUID envId = createEnvironment();
+    UUID sourceId = uuid();
+    UUID opId = uuid();
+    UUID node = uuid();
+    UUID leaseToken = uuid();
+
+    repository.createPending(
+        pendingCmd(
+            opId,
+            envId,
+            sourceId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            0L,
+            Instant.now().plus(10, ChronoUnit.MINUTES)));
+    insertConnection(envId, node, leaseToken, "READY", 60);
+    repository.claimPending(node, 10);
+
+    jdbcTemplate.update(
+        "update environment_operation set created_at = statement_timestamp() - interval '10"
+            + " second', deadline_at = statement_timestamp() - interval '1 second' where id = ?",
+        opId);
+
+    assertFalse(repository.markSucceeded(opId, node, leaseToken, "{\"late\":true}"));
+    assertFalse(repository.markFailed(opId, node, leaseToken, "LATE_RESULT", "late result"));
+    assertEquals(EnvironmentOperationStatus.RUNNING, repository.getById(opId).status());
+
+    assertEquals(1, repository.sweepExpiredRunning());
+    EnvironmentOperation swept = repository.getById(opId);
+    assertEquals(EnvironmentOperationStatus.UNKNOWN, swept.status());
+    assertEquals(EnvironmentOperationFailureCodes.RESULT_TIMEOUT, swept.failureCode());
+  }
+
   /** 测试意图：被抢占的旧 owner / 租约代币无法提交终态。 */
   @Test
   void staleOwnerOrLeaseTokenCannotCommitTerminal() throws SQLException {
@@ -693,16 +706,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opId,
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opId, envId, sourceId, EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
 
     insertConnection(envId, nodeA, tokenA, "READY", 60);
     repository.claimPending(nodeA, 10);
@@ -728,16 +732,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opId,
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opId, envId, sourceId, EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
 
     insertConnection(envId, nodeA, tokenA, "READY", 60);
     repository.claimPending(nodeA, 10);
@@ -771,16 +766,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opId,
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opId, envId, sourceId, EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
 
     // 1. PENDING 状态下成功取消
     assertTrue(repository.cancelPending(opId));
@@ -794,16 +780,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     // 3. 创建新操作并流转至 RUNNING
     UUID opId2 = uuid();
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opId2,
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opId2, envId, sourceId, EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
     insertConnection(envId, node, leaseToken, "READY", 60);
     repository.claimPending(node, 10);
 
@@ -825,30 +802,14 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
 
     // 先创建 opRunning 并立即认领，确保它处于 RUNNING 状态
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opRunning,
-            envId,
-            uuid(),
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(
+            opRunning, envId, uuid(), EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
     repository.claimPending(node, 1);
 
     // 再创建 opPending，保持 PENDING 状态
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opPending,
-            envId,
-            uuid(),
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(
+            opPending, envId, uuid(), EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
 
     // 人工将两个操作的截止时间调整为过去
     jdbcTemplate.update(
@@ -893,16 +854,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opId,
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opId, envId, sourceId, EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
 
     insertConnection(envId, node, leaseToken, "READY", 60);
     repository.claimPending(node, 10);
@@ -931,16 +883,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
       UUID opId = uuid();
       opIds.add(opId);
       repository.createPending(
-          new CreatePendingOperationCommand(
-              opId,
-              envId,
-              uuid(),
-              EnvironmentOperationType.SKILL_REFRESH,
-              0L,
-              0L,
-              "{}",
-              "{}",
-              deadlineAt));
+          pendingCmd(opId, envId, uuid(), EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
     }
 
     List<EnvironmentOperation> list = repository.listByEnvironment(envId, 3);
@@ -970,27 +913,9 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     UUID opA = uuid();
     UUID opB = uuid();
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opA,
-            envId1,
-            uuid(),
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opA, envId1, uuid(), EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opB,
-            envId2,
-            uuid(),
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opB, envId2, uuid(), EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
 
     insertConnection(envId1, nodeA, uuid(), "READY", 60);
     insertConnection(envId2, nodeB, uuid(), "READY", 60);
@@ -1031,17 +956,18 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                     new CreatePendingOperationCommand(
                         uuid(),
                         envId,
+                        EnvironmentOperationResourceType.SKILL_SOURCE,
                         sourceId,
                         EnvironmentOperationType.SKILL_REFRESH,
                         -1L,
-                        0L,
                         "{}",
                         "{}",
                         deadlineAt)));
-    assertTrue(srcVerEx.getMessage().contains("sourceVersion must be non-negative"));
+    assertTrue(srcVerEx.getMessage().contains("resourceVersion must be non-negative"));
     assertNull(srcVerEx.getCause());
 
-    AiValidationException srcSetVerEx =
+    // 资源类型与操作类型不匹配拦截
+    AiValidationException pairEx =
         assertThrows(
             AiValidationException.class,
             () ->
@@ -1049,15 +975,15 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                     new CreatePendingOperationCommand(
                         uuid(),
                         envId,
+                        EnvironmentOperationResourceType.MCP_SERVER,
                         sourceId,
                         EnvironmentOperationType.SKILL_REFRESH,
                         0L,
-                        -1L,
                         "{}",
                         "{}",
                         deadlineAt)));
-    assertTrue(srcSetVerEx.getMessage().contains("sourceSetVersion must be non-negative"));
-    assertNull(srcSetVerEx.getCause());
+    assertTrue(pairEx.getMessage().contains("is incompatible with resourceType"));
+    assertNull(pairEx.getCause());
 
     // 2. 非法的 arguments JSON（非对象）
     assertThrows(
@@ -1067,9 +993,9 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                 new CreatePendingOperationCommand(
                     uuid(),
                     envId,
+                    EnvironmentOperationResourceType.SKILL_SOURCE,
                     sourceId,
                     EnvironmentOperationType.SKILL_REFRESH,
-                    0L,
                     0L,
                     "[1, 2, 3]",
                     "{}",
@@ -1084,9 +1010,9 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                     new CreatePendingOperationCommand(
                         uuid(),
                         envId,
+                        EnvironmentOperationResourceType.SKILL_SOURCE,
                         sourceId,
                         EnvironmentOperationType.SKILL_REFRESH,
-                        0L,
                         0L,
                         "not-json-secret",
                         "{}",
@@ -1103,9 +1029,9 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                     new CreatePendingOperationCommand(
                         uuid(),
                         envId,
+                        EnvironmentOperationResourceType.SKILL_SOURCE,
                         sourceId,
                         EnvironmentOperationType.SKILL_REFRESH,
-                        0L,
                         0L,
                         "{\"secretKey\":\"valueA\",\"secretKey\":\"valueB\"}",
                         "{}",
@@ -1124,9 +1050,9 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                     new CreatePendingOperationCommand(
                         uuid(),
                         envId,
+                        EnvironmentOperationResourceType.SKILL_SOURCE,
                         sourceId,
                         EnvironmentOperationType.SKILL_REFRESH,
-                        0L,
                         0L,
                         "{\"secretKey\":\"value\"} trailing_secret_garbage",
                         "{}",
@@ -1143,9 +1069,9 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                 new CreatePendingOperationCommand(
                     uuid(),
                     uuid(),
+                    EnvironmentOperationResourceType.SKILL_SOURCE,
                     sourceId,
                     EnvironmentOperationType.SKILL_REFRESH,
-                    0L,
                     0L,
                     "{}",
                     "{}",
@@ -1159,9 +1085,9 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                 new CreatePendingOperationCommand(
                     uuid(),
                     envId,
+                    EnvironmentOperationResourceType.SKILL_SOURCE,
                     sourceId,
                     EnvironmentOperationType.SKILL_REFRESH,
-                    0L,
                     0L,
                     "{}",
                     "\"not-an-object\"",
@@ -1175,9 +1101,9 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                     new CreatePendingOperationCommand(
                         uuid(),
                         envId,
+                        EnvironmentOperationResourceType.SKILL_SOURCE,
                         sourceId,
                         EnvironmentOperationType.SKILL_REFRESH,
-                        0L,
                         0L,
                         "{}",
                         "{\"param\":1,\"param\":2}",
@@ -1193,9 +1119,9 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
                     new CreatePendingOperationCommand(
                         uuid(),
                         envId,
+                        EnvironmentOperationResourceType.SKILL_SOURCE,
                         sourceId,
                         EnvironmentOperationType.SKILL_REFRESH,
-                        0L,
                         0L,
                         "{}",
                         "{\"param\":1} extra_token",
@@ -1216,16 +1142,7 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     UUID opId = uuid();
     Instant deadlineAt = Instant.now().plus(10, ChronoUnit.MINUTES);
     repository.createPending(
-        new CreatePendingOperationCommand(
-            opId,
-            envId,
-            uuid(),
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            0L,
-            "{}",
-            "{}",
-            deadlineAt));
+        pendingCmd(opId, envId, uuid(), EnvironmentOperationType.SKILL_REFRESH, 0L, deadlineAt));
 
     repository.claimPending(node, 10);
 
@@ -1286,13 +1203,12 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
       PGConnection pgConnection = listenConn.unwrap(PGConnection.class);
 
       CreatePendingOperationWithTimeoutCommand command =
-          new CreatePendingOperationWithTimeoutCommand(
+          timeoutCmd(
               opId,
               envId,
               sourceId,
               EnvironmentOperationType.SKILL_REFRESH,
               1L,
-              2L,
               "{\"url\":\"https://example.com/repo.git\"}",
               "{\"sourceType\":\"git\"}",
               60000L);
@@ -1331,13 +1247,12 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     insertConnection(envId, node, leaseToken, "READY", 300);
 
     CreatePendingOperationWithTimeoutCommand command =
-        new CreatePendingOperationWithTimeoutCommand(
+        timeoutCmd(
             opId,
             envId,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
             1L,
-            2L,
             "{\"type\":\"git\"}",
             "{\"sourceType\":\"git\"}",
             30000L);
@@ -1374,11 +1289,12 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "insert into environment_operation (id, environment_id, source_id, operation_type,"
-                    + " status, source_version, source_set_version, arguments, parameter_summary,"
+                "insert into environment_operation (id, environment_id, resource_type, resource_id,"
+                    + " operation_type, status, resource_version, arguments, parameter_summary,"
                     + " deadline_at, owner_node_id, lease_token, started_at, created_at, updated_at)"
-                    + " values (?, ?, ?, 'SKILL_REFRESH', 'RUNNING', 1, 1, '{}'::jsonb, '{}'::jsonb,"
-                    + " statement_timestamp() - interval '10 second', ?, ?, statement_timestamp() - interval '20 second',"
+                    + " values (?, ?, 'SKILL_SOURCE', ?, 'SKILL_REFRESH', 'RUNNING', 1, '{}'::jsonb,"
+                    + " '{}'::jsonb, statement_timestamp() - interval '10 second', ?, ?,"
+                    + " statement_timestamp() - interval '20 second',"
                     + " statement_timestamp() - interval '30 second', statement_timestamp() - interval '20 second')")) {
       ps.setObject(1, opId1);
       ps.setObject(2, envId);
@@ -1392,11 +1308,12 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "insert into environment_operation (id, environment_id, source_id, operation_type,"
-                    + " status, source_version, source_set_version, arguments, parameter_summary,"
+                "insert into environment_operation (id, environment_id, resource_type, resource_id,"
+                    + " operation_type, status, resource_version, arguments, parameter_summary,"
                     + " deadline_at, owner_node_id, lease_token, started_at, created_at, updated_at)"
-                    + " values (?, ?, ?, 'SKILL_REFRESH', 'RUNNING', 1, 1, '{}'::jsonb, '{}'::jsonb,"
-                    + " statement_timestamp() - interval '10 second', ?, ?, statement_timestamp() - interval '20 second',"
+                    + " values (?, ?, 'SKILL_SOURCE', ?, 'SKILL_REFRESH', 'RUNNING', 1, '{}'::jsonb,"
+                    + " '{}'::jsonb, statement_timestamp() - interval '10 second', ?, ?,"
+                    + " statement_timestamp() - interval '20 second',"
                     + " statement_timestamp() - interval '30 second', statement_timestamp() - interval '20 second')")) {
       ps.setObject(1, opId2);
       ps.setObject(2, envId);
@@ -1426,13 +1343,12 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     UUID opId = uuid();
 
     CreatePendingOperationWithTimeoutCommand command =
-        new CreatePendingOperationWithTimeoutCommand(
+        timeoutCmd(
             opId,
             envId,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
             1L,
-            2L,
             "{\"secretArg\":\"value\"}",
             "{\"sourceType\":\"git\"}",
             30000L);
@@ -1455,6 +1371,78 @@ class PostgresqlEnvironmentOperationRepositoryIntegrationTest extends PostgresSc
     UUID nonExistentOp = uuid();
     assertTrue(repository.findSafe(envId, nonExistentOp).isEmpty());
     assertThrows(AiResourceNotFoundException.class, () -> repository.getSafe(envId, nonExistentOp));
+  }
+
+  /**
+   * 测试意图：直接在数据库层验证 V4 迁移引入的 CHECK 约束和部分唯一索引： 1. operation_type 与 resource_type 的枚举约束及 pairing 约束；
+   * 2. 同一资源在 PENDING/RUNNING 状态下的部分唯一索引； 3. 证明 MCP_SERVER_DISCOVER 只能与 MCP_SERVER 配对，SKILL_* 只能与
+   * SKILL_SOURCE 配对。
+   */
+  @Test
+  void databaseConstraintsAndPairingEnforcedAtSqlLevel() throws SQLException {
+    UUID envId = createEnvironment();
+    UUID skillSourceId = uuid();
+    UUID mcpServerId = uuid();
+
+    String insertSql =
+        """
+        insert into environment_operation (
+            id, environment_id, resource_type, resource_id,
+            operation_type, status, resource_version,
+            arguments, parameter_summary, deadline_at,
+            created_at, updated_at
+        ) values (
+            ?, ?, ?, ?,
+            ?, 'PENDING', 0,
+            '{}'::jsonb, '{}'::jsonb, statement_timestamp() + interval '10 minutes',
+            statement_timestamp(), statement_timestamp()
+        )
+        """;
+
+    // 1. 合法插入：Skill 操作 + SKILL_SOURCE
+    jdbcTemplate.update(insertSql, uuid(), envId, "SKILL_SOURCE", skillSourceId, "SKILL_REFRESH");
+    jdbcTemplate.update(insertSql, uuid(), envId, "SKILL_SOURCE", uuid(), "SKILL_INSTALL");
+    jdbcTemplate.update(insertSql, uuid(), envId, "SKILL_SOURCE", uuid(), "SKILL_UPDATE");
+
+    // 2. 合法插入：MCP 操作 + MCP_SERVER
+    jdbcTemplate.update(insertSql, uuid(), envId, "MCP_SERVER", mcpServerId, "MCP_SERVER_DISCOVER");
+
+    // 3. 非法 operation_type: 触发 ck_environment_operation_type
+    assertThrows(
+        DataAccessException.class,
+        () ->
+            jdbcTemplate.update(insertSql, uuid(), envId, "SKILL_SOURCE", uuid(), "INVALID_TYPE"));
+
+    // 4. 非法 resource_type: 触发 ck_environment_operation_resource_type
+    assertThrows(
+        DataAccessException.class,
+        () ->
+            jdbcTemplate.update(
+                insertSql, uuid(), envId, "INVALID_RESOURCE", uuid(), "SKILL_REFRESH"));
+
+    // 5. 配对错误：SKILL_REFRESH 与 MCP_SERVER 配对 -> 触发 ck_environment_operation_type_resource_pair
+    assertThrows(
+        DataAccessException.class,
+        () -> jdbcTemplate.update(insertSql, uuid(), envId, "MCP_SERVER", uuid(), "SKILL_REFRESH"));
+
+    // 6. 配对错误：MCP_SERVER_DISCOVER 与 SKILL_SOURCE 配对 -> 触发
+    // ck_environment_operation_type_resource_pair
+    assertThrows(
+        DataAccessException.class,
+        () ->
+            jdbcTemplate.update(
+                insertSql, uuid(), envId, "SKILL_SOURCE", uuid(), "MCP_SERVER_DISCOVER"));
+
+    // 7. 活跃部分唯一索引：同一 (envId, 'MCP_SERVER', mcpServerId) 存在第二个 PENDING 操作 -> 触发
+    // uk_environment_operation_active
+    assertThrows(
+        DataAccessException.class,
+        () ->
+            jdbcTemplate.update(
+                insertSql, uuid(), envId, "MCP_SERVER", mcpServerId, "MCP_SERVER_DISCOVER"));
+
+    // 8. 相同 resourceId 但不同 resource_type: 不冲突
+    jdbcTemplate.update(insertSql, uuid(), envId, "SKILL_SOURCE", mcpServerId, "SKILL_REFRESH");
   }
 
   private UUID createEnvironment() throws SQLException {

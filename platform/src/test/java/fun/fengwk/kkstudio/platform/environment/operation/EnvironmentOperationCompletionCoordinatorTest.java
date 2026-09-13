@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.core.JsonParseException;
@@ -17,16 +18,21 @@ import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDiagnostic;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceConfig;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceConfigCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshot;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshotCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceType;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /** 验证 {@link EnvironmentOperationCompletionCoordinatorImpl} 对结果的解析、安全过滤与终结编排。 */
 class EnvironmentOperationCompletionCoordinatorTest {
 
   private EnvironmentOperationResultPublisher publisher;
+  private McpDiscoveryResultPublisher mcpDiscoveryResultPublisher;
   private EnvironmentOperationRepository repository;
   private ObjectMapper objectMapper;
   private EnvironmentOperationCompletionCoordinator coordinator;
@@ -36,14 +42,32 @@ class EnvironmentOperationCompletionCoordinatorTest {
   private final UUID nodeId = UUID.randomUUID();
   private final UUID leaseToken = UUID.randomUUID();
   private final UUID sourceId = UUID.randomUUID();
+  private String validSkillArguments;
 
   @BeforeEach
   void setUp() {
     publisher = mock(EnvironmentOperationResultPublisher.class);
+    mcpDiscoveryResultPublisher = mock(McpDiscoveryResultPublisher.class);
     repository = mock(EnvironmentOperationRepository.class);
     objectMapper = new ObjectMapper().findAndRegisterModules();
     coordinator =
-        new EnvironmentOperationCompletionCoordinatorImpl(publisher, repository, objectMapper);
+        new EnvironmentOperationCompletionCoordinatorImpl(
+            publisher, mcpDiscoveryResultPublisher, repository, objectMapper);
+
+    DaemonSkillSourceConfig config =
+        new DaemonSkillSourceConfig(
+            sourceId,
+            2L,
+            1L,
+            DaemonSkillSourceType.PATH,
+            "/skills",
+            false,
+            null,
+            null,
+            null,
+            null,
+            Set.of(sourceId));
+    validSkillArguments = new DaemonSkillSourceConfigCodec().encode(config);
   }
 
   /** 测试意图：验证当传入 null 结果时，直接收敛为 INVALID_RESULT，绝不抛出异常等待超时。 */
@@ -54,7 +78,17 @@ class EnvironmentOperationCompletionCoordinatorTest {
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
-        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, null);
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            validSkillArguments,
+            null);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
@@ -75,7 +109,16 @@ class EnvironmentOperationCompletionCoordinatorTest {
 
     OperationPublishOutcome outcome =
         coordinator.coordinateResult(
-            envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, errorResult);
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            validSkillArguments,
+            errorResult);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
@@ -96,7 +139,16 @@ class EnvironmentOperationCompletionCoordinatorTest {
 
     OperationPublishOutcome outcome =
         coordinator.coordinateResult(
-            envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, errorResult);
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            validSkillArguments,
+            errorResult);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
@@ -114,7 +166,17 @@ class EnvironmentOperationCompletionCoordinatorTest {
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
-        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            validSkillArguments,
+            result);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
@@ -147,7 +209,17 @@ class EnvironmentOperationCompletionCoordinatorTest {
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
-        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            validSkillArguments,
+            result);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
@@ -167,7 +239,17 @@ class EnvironmentOperationCompletionCoordinatorTest {
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
-        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, textResult);
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            validSkillArguments,
+            textResult);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
@@ -183,7 +265,16 @@ class EnvironmentOperationCompletionCoordinatorTest {
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
-        coordinator.coordinateExecutionFailure(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L);
+        coordinator.coordinateExecutionFailure(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            validSkillArguments);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
@@ -225,7 +316,17 @@ class EnvironmentOperationCompletionCoordinatorTest {
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
-        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            validSkillArguments,
+            result);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
@@ -240,7 +341,8 @@ class EnvironmentOperationCompletionCoordinatorTest {
     when(failingMapper.readTree(any(String.class)))
         .thenThrow(new JsonParseException(null, "invalid json"));
     EnvironmentOperationCompletionCoordinator coord =
-        new EnvironmentOperationCompletionCoordinatorImpl(publisher, repository, failingMapper);
+        new EnvironmentOperationCompletionCoordinatorImpl(
+            publisher, mcpDiscoveryResultPublisher, repository, failingMapper);
 
     EnvironmentCapabilityResult result =
         EnvironmentCapabilityResult.json(opId.toString(), "{\"raw\":\"json\"}");
@@ -250,7 +352,17 @@ class EnvironmentOperationCompletionCoordinatorTest {
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
-        coord.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+        coord.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            validSkillArguments,
+            result);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
@@ -269,7 +381,17 @@ class EnvironmentOperationCompletionCoordinatorTest {
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
-        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            validSkillArguments,
+            result);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
@@ -296,7 +418,17 @@ class EnvironmentOperationCompletionCoordinatorTest {
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
-        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            validSkillArguments,
+            result);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
@@ -323,11 +455,358 @@ class EnvironmentOperationCompletionCoordinatorTest {
         .thenReturn(OperationPublishOutcome.APPLIED);
 
     OperationPublishOutcome outcome =
-        coordinator.coordinateResult(envId, opId, nodeId, leaseToken, 1L, sourceId, 2L, result);
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            validSkillArguments,
+            result);
 
     assertEquals(OperationPublishOutcome.APPLIED, outcome);
     verify(publisher)
         .publishInvalidResult(
             eq(envId), eq(opId), eq(nodeId), eq(leaseToken), eq(1L), eq(sourceId), eq(2L));
+  }
+
+  /** 测试意图：验证 Skill 操作 arguments 解码失败或字段不匹配时，fail closed 并直接标记为 FAILED(INVALID_RESULT)。 */
+  @Test
+  void coordinateSkillResultWithMalformedArgumentsMarksFailedInvalidResult() {
+    EnvironmentCapabilityResult result = EnvironmentCapabilityResult.json(opId.toString(), "{}");
+    when(repository.markFailed(
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationFailureCodes.INVALID_RESULT,
+            EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE))
+        .thenReturn(true);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            "invalid-json",
+            result);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(repository)
+        .markFailed(
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationFailureCodes.INVALID_RESULT,
+            EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
+    verifyNoInteractions(publisher);
+  }
+
+  /** 测试意图：验证 MCP_SERVER_DISCOVER 成功委托至 McpDiscoveryResultPublisher，不调用 Skill 发布器。 */
+  @Test
+  void coordinateMcpDiscoverResult_success_delegatesToMcpPublisher() {
+    EnvironmentCapabilityResult result = EnvironmentCapabilityResult.json(opId.toString(), "{}");
+    UUID mcpResourceId = UUID.randomUUID();
+    when(mcpDiscoveryResultPublisher.publishDiscoverySuccess(
+            envId, opId, nodeId, leaseToken, mcpResourceId, 0L, result))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
+            EnvironmentOperationResourceType.MCP_SERVER,
+            mcpResourceId,
+            0L,
+            "{}",
+            result);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(mcpDiscoveryResultPublisher)
+        .publishDiscoverySuccess(envId, opId, nodeId, leaseToken, mcpResourceId, 0L, result);
+    verifyNoInteractions(publisher);
+  }
+
+  /**
+   * 测试意图：验证 MCP_SERVER_DISCOVER 失败委托至 McpDiscoveryResultPublisher 为 OPERATION_FAILED，不调用 Skill 发布器。
+   */
+  @Test
+  void coordinateMcpDiscoverResult_error_delegatesToMcpPublisher() {
+    EnvironmentCapabilityResult errorResult =
+        EnvironmentCapabilityResult.codedError(opId.toString(), "ERR", "mcp failed");
+    UUID mcpResourceId = UUID.randomUUID();
+    when(mcpDiscoveryResultPublisher.publishDiscoveryFailure(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            mcpResourceId,
+            0L,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
+            EnvironmentOperationResourceType.MCP_SERVER,
+            mcpResourceId,
+            0L,
+            "{}",
+            errorResult);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(mcpDiscoveryResultPublisher)
+        .publishDiscoveryFailure(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            mcpResourceId,
+            0L,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
+    verifyNoInteractions(publisher);
+  }
+
+  /**
+   * 测试意图：验证 Skill 操作执行失败时 arguments 无法解码为 Skill 来源配置，fail closed 直接标记
+   * FAILED(OPERATION_FAILED)，绝不调用发布器。
+   */
+  @Test
+  void coordinateSkillExecutionFailureWithMalformedArgumentsMarksFailedOperationFailed() {
+    when(repository.markFailed(
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE))
+        .thenReturn(true);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateExecutionFailure(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            "not-valid-json");
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(repository)
+        .markFailed(
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
+    verifyNoInteractions(publisher);
+  }
+
+  /**
+   * 测试意图：验证 Skill 操作执行失败时 arguments 内的身份版本与操作行不一致，fail closed 直接标记
+   * FAILED(OPERATION_FAILED)，且租约失效时返回 LEASE_LOST。
+   */
+  @Test
+  void coordinateSkillExecutionFailureWithArgumentsMismatchMarksFailedOperationFailed() {
+    UUID mismatchedSourceId = UUID.randomUUID();
+    DaemonSkillSourceConfig mismatched =
+        new DaemonSkillSourceConfig(
+            mismatchedSourceId,
+            2L,
+            1L,
+            DaemonSkillSourceType.PATH,
+            "/skills",
+            false,
+            null,
+            null,
+            null,
+            null,
+            Set.of(mismatchedSourceId));
+    when(repository.markFailed(
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE))
+        .thenReturn(false);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateExecutionFailure(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            new DaemonSkillSourceConfigCodec().encode(mismatched));
+
+    assertEquals(OperationPublishOutcome.LEASE_LOST, outcome);
+    verify(repository)
+        .markFailed(
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
+    verifyNoInteractions(publisher);
+  }
+
+  /**
+   * 测试意图：验证 Skill 操作成功路径前 arguments 身份不匹配时同样 fail closed 为 FAILED(INVALID_RESULT)，避免把
+   * 其它来源的快照写进当前操作。
+   */
+  @Test
+  void coordinateSkillResultWithArgumentsIdentityMismatchMarksFailedInvalidResult() {
+    EnvironmentCapabilityResult result = EnvironmentCapabilityResult.json(opId.toString(), "{}");
+    DaemonSkillSourceConfig mismatched =
+        new DaemonSkillSourceConfig(
+            sourceId,
+            999L,
+            1L,
+            DaemonSkillSourceType.PATH,
+            "/skills",
+            false,
+            null,
+            null,
+            null,
+            null,
+            Set.of(sourceId));
+    when(repository.markFailed(
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationFailureCodes.INVALID_RESULT,
+            EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE))
+        .thenReturn(true);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            sourceId,
+            2L,
+            new DaemonSkillSourceConfigCodec().encode(mismatched),
+            result);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(repository)
+        .markFailed(
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationFailureCodes.INVALID_RESULT,
+            EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
+    verifyNoInteractions(publisher);
+  }
+
+  /**
+   * 测试意图：验证 MCP_SERVER_DISCOVER 返回结果 callId 与操作 ID 不符时收敛为 FAILED(INVALID_RESULT)， 绝不把不可信结果当作发现成功。
+   */
+  @Test
+  void coordinateMcpDiscoverResult_callIdMismatch_delegatesInvalidResult() {
+    EnvironmentCapabilityResult mismatched =
+        EnvironmentCapabilityResult.json("other-call-id", "{}");
+    UUID mcpResourceId = UUID.randomUUID();
+    when(mcpDiscoveryResultPublisher.publishDiscoveryFailure(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            mcpResourceId,
+            0L,
+            EnvironmentOperationFailureCodes.INVALID_RESULT,
+            EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateResult(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
+            EnvironmentOperationResourceType.MCP_SERVER,
+            mcpResourceId,
+            0L,
+            "{}",
+            mismatched);
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(mcpDiscoveryResultPublisher)
+        .publishDiscoveryFailure(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            mcpResourceId,
+            0L,
+            EnvironmentOperationFailureCodes.INVALID_RESULT,
+            EnvironmentOperationFailureCodes.INVALID_RESULT_MESSAGE);
+    verifyNoInteractions(publisher);
+  }
+
+  /** 测试意图：验证 MCP_SERVER_DISCOVER 执行失败协调收敛至 McpDiscoveryResultPublisher，不调用 Skill 发布器。 */
+  @Test
+  void coordinateMcpDiscoverFailure_delegatesToMcpPublisher() {
+    UUID mcpResourceId = UUID.randomUUID();
+    when(mcpDiscoveryResultPublisher.publishDiscoveryFailure(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            mcpResourceId,
+            0L,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE))
+        .thenReturn(OperationPublishOutcome.APPLIED);
+
+    OperationPublishOutcome outcome =
+        coordinator.coordinateExecutionFailure(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
+            EnvironmentOperationResourceType.MCP_SERVER,
+            mcpResourceId,
+            0L,
+            "{}");
+
+    assertEquals(OperationPublishOutcome.APPLIED, outcome);
+    verify(mcpDiscoveryResultPublisher)
+        .publishDiscoveryFailure(
+            envId,
+            opId,
+            nodeId,
+            leaseToken,
+            mcpResourceId,
+            0L,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED,
+            EnvironmentOperationFailureCodes.OPERATION_FAILED_MESSAGE);
+    verifyNoInteractions(publisher);
   }
 }
