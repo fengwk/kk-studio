@@ -13,9 +13,11 @@ interface EnvironmentOperationCompletionCoordinator {
       UUID operationId,
       UUID ownerNodeId,
       UUID leaseToken,
-      long sourceSetVersion,
-      UUID sourceId,
-      long sourceVersion,
+      EnvironmentOperationType operationType,
+      EnvironmentOperationResourceType resourceType,
+      UUID resourceId,
+      long resourceVersion,
+      String arguments,
       EnvironmentCapabilityResult result);
 
   /** 协调确定性执行失败（如远程报告失败或取消）。 */
@@ -24,9 +26,11 @@ interface EnvironmentOperationCompletionCoordinator {
       UUID operationId,
       UUID ownerNodeId,
       UUID leaseToken,
-      long sourceSetVersion,
-      UUID sourceId,
-      long sourceVersion);
+      EnvironmentOperationType operationType,
+      EnvironmentOperationResourceType resourceType,
+      UUID resourceId,
+      long resourceVersion,
+      String arguments);
 
   /** 协调传输层不确定性错误或网络断开至 UNKNOWN 状态。 */
   boolean coordinateTransportUnknown(UUID operationId, UUID ownerNodeId, UUID leaseToken);

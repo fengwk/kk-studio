@@ -39,11 +39,11 @@ class EnvironmentOperationInternalModelsTest {
         new EnvironmentOperation(
             opId,
             UUID.randomUUID(),
+            EnvironmentOperationResourceType.SKILL_SOURCE,
             UUID.randomUUID(),
             EnvironmentOperationType.SKILL_REFRESH,
             EnvironmentOperationStatus.RUNNING,
             1L,
-            2L,
             "{}",
             "{}",
             Instant.now().plusSeconds(60),
@@ -76,11 +76,11 @@ class EnvironmentOperationInternalModelsTest {
         new EnvironmentOperation(
             opId,
             envId,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
             EnvironmentOperationStatus.RUNNING,
             1L,
-            2L,
             secretArgs,
             "{\"sourceType\":\"git\"}",
             Instant.now().plusSeconds(60),
@@ -114,10 +114,10 @@ class EnvironmentOperationInternalModelsTest {
         new CreatePendingOperationWithTimeoutCommand(
             opId,
             envId,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
             1L,
-            2L,
             secretArgs,
             "{\"type\":\"git\"}",
             30000L);
@@ -125,6 +125,31 @@ class EnvironmentOperationInternalModelsTest {
     String str = cmd.toString();
     assertTrue(str.contains(opId.toString()));
     assertFalse(str.contains("my_password_xyz"), "arguments 绝不能泄露在 toString 中");
+  }
+
+  /** 测试意图：验证 CreatePendingOperationCommand 在 toString() 中脱敏 arguments。 */
+  @Test
+  void createPendingOperationCommandDoesNotLeakArgumentsInToString() {
+    UUID opId = UUID.randomUUID();
+    UUID envId = UUID.randomUUID();
+    UUID resourceId = UUID.randomUUID();
+    String secretArgs = "{\"token\":\"super_secret_key_999\"}";
+
+    CreatePendingOperationCommand cmd =
+        new CreatePendingOperationCommand(
+            opId,
+            envId,
+            EnvironmentOperationResourceType.MCP_SERVER,
+            resourceId,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
+            0L,
+            secretArgs,
+            "{\"type\":\"mcp\"}",
+            Instant.now().plusSeconds(60));
+
+    String str = cmd.toString();
+    assertTrue(str.contains(opId.toString()));
+    assertFalse(str.contains("super_secret_key_999"), "arguments 绝不能泄露在 toString 中");
   }
 
   /** 测试意图：验证 EnvironmentOperation 在 toString() 与 Jackson 序列化中均彻底排除 leaseToken 与 arguments。 */
@@ -141,11 +166,11 @@ class EnvironmentOperationInternalModelsTest {
         new EnvironmentOperation(
             opId,
             envId,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
             EnvironmentOperationStatus.RUNNING,
             1L,
-            2L,
             secretArgs,
             "{\"type\":\"git\"}",
             Instant.now().plusSeconds(60),
@@ -187,11 +212,11 @@ class EnvironmentOperationInternalModelsTest {
         new SafeEnvironmentOperation(
             UUID.randomUUID(),
             UUID.randomUUID(),
+            EnvironmentOperationResourceType.SKILL_SOURCE,
             UUID.randomUUID(),
             EnvironmentOperationType.SKILL_REFRESH,
             EnvironmentOperationStatus.RUNNING,
             1L,
-            0L,
             "{}",
             Instant.now(),
             Instant.now(),
@@ -207,11 +232,11 @@ class EnvironmentOperationInternalModelsTest {
         new SafeEnvironmentOperation(
             UUID.randomUUID(),
             UUID.randomUUID(),
+            EnvironmentOperationResourceType.SKILL_SOURCE,
             UUID.randomUUID(),
             EnvironmentOperationType.SKILL_REFRESH,
             EnvironmentOperationStatus.SUCCEEDED,
             1L,
-            0L,
             "{}",
             Instant.now(),
             Instant.now(),

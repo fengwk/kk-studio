@@ -5,7 +5,7 @@
 --   environment_inventory      每个 Environment 恰一行：期望的来源集合版本与最近一次被围栏接受的 READY 报告
 --   environment_skill_source   每个来源恰一行：Platform 唯一的来源配置，version 同时是 CAS 令牌与 Daemon sourceVersion
 --   environment_skill          每个来源最新一次成功扫描的持久 inventory；Skill 正文永不入库
---   environment_operation      跨节点管理信箱与不可变历史；source_id 故意不建 FK
+--   environment_operation      跨节点管理信箱与不可变历史；resource_id 故意不建 FK
 --
 -- 全部持久 id 由应用生成（uuid 主键，无序列、无触发器、无函数）。所有 guard 在任何 mutation 之前执行，
 -- 且本迁移在单个事务内运行，因此任一 guard 失败都不会留下半迁移形状。
@@ -355,20 +355,20 @@ comment on index idx_environment_skill_source is '按 Environment 与来源列�
 -- -----------------------------------------------------------------------------
 -- 4. environment_operation
 --
--- 跨节点管理信箱与不可变历史。source_id 故意不建 FK：删除或改写来源配置不得抹掉操作历史，
--- 陈旧操作由 Platform 依据来源是否存在/版本是否变化收敛为 RESOURCE_CHANGED。
--- arguments 是冻结的私有 DaemonSkillSourceConfig（可能含 Git URL），errors/list 摘要绝不回显它；
+-- 跨节点管理信箱与不可变历史。resource_id 故意不建 FK：删除或改写资源配置不得抹掉操作历史，
+-- 陈旧操作由 Platform 依据资源是否存在/版本是否变化收敛为 RESOURCE_CHANGED。
+-- arguments 是冻结的私有执行参数（可能含凭据或敏感配置），errors/list 摘要绝不回显它；
 -- parameter_summary 是可以安全公开的摘要。
 -- -----------------------------------------------------------------------------
 
 create table environment_operation (
     id                  uuid           primary key,
     environment_id      uuid           not null,
-    source_id           uuid           not null,
+    resource_type       varchar(32)    not null,
+    resource_id         uuid           not null,
     operation_type      varchar(32)    not null,
     status              varchar(16)    not null,
-    source_version      bigint         not null,
-    source_set_version  bigint         not null,
+    resource_version    bigint         not null,
     arguments           jsonb          not null,
     parameter_summary   jsonb          not null,
     deadline_at         timestamptz(3) not null,
@@ -384,13 +384,20 @@ create table environment_operation (
     constraint fk_environment_operation_environment foreign key (environment_id)
         references environment (id) on delete cascade,
     constraint ck_environment_operation_type check (
-        operation_type in ('SKILL_REFRESH', 'SKILL_INSTALL', 'SKILL_UPDATE')
+        operation_type in ('SKILL_REFRESH', 'SKILL_INSTALL', 'SKILL_UPDATE', 'MCP_SERVER_DISCOVER')
+    ),
+    constraint ck_environment_operation_resource_type check (
+        resource_type in ('SKILL_SOURCE', 'MCP_SERVER')
+    ),
+    constraint ck_environment_operation_type_resource_pair check (
+        (operation_type in ('SKILL_REFRESH', 'SKILL_INSTALL', 'SKILL_UPDATE') and resource_type = 'SKILL_SOURCE')
+        or (operation_type = 'MCP_SERVER_DISCOVER' and resource_type = 'MCP_SERVER')
     ),
     constraint ck_environment_operation_status check (
         status in ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'UNKNOWN', 'CANCELLED')
     ),
-    constraint ck_environment_operation_versions_nonneg check (
-        source_version >= 0 and source_set_version >= 0
+    constraint ck_environment_operation_version_nonneg check (
+        resource_version >= 0
     ),
     constraint ck_environment_operation_arguments_object check (
         jsonb_typeof(arguments) = 'object'
@@ -484,15 +491,15 @@ create table environment_operation (
     )
 );
 
-comment on table environment_operation is '跨节点 Skill 管理操作信箱与不可变历史：PENDING 可被任一合格节点认领，终态不可回退；source_id 故意不建 FK 以保留来源删除后的历史';
+comment on table environment_operation is '跨节点管理操作信箱与不可变历史：PENDING 可被任一合格节点认领，终态不可回退；resource_id 故意不建 FK 以保留资源删除后的历史';
 comment on column environment_operation.id is '操作 UUID（调用方生成，永不重用）';
 comment on column environment_operation.environment_id is '目标 Environment 的全局唯一 UUID（FK cascade）';
-comment on column environment_operation.source_id is '目标来源的全局唯一 UUID（故意不建 FK：来源删除后操作历史仍然存在）';
-comment on column environment_operation.operation_type is '操作类型：SKILL_REFRESH / SKILL_INSTALL / SKILL_UPDATE';
+comment on column environment_operation.resource_type is '目标资源类型：SKILL_SOURCE / MCP_SERVER';
+comment on column environment_operation.resource_id is '目标资源的全局唯一 UUID（故意不建 FK：资源删除后操作历史仍然存在）';
+comment on column environment_operation.operation_type is '操作类型：SKILL_REFRESH / SKILL_INSTALL / SKILL_UPDATE / MCP_SERVER_DISCOVER';
 comment on column environment_operation.status is '生命周期：PENDING / RUNNING / SUCCEEDED / FAILED / UNKNOWN / CANCELLED';
-comment on column environment_operation.source_version is '发起时的来源行版本；过期操作必须收敛为 RESOURCE_CHANGED';
-comment on column environment_operation.source_set_version is '发起时的来源集合代际，用于围栏过期操作';
-comment on column environment_operation.arguments is '冻结的私有调用参数（DaemonSkillSourceConfig JSON object，可能含 Git URL；错误与列表摘要绝不回显）';
+comment on column environment_operation.resource_version is '发起时的目标资源版本；过期操作必须收敛为 RESOURCE_CHANGED';
+comment on column environment_operation.arguments is '冻结的私有调用参数（JSON object；错误与列表摘要绝不回显）';
 comment on column environment_operation.parameter_summary is '可公开的参数摘要（JSON object，不含 URL/凭证）';
 comment on column environment_operation.deadline_at is '认领与执行的硬超时（毫秒精度，不得早于 created_at）';
 comment on column environment_operation.owner_node_id is '认领该操作的 App 节点实例 UUID（PENDING 为空）';
@@ -505,12 +512,12 @@ comment on column environment_operation.failure_message is '失败描述（FAILE
 comment on column environment_operation.created_at is '创建时间（毫秒精度）';
 comment on column environment_operation.updated_at is '最后更新时间（毫秒精度），应用侧维护';
 
--- 同一来源同时至多一个未终结操作：重复触发不能产生两个竞争执行者。
+-- 同一目标资源同时至多一个未终结操作：重复触发不能产生两个竞争执行者。
 create unique index uk_environment_operation_active
-    on environment_operation (environment_id, source_id)
+    on environment_operation (environment_id, resource_type, resource_id)
     where status in ('PENDING', 'RUNNING');
 
-comment on index uk_environment_operation_active is '同一 (environment, source) 至多一个未终结操作';
+comment on index uk_environment_operation_active is '同一 (environment, resource_type, resource_id) 至多一个未终结操作';
 
 create index idx_environment_operation_claim
     on environment_operation (status, deadline_at, environment_id)

@@ -36,11 +36,11 @@ class EnvironmentOperationDtoContractTest {
         {
           "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
           "environmentId": "11111111-1111-1111-1111-111111111111",
-          "sourceId": "22222222-2222-2222-2222-222222222222",
+          "resourceType": "SKILL_SOURCE",
+          "resourceId": "22222222-2222-2222-2222-222222222222",
           "operationType": "SKILL_REFRESH",
           "status": "PENDING",
-          "sourceVersion": "1",
-          "sourceSetVersion": "2",
+          "resourceVersion": "1",
           "parameterSummary": {"sourceType": "path"},
           "resultSummary": {"revision": "abc", "skillCount": 1}
         }
@@ -48,6 +48,9 @@ class EnvironmentOperationDtoContractTest {
 
     EnvironmentOperationDTO dto = MAPPER.readValue(json, EnvironmentOperationDTO.class);
     assertEquals("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", dto.getId());
+    assertEquals("SKILL_SOURCE", dto.getResourceType());
+    assertEquals("22222222-2222-2222-2222-222222222222", dto.getResourceId());
+    assertEquals("1", dto.getResourceVersion());
     assertEquals("path", dto.getParameterSummary().get("sourceType"));
     assertEquals(1, dto.getResultSummary().get("skillCount"));
 
@@ -63,5 +66,27 @@ class EnvironmentOperationDtoContractTest {
                 "{\"id\":\"" + dto.getId() + "\",\"leaseToken\":\"secret\"}",
                 EnvironmentOperationDTO.class),
         "包含未声明的内部字段必须被拒绝");
+  }
+
+  /** 意图：操作响应 DTO 严格拒绝旧的 sourceId、sourceVersion、sourceSetVersion 字段，不保留别名。 */
+  @Test
+  void operationDtoRejectsLegacySourceFields() {
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                "{\"sourceId\":\"22222222-2222-2222-2222-222222222222\"}",
+                EnvironmentOperationDTO.class),
+        "旧字段 sourceId 必须被拒绝");
+
+    assertThrows(
+        Exception.class,
+        () -> MAPPER.readValue("{\"sourceVersion\":\"1\"}", EnvironmentOperationDTO.class),
+        "旧字段 sourceVersion 必须被拒绝");
+
+    assertThrows(
+        Exception.class,
+        () -> MAPPER.readValue("{\"sourceSetVersion\":\"2\"}", EnvironmentOperationDTO.class),
+        "旧字段 sourceSetVersion 必须被拒绝");
   }
 }

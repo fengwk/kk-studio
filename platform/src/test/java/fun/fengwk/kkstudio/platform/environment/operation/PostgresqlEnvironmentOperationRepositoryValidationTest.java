@@ -48,9 +48,9 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     return new CreatePendingOperationCommand(
         opId,
         envId,
+        EnvironmentOperationResourceType.SKILL_SOURCE,
         sourceId,
         EnvironmentOperationType.SKILL_REFRESH,
-        0L,
         0L,
         "{\"path\":\"/opt\"}",
         "{\"type\":\"PATH\"}",
@@ -61,43 +61,43 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     return new CreatePendingOperationWithTimeoutCommand(
         opId,
         envId,
+        EnvironmentOperationResourceType.SKILL_SOURCE,
         sourceId,
         EnvironmentOperationType.SKILL_REFRESH,
-        0L,
         0L,
         "{\"path\":\"/opt\"}",
         "{\"type\":\"PATH\"}",
         timeoutMillis);
   }
 
-  /** 测试意图：验证创建挂起操作命令中 sourceVersion 为负数时拒绝并抛出 AiValidationException。 */
+  /** 测试意图：验证创建挂起操作命令中 resourceVersion 为负数时拒绝并抛出 AiValidationException。 */
   @Test
-  void validateCommand_sourceVersionNegative_throwsAiValidationException() {
+  void validateCommand_resourceVersionNegative_throwsAiValidationException() {
     CreatePendingOperationCommand cmd =
         new CreatePendingOperationCommand(
             opId,
             envId,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
             -1L,
-            0L,
             "{}",
             "{}",
             Instant.now().plusSeconds(60));
     assertThrows(AiValidationException.class, () -> repository.createPending(cmd));
   }
 
-  /** 测试意图：验证创建挂起操作命令中 sourceSetVersion 为负数时拒绝并抛出 AiValidationException。 */
+  /** 测试意图：验证创建挂起操作命令中 resourceType 与 type.resourceType() 不匹配时拒绝并抛出 AiValidationException。 */
   @Test
-  void validateCommand_sourceSetVersionNegative_throwsAiValidationException() {
+  void validateCommand_resourceTypeMismatch_throwsAiValidationException() {
     CreatePendingOperationCommand cmd =
         new CreatePendingOperationCommand(
             opId,
             envId,
+            EnvironmentOperationResourceType.MCP_SERVER,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
             0L,
-            -1L,
             "{}",
             "{}",
             Instant.now().plusSeconds(60));
@@ -114,9 +114,9 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
             new CreatePendingOperationCommand(
                 opId,
                 envId,
+                EnvironmentOperationResourceType.SKILL_SOURCE,
                 sourceId,
                 EnvironmentOperationType.SKILL_REFRESH,
-                0L,
                 0L,
                 null,
                 "{}",
@@ -127,9 +127,9 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         new CreatePendingOperationCommand(
             opId,
             envId,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
-            0L,
             0L,
             "   ",
             "{}",
@@ -141,9 +141,9 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         new CreatePendingOperationCommand(
             opId,
             envId,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
-            0L,
             0L,
             "not-a-json",
             "{}",
@@ -162,34 +162,21 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         () -> repository.createPendingWithTimeout(validTimeoutCommand(-100L)));
   }
 
-  /** 测试意图：验证带超时创建命令中版本号为负数时抛出 AiValidationException。 */
+  /** 测试意图：验证带超时创建命令中 resourceVersion 为负数时抛出 AiValidationException。 */
   @Test
-  void validateCommandWithTimeout_versionsNegative_throwsAiValidationException() {
+  void validateCommandWithTimeout_resourceVersionNegative_throwsAiValidationException() {
     CreatePendingOperationWithTimeoutCommand cmd1 =
         new CreatePendingOperationWithTimeoutCommand(
             opId,
             envId,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
             sourceId,
             EnvironmentOperationType.SKILL_REFRESH,
             -1L,
-            0L,
             "{}",
             "{}",
             60000L);
     assertThrows(AiValidationException.class, () -> repository.createPendingWithTimeout(cmd1));
-
-    CreatePendingOperationWithTimeoutCommand cmd2 =
-        new CreatePendingOperationWithTimeoutCommand(
-            opId,
-            envId,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
-            -1L,
-            "{}",
-            "{}",
-            60000L);
-    assertThrows(AiValidationException.class, () -> repository.createPendingWithTimeout(cmd2));
   }
 
   /** 测试意图：验证创建挂起操作在数据库未返回插入行时抛出 AiValidationException。 */
