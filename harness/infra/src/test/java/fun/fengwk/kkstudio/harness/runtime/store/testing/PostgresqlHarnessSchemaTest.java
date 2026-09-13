@@ -16,14 +16,15 @@ import java.util.UUID;
 class PostgresqlHarnessSchemaTest {
 
   /**
-   * Harness runtime 协议恰好七张表；业务表不使用 harness_ 前缀（V1 中唯一的应用层 Session blob 引用表为 session_blob_ref）， 因此
-   * {@code harness_%} 全量查询结果必须精确等于该七表。
+   * Harness runtime 协议及原子 owner guard 恰好八张表；业务表不使用 harness_ 前缀（V1 中唯一的应用层 Session blob 引用表为
+   * session_blob_ref），因此 {@code harness_%} 全量查询结果必须精确等于该八表。
    */
   private static final List<String> RUNTIME_TABLES =
       List.of(
           "harness_entry",
           "harness_model_invocation",
           "harness_session",
+          "harness_session_owner_guard",
           "harness_thread",
           "harness_thread_command",
           "harness_tool_invocation",
@@ -38,7 +39,7 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
-  void schemaContainsExactlyTheSevenRuntimeTables() {
+  void schemaContainsExactlyTheEightHarnessTables() {
     // 精确查询全部 harness_% 表：任何业务表（如 session_blob_ref）不得混入 runtime 协议空间。
     List<String> tables =
         jdbc.queryForList(
@@ -135,6 +136,7 @@ class PostgresqlHarnessSchemaTest {
             "idx_harness_thread_session",
             "idx_harness_work_available",
             "idx_harness_work_lease_until",
+            "pk_harness_session_owner_guard",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
             "uk_harness_model_invocation_result",

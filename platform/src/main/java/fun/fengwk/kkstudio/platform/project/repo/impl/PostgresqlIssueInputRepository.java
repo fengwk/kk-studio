@@ -43,6 +43,18 @@ public class PostgresqlIssueInputRepository implements IssueInputRepository {
         .collect(Collectors.toList());
   }
 
+  @Override
+  public IssueInput findFirstAfterSequence(UUID issueId, long afterSequence) {
+    return toModel(issueInputMapper.findFirstAfterSequence(issueId, afterSequence));
+  }
+
+  @Override
+  public IssueInput findFirstByKindAfterSequence(
+      UUID issueId, IssueInputKind kind, long afterSequence) {
+    return toModel(
+        issueInputMapper.findFirstByKindAfterSequence(issueId, kind.name(), afterSequence));
+  }
+
   private IssueInputDO toDO(IssueInput input) {
     if (input == null) {
       return null;

@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
+import fun.fengwk.kkstudio.platform.project.controller.IssueControllerProperties;
 
 /**
  * Platform 测试上下文的 Harness 装配基座。
@@ -32,5 +33,10 @@ public class PlatformHarnessTestConfiguration {
   @Bean
   public HarnessCatalog harnessCatalog(ObjectProvider<HarnessContributor> contributors) {
     return HarnessCatalog.from(contributors.orderedStream().toList());
+  }
+
+  @Bean
+  public IssueControllerProperties issueControllerProperties() {
+    return new IssueControllerProperties();
   }
 }

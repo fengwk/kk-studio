@@ -412,13 +412,25 @@ class IssueServiceIntegrationTest extends ProjectTestSupport {
     UUID issueId = issue.getId();
 
     issueService.appendInput(issueId, IssueInputKind.HUMAN, "Input 1", "k1");
-    issueService.appendInput(issueId, IssueInputKind.HUMAN, "Input 2", "k2");
+    issueService.appendInput(issueId, IssueInputKind.RETRY, "Input 2", "k2");
     issueService.appendInput(issueId, IssueInputKind.HUMAN, "Input 3", "k3");
 
     List<IssueInput> afterSeq1 = issueInputRepository.listAfterSequence(issueId, 1L);
     assertEquals(2, afterSeq1.size());
     assertEquals(2L, afterSeq1.get(0).getSequence());
     assertEquals(3L, afterSeq1.get(1).getSequence());
+    assertEquals(2L, issueInputRepository.findFirstAfterSequence(issueId, 1L).getSequence());
+    assertEquals(
+        3L,
+        issueInputRepository
+            .findFirstByKindAfterSequence(issueId, IssueInputKind.HUMAN, 1L)
+            .getSequence());
+    assertEquals(
+        2L,
+        issueInputRepository
+            .findFirstByKindAfterSequence(issueId, IssueInputKind.RETRY, 0L)
+            .getSequence());
+    assertNull(issueInputRepository.findFirstAfterSequence(issueId, 3L));
 
     // 使用不挂接 input 且无 controller_work 的独立 BACKLOG issue 测试 repository deleteById
     Issue cleanIssue =

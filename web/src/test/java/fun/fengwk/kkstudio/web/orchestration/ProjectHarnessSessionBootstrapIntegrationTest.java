@@ -15,11 +15,15 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.project.controller.IssueReconcileOutcome;
+import fun.fengwk.kkstudio.platform.project.controller.IssueReconciler;
+import fun.fengwk.kkstudio.platform.project.model.ClaimedControllerWork;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
+import fun.fengwk.kkstudio.platform.project.service.IssueControllerWorkStore;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
@@ -52,6 +56,8 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
   @Autowired private ProjectService projectService;
   @Autowired private IssueService issueService;
   @Autowired private IssueRunService issueRunService;
+  @Autowired private IssueControllerWorkStore controllerWorkStore;
+  @Autowired private IssueReconciler issueReconciler;
   @Autowired private JdbcTemplate jdbcTemplate;
 
   @Test
@@ -419,6 +425,46 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
     assertEquals(1, count("harness_session_owner_guard", "session_id", sharedSessionId));
     assertEquals(1, count("project_session", "project_id", proj.getId()));
     assertEquals(1, count("project_session", "session_id", sharedSessionId));
+  }
+
+  @Test
+  void reconcilerAtomicallyCreatesRunAndHarnessSession() {
+    // 测试意图：P2 的真实 reconcile 事务必须一起持久化 Issue 状态、Run、Session、ROOT、Thread、Command 与归属边。
+    String agentName = createTestAgent();
+    Project project = projectService.createProject("Reconcile Project", "Desc", agentName);
+    Issue issue =
+        issueService.createIssue(
+            project.getId(), "Reconcile Issue", "Desc", agentName, null, IssueStatus.TODO);
+    Instant claimAt = Instant.now().plusSeconds(1);
+    ClaimedControllerWork claim =
+        controllerWorkStore
+            .claimNext(claimAt, "reconcile-worker", claimAt.plusSeconds(30))
+            .orElseThrow();
+
+    assertEquals(IssueReconcileOutcome.EXECUTOR_STARTED, issueReconciler.reconcile(claim));
+
+    UUID runId =
+        jdbcTemplate.queryForObject(
+            "select id from issue_run where issue_id = ?", UUID.class, issue.getId());
+    UUID sessionId =
+        jdbcTemplate.queryForObject(
+            "select session_id from issue_run_session where run_id = ?", UUID.class, runId);
+    UUID threadId =
+        jdbcTemplate.queryForObject(
+            "select id from harness_thread where session_id = ?", UUID.class, sessionId);
+    assertEquals(
+        "IN_PROGRESS",
+        jdbcTemplate.queryForObject(
+            "select status from issue where id = ?", String.class, issue.getId()));
+    assertEquals(1, count("issue_run", "id", runId));
+    assertEquals(1, count("issue_run_session", "run_id", runId));
+    assertEquals(1, count("harness_session_owner_guard", "session_id", sessionId));
+    assertEquals(1, count("harness_session", "id", sessionId));
+    assertEquals(1, count("harness_entry", "session_id", sessionId));
+    assertEquals(1, count("harness_thread", "id", threadId));
+    assertEquals(1, count("harness_thread_command", "thread_id", threadId));
+    assertEquals(1, count("harness_work", "target_id", threadId));
+    assertNotNull(controllerWorkStore.getWork(issue.getId()));
   }
 
   private int count(String table, String column, Object value) {
