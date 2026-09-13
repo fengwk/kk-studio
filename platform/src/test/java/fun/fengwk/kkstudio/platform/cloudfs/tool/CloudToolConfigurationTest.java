@@ -10,6 +10,7 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.platform.cloudfs.blob.StorageBlobFileReader;
 import fun.fengwk.kkstudio.platform.cloudfs.service.CloudFileSystemService;
+import fun.fengwk.kkstudio.platform.cloudfs.service.CloudQueryService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 
 /** 测试 CloudToolConfiguration Spring Bean 装配行为。 */
@@ -19,6 +20,7 @@ class CloudToolConfigurationTest {
   void testBeanWiring() {
     CloudToolConfiguration config = new CloudToolConfiguration();
     CloudFileSystemService fileSystemService = mock(CloudFileSystemService.class);
+    CloudQueryService queryService = mock(CloudQueryService.class);
     StorageBlobContentService blobContentService = mock(StorageBlobContentService.class);
 
     @SuppressWarnings("unchecked")
@@ -35,11 +37,11 @@ class CloudToolConfigurationTest {
     ObjectProvider<StorageBlobFileReader> readerProvider = mock(ObjectProvider.class);
     when(readerProvider.getIfAvailable()).thenReturn(reader);
 
-    CloudReadTool readTool = config.cloudReadTool(fileSystemService, readerProvider);
+    CloudReadTool readTool = config.cloudReadTool(fileSystemService, queryService, readerProvider);
     CloudWriteTool writeTool = config.cloudWriteTool(fileSystemService);
     CloudEditTool editTool = config.cloudEditTool(fileSystemService);
-    CloudFindTool findTool = config.cloudFindTool(fileSystemService);
-    CloudGrepTool grepTool = config.cloudGrepTool(fileSystemService, readerProvider);
+    CloudFindTool findTool = config.cloudFindTool(queryService);
+    CloudGrepTool grepTool = config.cloudGrepTool(queryService);
 
     assertNotNull(readTool);
     assertNotNull(writeTool);

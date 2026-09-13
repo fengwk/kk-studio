@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.platform.cloudfs.blob.StorageBlobFileReader;
 import fun.fengwk.kkstudio.platform.cloudfs.service.CloudFileSystemService;
+import fun.fengwk.kkstudio.platform.cloudfs.service.CloudQueryService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 
 /** Cloud File System 工具与 Contributor Spring 装配配置。 */
@@ -25,8 +26,10 @@ public class CloudToolConfiguration {
   @ConditionalOnMissingBean
   public CloudReadTool cloudReadTool(
       CloudFileSystemService fileSystemService,
+      CloudQueryService queryService,
       ObjectProvider<StorageBlobFileReader> blobFileReaderProvider) {
-    return new CloudReadTool(fileSystemService, blobFileReaderProvider.getIfAvailable());
+    return new CloudReadTool(
+        fileSystemService, blobFileReaderProvider.getIfAvailable(), queryService);
   }
 
   @Bean
@@ -43,16 +46,14 @@ public class CloudToolConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public CloudFindTool cloudFindTool(CloudFileSystemService fileSystemService) {
-    return new CloudFindTool(fileSystemService);
+  public CloudFindTool cloudFindTool(CloudQueryService queryService) {
+    return new CloudFindTool(queryService);
   }
 
   @Bean
   @ConditionalOnMissingBean
-  public CloudGrepTool cloudGrepTool(
-      CloudFileSystemService fileSystemService,
-      ObjectProvider<StorageBlobFileReader> blobFileReaderProvider) {
-    return new CloudGrepTool(fileSystemService, blobFileReaderProvider.getIfAvailable());
+  public CloudGrepTool cloudGrepTool(CloudQueryService queryService) {
+    return new CloudGrepTool(queryService);
   }
 
   @Bean
