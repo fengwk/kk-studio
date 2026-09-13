@@ -447,7 +447,7 @@ public class EnvironmentOperationDispatcher {
       case SKILL_REFRESH -> EnvironmentCapabilityIds.SKILL_SOURCE_REFRESH;
       case SKILL_INSTALL -> EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL;
       case SKILL_UPDATE -> EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE;
-      case MCP_SERVER_DISCOVER -> new EnvironmentCapabilityId("mcp.local.discover");
+      case MCP_SERVER_DISCOVER -> EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER;
     };
   }
 

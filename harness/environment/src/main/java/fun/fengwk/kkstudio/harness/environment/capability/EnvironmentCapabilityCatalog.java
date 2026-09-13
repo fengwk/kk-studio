@@ -29,7 +29,7 @@ public final class EnvironmentCapabilityCatalog {
   /** capability catalog 版本：v3 新增 local MCP 执行与发现能力。 */
   public static final String CATALOG_VERSION = "3";
 
-  /** 基础 capability 版本；当前三个来源管理能力使用该版本。 */
+  /** 基础 capability 版本。 */
   public static final String VERSION = "1";
 
   /** 引入必填绝对 workdir 的 coding/process/LSP 能力版本。 */
