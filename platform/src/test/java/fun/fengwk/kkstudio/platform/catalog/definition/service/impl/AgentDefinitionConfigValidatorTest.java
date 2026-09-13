@@ -25,9 +25,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
-import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolClientFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
@@ -43,6 +44,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 
 /** Agent 配置的校验：工具 ID 必须来自统一 RuntimeToolCatalog 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
 class AgentDefinitionConfigValidatorTest {
@@ -161,16 +163,19 @@ class AgentDefinitionConfigValidatorTest {
   void acceptsDynamicMcpToolId() {
     // 意图：验证动态 MCP 工具在聚合到 RuntimeToolCatalog 后能够正常通过 Agent 配置校验
     McpServerRepository repo = mock(McpServerRepository.class);
-    McpToolClientFactory factory = mock(McpToolClientFactory.class);
-    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, factory);
+    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
 
     UUID serverId = UUID.randomUUID();
     McpServer server = new McpServer();
     server.setId(serverId);
     server.setName("test-server");
-    server.setUrl("http://localhost:8080");
-    server.setTimeoutMillis(5000L);
+    server.setConnectionType(McpConnectionType.REMOTE);
+    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
+    server.setDiscoveredVersion(1L);
+    server.setEnabled(true);
     server.setVersion(1L);
+    server.setConnectionConfig("{\"url\":\"http://localhost:8080\",\"headers\":{}}");
+    server.setTimeoutMillis(5000L);
 
     UUID toolId = UUID.randomUUID();
     McpTool mcpTool = new McpTool();
@@ -181,6 +186,8 @@ class AgentDefinitionConfigValidatorTest {
     mcpTool.setDescription("echo tool");
     mcpTool.setInputSchemaJson(
         "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    mcpTool.setAvailable(true);
+    mcpTool.setSchemaRevision(1L);
 
     when(repo.getToolById(toolId)).thenReturn(Optional.of(mcpTool));
     when(repo.getById(serverId)).thenReturn(Optional.of(server));

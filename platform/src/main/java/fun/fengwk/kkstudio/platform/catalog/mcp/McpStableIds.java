@@ -2,17 +2,19 @@ package fun.fengwk.kkstudio.platform.catalog.mcp;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
+import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
 /**
- * MCP 工具的稳定全局身份。
+ * MCP 工具与 Server 的稳定全局身份解析器。
  *
  * <p>身份由 mcp_tool 行的稳定 UUID 派生：AgentToolId = {@code mcp.<32 位小写 hex uuid>}；ContributionId =
- * contributor {@code platform.mcp} + localName {@code tool.<32 位小写 hex uuid>}。refresh/update 按
- * {@code (serverId, sourceName)} 保留既有 UUID，因此身份跨发现周期稳定；新工具生成新 UUID。
+ * contributor {@code platform.mcp} + localName {@code tool.<32 位小写 hex uuid>}。
+ *
+ * <p>所有 MCP 外部与路径 UUID 参数均在此严格校验规范的小写连字符格式（36 字符）。
  */
 public final class McpStableIds {
 
@@ -69,10 +71,35 @@ public final class McpStableIds {
       }
       dashed.append(current);
     }
-    try {
-      return Optional.of(UUID.fromString(dashed.toString()));
-    } catch (IllegalArgumentException error) {
-      return Optional.empty();
+    return Optional.of(UUID.fromString(dashed.toString()));
+  }
+
+  /** 判断字符串是否为标准的小写带连字符 36 字符 UUID（不接受大写或无连字符）。 */
+  public static boolean isCanonicalDashedUuid(String value) {
+    if (value == null || value.length() != 36) {
+      return false;
     }
+    for (int i = 0; i < 36; i++) {
+      char c = value.charAt(i);
+      if (i == 8 || i == 13 || i == 18 || i == 23) {
+        if (c != '-') {
+          return false;
+        }
+      } else {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  /** 严格校验并解析 canonical 小写带连字符 UUID；不满足时抛出 {@link AiValidationException}。 */
+  public static UUID requireCanonicalDashedUuid(String value, String fieldName) {
+    if (!isCanonicalDashedUuid(value)) {
+      throw new AiValidationException(
+          "mcp_server", fieldName + " must be a canonical lowercase dashed UUID: " + value);
+    }
+    return UUID.fromString(value);
   }
 }

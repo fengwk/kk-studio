@@ -194,6 +194,17 @@ public final class ToolExecutionGateway implements ToolGateway {
               "Frozen tool environment requirement does not match catalog requirements: "
                   + frozenDefinition.id()));
     }
+    if (requirements.requiredEnvironmentId() != null
+        && !requirements.requiredEnvironmentId().equals(binding.environmentId())) {
+      return new ResolvedContribution(
+          null,
+          new ToolInvocationError(
+              TOOL_DEFINITION_MISMATCH_KIND,
+              "Frozen tool bound environment "
+                  + binding.environmentId()
+                  + " does not match catalog required environment: "
+                  + requirements.requiredEnvironmentId()));
+    }
     if (!stateAccessesMatch(frozenContributor, requirements)) {
       return new ResolvedContribution(
           null,

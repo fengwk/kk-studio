@@ -175,9 +175,13 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "mcp_server",
         "id",
         "name",
-        "url",
-        "bearer_token",
+        "connection_type",
+        "environment_id",
+        "connection_config",
         "timeout_millis",
+        "discovery_status",
+        "discovered_version",
+        "enabled",
         "created_at",
         "updated_at",
         "version");
@@ -188,7 +192,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "source_name",
         "model_name",
         "description",
-        "input_schema");
+        "input_schema",
+        "schema_revision",
+        "available");
     assertColumns("canvas_document", "id", "title", "version", "created_at", "updated_at");
     assertColumns("canvas_group", "id", "canvas_id", "title", "x", "y", "width", "height");
     assertColumns(
@@ -1051,6 +1057,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "session_blob_ref", "blob_id");
     assertColumnType("uuid", "chat", "id");
     assertColumnType("uuid", "mcp_server", "id");
+    assertColumnType("uuid", "mcp_server", "environment_id");
+    assertColumnType("jsonb", "mcp_server", "connection_config");
     assertColumnType("uuid", "mcp_tool", "id");
     assertColumnType("uuid", "mcp_tool", "mcp_server_id");
     assertColumnType("jsonb", "mcp_tool", "input_schema");
@@ -1297,6 +1305,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " 'fk_canvas_function_resource_pin_node',"
                     + " 'fk_chat_session_chat', 'fk_chat_session_session',"
                     + " 'fk_canvas_session_canvas', 'fk_canvas_session_session', 'fk_mcp_tool_server',"
+                    + " 'fk_mcp_server_environment',"
                     + " 'fk_environment_inventory_environment',"
                     + " 'fk_environment_skill_source_environment',"
                     + " 'fk_environment_skill_source',"
@@ -1328,6 +1337,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_canvas_session_canvas",
             "fk_canvas_session_session",
             "fk_mcp_tool_server",
+            "fk_mcp_server_environment",
             "fk_environment_inventory_environment",
             "fk_environment_skill_source_environment",
             "fk_environment_skill_source",

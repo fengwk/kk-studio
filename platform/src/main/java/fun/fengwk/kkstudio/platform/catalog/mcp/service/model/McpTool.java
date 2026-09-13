@@ -1,10 +1,11 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.service.model;
 
 import lombok.Data;
+import lombok.ToString;
 
 import java.util.UUID;
 
-/** 已冻结的 MCP 远端工具行（内部模型）。 */
+/** 已持久化的 MCP 工具行。 */
 @Data
 public class McpTool {
 
@@ -20,9 +21,15 @@ public class McpTool {
   /** 全局唯一模型可见工具名。 */
   private String modelName;
 
-  /** 远端工具描述（非空白）。 */
-  private String description;
+  /** 远端工具描述。 */
+  @ToString.Exclude private String description;
 
   /** 远端工具 JSON input schema（canonical JSON object 文本）。 */
-  private String inputSchemaJson;
+  @ToString.Exclude private String inputSchemaJson;
+
+  /** 模式修订代际（非负，定义变更或下线重现时递增）。 */
+  private Long schemaRevision;
+
+  /** 是否可用（远端消失时 tombstone 为 false 保留稳定 UUID）。 */
+  private boolean available;
 }

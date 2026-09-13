@@ -2,10 +2,12 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -16,12 +18,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerRefreshDTO;
+import fun.fengwk.kkstudio.share.ai.mcp.McpServerDiscoverDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -30,8 +33,8 @@ import java.io.IOException;
 /**
  * Platform MCP Server Web REST API HTTP 契约测试。
  *
- * <p>验证 {@code /api/ai/mcp-servers} 下的 create/update/refresh/delete/list/get 契约、 状态码与响应体中 Bearer
- * Token 的严格脱敏。
+ * <p>验证 {@code /api/ai/mcp-servers} 下的 create/update/discover/delete/list/get 契约、 安全元数据投影、显式 config
+ * 读取（强制 no-store）与发现状态码。
  */
 @AutoConfigureMockMvc
 public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
@@ -54,16 +57,27 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
   }
 
   @Test
-  public void fullCrudLifecycleAndTokenRedaction() throws Exception {
+  public void fullCrudLifecycleAndConfigPrivacy() throws Exception {
     fakeServer.addTool("echo", "Echo text", "{}");
+
+    String remoteConfig =
+        """
+        {
+          "type": "remote",
+          "url": "%s",
+          "headers": {
+            "Authorization": "Bearer secret-token-12345"
+          },
+          "timeoutMillis": 15000
+        }
+        """
+            .formatted(fakeServer.endpointUrl());
 
     // 1. 创建 Server
     String name = "web_mcp_" + System.nanoTime();
     McpServerCreateDTO create = new McpServerCreateDTO();
     create.setName(name);
-    create.setUrl(fakeServer.endpointUrl());
-    create.setBearerToken("secret-token-12345");
-    create.setTimeoutMillis(15000L);
+    create.setConfigJson(remoteConfig);
 
     MvcResult createResult =
         mockMvc
@@ -73,17 +87,20 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
                     .content(objectMapper.writeValueAsString(create)))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.name").value(name))
-            .andExpect(jsonPath("$.data.bearerTokenConfigured").value(true))
+            .andExpect(jsonPath("$.data.type").value("remote"))
             .andExpect(jsonPath("$.data.version").value("0"))
+            .andExpect(jsonPath("$.data.discoveryStatus").value("UNVERIFIED"))
             .andReturn();
 
     JsonNode createData = data(createResult);
     String id = createData.get("id").asText();
     assertNotNull(id);
-    // 确认 JSON 响应完全不含 bearerToken 属性
-    assertFalse(createData.has("bearerToken"));
+    // 确认 JSON 响应完全不含敏感信息
+    assertFalse(createData.has("configJson"));
+    assertFalse(createData.has("url"));
+    assertFalse(createData.has("headers"));
 
-    // 2. GET /api/ai/mcp-servers/{id}
+    // 2. GET /api/ai/mcp-servers/{id} (安全公开视图)
     MvcResult getResult =
         mockMvc
             .perform(get("/api/ai/mcp-servers/{id}", id))
@@ -92,18 +109,53 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
             .andExpect(jsonPath("$.data.name").value(name))
             .andReturn();
     JsonNode getData = data(getResult);
-    assertFalse(getData.has("bearerToken"));
+    assertFalse(getData.has("configJson"));
+    assertFalse(getData.has("url"));
 
-    // 3. GET /api/ai/mcp-servers (分页)
+    // 3. GET /api/ai/mcp-servers/{id}/config (显式配置读取，必须带有 Cache-Control: no-store)
+    MvcResult getConfigResult =
+        mockMvc
+            .perform(get("/api/ai/mcp-servers/{id}/config", id))
+            .andExpect(status().isOk())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andExpect(jsonPath("$.data.id").value(id))
+            .andExpect(jsonPath("$.data.name").value(name))
+            .andReturn();
+    JsonNode getConfigData = data(getConfigResult);
+    assertTrue(getConfigData.has("configJson"));
+    assertTrue(getConfigData.get("configJson").asText().contains("secret-token-12345"));
+
+    // 4. GET /api/ai/mcp-servers (分页)
     mockMvc
         .perform(get("/api/ai/mcp-servers").param("pageNumber", "1").param("pageSize", "10"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.results").isArray());
 
-    // 4. PUT /api/ai/mcp-servers/{id} (更新)
+    // 5. POST /api/ai/mcp-servers/{id}/discover (发现，返回 202 Accepted)
+    McpServerDiscoverDTO discover = new McpServerDiscoverDTO();
+    discover.setExpectedVersion("0");
+    mockMvc
+        .perform(
+            post("/api/ai/mcp-servers/{id}/discover", id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(discover)))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.server.discoveryStatus").value("AVAILABLE"))
+        .andExpect(jsonPath("$.data.server.toolCount").value(1));
+
+    // 6. PUT /api/ai/mcp-servers/{id} (更新)
+    String newConfig =
+        """
+        {
+          "type": "remote",
+          "url": "%s",
+          "timeoutMillis": 20000
+        }
+        """
+            .formatted(fakeServer.endpointUrl());
     McpServerUpdateDTO update = new McpServerUpdateDTO();
-    update.setTimeoutMillis(20000L);
     update.setExpectedVersion("0");
+    update.setConfigJson(newConfig);
 
     mockMvc
         .perform(
@@ -112,27 +164,15 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(update)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.timeoutMillis").value(20000))
-        .andExpect(jsonPath("$.data.version").value("1"));
+        .andExpect(jsonPath("$.data.version").value("1"))
+        .andExpect(jsonPath("$.data.discoveryStatus").value("UNVERIFIED"));
 
-    // 5. POST /api/ai/mcp-servers/{id}/refresh (刷新)
-    // 测试意图：验证 refresh POST 改为最小 JSON body {expectedVersion} 进行 CAS 刷新，返回 200 OK 与自增 version。
-    McpServerRefreshDTO refresh = new McpServerRefreshDTO();
-    refresh.setExpectedVersion("1");
+    // 7. DELETE /api/ai/mcp-servers/{id} (删除)
     mockMvc
-        .perform(
-            post("/api/ai/mcp-servers/{id}/refresh", id)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(refresh)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("2"));
-
-    // 6. DELETE /api/ai/mcp-servers/{id} (删除)
-    // 测试意图：验证 delete 仍使用 query 参数 expectedVersion 进行 CAS 删除，返回 204 NoContent。
-    mockMvc
-        .perform(delete("/api/ai/mcp-servers/{id}", id).param("expectedVersion", "2"))
+        .perform(delete("/api/ai/mcp-servers/{id}", id).param("expectedVersion", "1"))
         .andExpect(status().isNoContent());
 
-    // 7. 删除后查询 404
+    // 8. 删除后查询 404
     mockMvc.perform(get("/api/ai/mcp-servers/{id}", id)).andExpect(status().isNotFound());
   }
 
@@ -141,10 +181,19 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
     fakeServer.addTool("ping", "Ping", "{}");
 
     String name = "conflict_mcp_" + System.nanoTime();
+    String config =
+        """
+        {
+          "type": "remote",
+          "url": "%s",
+          "timeoutMillis": 5000
+        }
+        """
+            .formatted(fakeServer.endpointUrl());
+
     McpServerCreateDTO create = new McpServerCreateDTO();
     create.setName(name);
-    create.setUrl(fakeServer.endpointUrl());
-    create.setTimeoutMillis(5000L);
+    create.setConfigJson(config);
 
     MvcResult createResult =
         mockMvc
@@ -157,10 +206,10 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
 
     String id = data(createResult).get("id").asText();
 
-    // 测试意图：验证 PUT /api/ai/mcp-servers/{id} 在 body expectedVersion 版本过期时返回 409 Conflict。
+    // 验证 PUT 在 expectedVersion 版本过期时返回 409 Conflict
     McpServerUpdateDTO badVersionUpdate = new McpServerUpdateDTO();
-    badVersionUpdate.setTimeoutMillis(10000L);
     badVersionUpdate.setExpectedVersion("999");
+    badVersionUpdate.setConfigJson(config);
 
     mockMvc
         .perform(
@@ -170,26 +219,34 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("version_conflict"));
 
-    // 测试意图：验证 POST /api/ai/mcp-servers/{id}/refresh 在 body expectedVersion 版本过期时返回 409 Conflict。
-    McpServerRefreshDTO badVersionRefresh = new McpServerRefreshDTO();
-    badVersionRefresh.setExpectedVersion("999");
+    // 验证 POST discover 在 expectedVersion 版本过期时返回 409 Conflict
+    McpServerDiscoverDTO badVersionDiscover = new McpServerDiscoverDTO();
+    badVersionDiscover.setExpectedVersion("999");
 
     mockMvc
         .perform(
-            post("/api/ai/mcp-servers/{id}/refresh", id)
+            post("/api/ai/mcp-servers/{id}/discover", id)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(badVersionRefresh)))
+                .content(objectMapper.writeValueAsString(badVersionDiscover)))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("version_conflict"));
   }
 
   @Test
-  public void rejectsInvalidUrlWithBadRequestAndRedactsUrl() throws Exception {
+  public void rejectsInvalidConfigWithBadRequestAndRedactsSecrets() throws Exception {
     String name = "bad_url_mcp_" + System.nanoTime();
+    String config =
+        """
+        {
+          "type": "remote",
+          "url": "http://user:secret@example.com/mcp",
+          "timeoutMillis": 5000
+        }
+        """;
+
     McpServerCreateDTO create = new McpServerCreateDTO();
     create.setName(name);
-    create.setUrl("http://user:secret@example.com/mcp");
-    create.setTimeoutMillis(5000L);
+    create.setConfigJson(config);
 
     MvcResult result =
         mockMvc
@@ -206,16 +263,24 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
     assertFalse(responseBody.contains("user:secret@example.com"));
   }
 
-  /** 测试意图：验证 POST /api/ai/mcp-servers/{id}/refresh 携带未知额外字段时 fail-closed 拒绝并返回 400 BadRequest。 */
   @Test
-  public void rejectsUnknownFieldsOnRefreshWithBadRequest() throws Exception {
+  public void rejectsUnknownFieldsOnDiscoverWithBadRequest() throws Exception {
     fakeServer.addTool("echo", "Echo text", "{}");
 
     String name = "rej_mcp_" + System.currentTimeMillis();
+    String config =
+        """
+        {
+          "type": "remote",
+          "url": "%s",
+          "timeoutMillis": 5000
+        }
+        """
+            .formatted(fakeServer.endpointUrl());
+
     McpServerCreateDTO create = new McpServerCreateDTO();
     create.setName(name);
-    create.setUrl(fakeServer.endpointUrl());
-    create.setTimeoutMillis(5000L);
+    create.setConfigJson(config);
 
     MvcResult createResult =
         mockMvc
@@ -230,7 +295,7 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            post("/api/ai/mcp-servers/{id}/refresh", id)
+            post("/api/ai/mcp-servers/{id}/discover", id)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"0\",\"extraField\":\"forbidden\"}"))
         .andExpect(status().isBadRequest());

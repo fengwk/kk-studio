@@ -37,6 +37,13 @@ public final class McpInputSchemaConverter {
 
   private McpInputSchemaConverter() {}
 
+  public static String toCanonicalJson(JsonNode root) {
+    if (root == null || !root.isObject()) {
+      throw new AiValidationException("mcp_server", "input schema must be a JSON object");
+    }
+    return SCHEMA_CODEC.encode(convertObject(root, "mcp_server"));
+  }
+
   /**
    * 把远端 input schema JSON 文本转换为 canonical input schema JSON；输入必须是 JSON object。
    *

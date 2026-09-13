@@ -10,6 +10,8 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl.mapper.McpServerMapper;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl.model.McpServerDO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl.model.McpToolDO;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 
@@ -17,7 +19,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-/** 基于 PostgreSQL 的 MCP server 与工具仓库。 */
+/** 基于 PostgreSQL 的 MCP server 与工具仓库实现。 */
 @AllArgsConstructor
 @Repository
 public class PostgresqlMcpServerRepository implements McpServerRepository {
@@ -63,6 +65,14 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
   }
 
   @Override
+  public boolean updateDiscoveryResult(
+      UUID id, long expectedVersion, McpDiscoveryStatus discoveryStatus, Long discoveredVersion) {
+    return mapper.updateDiscoveryResult(
+            id, expectedVersion, discoveryStatus.name(), discoveredVersion)
+        == 1;
+  }
+
+  @Override
   public boolean deleteById(UUID id, long expectedVersion) {
     return mapper.deleteById(id, expectedVersion) == 1;
   }
@@ -75,6 +85,21 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
   @Override
   public List<McpTool> listTools(UUID serverId) {
     return mapper.listTools(serverId).stream().map(this::convertTool).toList();
+  }
+
+  @Override
+  public List<McpTool> listAvailableTools(UUID serverId) {
+    return mapper.listAvailableTools(serverId).stream().map(this::convertTool).toList();
+  }
+
+  @Override
+  public List<McpTool> listAllAvailableTools() {
+    return mapper.listAllAvailableTools().stream().map(this::convertTool).toList();
+  }
+
+  @Override
+  public int countAvailableTools(UUID serverId) {
+    return mapper.countAvailableTools(serverId);
   }
 
   @Override
@@ -113,9 +138,18 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
     McpServerDO result = new McpServerDO();
     result.setId(server.getId());
     result.setName(server.getName());
-    result.setUrl(server.getUrl());
-    result.setBearerToken(server.getBearerToken());
+    result.setConnectionType(
+        server.getConnectionType() == null ? null : server.getConnectionType().name());
+    result.setEnvironmentId(server.getEnvironmentId());
+    result.setConnectionConfig(server.getConnectionConfig());
+    result.setEnabled(server.isEnabled());
     result.setTimeoutMillis(server.getTimeoutMillis());
+    result.setDiscoveryStatus(
+        server.getDiscoveryStatus() == null ? null : server.getDiscoveryStatus().name());
+    result.setDiscoveredVersion(server.getDiscoveredVersion());
+    result.setVersion(server.getVersion());
+    result.setCreateTime(server.getCreateTime());
+    result.setUpdateTime(server.getUpdateTime());
     return result;
   }
 
@@ -126,9 +160,19 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
     McpServer result = new McpServer();
     result.setId(server.getId());
     result.setName(server.getName());
-    result.setUrl(server.getUrl());
-    result.setBearerToken(server.getBearerToken());
+    result.setConnectionType(
+        server.getConnectionType() == null
+            ? null
+            : McpConnectionType.valueOf(server.getConnectionType()));
+    result.setEnvironmentId(server.getEnvironmentId());
+    result.setConnectionConfig(server.getConnectionConfig());
+    result.setEnabled(server.isEnabled());
     result.setTimeoutMillis(server.getTimeoutMillis());
+    result.setDiscoveryStatus(
+        server.getDiscoveryStatus() == null
+            ? null
+            : McpDiscoveryStatus.valueOf(server.getDiscoveryStatus()));
+    result.setDiscoveredVersion(server.getDiscoveredVersion());
     result.setVersion(server.getVersion());
     result.setCreateTime(server.getCreateTime());
     result.setUpdateTime(server.getUpdateTime());
@@ -146,6 +190,8 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
     result.setModelName(tool.getModelName());
     result.setDescription(tool.getDescription());
     result.setInputSchemaJson(tool.getInputSchemaJson());
+    result.setSchemaRevision(tool.getSchemaRevision());
+    result.setAvailable(tool.isAvailable());
     return result;
   }
 
@@ -160,6 +206,8 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
     result.setModelName(tool.getModelName());
     result.setDescription(tool.getDescription());
     result.setInputSchemaJson(tool.getInputSchemaJson());
+    result.setSchemaRevision(tool.getSchemaRevision());
+    result.setAvailable(tool.isAvailable());
     return result;
   }
 }

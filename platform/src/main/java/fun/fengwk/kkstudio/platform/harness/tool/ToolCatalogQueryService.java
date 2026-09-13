@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.tool;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO;
 
@@ -25,11 +26,17 @@ public class ToolCatalogQueryService {
 
   private static ToolCatalogEntryDTO toDto(ToolContribution contribution) {
     ToolDescriptor descriptor = contribution.definition().descriptor();
+    ToolRequirements requirements = contribution.requirements();
     ToolCatalogEntryDTO dto = new ToolCatalogEntryDTO();
     dto.setId(contribution.definition().id().value());
     dto.setName(descriptor.name());
     dto.setVersion(descriptor.version());
     dto.setDescription(descriptor.description());
+    dto.setEnvironmentRequired(requirements != null && requirements.environmentRequired());
+    dto.setEnvironmentId(
+        requirements != null && requirements.requiredEnvironmentId() != null
+            ? requirements.requiredEnvironmentId().value().toString()
+            : null);
     return dto;
   }
 }
