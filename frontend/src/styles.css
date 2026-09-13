@@ -6314,7 +6314,7 @@ select.settings-input option {
   line-height: 1.35;
 }
 
-.environment-card .status-pill {
+.status-pill {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
@@ -6328,16 +6328,38 @@ select.settings-input option {
   letter-spacing: 0.02em;
 }
 
-.environment-card .status-pill.is-ready {
+.status-pill.is-ready,
+.status-pill.is-succeeded {
   color: var(--green-primary);
   border-color: var(--green-border);
   background: var(--green-soft);
 }
 
-.environment-card .status-pill.is-offline {
+.status-pill.is-offline,
+.status-pill.is-pending {
   color: var(--warning);
-  border-color: rgba(240, 192, 96, 0.35);
-  background: rgba(240, 192, 96, 0.1);
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
+
+.status-pill.is-running {
+  color: var(--info);
+  border-color: rgba(119, 199, 245, 0.35);
+  background: var(--info-soft);
+}
+
+.status-pill.is-failed {
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.status-pill.is-unapplied,
+.status-pill.is-cancelled,
+.status-pill.is-unknown {
+  color: var(--fg-muted);
+  border-color: var(--border);
+  background: var(--surface-raised);
 }
 
 .environment-card .meta-block {
@@ -6358,6 +6380,377 @@ select.settings-input option {
   max-width: 148px;
   padding: 0 10px;
   font-size: 12px;
+}
+
+/* --- Environment Management Modal & Sections --- */
+
+.env-management-modal-card {
+  width: min(860px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.env-mgmt-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+}
+
+.env-mgmt-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.env-mgmt-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.env-mgmt-section-header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.env-mgmt-section-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.env-mgmt-badge-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+}
+
+.env-sources-list,
+.env-operations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.env-source-card,
+.env-op-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.env-source-card-header,
+.env-op-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.env-source-card-badges,
+.env-op-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.env-source-id,
+.env-op-id {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.env-source-config {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.env-meta-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.env-meta-row .lbl {
+  color: var(--fg-dim);
+  min-width: 90px;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.env-meta-row .val {
+  word-break: break-all;
+}
+
+.env-source-applied-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.env-fact-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.env-fact-item .lbl {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.env-fact-item .val {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.env-diag-error,
+.env-op-failure {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 96, 96, 0.1);
+  border: 1px solid var(--danger-border, rgba(255, 96, 96, 0.45));
+  color: var(--danger, #ff7b7b);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.env-diag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.env-diag-list .lbl {
+  font-weight: 600;
+  color: var(--warning, #f0c060);
+}
+
+.env-diag-list ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.env-source-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.env-inventory-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.env-inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.env-inventory-meta-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.env-inventory-meta-card .lbl {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.env-inventory-meta-card .val {
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.env-grid-span-full {
+  grid-column: 1 / -1;
+}
+
+.env-inventory-skills-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.env-subsection-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.env-skills-count {
+  font-size: 12px;
+  color: var(--fg-dim);
+  font-weight: 450;
+}
+
+.env-skills-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+}
+
+.env-skills-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.env-skills-table th,
+.env-skills-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.env-skills-table th {
+  background: var(--surface);
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+
+.env-skills-table tr:last-child td {
+  border-bottom: none;
+}
+
+.env-empty-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+  padding: 4px 0;
+}
+
+.env-op-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.env-op-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.env-op-times .val {
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.env-op-result-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.env-op-result-box .lbl {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.env-op-result-json {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-family: monospace;
+  font-size: 11px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.env-source-modal-card {
+  width: min(520px, 100%);
+}
+
+.env-type-selector {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.env-type-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+
+.env-type-option.is-selected {
+  border-color: var(--accent);
+  background: var(--green-soft);
+  font-weight: 600;
+}
+
+.env-type-option.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.env-action-modal-card {
+  width: min(460px, 100%);
+}
+
+.meta-chip.is-type {
+  font-weight: 700;
+}
+
+.meta-chip.is-default {
+  background: var(--surface-raised);
+  border-color: var(--border);
+  color: var(--fg-muted);
 }
 
 .capability-picker .capability-options {
@@ -6936,4 +7329,39 @@ select.settings-input option {
     padding: 0 12px;
     font-size: 14px;
   }
+}
+
+/* MCP Server JSON-only editor & Environment operations */
+.mcp-modal-card {
+  width: min(640px, 100%);
+}
+
+.mcp-json-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.mcp-config-json-textarea {
+  min-height: 240px !important;
+  resize: vertical;
+}
+
+.mcp-validation-msg {
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.mcp-validation-msg.is-success {
+  color: var(--success, #10b981);
+}
+
+.mcp-validation-msg.is-error {
+  color: var(--danger, #ef4444);
+}
+
+.meta-chip.is-resource {
+  font-weight: 600;
 }

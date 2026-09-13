@@ -28,9 +28,6 @@ public class EnvironmentCardDTO {
   /** 支持的原子能力列表。 */
   private List<LiveEnvironmentCapabilityDTO> capabilities;
 
-  /** daemon 通告的技能列表。 */
-  private List<LiveEnvironmentSkillDTO> skills;
-
   /** daemon 实际 root display path。 */
   private String rootPath;
 

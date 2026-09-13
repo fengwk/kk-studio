@@ -16,4 +16,10 @@ public class ToolCatalogEntryDTO {
 
   /** 工具描述（非空白）。 */
   private String description;
+
+  /** 是否需要绑定 Environment 执行。 */
+  private boolean environmentRequired;
+
+  /** 目标 Environment UUID（精确要求环境时非空，通用环境工具或 Host 工具为 null）。 */
+  private String environmentId;
 }

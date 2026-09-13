@@ -15,6 +15,7 @@
 
     <modules>
         <module>common</module>
+        <module>mcp</module>
         <module>tool</module>
         <module>environment</module>
         <module>environment-server</module>

@@ -12,7 +12,7 @@ DTO；宿主通过构造器注入全部外部能力，因此会话状态机可�
 
 ### 核心职责
 
-- 拥有 daemon 协议 v2 的服务端会话状态：HELLO 认证与 WELCOME 下发、READY 能力登记、HEARTBEAT 续约、入站/出站 sequence、
+- 拥有 daemon 协议 v3 的服务端会话状态：HELLO 认证与 WELCOME 下发、READY v2 能力登记、HEARTBEAT 续约、入站/出站 sequence、
   连接代际与关闭清理。
 - 以 `DaemonLeaseStore` 的围栏返回值推进租约语义：抢占/接管、READY 写入、心跳续约、断开宽限；存储不可用时 fail-closed。
 - 按 `(environmentId, invocationId)` 协调在途调用：发送 `INVOKE`、透传 `STARTED/PARTIAL`、收敛唯一终态、处理 `CANCEL` 与
@@ -64,7 +64,7 @@ DaemonEndpoint                 -> open / receive / close           （transport 
 EnvironmentCapabilityTransport -> invoke                            （产品调用方调用）
 ```
 
-握手时序与协议编解码仍由 `harness-environment` 的 v2 契约定义；本模块负责把协议推进为可观察状态：
+握手时序与协议编解码仍由 `harness-environment` 的 v3 契约定义；本模块负责把协议推进为可观察状态：
 
 ```text
 open(channel)
@@ -90,8 +90,9 @@ per-Environment 并发槽位、队列或容量配置；同一 Environment 内重
 第二次 wire 发送。
 
 ```text
-invoke(binding, request, listener)
-  -> 校验 capability descriptor 与 catalog 一致、workdir 为 null、callId 为 canonical UUID
+invoke(environmentId, request, listener)
+  -> 校验 capability descriptor 与 catalog 一致、callId 为 canonical UUID
+  -> 仅对 requiresWorkdir capability 按 READY 目标 OS 词法校验 arguments.workdir
   -> 读取本节点 READY 连接与其 leaseToken
   -> leaseStore.holdsReadyLease（准入围栏，存储访问在核心锁外）
   -> 登记 ActiveInvocation 并发送 INVOKE

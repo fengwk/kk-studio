@@ -4,9 +4,15 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAiConsoleResourceController } from '@/features/ai/catalog/useAiConsoleResourceController'
 import { agentService } from '@/shared/api/agent-service'
+import { environmentService } from '@/shared/api/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
-vi.mock('@/shared/api/environment-service', () => ({ environmentService: { listEnvironments: vi.fn(async () => []) } }))
+vi.mock('@/shared/api/environment-service', () => ({
+  environmentService: {
+    listEnvironments: vi.fn(async () => []),
+    listInventorySkills: vi.fn(async () => []),
+  },
+}))
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listProviders: vi.fn(),
@@ -46,6 +52,7 @@ describe('useAiConsoleResourceController', () => {
     vi.mocked(agentService.deleteModel).mockResolvedValue(undefined)
     vi.mocked(agentService.createAgent).mockResolvedValue(currentAgent)
     vi.mocked(agentService.deleteAgent).mockResolvedValue(undefined)
+    vi.mocked(environmentService.listInventorySkills).mockResolvedValue([])
     vi.mocked(agentService.updateProvider).mockImplementation(async (_name, data) => {
       currentProvider = { ...currentProvider, ...data, name: data.name ?? currentProvider.name }
       currentModel = { ...currentModel, providerName: currentProvider.name }
@@ -302,6 +309,86 @@ describe('useAiConsoleResourceController', () => {
     expect(agentService.deleteModel).not.toHaveBeenCalled()
     expect(agentService.deleteAgent).not.toHaveBeenCalled()
   })
+
+  it('gates the durable usable inventory query: only enabled when agent modal is open with non-empty environmentId', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listInventorySkills).mockResolvedValue([
+      {
+        sourceId: 'src-1',
+        name: 'dev',
+        description: 'dev skill',
+        sourceVersion: '1',
+        baseDirectory: '/tmp',
+        contentRevision: 'sha256-abc',
+        discoveredAt: '2026-07-20T00:00:00.000Z',
+      },
+    ])
+
+    renderHarness()
+    await ready()
+
+    // 1. Initially modal is closed: listInventorySkills not called
+    expect(environmentService.listInventorySkills).not.toHaveBeenCalled()
+    expect(screen.getByTestId('inventory-skills-status')).toHaveTextContent('idle')
+
+    // 2. Open provider modal: listInventorySkills not called
+    await user.click(screen.getByRole('button', { name: 'create-provider' }))
+    expect(environmentService.listInventorySkills).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'close-resource' }))
+
+    // 3. Open agent modal with empty environmentId: listInventorySkills not called
+    await user.click(screen.getByRole('button', { name: 'create-agent' }))
+    expect(environmentService.listInventorySkills).not.toHaveBeenCalled()
+
+    // 4. Set environmentId to env-1: query enables and fetches usable inventory with usableOnly=true
+    await user.type(screen.getByTestId('agent-environment-id'), 'env-1')
+    await waitFor(() => {
+      expect(environmentService.listInventorySkills).toHaveBeenCalledWith('env-1', true)
+      expect(screen.getByTestId('inventory-skills-count')).toHaveTextContent('1')
+    })
+
+    // 5. Switch environmentId to env-2: fetches inventory for env-2
+    await user.clear(screen.getByTestId('agent-environment-id'))
+    await user.type(screen.getByTestId('agent-environment-id'), 'env-2')
+    await waitFor(() => {
+      expect(environmentService.listInventorySkills).toHaveBeenCalledWith('env-2', true)
+    })
+
+    // 6. Close modal: query is disabled
+    await user.click(screen.getByRole('button', { name: 'close-resource' }))
+    expect(screen.getByTestId('inventory-skills-status')).toHaveTextContent('idle')
+  })
+
+  it('reflects durable usable inventory query loading and error states into resourceEditorModal', async () => {
+    const user = userEvent.setup()
+    let rejectInventory!: (err: unknown) => void
+
+    vi.mocked(environmentService.listInventorySkills).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectInventory = reject
+        }),
+    )
+
+    renderHarness()
+    await ready()
+
+    await user.click(screen.getByRole('button', { name: 'create-agent' }))
+    await user.type(screen.getByTestId('agent-environment-id'), 'env-slow')
+
+    // In-flight query sets inventorySkillsLoading to true
+    await waitFor(() => {
+      expect(screen.getByTestId('inventory-skills-status')).toHaveTextContent('loading')
+    })
+
+    // Reject query: sets inventorySkillsError
+    act(() => {
+      rejectInventory(new Error('Network failure'))
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('inventory-skills-status')).toHaveTextContent('error')
+    })
+  })
 })
 
 function ResourceControllerHarness() {
@@ -327,6 +414,10 @@ function ResourceControllerHarness() {
       <div data-testid="modal-open">{modal ? 'open' : 'closed'}</div>
       <div data-testid="form-error">{formError}</div>
       <div data-testid="field-error">{errorField}</div>
+      <div data-testid="inventory-skills-status">
+        {editor.inventorySkillsLoading ? 'loading' : editor.inventorySkillsError ? 'error' : 'idle'}
+      </div>
+      <div data-testid="inventory-skills-count">{editor.inventorySkills.length}</div>
       <button type="button" onClick={() => editor.onClose()}>
         close-resource
       </button>
@@ -411,6 +502,16 @@ function ResourceControllerHarness() {
               editor.onAgentDraftChange({
                 ...editor.agentDraft,
                 description: event.target.value,
+              })
+            }
+          />
+          <input
+            data-testid="agent-environment-id"
+            value={editor.agentDraft.environmentId}
+            onChange={(event) =>
+              editor.onAgentDraftChange({
+                ...editor.agentDraft,
+                environmentId: event.target.value,
               })
             }
           />

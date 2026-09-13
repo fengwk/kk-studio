@@ -65,4 +65,8 @@ export const sharedCatalog = {
     'en-US': 'Retry',
     'zh-CN': '重试',
   },
+  'shared.retry': {
+    'en-US': 'Retry',
+    'zh-CN': '重试',
+  },
 } satisfies LocaleCatalog

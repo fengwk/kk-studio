@@ -646,22 +646,23 @@ public class PlatformCanvasCommandServiceTest extends PostgresSpringTestSupport 
             Instant.now());
     resourceRepository.add(oldResource);
     resourceRepository.add(newResource);
+    Instant claimAt = Instant.now();
     runRepository.insertReady(
         new CanvasFunctionRun(
             nodeId,
             requestId,
             CanvasFunctionRunStatus.READY,
             0,
-            Instant.now(),
+            claimAt.minusSeconds(1),
             null,
             null,
             "QUEUED",
             "{\"stage\":\"QUEUED\"}",
             null,
-            Instant.now(),
-            Instant.now()));
+            claimAt,
+            claimAt));
     functionWorkStore
-        .claimNext(Instant.now().plusSeconds(1), Duration.ofSeconds(30), "snapshot-" + suffix)
+        .claimNext(claimAt, Duration.ofSeconds(30), "snapshot-" + suffix)
         .orElseThrow();
 
     ExecutorService executor = Executors.newSingleThreadExecutor();

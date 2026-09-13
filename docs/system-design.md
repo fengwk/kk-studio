@@ -166,7 +166,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 
 根 `pom.xml` 直接聚合六个 Maven module：`share`、`schema`、`canvas`、
 `harness`、`platform`、`web`。`canvas/pom.xml` 再聚合 `canvas/core` 和
-`canvas/infra`；`harness/pom.xml` 再聚合 `common`、`tool`、`environment`、`runtime`、
+`canvas/infra`；`harness/pom.xml` 再聚合 `common`、`mcp`、`tool`、`environment`、`environment-server`、`runtime`、
 `provider`、`contributor-api`、`builtin`、`infra` 和 `daemon`。下表列出的是可维护的逻辑模块/目录，
 不是 root reactor 的直接 children。`frontend/` 是独立的 Node/Vite 工程，
 不属于 Maven reactor。
@@ -179,6 +179,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `canvas/core` | Canvas 领域、typed command、ports、Function Catalog | JDK-only |
 | `canvas/infra` | Canvas PostgreSQL/MyBatis、Snapshot query、Function durable runtime | 依赖 `canvas-core`，不反向依赖 Platform/Harness/Web |
 | `harness/common` | Prompt template/loader、JSON 边界工具、ResourceRef、统一 ResultContent 与 InputSchema 体系 | 依赖 JDK/Jackson，无其它 Harness 依赖 |
+| `harness/mcp` | 可复用 MCP 传输与协议适配；LangChain4j 生产依赖收敛地，提供自定义 Stdio 传输、进程树清理与超时/取消管理 | 依赖 `harness-common`、`langchain4j-mcp` 与 Jackson |
 | `harness/tool` | Tool identity、descriptor、call/result 与 Tool JSON codecs（Result 组合 ResultContent） | 依赖 `harness-common` 与 Jackson |
 | `harness/environment` | Environment 身份、Capability SPI/catalog 与 Daemon v2 wire（CapabilityResult 组合 ResultContent） | 依赖 `harness-common` 与 Jackson，绝不依赖 `harness-tool` |
 | `harness/environment-server` | Environment daemon 会话核心：连接代际、租约围栏与按 `invocationId` 的调用协调 | 依赖 `harness-common`、`harness-environment` 与 Jackson，绝不依赖 Spring/JDBC/web |
@@ -187,7 +188,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `harness/contributor-api` | trusted Contributor 的 Catalog、BranchView、统一 Tool、effect 与 projector API | 生产依赖 `harness-tool`、`harness-environment`，不进生产 Common/Runtime |
 | `harness/builtin` | 第一方内置 14 工具、goal.state 与 context projector | 依赖 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment`、Jackson |
 | `harness/infra` | PostgreSQL HarnessStore、Work dispatcher、realtime、Resource store | 依赖 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Spring JDBC、PostgreSQL |
-| `harness/daemon` | 独立 Environment 进程适配器 | 依赖 `harness-common`、`harness-environment`、Jackson、JGit、LangChain4j adapters，绝不依赖 `harness-tool` |
+| `harness/daemon` | 独立 Environment 进程宿主与能力执行器 | 依赖 `harness-common`、`harness-environment`、`harness-mcp`、Jackson、JGit，绝不依赖 `harness-tool` |
 | `platform` | Catalog、MCP、Storage、Chat/Canvas application service、Resolver、Model/Tool/Environment Gateway | 适配 Share、Core/Runtime ports，不成为组合根 |
 | `web` | Spring Boot、HTTP、浏览器事件、daemon WebSocket、生产生命周期 | 唯一 composition root |
 
@@ -211,8 +212,10 @@ platform -> harness-builtin -> harness-contributor-api
 platform -> harness-runtime
 platform -> harness-provider -> harness-runtime
 platform -> harness-contributor-api
+platform -> harness-mcp -> harness-common
 harness-daemon -> harness-common
 harness-daemon -> harness-environment -> harness-common
+harness-daemon -> harness-mcp -> harness-common
 web -> harness-environment-server
 ```
 
@@ -424,8 +427,13 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
   `GlobalStorageToolResultHistoryMaterializer` 摄入 Blob，无法摄入则 fail closed。
 - Environment HELLO 通过 registration token 解析 canonical `EnvironmentId`；
   未过期 route lease 被占用时拒绝第二个持有者。
-- MCP 只支持 Streamable HTTP；server credential 不进入响应或日志，工具调用使用
-  per-call client，协议或连接失败只返回稳定通用错误。
+- MCP Server 采用严格单份配置 JSON，支持 Remote 与 Local 两种模式：
+  - Remote MCP 仅支持 Streamable HTTP，在 Backend 进程中通过 per-call client 执行，Header 支持整值 `${VAR}` 由 Backend 解析；
+  - Local MCP 仅支持 stdio，在配置的目标 Environment Daemon 进程中通过通用 capability（`mcp.local.call` / `mcp.local.discover`）执行，固定目标操作系统词法绝对 `cwd` 与 argv `command`，`env` 支持整值 `${VAR}` 由目标 Daemon 解析。Daemon 子进程客户端按 `(serverId, configVersion)` 懒创建与共享，新版本 fencing 旧版本并在活动调用归零后关闭（drain），单调用取消不打断并发调用，同版本配置漂移 fail-closed，无环境级配额或路径白名单。
+  - 凭据与安全边界：标准 DTO、日志与错误信息绝不回显 URL、headers、env、command、cwd 或敏感凭据；仅显式 `GET /api/ai/mcp-servers/{id}/config` 返回完整配置并强制附带 `Cache-Control: no-store`，前端仅在编辑时拉取且不缓存。
+  - 工具发现统一返回 HTTP 202 Accepted：Remote 在当前请求内同步完成且 `operation=null`；Local 提交 `MCP_SERVER_DISCOVER` 的持久 `EnvironmentOperation` 异步下发。
+  - Agent 运行时严格冻结版本，Local 工具要求 Agent 绑定的 `environmentId` 与 Server 配置一致；工具描述符动态版本为 `<serverVersion>.<schemaRevision>`，副作用恒为 `NON_IDEMPOTENT`。
+- 通用 EnvironmentOperation 资源模型：以 `(resource_type, resource_id, resource_version)` 抽象管理目标（`SKILL_SOURCE` 对应 `SKILL_REFRESH/INSTALL/UPDATE`；`MCP_SERVER` 对应 `MCP_SERVER_DISCOVER`）；同一目标资源通过唯一索引 `uk_environment_operation_active` 限制至多一个活动操作，资源删除不级联删除操作历史。
 - Trusted contributor loader 只位于
   `web/src/main/java/fun/fengwk/kkstudio/web/runtime/contributor/`，从配置目录加载并在启动时
   形成冻结 snapshot；Platform 和 Runtime 不直接接触 classloader。
@@ -456,6 +464,7 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
 - [harness-environment 模块](modules/harness-environment.md)：Environment 身份、Capability catalog 与 Daemon v2 wire。
 - [harness-environment-server 模块](modules/harness-environment-server.md)：daemon 会话、租约围栏与 `invocationId` 调用协调核心。
 - [harness-infra 模块](modules/harness-infra.md)：Harness Store、Work、通知与 ResourceStore。
+- [harness-mcp 模块](modules/harness-mcp.md)：Remote/Local MCP client、总预算、取消与 stdio 进程生命周期。
 - [harness-runtime 模块](modules/harness-runtime.md)：Agent Runtime 状态机与 processors。
 - [harness-tool 模块](modules/harness-tool.md)：Tool identity、descriptor、call/result 与 Tool JSON codecs。
 - [platform 模块](modules/platform.md)：application service、gateway 与外部适配。

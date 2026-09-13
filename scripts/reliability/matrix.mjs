@@ -12,9 +12,9 @@ export const MODEL_TOOL_NAMES = Object.freeze(['read', 'write', 'edit', 'bash', 
 export const ENVIRONMENT_CAPABILITY_IDS = Object.freeze([
   'fs.read',
   'fs.write',
-  'fs.apply-edit',
+  'fs.edit',
   'process.exec',
-  'fs.search',
+  'fs.grep',
   'fs.find',
 ])
 export const PROVIDER_NAME = 'minimax'

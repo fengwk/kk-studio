@@ -52,6 +52,7 @@ final class EnvironmentDaemonServerTestSupport {
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
           new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "Asia/Shanghai", "note", "/root"),
+          0,
           List.of());
 
   private EnvironmentDaemonServerTestSupport() {}

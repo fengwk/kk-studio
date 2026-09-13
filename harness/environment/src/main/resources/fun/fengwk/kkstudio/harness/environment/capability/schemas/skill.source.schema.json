@@ -1,0 +1,56 @@
+{
+  "type": "object",
+  "description": "Frozen Skill source configuration for one management operation. Never carries a workdir.",
+  "properties": {
+    "sourceId": {
+      "type": "string",
+      "description": "Stable Skill source UUID."
+    },
+    "sourceVersion": {
+      "type": "integer",
+      "description": "Configuration version of this source line."
+    },
+    "sourceSetVersion": {
+      "type": "integer",
+      "description": "Version of the global active source set described by activeSourceIds."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["path", "git"],
+      "description": "Skill source type."
+    },
+    "path": {
+      "type": "string",
+      "description": "Absolute or ~/ host path; path sources only."
+    },
+    "defaultSource": {
+      "type": "boolean",
+      "description": "Whether this is the default path source; path sources only."
+    },
+    "url": {
+      "type": "string",
+      "description": "Repository URL; git sources only."
+    },
+    "ref": {
+      "type": "string",
+      "description": "Optional git ref; git sources only."
+    },
+    "scanPath": {
+      "type": "string",
+      "description": "Optional repository-relative scan directory; git sources only."
+    },
+    "currentlyAppliedRevision": {
+      "type": "string",
+      "description": "Immutable revision previously applied by the daemon, if any."
+    },
+    "activeSourceIds": {
+      "type": "array",
+      "description": "Source ids that remain active after this operation.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["sourceId", "sourceVersion", "sourceSetVersion", "type", "activeSourceIds"],
+  "additionalProperties": false
+}

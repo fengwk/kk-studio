@@ -14,6 +14,9 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSourceInitializer;
+import fun.fengwk.kkstudio.platform.environment.skill.model.EnvironmentInventory;
+import fun.fengwk.kkstudio.platform.environment.skill.repo.SkillSourceRepository;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -26,7 +29,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentCapabilityDTO;
-import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentSkillDTO;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -49,6 +51,8 @@ public class EnvironmentServiceImpl implements EnvironmentService {
   private final JdbcTemplate jdbcTemplate;
   private final SystemSettingsSnapshot snapshot;
   private final Clock clock;
+  private final EnvironmentSkillSourceInitializer skillSourceInitializer;
+  private final SkillSourceRepository skillSourceRepository;
 
   @Override
   @Transactional
@@ -71,6 +75,8 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(RESOURCE, "environment name already exists: " + name, error);
     }
+    // 同一事务内补齐 inventory 头与缺省 PATH 来源：任一失败都回滚整个 Environment 创建，避免出现没有 inventory 身份的环境。
+    skillSourceInitializer.initialize(env.getId(), UUID.randomUUID());
     Environment created = environmentRepository.getById(env.getId());
     return toCardDto(created, true);
   }
@@ -256,6 +262,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     dto.setUpdateTime(env.getUpdateTime());
 
     EnvironmentId envId = EnvironmentId.of(env.getId());
+    EnvironmentInventory inventory = skillSourceRepository.getInventory(env.getId());
     Optional<EnvironmentConnection> connOpt = environmentRegistry.find(envId);
     if (connOpt.isPresent()) {
       EnvironmentConnection conn = connOpt.get();
@@ -265,21 +272,11 @@ public class EnvironmentServiceImpl implements EnvironmentService {
               clock.instant(),
               Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
       dto.setLastSeen(conn.lastSeenAt());
-      if (conn.status() == LiveEnvironmentStatus.READY && conn.daemonCapabilities() != null) {
-        dto.setRootPath(conn.rootPath());
-        dto.setSkills(
-            conn.skills().stream()
-                .map(
-                    s -> {
-                      LiveEnvironmentSkillDTO sdto = new LiveEnvironmentSkillDTO();
-                      sdto.setName(s.name());
-                      sdto.setDescription(s.description());
-                      return sdto;
-                    })
-                .toList());
-      } else {
-        dto.setSkills(List.of());
-      }
+      // 连接状态与能力列表是 live 事实；宿主 root 展示路径由持久 inventory 兜底，离线时仍然可读。
+      dto.setRootPath(
+          conn.status() == LiveEnvironmentStatus.READY && conn.daemonCapabilities() != null
+              ? conn.rootPath()
+              : reportedRootPath(inventory));
       dto.setCapabilities(
           conn.capabilities().stream()
               .map(
@@ -293,9 +290,14 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     } else {
       dto.setStatus("OFFLINE");
       dto.setReady(false);
-      dto.setSkills(List.of());
+      dto.setRootPath(reportedRootPath(inventory));
       dto.setCapabilities(List.of());
     }
     return dto;
+  }
+
+  /** 最近一次被接受 READY 报告的宿主 root 展示路径；从未报告过时为 null。只用于展示，不参与任何路径解析。 */
+  private static String reportedRootPath(EnvironmentInventory inventory) {
+    return inventory == null ? null : inventory.getRootPath();
   }
 }

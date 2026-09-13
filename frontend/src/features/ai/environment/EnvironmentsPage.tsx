@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Box, Check, Copy, KeyRound, Pencil, Plus, Trash2 } from 'lucide-react'
-import { filterEnvironments } from '@/features/ai/environment/environment-utils'
+import { Box, Check, Copy, KeyRound, Pencil, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { filterEnvironments, formatTimestamp } from '@/features/ai/environment/environment-utils'
 import { copyTextToClipboard } from '@/features/ai/environment/clipboard'
+import { EnvironmentManagementModal } from '@/features/ai/environment/EnvironmentManagementModal'
 import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
@@ -11,49 +12,10 @@ import { environmentService } from '@/shared/api/environment-service'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
-import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { useI18n, type AppLocale } from '@/shared/i18n'
-
-function formatDateTime24(date: Date, locale: AppLocale): string {
-  return date.toLocaleString(locale, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-}
-
-function formatLastSeen(value: InstantTimestamp | undefined, locale: AppLocale): string {
-  if (value == null || value === '') {
-    return ''
-  }
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const ms = value < 1e12 ? value * 1000 : value
-    return formatDateTime24(new Date(ms), locale)
-  }
-  const raw = String(value).trim()
-  if (!raw) {
-    return ''
-  }
-  if (/^\d+(\.\d+)?$/.test(raw)) {
-    const n = Number(raw)
-    if (Number.isFinite(n)) {
-      const ms = n < 1e12 ? n * 1000 : n
-      return formatDateTime24(new Date(ms), locale)
-    }
-  }
-  const parsed = Date.parse(raw)
-  if (Number.isFinite(parsed)) {
-    return formatDateTime24(new Date(parsed), locale)
-  }
-  return raw
-}
+import { useI18n } from '@/shared/i18n'
 
 function TagRow({ label, names, limit = 3 }: { label: string; names: string[]; limit?: number }) {
   const clean = names.map((name) => name.trim()).filter(Boolean)
@@ -118,6 +80,7 @@ export function EnvironmentsPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [rotateTarget, setRotateTarget] = useState<EnvironmentCardDTO | null>(null)
   const [rotateError, setRotateError] = useState<string | null>(null)
+  const [manageTarget, setManageTarget] = useState<EnvironmentCardDTO | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
 
   const environmentsQuery = useQuery({
@@ -354,10 +317,7 @@ export function EnvironmentsPage() {
                 const capabilityIds = (environment.capabilities ?? [])
                   .map((capability) => capability.id)
                   .filter(Boolean)
-                const skillNames = (environment.skills ?? [])
-                  .map((skill) => skill.name)
-                  .filter(Boolean)
-                const lastSeen = formatLastSeen(environment.lastSeen, locale)
+                const lastSeen = formatTimestamp(environment.lastSeen, locale)
                 return (
                   <article key={environment.id} className="info-card environment-card">
                     <div className="head">
@@ -391,7 +351,6 @@ export function EnvironmentsPage() {
                         </div>
                       ) : null}
                       <TagRow label={t('ai.environment.capabilities')} names={capabilityIds} />
-                      <TagRow label={t('ai.environment.skills')} names={skillNames} />
                     </div>
                     <div className="chat-card-foot split">
                       <button
@@ -412,6 +371,18 @@ export function EnvironmentsPage() {
                         {copied && copiedEnvironmentId === environment.id
                           ? t('ai.environment.tokenCopied')
                           : t('ai.environment.copyToken')}
+                      </button>
+                      <button
+                        type="button"
+                        className="action-enter-btn"
+                        aria-label={`${t('ai.environment.manage')} ${environment.name}`}
+                        onClick={() => {
+                          setConflict(null)
+                          setManageTarget(environment)
+                        }}
+                      >
+                        <SlidersHorizontal aria-hidden="true" />
+                        {t('ai.environment.manage')}
                       </button>
                       <button
                         type="button"
@@ -693,6 +664,13 @@ export function EnvironmentsPage() {
         </ModalBackdrop>
       )}
 
+      {manageTarget && (
+        <EnvironmentManagementModal
+          environment={manageTarget}
+          onClose={() => setManageTarget(null)}
+        />
+      )}
+
       <ConflictPresenter
         conflict={conflict}
         onRefresh={() => {
@@ -704,6 +682,7 @@ export function EnvironmentsPage() {
           setRotateError(null)
           setDeleteTarget(null)
           setDeleteError(null)
+          setManageTarget(null)
           void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
         }}
         onClose={() => setConflict(null)}

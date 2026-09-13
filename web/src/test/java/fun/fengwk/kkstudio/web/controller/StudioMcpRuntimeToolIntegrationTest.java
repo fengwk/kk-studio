@@ -121,13 +121,24 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
         """;
     fakeServer.addTool("echo", "Echo text", schemaJson);
 
-    // 2. 通过 HTTP POST /api/ai/mcp-servers 创建 Server，触发实际握手与工具发现入库
+    // 2. 通过 HTTP POST /api/ai/mcp-servers 创建 Server，触发显式发现并入库
     String serverName = "mcp_prod_" + (System.currentTimeMillis() % 1_000_000_000L);
+    String configJson =
+        """
+        {
+          "type": "remote",
+          "url": "%s",
+          "headers": {
+            "Authorization": "Bearer secret-bearer-token-do-not-leak"
+          },
+          "timeoutMillis": 15000
+        }
+        """
+            .formatted(fakeServer.endpointUrl());
+
     McpServerCreateDTO createMcp = new McpServerCreateDTO();
     createMcp.setName(serverName);
-    createMcp.setUrl(fakeServer.endpointUrl());
-    createMcp.setBearerToken("secret-bearer-token-do-not-leak");
-    createMcp.setTimeoutMillis(15000L);
+    createMcp.setConfigJson(configJson);
 
     MvcResult createMcpResult =
         mockMvc
@@ -137,12 +148,21 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
                     .content(objectMapper.writeValueAsString(createMcp)))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.name").value(serverName))
-            .andExpect(jsonPath("$.data.bearerTokenConfigured").value(true))
             .andExpect(jsonPath("$.data.version").value("0"))
+            .andExpect(jsonPath("$.data.discoveryStatus").value("UNVERIFIED"))
             .andReturn();
 
     String serverId = data(createMcpResult).get("id").asText();
     assertNotNull(serverId);
+
+    // 触发显式发现入库
+    mockMvc
+        .perform(
+            post("/api/ai/mcp-servers/{id}/discover", serverId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"0\"}"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.server.discoveryStatus").value("AVAILABLE"));
 
     // 从数据库中查询已持久化的动态工具行并获得稳定的 AgentToolId
     List<McpTool> persistedTools = mcpServerRepository.listTools(UUID.fromString(serverId));
@@ -162,7 +182,8 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
         .andExpect(
             jsonPath("$.data[?(@.id == '" + agentToolId.value() + "')].name")
                 .value(persistedTool.getModelName()))
-        .andExpect(jsonPath("$.data[?(@.id == '" + agentToolId.value() + "')].version").value("0"))
+        .andExpect(
+            jsonPath("$.data[?(@.id == '" + agentToolId.value() + "')].version").value("0.0"))
         .andExpect(
             jsonPath("$.data[?(@.id == '" + agentToolId.value() + "')].description")
                 .value("Echo text"));
@@ -268,11 +289,15 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     assertNotNull(spec);
 
     List<ToolBinding> toolBindings = spec.toolBindings();
-    assertEquals(1, toolBindings.size());
-    ToolBinding mcpBinding = toolBindings.get(0);
+    assertEquals(6, toolBindings.size());
+    ToolBinding mcpBinding =
+        toolBindings.stream()
+            .filter(binding -> binding.definition().id().equals(agentToolId))
+            .findFirst()
+            .orElseThrow();
     assertEquals(agentToolId, mcpBinding.definition().id());
     assertEquals(persistedTool.getModelName(), mcpBinding.definition().descriptor().name());
-    assertEquals("0", mcpBinding.definition().descriptor().version());
+    assertEquals("0.0", mcpBinding.definition().descriptor().version());
     assertFalse(mcpBinding.environmentRequired());
     assertNull(mcpBinding.environmentId());
     assertEquals(McpStableIds.CONTRIBUTOR_ID.value(), mcpBinding.contributor().contributorId());

@@ -4,10 +4,13 @@ import {
   buildSkillCandidates,
   buildSubagentCandidates,
   buildToolCandidates,
+  isSameSkillRef,
+  toggleSkillRef,
   withSelectedOrphans,
+  withSelectedSkillOrphans,
 } from '@/features/ai/catalog/agent-capability-candidates'
 import type { AgentDefinitionDTO, ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentSkillDTO } from '@/shared/api/contracts/ai-environment'
 
 function agent(name: string, description: string | null): AgentDefinitionDTO {
   return {
@@ -24,22 +27,19 @@ function agent(name: string, description: string | null): AgentDefinitionDTO {
   }
 }
 
-function environment(
+function inventorySkill(
+  sourceId: string,
   name: string,
-  skills: { name: string; description: string | null }[],
-): EnvironmentCardDTO {
+  description: string | null = null,
+): EnvironmentSkillDTO {
   return {
-    id: `id-${name}`,
+    sourceId,
     name,
-    rootPath: null,
-    status: 'READY',
-    ready: true,
-    lastSeen: null,
-    capabilities: [],
-    skills,
-    version: '1',
-    createTime: '2026-07-20T00:00:00.000Z',
-    updateTime: '2026-07-20T00:00:00.000Z',
+    description: description ?? '',
+    sourceVersion: '1',
+    baseDirectory: '/tmp',
+    contentRevision: 'sha256-abc',
+    discoveredAt: '2026-07-20T00:00:00.000Z',
   }
 }
 
@@ -94,47 +94,108 @@ describe('agent-capability-candidates', () => {
     expect(tools[0]).not.toHaveProperty('source')
   })
 
-  it('never unions skills across two Environments: only the selected one is returned', () => {
-    const local = environment('local', [
-      { name: 'dev', description: 'dev skill' },
-      { name: 'ops', description: 'ops skill' },
-    ])
-    const remote = environment('remote', [
-      { name: 'dev', description: 'duplicate' },
-      { name: 'docs', description: null },
-    ])
+  it('builds skill candidates from durable inventory without gating on environment ready', () => {
+    const inventory = [
+      inventorySkill('src-1', 'dev', 'dev skill'),
+      inventorySkill('src-1', 'ops', 'ops skill'),
+      inventorySkill('src-1', 'dev', 'duplicate exact'),
+    ]
 
-    expect(buildSkillCandidates(local)).toEqual([
-      { value: 'dev', name: 'dev', description: 'dev skill' },
-      { value: 'ops', name: 'ops', description: 'ops skill' },
-    ])
-    // 切换来源后只返回该来源的 skills，绝不出现另一个 Environment 的 'ops'。
-    expect(buildSkillCandidates(remote)).toEqual([
-      { value: 'dev', name: 'dev', description: 'duplicate' },
-      { value: 'docs', name: 'docs', description: null },
+    expect(buildSkillCandidates(inventory)).toEqual([
+      {
+        ref: { sourceId: 'src-1', name: 'dev' },
+        sourceId: 'src-1',
+        name: 'dev',
+        description: 'dev skill',
+      },
+      {
+        ref: { sourceId: 'src-1', name: 'ops' },
+        sourceId: 'src-1',
+        name: 'ops',
+        description: 'ops skill',
+      },
     ])
   })
 
-  it('returns no live skills without a selected source', () => {
+  it('preserves same-name skills from different sourceIds as distinct candidates', () => {
+    const inventory = [
+      inventorySkill('src-1', 'search', 'source 1 search'),
+      inventorySkill('src-2', 'search', 'source 2 search'),
+    ]
+
+    expect(buildSkillCandidates(inventory)).toEqual([
+      {
+        ref: { sourceId: 'src-1', name: 'search' },
+        sourceId: 'src-1',
+        name: 'search',
+        description: 'source 1 search',
+      },
+      {
+        ref: { sourceId: 'src-2', name: 'search' },
+        sourceId: 'src-2',
+        name: 'search',
+        description: 'source 2 search',
+      },
+    ])
+  })
+
+  it('returns no skills for empty or undefined inventory', () => {
     expect(buildSkillCandidates(undefined)).toEqual([])
+    expect(buildSkillCandidates(null)).toEqual([])
+    expect(buildSkillCandidates([])).toEqual([])
   })
 
-  it('requires the ready flag and ignores stale READY status text', () => {
-    const live = environment('local', [{ name: 'dev', description: 'dev skill' }])
-    // 状态文本仍是 READY 但 ready=false（过期/不可用）：排除。
-    expect(buildSkillCandidates({ ...live, ready: false })).toEqual([])
-    // ready 标记为 true 时以可用性为准，状态文本只是展示。
-    expect(
-      buildSkillCandidates({ ...live, status: 'CONNECTING' }).map((item) => item.name),
-    ).toEqual(['dev'])
-  })
-
-  it('retains selected orphans', () => {
-    const local = environment('local', [{ name: 'dev', description: 'dev skill' }])
-    expect(withSelectedOrphans(buildSkillCandidates(local), ['missing'])).toEqual([
-      { value: 'dev', name: 'dev', description: 'dev skill' },
-      { value: 'missing', name: 'missing', description: null, offline: true, missing: true },
+  it('retains selected orphans without collapsing same-name refs from different sources', () => {
+    const candidates = buildSkillCandidates([
+      inventorySkill('src-1', 'dev', 'dev skill'),
     ])
+
+    const selected = [
+      { sourceId: 'src-1', name: 'dev' },
+      { sourceId: 'src-2', name: 'dev' },
+      { sourceId: 'src-3', name: 'missing-skill' },
+    ]
+
+    const merged = withSelectedSkillOrphans(candidates, selected)
+    expect(merged).toEqual([
+      {
+        ref: { sourceId: 'src-1', name: 'dev' },
+        sourceId: 'src-1',
+        name: 'dev',
+        description: 'dev skill',
+      },
+      {
+        ref: { sourceId: 'src-2', name: 'dev' },
+        sourceId: 'src-2',
+        name: 'dev',
+        description: null,
+        missing: true,
+      },
+      {
+        ref: { sourceId: 'src-3', name: 'missing-skill' },
+        sourceId: 'src-3',
+        name: 'missing-skill',
+        description: null,
+        missing: true,
+      },
+    ])
+  })
+
+  it('compares and toggles skill refs by exact composite identity', () => {
+    const refA = { sourceId: 'src-1', name: 'dev' }
+    const refB = { sourceId: 'src-2', name: 'dev' }
+    const refC = { sourceId: 'src-1', name: 'ops' }
+
+    expect(isSameSkillRef(refA, { sourceId: ' src-1 ', name: ' dev ' })).toBe(true)
+    expect(isSameSkillRef(refA, refB)).toBe(false)
+    expect(isSameSkillRef(refA, refC)).toBe(false)
+
+    const initial = [refA]
+    const added = toggleSkillRef(initial, refB)
+    expect(added).toEqual([refA, refB])
+
+    const removedA = toggleSkillRef(added, { sourceId: 'src-1', name: 'dev' })
+    expect(removedA).toEqual([refB])
   })
 
   it('builds subagent candidates from the global Agent catalog with name and description', () => {

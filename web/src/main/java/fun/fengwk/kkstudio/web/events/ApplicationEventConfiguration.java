@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.platform.cloudfs.event.CloudFilesEventHub;
+import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationDispatcher;
 import fun.fengwk.kkstudio.platform.project.controller.IssueControllerDispatcher;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
@@ -65,6 +66,7 @@ public class ApplicationEventConfiguration {
       HarnessWorkDispatcher dispatcher,
       IssueControllerDispatcher issueControllerDispatcher,
       CanvasFunctionDispatcher canvasFunctionDispatcher,
+      EnvironmentOperationDispatcher environmentOperationDispatcher,
       ThreadVersionHub threadVersionHub,
       CanvasVersionHub canvasVersionHub,
       CloudFilesEventHub cloudFilesEventHub,
@@ -89,27 +91,32 @@ public class ApplicationEventConfiguration {
                 CanvasFunctionDispatcher.CHANNEL,
                 ignored -> canvasFunctionDispatcher.wake(),
                 canvasFunctionDispatcher::wake),
-            // 4. 会话版本失效：Thread 版本号推进，通知 WebSocket 向前端广播版本事件以触发快照对账
+            // 4. 环境操作调度唤醒：广播提示有新的 EnvironmentOperation (REFRESH/INSTALL/UPDATE) 就绪，唤醒环境操作调度器
+            new PostgresqlNotificationHandler(
+                EnvironmentOperationDispatcher.CHANNEL,
+                ignored -> environmentOperationDispatcher.wake(),
+                environmentOperationDispatcher::wake),
+            // 5. 会话版本失效：Thread 版本号推进，通知 WebSocket 向前端广播版本事件以触发快照对账
             new PostgresqlNotificationHandler(
                 ThreadVersionHub.CHANNEL,
                 threadVersionHub::onNotification,
                 threadVersionHub::broadcastResync),
-            // 5. 画布版本失效：Canvas 文档版本号推进，通知 WebSocket 向前端广播版本事件以触发图谱更新
+            // 6. 画布版本失效：Canvas 文档版本号推进，通知 WebSocket 向前端广播版本事件以触发图谱更新
             new PostgresqlNotificationHandler(
                 CanvasVersionHub.CHANNEL,
                 canvasVersionHub::onNotification,
                 canvasVersionHub::broadcastResync),
-            // 6. Cloud Files 失效：任一节点提交 CFS 变更后，通知浏览器事件层回读权威快照
+            // 7. Cloud Files 失效：任一节点提交 CFS 变更后，通知浏览器事件层回读权威快照
             new PostgresqlNotificationHandler(
                 CloudFilesEventHub.CHANNEL,
                 cloudFilesEventHub::onNotification,
                 cloudFilesEventHub::broadcastResync),
-            // 7. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
+            // 8. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
             new PostgresqlNotificationHandler(
                 SystemSettingsChangeHandler.CHANNEL,
                 systemSettingsChangeHandler::onNotification,
                 systemSettingsChangeHandler::onResync),
-            // 8. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
+            // 9. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
             new PostgresqlNotificationHandler(
                 PostgresqlRealtimeEventSource.CHANNEL,
                 realtimeEventSource::onNotification,

@@ -3,32 +3,39 @@ package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
-/** 依据 {@link RuntimeToolCatalog} 校验 Agent 选择；在线 Environment 状态与校验无关。 */
+/** 依据 {@link RuntimeToolCatalog} 校验 Agent 选择；包含对工具环境需求的强制围栏校验。 */
 @Component
-final class AgentDefinitionConfigValidator {
+public final class AgentDefinitionConfigValidator {
 
   private final RuntimeToolCatalog toolCatalog;
 
-  AgentDefinitionConfigValidator(RuntimeToolCatalog toolCatalog) {
+  public AgentDefinitionConfigValidator(RuntimeToolCatalog toolCatalog) {
     this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
   }
 
-  void validate(AgentDefinitionConfigDTO config) {
+  public void validate(AgentDefinitionConfigDTO config) {
+    validate(config, null);
+  }
+
+  public void validate(AgentDefinitionConfigDTO config, UUID environmentId) {
     Objects.requireNonNull(config, "config");
-    validateToolIds(config.getToolIds());
+    validateToolIds(config.getToolIds(), environmentId);
     validateSkills(config.getSkills());
     validateSubagents(config.getSubagents());
   }
 
-  private void validateToolIds(List<String> values) {
+  private void validateToolIds(List<String> values, UUID environmentId) {
     for (String value : values) {
       AgentToolId id;
       try {
@@ -43,13 +50,38 @@ final class AgentDefinitionConfigValidator {
       if (contribution.definition().visibility() != ToolVisibility.SELECTABLE) {
         throw new IllegalArgumentException("internal tool cannot be selected by an Agent: " + id);
       }
+      ToolRequirements requirements = contribution.requirements();
+      if (requirements != null && requirements.requiredEnvironmentId() != null) {
+        UUID requiredEnv = requirements.requiredEnvironmentId().value();
+        if (environmentId == null) {
+          throw new IllegalArgumentException(
+              "tool "
+                  + id
+                  + " requires environment "
+                  + requiredEnv
+                  + " but agent has no environment");
+        }
+        if (!requiredEnv.equals(environmentId)) {
+          throw new IllegalArgumentException(
+              "tool "
+                  + id
+                  + " requires environment "
+                  + requiredEnv
+                  + " but agent has environment "
+                  + environmentId);
+        }
+      }
     }
   }
 
-  private static void validateSkills(List<String> names) {
-    for (String name : names) {
-      if (name.length() > 128) {
-        throw new IllegalArgumentException("agent skill name must be <= 128 characters: " + name);
+  private static void validateSkills(List<AgentSkillRefDTO> refs) {
+    if (refs == null) {
+      return;
+    }
+    for (AgentSkillRefDTO ref : refs) {
+      if (ref != null && ref.getName() != null && ref.getName().length() > 128) {
+        throw new IllegalArgumentException(
+            "agent skill name must be <= 128 characters: " + ref.getName());
       }
     }
   }

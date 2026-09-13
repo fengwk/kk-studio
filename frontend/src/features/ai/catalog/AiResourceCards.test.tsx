@@ -48,7 +48,7 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
     variant: 'quality',
     config: {
       toolIds: ['base.read', 'base.bash', 'base.grep'],
-      skills: ['dev'],
+      skills: [{ sourceId: 'src-1', name: 'dev' }],
       subagents: ['writer'],
     },
     version: '1',
@@ -96,6 +96,32 @@ describe('AI resource cards', () => {
     await user.click(screen.getByRole('button', { name: '删除 assistant' }))
     expect(onEdit).toHaveBeenCalledOnce()
     expect(onDelete).toHaveBeenCalledOnce()
+  })
+
+  it('projects skill ref names as tags on the agent card', () => {
+    render(
+      <AgentResourceCard
+        agent={agent({
+          config: {
+            toolIds: [],
+            skills: [
+              { sourceId: 'src-1', name: 'skill-alpha' },
+              { sourceId: 'src-2', name: 'skill-beta' },
+              { sourceId: 'src-3', name: 'skill-gamma' },
+            ],
+            subagents: [],
+          },
+        })}
+        models={[]}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+        deletePending={false}
+      />,
+    )
+    expect(screen.getByText('skill-alpha')).toBeInTheDocument()
+    expect(screen.getByText('skill-beta')).toBeInTheDocument()
+    expect(screen.queryByText('skill-gamma')).not.toBeInTheDocument()
+    expect(screen.getByText('+1')).toBeInTheDocument()
   })
 
   it('renders agent subagents as a tagged row with the same 2-item limit', () => {

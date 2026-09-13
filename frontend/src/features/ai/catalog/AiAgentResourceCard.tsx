@@ -47,7 +47,7 @@ export function AgentResourceCard({
   const model = models.find((item) => modelRef(item) === agent.model)
   const effectiveModel = formatEffectiveModel(model, agent)
   const toolIds = agent.config.toolIds
-  const skills = agent.config.skills
+  const skills = (agent.config.skills ?? []).map((skill) => skill.name)
   const subagents = agent.config.subagents
 
   return (

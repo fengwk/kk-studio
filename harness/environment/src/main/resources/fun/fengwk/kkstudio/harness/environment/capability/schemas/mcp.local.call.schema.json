@@ -1,0 +1,76 @@
+{
+  "type": "object",
+  "description": "Call a tool on a local MCP server. Never carries a workdir.",
+  "properties": {
+    "arguments": {
+      "type": "object",
+      "description": "Arguments to pass to the MCP tool.",
+      "properties": {},
+      "required": [],
+      "additionalProperties": true
+    },
+    "config": {
+      "type": "object",
+      "description": "Frozen local MCP server connection configuration.",
+      "properties": {
+        "command": {
+          "type": "array",
+          "description": "Command argv list to start the MCP process.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Absolute working directory path."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this server is enabled."
+        },
+        "env": {
+          "type": "object",
+          "description": "Environment variables map.",
+          "properties": {},
+          "required": [],
+          "additionalProperties": true
+        },
+        "environmentId": {
+          "type": "string",
+          "description": "Target environment ID."
+        },
+        "timeoutMillis": {
+          "type": "integer",
+          "description": "Execution timeout in milliseconds."
+        },
+        "type": {
+          "type": "string",
+          "description": "Connection type (must be local).",
+          "enum": ["local"]
+        }
+      },
+      "required": ["command", "cwd", "environmentId", "type"],
+      "additionalProperties": false
+    },
+    "configVersion": {
+      "type": "integer",
+      "description": "Configuration version of this server line."
+    },
+    "serverId": {
+      "type": "string",
+      "description": "Stable MCP server ID."
+    },
+    "toolName": {
+      "type": "string",
+      "description": "Name of the MCP tool to call."
+    }
+  },
+  "required": [
+    "arguments",
+    "config",
+    "configVersion",
+    "serverId",
+    "toolName"
+  ],
+  "additionalProperties": false
+}

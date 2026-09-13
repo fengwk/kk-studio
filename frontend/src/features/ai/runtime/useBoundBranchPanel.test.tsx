@@ -147,7 +147,11 @@ const agents = [
     systemPrompt: null,
     model: 'minimax/MiniMax',
     variant: 'default',
-    config: { toolIds: ['base.web-search'], skills: ['skill-a'], subagents: [] },
+    config: {
+      toolIds: ['base.web-search'],
+      skills: [{ sourceId: 'src-1', name: 'skill-a' }],
+      subagents: [],
+    },
     version: '0',
     createTime: null,
     updateTime: null,

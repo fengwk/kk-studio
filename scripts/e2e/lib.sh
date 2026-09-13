@@ -24,8 +24,8 @@ SPRING_PROFILE=${SPRING_PROFILES_ACTIVE:-e2e}
 DAEMON_ENV_NAME=${DAEMON_ENV_NAME:-tool-e2e}
 DAEMON_REGISTRATION_TOKEN=${DAEMON_REGISTRATION_TOKEN:-e2e-token-host-tool}
 DAEMON_ENV_ROOT=${DAEMON_ENV_ROOT:-"$WORK_DIR/environment"}
+DAEMON_DATA_DIR=${DAEMON_DATA_DIR:-"$WORK_DIR/daemon-data"}
 DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
-SKILL_DIR=${SKILL_DIR:-"$HOME/.agents/skills"}
 
 export DAEMON_ENV_ROOT
 
@@ -268,7 +268,7 @@ start_daemon() {
     --registration-token "$DAEMON_REGISTRATION_TOKEN" \
     --note "$DAEMON_NOTE" \
     --environment-root "$DAEMON_ENV_ROOT" \
-    --skill-dir "$SKILL_DIR" \
+    --data-dir "$DAEMON_DATA_DIR" \
     >"$WORK_DIR/daemon.log" 2>&1 &
   echo $! >"$WORK_DIR/daemon.pid"
   local i env_status=""

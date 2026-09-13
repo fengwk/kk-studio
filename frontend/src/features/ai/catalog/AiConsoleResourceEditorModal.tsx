@@ -10,7 +10,7 @@ import type {
   AgentProviderDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO, EnvironmentSkillDTO } from '@/shared/api/contracts/ai-environment'
 import { useI18n } from '@/shared/i18n'
 
 export function ResourceEditorModal({
@@ -20,6 +20,9 @@ export function ResourceEditorModal({
   agents = [],
   toolCatalog = [],
   environments = [],
+  inventorySkills = [],
+  inventorySkillsLoading = false,
+  inventorySkillsError = null,
   providerDraft,
   modelDraft,
   agentDraft,
@@ -38,6 +41,9 @@ export function ResourceEditorModal({
   agents?: AgentDefinitionDTO[]
   toolCatalog?: ToolCatalogEntryDTO[]
   environments?: EnvironmentCardDTO[]
+  inventorySkills?: EnvironmentSkillDTO[]
+  inventorySkillsLoading?: boolean
+  inventorySkillsError?: unknown
   providerDraft: ProviderDraft
   modelDraft: ModelDraft
   agentDraft: AgentDraft
@@ -97,6 +103,9 @@ export function ResourceEditorModal({
               agents={agents}
               toolCatalog={toolCatalog}
               environments={environments}
+              inventorySkills={inventorySkills}
+              inventorySkillsLoading={inventorySkillsLoading}
+              inventorySkillsError={inventorySkillsError}
               fieldErrors={fieldErrors}
               onChange={onAgentDraftChange}
             />

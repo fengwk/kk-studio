@@ -10,18 +10,21 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
-import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolClientFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 
 /**
  * 动态 MCP 运行时工具目录测试。
@@ -31,14 +34,12 @@ import java.util.UUID;
 class McpToolCatalogTest {
 
   private McpServerRepository repository;
-  private McpToolClientFactory clientFactory;
   private McpToolCatalog catalog;
 
   @BeforeEach
   void setUp() {
     repository = mock(McpServerRepository.class);
-    clientFactory = mock(McpToolClientFactory.class);
-    catalog = new McpToolCatalog(repository, clientFactory);
+    catalog = new McpToolCatalog(repository, mock(ExecutorService.class));
   }
 
   @Test
@@ -48,9 +49,13 @@ class McpToolCatalogTest {
     McpServer server = new McpServer();
     server.setId(serverId);
     server.setName("github");
-    server.setUrl("https://mcp.github.com");
-    server.setTimeoutMillis(15000L);
+    server.setConnectionType(McpConnectionType.REMOTE);
+    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
+    server.setDiscoveredVersion(2L);
+    server.setEnabled(true);
     server.setVersion(2L);
+    server.setConnectionConfig("{\"url\":\"https://mcp.github.com\",\"headers\":{}}");
+    server.setTimeoutMillis(15000L);
 
     UUID tool1Id = UUID.randomUUID();
     McpTool tool1 = new McpTool();
@@ -61,9 +66,11 @@ class McpToolCatalogTest {
     tool1.setDescription("List repositories");
     tool1.setInputSchemaJson(
         "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    tool1.setAvailable(true);
+    tool1.setSchemaRevision(2L);
 
     when(repository.listAllServers()).thenReturn(List.of(server));
-    when(repository.listTools(serverId)).thenReturn(List.of(tool1));
+    when(repository.listAvailableTools(serverId)).thenReturn(List.of(tool1));
 
     List<ToolContribution> tools = catalog.selectableTools();
     assertEquals(1, tools.size());
@@ -72,7 +79,7 @@ class McpToolCatalogTest {
     assertEquals(McpStableIds.agentToolId(tool1Id), contribution.definition().id());
     assertEquals(ToolVisibility.SELECTABLE, contribution.definition().visibility());
     assertEquals("mcp_github_list_repos", contribution.definition().descriptor().name());
-    assertEquals("2", contribution.definition().descriptor().version());
+    assertEquals("2.2", contribution.definition().descriptor().version());
     assertEquals("List repositories", contribution.definition().descriptor().description());
     assertEquals("tool", contribution.definition().descriptor().rendererKey());
     assertEquals(
@@ -80,6 +87,7 @@ class McpToolCatalogTest {
     assertEquals(15000L, contribution.definition().descriptor().timeout().toMillis());
     assertEquals("platform.mcp", contribution.id().contributorId().value());
     assertEquals(McpStableIds.localName(tool1Id), contribution.id().localName());
+    assertFalse(contribution.requirements().environmentRequired());
   }
 
   @Test
@@ -89,9 +97,13 @@ class McpToolCatalogTest {
     McpServer server = new McpServer();
     server.setId(serverId);
     server.setName("brave");
-    server.setUrl("https://brave.com/mcp");
-    server.setTimeoutMillis(5000L);
+    server.setConnectionType(McpConnectionType.REMOTE);
+    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
+    server.setDiscoveredVersion(0L);
+    server.setEnabled(true);
     server.setVersion(0L);
+    server.setConnectionConfig("{\"url\":\"https://brave.com/mcp\",\"headers\":{}}");
+    server.setTimeoutMillis(5000L);
 
     UUID toolId = UUID.randomUUID();
     McpTool tool = new McpTool();
@@ -102,6 +114,8 @@ class McpToolCatalogTest {
     tool.setDescription("Search web");
     tool.setInputSchemaJson(
         "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    tool.setAvailable(true);
+    tool.setSchemaRevision(1L);
 
     when(repository.getToolById(toolId)).thenReturn(Optional.of(tool));
     when(repository.getById(serverId)).thenReturn(Optional.of(server));
@@ -111,6 +125,47 @@ class McpToolCatalogTest {
     assertTrue(result.isPresent());
     assertEquals(agentToolId, result.get().definition().id());
     assertEquals("mcp_brave_web_search", result.get().definition().descriptor().name());
+  }
+
+  @Test
+  void localMcpToolRequiresEnvironmentId() {
+    // 意图：验证 Local MCP 工具贡献必须附带 requiredEnvironmentId
+    UUID serverId = UUID.randomUUID();
+    UUID envUuid = UUID.randomUUID();
+    EnvironmentId envId = EnvironmentId.of(envUuid);
+    McpServer server = new McpServer();
+    server.setId(serverId);
+    server.setName("local-dev");
+    server.setConnectionType(McpConnectionType.LOCAL);
+    server.setEnvironmentId(envUuid);
+    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
+    server.setDiscoveredVersion(1L);
+    server.setEnabled(true);
+    server.setVersion(1L);
+    server.setConnectionConfig(
+        "{\"command\":[\"node\",\"server.js\"],\"cwd\":\"/app\",\"env\":{}}");
+    server.setTimeoutMillis(5000L);
+
+    UUID toolId = UUID.randomUUID();
+    McpTool tool = new McpTool();
+    tool.setId(toolId);
+    tool.setServerId(serverId);
+    tool.setSourceName("local_tool");
+    tool.setModelName("mcp_local_tool");
+    tool.setDescription("Local tool description");
+    tool.setInputSchemaJson(
+        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    tool.setAvailable(true);
+    tool.setSchemaRevision(1L);
+
+    when(repository.getToolById(toolId)).thenReturn(Optional.of(tool));
+    when(repository.getById(serverId)).thenReturn(Optional.of(server));
+
+    AgentToolId agentToolId = McpStableIds.agentToolId(toolId);
+    Optional<ToolContribution> result = catalog.findTool(agentToolId);
+    assertTrue(result.isPresent());
+    assertTrue(result.get().requirements().environmentRequired());
+    assertEquals(envId, result.get().requirements().requiredEnvironmentId());
   }
 
   @Test

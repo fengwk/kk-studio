@@ -1732,7 +1732,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影固定 10 个原子 capabilities + skills + rootPath（daemon canonical Environment Root），coding/process/LSP 为 workdir 版（version=2）、skill.load 保持 version=1，且不公开旧 tools 或 READY environment metadata',
+  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影固定 11 个模型可见 capabilities + skills + rootPath（daemon canonical Environment Root），coding/process/LSP 与精确 revision skill.load 为 version=2，mcp.local.call 为 version=1，且不公开管理 capabilities、旧 tools 或 READY environment metadata',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -1747,25 +1747,29 @@ registerCase({
     const workdirCapabilityIds = [
       'fs.read',
       'fs.write',
-      'fs.apply-edit',
+      'fs.edit',
       'process.exec',
-      'fs.search',
+      'fs.grep',
       'fs.find',
       'lsp.goto-definition',
       'lsp.workspace-symbols',
       'lsp.java-decompile',
     ]
-    const expectedCapabilityIds = [...workdirCapabilityIds, 'skill.load']
+    const expectedCapabilities = [
+      ...workdirCapabilityIds.map((id) => ({ id, version: '2' })),
+      { id: 'skill.load', version: '2' },
+      { id: 'mcp.local.call', version: '1' },
+    ]
     const actualCapabilities = match.capabilities || []
-    const ids = actualCapabilities.map((capability) => capability.id)
+    const actualIdentity = actualCapabilities.map(({ id, version }) => ({ id, version }))
+    const ids = actualIdentity.map(({ id }) => id)
     assert(
-      ids.length === expectedCapabilityIds.length
-        && expectedCapabilityIds.every((id) => ids.includes(id))
-        && actualCapabilities.every((capability) =>
-          capability.version === (capability.id === 'skill.load' ? '1' : '2')),
-      safeDiagnosticJson({ expectedCapabilityIds, workdirCapabilityIds, actualCapabilities }),
+      JSON.stringify(actualIdentity) === JSON.stringify(expectedCapabilities),
+      safeDiagnosticJson({ expectedCapabilities, actualCapabilities }),
     )
     assert(!ids.includes('fs.list-directory'), safeDiagnosticJson(actualCapabilities))
+    assert(!ids.some((id) => id.startsWith('skill.source.')), safeDiagnosticJson(actualCapabilities))
+    assert(!ids.includes('mcp.local.discover'), safeDiagnosticJson(actualCapabilities))
     assert(Array.isArray(match.skills), safeDiagnosticJson(match))
     assert(
       !Object.hasOwn(match, 'tools')

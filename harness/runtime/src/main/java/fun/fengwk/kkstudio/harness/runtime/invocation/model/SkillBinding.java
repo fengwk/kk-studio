@@ -1,30 +1,34 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
+
+import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 冻结到一次 Model invocation 中的不可变 skill 事实。
  *
- * <p>body 被刻意排除在外：只有稳定的 canonical name、description，以及可空的 source Environment 路由身份， 才是 durable
- * 请求事实。展示元数据与 skill body 不会进入请求；目录不参与冻结。
+ * <p>身份是 {@code (sourceEnvironmentId, sourceId, name)} 加 {@code contentRevision}；{@code
+ * description} 与 {@code baseDirectory} 是规划与执行都要用的描述事实。body 被刻意排除在外：正文由 {@code skill.load} 按精确
+ * revision 取回， 不进入 durable 请求。冻结事实里没有 workdir —— skill 按身份与来源定位，不依赖会话目录。
+ *
+ * <p>全部字段都是必填：缺少 sourceId 或 revision 的旧形状被明确拒绝，不做 tolerant 解码，因此旧请求不会被静默解释成“当前版本”。
  */
-public record SkillBinding(String name, String description, EnvironmentId sourceEnvironmentId) {
+public record SkillBinding(
+    EnvironmentId sourceEnvironmentId,
+    UUID sourceId,
+    String name,
+    String description,
+    String baseDirectory,
+    String contentRevision) {
 
   public SkillBinding {
-    name = requireCanonical(name, "name", 128);
-    description = requireCanonical(description, "description", 1024);
-  }
-
-  private static String requireCanonical(String value, String field, int maxLength) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
-    }
-    if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
-    }
-    if (value.length() > maxLength) {
-      throw new IllegalArgumentException(field + " must be <= " + maxLength + " characters");
-    }
-    return value;
+    sourceEnvironmentId = Objects.requireNonNull(sourceEnvironmentId, "sourceEnvironmentId");
+    sourceId = Objects.requireNonNull(sourceId, "sourceId");
+    name = DaemonSkillDescriptor.canonicalName(name);
+    description = DaemonSkillDescriptor.canonicalDescription(description);
+    baseDirectory = DaemonSkillDescriptor.canonicalBaseDirectory(baseDirectory);
+    contentRevision = DaemonSkillDescriptor.contentRevision(contentRevision);
   }
 }

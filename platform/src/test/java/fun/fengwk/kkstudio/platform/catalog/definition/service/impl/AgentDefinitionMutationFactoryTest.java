@@ -14,24 +14,33 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 
 import java.util.List;
 
 /** 结构化的定义配置在持久化前必须规范化；create/update 共用可编辑 model 引用。 */
 public class AgentDefinitionMutationFactoryTest {
 
+  private static final String SOURCE_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
   @Test
   public void shouldPersistCanonicalCapabilityListsAndKeepIdentity() throws Exception {
     ObjectMapper objectMapper = new ObjectMapper();
     AgentDefinitionMutationFactory factory = factory(objectMapper);
-    AgentDefinitionConfigDTO config = config(List.of("browser"), List.of("java", "dev"));
+    AgentDefinitionConfigDTO config =
+        config(
+            List.of("browser"),
+            List.of(
+                new AgentSkillRefDTO(SOURCE_ID, "java"), new AgentSkillRefDTO(SOURCE_ID, "dev")));
     AgentDefinitionCreateDTO create = create("agent", "provider/model", config, "default");
 
     AgentDefinition definition = factory.newAgent("agent", create);
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
     assertEquals(List.of("browser"), stored.getToolIds());
-    assertEquals(List.of("java", "dev"), stored.getSkills());
+    assertEquals(
+        List.of(new AgentSkillRefDTO(SOURCE_ID, "java"), new AgentSkillRefDTO(SOURCE_ID, "dev")),
+        stored.getSkills());
     assertEquals("provider", definition.getModelProviderName());
     assertEquals("model", definition.getModelName());
 
@@ -51,11 +60,20 @@ public class AgentDefinitionMutationFactoryTest {
   public void shouldRejectNonCanonicalCapabilityNames() {
     AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
     AgentDefinitionCreateDTO create =
-        create("agent", "provider/model", config(List.of(), List.of("java", "java")), "default");
+        create(
+            "agent",
+            "provider/model",
+            config(
+                List.of(),
+                List.of(
+                    new AgentSkillRefDTO(SOURCE_ID, "java"),
+                    new AgentSkillRefDTO(SOURCE_ID, "java"))),
+            "default");
     AiValidationException error =
         assertThrows(AiValidationException.class, () -> factory.newAgent("agent", create));
     assertEquals(
-        "agent definition config skills must not contain duplicates: java", error.getMessage());
+        "agent definition config skills must not contain duplicates: " + SOURCE_ID + ":java",
+        error.getMessage());
 
     create.setConfig(config(List.of(" read "), List.of()));
     error = assertThrows(AiValidationException.class, () -> factory.newAgent("agent", create));
@@ -97,6 +115,26 @@ public class AgentDefinitionMutationFactoryTest {
         AiValidationException.class, () -> factory.newAgent(pathBreaking.getName(), pathBreaking));
   }
 
+  // 测试意图: 验证 mutation factory 在 body 或 name 为 null 时抛出清晰的 AiValidationException
+  @Test
+  public void shouldRejectNullPropertiesAndNullName() {
+    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
+    assertThrows(AiValidationException.class, () -> factory.newAgent("agent", null));
+    AgentDefinitionCreateDTO create =
+        create(null, "provider/model", config(List.of(), List.of()), null);
+    assertThrows(AiValidationException.class, () -> factory.newAgent(null, create));
+  }
+
+  // 测试意图: 验证 mutation factory 解析非法 environmentId 字符串时抛出 AiValidationException
+  @Test
+  public void shouldRejectInvalidEnvironmentId() {
+    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
+    AgentDefinitionCreateDTO create =
+        create("agent", "provider/model", config(List.of(), List.of()), null);
+    create.setEnvironmentId("not-a-valid-uuid");
+    assertThrows(AiValidationException.class, () -> factory.newAgent("agent", create));
+  }
+
   private static AgentDefinitionCreateDTO create(
       String name, String model, AgentDefinitionConfigDTO config, String variant) {
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
@@ -107,7 +145,8 @@ public class AgentDefinitionMutationFactoryTest {
     return create;
   }
 
-  private static AgentDefinitionConfigDTO config(List<String> toolIds, List<String> skills) {
+  private static AgentDefinitionConfigDTO config(
+      List<String> toolIds, List<AgentSkillRefDTO> skills) {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setToolIds(toolIds);
     config.setSkills(skills);

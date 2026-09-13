@@ -33,9 +33,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
-import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolClientFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
@@ -388,16 +389,19 @@ class ToolExecutionGatewayPreflightTest {
   void preflightAcceptsDynamicMcpTool() {
     // 意图：验证动态 MCP 工具在通过 RuntimeToolCatalog 聚合后能够顺利通过 Gateway preflight
     McpServerRepository repo = mock(McpServerRepository.class);
-    McpToolClientFactory factory = mock(McpToolClientFactory.class);
-    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, factory);
+    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
 
     UUID serverId = UUID.randomUUID();
     McpServer server = new McpServer();
     server.setId(serverId);
     server.setName("mcp-server");
-    server.setUrl("http://localhost:8080");
-    server.setTimeoutMillis(5000L);
+    server.setConnectionType(McpConnectionType.REMOTE);
+    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
+    server.setDiscoveredVersion(1L);
+    server.setEnabled(true);
     server.setVersion(1L);
+    server.setConnectionConfig("{\"url\":\"http://localhost:8080\",\"headers\":{}}");
+    server.setTimeoutMillis(5000L);
 
     UUID toolId = UUID.randomUUID();
     McpTool mcpTool = new McpTool();
@@ -408,6 +412,8 @@ class ToolExecutionGatewayPreflightTest {
     mcpTool.setDescription("echo tool");
     mcpTool.setInputSchemaJson(
         "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    mcpTool.setAvailable(true);
+    mcpTool.setSchemaRevision(1L);
 
     when(repo.getToolById(toolId)).thenReturn(Optional.of(mcpTool));
     when(repo.getById(serverId)).thenReturn(Optional.of(server));

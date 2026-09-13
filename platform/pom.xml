@@ -74,12 +74,8 @@
             <artifactId>org.eclipse.jgit</artifactId>
         </dependency>
         <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-mcp</artifactId>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-mcp</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.convention4j</groupId>
@@ -181,10 +177,13 @@
                                         <include>fun/fengwk/kkstudio/platform/catalog/mcp/McpStableIds</include>
                                         <include>fun/fengwk/kkstudio/platform/catalog/mcp/discovery/McpInputSchemaConverter</include>
                                         <include>fun/fengwk/kkstudio/platform/catalog/mcp/discovery/McpToolDiscovery</include>
+                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/service/McpConfigParser</include>
                                         <include>fun/fengwk/kkstudio/platform/catalog/mcp/service/McpServerMutationValidator</include>
                                         <include>fun/fengwk/kkstudio/platform/catalog/mcp/service/impl/McpServerServiceImpl</include>
                                         <include>fun/fengwk/kkstudio/platform/catalog/mcp/runtime/McpToolCatalog</include>
-                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/runtime/McpExecutableTool</include>
+                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/runtime/RemoteMcpExecutableTool</include>
+                                        <include>fun/fengwk/kkstudio/platform/catalog/mcp/runtime/LocalMcpExecutableTool</include>
+                                        <include>fun/fengwk/kkstudio/platform/environment/operation/DefaultMcpDiscoveryResultPublisher</include>
                                     </includes>
                                     <limits>
                                         <limit>

@@ -71,6 +71,7 @@ class RuntimeModuleArchitectureTest {
     assertHarnessModules(harnessRoot.resolve("pom.xml"));
     Path rootPom = harnessRoot.getParent().resolve("pom.xml");
     assertManagedInternalDependency(rootPom, "kk-studio-harness-common");
+    assertManagedInternalDependency(rootPom, "kk-studio-harness-mcp");
     assertManagedInternalDependency(rootPom, "kk-studio-harness-contributor-api");
     assertManagedInternalDependency(rootPom, "kk-studio-harness-builtin");
     assertManagedInternalDependency(rootPom, "kk-studio-harness-infra");
@@ -80,6 +81,12 @@ class RuntimeModuleArchitectureTest {
     assertDirectProductionDependencies(
         harnessRoot.resolve("common/pom.xml"),
         Set.of("com.fasterxml.jackson.core:jackson-databind"));
+    assertDirectProductionDependencies(
+        harnessRoot.resolve("mcp/pom.xml"),
+        Set.of(
+            "com.fasterxml.jackson.core:jackson-databind",
+            "dev.langchain4j:langchain4j-mcp",
+            "fun.fengwk.kk-studio:kk-studio-harness-common"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("tool/pom.xml"),
         Set.of(
@@ -140,6 +147,7 @@ class RuntimeModuleArchitectureTest {
             "dev.langchain4j:langchain4j-skills",
             "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
+            "fun.fengwk.kk-studio:kk-studio-harness-mcp",
             "org.eclipse.jgit:org.eclipse.jgit"));
 
     List<String> violations = scanViolations(main);
@@ -226,6 +234,7 @@ class RuntimeModuleArchitectureTest {
         modules.equals(
             List.of(
                 "common",
+                "mcp",
                 "tool",
                 "environment",
                 "environment-server",
@@ -236,7 +245,7 @@ class RuntimeModuleArchitectureTest {
                 "infra",
                 "daemon")),
         () ->
-            "harness modules must be exactly common/tool/environment/environment-server/runtime/provider/contributor-api/builtin/infra/daemon, got "
+            "harness modules must be exactly common/mcp/tool/environment/environment-server/runtime/provider/contributor-api/builtin/infra/daemon, got "
                 + modules);
   }
 

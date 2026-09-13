@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw } from 'lucide-react'
 import { ResourceCardLayout } from '@/features/ai/catalog/AiResourceCardLayout'
@@ -9,13 +9,21 @@ import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
-import { NumberInput } from '@/shared/ui/console/NumberInput'
 import { mcpServerService } from '@/shared/api/mcp-server-service'
+import { DEFAULT_OPERATION_LIMIT, environmentService } from '@/shared/api/environment-service'
 import type { McpServerDTO } from '@/shared/api/contracts/ai-mcp'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type AppLocale } from '@/shared/i18n'
+import {
+  formatMcpConfigJsonSafely,
+  isSemanticConfigEqual,
+  REMOTE_CONFIG_TEMPLATE,
+  validateMcpConfigJson,
+} from './mcp-config-json'
+import { McpConfigJsonEditor } from './McpConfigJsonEditor'
 
 function formatDateTime24(date: Date, locale: AppLocale): string {
   return date.toLocaleString(locale, {
@@ -60,19 +68,19 @@ function formatIsoTime(value: InstantTimestamp | undefined, locale: AppLocale): 
 
 interface CreateModalState {
   name: string
-  url: string
-  bearerToken: string
-  timeoutMillis: string
+  configJson: string
   error: string | null
 }
 
 interface EditModalState {
   server: McpServerDTO
-  url: string
-  timeoutMillis: string
-  tokenMode: 'keep' | 'clear' | 'set'
-  bearerToken: string
+  loading: boolean
+  fetchError: string | null
+  loadedVersion: string | null
+  loadedConfigJson: string | null
+  configJson: string
   error: string | null
+  discoverPending: boolean
 }
 
 export function McpServersPage() {
@@ -85,20 +93,47 @@ export function McpServersPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
 
+  // 单调递增请求代际 token：关闭或重新打开同一 server 时递增，防止 ABA 覆写
+  const editRequestGenerationRef = useRef(0)
+
+  useEffect(() => {
+    const generationRef = editRequestGenerationRef
+    return () => {
+      generationRef.current++
+    }
+  }, [])
+
+  // 10s 轮询以支持 Local 发现任务的最终状态收敛
   const serversQuery = useQuery({
     queryKey: queryKeys.mcpServers.list(1, 100),
     queryFn: () => mcpServerService.pageServers(1, 100),
+    refetchInterval: 10_000,
+  })
+
+  const environmentsQuery = useQuery({
+    queryKey: queryKeys.environments.list,
+    queryFn: () => environmentService.listEnvironments(),
   })
 
   const servers: McpServerDTO[] = serversQuery.data?.results ?? []
+  const environments: EnvironmentCardDTO[] = useMemo(
+    () => environmentsQuery.data ?? [],
+    [environmentsQuery.data],
+  )
+
+  const environmentsMap = useMemo(() => {
+    const map = new Map<string, EnvironmentCardDTO>()
+    for (const env of environments) {
+      map.set(env.id, env)
+    }
+    return map
+  }, [environments])
 
   const createMutation = useMutation({
-    mutationFn: (data: { name: string; url: string; bearerToken?: string | null; timeoutMillis: number }) =>
+    mutationFn: (data: { name: string; configJson: string }) =>
       mcpServerService.createServer({
         name: data.name,
-        url: data.url,
-        bearerToken: data.bearerToken?.trim() ? data.bearerToken.trim() : null,
-        timeoutMillis: data.timeoutMillis,
+        configJson: data.configJson,
       }),
     onSuccess: () => {
       setCreateModal(null)
@@ -116,38 +151,13 @@ export function McpServersPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: (data: {
-      id: string
-      expectedVersion: string
-      url: string
-      timeoutMillis: number
-      bearerToken?: string | null
-    }) =>
+    mutationFn: (data: { id: string; expectedVersion: string; configJson: string }) =>
       mcpServerService.updateServer(data.id, {
         expectedVersion: data.expectedVersion,
-        url: data.url,
-        timeoutMillis: data.timeoutMillis,
-        bearerToken: data.bearerToken,
+        configJson: data.configJson,
       }),
     onSuccess: () => {
-      setEditModal(null)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })
-    },
-    onError: (err: unknown) => {
-      if (isConflictError(err)) {
-        setConflict(presentConflict(err))
-        setEditModal(null)
-        return
-      }
-      const message = err instanceof Error ? err.message : String(err)
-      setEditModal((prev) => (prev ? { ...prev, error: message } : null))
-    },
-  })
-
-  const refreshMutation = useMutation({
-    mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: string }) =>
-      mcpServerService.refreshServer(id, expectedVersion),
-    onSuccess: () => {
+      editRequestGenerationRef.current++
       setEditModal(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })
       void queryClient.invalidateQueries({ queryKey: queryKeys.tools.all })
@@ -155,6 +165,7 @@ export function McpServersPage() {
     onError: (err: unknown) => {
       if (isConflictError(err)) {
         setConflict(presentConflict(err))
+        editRequestGenerationRef.current++
         setEditModal(null)
         return
       }
@@ -183,11 +194,84 @@ export function McpServersPage() {
     },
   })
 
+  function handleOpenCreate() {
+    setConflict(null)
+    setCreateModal({
+      name: '',
+      configJson: REMOTE_CONFIG_TEMPLATE,
+      error: null,
+    })
+  }
+
+  function handleOpenEdit(server: McpServerDTO) {
+    setConflict(null)
+    const generation = ++editRequestGenerationRef.current
+    setEditModal({
+      server,
+      loading: true,
+      fetchError: null,
+      loadedVersion: null,
+      loadedConfigJson: null,
+      configJson: '',
+      error: null,
+      discoverPending: false,
+    })
+
+    mcpServerService
+      .getServerConfig(server.id)
+      .then((config) => {
+        // 代际围栏检查：如果当前请求已被后续打开或关闭操作废弃，丢弃迟到的响应
+        if (editRequestGenerationRef.current !== generation) {
+          return
+        }
+        const pretty = formatMcpConfigJsonSafely(config.configJson)
+        setEditModal((prev) => {
+          if (!prev || editRequestGenerationRef.current !== generation) return null
+          return {
+            ...prev,
+            loading: false,
+            loadedVersion: config.version,
+            loadedConfigJson: pretty,
+            configJson: pretty,
+          }
+        })
+      })
+      .catch((err) => {
+        if (editRequestGenerationRef.current !== generation) {
+          return
+        }
+        setEditModal((prev) => {
+          if (!prev || editRequestGenerationRef.current !== generation) return null
+          return {
+            ...prev,
+            loading: false,
+            fetchError: err instanceof Error ? err.message : String(err),
+          }
+        })
+      })
+  }
+
+  function handleCloseEdit() {
+    editRequestGenerationRef.current++
+    setEditModal(null)
+  }
+
+  function handleRequestCloseCreate() {
+    if (!createMutation.isPending) {
+      setCreateModal(null)
+    }
+  }
+
+  function handleRequestCloseEdit() {
+    if (!updateMutation.isPending && !editModal?.discoverPending) {
+      handleCloseEdit()
+    }
+  }
+
   function handleCreateSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!createModal) return
     const name = createModal.name.trim()
-    const url = createModal.url.trim()
     if (!name) {
       setCreateModal({ ...createModal, error: t('ai.mcp.name') })
       return
@@ -199,44 +283,79 @@ export function McpServersPage() {
       })
       return
     }
-    if (!url) {
-      setCreateModal({ ...createModal, error: t('ai.mcp.url') })
+    const validation = validateMcpConfigJson(createModal.configJson)
+    if (!validation.valid) {
+      setCreateModal({ ...createModal, error: validation.error ?? 'Invalid JSON' })
       return
     }
-    const timeoutNum = Number(createModal.timeoutMillis) || 30000
     createMutation.mutate({
       name,
-      url,
-      bearerToken: createModal.bearerToken,
-      timeoutMillis: timeoutNum,
+      configJson: createModal.configJson,
     })
   }
 
   function handleUpdateSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!editModal) return
-    const url = editModal.url.trim()
-    if (!url) {
-      setEditModal({ ...editModal, error: t('ai.mcp.url') })
+    if (!editModal || !editModal.loadedVersion) return
+
+    const validation = validateMcpConfigJson(editModal.configJson)
+    if (!validation.valid) {
+      setEditModal({ ...editModal, error: validation.error ?? 'Invalid JSON' })
       return
     }
-    let bearerToken: string | null | undefined
-    if (editModal.tokenMode === 'keep') {
-      bearerToken = undefined
-    } else if (editModal.tokenMode === 'clear') {
-      bearerToken = ''
-    } else {
-      bearerToken = editModal.bearerToken.trim()
-    }
 
-    const timeoutNum = Number(editModal.timeoutMillis) || 30000
     updateMutation.mutate({
       id: editModal.server.id,
-      expectedVersion: editModal.server.version,
-      url,
-      timeoutMillis: timeoutNum,
-      bearerToken,
+      expectedVersion: editModal.loadedVersion,
+      configJson: editModal.configJson,
     })
+  }
+
+  async function handleDiscover() {
+    if (!editModal || !editModal.loadedVersion) return
+    setConflict(null)
+
+    // 严禁发现未保存的语义修改：空白等格式差异不影响语义
+    const semanticallyEqual = isSemanticConfigEqual(
+      editModal.configJson,
+      editModal.loadedConfigJson ?? '',
+    )
+    if (!semanticallyEqual) {
+      setEditModal((prev) =>
+        prev ? { ...prev, error: t('ai.mcp.unsavedDiscoverBlocked') } : null,
+      )
+      return
+    }
+
+    setEditModal((prev) => (prev ? { ...prev, discoverPending: true, error: null } : null))
+    try {
+      const res = await mcpServerService.discoverServer(
+        editModal.server.id,
+        editModal.loadedVersion,
+      )
+      void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tools.all })
+      if (res.operation && res.operation.environmentId) {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.environments.operations(
+            res.operation.environmentId,
+            DEFAULT_OPERATION_LIMIT,
+          ),
+        })
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.environments.detail(res.operation.environmentId),
+        })
+      }
+      handleCloseEdit()
+    } catch (err) {
+      if (isConflictError(err)) {
+        setConflict(presentConflict(err))
+        handleCloseEdit()
+        return
+      }
+      const message = err instanceof Error ? err.message : String(err)
+      setEditModal((prev) => (prev ? { ...prev, discoverPending: false, error: message } : null))
+    }
   }
 
   return (
@@ -244,25 +363,13 @@ export function McpServersPage() {
       <nav className="subbar">
         <NavigationSlot />
         <div className="subbar-actions">
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => {
-              setConflict(null)
-              setCreateModal({
-                name: '',
-                url: '',
-                bearerToken: '',
-                timeoutMillis: '30000',
-                error: null,
-              })
-            }}
-          >
+          <button type="button" className="btn-primary" onClick={handleOpenCreate}>
             <Plus aria-hidden="true" />
             {t('ai.mcp.create')}
           </button>
         </div>
       </nav>
+
       <div className="screen-body">
         {serversQuery.isLoading && <StateBlock title={t('ai.mcp.loading')} />}
         {serversQuery.error && (
@@ -282,39 +389,83 @@ export function McpServersPage() {
             ) : (
               servers.map((server: McpServerDTO) => {
                 const updateTime = formatIsoTime(server.updateTime, locale)
+                const envName = server.environmentId
+                  ? environmentsMap.get(server.environmentId)?.name ?? server.environmentId
+                  : null
+
+                const typeLabel =
+                  server.type === 'local'
+                    ? t('ai.mcp.typeLocal')
+                    : server.type === 'remote'
+                      ? t('ai.mcp.typeRemote')
+                      : String(server.type)
+
+                const statusLabel =
+                  server.discoveryStatus === 'AVAILABLE'
+                    ? t('ai.mcp.statusAvailable')
+                    : server.discoveryStatus === 'FAILED'
+                      ? t('ai.mcp.statusFailed')
+                      : server.discoveryStatus === 'UNVERIFIED'
+                        ? t('ai.mcp.statusUnverified')
+                        : String(server.discoveryStatus)
+
+                const subtitle =
+                  server.type === 'local'
+                    ? envName
+                      ? `Local · ${envName}`
+                      : 'Local'
+                    : 'Remote'
+
+                const rows: Array<
+                  | [string, string]
+                  | { label: string; value: string; wrap?: boolean }
+                  | { pairs: Array<{ label: string; value: string }> }
+                > = [
+                  {
+                    pairs: [
+                      { label: t('ai.mcp.type'), value: typeLabel },
+                      { label: t('ai.mcp.status'), value: statusLabel },
+                    ],
+                  },
+                  ...(server.type === 'local' && envName
+                    ? [{ label: t('ai.mcp.envSelect'), value: envName, wrap: true }]
+                    : []),
+                  {
+                    pairs: [
+                      { label: t('ai.mcp.toolCount'), value: String(server.toolCount) },
+                      { label: t('ai.catalog.card.timeout'), value: `${server.timeoutMillis}ms` },
+                    ],
+                  },
+                  {
+                    pairs: [
+                      { label: t('ai.mcp.version'), value: String(server.version) },
+                      {
+                        label: t('ai.mcp.enabledState'),
+                        value: server.enabled ? t('ai.mcp.enabled') : t('ai.mcp.disabled'),
+                      },
+                    ],
+                  },
+                  ...(server.discoveredVersion
+                    ? [
+                        {
+                          label: t('ai.mcp.discoveredVersion'),
+                          value: String(server.discoveredVersion),
+                        },
+                      ]
+                    : []),
+                  ...(updateTime ? [[t('ai.mcp.updated'), updateTime] as [string, string]] : []),
+                ]
+
                 return (
                   <ResourceCardLayout
                     key={server.id}
                     icon="server"
                     title={server.name}
-                    subtitle={server.url}
-                    rows={[
-                      { label: t('ai.catalog.card.url'), value: server.url, wrap: true },
-                      [
-                        t('ai.mcp.bearerToken'),
-                        server.bearerTokenConfigured ? t('ai.mcp.configured') : t('ai.mcp.anonymous'),
-                      ],
-                      {
-                        pairs: [
-                          { label: t('ai.catalog.card.timeout'), value: `${server.timeoutMillis}ms` },
-                          { label: t('ai.mcp.version'), value: String(server.version) },
-                        ],
-                      },
-                      ...(updateTime ? [[t('ai.mcp.updated'), updateTime] as [string, string]] : []),
-                    ]}
+                    subtitle={subtitle}
+                    rows={rows}
                     editAriaLabel={`${t('ai.mcp.edit')} ${server.name}`}
                     deleteAriaLabel={`${t('ai.mcp.delete')} ${server.name}`}
-                    onEdit={() => {
-                      setConflict(null)
-                      setEditModal({
-                        server,
-                        url: server.url,
-                        timeoutMillis: String(server.timeoutMillis ?? '30000'),
-                        tokenMode: 'keep',
-                        bearerToken: '',
-                        error: null,
-                      })
-                    }}
+                    onEdit={() => handleOpenEdit(server)}
                     onDelete={() => {
                       setConflict(null)
                       setDeleteError(null)
@@ -330,9 +481,9 @@ export function McpServersPage() {
       </div>
 
       {createModal && (
-        <ModalBackdrop onClose={() => setCreateModal(null)}>
+        <ModalBackdrop onClose={handleRequestCloseCreate}>
           <div
-            className="modal-card"
+            className="modal-card mcp-modal-card"
             role="dialog"
             aria-modal="true"
             aria-label={t('ai.mcp.create')}
@@ -340,7 +491,7 @@ export function McpServersPage() {
           >
             <ModalHeader
               title={t('ai.mcp.create')}
-              onClose={() => setCreateModal(null)}
+              onClose={handleRequestCloseCreate}
               closeDisabled={createMutation.isPending}
             />
             <form onSubmit={handleCreateSubmit}>
@@ -354,6 +505,7 @@ export function McpServersPage() {
                     }
                     placeholder="e.g. filesystem"
                     maxLength={32}
+                    disabled={createMutation.isPending}
                     required
                     autoFocus
                   />
@@ -361,49 +513,25 @@ export function McpServersPage() {
                     Lowercase letters, numbers, and underscores (^[a-z][a-z0-9_]*$)
                   </span>
                 </label>
-                <label className="form-group">
-                  <FieldLabel required>{t('ai.mcp.url')}</FieldLabel>
-                  <input
-                    type="url"
-                    value={createModal.url}
-                    onChange={(e) =>
-                      setCreateModal({ ...createModal, url: e.target.value, error: null })
-                    }
-                    placeholder="http://localhost:8000/mcp"
-                    maxLength={2048}
-                    required
-                  />
-                </label>
-                <label className="form-group">
-                  <FieldLabel>{t('ai.mcp.bearerToken')}</FieldLabel>
-                  <input
-                    type="password"
-                    value={createModal.bearerToken}
-                    onChange={(e) =>
-                      setCreateModal({ ...createModal, bearerToken: e.target.value })
-                    }
-                    placeholder="Optional token"
-                    autoComplete="off"
-                  />
-                </label>
-                <label className="form-group">
-                  <FieldLabel required>{t('ai.mcp.timeout')}</FieldLabel>
-                  <NumberInput
-                    value={createModal.timeoutMillis}
-                    onChange={(val) =>
-                      setCreateModal({ ...createModal, timeoutMillis: val })
-                    }
-                    min={1}
-                    step={1000}
-                  />
-                </label>
-                {createModal.error && <p className="field-error">{createModal.error}</p>}
+
+                <McpConfigJsonEditor
+                  value={createModal.configJson}
+                  onChange={(val) =>
+                    setCreateModal((prev) =>
+                      prev ? { ...prev, configJson: val, error: null } : null,
+                    )
+                  }
+                  environments={environments}
+                  disabled={createMutation.isPending}
+                  error={createModal.error}
+                />
               </div>
+
               <div className="modal-footer">
                 <button
                   type="button"
                   className="ghost-btn"
-                  onClick={() => setCreateModal(null)}
+                  onClick={handleRequestCloseCreate}
                   disabled={createMutation.isPending}
                 >
                   {t('shared.cancel')}
@@ -422,147 +550,86 @@ export function McpServersPage() {
       )}
 
       {editModal && (
-        <ModalBackdrop
-          onClose={() => {
-            if (!updateMutation.isPending && !refreshMutation.isPending) {
-              setEditModal(null)
-            }
-          }}
-        >
+        <ModalBackdrop onClose={handleRequestCloseEdit}>
           <div
-            className="modal-card"
+            className="modal-card mcp-modal-card"
             role="dialog"
             aria-modal="true"
-            aria-label={t('ai.mcp.edit')}
+            aria-label={`${t('ai.mcp.edit')} ${editModal.server.name}`}
             onMouseDown={(e) => e.stopPropagation()}
           >
             <ModalHeader
-              title={`${t('ai.mcp.edit')} - ${editModal.server.name}`}
-              onClose={() => setEditModal(null)}
-              closeDisabled={updateMutation.isPending || refreshMutation.isPending}
+              title={`${t('ai.mcp.edit')} · ${editModal.server.name}`}
+              onClose={handleRequestCloseEdit}
+              closeDisabled={updateMutation.isPending || editModal.discoverPending}
             />
-            <form onSubmit={handleUpdateSubmit}>
+            {editModal.loading ? (
               <div className="modal-body">
-                <label className="form-group">
-                  <FieldLabel required>{t('ai.mcp.url')}</FieldLabel>
-                  <input
-                    type="url"
-                    value={editModal.url}
-                    onChange={(e) =>
-                      setEditModal({ ...editModal, url: e.target.value, error: null })
-                    }
-                    placeholder="http://localhost:8000/mcp"
-                    maxLength={2048}
-                    required
-                    autoFocus
-                  />
-                </label>
-                <label className="form-group">
-                  <FieldLabel required>{t('ai.mcp.timeout')}</FieldLabel>
-                  <NumberInput
-                    value={editModal.timeoutMillis}
+                <StateBlock title={t('ai.mcp.loadingConfig')} />
+              </div>
+            ) : editModal.fetchError ? (
+              <div className="modal-body">
+                <StateBlock
+                  title={editModal.fetchError || t('ai.mcp.loadConfigFailed')}
+                  tone="danger"
+                />
+                <div style={{ marginTop: 12, textAlign: 'center' }}>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => handleOpenEdit(editModal.server)}
+                  >
+                    {t('shared.retry')}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleUpdateSubmit}>
+                <div className="modal-body">
+                  <McpConfigJsonEditor
+                    value={editModal.configJson}
                     onChange={(val) =>
-                      setEditModal({ ...editModal, timeoutMillis: val })
+                      setEditModal((prev) =>
+                        prev ? { ...prev, configJson: val, error: null } : null,
+                      )
                     }
-                    min={1}
-                    step={1000}
+                    environments={environments}
+                    disabled={updateMutation.isPending || editModal.discoverPending}
+                    error={editModal.error}
                   />
-                </label>
+                </div>
 
-                <fieldset className="form-group">
-                  <legend>{t('ai.mcp.tokenMode')}</legend>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input
-                        type="radio"
-                        name="tokenMode"
-                        value="keep"
-                        checked={editModal.tokenMode === 'keep'}
-                        onChange={() => setEditModal({ ...editModal, tokenMode: 'keep' })}
-                      />
-                      <span>{t('ai.mcp.tokenKeep')}</span>
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input
-                        type="radio"
-                        name="tokenMode"
-                        value="clear"
-                        checked={editModal.tokenMode === 'clear'}
-                        onChange={() => setEditModal({ ...editModal, tokenMode: 'clear' })}
-                      />
-                      <span>{t('ai.mcp.tokenClear')}</span>
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input
-                        type="radio"
-                        name="tokenMode"
-                        value="set"
-                        checked={editModal.tokenMode === 'set'}
-                        onChange={() => setEditModal({ ...editModal, tokenMode: 'set' })}
-                      />
-                      <span>{t('ai.mcp.tokenSet')}</span>
-                    </label>
-                  </div>
-                </fieldset>
-
-                {editModal.tokenMode === 'set' && (
-                  <label className="form-group">
-                    <FieldLabel required>{t('ai.mcp.bearerToken')}</FieldLabel>
-                    <input
-                      type="password"
-                      value={editModal.bearerToken}
-                      onChange={(e) =>
-                        setEditModal({ ...editModal, bearerToken: e.target.value })
-                      }
-                      placeholder="New token"
-                      autoComplete="off"
-                      required
+                <div className="modal-footer modal-footer-with-leading-action">
+                  <button
+                    type="button"
+                    className="ghost-btn modal-footer-leading-action"
+                    onClick={handleDiscover}
+                    disabled={editModal.discoverPending || updateMutation.isPending}
+                  >
+                    <RefreshCw
+                      className={editModal.discoverPending ? 'spin' : ''}
+                      aria-hidden="true"
                     />
-                  </label>
-                )}
-
-                {editModal.error && (
-                  <p className="field-error" role="alert">
-                    {editModal.error}
-                  </p>
-                )}
-              </div>
-              <div className="modal-footer modal-footer-with-leading-action">
-                <button
-                  type="button"
-                  className="ghost-btn modal-footer-leading-action"
-                  onClick={() => {
-                    setConflict(null)
-                    refreshMutation.mutate({
-                      id: editModal.server.id,
-                      expectedVersion: editModal.server.version,
-                    })
-                  }}
-                  disabled={refreshMutation.isPending || updateMutation.isPending}
-                >
-                  <RefreshCw
-                    className={refreshMutation.isPending ? 'spin' : ''}
-                    aria-hidden="true"
-                  />
-                  {t('ai.mcp.refresh')}
-                </button>
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  onClick={() => setEditModal(null)}
-                  disabled={updateMutation.isPending || refreshMutation.isPending}
-                >
-                  {t('shared.cancel')}
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  disabled={updateMutation.isPending || refreshMutation.isPending}
-                >
-                  {t('shared.confirm')}
-                </button>
-              </div>
-            </form>
+                    {t('ai.mcp.discover')}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={handleRequestCloseEdit}
+                    disabled={updateMutation.isPending || editModal.discoverPending}
+                  >
+                    {t('shared.cancel')}
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-primary"
+                    disabled={updateMutation.isPending || editModal.discoverPending}
+                  >
+                    {t('shared.confirm')}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </ModalBackdrop>
       )}
@@ -595,7 +662,7 @@ export function McpServersPage() {
         onRefresh={() => {
           setConflict(null)
           setCreateModal(null)
-          setEditModal(null)
+          handleCloseEdit()
           setDeleteTarget(null)
           setDeleteError(null)
           void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })

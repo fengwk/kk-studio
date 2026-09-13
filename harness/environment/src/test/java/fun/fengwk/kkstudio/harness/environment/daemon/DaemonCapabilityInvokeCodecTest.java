@@ -58,6 +58,16 @@ class DaemonCapabilityInvokeCodecTest {
         IllegalArgumentException.class,
         () ->
             new DaemonCapabilityInvokeCodec.InvokeRequest(
+                EnvironmentCapabilityIds.FS_READ, "1", null, Duration.ZERO));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonCapabilityInvokeCodec.InvokeRequest(
+                EnvironmentCapabilityIds.FS_READ, "1", "   ", Duration.ZERO));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonCapabilityInvokeCodec.InvokeRequest(
                 EnvironmentCapabilityIds.FS_READ, "1", "[]", Duration.ZERO));
     assertThrows(
         IllegalArgumentException.class,
@@ -94,6 +104,7 @@ class DaemonCapabilityInvokeCodecTest {
   /** duplicate、trailing、unknown 和 missing 字段必须在 wire 边界拒绝，避免不同解释器分叉。 */
   @Test
   void rejectsDuplicateTrailingUnknownAndMissingFields() {
+    assertInvalid(null);
     assertInvalid(
         "{\"capabilityId\":\"fs.read\",\"capabilityId\":\"fs.read\",\"capabilityVersion\":\"1\","
             + "\"arguments\":{},\"timeoutMillis\":0}");

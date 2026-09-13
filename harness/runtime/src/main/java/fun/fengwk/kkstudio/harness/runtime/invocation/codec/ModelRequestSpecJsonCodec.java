@@ -122,20 +122,34 @@ public final class ModelRequestSpecJsonCodec {
 
   private static ObjectNode encodeSkill(SkillBinding skill) {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
+    node.put("sourceEnvironmentId", skill.sourceEnvironmentId().toString());
+    node.put("sourceId", skill.sourceId().toString());
     node.put("name", skill.name());
     node.put("description", skill.description());
-    InvocationJsonSupport.putNullable(node, "sourceEnvironmentId", skill.sourceEnvironmentId());
+    node.put("baseDirectory", skill.baseDirectory());
+    node.put("contentRevision", skill.contentRevision());
     return node;
   }
 
+  /** 严格解码：全部身份/描述字段必填，旧 tolerant 形状（缺少 sourceId/revision）被拒绝。 */
   private static SkillBinding decodeSkill(JsonNode value) {
     ObjectNode node = InvocationJsonSupport.object(value, "skillBinding");
     InvocationJsonSupport.requireFields(
-        node, "skillBinding", "name", "description", "sourceEnvironmentId");
+        node,
+        "skillBinding",
+        "sourceEnvironmentId",
+        "sourceId",
+        "name",
+        "description",
+        "baseDirectory",
+        "contentRevision");
     return new SkillBinding(
+        InvocationJsonSupport.environmentId(node, "sourceEnvironmentId", "skillBinding"),
+        InvocationJsonSupport.requiredUuid(node, "sourceId", "skillBinding"),
         InvocationJsonSupport.text(node, "name", "skillBinding"),
         InvocationJsonSupport.text(node, "description", "skillBinding"),
-        InvocationJsonSupport.nullableEnvironmentId(node, "sourceEnvironmentId", "skillBinding"));
+        InvocationJsonSupport.text(node, "baseDirectory", "skillBinding"),
+        InvocationJsonSupport.text(node, "contentRevision", "skillBinding"));
   }
 
   private static ObjectNode encodeSubagent(SubagentBinding subagent) {

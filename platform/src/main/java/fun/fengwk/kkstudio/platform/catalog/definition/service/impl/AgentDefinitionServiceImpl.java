@@ -26,6 +26,8 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
+import java.util.UUID;
+
 /** 全局 Agent definition CRUD。 */
 @AllArgsConstructor
 @Service
@@ -55,10 +57,11 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
     String name = createDTO == null ? null : createDTO.getName();
     AgentDefinition definition = definitionMutationFactory.newAgent(name, createDTO);
-    referenceResolver.requireEnvironmentForShare(definition.getEnvironmentId());
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
-    validateConfig(config);
+    validateConfig(config, definition.getEnvironmentId());
+    referenceResolver.requireEnvironmentAndSkills(
+        definition.getEnvironmentId(), config.getSkills());
     referenceResolver.requireSubagentsForUpdate(config.getSubagents());
     try {
       if (!agentDefinitionRepository.create(definition)) {
@@ -97,10 +100,11 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     ModelRef modelRef = parseModelRef(updateDTO.getModel());
     referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
     definitionMutationFactory.update(definition, updateDTO);
-    referenceResolver.requireEnvironmentForShare(definition.getEnvironmentId());
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
-    validateConfig(config);
+    validateConfig(config, definition.getEnvironmentId());
+    referenceResolver.requireEnvironmentAndSkills(
+        definition.getEnvironmentId(), config.getSkills());
     AgentDefinition locked =
         referenceResolver.requireAgentAndSubagentsForUpdate(name, config.getSubagents());
     ensureExpectedVersion(locked, name, rawExpected, expected);
@@ -174,9 +178,9 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     }
   }
 
-  private void validateConfig(AgentDefinitionConfigDTO config) {
+  private void validateConfig(AgentDefinitionConfigDTO config, UUID environmentId) {
     try {
-      configValidator.validate(config);
+      configValidator.validate(config, environmentId);
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }

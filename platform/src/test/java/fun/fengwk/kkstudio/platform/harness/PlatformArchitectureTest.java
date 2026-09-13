@@ -229,12 +229,11 @@ class PlatformArchitectureTest {
   private static final Set<String> REQUIRED_LANGCHAIN_DECLARATIONS =
       Set.of(
           "pom.xml|dependencyManagement|dev.langchain4j|langchain4j-bom",
-          "platform/pom.xml|dependencies|dev.langchain4j|langchain4j-core",
-          "platform/pom.xml|dependencies|dev.langchain4j|langchain4j-mcp");
+          "harness/mcp/pom.xml|dependencies|dev.langchain4j|langchain4j-mcp");
 
   /**
-   * 全仓 POM 架构守卫：LangChain4j 依赖禁止重新进入 reactor，除 platform 的 MCP 适配器（langchain4j-core、langchain4j-mcp）
-   * 与根 POM 的版本管理（langchain4j-bom）外，任何其他 artifact 或模块声明都会被拦截。
+   * 全仓 POM 架构守卫：LangChain4j 依赖仅允许由 harness/mcp 适配器直接声明 langchain4j-mcp，并由根 POM 管理版本；任何其他
+   * artifact、模块或上下文声明都会被拦截。
    */
   @Test
   void reactorDeclaresNoDisallowedLangChainDependencies() {
@@ -300,11 +299,19 @@ class PlatformArchitectureTest {
     List<DeclaredDependency> duplicated =
         List.of(
             new DeclaredDependency(
-                "platform/pom.xml", "dependencies", "dev.langchain4j", "langchain4j-mcp", "1.19.0"),
+                "harness/mcp/pom.xml",
+                "dependencies",
+                "dev.langchain4j",
+                "langchain4j-mcp",
+                "1.19.0"),
             new DeclaredDependency(
-                "platform/pom.xml", "dependencies", "dev.langchain4j", "langchain4j-mcp", "1.19.0"),
+                "harness/mcp/pom.xml",
+                "dependencies",
+                "dev.langchain4j",
+                "langchain4j-mcp",
+                "1.19.0"),
             new DeclaredDependency(
-                "platform/pom.xml",
+                "harness/mcp/pom.xml",
                 "dependencies",
                 "dev.langchain4j",
                 "langchain4j-mcp",
@@ -323,9 +330,8 @@ class PlatformArchitectureTest {
 
     Set<String> missing = new LinkedHashSet<>(REQUIRED_LANGCHAIN_DECLARATIONS);
     missing.removeAll(identitySet);
-    assertEquals(2, missing.size());
+    assertEquals(1, missing.size());
     assertTrue(missing.contains("pom.xml|dependencyManagement|dev.langchain4j|langchain4j-bom"));
-    assertTrue(missing.contains("platform/pom.xml|dependencies|dev.langchain4j|langchain4j-core"));
   }
 
   /** 验证守卫逻辑对非法坐标、非法模块与非法上下文具备明确的违规拦截与诊断能力。 */
@@ -340,7 +346,7 @@ class PlatformArchitectureTest {
                 "dev.langchain4j",
                 "langchain4j-open-ai",
                 "1.19.0"),
-            // 在非 platform 模块中引入 MCP
+            // 在非 harness/mcp 模块中引入 MCP
             new DeclaredDependency(
                 "harness/daemon/pom.xml",
                 "dependencies",
@@ -500,18 +506,14 @@ class PlatformArchitectureTest {
     assertTrue(violations.stream().anyMatch(v -> v.contains("profile[test-profile]/dependencies")));
   }
 
-  /**
-   * 生产代码源码 import 守卫：全仓所有模块的 main 源码中，{@code dev.langchain4j.*} 只允许出现在 platform 的 MCP
-   * 客户端适配器包（{@code platform/.../catalog/mcp/client/}）中。
-   */
+  /** 生产代码源码 import 守卫：全仓所有模块的 main 源码中，{@code dev.langchain4j.*} 只允许出现在 harness/mcp 的协议适配器包中。 */
   @Test
-  void productionSourcesImportLangChainOnlyInPlatformMcpClient() throws IOException {
+  void productionSourcesImportLangChainOnlyInHarnessMcp() throws IOException {
     Path root = locateReactorRoot();
     List<Path> poms = enumerateReactorPoms(root);
     List<String> violations = new ArrayList<>();
 
-    String allowedPrefix =
-        "platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/";
+    String allowedPrefix = "harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/";
 
     for (Path pom : poms) {
       Path moduleDir = pom.getParent();
@@ -544,7 +546,7 @@ class PlatformArchitectureTest {
     assertTrue(
         violations.isEmpty(),
         () ->
-            "LangChain4j imports found outside allowed platform MCP client boundary ("
+            "LangChain4j imports found outside allowed harness/mcp boundary ("
                 + allowedPrefix
                 + "):\n"
                 + String.join("\n", violations));
@@ -571,9 +573,8 @@ class PlatformArchitectureTest {
         violations.add(
             String.format(
                 "disallowed LangChain4j dependency in %s (%s): %s:%s (LangChain4j is restricted to"
-                    + " platform MCP adapter 'dev.langchain4j:langchain4j-mcp' /"
-                    + " 'dev.langchain4j:langchain4j-core' and root 'dev.langchain4j:langchain4j-bom'"
-                    + " version management)",
+                    + " harness/mcp adapter 'dev.langchain4j:langchain4j-mcp' and root"
+                    + " 'dev.langchain4j:langchain4j-bom' version management)",
                 dep.modulePath(), dep.context(), dep.groupId(), dep.artifactId()));
       }
     }
@@ -595,11 +596,10 @@ class PlatformArchitectureTest {
         && "langchain4j-bom".equals(dep.artifactId())) {
       return true;
     }
-    if ("platform/pom.xml".equals(dep.modulePath())
+    if ("harness/mcp/pom.xml".equals(dep.modulePath())
         && "dependencies".equals(dep.context())
         && "dev.langchain4j".equals(dep.groupId())
-        && ("langchain4j-core".equals(dep.artifactId())
-            || "langchain4j-mcp".equals(dep.artifactId()))) {
+        && "langchain4j-mcp".equals(dep.artifactId())) {
       return true;
     }
     return false;
