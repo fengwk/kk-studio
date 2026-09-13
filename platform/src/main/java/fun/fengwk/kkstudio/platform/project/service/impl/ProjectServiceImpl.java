@@ -4,16 +4,32 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
+import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
+import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
+import fun.fengwk.kkstudio.platform.project.model.IssueInput;
+import fun.fengwk.kkstudio.platform.project.model.IssueRun;
+import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
+import fun.fengwk.kkstudio.platform.project.repo.IssueControllerWorkRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueInputRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -24,6 +40,12 @@ public class ProjectServiceImpl implements ProjectService {
 
   private final ProjectRepository projectRepository;
   private final ProjectSessionRepository projectSessionRepository;
+  private final IssueRepository issueRepository;
+  private final IssueDependencyRepository issueDependencyRepository;
+  private final IssueInputRepository issueInputRepository;
+  private final IssueRunRepository issueRunRepository;
+  private final IssueControllerWorkRepository issueControllerWorkRepository;
+  private final SessionDeletionOrchestrator sessionDeletionOrchestrator;
 
   @Transactional
   @Override
@@ -153,6 +175,159 @@ public class ProjectServiceImpl implements ProjectService {
           String.valueOf(latest != null ? latest.getVersion() : -1));
     }
     return projectRepository.getById(id);
+  }
+
+  @Transactional
+  @Override
+  public void deleteProject(UUID id, long expectedVersion) {
+    Objects.requireNonNull(id, "id");
+    if (expectedVersion < 0) {
+      throw new AiValidationException("project", "expectedVersion must be non-negative");
+    }
+
+    // 1. 锁 Project 行并校验存在性与版本
+    Project project = projectRepository.lockById(id);
+    if (project == null) {
+      throw new AiResourceNotFoundException("project", id.toString());
+    }
+    if (project.getVersion() != expectedVersion) {
+      throw new AiVersionConflictException(
+          "project",
+          id.toString(),
+          String.valueOf(expectedVersion),
+          String.valueOf(project.getVersion()));
+    }
+
+    // 2. 查出该 Project 下的所有 Issues，并按 UUID 升序锁定
+    List<Issue> issues = issueRepository.listByProjectId(id);
+    List<Issue> sortedIssues =
+        issues.stream().sorted(Comparator.comparing(Issue::getId, UuidOrder.COMPARATOR)).toList();
+
+    for (Issue issue : sortedIssues) {
+      Issue lockedIssue = issueRepository.lockById(issue.getId());
+      if (lockedIssue == null || !lockedIssue.getProjectId().equals(id)) {
+        throw new AiValidationException(
+            "issue", "Issue disappeared or belongs to different project: " + issue.getId());
+      }
+    }
+
+    // 3. 查出所有 Issues 的所有 Runs，并按 UUID 升序锁定
+    List<IssueRun> allRuns = new ArrayList<>();
+    for (Issue issue : sortedIssues) {
+      allRuns.addAll(issueRunRepository.listByIssueId(issue.getId()));
+    }
+    List<IssueRun> sortedRuns =
+        allRuns.stream()
+            .sorted(Comparator.comparing(IssueRun::getId, UuidOrder.COMPARATOR))
+            .toList();
+
+    for (IssueRun run : sortedRuns) {
+      IssueRun lockedRun = issueRunRepository.lockById(run.getId());
+      if (lockedRun == null) {
+        throw new AiValidationException("issue_run", "Issue run disappeared: " + run.getId());
+      }
+    }
+
+    // 4. 校验所有 Runs：若任何 run 为 RUNNING / WAITING_HUMAN / UNKNOWN 则明确拒绝
+    for (IssueRun run : sortedRuns) {
+      IssueRunStatus status = run.getStatus();
+      if (status == IssueRunStatus.RUNNING
+          || status == IssueRunStatus.WAITING_HUMAN
+          || status == IssueRunStatus.UNKNOWN) {
+        throw new AiValidationException(
+            "issue_run",
+            "Cannot delete project with active or unknown runs: run "
+                + run.getId()
+                + " is "
+                + status);
+      }
+    }
+
+    // 5. 编排删除：
+    // (a) controller work
+    for (Issue issue : sortedIssues) {
+      issueControllerWorkRepository.deleteByIssueId(issue.getId());
+    }
+
+    // (b) 对每个 run 调 SessionDeletionOrchestrator.deleteSessionsByOwner(ISSUE_RUN)
+    for (IssueRun run : sortedRuns) {
+      sessionDeletionOrchestrator.deleteSessionsByOwner(
+          new OwnerRef(OwnerType.ISSUE_RUN, run.getId()));
+    }
+
+    // (c) run rows：先删 reviewer (有 submission_run_id)，再删 executor
+    List<IssueRun> reviewerRuns =
+        sortedRuns.stream().filter(r -> r.getSubmissionRunId() != null).toList();
+    List<IssueRun> executorRuns =
+        sortedRuns.stream().filter(r -> r.getSubmissionRunId() == null).toList();
+
+    for (IssueRun run : reviewerRuns) {
+      boolean deleted = issueRunRepository.deleteById(run.getId(), run.getVersion());
+      if (!deleted) {
+        throw new AiVersionConflictException(
+            "issue_run", run.getId().toString(), String.valueOf(run.getVersion()), "unknown");
+      }
+    }
+    for (IssueRun run : executorRuns) {
+      boolean deleted = issueRunRepository.deleteById(run.getId(), run.getVersion());
+      if (!deleted) {
+        throw new AiVersionConflictException(
+            "issue_run", run.getId().toString(), String.valueOf(run.getVersion()), "unknown");
+      }
+    }
+
+    // (d) inputs
+    for (Issue issue : sortedIssues) {
+      List<IssueInput> inputs = issueInputRepository.listByIssueId(issue.getId());
+      if (!inputs.isEmpty()) {
+        int deleted = issueInputRepository.deleteByIssueId(issue.getId());
+        if (deleted != inputs.size()) {
+          throw new AiValidationException(
+              "issue_input",
+              "Deleted inputs count mismatch for issue "
+                  + issue.getId()
+                  + ": expected "
+                  + inputs.size()
+                  + ", actual "
+                  + deleted);
+        }
+      }
+    }
+
+    // (e) dependency edges
+    List<IssueDependency> deps = issueDependencyRepository.listByProjectId(id);
+    if (!deps.isEmpty()) {
+      int deleted = issueDependencyRepository.deleteByProjectId(id);
+      if (deleted != deps.size()) {
+        throw new AiValidationException(
+            "issue_dependency",
+            "Deleted dependencies count mismatch for project "
+                + id
+                + ": expected "
+                + deps.size()
+                + ", actual "
+                + deleted);
+      }
+    }
+
+    // (f) issues
+    for (Issue issue : sortedIssues) {
+      boolean deleted = issueRepository.deleteById(issue.getId(), issue.getVersion());
+      if (!deleted) {
+        throw new AiVersionConflictException(
+            "issue", issue.getId().toString(), String.valueOf(issue.getVersion()), "unknown");
+      }
+    }
+
+    // (g) deleteSessionsByOwner(PROJECT)
+    sessionDeletionOrchestrator.deleteSessionsByOwner(new OwnerRef(OwnerType.PROJECT, id));
+
+    // (h) project CAS 删除
+    boolean projectDeleted = projectRepository.deleteById(id, expectedVersion);
+    if (!projectDeleted) {
+      throw new AiVersionConflictException(
+          "project", id.toString(), String.valueOf(expectedVersion), "unknown");
+    }
   }
 
   @Override

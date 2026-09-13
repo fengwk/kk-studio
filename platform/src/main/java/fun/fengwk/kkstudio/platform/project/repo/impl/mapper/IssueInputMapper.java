@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.project.repo.impl.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -91,4 +92,7 @@ public interface IssueInputMapper extends BaseMapper {
       @Param("issueId") UUID issueId,
       @Param("kind") String kind,
       @Param("afterSequence") long afterSequence);
+
+  @Delete("delete from issue_input where issue_id = #{issueId}")
+  int deleteByIssueId(@Param("issueId") UUID issueId);
 }
