@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
 public class CloudDirectoryNotEmptyException extends CloudFileSystemException {
 
   private final CloudPath path;
+  private final int childCount;
 
   public CloudDirectoryNotEmptyException(CloudPath path, int childCount) {
     super(
@@ -13,9 +14,14 @@ public class CloudDirectoryNotEmptyException extends CloudFileSystemException {
             "Cannot delete non-empty directory at path: %s (contains %d children)",
             path, childCount));
     this.path = path;
+    this.childCount = childCount;
   }
 
   public CloudPath getPath() {
     return path;
+  }
+
+  public int getChildCount() {
+    return childCount;
   }
 }

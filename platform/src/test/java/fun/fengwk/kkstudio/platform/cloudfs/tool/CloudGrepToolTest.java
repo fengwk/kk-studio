@@ -29,10 +29,12 @@ import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudTextRevision;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.ToolArtifactPath;
 import fun.fengwk.kkstudio.platform.cloudfs.service.CloudFileSystemService;
+import fun.fengwk.kkstudio.platform.cloudfs.service.impl.CloudQueryServiceImpl;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -49,7 +51,8 @@ class CloudGrepToolTest {
   void setUp() {
     mockService = mock(CloudFileSystemService.class);
     mockBlobReader = mock(StorageBlobFileReader.class);
-    grepTool = new CloudGrepTool(mockService, mockBlobReader);
+    grepTool =
+        new CloudGrepTool(new CloudQueryServiceImpl(mockService, Optional.of(mockBlobReader)));
   }
 
   @Test
