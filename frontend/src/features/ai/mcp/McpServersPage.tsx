@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw } from 'lucide-react'
 import { ResourceCardLayout } from '@/features/ai/catalog/AiResourceCardLayout'
@@ -18,16 +18,12 @@ import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type AppLocale } from '@/shared/i18n'
 import {
-  createLocalConfigTemplate,
-  extractDraftConnectionType,
-  extractDraftEnvironmentId,
-  formatMcpConfigJson,
   formatMcpConfigJsonSafely,
   isSemanticConfigEqual,
   REMOTE_CONFIG_TEMPLATE,
-  updateLocalEnvironmentIdInJson,
   validateMcpConfigJson,
 } from './mcp-config-json'
+import { McpConfigJsonEditor } from './McpConfigJsonEditor'
 
 function formatDateTime24(date: Date, locale: AppLocale): string {
   return date.toLocaleString(locale, {
@@ -73,8 +69,6 @@ function formatIsoTime(value: InstantTimestamp | undefined, locale: AppLocale): 
 interface CreateModalState {
   name: string
   configJson: string
-  validationMessage: string | null
-  validationTone: 'success' | 'error' | null
   error: string | null
 }
 
@@ -85,8 +79,6 @@ interface EditModalState {
   loadedVersion: string | null
   loadedConfigJson: string | null
   configJson: string
-  validationMessage: string | null
-  validationTone: 'success' | 'error' | null
   error: string | null
   discoverPending: boolean
 }
@@ -101,8 +93,15 @@ export function McpServersPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
 
-  // 围栏追踪当前正在编辑的 server ID，防止晚到达的异步配置响应覆写其他 server 或已关闭的弹窗
-  const activeEditServerIdRef = useRef<string | null>(null)
+  // 单调递增请求代际 token：关闭或重新打开同一 server 时递增，防止 ABA 覆写
+  const editRequestGenerationRef = useRef(0)
+
+  useEffect(() => {
+    const generationRef = editRequestGenerationRef
+    return () => {
+      generationRef.current++
+    }
+  }, [])
 
   // 10s 轮询以支持 Local 发现任务的最终状态收敛
   const serversQuery = useQuery({
@@ -112,7 +111,7 @@ export function McpServersPage() {
   })
 
   const environmentsQuery = useQuery({
-    queryKey: ['environments', 'list'],
+    queryKey: queryKeys.environments.list,
     queryFn: () => environmentService.listEnvironments(),
   })
 
@@ -158,7 +157,7 @@ export function McpServersPage() {
         configJson: data.configJson,
       }),
     onSuccess: () => {
-      activeEditServerIdRef.current = null
+      editRequestGenerationRef.current++
       setEditModal(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })
       void queryClient.invalidateQueries({ queryKey: queryKeys.tools.all })
@@ -166,7 +165,7 @@ export function McpServersPage() {
     onError: (err: unknown) => {
       if (isConflictError(err)) {
         setConflict(presentConflict(err))
-        activeEditServerIdRef.current = null
+        editRequestGenerationRef.current++
         setEditModal(null)
         return
       }
@@ -200,15 +199,13 @@ export function McpServersPage() {
     setCreateModal({
       name: '',
       configJson: REMOTE_CONFIG_TEMPLATE,
-      validationMessage: null,
-      validationTone: null,
       error: null,
     })
   }
 
   function handleOpenEdit(server: McpServerDTO) {
     setConflict(null)
-    activeEditServerIdRef.current = server.id
+    const generation = ++editRequestGenerationRef.current
     setEditModal({
       server,
       loading: true,
@@ -216,8 +213,6 @@ export function McpServersPage() {
       loadedVersion: null,
       loadedConfigJson: null,
       configJson: '',
-      validationMessage: null,
-      validationTone: null,
       error: null,
       discoverPending: false,
     })
@@ -225,37 +220,39 @@ export function McpServersPage() {
     mcpServerService
       .getServerConfig(server.id)
       .then((config) => {
-        // 异步围栏检查：如果当前弹窗已被关闭或切换到其他 server，忽略迟到的响应
-        if (activeEditServerIdRef.current === server.id) {
-          const pretty = formatMcpConfigJsonSafely(config.configJson)
-          setEditModal((prev) => {
-            if (!prev || prev.server.id !== server.id) return prev
-            return {
-              ...prev,
-              loading: false,
-              loadedVersion: config.version,
-              loadedConfigJson: pretty,
-              configJson: pretty,
-            }
-          })
+        // 代际围栏检查：如果当前请求已被后续打开或关闭操作废弃，丢弃迟到的响应
+        if (editRequestGenerationRef.current !== generation) {
+          return
         }
+        const pretty = formatMcpConfigJsonSafely(config.configJson)
+        setEditModal((prev) => {
+          if (!prev || editRequestGenerationRef.current !== generation) return null
+          return {
+            ...prev,
+            loading: false,
+            loadedVersion: config.version,
+            loadedConfigJson: pretty,
+            configJson: pretty,
+          }
+        })
       })
       .catch((err) => {
-        if (activeEditServerIdRef.current === server.id) {
-          setEditModal((prev) => {
-            if (!prev || prev.server.id !== server.id) return prev
-            return {
-              ...prev,
-              loading: false,
-              fetchError: err instanceof Error ? err.message : String(err),
-            }
-          })
+        if (editRequestGenerationRef.current !== generation) {
+          return
         }
+        setEditModal((prev) => {
+          if (!prev || editRequestGenerationRef.current !== generation) return null
+          return {
+            ...prev,
+            loading: false,
+            fetchError: err instanceof Error ? err.message : String(err),
+          }
+        })
       })
   }
 
   function handleCloseEdit() {
-    activeEditServerIdRef.current = null
+    editRequestGenerationRef.current++
     setEditModal(null)
   }
 
@@ -431,7 +428,7 @@ export function McpServersPage() {
                     pairs: [
                       { label: t('ai.mcp.version'), value: String(server.version) },
                       {
-                        label: t('ai.mcp.enabled'),
+                        label: t('ai.mcp.enabledState'),
                         value: server.enabled ? t('ai.mcp.enabled') : t('ai.mcp.disabled'),
                       },
                     ],
@@ -496,6 +493,7 @@ export function McpServersPage() {
                     }
                     placeholder="e.g. filesystem"
                     maxLength={32}
+                    disabled={createMutation.isPending}
                     required
                     autoFocus
                   />
@@ -504,153 +502,19 @@ export function McpServersPage() {
                   </span>
                 </label>
 
-                <div className="form-group">
-                  <FieldLabel required>{t('ai.mcp.configJson')}</FieldLabel>
-                  <div className="mcp-json-toolbar">
-                    <button
-                      type="button"
-                      className="ghost-btn btn-sm"
-                      onClick={() => {
-                        setCreateModal({
-                          ...createModal,
-                          configJson: REMOTE_CONFIG_TEMPLATE,
-                          validationMessage: null,
-                          validationTone: null,
-                          error: null,
-                        })
-                      }}
-                    >
-                      {t('ai.mcp.remoteTemplate')}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-btn btn-sm"
-                      onClick={() => {
-                        const firstEnvId = environments[0]?.id
-                        setCreateModal({
-                          ...createModal,
-                          configJson: createLocalConfigTemplate(firstEnvId),
-                          validationMessage: null,
-                          validationTone: null,
-                          error: null,
-                        })
-                      }}
-                    >
-                      {t('ai.mcp.localTemplate')}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-btn btn-sm"
-                      onClick={() => {
-                        try {
-                          const formatted = formatMcpConfigJson(createModal.configJson)
-                          setCreateModal({
-                            ...createModal,
-                            configJson: formatted,
-                            validationMessage: null,
-                            validationTone: null,
-                          })
-                        } catch (err) {
-                          setCreateModal({
-                            ...createModal,
-                            validationMessage: err instanceof Error ? err.message : String(err),
-                            validationTone: 'error',
-                          })
-                        }
-                      }}
-                    >
-                      {t('ai.mcp.formatJson')}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-btn btn-sm"
-                      onClick={() => {
-                        const res = validateMcpConfigJson(createModal.configJson)
-                        if (res.valid) {
-                          setCreateModal({
-                            ...createModal,
-                            validationMessage: t('ai.mcp.validationPassed'),
-                            validationTone: 'success',
-                          })
-                        } else {
-                          setCreateModal({
-                            ...createModal,
-                            validationMessage: res.error ?? 'Invalid JSON',
-                            validationTone: 'error',
-                          })
-                        }
-                      }}
-                    >
-                      {t('ai.mcp.validateJson')}
-                    </button>
-                  </div>
-
-                  {extractDraftConnectionType(createModal.configJson) === 'local' && (
-                    <label className="form-group" style={{ marginBottom: 8 }}>
-                      <FieldLabel>{t('ai.mcp.envSelect')}</FieldLabel>
-                      <select
-                        aria-label={t('ai.mcp.envSelect')}
-                        value={extractDraftEnvironmentId(createModal.configJson) ?? ''}
-                        onChange={(e) => {
-                          const selected = e.target.value
-                          if (selected) {
-                            const rewritten = updateLocalEnvironmentIdInJson(
-                              createModal.configJson,
-                              selected,
-                            )
-                            setCreateModal({
-                              ...createModal,
-                              configJson: rewritten,
-                              error: null,
-                            })
-                          }
-                        }}
-                      >
-                        <option value="" disabled>
-                          -- {t('ai.mcp.envSelect')} --
-                        </option>
-                        {environments.map((env) => (
-                          <option key={env.id} value={env.id}>
-                            {env.name} ({env.id.slice(0, 8)}...)
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-
-                  <textarea
-                    className="code-textarea mcp-config-json-textarea"
-                    aria-label={t('ai.mcp.configJson')}
-                    value={createModal.configJson}
-                    onChange={(e) =>
-                      setCreateModal({
-                        ...createModal,
-                        configJson: e.target.value,
-                        validationMessage: null,
-                        error: null,
-                      })
-                    }
-                    placeholder="{}"
-                    rows={12}
-                    required
-                  />
-
-                  {createModal.validationMessage && (
-                    <div
-                      className={`mcp-validation-msg is-${createModal.validationTone ?? 'info'}`}
-                      role={createModal.validationTone === 'error' ? 'alert' : 'status'}
-                    >
-                      {createModal.validationMessage}
-                    </div>
-                  )}
-                </div>
-
-                {createModal.error && (
-                  <p className="field-error" role="alert">
-                    {createModal.error}
-                  </p>
-                )}
+                <McpConfigJsonEditor
+                  value={createModal.configJson}
+                  onChange={(val) =>
+                    setCreateModal((prev) =>
+                      prev ? { ...prev, configJson: val, error: null } : null,
+                    )
+                  }
+                  environments={environments}
+                  disabled={createMutation.isPending}
+                  error={createModal.error}
+                />
               </div>
+
               <div className="modal-footer">
                 <button
                   type="button"
@@ -660,7 +524,11 @@ export function McpServersPage() {
                 >
                   {t('shared.cancel')}
                 </button>
-                <button type="submit" className="btn-primary" disabled={createMutation.isPending}>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={createMutation.isPending}
+                >
                   {t('shared.confirm')}
                 </button>
               </div>
@@ -670,22 +538,16 @@ export function McpServersPage() {
       )}
 
       {editModal && (
-        <ModalBackdrop
-          onClose={() => {
-            if (!updateMutation.isPending && !editModal.discoverPending) {
-              handleCloseEdit()
-            }
-          }}
-        >
+        <ModalBackdrop onClose={handleCloseEdit}>
           <div
             className="modal-card mcp-modal-card"
             role="dialog"
             aria-modal="true"
-            aria-label={t('ai.mcp.edit')}
+            aria-label={`${t('ai.mcp.edit')} ${editModal.server.name}`}
             onMouseDown={(e) => e.stopPropagation()}
           >
             <ModalHeader
-              title={`${t('ai.mcp.edit')} - ${editModal.server.name}`}
+              title={`${t('ai.mcp.edit')} · ${editModal.server.name}`}
               onClose={handleCloseEdit}
               closeDisabled={updateMutation.isPending || editModal.discoverPending}
             />
@@ -696,7 +558,7 @@ export function McpServersPage() {
             ) : editModal.fetchError ? (
               <div className="modal-body">
                 <StateBlock
-                  title={`${t('ai.mcp.loadConfigFailed')}: ${editModal.fetchError}`}
+                  title={editModal.fetchError || t('ai.mcp.loadConfigFailed')}
                   tone="danger"
                 />
                 <div style={{ marginTop: 12, textAlign: 'center' }}>
@@ -705,159 +567,24 @@ export function McpServersPage() {
                     className="ghost-btn"
                     onClick={() => handleOpenEdit(editModal.server)}
                   >
-                    {t('shared.confirm')}
+                    {t('shared.retry')}
                   </button>
                 </div>
               </div>
             ) : (
               <form onSubmit={handleUpdateSubmit}>
                 <div className="modal-body">
-                  <div className="form-group">
-                    <FieldLabel required>{t('ai.mcp.configJson')}</FieldLabel>
-                    <div className="mcp-json-toolbar">
-                      <button
-                        type="button"
-                        className="ghost-btn btn-sm"
-                        onClick={() => {
-                          setEditModal({
-                            ...editModal,
-                            configJson: REMOTE_CONFIG_TEMPLATE,
-                            validationMessage: null,
-                            validationTone: null,
-                            error: null,
-                          })
-                        }}
-                      >
-                        {t('ai.mcp.remoteTemplate')}
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-btn btn-sm"
-                        onClick={() => {
-                          const firstEnvId = environments[0]?.id
-                          setEditModal({
-                            ...editModal,
-                            configJson: createLocalConfigTemplate(firstEnvId),
-                            validationMessage: null,
-                            validationTone: null,
-                            error: null,
-                          })
-                        }}
-                      >
-                        {t('ai.mcp.localTemplate')}
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-btn btn-sm"
-                        onClick={() => {
-                          try {
-                            const formatted = formatMcpConfigJson(editModal.configJson)
-                            setEditModal({
-                              ...editModal,
-                              configJson: formatted,
-                              validationMessage: null,
-                              validationTone: null,
-                            })
-                          } catch (err) {
-                            setEditModal({
-                              ...editModal,
-                              validationMessage: err instanceof Error ? err.message : String(err),
-                              validationTone: 'error',
-                            })
-                          }
-                        }}
-                      >
-                        {t('ai.mcp.formatJson')}
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-btn btn-sm"
-                        onClick={() => {
-                          const res = validateMcpConfigJson(editModal.configJson)
-                          if (res.valid) {
-                            setEditModal({
-                              ...editModal,
-                              validationMessage: t('ai.mcp.validationPassed'),
-                              validationTone: 'success',
-                            })
-                          } else {
-                            setEditModal({
-                              ...editModal,
-                              validationMessage: res.error ?? 'Invalid JSON',
-                              validationTone: 'error',
-                            })
-                          }
-                        }}
-                      >
-                        {t('ai.mcp.validateJson')}
-                      </button>
-                    </div>
-
-                    {extractDraftConnectionType(editModal.configJson) === 'local' && (
-                      <label className="form-group" style={{ marginBottom: 8 }}>
-                        <FieldLabel>{t('ai.mcp.envSelect')}</FieldLabel>
-                        <select
-                          aria-label={t('ai.mcp.envSelect')}
-                          value={extractDraftEnvironmentId(editModal.configJson) ?? ''}
-                          onChange={(e) => {
-                            const selected = e.target.value
-                            if (selected) {
-                              const rewritten = updateLocalEnvironmentIdInJson(
-                                editModal.configJson,
-                                selected,
-                              )
-                              setEditModal({
-                                ...editModal,
-                                configJson: rewritten,
-                                error: null,
-                              })
-                            }
-                          }}
-                        >
-                          <option value="" disabled>
-                            -- {t('ai.mcp.envSelect')} --
-                          </option>
-                          {environments.map((env) => (
-                            <option key={env.id} value={env.id}>
-                              {env.name} ({env.id.slice(0, 8)}...)
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
-
-                    <textarea
-                      className="code-textarea mcp-config-json-textarea"
-                      aria-label={t('ai.mcp.configJson')}
-                      value={editModal.configJson}
-                      onChange={(e) =>
-                        setEditModal({
-                          ...editModal,
-                          configJson: e.target.value,
-                          validationMessage: null,
-                          error: null,
-                        })
-                      }
-                      placeholder="{}"
-                      rows={12}
-                      required
-                    />
-
-                    {editModal.validationMessage && (
-                      <div
-                        className={`mcp-validation-msg is-${editModal.validationTone ?? 'info'}`}
-                        role={editModal.validationTone === 'error' ? 'alert' : 'status'}
-                      >
-                        {editModal.validationMessage}
-                      </div>
-                    )}
-                  </div>
-
-                  {editModal.error && (
-                    <p className="field-error" role="alert">
-                      {editModal.error}
-                    </p>
-                  )}
+                  <McpConfigJsonEditor
+                    value={editModal.configJson}
+                    onChange={(val) =>
+                      setEditModal((prev) =>
+                        prev ? { ...prev, configJson: val, error: null } : null,
+                      )
+                    }
+                    environments={environments}
+                    disabled={updateMutation.isPending || editModal.discoverPending}
+                    error={editModal.error}
+                  />
                 </div>
 
                 <div className="modal-footer modal-footer-with-leading-action">

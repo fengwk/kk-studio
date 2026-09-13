@@ -534,6 +534,7 @@ export function formatMcpConfigJsonSafely(json: string): string {
 
 /**
  * 提取草稿 JSON 中的连接类型（remote 或 local）。
+ * 仅在合法且无重复键的 JSON 对象下提取，无效或重复 JSON 返回 null。
  */
 export function extractDraftConnectionType(json: string): 'remote' | 'local' | null {
   try {
@@ -542,36 +543,42 @@ export function extractDraftConnectionType(json: string): 'remote' | 'local' | n
     if (
       parsed &&
       typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
       (parsed.type === 'remote' || parsed.type === 'local')
     ) {
       return parsed.type
     }
   } catch {
-    if (/"type"\s*:\s*"local"/.test(json)) return 'local'
-    if (/"type"\s*:\s*"remote"/.test(json)) return 'remote'
+    return null
   }
   return null
 }
 
 /**
  * 提取草稿 JSON 中的 environmentId。
+ * 仅在合法且无重复键的 JSON 对象下提取，无效或重复 JSON 返回 null。
  */
 export function extractDraftEnvironmentId(json: string): string | null {
   try {
     assertNoDuplicateJsonKeys(json)
     const parsed = JSON.parse(json)
-    if (parsed && typeof parsed === 'object' && typeof parsed.environmentId === 'string') {
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      typeof parsed.environmentId === 'string'
+    ) {
       return parsed.environmentId
     }
   } catch {
-    const match = /"environmentId"\s*:\s*"([^"]*)"/.exec(json)
-    if (match) return match[1]
+    return null
   }
   return null
 }
 
 /**
  * 在保持单一权威 JSON 的前提下，回写 Local JSON 中的 environmentId。
+ * 无效或含重复键的 JSON 保持原样不进行任何修改。
  */
 export function updateLocalEnvironmentIdInJson(json: string, environmentId: string): string {
   try {
@@ -582,9 +589,7 @@ export function updateLocalEnvironmentIdInJson(json: string, environmentId: stri
       return JSON.stringify(obj, null, 2)
     }
   } catch {
-    if (/"environmentId"\s*:\s*"[^"]*"/.test(json)) {
-      return json.replace(/"environmentId"\s*:\s*"[^"]*"/, `"environmentId": "${environmentId}"`)
-    }
+    return json
   }
   return json
 }
@@ -607,7 +612,7 @@ export function createLocalConfigTemplate(environmentId?: string): string {
   return JSON.stringify(
     {
       type: 'local',
-      environmentId: environmentId || '00000000-0000-0000-0000-000000000000',
+      environmentId: environmentId || '',
       command: ['my-mcp-server', '--stdio'],
       cwd: '/workspace/project',
       env: {

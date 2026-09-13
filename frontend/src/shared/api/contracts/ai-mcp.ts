@@ -14,17 +14,17 @@ export interface McpServerDTO {
   /** 唯一名：^[a-z][a-z0-9_]*$ 且 <=32 字符，创建后不可变。 */
   name: string
   /** 连接类型：remote 或 local。 */
-  type: McpConnectionType | string
+  type: McpConnectionType
   /** 目标 Environment UUID（local 类型必填，remote 类型为 null）。 */
-  environmentId?: string | null
+  environmentId: string | null
   /** 公共启用状态。 */
   enabled: boolean
   /** 正整数毫秒超时。 */
   timeoutMillis: BackendLong
   /** 发现状态：UNVERIFIED、AVAILABLE、FAILED。 */
-  discoveryStatus: McpDiscoveryStatus | string
+  discoveryStatus: McpDiscoveryStatus
   /** 最近一次成功验证的配置版本（非负十进制字符串；未验证或变更后为 null）。 */
-  discoveredVersion?: CatalogVersion | null
+  discoveredVersion: CatalogVersion | null
   /** 当前 server 下持久工具数量（仅统计可用工具）。 */
   toolCount: number
   /** 当前配置的非负十进制字符串版本号；客户端每次更新/发现时必须回传。 */
@@ -76,5 +76,5 @@ export interface McpServerDiscoverDTO {
  */
 export interface McpServerDiscoveryResponseDTO {
   server: McpServerDTO
-  operation?: EnvironmentOperationDTO | null
+  operation: EnvironmentOperationDTO | null
 }

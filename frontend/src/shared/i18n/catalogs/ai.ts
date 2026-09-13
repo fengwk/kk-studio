@@ -2269,14 +2269,6 @@ export const aiCatalog = {
     'en-US': 'Discover Tools',
     'zh-CN': '发现工具',
   },
-  'ai.mcp.discoverScheduled': {
-    'en-US': 'Discovery operation scheduled',
-    'zh-CN': '发现操作已进入后台队列',
-  },
-  'ai.mcp.discoverSuccess': {
-    'en-US': 'Tools discovered successfully',
-    'zh-CN': '工具发现成功',
-  },
   'ai.mcp.unsavedDiscoverBlocked': {
     'en-US': 'Unsaved configuration changes. Please save before discovering tools.',
     'zh-CN': '存在未保存的配置更改，请先保存再发现工具。',
@@ -2349,13 +2341,13 @@ export const aiCatalog = {
     'en-US': 'Failed',
     'zh-CN': '失败',
   },
-  'ai.mcp.timeout': {
-    'en-US': 'Timeout (ms)',
-    'zh-CN': '超时时间 (毫秒)',
-  },
   'ai.mcp.discoveredVersion': {
     'en-US': 'Discovered Version',
     'zh-CN': '已验证版本',
+  },
+  'ai.mcp.enabledState': {
+    'en-US': 'Enabled State',
+    'zh-CN': '启用状态',
   },
   'ai.mcp.enabled': {
     'en-US': 'Enabled',

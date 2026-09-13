@@ -296,12 +296,49 @@ describe('mcp-config-json', () => {
     })
 
     /**
-     * 测试意图：验证连接类型提取器能从有效或草稿文本中识别 remote 与 local。
+     * 测试意图：验证连接类型提取器能从有效 JSON 文本中识别 remote 与 local，无效或含重复键 JSON 返回 null。
      */
-    it('extracts draft connection type', () => {
+    it('extracts draft connection type only from valid non-duplicate JSON', () => {
       expect(extractDraftConnectionType(REMOTE_CONFIG_TEMPLATE)).toBe('remote')
-      expect(extractDraftConnectionType(createLocalConfigTemplate())).toBe('local')
-      expect(extractDraftConnectionType('{"type": "local",')).toBe('local')
+      expect(extractDraftConnectionType(createLocalConfigTemplate('00000000-0000-0000-0000-000000000001'))).toBe('local')
+      expect(extractDraftConnectionType('{"type": "local",')).toBeNull()
+      expect(extractDraftConnectionType('{"type": "local", "type": "remote"}')).toBeNull()
+    })
+
+    /**
+     * 测试意图：验证 environmentId 提取在语法错误或含重复键时返回 null，不进行正则误推断。
+     */
+    it('extracts draft environmentId only from valid non-duplicate JSON', () => {
+      const valid = '{"environmentId": "11111111-1111-1111-1111-111111111111"}'
+      expect(extractDraftEnvironmentId(valid)).toBe('11111111-1111-1111-1111-111111111111')
+      expect(extractDraftEnvironmentId('{"environmentId": "11111111-1111-1111-1111-111111111111",')).toBeNull()
+      expect(
+        extractDraftEnvironmentId(
+          '{"environmentId": "11111111-1111-1111-1111-111111111111", "environmentId": "22222222-2222-2222-2222-222222222222"}',
+        ),
+      ).toBeNull()
+    })
+
+    /**
+     * 测试意图：验证当 JSON 存在语法错误或重复键时，回写函数不做部分正则替换并原样返回。
+     */
+    it('leaves invalid or duplicate JSON untouched when rewriting environmentId', () => {
+      const broken = '{"environmentId": "old", broken'
+      expect(updateLocalEnvironmentIdInJson(broken, 'new-id')).toBe(broken)
+
+      const duplicate = '{"environmentId": "old", "environmentId": "dup"}'
+      expect(updateLocalEnvironmentIdInJson(duplicate, 'new-id')).toBe(duplicate)
+    })
+
+    /**
+     * 测试意图：验证无参创建 local 模板时 environmentId 保持为空，以便校验显式失败，不构造假全零 UUID。
+     */
+    it('creates local template with empty environmentId when no environment is provided', () => {
+      const template = createLocalConfigTemplate()
+      expect(JSON.parse(template).environmentId).toBe('')
+      const validation = validateMcpConfigJson(template)
+      expect(validation.valid).toBe(false)
+      expect(validation.error).toContain('environmentId')
     })
   })
 })
