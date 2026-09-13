@@ -202,8 +202,8 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
     UUID projectId = project.getId();
     UUID sessionId = createHarnessSession();
 
-    // 绑定 Coordinator Session
-    projectService.bindCoordinatorSession(projectId, sessionId);
+    // 绑定 Coordinator Session（通过 repository 直接建立关系以测试服务查询）
+    assertTrue(projectSessionRepository.bindSession(projectId, sessionId));
 
     // 双向查找
     ProjectSession byProj = projectService.getCoordinatorSession(projectId);
@@ -218,12 +218,6 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
     // 删除关联边
     assertTrue(projectSessionRepository.deleteByProjectId(projectId));
     assertNull(projectService.getCoordinatorSession(projectId));
-
-    // 不存在的项目绑定 coordinator 会报错
-    UUID nonExistent = UUID.randomUUID();
-    assertThrows(
-        AiResourceNotFoundException.class,
-        () -> projectService.bindCoordinatorSession(nonExistent, sessionId));
   }
 
   @Test
@@ -256,41 +250,6 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
         AiResourceNotFoundException.class, () -> projectService.archiveProject(nonExistent, 0L));
     assertThrows(
         AiResourceNotFoundException.class, () -> projectService.unarchiveProject(nonExistent, 0L));
-  }
-
-  @Test
-  void testCoordinatorSessionBindingEdgeCases() {
-    String agentName = createTestAgent();
-    Project project1 = projectService.createProject("Proj 1", "Desc", agentName);
-    Project project2 = projectService.createProject("Proj 2", "Desc", agentName);
-    UUID s1 = createHarnessSession();
-    UUID s2 = createHarnessSession();
-
-    // 1. 成功绑定
-    projectService.bindCoordinatorSession(project1.getId(), s1);
-
-    // 2. 幂等重复绑定相同 session -> 成功
-    projectService.bindCoordinatorSession(project1.getId(), s1);
-
-    // 3. 同一项目尝试绑定不同 session -> 拒绝
-    AiValidationException ex1 =
-        assertThrows(
-            AiValidationException.class,
-            () -> projectService.bindCoordinatorSession(project1.getId(), s2));
-    assertTrue(ex1.getMessage().contains("already bound to a different session"));
-
-    // 4. 不同项目尝试绑定相同 session (existingForSession) -> 拒绝
-    AiValidationException ex2 =
-        assertThrows(
-            AiValidationException.class,
-            () -> projectService.bindCoordinatorSession(project2.getId(), s1));
-    assertTrue(ex2.getMessage().contains("Session is already bound to another project"));
-
-    // 5. 归档项目禁止绑定 session -> 拒绝
-    projectService.archiveProject(project2.getId(), 0L);
-    assertThrows(
-        AiValidationException.class,
-        () -> projectService.bindCoordinatorSession(project2.getId(), s2));
   }
 
   @Test

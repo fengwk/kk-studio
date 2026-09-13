@@ -661,7 +661,7 @@ public class PlatformCanvasCommandServiceTest extends PostgresSpringTestSupport 
             Instant.now(),
             Instant.now()));
     functionWorkStore
-        .claimNext(Instant.now(), Duration.ofSeconds(30), "snapshot-" + suffix)
+        .claimNext(Instant.now().plusSeconds(1), Duration.ofSeconds(30), "snapshot-" + suffix)
         .orElseThrow();
 
     ExecutorService executor = Executors.newSingleThreadExecutor();

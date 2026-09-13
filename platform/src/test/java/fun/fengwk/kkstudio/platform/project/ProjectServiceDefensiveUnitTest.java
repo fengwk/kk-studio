@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.platform.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -41,17 +39,6 @@ class ProjectServiceDefensiveUnitTest {
                 AiValidationException.class,
                 () -> service.createProject("Title", null, "coordinator"))
             .getMessage());
-
-    UUID projectId = UUID.randomUUID();
-    UUID sessionId = UUID.randomUUID();
-    when(projectRepository.lockById(projectId)).thenReturn(project(projectId, 0L, false));
-    when(sessionRepository.bindSession(projectId, sessionId)).thenReturn(false);
-    assertEquals(
-        "Failed to bind coordinator session",
-        assertThrows(
-                AiValidationException.class,
-                () -> service.bindCoordinatorSession(projectId, sessionId))
-            .getMessage());
   }
 
   @Test
@@ -89,46 +76,6 @@ class ProjectServiceDefensiveUnitTest {
         assertThrows(
             AiVersionConflictException.class, () -> service.unarchiveProject(unarchiveId, 4L));
     assertEquals("-1", unarchiveConflict.actualVersion());
-  }
-
-  @Test
-  void testKnownOwnerConstraintIsTranslatedWithoutDatabaseDetails() {
-    ProjectRepository projectRepository = mock(ProjectRepository.class);
-    ProjectSessionRepository sessionRepository = mock(ProjectSessionRepository.class);
-    ProjectServiceImpl service = new ProjectServiceImpl(projectRepository, sessionRepository);
-    UUID projectId = UUID.randomUUID();
-    UUID sessionId = UUID.randomUUID();
-    when(projectRepository.lockById(projectId)).thenReturn(project(projectId, 0L, false));
-    when(sessionRepository.bindSession(projectId, sessionId))
-        .thenThrow(constraintViolation("chk_harness_session_single_owner"));
-
-    // 已知单归属冲突必须转换成稳定领域错误，且不保留数据库异常 cause。
-    AiValidationException exception =
-        assertThrows(
-            AiValidationException.class,
-            () -> service.bindCoordinatorSession(projectId, sessionId));
-    assertEquals("Session is already owned by another entity", exception.getMessage());
-    assertNull(exception.getCause());
-  }
-
-  @Test
-  void testUnknownOwnerConstraintIsPropagated() {
-    ProjectRepository projectRepository = mock(ProjectRepository.class);
-    ProjectSessionRepository sessionRepository = mock(ProjectSessionRepository.class);
-    ProjectServiceImpl service = new ProjectServiceImpl(projectRepository, sessionRepository);
-    UUID projectId = UUID.randomUUID();
-    UUID sessionId = UUID.randomUUID();
-    when(projectRepository.lockById(projectId)).thenReturn(project(projectId, 0L, false));
-    DataIntegrityViolationException original =
-        new DataIntegrityViolationException("unrelated constraint");
-    when(sessionRepository.bindSession(projectId, sessionId)).thenThrow(original);
-
-    // 未识别的数据库错误不能被误报为 session 冲突。
-    assertSame(
-        original,
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () -> service.bindCoordinatorSession(projectId, sessionId)));
   }
 
   private static Project project(UUID id, long version, boolean archived) {

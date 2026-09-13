@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.orchestration;
 
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,6 +25,16 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueRun;
+import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
+import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
+import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
+import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -54,6 +65,11 @@ public class HarnessCommandAcceptanceOrchestrator {
   private final CanvasSessionRepository canvasSessionRepository;
   private final ChatRepository chatRepository;
   private final CanvasStore canvasStore;
+  private final ProjectRepository projectRepository;
+  private final ProjectSessionRepository projectSessionRepository;
+  private final IssueRepository issueRepository;
+  private final IssueRunRepository issueRunRepository;
+  private final IssueRunSessionRepository issueRunSessionRepository;
   private final ObjectProvider<HarnessStore> stores;
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final ObjectProvider<StorageUploadService> uploadServices;
@@ -64,6 +80,11 @@ public class HarnessCommandAcceptanceOrchestrator {
       CanvasSessionRepository canvasSessionRepository,
       ChatRepository chatRepository,
       CanvasStore canvasStore,
+      ProjectRepository projectRepository,
+      ProjectSessionRepository projectSessionRepository,
+      IssueRepository issueRepository,
+      IssueRunRepository issueRunRepository,
+      IssueRunSessionRepository issueRunSessionRepository,
       ObjectProvider<HarnessStore> stores,
       ObjectProvider<HarnessRuntime> runtimes,
       ObjectProvider<StorageUploadService> uploadServices,
@@ -74,6 +95,13 @@ public class HarnessCommandAcceptanceOrchestrator {
         Objects.requireNonNull(canvasSessionRepository, "canvasSessionRepository");
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
     this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
+    this.projectRepository = Objects.requireNonNull(projectRepository, "projectRepository");
+    this.projectSessionRepository =
+        Objects.requireNonNull(projectSessionRepository, "projectSessionRepository");
+    this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
+    this.issueRunRepository = Objects.requireNonNull(issueRunRepository, "issueRunRepository");
+    this.issueRunSessionRepository =
+        Objects.requireNonNull(issueRunSessionRepository, "issueRunSessionRepository");
     this.stores = Objects.requireNonNull(stores, "stores");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.uploadServices = Objects.requireNonNull(uploadServices, "uploadServices");
@@ -121,13 +149,48 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /** KEY SHARE 锁定 owner 行：阻止 owner 删除（排他锁等待）但允许同 owner 的并发接受。owner 缺失即归属目标不存在，确定性拒绝。 */
   private void lockOwnerForKeyShare(OwnerRef owner) {
-    if (owner.type() == OwnerType.CHAT) {
-      if (chatRepository.lockForKeyShare(owner.id()) == null) {
-        throw new IllegalArgumentException("chat " + owner.id() + " does not exist");
+    switch (owner.type()) {
+      case CHAT -> {
+        if (chatRepository.lockForKeyShare(owner.id()) == null) {
+          throw new IllegalArgumentException("chat " + owner.id() + " does not exist");
+        }
       }
-    } else {
-      if (canvasStore.lockDocumentForKeyShare(owner.id()).isEmpty()) {
-        throw new IllegalArgumentException("canvas " + owner.id() + " does not exist");
+      case CANVAS -> {
+        if (canvasStore.lockDocumentForKeyShare(owner.id()).isEmpty()) {
+          throw new IllegalArgumentException("canvas " + owner.id() + " does not exist");
+        }
+      }
+      case PROJECT -> {
+        if (projectRepository.lockForKeyShare(owner.id()) == null) {
+          throw new IllegalArgumentException("project " + owner.id() + " does not exist");
+        }
+      }
+      case ISSUE_RUN -> {
+        IssueRun run = issueRunRepository.getById(owner.id());
+        if (run == null) {
+          throw new IllegalArgumentException("issue run " + owner.id() + " does not exist");
+        }
+        Issue issue = issueRepository.getById(run.getIssueId());
+        if (issue == null) {
+          throw new IllegalArgumentException("issue " + run.getIssueId() + " does not exist");
+        }
+        UUID projectId = issue.getProjectId();
+        if (projectRepository.lockForKeyShare(projectId) == null) {
+          throw new IllegalArgumentException("project " + projectId + " does not exist");
+        }
+        Issue lockedIssue = issueRepository.lockById(issue.getId());
+        if (lockedIssue == null || !lockedIssue.getProjectId().equals(projectId)) {
+          throw new IllegalArgumentException(
+              "issue " + issue.getId() + " does not belong to project " + projectId);
+        }
+        IssueRun lockedRun = issueRunRepository.lockById(owner.id());
+        if (lockedRun == null || !lockedRun.getIssueId().equals(issue.getId())) {
+          throw new IllegalArgumentException(
+              "issue run " + owner.id() + " does not belong to issue " + issue.getId());
+        }
+        if (lockedRun.getActorType() != IssueRunActorType.AGENT) {
+          throw new IllegalArgumentException("issue run " + owner.id() + " is not an AGENT run");
+        }
       }
     }
   }
@@ -139,17 +202,32 @@ public class HarnessCommandAcceptanceOrchestrator {
         .orElseThrow(() -> new IllegalArgumentException("thread " + threadId + " does not exist"));
   }
 
-  /** 归属校验：目标 Session 必须已由该 owner 的 relation 行持有（Chat/Canvas 互斥由 relation 唯一存在性保证）。 */
+  /** 归属校验：目标 Session 必须已由该 owner 的 relation 行持有（四类互斥由 relation 唯一存在性保证）。 */
   private void requireOwnedSession(OwnerRef owner, UUID sessionId) {
-    if (owner.type() == OwnerType.CHAT) {
-      ChatSession relation = chatSessionRepository.findBySessionId(sessionId);
-      if (relation == null || !relation.chatId().equals(owner.id())) {
-        throw new IllegalArgumentException("session " + sessionId + " is not owned by " + owner);
+    switch (owner.type()) {
+      case CHAT -> {
+        ChatSession relation = chatSessionRepository.findBySessionId(sessionId);
+        if (relation == null || !relation.chatId().equals(owner.id())) {
+          throw new IllegalArgumentException("session " + sessionId + " is not owned by " + owner);
+        }
       }
-    } else {
-      CanvasSession relation = canvasSessionRepository.findBySessionId(sessionId);
-      if (relation == null || !relation.canvasId().equals(owner.id())) {
-        throw new IllegalArgumentException("session " + sessionId + " is not owned by " + owner);
+      case CANVAS -> {
+        CanvasSession relation = canvasSessionRepository.findBySessionId(sessionId);
+        if (relation == null || !relation.canvasId().equals(owner.id())) {
+          throw new IllegalArgumentException("session " + sessionId + " is not owned by " + owner);
+        }
+      }
+      case PROJECT -> {
+        ProjectSession relation = projectSessionRepository.findBySessionId(sessionId);
+        if (relation == null || !relation.getProjectId().equals(owner.id())) {
+          throw new IllegalArgumentException("session " + sessionId + " is not owned by " + owner);
+        }
+      }
+      case ISSUE_RUN -> {
+        IssueRunSession relation = issueRunSessionRepository.findBySessionId(sessionId);
+        if (relation == null || !relation.getRunId().equals(owner.id())) {
+          throw new IllegalArgumentException("session " + sessionId + " is not owned by " + owner);
+        }
       }
     }
   }
@@ -176,16 +254,23 @@ public class HarnessCommandAcceptanceOrchestrator {
    * 主键唯一性共同保证，而非额外的行锁。
    */
   private void createOwnership(HarnessStore.Transaction tx, UUID sessionId, OwnerRef owner) {
-    int inserted =
-        owner.type() == OwnerType.CHAT
-            ? chatSessionRepository.insertIfNotOwnedByOther(sessionId, owner.id())
-            : canvasSessionRepository.insertIfNotOwnedByOther(sessionId, owner.id());
-    if (inserted == 0) {
+    boolean bound;
+    try {
+      bound =
+          switch (owner.type()) {
+            case CHAT -> chatSessionRepository.insertIfNotOwnedByOther(sessionId, owner.id()) == 1;
+            case CANVAS -> canvasSessionRepository.insertIfNotOwnedByOther(sessionId, owner.id())
+                == 1;
+            case PROJECT -> projectSessionRepository.bindSession(owner.id(), sessionId);
+            case ISSUE_RUN -> issueRunSessionRepository.bindSession(owner.id(), sessionId);
+          };
+    } catch (DataIntegrityViolationException e) {
       throw new IllegalStateException(
-          "session " + sessionId + " is already owned by the other studio kind");
+          "session " + sessionId + " is already owned or could not be bound to " + owner, e);
     }
-    if (inserted != 1) {
-      throw new IllegalStateException("unexpected ownership rows for session " + sessionId);
+    if (!bound) {
+      throw new IllegalStateException(
+          "session " + sessionId + " is already owned or could not be bound to " + owner);
     }
   }
 

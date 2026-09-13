@@ -56,6 +56,14 @@ public interface ProjectMapper extends BaseMapper {
   @ResultMap("projectResultMap")
   ProjectDO lockById(@Param("id") UUID id);
 
+  @Select("select " + COLUMNS + " from project where id = #{id} for share")
+  @ResultMap("projectResultMap")
+  ProjectDO lockForShare(@Param("id") UUID id);
+
+  @Select("select " + COLUMNS + " from project where id = #{id} for key share")
+  @ResultMap("projectResultMap")
+  ProjectDO lockForKeyShare(@Param("id") UUID id);
+
   @Update(
       """
       update project

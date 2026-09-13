@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.platform.project.service.impl;
 
 import lombok.AllArgsConstructor;
-import org.postgresql.util.PSQLException;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -173,68 +171,6 @@ public class ProjectServiceImpl implements ProjectService {
       return projectRepository.listAll();
     }
     return projectRepository.listByArchived(false);
-  }
-
-  @Transactional
-  @Override
-  public void bindCoordinatorSession(UUID projectId, UUID sessionId) {
-    Objects.requireNonNull(projectId, "projectId");
-    Objects.requireNonNull(sessionId, "sessionId");
-
-    Project project = projectRepository.lockById(projectId);
-    if (project == null) {
-      throw new AiResourceNotFoundException("project", projectId.toString());
-    }
-    if (project.isArchived()) {
-      throw new AiValidationException("project", "Cannot bind session to archived project");
-    }
-
-    // 同 relation 同 session 幂等
-    ProjectSession existingForProject = projectSessionRepository.findByProjectId(projectId);
-    if (existingForProject != null) {
-      if (existingForProject.getSessionId().equals(sessionId)) {
-        return;
-      }
-      throw new AiValidationException(
-          "project_session", "Project is already bound to a different session");
-    }
-
-    ProjectSession existingForSession = projectSessionRepository.findBySessionId(sessionId);
-    if (existingForSession != null) {
-      throw new AiValidationException(
-          "project_session", "Session is already bound to another project");
-    }
-
-    try {
-      boolean bound = projectSessionRepository.bindSession(projectId, sessionId);
-      if (!bound) {
-        throw new AiValidationException("project_session", "Failed to bind coordinator session");
-      }
-    } catch (DataIntegrityViolationException e) {
-      if (isSingleOwnerConflict(e)) {
-        throw new AiValidationException(
-            "project_session", "Session is already owned by another entity");
-      }
-      throw e;
-    }
-  }
-
-  private boolean isSingleOwnerConflict(DataIntegrityViolationException e) {
-    Throwable root = e.getRootCause();
-    if (root instanceof PSQLException pe) {
-      String constraint =
-          pe.getServerErrorMessage() != null ? pe.getServerErrorMessage().getConstraint() : null;
-      if ("chk_harness_session_single_owner".equals(constraint)
-          || "pk_harness_session_owner_guard".equals(constraint)
-          || "uk_project_session_session".equals(constraint)) {
-        return true;
-      }
-    }
-    String message = e.getMessage();
-    return message != null
-        && (message.contains("chk_harness_session_single_owner")
-            || message.contains("pk_harness_session_owner_guard")
-            || message.contains("uk_project_session_session"));
   }
 
   @Override

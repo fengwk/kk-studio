@@ -56,8 +56,6 @@ public interface IssueRunService {
 
   List<IssueRun> listRuns(UUID issueId);
 
-  void bindSession(UUID runId, UUID sessionId);
-
   IssueRunSession getRunSession(UUID runId);
 
   IssueRunSession findRunSession(UUID sessionId);

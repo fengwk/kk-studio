@@ -27,7 +27,6 @@ import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
@@ -479,80 +478,6 @@ class IssueRunServiceDefensiveUnitTest {
     when(appendFailure.inputs.append(any(IssueInput.class))).thenReturn(false);
     assertValidation(
         "Failed to append retry input", () -> appendFailure.service.retryRun(issueId, "retry"));
-  }
-
-  @Test
-  void testBindSessionIdempotencyConflictsAndConstraintTranslation() {
-    UUID issueId = UUID.randomUUID();
-    UUID runId = UUID.randomUUID();
-    UUID sessionId = UUID.randomUUID();
-    UUID otherSessionId = UUID.randomUUID();
-
-    Fixture sameBinding = new Fixture();
-    sameBinding.stubLockChain(
-        issue(issueId, IssueStatus.IN_PROGRESS), run(runId, issueId, IssueRunRole.EXECUTOR));
-    when(sameBinding.runSessions.findByRunId(runId))
-        .thenReturn(IssueRunSession.builder().runId(runId).sessionId(sessionId).build());
-    sameBinding.service.bindSession(runId, sessionId);
-    verify(sameBinding.runSessions, never()).bindSession(any(UUID.class), any(UUID.class));
-
-    Fixture differentBinding = new Fixture();
-    differentBinding.stubLockChain(
-        issue(issueId, IssueStatus.IN_PROGRESS), run(runId, issueId, IssueRunRole.EXECUTOR));
-    when(differentBinding.runSessions.findByRunId(runId))
-        .thenReturn(IssueRunSession.builder().runId(runId).sessionId(otherSessionId).build());
-    assertValidation(
-        "Run is already bound to a different session",
-        () -> differentBinding.service.bindSession(runId, sessionId));
-
-    Fixture sessionConflict = new Fixture();
-    sessionConflict.stubLockChain(
-        issue(issueId, IssueStatus.IN_PROGRESS), run(runId, issueId, IssueRunRole.EXECUTOR));
-    when(sessionConflict.runSessions.findBySessionId(sessionId))
-        .thenReturn(
-            IssueRunSession.builder().runId(UUID.randomUUID()).sessionId(sessionId).build());
-    assertValidation(
-        "Session is already bound to another run",
-        () -> sessionConflict.service.bindSession(runId, sessionId));
-
-    Fixture inactive = new Fixture();
-    IssueRun inactiveRun = run(runId, issueId, IssueRunRole.EXECUTOR);
-    inactiveRun.setStatus(IssueRunStatus.COMPLETED);
-    inactive.stubLockChain(issue(issueId, IssueStatus.IN_REVIEW), inactiveRun);
-    assertValidation(
-        "Cannot bind session to inactive run, status is COMPLETED",
-        () -> inactive.service.bindSession(runId, sessionId));
-
-    Fixture falseResult = new Fixture();
-    falseResult.stubLockChain(
-        issue(issueId, IssueStatus.IN_PROGRESS), run(runId, issueId, IssueRunRole.EXECUTOR));
-    when(falseResult.runSessions.bindSession(runId, sessionId)).thenReturn(false);
-    assertValidation(
-        "Failed to bind run session", () -> falseResult.service.bindSession(runId, sessionId));
-
-    Fixture knownConstraint = new Fixture();
-    knownConstraint.stubLockChain(
-        issue(issueId, IssueStatus.IN_PROGRESS), run(runId, issueId, IssueRunRole.EXECUTOR));
-    when(knownConstraint.runSessions.bindSession(runId, sessionId))
-        .thenThrow(constraintViolation("chk_harness_session_single_owner"));
-    AiValidationException translated =
-        assertThrows(
-            AiValidationException.class,
-            () -> knownConstraint.service.bindSession(runId, sessionId));
-    assertEquals("Session is already owned by another entity", translated.getMessage());
-    assertNull(translated.getCause());
-
-    Fixture unknownConstraint = new Fixture();
-    unknownConstraint.stubLockChain(
-        issue(issueId, IssueStatus.IN_PROGRESS), run(runId, issueId, IssueRunRole.EXECUTOR));
-    DataIntegrityViolationException original =
-        new DataIntegrityViolationException("unrelated constraint");
-    when(unknownConstraint.runSessions.bindSession(runId, sessionId)).thenThrow(original);
-    assertSame(
-        original,
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () -> unknownConstraint.service.bindSession(runId, sessionId)));
   }
 
   private static Fixture humanReviewFixture(UUID issueId) {
