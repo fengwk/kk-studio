@@ -32,6 +32,7 @@
 | harness-environment | [modules/harness-environment.md](modules/harness-environment.md) | Environment 身份、Capability catalog 与 Daemon v2 wire |
 | harness-environment-server | [modules/harness-environment-server.md](modules/harness-environment-server.md) | Environment daemon 会话、租约与调用协调核心 |
 | harness-infra | [modules/harness-infra.md](modules/harness-infra.md) | Harness Store、Work、通知和 ResourceStore |
+| harness-mcp | [modules/harness-mcp.md](modules/harness-mcp.md) | Remote/Local MCP client、总预算、取消与 stdio 进程生命周期 |
 | harness-provider | [modules/harness-provider.md](modules/harness-provider.md) | JDK 21 HttpClient + SSE 传输与增量解析基础设施 |
 | harness-runtime | [modules/harness-runtime.md](modules/harness-runtime.md) | Agent Runtime 状态机与 processors |
 | harness-tool | [modules/harness-tool.md](modules/harness-tool.md) | Tool identity、descriptor、call/result 与 Tool JSON codecs |
