@@ -256,6 +256,18 @@ export function McpServersPage() {
     setEditModal(null)
   }
 
+  function handleRequestCloseCreate() {
+    if (!createMutation.isPending) {
+      setCreateModal(null)
+    }
+  }
+
+  function handleRequestCloseEdit() {
+    if (!updateMutation.isPending && !editModal?.discoverPending) {
+      handleCloseEdit()
+    }
+  }
+
   function handleCreateSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!createModal) return
@@ -469,7 +481,7 @@ export function McpServersPage() {
       </div>
 
       {createModal && (
-        <ModalBackdrop onClose={() => setCreateModal(null)}>
+        <ModalBackdrop onClose={handleRequestCloseCreate}>
           <div
             className="modal-card mcp-modal-card"
             role="dialog"
@@ -479,7 +491,7 @@ export function McpServersPage() {
           >
             <ModalHeader
               title={t('ai.mcp.create')}
-              onClose={() => setCreateModal(null)}
+              onClose={handleRequestCloseCreate}
               closeDisabled={createMutation.isPending}
             />
             <form onSubmit={handleCreateSubmit}>
@@ -519,7 +531,7 @@ export function McpServersPage() {
                 <button
                   type="button"
                   className="ghost-btn"
-                  onClick={() => setCreateModal(null)}
+                  onClick={handleRequestCloseCreate}
                   disabled={createMutation.isPending}
                 >
                   {t('shared.cancel')}
@@ -538,7 +550,7 @@ export function McpServersPage() {
       )}
 
       {editModal && (
-        <ModalBackdrop onClose={handleCloseEdit}>
+        <ModalBackdrop onClose={handleRequestCloseEdit}>
           <div
             className="modal-card mcp-modal-card"
             role="dialog"
@@ -548,7 +560,7 @@ export function McpServersPage() {
           >
             <ModalHeader
               title={`${t('ai.mcp.edit')} · ${editModal.server.name}`}
-              onClose={handleCloseEdit}
+              onClose={handleRequestCloseEdit}
               closeDisabled={updateMutation.isPending || editModal.discoverPending}
             />
             {editModal.loading ? (
@@ -603,7 +615,7 @@ export function McpServersPage() {
                   <button
                     type="button"
                     className="ghost-btn"
-                    onClick={handleCloseEdit}
+                    onClick={handleRequestCloseEdit}
                     disabled={updateMutation.isPending || editModal.discoverPending}
                   >
                     {t('shared.cancel')}
