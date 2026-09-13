@@ -14,6 +14,10 @@ public interface ProjectRepository {
 
   Project lockById(UUID id);
 
+  Project lockForShare(UUID id);
+
+  Project lockForKeyShare(UUID id);
+
   boolean updateById(Project project, long expectedVersion);
 
   boolean updateArchivedAt(UUID id, Instant archivedAt, long expectedVersion);
