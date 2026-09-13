@@ -47,7 +47,7 @@ function draft(overrides: Partial<AgentDraft> = {}): AgentDraft {
     variant: 'quality',
     environmentId: ' env-uuid-1 ',
     toolIds: [' base.read ', 'base.bash'],
-    skills: [' dev '],
+    skills: [{ sourceId: ' src-1 ', name: ' dev ' }],
     subagents: [' helper '],
     ...overrides,
   }
@@ -67,7 +67,7 @@ describe('ai-agent-draft-codec', () => {
   it('normalizes tool IDs and capability names and rejects collisions in create payloads', () => {
     expect(toEditableAgent(draft()).config).toMatchObject({
       toolIds: ['base.read', 'base.bash'],
-      skills: ['dev'],
+      skills: [{ sourceId: 'src-1', name: 'dev' }],
       subagents: ['helper'],
     })
     expect(() => toEditableAgent(draft({ toolIds: ['base.read', 'base.read'] }))).toThrow(
@@ -76,6 +76,36 @@ describe('ai-agent-draft-codec', () => {
     expect(() => toEditableAgent(draft({ subagents: ['helper', 'helper'] }))).toThrow(
       /名称不能重复/,
     )
+    expect(() =>
+      toEditableAgent(
+        draft({
+          skills: [
+            { sourceId: 'src-1', name: 'dev' },
+            { sourceId: 'src-1', name: 'dev' },
+          ],
+        }),
+      ),
+    ).toThrow(/名称不能重复/)
+  })
+
+  it('allows same-name skills from different sourceIds and rejects blank components', () => {
+    const multiSourceDraft = draft({
+      skills: [
+        { sourceId: 'src-1', name: 'search' },
+        { sourceId: 'src-2', name: 'search' },
+      ],
+    })
+    expect(toEditableAgent(multiSourceDraft).config.skills).toEqual([
+      { sourceId: 'src-1', name: 'search' },
+      { sourceId: 'src-2', name: 'search' },
+    ])
+
+    expect(() =>
+      toEditableAgent(draft({ skills: [{ sourceId: '   ', name: 'search' }] })),
+    ).toThrow(/skills/)
+    expect(() =>
+      toEditableAgent(draft({ skills: [{ sourceId: 'src-1', name: '   ' }] })),
+    ).toThrow(/skills/)
   })
 
   it('projects persisted definitions and normalizes nullable values', () => {
@@ -88,7 +118,7 @@ describe('ai-agent-draft-codec', () => {
       environmentId: 'env-uuid-1',
       config: {
         toolIds: [' base.read ', ''],
-        skills: [],
+        skills: [{ sourceId: ' src-1 ', name: ' dev ' }],
         subagents: [' writer ', ''],
       },
       version: '1',
@@ -104,9 +134,32 @@ describe('ai-agent-draft-codec', () => {
       variant: 'quality',
       environmentId: 'env-uuid-1',
       toolIds: ['base.read'],
-      skills: [],
+      skills: [{ sourceId: 'src-1', name: 'dev' }],
       subagents: ['writer'],
     })
+
+    expect(() =>
+      toAgentDraft({
+        ...agent,
+        config: {
+          ...agent.config,
+          skills: [
+            { sourceId: 'src-1', name: 'dev' },
+            { sourceId: 'src-1', name: 'dev' },
+          ],
+        },
+      }),
+    ).toThrow(/名称不能重复/)
+
+    expect(() =>
+      toAgentDraft({
+        ...agent,
+        config: {
+          ...agent.config,
+          skills: [{ sourceId: ' ', name: 'dev' }],
+        },
+      }),
+    ).toThrow(/skills/)
 
     expect(
       toAgentDraft({
@@ -127,7 +180,7 @@ describe('ai-agent-draft-codec', () => {
       environmentId: 'env-uuid-1',
       config: {
         toolIds: ['base.read', 'base.bash'],
-        skills: ['dev'],
+        skills: [{ sourceId: 'src-1', name: 'dev' }],
         subagents: ['helper'],
       },
     }
@@ -140,7 +193,7 @@ describe('ai-agent-draft-codec', () => {
       environmentId: 'env-uuid-1',
       config: {
         toolIds: ['base.read', 'base.bash'],
-        skills: ['dev'],
+        skills: [{ sourceId: 'src-1', name: 'dev' }],
         subagents: ['helper'],
       },
     })
@@ -153,7 +206,11 @@ describe('ai-agent-draft-codec', () => {
       description: null,
       systemPrompt: null,
       environmentId: null,
-      config: { toolIds: ['base.read', 'base.bash'], skills: ['dev'], subagents: ['helper'] },
+      config: {
+        toolIds: ['base.read', 'base.bash'],
+        skills: [{ sourceId: 'src-1', name: 'dev' }],
+        subagents: ['helper'],
+      },
     })
     expect(toEditableAgent(draft({ variant: ' ' })).variant).toBeNull()
   })
@@ -171,7 +228,9 @@ describe('ai-agent-draft-codec', () => {
     [{ name: ' ' }, /name/],
     [{ model: ' ' }, /model/],
     [{ toolIds: ['base.read', 'base.read'] }, /toolIds/],
-    [{ skills: ['dev', 'dev'] }, /skills/],
+    [{ skills: [{ sourceId: 'src-1', name: 'dev' }, { sourceId: 'src-1', name: 'dev' }] }, /skills/],
+    [{ skills: [{ sourceId: '', name: 'dev' }] }, /skills/],
+    [{ skills: [{ sourceId: 'src-1', name: '' }] }, /skills/],
     [{ subagents: ['helper', 'helper'] }, /subagents/],
   ] as Array<[Partial<AgentDraft>, RegExp]>)(
     'rejects invalid complete bodies %#',
@@ -186,7 +245,7 @@ describe('ai-agent-draft-codec', () => {
   it('writes the strict config shape with only toolIds, skills, and subagents', () => {
     expect(toEditableAgent(draft()).config).toEqual({
       toolIds: ['base.read', 'base.bash'],
-      skills: ['dev'],
+      skills: [{ sourceId: 'src-1', name: 'dev' }],
       subagents: ['helper'],
     })
   })

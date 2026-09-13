@@ -11,7 +11,7 @@ import type {
   AgentModelConfigDTO,
   AgentModelView,
 } from '@/shared/api/contracts/ai-catalog'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO, EnvironmentSkillDTO } from '@/shared/api/contracts/ai-environment'
 
 const baseConfig: AgentModelConfigDTO = {
   limit: { context: 128000, output: 8192 },
@@ -48,10 +48,9 @@ function modelWithVariants(): AgentModelView {
 function environmentCard(
   id: string,
   name: string,
-  skills: { name: string; description: string | null }[],
   extra?: Partial<EnvironmentCardDTO>,
 ): EnvironmentCardDTO {
-  return {
+  const intermediate = {
     id,
     name,
     rootPath: null,
@@ -59,11 +58,28 @@ function environmentCard(
     ready: true,
     lastSeen: null,
     capabilities: [],
-    skills,
+    skills: [],
     version: '1',
     createTime: '2026-07-20T00:00:00.000Z',
     updateTime: '2026-07-20T00:00:00.000Z',
     ...extra,
+  }
+  return intermediate as EnvironmentCardDTO
+}
+
+function inventorySkill(
+  sourceId: string,
+  name: string,
+  description: string | null = null,
+): EnvironmentSkillDTO {
+  return {
+    sourceId,
+    name,
+    description: description ?? '',
+    sourceVersion: '1',
+    baseDirectory: '/tmp',
+    contentRevision: 'sha256-abc',
+    discoveredAt: '2026-07-20T00:00:00.000Z',
   }
 }
 
@@ -85,7 +101,7 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
 const ENV_LABEL = '绑定环境'
 
 describe('AgentForm current contracts', () => {
-  it('selects model/variant and environment UUID, and skills come from selected environment card', async () => {
+  it('selects model/variant and environment UUID, and skills come from durable usable inventory', async () => {
     const user = userEvent.setup()
     const longDescription =
       'Execute shell commands in the configured environment and return the captured output without losing long diagnostic context.'
@@ -94,13 +110,17 @@ describe('AgentForm current contracts', () => {
         ...emptyAgentDraft(modelWithVariants()),
         toolIds: ['missing-tool'],
       })
+      const inventory = [
+        inventorySkill('src-1', 'dev', 'dev skill'),
+      ]
       return (
         <AgentForm
           draft={draft}
           models={[modelWithVariants()]}
           environments={[
-            environmentCard('env-1', 'local', [{ name: 'dev', description: 'dev' }]),
+            environmentCard('env-1', 'local'),
           ]}
+          inventorySkills={draft.environmentId ? inventory : []}
           toolCatalog={[
             {
               id: 'base.bash',
@@ -129,15 +149,91 @@ describe('AgentForm current contracts', () => {
     await user.click(bashInput)
     expect(bashInput).toBeChecked()
 
-    // 未绑定环境时没有任何 live skill 候选
+    // 未绑定环境时没有任何 durable inventory skill 候选
     expect(screen.queryByLabelText(/dev/)).not.toBeInTheDocument()
     expect(screen.getByText('暂无候选 Skills')).toBeInTheDocument()
 
-    // 选择绑定环境后，技能候选来自该卡片
+    // 选择绑定环境后，技能候选来自 durable inventory
     await chooseSelectOption(user, ENV_LABEL, 'local')
     expect(screen.getByLabelText(/dev/)).not.toBeChecked()
     await user.click(screen.getByLabelText(/dev/))
     expect(screen.getByLabelText(/dev/)).toBeChecked()
+  })
+
+  it('allows selecting bound offline environment and its persisted usable skills', async () => {
+    const user = userEvent.setup()
+    const drafts: AgentDraft[] = []
+    function Harness() {
+      const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft(modelWithVariants()))
+      const offlineEnv = environmentCard('env-offline', 'offline-box', {
+        status: 'OFFLINE',
+        ready: false,
+      })
+      const inventory = [
+        inventorySkill('src-off', 'offline-skill', 'persisted offline skill'),
+      ]
+      return (
+        <AgentForm
+          draft={draft}
+          models={[modelWithVariants()]}
+          environments={[offlineEnv]}
+          inventorySkills={draft.environmentId === 'env-offline' ? inventory : []}
+          onChange={(next) => {
+            drafts.push(next)
+            setDraft(next)
+          }}
+        />
+      )
+    }
+    render(<Harness />)
+    // Offline environment option is marked offline in the label and can be selected
+    await chooseSelectOption(user, ENV_LABEL, 'offline-box (offline)')
+    expect(drafts.at(-1)?.environmentId).toBe('env-offline')
+
+    // Persisted inventory skill is selectable while environment is offline
+    const skillCheckbox = screen.getByLabelText(/offline-skill/)
+    expect(skillCheckbox).not.toBeChecked()
+    await user.click(skillCheckbox)
+    expect(drafts.at(-1)?.skills).toEqual([{ sourceId: 'src-off', name: 'offline-skill' }])
+  })
+
+  it('does not collapse same-name skills from different sourceIds', async () => {
+    const user = userEvent.setup()
+    const drafts: AgentDraft[] = []
+    function Harness() {
+      const [draft, setDraft] = useState<AgentDraft>({
+        ...emptyAgentDraft(modelWithVariants()),
+        environmentId: 'env-1',
+      })
+      const inventory = [
+        inventorySkill('src-1-uuid-1234', 'search', 'first search skill'),
+        inventorySkill('src-2-uuid-5678', 'search', 'second search skill'),
+      ]
+      return (
+        <AgentForm
+          draft={draft}
+          models={[modelWithVariants()]}
+          environments={[environmentCard('env-1', 'local')]}
+          inventorySkills={inventory}
+          onChange={(next) => {
+            drafts.push(next)
+            setDraft(next)
+          }}
+        />
+      )
+    }
+    render(<Harness />)
+    const checkboxes = screen.getAllByRole('checkbox', { name: /search/ })
+    expect(checkboxes).toHaveLength(2)
+
+    // Check both skills with the same name
+    await user.click(checkboxes[0])
+    await user.click(checkboxes[1])
+
+    expect(drafts.at(-1)?.skills).toEqual([
+      { sourceId: 'src-1-uuid-1234', name: 'search' },
+      { sourceId: 'src-2-uuid-5678', name: 'search' },
+    ])
   })
 
   it('renders field-level errors for tools and skills', () => {
@@ -165,13 +261,14 @@ describe('AgentForm current contracts', () => {
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>({
         ...emptyAgentDraft(modelWithVariants()),
-        skills: ['ghost-skill'],
+        skills: [{ sourceId: 'src-ghost', name: 'ghost-skill' }],
       })
       return (
         <AgentForm
           draft={draft}
           models={[modelWithVariants()]}
-          environments={[environmentCard('env-1', 'local', [{ name: 'dev', description: 'dev' }])]}
+          environments={[environmentCard('env-1', 'local')]}
+          inventorySkills={[]}
           onChange={setDraft}
         />
       )
@@ -187,38 +284,131 @@ describe('AgentForm current contracts', () => {
     expect(ghost).not.toBeChecked()
   })
 
-  it('switches environment selection and updates skill candidates without losing selected names', async () => {
+  it('clears skills on environment change or unbind, but preserves refs on same ID rerender', async () => {
     const user = userEvent.setup()
+    const drafts: AgentDraft[] = []
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft(modelWithVariants()))
+      const inventoryA = [inventorySkill('src-1', 'dev', 'dev skill')]
+      const inventoryB = [inventorySkill('src-2', 'ops', 'ops skill')]
+      const currentInventory =
+        draft.environmentId === 'env-1'
+          ? inventoryA
+          : draft.environmentId === 'env-2'
+            ? inventoryB
+            : []
       return (
         <AgentForm
           draft={draft}
           models={[modelWithVariants()]}
           environments={[
-            environmentCard('env-1', 'local', [
-              { name: 'dev', description: 'dev skill' },
-              { name: 'ops', description: 'ops skill' },
-            ]),
-            environmentCard('env-2', 'remote', [
-              { name: 'dev', description: 'duplicate' },
-              { name: 'docs', description: null },
-            ]),
+            environmentCard('env-1', 'local'),
+            environmentCard('env-2', 'remote'),
           ]}
-          onChange={setDraft}
+          inventorySkills={currentInventory}
+          onChange={(next) => {
+            drafts.push(next)
+            setDraft(next)
+          }}
         />
       )
     }
     render(<Harness />)
-    await chooseSelectOption(user, ENV_LABEL, 'local')
-    await user.click(screen.getByLabelText(/dev/))
-    await user.click(screen.getByLabelText(/ops/))
 
-    // 切换到 remote 环境
+    // Select env-1
+    await chooseSelectOption(user, ENV_LABEL, 'local')
+    expect(drafts.at(-1)?.environmentId).toBe('env-1')
+
+    // Check dev
+    await user.click(screen.getByLabelText(/dev/))
+    expect(drafts.at(-1)?.skills).toEqual([{ sourceId: 'src-1', name: 'dev' }])
+
+    // Switch to env-2 -> skills cleared explicitly
     await chooseSelectOption(user, ENV_LABEL, 'remote')
-    expect(screen.getByLabelText(/dev/)).toBeChecked()
-    expect(screen.getByLabelText(/ops/)).toBeChecked()
-    expect(screen.getByLabelText(/docs/)).not.toBeChecked()
+    expect(drafts.at(-1)?.environmentId).toBe('env-2')
+    expect(drafts.at(-1)?.skills).toEqual([])
+
+    // Select ops on env-2
+    await user.click(screen.getByLabelText(/ops/))
+    expect(drafts.at(-1)?.skills).toEqual([{ sourceId: 'src-2', name: 'ops' }])
+
+    // Unbind environment -> skills cleared explicitly
+    await chooseSelectOption(user, ENV_LABEL, '（无）')
+    expect(drafts.at(-1)?.environmentId).toBe('')
+    expect(drafts.at(-1)?.skills).toEqual([])
+  })
+
+  it('renders loading and error states while keeping saved selected refs visible as removable orphans', async () => {
+    const savedSkill = { sourceId: 'src-saved', name: 'saved-skill' }
+
+    // Loading state with saved refs
+    const { rerender } = render(
+      <AgentForm
+        draft={{
+          ...emptyAgentDraft(modelWithVariants()),
+          environmentId: 'env-1',
+          skills: [savedSkill],
+        }}
+        models={[modelWithVariants()]}
+        environments={[environmentCard('env-1', 'local')]}
+        inventorySkillsLoading={true}
+        onChange={() => undefined}
+      />,
+    )
+    expect(screen.getByText('正在加载资源')).toBeInTheDocument()
+    const savedCheckbox = screen.getByLabelText(/saved-skill/)
+    expect(savedCheckbox).toBeChecked()
+    expect(screen.getByText('不可用')).toBeInTheDocument()
+
+    // Loading state with NO saved refs
+    rerender(
+      <AgentForm
+        draft={{
+          ...emptyAgentDraft(modelWithVariants()),
+          environmentId: 'env-1',
+          skills: [],
+        }}
+        models={[modelWithVariants()]}
+        environments={[environmentCard('env-1', 'local')]}
+        inventorySkillsLoading={true}
+        onChange={() => undefined}
+      />,
+    )
+    expect(screen.getByText('正在加载资源')).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: /saved-skill/ })).not.toBeInTheDocument()
+
+    // Error state with saved refs
+    rerender(
+      <AgentForm
+        draft={{
+          ...emptyAgentDraft(modelWithVariants()),
+          environmentId: 'env-1',
+          skills: [savedSkill],
+        }}
+        models={[modelWithVariants()]}
+        environments={[environmentCard('env-1', 'local')]}
+        inventorySkillsError={new Error('Failed to load')}
+        onChange={() => undefined}
+      />,
+    )
+    expect(screen.getByText('加载失败')).toBeInTheDocument()
+    expect(screen.getByLabelText(/saved-skill/)).toBeChecked()
+
+    // Error state with NO saved refs
+    rerender(
+      <AgentForm
+        draft={{
+          ...emptyAgentDraft(modelWithVariants()),
+          environmentId: 'env-1',
+          skills: [],
+        }}
+        models={[modelWithVariants()]}
+        environments={[environmentCard('env-1', 'local')]}
+        inventorySkillsError={new Error('Failed to load')}
+        onChange={() => undefined}
+      />,
+    )
+    expect(screen.getByText('加载失败')).toBeInTheDocument()
   })
 
   it('handles subagents candidates and excludes self in create mode', () => {

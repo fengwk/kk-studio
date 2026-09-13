@@ -1,5 +1,9 @@
-import type { AgentDefinitionDTO, ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  AgentDefinitionDTO,
+  AgentSkillRefDTO,
+  ToolCatalogEntryDTO,
+} from '@/shared/api/contracts/ai-catalog'
+import type { EnvironmentSkillDTO } from '@/shared/api/contracts/ai-environment'
 
 export interface CapabilityOption {
   value: string
@@ -7,7 +11,15 @@ export interface CapabilityOption {
   version?: string | null
   description: string | null
   offline?: boolean
-  /** 已配置但不在当前 live 候选中（仍展示，可取消勾选）。 */
+  /** 已配置但不在当前候选中（仍展示，可取消勾选）。 */
+  missing?: boolean
+}
+
+export interface SkillCandidateOption {
+  ref: AgentSkillRefDTO
+  sourceId: string
+  name: string
+  description: string | null
   missing?: boolean
 }
 
@@ -56,27 +68,34 @@ export function buildPermissionToolCandidates(
 }
 
 /**
- * 构建单个选中 Environment Card 的 skill 候选。
+ * 构建来自 Environment usable durable inventory 的 skill 候选。
  *
- * 只接受至多一个 Environment Card；未选择或 {@code ready !== true} 一律返回空列表。
- * ready 是服务端统一可用性标记（READY + 连接打开 + 心跳未过期），status 文本只用于展示，不作为可用性判断。
+ * 不读取 EnvironmentCardDTO.skills，且不依赖 environment.ready。
+ * 即便 Environment 离线，只要持久 inventory 存在且可用即可选择。
+ * 针对 (sourceId, name) 复合身份去重；来自不同 sourceId 的同名技能保持独立候选。
  */
 export function buildSkillCandidates(
-  environment: EnvironmentCardDTO | undefined,
-): CapabilityOption[] {
-  if (!environment || environment.ready !== true) {
+  skills: EnvironmentSkillDTO[] | null | undefined,
+): SkillCandidateOption[] {
+  if (!skills?.length) {
     return []
   }
-  const options: CapabilityOption[] = []
+  const options: SkillCandidateOption[] = []
   const seen = new Set<string>()
-  for (const skill of environment.skills ?? []) {
+  for (const skill of skills) {
+    const sourceId = skill.sourceId?.trim()
     const name = skill.name?.trim()
-    if (!name || seen.has(name)) {
+    if (!sourceId || !name) {
       continue
     }
-    seen.add(name)
+    const key = `${sourceId}::${name}`
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
     options.push({
-      value: name,
+      ref: { sourceId, name },
+      sourceId,
       name,
       description: skill.description ?? null,
     })
@@ -134,4 +153,54 @@ export function withSelectedOrphans(
     merged.push(orphan)
   }
   return merged
+}
+
+/**
+ * 把已保存但在当前 inventory 中缺失的 skill refs 并入候选列表展示为不可用/可移除项。
+ * 针对 (sourceId, name) 复合身份去重，不折叠来自不同 sourceId 的同名技能。
+ */
+export function withSelectedSkillOrphans(
+  candidates: SkillCandidateOption[],
+  selected: AgentSkillRefDTO[],
+): SkillCandidateOption[] {
+  const byKey = new Map(
+    candidates.map((item) => [`${item.ref.sourceId}::${item.ref.name}`, item]),
+  )
+  const merged = [...candidates]
+  for (const raw of selected) {
+    const sourceId = raw?.sourceId?.trim()
+    const name = raw?.name?.trim()
+    if (!sourceId || !name) {
+      continue
+    }
+    const key = `${sourceId}::${name}`
+    if (byKey.has(key)) {
+      continue
+    }
+    const orphan: SkillCandidateOption = {
+      ref: { sourceId, name },
+      sourceId,
+      name,
+      description: null,
+      missing: true,
+    }
+    byKey.set(key, orphan)
+    merged.push(orphan)
+  }
+  return merged
+}
+
+export function isSameSkillRef(a: AgentSkillRefDTO, b: AgentSkillRefDTO): boolean {
+  return a.sourceId.trim() === b.sourceId.trim() && a.name.trim() === b.name.trim()
+}
+
+export function toggleSkillRef(
+  items: AgentSkillRefDTO[],
+  target: AgentSkillRefDTO,
+): AgentSkillRefDTO[] {
+  const exists = items.some((item) => isSameSkillRef(item, target))
+  if (exists) {
+    return items.filter((item) => !isSameSkillRef(item, target))
+  }
+  return [...items, { sourceId: target.sourceId.trim(), name: target.name.trim() }]
 }
