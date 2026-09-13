@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentCapabilityDTO;
-import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentSkillDTO;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -273,7 +272,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
               clock.instant(),
               Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
       dto.setLastSeen(conn.lastSeenAt());
-      // 连接状态与能力列表是 live 事实；Skill 与宿主 root 是持久事实，离线时仍然可读。
+      // 连接状态与能力列表是 live 事实；宿主 root 展示路径由持久 inventory 兜底，离线时仍然可读。
       dto.setRootPath(
           conn.status() == LiveEnvironmentStatus.READY && conn.daemonCapabilities() != null
               ? conn.rootPath()
@@ -294,17 +293,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       dto.setRootPath(reportedRootPath(inventory));
       dto.setCapabilities(List.of());
     }
-    // 可用 Skill 只由持久 inventory 决定：来源 READY 且 applied/行版本都等于当前 source.version。
-    dto.setSkills(
-        skillSourceRepository.listUsableSkills(env.getId()).stream()
-            .map(
-                entry -> {
-                  LiveEnvironmentSkillDTO sdto = new LiveEnvironmentSkillDTO();
-                  sdto.setName(entry.getName());
-                  sdto.setDescription(entry.getDescription());
-                  return sdto;
-                })
-            .toList());
     return dto;
   }
 
