@@ -147,4 +147,7 @@ public interface IssueControllerWorkMapper extends BaseMapper {
       @Param("claimedWakeVersion") long claimedWakeVersion,
       @Param("now") Instant now,
       @Param("requestedAt") Instant requestedAt);
+
+  @Delete("delete from issue_controller_work where issue_id = #{issueId}")
+  int deleteByIssueId(@Param("issueId") UUID issueId);
 }

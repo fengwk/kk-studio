@@ -19,4 +19,6 @@ public interface IssueInputRepository {
   IssueInput findFirstAfterSequence(UUID issueId, long afterSequence);
 
   IssueInput findFirstByKindAfterSequence(UUID issueId, IssueInputKind kind, long afterSequence);
+
+  int deleteByIssueId(UUID issueId);
 }

@@ -25,4 +25,6 @@ public interface IssueControllerWorkRepository {
 
   boolean reschedule(
       UUID issueId, String leaseToken, long claimedWakeVersion, Instant now, Instant requestedAt);
+
+  int deleteByIssueId(UUID issueId);
 }
