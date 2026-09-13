@@ -222,6 +222,120 @@ class SkillFrontMatterParserTest {
     assertTrue(error.getMessage().contains("malformed front matter entry"));
   }
 
+  /** 测试意图：包含 UTF-8 BOM（\uFEFF）与 front matter 内注释（#）能被正常剥离解析。 */
+  @Test
+  void parsesUtf8WithBomAndComments() throws IOException {
+    String content =
+        "\uFEFF---\n# Leading comment\nname: bom-skill\n# Mid comment\n\ndescription: Skill with BOM\n---\n# Body\n";
+    writeSkill(tempDir, content);
+
+    DaemonSkill skill = SkillFrontMatterParser.parse(tempDir, "test");
+    assertEquals("bom-skill", skill.name());
+    assertEquals("Skill with BOM", skill.description());
+    assertEquals("# Body", skill.body());
+  }
+
+  /** 测试意图：冒号后无符号的多行缩进延续文本（无 | 或 >）能被正确识别为块标量。 */
+  @Test
+  void parsesMultilineContinuationScalarWithoutPipe() throws IOException {
+    String content =
+        """
+        ---
+        name:
+          multiline-name
+        description:
+          first line
+          second line
+        ---
+        Body content
+        """;
+    writeSkill(tempDir, content);
+
+    DaemonSkill skill = SkillFrontMatterParser.parse(tempDir, "test");
+    assertEquals("multiline-name", skill.name());
+    assertEquals("first line\nsecond line", skill.description());
+    assertEquals("Body content", skill.body());
+  }
+
+  /** 测试意图：冒号后空无内容且无缩进延续行时解析为空字符串，触发缺少必填项校验。 */
+  @Test
+  void rejectsEmptyKeyOrEmptyFieldValue() throws IOException {
+    // 冒号后完全为空且无延续行
+    String emptyValueContent =
+        """
+        ---
+        name:
+        description: valid description
+        ---
+        Body
+        """;
+    writeSkill(tempDir, emptyValueContent);
+    SkillParseException emptyValError =
+        assertThrows(
+            SkillParseException.class, () -> SkillFrontMatterParser.parse(tempDir, "test"));
+    assertTrue(emptyValError.getMessage().contains("missing non-blank front matter name"));
+
+    // 冒号前 key 为空
+    String emptyKeyContent =
+        """
+        ---
+        : empty-key-value
+        name: valid
+        description: valid
+        ---
+        Body
+        """;
+    writeSkill(tempDir, emptyKeyContent);
+    SkillParseException error =
+        assertThrows(
+            SkillParseException.class, () -> SkillFrontMatterParser.parse(tempDir, "test"));
+    assertTrue(error.getMessage().contains("empty front matter key"));
+  }
+
+  /** 测试意图：双引号标量转义字符（\\r, \\t, \\", \\\\ 以及末尾单个 \\）能被正确反转义。 */
+  @Test
+  void parsesDoubleQuotedEscapeSequences() throws IOException {
+    String content =
+        """
+        ---
+        name: "escaped\\tskill"
+        description: "first\\rsecond\\tthird\\\"quote\\\\slash\\a"
+        ---
+        Body
+        """;
+    writeSkill(tempDir, content);
+
+    DaemonSkill skill = SkillFrontMatterParser.parse(tempDir, "test");
+    assertEquals("escaped\tskill", skill.name());
+    assertEquals("first\rsecond\tthird\"quote\\slasha", skill.description());
+  }
+
+  /** 测试意图：支持 CRLF（\\r\\n）与经典 Mac CR（\\r）换行符的统一拆分。 */
+  @Test
+  void parsesCrlfAndStandaloneCrLineEndings() throws IOException {
+    String content =
+        "---\r\nname: crlf-skill\r\ndescription: crlf desc\r\n---\r\nLine 1\rLine 2\r\nLine 3\n";
+    writeSkill(tempDir, content);
+
+    DaemonSkill skill = SkillFrontMatterParser.parse(tempDir, "test");
+    assertEquals("crlf-skill", skill.name());
+    assertEquals("crlf desc", skill.description());
+    assertEquals("Line 1\nLine 2\nLine 3", skill.body());
+  }
+
+  /** 测试意图：SKILL.md 不存在或不可读时抛出清晰且脱敏的 SkillParseException。 */
+  @Test
+  void rejectsNonReadableSkillFile() {
+    Path missingDir = tempDir.resolve("missing");
+    SkillParseException error =
+        assertThrows(
+            SkillParseException.class,
+            () -> SkillFrontMatterParser.parse(missingDir, "source-ctx"));
+    assertTrue(error.getMessage().contains("not readable"));
+    assertTrue(error.getMessage().contains("source-ctx"));
+    assertFalse(error.getMessage().contains(missingDir.toString()));
+  }
+
   private void writeSkill(Path root, String content) throws IOException {
     Files.writeString(root.resolve("SKILL.md"), content);
   }

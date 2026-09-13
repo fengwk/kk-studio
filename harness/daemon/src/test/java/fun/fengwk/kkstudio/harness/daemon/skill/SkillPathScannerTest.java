@@ -287,6 +287,21 @@ class SkillPathScannerTest {
     assertEquals(home.resolve("skills/dev"), DaemonSkillSourcePaths.resolve("~/skills/dev", home));
   }
 
+  /** 测试意图：诊断项达到 MAX_DIAGNOSTICS（256）上限后截断，防止海量坏目录消耗内存。 */
+  @Test
+  void truncatesDiagnosticsAtMaxLimit() throws IOException {
+    Path root = Files.createDirectories(tempDir.resolve("skills-max-diag"));
+    for (int i = 0; i < 260; i++) {
+      Path bad = Files.createDirectories(root.resolve("bad-" + i));
+      Files.writeString(bad.resolve("SKILL.md"), "invalid without front matter delimiters\n");
+    }
+
+    DaemonSkillRegistry registry = DaemonSkillTestSupport.open(tempDir.resolve("data"));
+    DaemonSkillSourceSnapshot snapshot = registry.refresh(config(root));
+
+    assertEquals(256, snapshot.diagnostics().size());
+  }
+
   private static List<String> skillNames(DaemonSkillSourceSnapshot snapshot) {
     return snapshot.skills().stream().map(skill -> skill.name()).toList();
   }
