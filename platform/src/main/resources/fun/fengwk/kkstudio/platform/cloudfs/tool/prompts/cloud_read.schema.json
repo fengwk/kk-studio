@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "CFS canonical absolute path to a file or directory to read."
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Positive integer 1-based line or entry offset. Defaults to 1."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Positive integer maximum number of lines or entries to return. Defaults to 200 and must not exceed 2000."
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "additionalProperties": false
+}
