@@ -31,6 +31,7 @@ const moduleDocuments = [
   'harness-environment.md',
   'harness-environment-server.md',
   'harness-infra.md',
+  'harness-mcp.md',
   'harness-provider.md',
   'harness-runtime.md',
   'harness-tool.md',
@@ -410,6 +411,7 @@ function checkRepositoryStructure() {
 
   const expectedHarnessModules = [
     'common',
+    'mcp',
     'tool',
     'environment',
     'environment-server',
@@ -489,6 +491,7 @@ function checkNoHarnessModuleDocs() {
 
 const harnessProductionModules = [
   'common',
+  'mcp',
   'tool',
   'contributor-api',
   'builtin',
