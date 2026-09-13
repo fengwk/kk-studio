@@ -160,7 +160,12 @@ public final class ProviderMessageProjector {
       // durable blob 引用原样投影；Provider attempt 物化（platform ProviderResourceMaterializer）在每次
       // attempt 时按 storage_blob 事实替换为携带新鲜预签名 URL 的 media 块或确定性文本回退。
       return new ProviderResourceBlock(
-          value.blobId(), value.name(), value.preview() == null ? "" : value.preview());
+          value.blobId(),
+          value.name(),
+          value.artifactPath(),
+          value.totalBytes(),
+          value.totalLines(),
+          value.preview() == null ? "" : value.preview());
     }
     throw new IllegalArgumentException("unsupported agent message content: " + content.getClass());
   }

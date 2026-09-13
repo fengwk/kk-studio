@@ -217,7 +217,8 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresT
         jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId);
 
     UUID entryThreadId = UUID.randomUUID();
-    ResourceMessageContent resource = new ResourceMessageContent(blobId, "resource.txt", "preview");
+    ResourceMessageContent resource =
+        ResourceMessageContent.media(blobId, "resource.txt", "preview");
     AcceptedCommands reused =
         acceptanceService.accept(
             owner,

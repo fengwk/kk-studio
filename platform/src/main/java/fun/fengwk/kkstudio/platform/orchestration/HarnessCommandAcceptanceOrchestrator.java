@@ -327,7 +327,7 @@ public class HarnessCommandAcceptanceOrchestrator {
     }
     refManager.retainRef(sessionId, ready.blobId());
     uploadService.delete(uploadId);
-    return new ResourceMessageContent(ready.blobId(), ready.filename(), null);
+    return ResourceMessageContent.media(ready.blobId(), ready.filename());
   }
 
   /** RESOURCE 只复用当前 Session 已持有的 durable ref，不新增 retain，也不信任跨 Session blob id。 */

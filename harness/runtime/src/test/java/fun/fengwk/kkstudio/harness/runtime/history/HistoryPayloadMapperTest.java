@@ -302,7 +302,7 @@ class HistoryPayloadMapperTest {
         MAPPER.toolResultPayload(
             invocation,
             List.of(
-                new ResourceMessageContent(new UUID(0L, 1L), "report.txt", "complete preview")));
+                ResourceMessageContent.media(new UUID(0L, 1L), "report.txt", "complete preview")));
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
     ResourceMessageContent mapped = (ResourceMessageContent) result.contents().get(0);

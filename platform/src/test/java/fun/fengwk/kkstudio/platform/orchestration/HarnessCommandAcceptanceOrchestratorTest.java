@@ -404,7 +404,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   void reusesOnlyResourcesAlreadyOwnedByTheSession() {
     // Durable RESOURCE 不新增 retain；缺 manager 或跨 Session blob 都明确拒绝。
     ResourceMessageContent resource =
-        new ResourceMessageContent(BLOB_ID, "existing.txt", "preview");
+        ResourceMessageContent.media(BLOB_ID, "existing.txt", "preview");
     AcceptCommandsCommand command = newSession(user(resource));
     when(chatSessionRepository.insertIfNotOwnedByOther(SESSION_ID, CHAT_ID)).thenReturn(1);
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);

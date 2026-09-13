@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolArtifactOutputFormatter;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
@@ -101,6 +102,14 @@ public final class ProviderResourceMaterializer {
     }
     if (!(block instanceof ProviderResourceBlock resource)) {
       return block;
+    }
+    if (resource.isTextArtifact()) {
+      return new ProviderTextBlock(
+          ToolArtifactOutputFormatter.formatNotice(
+              resource.artifactPath(),
+              resource.totalBytes(),
+              resource.totalLines(),
+              resource.preview()));
     }
     StorageBlob blob = blobManager == null ? null : blobManager.getBlob(resource.blobId());
     String mediaType =

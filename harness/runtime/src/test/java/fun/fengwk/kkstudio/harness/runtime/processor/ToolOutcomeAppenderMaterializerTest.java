@@ -53,7 +53,7 @@ class ToolOutcomeAppenderMaterializerTest {
       InMemoryHarnessStore store = new InMemoryHarnessStore();
       AtomicBoolean materialized = new AtomicBoolean(false);
       ToolResultHistoryMaterializer materializer =
-          (sessionId, result) -> {
+          (context, result) -> {
             materialized.set(true);
             return List.of(new TextMessageContent("must not appear"));
           };
@@ -66,6 +66,7 @@ class ToolOutcomeAppenderMaterializerTest {
               tx ->
                   ToolOutcomeAppender.append(
                       tx,
+                      chain.turn().threadId(),
                       before.root().sessionId(),
                       chain.assistantEntryId(),
                       invocation,
@@ -102,11 +103,12 @@ class ToolOutcomeAppenderMaterializerTest {
             tx ->
                 ToolOutcomeAppender.append(
                     tx,
+                    chain.turn().threadId(),
                     before.root().sessionId(),
                     chain.assistantEntryId(),
                     invocation,
                     NOW,
-                    (sessionId, result) -> contents));
+                    (context, result) -> contents));
 
     MessagePayload actual =
         assertInstanceOf(MessagePayload.class, entry(store, applied.headEntryId()).payload());
@@ -145,7 +147,12 @@ class ToolOutcomeAppenderMaterializerTest {
         store.transaction(
             tx ->
                 ToolOutcomeAppender.append(
-                    tx, before.root().sessionId(), chain.assistantEntryId(), invocation, NOW));
+                    tx,
+                    chain.turn().threadId(),
+                    before.root().sessionId(),
+                    chain.assistantEntryId(),
+                    invocation,
+                    NOW));
 
     ToolResultMessageContent result =
         assertInstanceOf(
@@ -180,7 +187,12 @@ class ToolOutcomeAppenderMaterializerTest {
             store.transaction(
                 tx ->
                     ToolOutcomeAppender.append(
-                        tx, before.root().sessionId(), chain.assistantEntryId(), invocation, NOW)));
+                        tx,
+                        chain.turn().threadId(),
+                        before.root().sessionId(),
+                        chain.assistantEntryId(),
+                        invocation,
+                        NOW)));
   }
 
   /** SUCCEEDED 的 CUSTOM effects 按冻结顺序位于 ToolResult 之前；head 仍是 ToolResult Entry。 */
@@ -209,7 +221,12 @@ class ToolOutcomeAppenderMaterializerTest {
         store.transaction(
             tx ->
                 ToolOutcomeAppender.append(
-                    tx, before.root().sessionId(), chain.assistantEntryId(), invocation, NOW));
+                    tx,
+                    chain.turn().threadId(),
+                    before.root().sessionId(),
+                    chain.assistantEntryId(),
+                    invocation,
+                    NOW));
 
     // head 是 ToolResult Entry；其父链依次是 effect-b、effect-a、assistant。
     Entry result = entry(store, applied.headEntryId());
@@ -245,11 +262,12 @@ class ToolOutcomeAppenderMaterializerTest {
             tx ->
                 ToolOutcomeAppender.append(
                     tx,
+                    chain.turn().threadId(),
                     before.root().sessionId(),
                     chain.assistantEntryId(),
                     invocation,
                     NOW,
-                    (sessionId, result) -> List.of()));
+                    (context, result) -> List.of()));
 
     ToolResultMessageContent result =
         assertInstanceOf(

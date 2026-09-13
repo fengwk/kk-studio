@@ -50,10 +50,8 @@ class HistoryEntryPayloadJsonCodecTest {
                 AgentMessageRole.USER,
                 List.of(
                     new TextMessageContent("hello"),
-                    new ResourceMessageContent(
-                        UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
-                        "reference.mp4",
-                        null))),
+                    ResourceMessageContent.media(
+                        UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"), "reference.mp4"))),
             null,
             null);
     EntryPayload assistant =

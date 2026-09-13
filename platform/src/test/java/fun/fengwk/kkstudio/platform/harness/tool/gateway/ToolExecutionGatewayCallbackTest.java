@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -61,9 +62,9 @@ class ToolExecutionGatewayCallbackTest {
 
   private static final byte[] BINARY_BYTES = new byte[] {1, 2, 3, 4, 5};
   private static final String LARGE_TEXT =
-      "x".repeat(ToolResultExternalizer.INLINE_RESULT_UTF8_BYTES + 1);
+      "x".repeat(ToolResultFinalizer.INLINE_MAX_UTF8_BYTES + 1);
   private static final String LARGE_JSON =
-      "{\"data\":\"" + "y".repeat(ToolResultExternalizer.INLINE_RESULT_UTF8_BYTES) + "\"}";
+      "{\"data\":\"" + "y".repeat(ToolResultFinalizer.INLINE_MAX_UTF8_BYTES) + "\"}";
   private static final UUID ID = new UUID(0L, 1L);
 
   @Test
@@ -104,53 +105,54 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result);
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
-    assertEquals(2, listener.store.puts.size());
-    // 大文本 -> text/plain + .txt 名；大 JSON -> application/json + .json 名；UTF-8 字节精确。
+    assertEquals(1, listener.store.puts.size());
+    // 多个文本块由 \n\n 聚合为一个 text/plain + .txt managed resource
     ToolGatewayTestSupport.FakeResourceStore.PutRecord textPut = listener.store.puts.get(0);
     assertEquals("text/plain", textPut.mediaType());
-    assertEquals("demo-result-2.txt", textPut.name());
-    assertArrayEquals(LARGE_TEXT.getBytes(StandardCharsets.UTF_8), textPut.content());
-    ToolGatewayTestSupport.FakeResourceStore.PutRecord jsonPut = listener.store.puts.get(1);
-    assertEquals("application/json", jsonPut.mediaType());
-    assertEquals("demo-result-3.json", jsonPut.name());
-    assertArrayEquals(LARGE_JSON.getBytes(StandardCharsets.UTF_8), jsonPut.content());
-    // 小文本保持内联；两个外部化内容替换为 ResourceResultContent。
-    assertEquals(3, succeeded.result().contents().size());
-    assertEquals(new TextResultContent("small"), succeeded.result().contents().get(0));
-    ResourceResultContent externalizedText =
-        assertInstanceOf(ResourceResultContent.class, succeeded.result().contents().get(1));
-    ResourceResultContent externalizedJson =
-        assertInstanceOf(ResourceResultContent.class, succeeded.result().contents().get(2));
-    assertEquals(LARGE_TEXT, externalizedText.preview());
-    assertEquals(LARGE_JSON, externalizedJson.preview());
+    assertEquals("demo-result.txt", textPut.name());
+    String expectedJoined = "small\n\n" + LARGE_TEXT + "\n\n" + LARGE_JSON;
+    assertArrayEquals(expectedJoined.getBytes(StandardCharsets.UTF_8), textPut.content());
+    // 所有文本内容投影为一个 ResourceResultContent，位于第一个文本位置
+    assertEquals(1, succeeded.result().contents().size());
+    ResourceResultContent externalized =
+        assertInstanceOf(ResourceResultContent.class, succeeded.result().contents().get(0));
+    assertEquals("demo-result.txt", externalized.resource().name());
+    assertNotNull(externalized.textMetadata());
+    assertEquals(
+        expectedJoined.getBytes(StandardCharsets.UTF_8).length,
+        externalized.textMetadata().totalBytes());
   }
 
   @Test
   void inlineThresholdBoundaryIsExact() {
-    String atThreshold = "x".repeat(ToolResultExternalizer.INLINE_RESULT_UTF8_BYTES);
-    ToolResult result =
-        new ToolResult(
-            "call-1",
-            List.of(new TextResultContent(atThreshold), new TextResultContent(atThreshold + "x")),
-            false,
-            "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result);
-    // 恰好 8192 字节保持内联；8193 字节外部化。
-    assertEquals(1, listener.store.puts.size());
-    ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
-        (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
-    assertEquals(2, succeeded.result().contents().size());
-    assertEquals(new TextResultContent(atThreshold), succeeded.result().contents().get(0));
-    assertInstanceOf(ResourceResultContent.class, succeeded.result().contents().get(1));
+    String atThreshold = "x".repeat(ToolResultFinalizer.INLINE_MAX_UTF8_BYTES);
+    ToolResult inlineResult =
+        new ToolResult("call-1", List.of(new TextResultContent(atThreshold)), false, "{}");
+    ToolGatewayTestSupport.RecordingListener inlineListener = runHostSyncComplete(inlineResult);
+    assertEquals(0, inlineListener.store.puts.size());
+    ToolGatewayTestSupport.RecordingListener.Event.Succeeded inlineSucceeded =
+        (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) inlineListener.events.get(0);
+    assertEquals(1, inlineSucceeded.result().contents().size());
+    assertEquals(new TextResultContent(atThreshold), inlineSucceeded.result().contents().get(0));
+
+    ToolResult overResult =
+        new ToolResult("call-1", List.of(new TextResultContent(atThreshold + "x")), false, "{}");
+    ToolGatewayTestSupport.RecordingListener overListener = runHostSyncComplete(overResult);
+    assertEquals(1, overListener.store.puts.size());
+    ToolGatewayTestSupport.RecordingListener.Event.Succeeded overSucceeded =
+        (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) overListener.events.get(0);
+    assertEquals(1, overSucceeded.result().contents().size());
+    assertInstanceOf(ResourceResultContent.class, overSucceeded.result().contents().get(0));
   }
 
-  /** 恰好 16 KiB 的外部化文本完整保留为 preview，不添加截断标记。 */
+  /** 恰好在 preview 限制内的外部化文本完整保留为 preview，不添加截断标记。 */
   @Test
   void externalizedTextAtPreviewLimitKeepsExactPreview() {
-    String text = "x".repeat(ResourceRef.MAX_PREVIEW_UTF8_BYTES);
+    String text = "x".repeat(ToolResultFinalizer.TRUNCATED_PREVIEW_MAX_UTF8_BYTES);
+    String input = text + "\n" + "y".repeat(ToolResultFinalizer.INLINE_MAX_UTF8_BYTES);
     ToolGatewayTestSupport.RecordingListener listener =
         runHostSyncComplete(
-            new ToolResult("call-1", List.of(new TextResultContent(text)), false, "{}"));
+            new ToolResult("call-1", List.of(new TextResultContent(input)), false, "{}"));
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
 
@@ -158,19 +160,16 @@ class ToolExecutionGatewayCallbackTest {
         assertInstanceOf(ResourceResultContent.class, succeeded.result().contents().getFirst());
     assertEquals(text, resource.preview());
     assertEquals(
-        ResourceRef.MAX_PREVIEW_UTF8_BYTES, ResourceRef.utf8Length(resource.preview(), "preview"));
+        ToolResultFinalizer.TRUNCATED_PREVIEW_MAX_UTF8_BYTES,
+        ResourceRef.utf8Length(resource.preview(), "preview"));
   }
 
-  /** 超过 16 KiB 时按 code point 截断并追加稳定标记，不拆分 surrogate 或 UTF-8 序列。 */
+  /** 超过 2 KiB 时按 code point 截断，无额外标记，不拆分 surrogate 或 UTF-8 序列。 */
   @Test
   void oversizedTextGetsDeterministicUtf8SafePreview() {
-    int markerBytes =
-        ResourceRef.utf8Length(
-            ToolResultExternalizer.PREVIEW_TRUNCATION_MARKER, "preview truncation marker");
-    int prefixBudget = ResourceRef.MAX_PREVIEW_UTF8_BYTES - markerBytes;
-    String text = "a".repeat(prefixBudget - 1) + "\uD83D\uDE00" + "tail".repeat(1024);
-    String expected =
-        "a".repeat(prefixBudget - 1) + ToolResultExternalizer.PREVIEW_TRUNCATION_MARKER;
+    int budget = ToolResultFinalizer.TRUNCATED_PREVIEW_MAX_UTF8_BYTES;
+    String text = "a".repeat(budget - 1) + "\uD83D\uDE00" + "tail".repeat(16384);
+    String expected = "a".repeat(budget - 1);
 
     ToolGatewayTestSupport.RecordingListener first =
         runHostSyncComplete(
@@ -195,14 +194,14 @@ class ToolExecutionGatewayCallbackTest {
     assertEquals(firstResource.preview(), secondResource.preview());
     assertTrue(
         ResourceRef.utf8Length(firstResource.preview(), "preview")
-            <= ResourceRef.MAX_PREVIEW_UTF8_BYTES);
+            <= ToolResultFinalizer.TRUNCATED_PREVIEW_MAX_UTF8_BYTES);
   }
 
-  /** 9,926-byte read/bash 类输出虽被外部化，仍经 durable RESOURCE（preview 完整保留）与 provider 投影完整暴露给模型。 */
   @Test
-  void externalized9926ByteTextRemainsFullyVisibleToProviderModel() {
-    String text = "0123456789".repeat(992) + "123456";
-    assertEquals(9926, text.getBytes(StandardCharsets.UTF_8).length);
+  void externalizedTextArtifactRemainsFullyVisibleToProviderModel() {
+    String text = "0123456789".repeat(6000);
+    int totalBytes = text.getBytes(StandardCharsets.UTF_8).length;
+    assertTrue(totalBytes > ToolResultFinalizer.INLINE_MAX_UTF8_BYTES);
     ToolGatewayTestSupport.RecordingListener listener =
         runHostSyncComplete(
             new ToolResult("call-1", List.of(new TextResultContent(text)), false, "{}"));
@@ -225,10 +224,16 @@ class ToolExecutionGatewayCallbackTest {
             Instant.EPOCH,
             Instant.EPOCH);
 
+    String artifactPath =
+        "/.artifacts/tool-results/00000000-0000-0000-0000-000000000001/00000000-0000-0000-0000-000000000001.txt";
+    String preview = ToolResultFinalizer.extractRawPreview(text);
     MessagePayload payload =
         new HistoryPayloadMapper()
             .toolResultPayload(
-                invocation, List.of(new ResourceMessageContent(ID, "demo-result-1.txt", text)));
+                invocation,
+                List.of(
+                    ResourceMessageContent.artifact(
+                        ID, "demo-result.txt", artifactPath, totalBytes, 1L, preview)));
     ProviderToolResultBlock projected =
         assertInstanceOf(
             ProviderToolResultBlock.class,
@@ -238,24 +243,21 @@ class ToolExecutionGatewayCallbackTest {
                 .contents()
                 .getFirst());
     assertEquals(
-        new ProviderResourceBlock(ID, "demo-result-1.txt", text), projected.contents().getFirst());
+        new ProviderResourceBlock(
+            ID, "demo-result.txt", artifactPath, (long) totalBytes, 1L, preview),
+        projected.contents().getFirst());
   }
 
   @Test
   void existingResourceContentPassesThroughWithoutStoreWrite() {
     byte[] existing = new byte[] {1, 2, 3};
-    ResourceRef ref =
-        new ResourceRef(
-            "file:///resources/" + ToolGatewayTestSupport.sha256(existing),
-            "text/plain",
-            "existing",
-            (long) existing.length,
-            ToolGatewayTestSupport.sha256(existing));
+    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ResourceRef ref = store.seed("text/plain", "existing", existing);
     ResourceResultContent existingContent = new ResourceResultContent(ref, "existing preview");
     ToolResult result =
         new ToolResult(
             "call-1", List.of(existingContent, new TextResultContent("inline")), false, "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result);
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result, store);
     assertTrue(listener.store.puts.isEmpty());
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
@@ -1257,7 +1259,8 @@ class ToolExecutionGatewayCallbackTest {
       contents.add(new TextResultContent("x".repeat(8 * 1024)));
     }
     contents.add(new BinaryResultContent("image/png", BINARY_BYTES));
-    String details = "{\"data\":\"" + "y".repeat(600 * 1024) + "\"}";
+    int padding = ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES - 64;
+    String details = "{\"data\":\"" + "y".repeat(padding) + "\"}";
     ToolResult result = new ToolResult("call-1", contents, false, details);
     ToolGatewayTestSupport.RecordingListener listener =
         runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore());
@@ -1271,25 +1274,6 @@ class ToolExecutionGatewayCallbackTest {
   }
 
   @Test
-  void projectedPreviewBytesAreCheckedBeforeAnyPut() {
-    List<ResultContent> contents = new ArrayList<>(ToolResult.MAX_CONTENT_ITEMS);
-    String text = "x".repeat(ResourceRef.MAX_PREVIEW_UTF8_BYTES);
-    for (int index = 0; index < ToolResult.MAX_CONTENT_ITEMS; index++) {
-      contents.add(new TextResultContent(text));
-    }
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-
-    ToolGatewayTestSupport.RecordingListener listener =
-        runHostSyncComplete(new ToolResult("call-1", contents, false, "{}"), store);
-
-    ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
-        (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.getFirst();
-    assertEquals("INVALID_RESULT", failed.failure().error().kind());
-    assertTrue(failed.failure().error().message().contains("must not exceed"));
-    assertTrue(store.puts.isEmpty(), "preview size rejection must happen before any put");
-  }
-
-  @Test
   void plannedRefMismatchAfterPutMapsToUnknown() {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     store.mismatchReturnedRef = true;
@@ -1300,7 +1284,8 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("RESOURCE_STORE_FAILED", unknown.error().kind());
-    assertTrue(unknown.error().message().contains("cannot be confirmed"));
+    assertEquals(
+        "Tool result resource persistence failed; outcome is unknown.", unknown.error().message());
     assertEquals(1, store.puts.size(), "put side effect occurred before the contract mismatch");
   }
 
@@ -1394,7 +1379,7 @@ class ToolExecutionGatewayCallbackTest {
         runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore(), maxBytes);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
-    assertEquals("INVALID_RESULT", failed.failure().error().kind());
+    assertEquals(ToolResultFinalizer.OUTPUT_TOO_LARGE_KIND, failed.failure().error().kind());
     assertFalse(failed.failure().retryable());
     assertTrue(listener.store.puts.isEmpty(), "oversized item must be rejected before any put");
   }

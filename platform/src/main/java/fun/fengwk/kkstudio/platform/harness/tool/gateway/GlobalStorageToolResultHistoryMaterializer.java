@@ -9,74 +9,88 @@ import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryContext;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
+import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
-import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
+import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
+import fun.fengwk.kkstudio.platform.cloudfs.domain.ToolArtifactPath;
+import fun.fengwk.kkstudio.platform.cloudfs.service.CloudArtifactService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobIngestService;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Duration;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 基于全局 Blob 存储的 {@link ToolResultHistoryMaterializer}：在 Tool outcome Entry 插入前、同一 store 事务内，把 瞬时
- * Resource 引用内容（data/file/http/https/s3）外部化为全局 Storage blob，并以 {@code
- * ResourceMessageContent(blobId, name, preview)} 返回 durable 内容；Text/Json 原样映射。
+ * 基于全局 Blob 存储与 CFS Tool Artifact 挂载的 {@link ToolResultHistoryMaterializer}。
  *
- * <p>解析与摄入按内容顺序逐个完成（失败即异常 → 调用方事务整体回滚，绝不产生部分 history）。单资源字节预算与数据库
- * SystemSettings.Advanced.resourceMaxBytes 默认一致（16 MiB）。s3 URI 的 bucket 必须与全局存储 配置 bucket
- * 精确一致，否则确定性拒绝（服务端 S3 客户端是固定 bucket 契约）。本类由 S3 装配（{@code S3StorageConfiguration}）以 bean 形式提供；S3
- * 未启用时不存在该 bean，Runtime 对含 Resource 引用的 ToolResult 保持 fail-closed。
+ * <p>在 Tool outcome Entry 插入前、同一 store 事务内：
+ *
+ * <ul>
+ *   <li>只通过注入的 Platform {@link ResourceStore} 读取其拥有的 Resource，绝不解析或访问任意外部 URI；
+ *   <li>对文本工件严格复核 ref size/sha、UTF-8 编码合法性与 totalBytes/totalLines 计数；
+ *   <li>摄入全局存储（{@code storage_blob}）并关联 session ref；
+ *   <li>对文本工件在同一事务内调用 {@link CloudArtifactService#createToolArtifact} 挂载到 {@code
+ *       /.artifacts/tool-results/{threadId}/{invocationId}.txt|json} 并独立 retain；
+ *   <li>构造并返回携带完整结构化 facts 的 durable {@link ResourceMessageContent}；
+ *   <li>任一项失败整体回滚事务，绝不产生部分 history。
+ * </ul>
  */
 public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHistoryMaterializer {
 
-  /** 单资源解析字节预算：与 SystemSettings.Advanced.resourceMaxBytes 默认值一致（独立于装配值的安全上界）。 */
-  static final int MAX_RESOLVED_BYTES = 16 * 1024 * 1024;
-
   private final StorageBlobIngestService ingestService;
-  private final S3StorageService s3StorageService;
-  private final String storageBucket;
-  private final HttpClient httpClient;
+  private final CloudArtifactService cloudArtifactService;
+  private final ResourceStore resourceStore;
+  private final int resourceMaxBytes;
 
   public GlobalStorageToolResultHistoryMaterializer(
       StorageBlobIngestService ingestService,
-      S3StorageService s3StorageService,
-      S3StorageProperties s3StorageProperties) {
+      CloudArtifactService cloudArtifactService,
+      ResourceStore resourceStore,
+      int resourceMaxBytes) {
     this.ingestService = Objects.requireNonNull(ingestService, "ingestService");
-    this.s3StorageService = Objects.requireNonNull(s3StorageService, "s3StorageService");
-    this.storageBucket =
-        Objects.requireNonNull(s3StorageProperties, "s3StorageProperties").getBucket();
-    this.httpClient =
-        HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
+    this.cloudArtifactService =
+        Objects.requireNonNull(cloudArtifactService, "cloudArtifactService");
+    this.resourceStore = Objects.requireNonNull(resourceStore, "resourceStore");
+    if (resourceMaxBytes <= 0) {
+      throw new IllegalArgumentException("resourceMaxBytes must be positive");
+    }
+    this.resourceMaxBytes = resourceMaxBytes;
   }
 
   @Override
   @Transactional(propagation = Propagation.MANDATORY)
-  public List<AgentMessageContent> materialize(UUID sessionId, ToolResult result) {
-    Objects.requireNonNull(sessionId, "sessionId");
+  public List<AgentMessageContent> materialize(
+      ToolResultHistoryContext context, ToolResult result) {
+    Objects.requireNonNull(context, "context");
     Objects.requireNonNull(result, "result");
     List<ResultContent> source = result.contents();
+    ResolvedResource[] resolvedResources = new ResolvedResource[source.size()];
+    for (int index = 0; index < source.size(); index++) {
+      ResultContent content = source.get(index);
+      if (content instanceof BinaryResultContent) {
+        throw new IllegalArgumentException(
+            "binary tool content must be finalized before history materialization");
+      }
+      if (content instanceof ResourceResultContent resource) {
+        resolvedResources[index] = resolveResource(resource);
+      }
+    }
+
     List<AgentMessageContent> contents = new ArrayList<>(source.size());
     for (int index = 0; index < source.size(); index++) {
       ResultContent content = source.get(index);
@@ -84,12 +98,8 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
         contents.add(new TextMessageContent(text.text()));
       } else if (content instanceof JsonResultContent json) {
         contents.add(new JsonMessageContent(json.json()));
-      } else if (content instanceof BinaryResultContent binary) {
-        // 外部化器在 Gateway 侧已把 transient Binary 转为 ResourceResultContent；此处防御性支持并保持确定性。
-        UUID blobId = ingestService.ingest(sessionId, binary.content(), binary.mediaType());
-        contents.add(new ResourceMessageContent(blobId, "content-" + (index + 1), null));
       } else if (content instanceof ResourceResultContent resource) {
-        contents.add(ingestResource(sessionId, index + 1, resource));
+        contents.add(ingestResource(context, index + 1, resource, resolvedResources[index]));
       } else {
         throw new IllegalArgumentException(
             "unsupported tool content kind for history materialization: "
@@ -100,116 +110,97 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
   }
 
   private ResourceMessageContent ingestResource(
-      UUID sessionId, int index, ResourceResultContent resource) {
+      ToolResultHistoryContext context,
+      int index,
+      ResourceResultContent resource,
+      ResolvedResource resolved) {
     ResourceRef ref = resource.resource();
-    byte[] bytes = resolveBytes(ref);
-    UUID blobId = ingestService.ingest(sessionId, bytes, ref.mediaType());
+    byte[] bytes = resolved.bytes();
+
+    if (resource.textMetadata() != null) {
+      UUID blobId = ingestService.ingest(context.sessionId(), bytes, ref.mediaType());
+      String ext = "application/json".equals(ref.mediaType()) ? "json" : "txt";
+      cloudArtifactService.createToolArtifact(
+          context.threadId(), context.invocationId(), ext, blobId);
+      CloudPath artifactPath =
+          ToolArtifactPath.format(context.threadId(), context.invocationId(), ext);
+      String name = ref.name() == null ? context.toolName() + "-result." + ext : ref.name();
+      return ResourceMessageContent.artifact(
+          blobId,
+          name,
+          artifactPath.toString(),
+          bytes.length,
+          resolved.totalLines(),
+          resolved.preview());
+    }
+
+    UUID blobId = ingestService.ingest(context.sessionId(), bytes, ref.mediaType());
     String name = ref.name() == null ? "resource-" + index : ref.name();
-    return new ResourceMessageContent(blobId, name, resource.preview());
+    return ResourceMessageContent.media(blobId, name, resource.preview());
   }
 
-  /** 按 URI scheme 解析资源字节；ref 已在构造时完成全部确定性校验，此处只做有界取数。 */
-  private byte[] resolveBytes(ResourceRef ref) {
-    String scheme = URI.create(ref.uri()).getScheme();
-    return switch (scheme) {
-      case "data" -> decodeDataUri(ref.uri());
-      case "file" -> readFile(URI.create(ref.uri()));
-      case "http", "https" -> fetchHttp(ref.uri());
-      case "s3" -> readS3(ref.uri());
-      default -> throw new IllegalArgumentException("unsupported uri scheme: " + scheme);
-    };
-  }
-
-  /** data URI：ref 构造时已验证精确 header 与规范载荷；此处按同一规则解码（<mediaType>, 或 <mediaType>;base64,）。 */
-  private static byte[] decodeDataUri(String uri) {
-    String ssp = URI.create(uri).getRawSchemeSpecificPart();
-    int comma = ssp.indexOf(',');
-    String header = ssp.substring(0, comma);
-    String payload = ssp.substring(comma + 1);
-    if (header.endsWith(";base64")) {
-      return Base64.getDecoder().decode(payload);
+  private ResolvedResource resolveResource(ResourceResultContent resource) {
+    ResourceRef ref = resource.resource();
+    if (ref.size() == null || ref.sha256() == null) {
+      throw new IllegalArgumentException("managed resource must declare size and sha256");
     }
-    byte[] raw = payload.getBytes(StandardCharsets.US_ASCII);
-    ByteArrayOutputStream decoded = new ByteArrayOutputStream(raw.length);
-    for (int index = 0; index < raw.length; index++) {
-      byte current = raw[index];
-      if (current == '%') {
-        int value =
-            Character.digit(payload.charAt(index + 1), 16) * 16
-                + Character.digit(payload.charAt(index + 2), 16);
-        decoded.write(value);
-        index += 2;
-      } else {
-        decoded.write(current);
-      }
-    }
-    return decoded.toByteArray();
-  }
-
-  private static byte[] readFile(URI uri) {
-    Path path = Path.of(uri);
-    try {
-      long size = Files.size(path);
-      if (size > MAX_RESOLVED_BYTES) {
-        throw new IllegalArgumentException(
-            "file resource must not exceed " + MAX_RESOLVED_BYTES + " bytes");
-      }
-      return Files.readAllBytes(path);
-    } catch (IOException error) {
-      throw new IllegalArgumentException("cannot read file resource " + uri, error);
-    }
-  }
-
-  private byte[] fetchHttp(String uri) {
-    try {
-      HttpRequest request =
-          HttpRequest.newBuilder(URI.create(uri)).timeout(Duration.ofSeconds(30)).GET().build();
-      HttpResponse<InputStream> response =
-          httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-      if (response.statusCode() < 200 || response.statusCode() >= 300) {
-        throw new IllegalArgumentException(
-            "http resource returned status " + response.statusCode() + ": " + uri);
-      }
-      long declared = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
-      if (declared > MAX_RESOLVED_BYTES) {
-        throw new IllegalArgumentException(
-            "http resource must not exceed " + MAX_RESOLVED_BYTES + " bytes");
-      }
-      return readBounded(response.body());
-    } catch (IOException | InterruptedException error) {
-      if (error instanceof InterruptedException) {
-        Thread.currentThread().interrupt();
-      }
-      throw new IllegalArgumentException("cannot fetch http resource " + uri, error);
-    }
-  }
-
-  private byte[] readS3(String uri) {
-    URI parsed = URI.create(uri);
-    if (!storageBucket.equals(parsed.getHost())) {
+    if (ref.size() > resourceMaxBytes) {
       throw new IllegalArgumentException(
-          "s3 resource bucket must be the configured storage bucket: " + uri);
+          "managed resource must not exceed " + resourceMaxBytes + " bytes");
     }
-    String key = parsed.getRawPath().substring(1);
-    // s3 URI 的有界下载（HEAD 校验声明长度 + 复核实际字节数），超限确定性拒绝。
-    return s3StorageService.download(key, MAX_RESOLVED_BYTES).getBytes();
+
+    byte[] bytes;
+    try {
+      bytes = resourceStore.read(ref);
+    } catch (RuntimeException failure) {
+      throw new IllegalArgumentException("managed resource content is unavailable");
+    }
+    if (bytes == null
+        || bytes.length != ref.size()
+        || bytes.length > resourceMaxBytes
+        || !ref.sha256().equals(sha256Hex(bytes))) {
+      throw new IllegalArgumentException("managed resource content failed integrity validation");
+    }
+
+    if (resource.textMetadata() == null) {
+      return new ResolvedResource(bytes, null, null);
+    }
+    String text;
+    try {
+      CharsetDecoder decoder =
+          StandardCharsets.UTF_8
+              .newDecoder()
+              .onMalformedInput(CodingErrorAction.REPORT)
+              .onUnmappableCharacter(CodingErrorAction.REPORT);
+      text = decoder.decode(ByteBuffer.wrap(bytes)).toString();
+    } catch (CharacterCodingException invalid) {
+      throw new IllegalArgumentException("text artifact content must be valid UTF-8");
+    }
+    long totalLines = ToolResultFinalizer.countPhysicalLines(text);
+    if (resource.textMetadata().totalBytes() != bytes.length
+        || resource.textMetadata().totalLines() != totalLines) {
+      throw new IllegalArgumentException("text artifact metadata failed integrity validation");
+    }
+    return new ResolvedResource(bytes, ToolResultFinalizer.extractRawPreview(text), totalLines);
   }
 
-  private static byte[] readBounded(InputStream input) throws IOException {
-    try (InputStream in = input) {
-      ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-      byte[] chunk = new byte[8192];
-      int total = 0;
-      int read;
-      while ((read = in.read(chunk)) != -1) {
-        total += read;
-        if (total > MAX_RESOLVED_BYTES) {
-          throw new IllegalArgumentException(
-              "http resource must not exceed " + MAX_RESOLVED_BYTES + " bytes");
-        }
-        buffer.write(chunk, 0, read);
+  private record ResolvedResource(byte[] bytes, String preview, Long totalLines) {
+    private ResolvedResource {
+      bytes = Objects.requireNonNull(bytes, "bytes");
+      if ((preview == null) != (totalLines == null)) {
+        throw new IllegalArgumentException(
+            "preview and totalLines must either both be present or both be absent");
       }
-      return buffer.toByteArray();
+    }
+  }
+
+  private static String sha256Hex(byte[] content) {
+    try {
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      digest.update(content);
+      return HexFormat.of().formatHex(digest.digest());
+    } catch (NoSuchAlgorithmException error) {
+      throw new IllegalStateException("SHA-256 is not available", error);
     }
   }
 }
