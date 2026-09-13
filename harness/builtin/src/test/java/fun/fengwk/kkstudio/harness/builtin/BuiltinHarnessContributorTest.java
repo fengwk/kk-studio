@@ -141,7 +141,7 @@ class BuiltinHarnessContributorTest {
         "edit",
         BuiltinToolIds.EDIT,
         "environment.edit",
-        EnvironmentCapabilityIds.FS_APPLY_EDIT,
+        EnvironmentCapabilityIds.FS_EDIT,
         ToolSideEffect.NON_IDEMPOTENT,
         Duration.ofMinutes(1));
     assertEnvironmentTool(
@@ -157,7 +157,7 @@ class BuiltinHarnessContributorTest {
         "grep",
         BuiltinToolIds.GREP,
         "environment.grep",
-        EnvironmentCapabilityIds.FS_SEARCH,
+        EnvironmentCapabilityIds.FS_GREP,
         ToolSideEffect.READ_ONLY,
         Duration.ofHours(1));
     assertEnvironmentTool(

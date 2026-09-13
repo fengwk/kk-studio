@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
-import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -102,44 +101,44 @@ public final class BashCapability implements EnvironmentCapability {
       if (handle.terminal.get()) {
         handle.timeoutFuture.cancel(false);
       }
-      ByteArrayOutputStream output = new ByteArrayOutputStream();
-      Utf8StreamDecoder streamDecoder = new Utf8StreamDecoder();
-      try (InputStream input = process.getInputStream()) {
-        byte[] buffer = new byte[4096];
-        int count;
-        while ((count = input.read(buffer)) >= 0) {
-          output.write(buffer, 0, count);
-          emitPartial(request.call().id(), listener, handle, streamDecoder.decode(buffer, count));
+      EnvironmentCapabilityResult res;
+      try (OutputSpool output = new OutputSpool()) {
+        Utf8StreamDecoder streamDecoder = new Utf8StreamDecoder();
+        try (InputStream input = process.getInputStream()) {
+          byte[] buffer = new byte[4096];
+          int count;
+          while ((count = input.read(buffer)) >= 0) {
+            output.write(buffer, 0, count);
+            if (output.isTooLarge()) {
+              handle.stopProcessTree();
+              break;
+            }
+            emitPartial(request.call().id(), listener, handle, streamDecoder.decode(buffer, count));
+          }
+          if (!output.isTooLarge()) {
+            emitPartial(request.call().id(), listener, handle, streamDecoder.finish());
+          }
         }
-        emitPartial(request.call().id(), listener, handle, streamDecoder.finish());
-      }
-      int exitCode = process.waitFor();
-      if (handle.cancelled.get()) {
-        handle.complete(
-            listener, AbstractCodingCapability.error(request.call().id(), "Operation cancelled"));
-      } else if (handle.timedOut.get()) {
-        handle.complete(
-            listener, AbstractCodingCapability.error(request.call().id(), "Command timed out"));
-      } else {
-        boolean failed = exitCode != 0;
-        byte[] bytes = output.toByteArray();
-        if (failed) {
-          byte[] exitBytes =
-              ("\nCommand exited with code " + exitCode).getBytes(StandardCharsets.UTF_8);
-          byte[] combined = new byte[bytes.length + exitBytes.length];
-          System.arraycopy(bytes, 0, combined, 0, bytes.length);
-          System.arraycopy(exitBytes, 0, combined, bytes.length, exitBytes.length);
-          bytes = combined;
-        }
-        EnvironmentCapabilityResult res =
-            OutputLimiter.limit(request.call().id(), bytes, "text/plain", config);
-        if (failed) {
+        int exitCode = process.waitFor();
+        if (handle.cancelled.get()) {
+          res = AbstractCodingCapability.error(request.call().id(), "Operation cancelled");
+        } else if (handle.timedOut.get()) {
+          res = AbstractCodingCapability.error(request.call().id(), "Command timed out");
+        } else if (output.isTooLarge()) {
           res =
-              new EnvironmentCapabilityResult(
-                  res.callId(), res.contents(), true, res.detailsJson());
+              EnvironmentCapabilityResult.error(
+                  request.call().id(),
+                  "OUTPUT_TOO_LARGE: command output exceeded 16 MiB hard limit");
+        } else {
+          boolean failed = exitCode != 0;
+          if (failed) {
+            output.write(
+                ("\nCommand exited with code " + exitCode).getBytes(StandardCharsets.UTF_8));
+          }
+          res = output.finish(request.call().id(), failed, config.resourceStore(), "text/plain");
         }
-        handle.complete(listener, res);
       }
+      handle.complete(listener, res);
     } catch (Exception error) {
       handle.complete(
           listener, AbstractCodingCapability.error(request.call().id(), error.getMessage()));
@@ -159,12 +158,17 @@ public final class BashCapability implements EnvironmentCapability {
         : requestedTimeout;
   }
 
+  static final int MAX_PARTIAL_RESULT_UTF8_BYTES = 256 * 1024;
+
   private static void emitPartial(
       String callId,
       EnvironmentCapabilityExecutionListener listener,
       BashHandle handle,
       String text) {
     if (!text.isEmpty() && !handle.cancelled.get() && !handle.timedOut.get()) {
+      if (text.length() > MAX_PARTIAL_RESULT_UTF8_BYTES) {
+        text = text.substring(0, MAX_PARTIAL_RESULT_UTF8_BYTES);
+      }
       listener.onPartial(EnvironmentCapabilityResult.text(callId, text));
     }
   }

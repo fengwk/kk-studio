@@ -7,11 +7,15 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -19,10 +23,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public final class EditCapability extends AbstractCodingCapability {
 
   public EditCapability(CodingToolsConfig config, ExecutorService executor) {
-    super(
-        config,
-        executor,
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_APPLY_EDIT));
+    super(config, executor, EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT));
   }
 
   @Override
@@ -32,6 +33,11 @@ public final class EditCapability extends AbstractCodingCapability {
     String rawPath = string(args, "path");
     String oldText = string(args, "old_string");
     String newText = string(args, "new_string");
+
+    if (oldText.isEmpty()) {
+      throw new IllegalArgumentException("old_string must not be empty");
+    }
+
     String normalizedOld = normalizeToLf(oldText);
     String normalizedNew = normalizeToLf(newText);
     if (normalizedOld.equals(normalizedNew)) {
@@ -39,14 +45,14 @@ public final class EditCapability extends AbstractCodingCapability {
           "No changes to apply: old_string and new_string must differ after line-ending"
               + " normalization");
     }
-    if (oldText.isEmpty()) {
-      throw new IllegalArgumentException("old_string must not be empty");
-    }
-    Path path =
-        EnvironmentPaths.existing(rawPath, EnvironmentPaths.workdir(string(args, "workdir")));
+
+    Path workdir = EnvironmentPaths.workdir(string(args, "workdir"));
+    Path path = EnvironmentPaths.existing(rawPath, workdir);
+    String displayPath = EnvironmentPaths.displayPath(path, workdir, rawPath);
     if (Files.isDirectory(path)) {
-      throw new IllegalArgumentException("path must be a file: " + rawPath);
+      throw new IllegalArgumentException("path must be a file: " + displayPath);
     }
+
     ReentrantLock lock = FileMutations.lock(path);
     try {
       byte[] originalBytes = Files.readAllBytes(path);
@@ -55,22 +61,24 @@ public final class EditCapability extends AbstractCodingCapability {
       String lineEndingStyle = detectLineEnding(source);
       LineEndingDocument document = parseLineEndingDocument(source);
       List<Occurrence> occurrences = buildOccurrences(document, normalizedOld);
+
       if (occurrences.isEmpty()) {
-        throw new IllegalArgumentException("old_string was not found in file");
+        throw new IllegalArgumentException("Could not find old_string in " + displayPath);
       }
       boolean replaceAll = optionalBoolean(args, "replace_all");
       if (!replaceAll && occurrences.size() > 1) {
         throw new IllegalArgumentException(
             "Found "
                 + occurrences.size()
-                + " exact matches; use replace_all to change every match");
+                + " exact matches; use replace_all to change every match or provide more context");
       }
       if (replaceAll && hasOverlappingOccurrences(occurrences)) {
         throw new IllegalArgumentException(
             "Found overlapping exact matches for old_string in "
-                + rawPath
+                + displayPath
                 + "; replace_all cannot safely apply overlapping replacements");
       }
+
       LineEndingDocument nextDocument = document;
       List<Occurrence> pending =
           replaceAll ? new ArrayList<>(occurrences) : List.of(occurrences.getFirst());
@@ -78,39 +86,122 @@ public final class EditCapability extends AbstractCodingCapability {
         nextDocument =
             applyOccurrence(nextDocument, pending.get(index), normalizedNew, lineEndingStyle);
       }
+
       if (execution.isCancelled()) {
         throw new InterruptedException();
       }
+
       byte[] encoded =
           TextFileCodec.encode(
               serializeLineEndingDocument(nextDocument), decoded.charset(), decoded.bomLength());
       if (Arrays.equals(encoded, originalBytes)) {
         throw new IllegalArgumentException("No changes to apply: edit would not change the file");
       }
-      Files.write(path, encoded);
-      int replacements = replaceAll ? occurrences.size() : 1;
+
+      String diffText = buildContextualDiff(document, nextDocument, pending, normalizedNew);
+
+      Path parent = Objects.requireNonNull(path.getParent(), "path must have a parent");
+      Path temp = Files.createTempFile(parent, ".kk-edit-", ".tmp");
+      try {
+        Files.write(temp, encoded);
+        try {
+          Files.move(
+              temp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException e) {
+          Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
+        }
+      } finally {
+        Files.deleteIfExists(temp);
+      }
+
       return success(
           request.call().id(),
           "Edited "
-              + rawPath
+              + displayPath
               + " successfully.\nReplacements: "
-              + replacements
-              + "\n\ndiff:\n-"
-              + summary(oldText)
-              + "\n+"
-              + summary(newText));
+              + pending.size()
+              + "\n\ndiff:\n"
+              + diffText);
     } finally {
       lock.unlock();
     }
   }
 
-  /** LF/CRLF/CR 统一为 LF，用于在归一化空间匹配 old_string 并比较 new_string。 */
+  static String buildContextualDiff(
+      LineEndingDocument originalDoc,
+      LineEndingDocument nextDoc,
+      List<Occurrence> occurrences,
+      String normalizedNew) {
+    if (occurrences.isEmpty()) {
+      return "";
+    }
+    StringBuilder sb = new StringBuilder();
+    int totalOriginalLines = originalDoc.lines().size();
+    int totalNextLines = nextDoc.lines().size();
+    int width = Math.max(2, String.valueOf(Math.max(totalOriginalLines, totalNextLines)).length());
+
+    List<Occurrence> sorted = new ArrayList<>(occurrences);
+    sorted.sort(Comparator.comparingInt(Occurrence::startLine));
+
+    int lastPrintedOriginalLine = -1;
+
+    for (int i = 0; i < sorted.size(); i++) {
+      Occurrence occ = sorted.get(i);
+      int contextStart = Math.max(0, occ.startLine() - 3);
+      int contextEnd = Math.min(totalOriginalLines - 1, occ.endLine() + 3);
+
+      if (lastPrintedOriginalLine == -1) {
+        if (contextStart > 0) {
+          sb.append("...\n");
+        }
+      } else if (contextStart > lastPrintedOriginalLine + 1) {
+        sb.append("...\n");
+      } else {
+        contextStart = lastPrintedOriginalLine + 1;
+      }
+
+      for (int lineIdx = contextStart; lineIdx < occ.startLine(); lineIdx++) {
+        sb.append(
+            String.format(" %" + width + "d|%s\n", lineIdx + 1, originalDoc.lines().get(lineIdx)));
+      }
+
+      for (int lineIdx = occ.startLine(); lineIdx <= occ.endLine(); lineIdx++) {
+        sb.append(
+            String.format("-%" + width + "d|%s\n", lineIdx + 1, originalDoc.lines().get(lineIdx)));
+      }
+
+      String[] newLines = normalizedNew.split("\n", -1);
+      for (int n = 0; n < newLines.length; n++) {
+        int lineNum = occ.startLine() + 1 + n;
+        sb.append(String.format("+%" + width + "d|%s\n", lineNum, newLines[n]));
+      }
+
+      int nextOccStart =
+          (i + 1 < sorted.size()) ? sorted.get(i + 1).startLine() : Integer.MAX_VALUE;
+      int followEnd = Math.min(contextEnd, nextOccStart - 1);
+      for (int lineIdx = occ.endLine() + 1; lineIdx <= followEnd; lineIdx++) {
+        sb.append(
+            String.format(" %" + width + "d|%s\n", lineIdx + 1, originalDoc.lines().get(lineIdx)));
+      }
+      lastPrintedOriginalLine = followEnd;
+    }
+
+    if (lastPrintedOriginalLine < totalOriginalLines - 1) {
+      sb.append("...\n");
+    }
+
+    String diff = sb.toString();
+    if (diff.length() > 30 * 1024) {
+      diff = diff.substring(0, 30 * 1024) + "\n... (diff truncated to fit inline limit)\n";
+    }
+    return diff.stripTrailing();
+  }
+
   private static String normalizeToLf(String value) {
     return value.replace("\r\n", "\n").replace('\r', '\n');
   }
 
-  /** 检测既有行尾样式：统一 CRLF、统一 LF、统一 CR 或 mixed；不做整文件规范化。 */
-  private static String detectLineEnding(String text) {
+  static String detectLineEnding(String text) {
     boolean hasCrlf = text.contains("\r\n");
     String withoutCrlf = text.replace("\r\n", "");
     boolean hasCr = withoutCrlf.contains("\r");
@@ -128,36 +219,22 @@ public final class EditCapability extends AbstractCodingCapability {
     return "\n";
   }
 
-  /** 行级文本表示：内容行与每行后的既有分隔符（null 表示文件尾无换行）。 */
-  private record LineEndingDocument(List<String> lines, List<String> eolAfter) {}
-
-  /** occurrence 在归一化文本中的区间、行光标以及被消费/尾随的分隔符。 */
-  private record Occurrence(
-      int startIndex,
-      int endIndex,
-      int startLine,
-      int startColumn,
-      int endLine,
-      int endColumn,
-      List<String> consumedEndings,
-      String trailingEnding) {}
-
-  private record Cursor(int lineIndex, int column) {}
-
-  private static LineEndingDocument parseLineEndingDocument(String content) {
+  private static LineEndingDocument parseLineEndingDocument(String text) {
     List<String> lines = new ArrayList<>();
     List<String> eolAfter = new ArrayList<>();
     StringBuilder current = new StringBuilder();
-    for (int index = 0; index < content.length(); index++) {
-      char ch = content.charAt(index);
+    for (int index = 0; index < text.length(); index++) {
+      char ch = text.charAt(index);
       if (ch == '\r') {
-        String ending =
-            index + 1 < content.length() && content.charAt(index + 1) == '\n' ? "\r\n" : "\r";
-        if ("\r\n".equals(ending)) {
+        if (index + 1 < text.length() && text.charAt(index + 1) == '\n') {
+          lines.add(current.toString());
+          eolAfter.add("\r\n");
+          current.setLength(0);
           index++;
+          continue;
         }
         lines.add(current.toString());
-        eolAfter.add(ending);
+        eolAfter.add("\r");
         current.setLength(0);
         continue;
       }
@@ -220,7 +297,6 @@ public final class EditCapability extends AbstractCodingCapability {
     throw new IllegalArgumentException("line ending document index is out of range");
   }
 
-  /** 每个起点都探测一次，重叠 occurrence 同样计入唯一性判断。 */
   private static List<Integer> occurrenceStarts(String text, String search) {
     List<Integer> starts = new ArrayList<>();
     int offset = 0;
@@ -268,7 +344,6 @@ public final class EditCapability extends AbstractCodingCapability {
     return false;
   }
 
-  /** mixed 文件中新增换行沿用被替换段的行尾；无对应时回退 LF。 */
   private static String resolveInsertedEnding(
       String style, List<String> consumedEndings, int replacementEndingIndex) {
     if (!"mixed".equals(style)) {
@@ -311,7 +386,17 @@ public final class EditCapability extends AbstractCodingCapability {
     return new LineEndingDocument(lines, eolAfter);
   }
 
-  private static String summary(String value) {
-    return value.length() <= 1000 ? value : value.substring(0, 1000) + "... (diff text truncated)";
-  }
+  record LineEndingDocument(List<String> lines, List<String> eolAfter) {}
+
+  record Cursor(int lineIndex, int column) {}
+
+  record Occurrence(
+      int startIndex,
+      int endIndex,
+      int startLine,
+      int startColumn,
+      int endLine,
+      int endColumn,
+      List<String> consumedEndings,
+      String trailingEnding) {}
 }

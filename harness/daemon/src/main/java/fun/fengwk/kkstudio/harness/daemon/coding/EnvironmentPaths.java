@@ -111,4 +111,26 @@ final class EnvironmentPaths {
   private static String display(String value) {
     return value == null ? "<missing>" : value;
   }
+
+  /** 将目标绝对路径转换为相对 workdir 的展示路径，统一以 '/' 分隔。 */
+  static String displayPath(Path target, Path workdir, String rawPath) {
+    try {
+      if (target != null && workdir != null && target.startsWith(workdir)) {
+        Path relative = workdir.relativize(target);
+        String relStr = relative.toString().replace('\\', '/');
+        return relStr.isEmpty() ? "." : relStr;
+      }
+    } catch (IllegalArgumentException ignored) {
+    }
+    if (rawPath != null && !rawPath.isBlank()) {
+      try {
+        Path parsed = Path.of(rawPath);
+        if (!parsed.isAbsolute()) {
+          return parsed.normalize().toString().replace('\\', '/');
+        }
+      } catch (RuntimeException ignored) {
+      }
+    }
+    return target != null ? target.toString().replace('\\', '/') : display(rawPath);
+  }
 }

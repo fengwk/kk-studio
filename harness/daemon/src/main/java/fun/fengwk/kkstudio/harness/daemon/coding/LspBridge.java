@@ -62,28 +62,40 @@ final class LspBridge {
   }
 
   String gotoDefinition(Path workdir, Path path, int line, int character) throws Exception {
-    return invokeBridge(
-        workdir,
-        request("goto_definition")
-            .put("path", path.toString())
-            .put("line", line)
-            .put("character", character));
+    String output =
+        invokeBridge(
+            workdir,
+            request("goto_definition")
+                .put("workdir", workdir.toString())
+                .put("path", path.toString())
+                .put("line", line)
+                .put("character", character));
+    return relativizeLspText(output, workdir);
   }
 
   String workspaceSymbols(Path workdir, Path path, String query, int limit) throws Exception {
-    return invokeBridge(
-        workdir,
-        request("workspace_symbols")
-            .put("path", path.toString())
-            .put("query", query)
-            .put("limit", limit));
+    String output =
+        invokeBridge(
+            workdir,
+            request("workspace_symbols")
+                .put("workdir", workdir.toString())
+                .put("path", path.toString())
+                .put("query", query)
+                .put("limit", limit));
+    return relativizeLspText(output, workdir);
   }
 
   String javaDecompile(Path workdir, Path path, String target) throws Exception {
     if (bridgeAvailable()) {
       try {
-        return invokeBridge(
-            workdir, request("java_decompile").put("path", path.toString()).put("target", target));
+        String output =
+            invokeBridge(
+                workdir,
+                request("java_decompile")
+                    .put("workdir", workdir.toString())
+                    .put("path", path.toString())
+                    .put("target", target));
+        return relativizeLspText(output, workdir);
       } catch (IllegalStateException | IOException bridgeError) {
         String fallback = tryJavap(workdir, path, target);
         if (fallback != null) {
@@ -103,6 +115,25 @@ final class LspBridge {
         UNAVAILABLE_MESSAGE
             + " javap fallback could not resolve target: "
             + summarizeTarget(target));
+  }
+
+  static String relativizeLspText(String text, Path workdir) {
+    if (text == null || text.isBlank() || workdir == null) {
+      return text;
+    }
+    String workdirStr = workdir.toString().replace('\\', '/');
+    if (!workdirStr.endsWith("/")) {
+      workdirStr += "/";
+    }
+    String fileUriPrefix = "file://" + workdirStr;
+    String result = text.replace('\\', '/');
+    if (result.contains(fileUriPrefix)) {
+      result = result.replace(fileUriPrefix, "");
+    }
+    if (result.contains(workdirStr)) {
+      result = result.replace(workdirStr, "");
+    }
+    return result;
   }
 
   String tryJavap(Path workdir, Path sourcePath, String target) throws Exception {
