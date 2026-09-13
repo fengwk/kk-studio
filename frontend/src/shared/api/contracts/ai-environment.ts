@@ -191,11 +191,15 @@ export interface EnvironmentSkillDTO {
   discoveredAt: InstantTimestamp
 }
 
+/** 目标资源类型：SKILL_SOURCE / MCP_SERVER。 */
+export type EnvironmentOperationResourceType = 'SKILL_SOURCE' | 'MCP_SERVER'
+
 /** Environment Operation 操作类型 wire 值。 */
 export type EnvironmentOperationType =
   | 'SKILL_REFRESH'
   | 'SKILL_INSTALL'
   | 'SKILL_UPDATE'
+  | 'MCP_SERVER_DISCOVER'
 
 /** Environment Operation 生命周期状态 wire 值。 */
 export type EnvironmentOperationStatus =
@@ -215,31 +219,33 @@ export interface EnvironmentOperationCreateDTO {
 }
 
 /**
- * Environment Skill 来源操作公开安全响应 DTO。
+ * Environment 管理操作公开安全响应 DTO。
+ * 安全边界：移除了私有参数 arguments、leaseToken 与 ownerNodeId。
+ * 泛化支持 SKILL_SOURCE 与 MCP_SERVER 两类资源。
  */
 export interface EnvironmentOperationDTO {
   /** 操作全局唯一 UUID。 */
   id: string
   /** 所属 Environment UUID。 */
   environmentId: string
-  /** 目标来源 UUID。 */
-  sourceId: string
-  /** 操作类型：SKILL_REFRESH / SKILL_INSTALL / SKILL_UPDATE。 */
-  operationType: EnvironmentOperationType
+  /** 目标资源类型：SKILL_SOURCE / MCP_SERVER。 */
+  resourceType: EnvironmentOperationResourceType | string
+  /** 目标资源 UUID。 */
+  resourceId: string
+  /** 操作类型：SKILL_REFRESH / SKILL_INSTALL / SKILL_UPDATE / MCP_SERVER_DISCOVER。 */
+  operationType: EnvironmentOperationType | string
   /** 生命周期状态：PENDING / RUNNING / SUCCEEDED / FAILED / UNKNOWN / CANCELLED。 */
   status: EnvironmentOperationStatus
-  /** 冻结的来源配置版本（canonical 非负十进制字符串）。 */
-  sourceVersion: CatalogVersion
-  /** 冻结的来源集合代际版本（canonical 非负十进制字符串）。 */
-  sourceSetVersion: CatalogVersion
+  /** 冻结的目标资源版本（canonical 非负十进制字符串）。 */
+  resourceVersion: CatalogVersion
   /** 操作参数的安全结构化摘要。 */
   parameterSummary: Record<string, unknown>
   /** 截止时间戳。 */
   deadlineAt: InstantTimestamp
   /** 开始执行时间戳；从未认领时为 null。 */
-  startedAt: InstantTimestamp
+  startedAt: InstantTimestamp | null
   /** 终态完成时间戳；未终结时为 null。 */
-  finishedAt: InstantTimestamp
+  finishedAt: InstantTimestamp | null
   /** 执行成功后的结构化结果摘要；未成功时为 null。 */
   resultSummary: Record<string, unknown> | null
   /** 失败或未知状态下的分类错误码；成功或活动状态下为 null。 */
