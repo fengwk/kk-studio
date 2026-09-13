@@ -70,6 +70,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         timeoutMillis);
   }
 
+  /** 测试意图：验证创建挂起操作命令中 sourceVersion 为负数时拒绝并抛出 AiValidationException。 */
   @Test
   void validateCommand_sourceVersionNegative_throwsAiValidationException() {
     CreatePendingOperationCommand cmd =
@@ -86,6 +87,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertThrows(AiValidationException.class, () -> repository.createPending(cmd));
   }
 
+  /** 测试意图：验证创建挂起操作命令中 sourceSetVersion 为负数时拒绝并抛出 AiValidationException。 */
   @Test
   void validateCommand_sourceSetVersionNegative_throwsAiValidationException() {
     CreatePendingOperationCommand cmd =
@@ -102,6 +104,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertThrows(AiValidationException.class, () -> repository.createPending(cmd));
   }
 
+  /** 测试意图：验证创建挂起操作命令中 arguments 为空白或非合法 JSON 时抛出异常。 */
   @Test
   void validateCommand_argumentsInvalid_throwsAiValidationException() {
     // null arguments throws NPE at Command record construction
@@ -148,6 +151,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertThrows(AiValidationException.class, () -> repository.createPending(cmdNonJson));
   }
 
+  /** 测试意图：验证带超时创建命令中 timeoutMillis 小于等于 0 时抛出 AiValidationException。 */
   @Test
   void validateCommandWithTimeout_timeoutZeroOrNegative_throwsAiValidationException() {
     assertThrows(
@@ -158,6 +162,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         () -> repository.createPendingWithTimeout(validTimeoutCommand(-100L)));
   }
 
+  /** 测试意图：验证带超时创建命令中版本号为负数时抛出 AiValidationException。 */
   @Test
   void validateCommandWithTimeout_versionsNegative_throwsAiValidationException() {
     CreatePendingOperationWithTimeoutCommand cmd1 =
@@ -187,6 +192,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertThrows(AiValidationException.class, () -> repository.createPendingWithTimeout(cmd2));
   }
 
+  /** 测试意图：验证创建挂起操作在数据库未返回插入行时抛出 AiValidationException。 */
   @Test
   void createPending_emptyResults_throwsAiValidationException() {
     when(jdbcTemplate.query(
@@ -205,6 +211,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertThrows(AiValidationException.class, () -> repository.createPending(validCommand()));
   }
 
+  /** 测试意图：验证带超时创建挂起操作在数据库未返回插入行时抛出 AiValidationException。 */
   @Test
   void createPendingWithTimeout_emptyResults_throwsAiValidationException() {
     when(jdbcTemplate.query(
@@ -225,6 +232,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         () -> repository.createPendingWithTimeout(validTimeoutCommand(60000L)));
   }
 
+  /** 测试意图：验证创建挂起操作触发外键约束异常（23503）时转换为 AiResourceNotFoundException。 */
   @Test
   void classifyCreateError_foreignKeyViolation_throwsAiResourceNotFoundException() {
     DataAccessException dae =
@@ -246,6 +254,10 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertThrows(AiResourceNotFoundException.class, () -> repository.createPending(validCommand()));
   }
 
+  /**
+   * 测试意图：验证创建挂起操作触发活跃操作唯一约束异常（uk_environment_operation_active）时转换为
+   * DuplicateActiveOperationException。
+   */
   @Test
   void classifyCreateError_uniqueConstraintActive_throwsDuplicateActiveOperationException() {
     DataAccessException dae =
@@ -271,6 +283,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         DuplicateActiveOperationException.class, () -> repository.createPending(validCommand()));
   }
 
+  /** 测试意图：验证创建挂起操作触发主键冲突时转换为提示 ID 已存在的 AiValidationException。 */
   @Test
   void classifyCreateError_uniqueConstraintPkey_throwsAiValidationException() {
     DataAccessException dae =
@@ -296,6 +309,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertTrue(ex.getMessage().contains("operation id already exists"));
   }
 
+  /** 测试意图：验证创建挂起操作触发其他唯一约束异常时转换为通用唯一约束冲突 AiValidationException。 */
   @Test
   void classifyCreateError_uniqueConstraintOther_throwsAiValidationException() {
     DataAccessException dae =
@@ -321,6 +335,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertTrue(ex.getMessage().contains("operation unique constraint violation"));
   }
 
+  /** 测试意图：验证创建挂起操作遇到未知 SQL 状态码时转换为创建失败 AiValidationException。 */
   @Test
   void classifyCreateError_unknownSqlState_throwsAiValidationException() {
     DataAccessException dae =
@@ -344,6 +359,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertTrue(ex.getMessage().contains("failed to create pending operation"));
   }
 
+  /** 测试意图：验证创建挂起操作触发检查约束异常（23514）时转换为 AiValidationException。 */
   @Test
   void classifyCreateError_checkConstraintViolation_throwsAiValidationException() {
     DataAccessException dae =
@@ -365,6 +381,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertThrows(AiValidationException.class, () -> repository.createPending(validCommand()));
   }
 
+  /** 测试意图：验证带超时创建操作触发活跃操作唯一约束异常时转换为 DuplicateActiveOperationException。 */
   @Test
   void classifyCreateTimeoutError_uniqueConstraintActive_throwsDuplicateActiveOperationException() {
     DataAccessException dae =
@@ -391,6 +408,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         () -> repository.createPendingWithTimeout(validTimeoutCommand(60000L)));
   }
 
+  /** 测试意图：验证带超时创建操作触发主键冲突时转换为提示 ID 已存在的 AiValidationException。 */
   @Test
   void classifyCreateTimeoutError_uniqueConstraintPkey_throwsAiValidationException() {
     DataAccessException dae =
@@ -418,6 +436,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertTrue(ex.getMessage().contains("operation id already exists"));
   }
 
+  /** 测试意图：验证带超时创建操作触发其他唯一约束异常时转换为通用唯一约束冲突 AiValidationException。 */
   @Test
   void classifyCreateTimeoutError_uniqueConstraintOther_throwsAiValidationException() {
     DataAccessException dae =
@@ -445,6 +464,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertTrue(ex.getMessage().contains("operation unique constraint violation"));
   }
 
+  /** 测试意图：验证带超时创建操作遇到未知 SQL 状态码时转换为创建失败 AiValidationException。 */
   @Test
   void classifyCreateTimeoutError_unknownSqlState_throwsAiValidationException() {
     DataAccessException dae =
@@ -470,6 +490,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertTrue(ex.getMessage().contains("failed to create pending operation"));
   }
 
+  /** 测试意图：验证带超时创建操作触发外键约束异常（23503）时转换为 AiResourceNotFoundException。 */
   @Test
   void classifyCreateTimeoutError_foreignKeyViolation_throwsAiResourceNotFoundException() {
     DataAccessException dae =
@@ -493,6 +514,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         () -> repository.createPendingWithTimeout(validTimeoutCommand(60000L)));
   }
 
+  /** 测试意图：验证带超时创建操作触发检查约束异常（23514）时转换为 AiValidationException。 */
   @Test
   void classifyCreateTimeoutError_checkConstraintViolation_throwsAiValidationException() {
     DataAccessException dae =
@@ -516,55 +538,98 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         () -> repository.createPendingWithTimeout(validTimeoutCommand(60000L)));
   }
 
+  /** 测试意图：验证 markFailed 接口针对 failureCode 与 failureMessage 各项规则的校验与错误提示契约。 */
   @Test
   void markFailed_failureCodeAndMessageValidation() {
     // null failureCode
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markFailed(opId, nodeId, leaseToken, null, "error"));
+    AiValidationException exNullCode =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markFailed(opId, nodeId, leaseToken, null, "error"));
+    assertTrue(exNullCode.getMessage().contains("failureCode must not be null"));
 
     // invalid failureCode format (must be UPPER_SNAKE)
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markFailed(opId, nodeId, leaseToken, "invalid-code", "error"));
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markFailed(opId, nodeId, leaseToken, "code.with.dots", "error"));
+    AiValidationException exInvalidCode1 =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markFailed(opId, nodeId, leaseToken, "invalid-code", "error"));
+    assertTrue(exInvalidCode1.getMessage().contains("invalid failure code format"));
+
+    AiValidationException exInvalidCode2 =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markFailed(opId, nodeId, leaseToken, "code.with.dots", "error"));
+    assertTrue(exInvalidCode2.getMessage().contains("invalid failure code format"));
 
     // null or blank failureMessage
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markFailed(opId, nodeId, leaseToken, "err.code", null));
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markFailed(opId, nodeId, leaseToken, "err.code", "   "));
+    AiValidationException exNullMsg =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markFailed(opId, nodeId, leaseToken, "EXECUTION_FAILED", null));
+    assertTrue(exNullMsg.getMessage().contains("failure message must not be blank"));
+
+    AiValidationException exBlankMsg =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markFailed(opId, nodeId, leaseToken, "EXECUTION_FAILED", "   "));
+    assertTrue(exBlankMsg.getMessage().contains("failure message must not be blank"));
 
     // untrimmed failureMessage
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markFailed(opId, nodeId, leaseToken, "err.code", " leading space"));
+    AiValidationException exUntrimmedMsg =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                repository.markFailed(
+                    opId, nodeId, leaseToken, "EXECUTION_FAILED", " leading space"));
+    assertTrue(
+        exUntrimmedMsg
+            .getMessage()
+            .contains("failure message must not contain leading or trailing whitespace"));
 
     // failureMessage exceeding 1000 characters
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markFailed(opId, nodeId, leaseToken, "err.code", "x".repeat(1001)));
+    AiValidationException exTooLongMsg =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                repository.markFailed(
+                    opId, nodeId, leaseToken, "EXECUTION_FAILED", "x".repeat(1001)));
+    assertTrue(
+        exTooLongMsg.getMessage().contains("failure message exceeds maximum allowed length of"));
 
     // failureMessage containing ISO control characters
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markFailed(opId, nodeId, leaseToken, "err.code", "error\u0007bell"));
+    AiValidationException exControlMsg =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                repository.markFailed(
+                    opId, nodeId, leaseToken, "EXECUTION_FAILED", "error\u0007bell"));
+    assertTrue(
+        exControlMsg.getMessage().contains("failure message contains invalid control characters"));
   }
 
+  /** 测试意图：验证 markUnknown 接口针对 failureCode 与 failureMessage 校验规则的防御契约。 */
   @Test
   void markUnknown_failureCodeAndMessageValidation() {
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markUnknown(opId, nodeId, leaseToken, null, "error"));
-    assertThrows(
-        AiValidationException.class,
-        () -> repository.markUnknown(opId, nodeId, leaseToken, "err.code", ""));
+    AiValidationException exNullCode =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markUnknown(opId, nodeId, leaseToken, null, "error"));
+    assertTrue(exNullCode.getMessage().contains("failureCode must not be null"));
+
+    AiValidationException exInvalidCode =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markUnknown(opId, nodeId, leaseToken, "invalid-code", "error"));
+    assertTrue(exInvalidCode.getMessage().contains("invalid failure code format"));
+
+    AiValidationException exBlankMsg =
+        assertThrows(
+            AiValidationException.class,
+            () -> repository.markUnknown(opId, nodeId, leaseToken, "EXECUTION_FAILED", ""));
+    assertTrue(exBlankMsg.getMessage().contains("failure message must not be blank"));
   }
 
+  /** 测试意图：验证 markSucceeded 在 resultSummary 为 null 时安全回退为默认空对象 "{}"。 */
   @Test
   void markSucceeded_nullResultSummaryDefaultsToEmptyObject() {
     when(jdbcTemplate.update(
@@ -580,6 +645,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertTrue(success);
   }
 
+  /** 测试意图：验证 listByEnvironment 对查询分页 limit 进行保底与上限归一化（1-500，默认 50）。 */
   @Test
   void listByEnvironment_normalizesLimits() {
     when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq(envId), anyInt()))
@@ -594,6 +660,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     verify(jdbcTemplate).query(anyString(), any(RowMapper.class), eq(envId), eq(500));
   }
 
+  /** 测试意图：验证 listSafeByEnvironment 对查询分页 limit 进行保底与上限归一化（1-500，默认 50）。 */
   @Test
   void listSafeByEnvironment_normalizesLimits() {
     when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq(envId), anyInt()))
@@ -606,6 +673,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     verify(jdbcTemplate).query(anyString(), any(RowMapper.class), eq(envId), eq(500));
   }
 
+  /** 测试意图：验证认领挂起操作时若 limit 小于等于 0 则直接返回空列表，避免无意义的数据库查询。 */
   @Test
   void claimPending_zeroOrNegativeLimit_returnsEmptyWithoutQueryingDatabase() {
     List<EnvironmentOperation> res = repository.claimPending(nodeId, 0);
@@ -616,6 +684,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertTrue(resTimeout.isEmpty());
   }
 
+  /** 测试意图：验证 rescheduleUnsent 在不同状态与查询结果下正确映射为对应的 RescheduleOutcome 枚举。 */
   @Test
   void rescheduleUnsent_outcomes() {
     // Empty results -> STALE
@@ -638,6 +707,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     assertEquals(RescheduleOutcome.STALE, repository.rescheduleUnsent(opId, nodeId, leaseToken));
   }
 
+  /** 测试意图：验证 getById 与 getSafe 查询不到指定操作记录时抛出 AiResourceNotFoundException。 */
   @Test
   void findByIdAndSafe_notFound_throwsAiResourceNotFoundException() {
     when(jdbcTemplate.query(anyString(), any(RowMapper.class), eq(opId))).thenReturn(List.of());
