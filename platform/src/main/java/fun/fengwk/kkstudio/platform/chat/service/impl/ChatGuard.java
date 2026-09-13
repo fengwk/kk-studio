@@ -31,7 +31,7 @@ public class ChatGuard {
     UUID parsed = ChatIds.parseUuid(id, "id");
     Chat chat = chatRepository.getById(parsed);
     if (chat == null) {
-      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+      throw new AiResourceNotFoundException(RESOURCE);
     }
     return chat;
   }
@@ -39,7 +39,7 @@ public class ChatGuard {
   public Chat requireChat(UUID id) {
     Chat chat = chatRepository.getById(id);
     if (chat == null) {
-      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+      throw new AiResourceNotFoundException(RESOURCE);
     }
     return chat;
   }

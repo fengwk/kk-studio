@@ -47,10 +47,10 @@ public class ProjectSnapshotAssembler {
 
     Project project = projectService.getProject(projectId);
     if (project == null) {
-      throw new AiResourceNotFoundException("project", projectId.toString());
+      throw new AiResourceNotFoundException("project");
     }
     if (!project.getId().equals(projectId)) {
-      throw new IllegalStateException("Foreign project returned for id: " + projectId);
+      throw new IllegalStateException("Foreign project returned for snapshot");
     }
 
     // 1. 读取未归档 Issues
@@ -58,13 +58,7 @@ public class ProjectSnapshotAssembler {
     List<ProjectIssueSnapshotDTO> issueSnapshots = new ArrayList<>(issues.size());
     for (Issue issue : issues) {
       if (!issue.getProjectId().equals(projectId)) {
-        throw new IllegalStateException(
-            "Foreign issue "
-                + issue.getId()
-                + " with projectId "
-                + issue.getProjectId()
-                + " found in project "
-                + projectId);
+        throw new IllegalStateException("Foreign issue returned for project snapshot");
       }
 
       boolean blocked = issueService.isBlocked(issue.getId());
@@ -73,13 +67,7 @@ public class ProjectSnapshotAssembler {
       IssueRun currentOrLatest =
           activeRun != null ? activeRun : issueRunService.getLatestRun(issue.getId());
       if (currentOrLatest != null && !currentOrLatest.getIssueId().equals(issue.getId())) {
-        throw new IllegalStateException(
-            "Foreign run "
-                + currentOrLatest.getId()
-                + " with issueId "
-                + currentOrLatest.getIssueId()
-                + " found for issue "
-                + issue.getId());
+        throw new IllegalStateException("Foreign run returned for issue snapshot");
       }
 
       issueSnapshots.add(
@@ -95,11 +83,7 @@ public class ProjectSnapshotAssembler {
     List<IssueDependencyDTO> dependencyDTOs = new ArrayList<>(dependencies.size());
     for (IssueDependency dep : dependencies) {
       if (!dep.getProjectId().equals(projectId)) {
-        throw new IllegalStateException(
-            "Foreign dependency with projectId "
-                + dep.getProjectId()
-                + " found in project "
-                + projectId);
+        throw new IllegalStateException("Foreign dependency returned for project snapshot");
       }
       dependencyDTOs.add(mapper.toDto(dep));
     }
@@ -113,10 +97,7 @@ public class ProjectSnapshotAssembler {
     if (sessionRelation != null) {
       if (!sessionRelation.getProjectId().equals(projectId)) {
         throw new IllegalStateException(
-            "Foreign coordinator session relation with projectId "
-                + sessionRelation.getProjectId()
-                + " found in project "
-                + projectId);
+            "Foreign coordinator session relation returned for project snapshot");
       }
       UUID sessionId = sessionRelation.getSessionId();
       coordinatorSessionId = ProjectDtoMapper.formatUuid(sessionId);

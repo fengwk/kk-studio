@@ -57,6 +57,11 @@ export function CreateProjectModal({
       setErrorMessage('项目名称不能为空')
       return
     }
+    const trimmedCoordinatorAgentName = coordinatorAgentName.trim()
+    if (!trimmedCoordinatorAgentName) {
+      setErrorMessage('Coordinator Agent 名称不能为空')
+      return
+    }
 
     setIsSubmitting(true)
     setErrorMessage(null)
@@ -64,7 +69,7 @@ export function CreateProjectModal({
       const created = await api.createProject({
         title: trimmedTitle,
         description: description.trim() || null,
-        coordinatorAgentName: coordinatorAgentName.trim() || null,
+        coordinatorAgentName: trimmedCoordinatorAgentName,
       })
       onSuccess(created)
       onClose()
@@ -141,13 +146,16 @@ export function CreateProjectModal({
             </div>
 
             <div className="form-group">
-              <label htmlFor="create-project-coordinator">Coordinator Agent 名称</label>
+              <label htmlFor="create-project-coordinator">
+                Coordinator Agent 名称 <span style={{ color: 'var(--danger)' }}>*</span>
+              </label>
               <input
                 id="create-project-coordinator"
                 type="text"
                 value={coordinatorAgentName}
                 onChange={(e) => setCoordinatorAgentName(e.target.value)}
-                placeholder="可选，指定负责编排的 Coordinator Agent 名称"
+                placeholder="输入负责编排的 Coordinator Agent 名称"
+                required
               />
             </div>
           </div>
@@ -164,7 +172,7 @@ export function CreateProjectModal({
             <button
               type="submit"
               className="btn-primary"
-              disabled={isSubmitting || !title.trim()}
+              disabled={isSubmitting || !title.trim() || !coordinatorAgentName.trim()}
             >
               {isSubmitting ? '创建中...' : '创建项目'}
             </button>

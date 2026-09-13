@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ApiError } from '@/shared/api/client'
 import { ProjectsPage } from './ProjectsPage'
 import type { ProjectsApi } from './projects-api'
 import type { ProjectDTO } from './types'
+import { notifyProjectsChanged } from './useProjectsInvalidation'
 
 describe('ProjectsPage', () => {
   const mockProjects: ProjectDTO[] = [
@@ -22,7 +23,7 @@ describe('ProjectsPage', () => {
       id: 'a0000000-0000-0000-0000-000000000002',
       title: 'Beta Project',
       description: 'Second project',
-      coordinatorAgentName: null,
+      coordinatorAgentName: 'coordinator-2',
       nextIssueNumber: '1',
       version: '0',
       archivedAt: '2026-09-14T01:00:00Z',
@@ -128,6 +129,9 @@ describe('ProjectsPage', () => {
     const descInput = screen.getByLabelText(/项目描述/i)
     fireEvent.change(descInput, { target: { value: 'Brand new project' } })
 
+    const coordinatorInput = screen.getByLabelText(/Coordinator Agent 名称/i)
+    fireEvent.change(coordinatorInput, { target: { value: 'agent-gamma' } })
+
     const submitBtn = screen.getByRole('button', { name: '创建项目' })
     fireEvent.click(submitBtn)
 
@@ -135,7 +139,7 @@ describe('ProjectsPage', () => {
       expect(api.createProject).toHaveBeenCalledWith({
         title: 'Gamma Project',
         description: 'Brand new project',
-        coordinatorAgentName: null,
+        coordinatorAgentName: 'agent-gamma',
       })
       expect(onSelectProject).toHaveBeenCalledWith(newProj.id)
     })
@@ -330,5 +334,33 @@ describe('ProjectsPage', () => {
     await waitFor(() => {
       expect(api.listProjects).toHaveBeenCalledTimes(2)
     })
+
+    act(() => notifyProjectsChanged())
+    await waitFor(() => {
+      expect(api.listProjects).toHaveBeenCalledTimes(3)
+    })
+  })
+
+  it('ignores a stale project list response after a newer invalidation reload', async () => {
+    // 测试意图：较早发起的列表请求后返回时，不得覆盖失效通知拉取到的新数据。
+    let resolveInitial!: (projects: ProjectDTO[]) => void
+    const initial = new Promise<ProjectDTO[]>((resolve) => {
+      resolveInitial = resolve
+    })
+    const latest = [{ ...mockProjects[0], title: 'Latest Project' }]
+    const api = createMockApi({
+      listProjects: vi.fn().mockReturnValueOnce(initial).mockResolvedValue(latest),
+    })
+    render(<ProjectsPage api={api} />)
+
+    act(() => notifyProjectsChanged())
+    expect(await screen.findByText('Latest Project')).toBeInTheDocument()
+
+    await act(async () => {
+      resolveInitial([{ ...mockProjects[0], title: 'Stale Project' }])
+      await initial
+    })
+    expect(screen.getByText('Latest Project')).toBeInTheDocument()
+    expect(screen.queryByText('Stale Project')).not.toBeInTheDocument()
   })
 })

@@ -6,18 +6,11 @@ public class AiVersionConflictException extends AiDomainException {
   private final String expectedVersion;
   private final String actualVersion;
 
-  public AiVersionConflictException(
-      String resource, String id, String expectedVersion, String actualVersion) {
+  public AiVersionConflictException(String resource, String expectedVersion, String actualVersion) {
     super(
         DomainErrorCode.VERSION_CONFLICT,
         resource,
-        resource
-            + " version conflict: expected="
-            + expectedVersion
-            + " actual="
-            + actualVersion
-            + " id="
-            + id);
+        resource + " version conflict: expected=" + expectedVersion + " actual=" + actualVersion);
     this.expectedVersion = expectedVersion;
     this.actualVersion = actualVersion;
   }

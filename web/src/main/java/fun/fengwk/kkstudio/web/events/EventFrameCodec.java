@@ -24,11 +24,11 @@ import java.util.UUID;
  * 事件通道帧的严格 JSON codec：所有帧（客户端与服务端）都带 {@code version:1}；客户端帧手工字段校验（duplicate/trailing/unknown/
  * missing/wrong-type 全部拒绝），服务端帧确定性编码。
  *
- * <p>客户端帧 {@code {version:1, type:'subscribe'|'unsubscribe', resource:{kind:'thread'|'canvas',
- * id}}} 字段集精确；服务端帧 {@code subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code
- * resync{resource}} / {@code heartbeat} / {@code error{code,message[,resource]}}。资源 id 必须是
- * canonical UUID （{@code UUID.fromString} 往返一致）；游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超
- * bigint）。
+ * <p>客户端帧 {@code {version:1, type:'subscribe'|'unsubscribe', resource}} 字段集精确；Thread/Canvas
+ * resource 带 canonical UUID id，Projects/Cloud Files 是无 id 的全局 resource。服务端帧 {@code
+ * subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code resync{resource}} /
+ * {@code heartbeat} / {@code error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code
+ * 0|[1-9][0-9]*}，不超 bigint）。
  */
 final class EventFrameCodec {
 
@@ -42,9 +42,12 @@ final class EventFrameCodec {
 
   private static final Set<String> CLIENT_FRAME_FIELDS = orderedSet("version", "type", "resource");
   private static final Set<String> RESOURCE_FIELDS = orderedSet("kind", "id");
+  private static final Set<String> GLOBAL_RESOURCE_FIELDS = orderedSet("kind");
 
   private static final String THREAD = ResourceKind.THREAD.name().toLowerCase();
   private static final String CANVAS = ResourceKind.CANVAS.name().toLowerCase();
+  private static final String PROJECTS = ResourceKind.PROJECTS.name().toLowerCase();
+  private static final String CLOUD_FILES = "cloud-files";
 
   static {
     MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -72,7 +75,7 @@ final class EventFrameCodec {
     try {
       root = MAPPER.readTree(json);
     } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException("malformed client frame JSON", error);
+      throw new IllegalArgumentException("malformed client frame JSON");
     }
     ObjectNode node = requireObject(root, "frame");
     requireExactFields(node, CLIENT_FRAME_FIELDS, "frame");
@@ -85,14 +88,20 @@ final class EventFrameCodec {
       type = ClientFrame.Type.UNSUBSCRIBE;
     } else {
       // 只接受精确小写；toUpperCase 归一化会放行 SUBSCRIBE/Subscribe 等非 canonical 值。
-      throw new IllegalArgumentException(
-          "frame.type must be subscribe or unsubscribe: " + typeName);
+      throw new IllegalArgumentException("frame.type must be subscribe or unsubscribe");
     }
     return new ClientFrame(type, parseResource(node.get("resource")));
   }
 
   /** 编码 {@code subscribed} ack 帧（{@code cursor} 为 canonical 非负十进制）。 */
   String subscribed(ResourceKey resource, long cursor) {
+    if (cursor < 0) {
+      throw new IllegalArgumentException("cursor must be non-negative");
+    }
+    if ((resource.kind() == ResourceKind.PROJECTS || resource.kind() == ResourceKind.CLOUD_FILES)
+        && cursor != 0) {
+      throw new IllegalArgumentException("global resource cursor must be zero");
+    }
     ObjectNode node = NODES.objectNode();
     node.put("version", 1);
     node.put("type", "subscribed");
@@ -112,12 +121,26 @@ final class EventFrameCodec {
     node.put("type", "event");
     node.set("resource", resourceNode(resource));
     if (signal instanceof Signal.Version version) {
+      if (resource.kind() != ResourceKind.THREAD && resource.kind() != ResourceKind.CANVAS) {
+        throw new IllegalArgumentException("version signal requires a versioned resource");
+      }
       node.put("name", "version");
       node.put("cursor", version.version());
       node.set("data", dataNode("version", version.version()));
     } else if (signal instanceof Signal.Realtime realtime) {
+      if (resource.kind() != ResourceKind.THREAD) {
+        throw new IllegalArgumentException("realtime signal requires a thread resource");
+      }
       node.put("name", "realtime");
       node.set("data", realtimeCodec.encodeNode(realtime.event()));
+    } else if (signal instanceof Signal.ProjectChanged projectChanged) {
+      if (resource.kind() != ResourceKind.PROJECTS) {
+        throw new IllegalArgumentException("project change signal requires the projects resource");
+      }
+      node.put("name", "changed");
+      ObjectNode data = NODES.objectNode();
+      data.put("projectId", projectChanged.projectId().toString());
+      node.set("data", data);
     } else if (signal instanceof Signal.Resync) {
       throw new IllegalArgumentException("resync signal is not an event frame");
     } else {
@@ -180,10 +203,10 @@ final class EventFrameCodec {
     try {
       parsed = UUID.fromString(value);
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID: " + value, error);
+      throw new IllegalArgumentException(field + " must be a canonical UUID");
     }
     if (!parsed.toString().equals(value)) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID: " + value);
+      throw new IllegalArgumentException(field + " must be a canonical UUID");
     }
     return parsed;
   }
@@ -198,25 +221,42 @@ final class EventFrameCodec {
 
   private static ResourceKey parseResource(JsonNode value) {
     ObjectNode node = requireObject(value, "frame.resource");
-    requireExactFields(node, RESOURCE_FIELDS, "frame.resource");
     String kindName = requiredText(node, "kind", "frame.resource");
-    ResourceKind kind;
     if (THREAD.equals(kindName)) {
-      kind = ResourceKind.THREAD;
-    } else if (CANVAS.equals(kindName)) {
-      kind = ResourceKind.CANVAS;
-    } else {
-      throw new IllegalArgumentException(
-          "frame.resource.kind must be thread or canvas: " + kindName);
+      requireExactFields(node, RESOURCE_FIELDS, "frame.resource");
+      return new ResourceKey(
+          ResourceKind.THREAD,
+          parseUuid(requiredText(node, "id", "frame.resource"), "frame.resource.id"));
     }
-    return new ResourceKey(
-        kind, parseUuid(requiredText(node, "id", "frame.resource"), "frame.resource.id"));
+    if (CANVAS.equals(kindName)) {
+      requireExactFields(node, RESOURCE_FIELDS, "frame.resource");
+      return new ResourceKey(
+          ResourceKind.CANVAS,
+          parseUuid(requiredText(node, "id", "frame.resource"), "frame.resource.id"));
+    }
+    if (PROJECTS.equals(kindName)) {
+      requireExactFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
+      return new ResourceKey(ResourceKind.PROJECTS, null);
+    }
+    if (CLOUD_FILES.equals(kindName)) {
+      requireExactFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
+      return new ResourceKey(ResourceKind.CLOUD_FILES, null);
+    }
+    throw new IllegalArgumentException(
+        "frame.resource.kind must be thread, canvas, projects, or cloud-files");
   }
 
   private static ObjectNode resourceNode(ResourceKey resource) {
     ObjectNode node = NODES.objectNode();
-    node.put("kind", resource.kind() == ResourceKind.THREAD ? THREAD : CANVAS);
-    node.put("id", resource.id().toString());
+    switch (resource.kind()) {
+      case THREAD -> node.put("kind", THREAD);
+      case CANVAS -> node.put("kind", CANVAS);
+      case PROJECTS -> node.put("kind", PROJECTS);
+      case CLOUD_FILES -> node.put("kind", CLOUD_FILES);
+    }
+    if (resource.id() != null) {
+      node.put("id", resource.id().toString());
+    }
     return node;
   }
 
@@ -243,7 +283,7 @@ final class EventFrameCodec {
         .forEachRemaining(
             name -> {
               if (!fields.contains(name)) {
-                throw new IllegalArgumentException(context + " has unknown field: " + name);
+                throw new IllegalArgumentException(context + " has an unknown field");
               }
             });
   }

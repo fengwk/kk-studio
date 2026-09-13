@@ -67,8 +67,9 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
         AiValidationException.class,
         () -> issueService.addDependency(issueA.getId(), issueOther.getId(), 0L));
 
-    // 同项目依赖成功
-    issueService.addDependency(issueA.getId(), issueB.getId(), 0L);
+    // 同项目依赖成功；返回值必须包含数据库生成时间，供 REST 直接映射权威事实。
+    IssueDependency added = issueService.addDependency(issueA.getId(), issueB.getId(), 0L);
+    assertNotNull(added.getCreatedAt());
     List<IssueDependency> deps = issueService.listDependencies(issueA.getId());
     assertEquals(1, deps.size());
     assertEquals(issueB.getId(), deps.getFirst().getDependsOnIssueId());

@@ -61,24 +61,24 @@ class FlywayAutoConfigurationIntegrationTest {
       try (ResultSet history =
           st.executeQuery(
               "select count(*) from flyway_schema_history"
-                  + " where success = true and ((version in ('1', '2', '3', '4', '5', '6', '7'))"
+                  + " where success = true and ((version in ('1', '2', '3', '4', '5', '6', '7', '8'))"
                   + " or (version is null and description = 'dev seed'))")) {
         assertTrue(history.next());
         assertEquals(
-            8L,
+            9L,
             history.getLong(1),
-            "all seven baseline migrations and the dev seed must be recorded");
+            "all eight baseline migrations and the dev seed must be recorded");
       }
       try (ResultSet unexpectedMigration =
           st.executeQuery(
               "select count(*) from flyway_schema_history"
                   + " where version is not null"
-                  + " and version not in ('1', '2', '3', '4', '5', '6', '7')")) {
+                  + " and version not in ('1', '2', '3', '4', '5', '6', '7', '8')")) {
         assertTrue(unexpectedMigration.next());
         assertEquals(
             0L,
             unexpectedMigration.getLong(1),
-            "only the current V1 through V7 migrations are known");
+            "only the current V1 through V8 migrations are known");
       }
       try (ResultSet modelIdColumn =
           st.executeQuery(

@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import type { CloudFilesApi } from './cloud-files-api'
 import { FilesPage } from './FilesPage'
 import type { CloudFileSnapshotDTO, CloudNodeDTO } from './types'
+import { notifyCloudFilesChanged } from './useCloudFilesInvalidation'
 
 const ROOT_DIR_NODE: CloudNodeDTO = {
   id: '00000000-0000-0000-0000-000000000001',
@@ -16,6 +17,7 @@ const ROOT_DIR_NODE: CloudNodeDTO = {
   mediaType: null,
   sizeBytes: null,
   sha256: null,
+  revision: null,
   createdAt: null,
   updatedAt: null,
 }
@@ -30,6 +32,7 @@ const TEXT_FILE_NODE: CloudNodeDTO = {
   mediaType: 'text/markdown',
   sizeBytes: '25',
   sha256: null,
+  revision: '1',
   createdAt: null,
   updatedAt: null,
 }
@@ -44,6 +47,7 @@ const BLOB_IMAGE_NODE: CloudNodeDTO = {
   mediaType: 'image/png',
   sizeBytes: '4096',
   sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  revision: null,
   createdAt: null,
   updatedAt: null,
 }
@@ -58,6 +62,7 @@ const ARTIFACT_NODE: CloudNodeDTO = {
   mediaType: null,
   sizeBytes: null,
   sha256: null,
+  revision: null,
   createdAt: null,
   updatedAt: null,
 }
@@ -103,7 +108,11 @@ function createMockApi(overrides: Partial<CloudFilesApi> = {}): CloudFilesApi {
       }
       return Promise.reject(new Error(`Not found: ${path}`))
     }),
-    saveText: vi.fn().mockResolvedValue(undefined),
+    saveText: vi.fn().mockResolvedValue({
+      ...TEXT_FILE_NODE,
+      version: '2',
+      revision: '2',
+    }),
     patchText: vi.fn().mockResolvedValue(undefined),
     createDirectory: vi.fn().mockResolvedValue(undefined),
     moveNode: vi.fn().mockResolvedValue(undefined),
@@ -140,6 +149,50 @@ describe('FilesPage', () => {
     expect(screen.queryByText('/.artifacts')).not.toBeInTheDocument()
   })
 
+  it('ignores a stale directory response after a newer invalidation refresh', async () => {
+    // 测试意图：迟到的旧目录响应不得覆盖较新的失效刷新结果。
+    const oldNode = { ...TEXT_FILE_NODE, name: 'old.md', path: '/old.md' }
+    const newNode = { ...TEXT_FILE_NODE, name: 'new.md', path: '/new.md' }
+    let resolveOldRoot!: (snapshot: CloudFileSnapshotDTO) => void
+    const oldRoot = new Promise<CloudFileSnapshotDTO>((resolve) => {
+      resolveOldRoot = resolve
+    })
+    let rootReads = 0
+    const api = createMockApi({
+      getFileSnapshot: vi.fn().mockImplementation((path: string) => {
+        if (path !== '/') {
+          return Promise.reject(new Error('Not found'))
+        }
+        if (rootReads++ === 0) {
+          return oldRoot
+        }
+        return Promise.resolve({
+          node: ROOT_DIR_NODE,
+          children: [newNode],
+          text: null,
+          blob: null,
+        })
+      }),
+    })
+
+    render(<FilesPage api={api} />)
+    act(() => notifyCloudFilesChanged())
+
+    expect(await screen.findByText('new.md')).toBeInTheDocument()
+    await act(async () => {
+      resolveOldRoot({
+        node: ROOT_DIR_NODE,
+        children: [oldNode],
+        text: null,
+        blob: null,
+      })
+      await oldRoot
+    })
+
+    expect(screen.getByText('new.md')).toBeInTheDocument()
+    expect(screen.queryByText('old.md')).not.toBeInTheDocument()
+  })
+
   it('selects a text file and displays its content in the text editor', async () => {
     const api = createMockApi()
     render(<FilesPage api={api} />)
@@ -150,6 +203,189 @@ describe('FilesPage', () => {
     // Text editor is rendered with content
     const textarea = await screen.findByTestId('text-editor-textarea')
     expect(textarea).toHaveValue('# Initial Notes\n')
+  })
+
+  it('keeps an unsaved draft mounted while an invalidation refresh is pending', async () => {
+    // 测试意图：全局失效刷新不得卸载当前编辑器或用服务端新内容覆盖未保存草稿。
+    let notesReads = 0
+    let resolveRefresh!: (snapshot: CloudFileSnapshotDTO) => void
+    const refresh = new Promise<CloudFileSnapshotDTO>((resolve) => {
+      resolveRefresh = resolve
+    })
+    const api = createMockApi({
+      getFileSnapshot: vi.fn().mockImplementation((path: string) => {
+        if (path === '/') {
+          return Promise.resolve({
+            node: ROOT_DIR_NODE,
+            children: [TEXT_FILE_NODE],
+            text: null,
+            blob: null,
+          })
+        }
+        if (path === '/notes.md' && notesReads++ === 0) {
+          return Promise.resolve({
+            node: TEXT_FILE_NODE,
+            children: null,
+            text: {
+              revision: '1',
+              endsWithNewline: true,
+              offset: 1,
+              totalLines: 1,
+              nextOffset: null,
+              lines: [{ lineNumber: 1, content: '# Initial Notes', truncated: false }],
+            },
+            blob: null,
+          })
+        }
+        if (path === '/notes.md') {
+          return refresh
+        }
+        return Promise.reject(new Error(`Not found: ${path}`))
+      }),
+    })
+    render(<FilesPage api={api} />)
+
+    fireEvent.click(await screen.findByText('notes.md'))
+    const textarea = await screen.findByTestId('text-editor-textarea')
+    fireEvent.change(textarea, { target: { value: '# Unsaved Draft' } })
+
+    act(() => notifyCloudFilesChanged())
+    await waitFor(() => expect(api.getFileSnapshot).toHaveBeenCalledTimes(4))
+    expect(screen.getByTestId('text-editor-textarea')).toBe(textarea)
+    expect(textarea).toHaveValue('# Unsaved Draft')
+
+    await act(async () => {
+      resolveRefresh({
+        node: { ...TEXT_FILE_NODE, version: '2' },
+        children: null,
+        text: {
+          revision: '2',
+          endsWithNewline: true,
+          offset: 1,
+          totalLines: 1,
+          nextOffset: null,
+          lines: [{ lineNumber: 1, content: '# Server Update', truncated: false }],
+        },
+        blob: null,
+      })
+      await refresh
+    })
+    expect(screen.getByTestId('text-editor-textarea')).toBe(textarea)
+    expect(textarea).toHaveValue('# Unsaved Draft')
+    expect(screen.getByText('Rev: 1')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '保存文件' }))
+    await waitFor(() => {
+      expect(api.saveText).toHaveBeenCalledWith({
+        path: '/notes.md',
+        content: '# Unsaved Draft',
+        expectedRevision: '1',
+      })
+    })
+    expect(await screen.findByText('Rev: 2')).toBeInTheDocument()
+  })
+
+  it('discards a conflicted draft by loading the latest complete text', async () => {
+    // 测试意图：用户明确放弃冲突草稿时，应以最新服务端正文和 revision 重置编辑器。
+    let notesReads = 0
+    const conflictError = new ApiError(
+      'Version conflict',
+      409,
+      'CLOUD_VERSION_CONFLICT',
+      { reason: 'CLOUD_REVISION_CONFLICT', detail: 'revision changed' },
+    )
+    const api = createMockApi({
+      saveText: vi.fn().mockRejectedValue(conflictError),
+      getFileSnapshot: vi.fn().mockImplementation((path: string) => {
+        if (path === '/') {
+          return Promise.resolve({
+            node: ROOT_DIR_NODE,
+            children: [TEXT_FILE_NODE],
+            text: null,
+            blob: null,
+          })
+        }
+        if (path === '/notes.md' && notesReads++ === 0) {
+          return Promise.resolve({
+            node: TEXT_FILE_NODE,
+            children: null,
+            text: {
+              revision: '1',
+              endsWithNewline: true,
+              offset: 1,
+              totalLines: 1,
+              nextOffset: null,
+              lines: [{ lineNumber: 1, content: '# Initial Notes', truncated: false }],
+            },
+            blob: null,
+          })
+        }
+        return Promise.resolve({
+          node: { ...TEXT_FILE_NODE, version: '2' },
+          children: null,
+          text: {
+            revision: '2',
+            endsWithNewline: true,
+            offset: 1,
+            totalLines: 1,
+            nextOffset: null,
+            lines: [{ lineNumber: 1, content: '# Server Update', truncated: false }],
+          },
+          blob: null,
+        })
+      }),
+    })
+    render(<FilesPage api={api} />)
+
+    fireEvent.click(await screen.findByText('notes.md'))
+    const textarea = await screen.findByTestId('text-editor-textarea')
+    fireEvent.change(textarea, { target: { value: '# Conflicted Draft' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存文件' }))
+    fireEvent.click(await screen.findByText('重新加载（放弃草稿）'))
+
+    await waitFor(() => {
+      expect(textarea).toHaveValue('# Server Update\n')
+      expect(screen.getByText('Rev: 2')).toBeInTheDocument()
+    })
+  })
+
+  it('keeps a partial text window read-only to prevent destructive replacement', async () => {
+    // 测试意图：服务端分段或截断文本只能预览，不能被完整写接口覆盖。
+    const api = createMockApi({
+      getFileSnapshot: vi.fn().mockImplementation((path: string) => {
+        if (path === '/') {
+          return Promise.resolve({
+            node: ROOT_DIR_NODE,
+            children: [TEXT_FILE_NODE],
+            text: null,
+            blob: null,
+          })
+        }
+        return Promise.resolve({
+          node: TEXT_FILE_NODE,
+          children: null,
+          text: {
+            revision: '1',
+            endsWithNewline: false,
+            offset: 1,
+            totalLines: 2,
+            nextOffset: 2,
+            lines: [{ lineNumber: 1, content: 'preview only', truncated: false }],
+          },
+          blob: null,
+        })
+      }),
+    })
+    render(<FilesPage api={api} />)
+
+    fireEvent.click(await screen.findByText('notes.md'))
+    const textarea = await screen.findByTestId('text-editor-textarea')
+    expect(textarea).toHaveAttribute('readonly')
+    expect(screen.getByText(/当前仅显示分段预览/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存文件' })).toBeDisabled()
+    fireEvent.change(textarea, { target: { value: 'destructive replacement' } })
+    expect(textarea).toHaveValue('preview only')
+    expect(api.saveText).not.toHaveBeenCalled()
   })
 
   it('proves draft survives 409 CAS conflict without being overwritten', async () => {
@@ -211,6 +447,7 @@ describe('FilesPage', () => {
       mediaType: 'text/plain',
       sizeBytes: '10',
       sha256: null,
+      revision: '1',
       createdAt: null,
       updatedAt: null,
     }
@@ -328,6 +565,7 @@ describe('FilesPage', () => {
       mediaType: 'text/plain',
       sizeBytes: '15',
       sha256: null,
+      revision: '1',
       createdAt: null,
       updatedAt: null,
     }
@@ -434,7 +672,11 @@ describe('FilesPage', () => {
         if (saveCount === 1) {
           return Promise.reject(conflictError)
         }
-        return Promise.resolve()
+        return Promise.resolve({
+          ...TEXT_FILE_NODE,
+          version: '3',
+          revision: '3',
+        })
       }),
       getFileSnapshot: vi.fn().mockImplementation((path: string) => {
         if (path === '/') {

@@ -8,6 +8,8 @@ const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const CANVAS_ID = 'cccccccc-0000-4000-8000-000000000001'
 const threadResource = { kind: 'thread', id: THREAD_ID } as const
 const canvasResource = { kind: 'canvas', id: CANVAS_ID } as const
+const projectsResource = { kind: 'projects' } as const
+const cloudFilesResource = { kind: 'cloud-files' } as const
 
 describe('encodeClientMessage', () => {
   it('encodes subscribe/unsubscribe frames with version=1 and the resource', () => {
@@ -19,6 +21,11 @@ describe('encodeClientMessage', () => {
         encodeClientMessage({ version: 1, type: 'unsubscribe', resource: canvasResource }),
       ),
     ).toEqual({ version: 1, type: 'unsubscribe', resource: canvasResource })
+    expect(
+      JSON.parse(
+        encodeClientMessage({ version: 1, type: 'subscribe', resource: projectsResource }),
+      ),
+    ).toEqual({ version: 1, type: 'subscribe', resource: projectsResource })
   })
 })
 
@@ -38,12 +45,37 @@ describe('decodeServerMessage', () => {
         JSON.stringify({ version: 1, type: 'subscribed', resource: threadResource, cursor: '42' }),
       ),
     ).toEqual({ type: 'subscribed', resource: threadResource, cursor: '42' })
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
+          type: 'subscribed',
+          resource: projectsResource,
+          cursor: '0',
+        }),
+      ),
+    ).toEqual({ type: 'subscribed', resource: projectsResource, cursor: '0' })
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
+          type: 'subscribed',
+          resource: cloudFilesResource,
+          cursor: '1',
+        }),
+      ),
+    ).toBeNull()
   })
 
   it('decodes resync frames', () => {
     expect(
       decodeServerMessage(JSON.stringify({ version: 1, type: 'resync', resource: canvasResource })),
     ).toEqual({ type: 'resync', resource: canvasResource })
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ version: 1, type: 'resync', resource: cloudFilesResource }),
+      ),
+    ).toEqual({ type: 'resync', resource: cloudFilesResource })
   })
 
   it('decodes event frames with strict per-name data shapes and mandatory matching cursor', () => {
@@ -98,6 +130,22 @@ describe('decodeServerMessage', () => {
       name: 'version',
       data: { version: '3' },
       cursor: '3',
+    })
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
+          type: 'event',
+          resource: projectsResource,
+          name: 'changed',
+          data: { projectId: THREAD_ID },
+        }),
+      ),
+    ).toEqual({
+      type: 'event',
+      resource: projectsResource,
+      name: 'changed',
+      data: { projectId: THREAD_ID },
     })
   })
 
@@ -164,6 +212,16 @@ describe('decodeServerMessage', () => {
           version: 1,
           type: 'resync',
           resource: { kind: 'canvas', id: 7 },
+        }),
+      ),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
+          type: 'subscribed',
+          resource: { kind: 'projects', id: THREAD_ID },
+          cursor: '0',
         }),
       ),
     ).toBeNull()
@@ -380,6 +438,34 @@ describe('decodeServerMessage', () => {
           data: { type: 'MODEL_DELTA' },
           cursor: '3',
         }),
+      ),
+    ).toBeNull()
+  })
+
+  it('rejects invalid global-resource event combinations and project payloads', () => {
+    const projectChanged = {
+      version: 1,
+      type: 'event',
+      resource: projectsResource,
+      name: 'changed',
+      data: { projectId: THREAD_ID },
+    }
+    expect(
+      decodeServerMessage(JSON.stringify({ ...projectChanged, cursor: '1' })),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ ...projectChanged, data: { projectId: 'not-a-uuid' } }),
+      ),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ ...projectChanged, data: { projectId: THREAD_ID, extra: true } }),
+      ),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ ...projectChanged, resource: cloudFilesResource }),
       ),
     ).toBeNull()
   })

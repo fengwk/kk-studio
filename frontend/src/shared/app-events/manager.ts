@@ -11,7 +11,7 @@ import type {
 export interface ApplicationEventListener {
   /** wire 订阅建立（首次与每次重连后都会触发）；cursor 是资源当前游标。 */
   onSubscribed?: (cursor: string) => void
-  /** 资源事件：thread 为 version/realtime，canvas 为 version；durable version 必带 cursor，realtime 不带。 */
+  /** 资源事件：thread 为 version/realtime，canvas 为 version，projects 为 changed。 */
   onEvent?: (name: ApplicationEventName, data: unknown, cursor: string | undefined) => void
   /** 服务端要求整体替换为全量快照。 */
   onResync?: () => void
@@ -152,5 +152,5 @@ export class ApplicationEventManager {
 }
 
 function resourceKey(resource: ApplicationEventResource): string {
-  return `${resource.kind}:${resource.id}`
+  return 'id' in resource ? `${resource.kind}:${resource.id}` : resource.kind
 }

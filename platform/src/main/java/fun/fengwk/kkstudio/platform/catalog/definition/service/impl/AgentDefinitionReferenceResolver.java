@@ -38,8 +38,7 @@ final class AgentDefinitionReferenceResolver {
   AgentDefinition requireAgent(String name) {
     AgentDefinition definition = agentDefinitionRepository.getByName(name);
     if (definition == null) {
-      throw new AiResourceNotFoundException(
-          DEFINITION_RESOURCE, DEFINITION_RESOURCE + " not found: " + name);
+      throw new AiResourceNotFoundException(DEFINITION_RESOURCE);
     }
     return definition;
   }
@@ -47,8 +46,7 @@ final class AgentDefinitionReferenceResolver {
   AgentDefinition requireAgentForUpdate(String name) {
     AgentDefinition definition = agentDefinitionRepository.getByNameForUpdate(name);
     if (definition == null) {
-      throw new AiResourceNotFoundException(
-          DEFINITION_RESOURCE, DEFINITION_RESOURCE + " not found: " + name);
+      throw new AiResourceNotFoundException(DEFINITION_RESOURCE);
     }
     return definition;
   }
@@ -56,8 +54,7 @@ final class AgentDefinitionReferenceResolver {
   AgentModel requireModel(String providerName, String modelName) {
     AgentModel model = agentModelRepository.getByProviderNameAndName(providerName, modelName);
     if (model == null) {
-      throw new AiResourceNotFoundException(
-          MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + providerName + "/" + modelName);
+      throw new AiResourceNotFoundException(MODEL_RESOURCE);
     }
     return model;
   }
@@ -66,8 +63,7 @@ final class AgentDefinitionReferenceResolver {
     AgentModel model =
         agentModelRepository.getByProviderNameAndNameForUpdate(providerName, modelName);
     if (model == null) {
-      throw new AiResourceNotFoundException(
-          MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + providerName + "/" + modelName);
+      throw new AiResourceNotFoundException(MODEL_RESOURCE);
     }
     return model;
   }
@@ -77,8 +73,7 @@ final class AgentDefinitionReferenceResolver {
     if (environmentId != null) {
       Environment environment = environmentRepository.lockForKeyShare(environmentId);
       if (environment == null) {
-        throw new AiResourceNotFoundException(
-            ENVIRONMENT_RESOURCE, ENVIRONMENT_RESOURCE + " not found: " + environmentId);
+        throw new AiResourceNotFoundException(ENVIRONMENT_RESOURCE);
       }
     }
   }
@@ -98,13 +93,11 @@ final class AgentDefinitionReferenceResolver {
       }
       Environment environment = environmentRepository.lockForKeyShare(environmentId);
       if (environment == null) {
-        throw new AiResourceNotFoundException(
-            ENVIRONMENT_RESOURCE, ENVIRONMENT_RESOURCE + " not found: " + environmentId);
+        throw new AiResourceNotFoundException(ENVIRONMENT_RESOURCE);
       }
       EnvironmentInventory inventory = skillSourceRepository.lockInventory(environmentId);
       if (inventory == null) {
-        throw new AiResourceNotFoundException(
-            ENVIRONMENT_RESOURCE, ENVIRONMENT_RESOURCE + " not found: " + environmentId);
+        throw new AiResourceNotFoundException(ENVIRONMENT_RESOURCE);
       }
       skillSourceRepository.lockAllSources(environmentId);
       List<SkillInventoryEntry> usableSkills =

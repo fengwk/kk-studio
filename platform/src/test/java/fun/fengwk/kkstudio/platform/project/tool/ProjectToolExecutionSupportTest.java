@@ -133,11 +133,12 @@ class ProjectToolExecutionSupportTest {
   @Test
   void sanitizeErrorMessage_variousExceptions() {
     // 验证各种异常的脱敏转换
-    AiResourceNotFoundException rnf = new AiResourceNotFoundException("issue", "secret-uuid");
+    AiResourceNotFoundException rnf = new AiResourceNotFoundException("issue");
+    assertEquals("issue not found", rnf.getMessage());
     assertEquals("issue not found", ProjectToolExecutionSupport.sanitizeErrorMessage(rnf));
 
-    AiVersionConflictException vc =
-        new AiVersionConflictException("issue", "secret-uuid", "1", "2");
+    AiVersionConflictException vc = new AiVersionConflictException("issue", "1", "2");
+    assertEquals("issue version conflict: expected=1 actual=2", vc.getMessage());
     assertEquals(
         "issue version conflict: expected=1 actual=2",
         ProjectToolExecutionSupport.sanitizeErrorMessage(vc));

@@ -354,7 +354,7 @@ class SystemPromptPreviewServiceTest {
     when(environments.find(environmentId)).thenReturn(Optional.empty());
     // 第一次：getInventory 抛出 AiResourceNotFoundException
     when(skillSources.getInventory(environmentId))
-        .thenThrow(new AiResourceNotFoundException("inventory", "not found"));
+        .thenThrow(new AiResourceNotFoundException("inventory"));
     // listUsableSkills 抛出 RuntimeException
     when(skillSources.listUsableSkills(environmentId))
         .thenThrow(new RuntimeException("network error"));

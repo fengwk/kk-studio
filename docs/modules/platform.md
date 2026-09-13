@@ -20,10 +20,12 @@ Platform 不是 HTTP composition root，也不承载浏览器协议、Spring Boo
 
 ### Goals
 
-- 为 Catalog、MCP、Chat、SystemSettings、Storage、Environment、Canvas 和 ComfyUI 提供稳定的 application service。
+- 为 Catalog、MCP、Chat、Project/Issue、Cloud File System、SystemSettings、Storage、
+  Environment、Canvas 和 ComfyUI 提供稳定的 application service。
 - 在 Model/Tool 执行进入第三方 transport 前完成确定性 admission、冻结事实校验、权限判定和容量控制。
 - 把 Provider SDK、S3 SDK、ComfyUI client、OpenCLI Hub HTTP 和 Environment Daemon WebSocket 隔离在窄 adapter 内。
-- 维护 Chat/Canvas/Harness/Blob 之间的 owner、引用计数、幂等键、CAS version 和深删除不变量。
+- 维护 Chat/Canvas/Project/IssueRun/Harness/Blob 之间的 owner、引用计数、幂等键、
+  CAS version 和深删除不变量。
 - 将 Canvas Function 的外部执行、checkpoint、resource materialization 与通用 Canvas Resource lifecycle 接通。
 - 让第三方结果在 durable state 形成前完成安全分类、尺寸校验和 Resource externalization。
 
@@ -159,6 +161,49 @@ Chat 删除不是单行删除：`ChatServiceImpl.deleteChat`先排他锁定 Chat
 `SessionDeletionOrchestrator.deleteSessionsByOwner(OwnerType.CHAT, chatId)`深删除全部 Session，最后删除 Chat。
 `chat_session`只表达 owner relation，不绕过 Session 的 Harness/Blob 清理。
 
+### Project、Issue 与确定性 Controller
+
+`ProjectServiceImpl` 与 `IssueServiceImpl` 提供 Project/Issue 的事务边界。Project
+持有必填 Coordinator Agent、项目内单调 Issue 编号、CAS `version` 与归档状态；
+Issue 持有六态生命周期、可空 assignee/reviewer Agent、`specRevision`、
+`inputSequence` 和归档状态。状态迁移白名单由 `IssueStatusTransition` 单点维护：
+
+```text
+ 待规划 -> 待处理 -> 执行中 -> 评审中 -> 完成
+            ^                         |
+            +---- REQUEST_CHANGES ----+
+ 非终态 -> 取消；完成/取消 -> 待处理
+```
+
+依赖边只能连接同一 Project 的未归档 Issue，添加时在 Project 图锁下按 UUID
+顺序锁两端，并通过递归 CTE 拒绝环；增删依赖推进目标 Issue 的
+`specRevision/version`。`issue_input` 是每 Issue 单调追加流，可用
+`idempotencyKey` 精确重放；追加输入推进 `inputSequence/version` 并唤醒
+Controller。
+
+Project Coordinator 和每个 Agent IssueRun 分别以 `OwnerType.PROJECT` 与
+`OwnerType.ISSUE_RUN` 拥有 Harness Session。`ProjectHarnessSessionBootstrapService`
+按 `Project -> Issue -> IssueRun` 锁序，在同一物理事务内原子创建 Session、ROOT、
+Thread、首条 Command、Work 与 owner relation；数据库
+`harness_session_owner_guard` 保证 Chat、Canvas、Project、IssueRun 四类 owner
+全局互斥。
+
+`IssueControllerDispatcher` 只负责 `issue_controller_work` 的短事务 claim、
+bounded handoff、合并 wake 和 poll；`IssueReconciler` 在
+`Project(FOR SHARE) -> Issue(FOR UPDATE) -> IssueRun(FOR UPDATE) -> work lease`
+锁序与 fencing 下每次推进一个有界动作。它处理依赖阻塞、Agent
+executor/reviewer Run、Harness bootstrap/inspection、输入 continuation、人工等待、
+deadline、continuation budget、retry/cancel 和 Coordinator attention；通知/poll
+都只是唤醒，数据库 work 行是可恢复事实。
+
+`ProjectHarnessContributor` 注册 12 个 INTERNAL 角色工具。Coordinator 只获得
+Project/Issue 查询与编排工具，Executor 只获得 submit/request-input，Reviewer
+只获得 review；`ProjectThreadOwnerResolver` 从 Thread 的唯一 owner relation
+解析角色，不依赖模型自报。Project 深删除先锁 Project、Issues、Runs 并拒绝活动或
+UNKNOWN Run，再按 controller work -> Run Sessions -> reviewer/executor Runs ->
+inputs/dependencies/Issues -> Coordinator Session -> Project 的顺序清理，每个 CAS
+删除都检查受影响行数。
+
 ### SystemSettings
 
 `system_setting`恰好一行（`id=1`），`config`是六个必填 section 的 canonical JSON：
@@ -211,6 +256,32 @@ Daemon wire 内联传输受限的 Base64 bytes，Backend 校验后以瞬时 Bina
 中只通过同一 Store 读取已终态化 Resource，经完整性复核后物化为 blob-backed Harness history，并将文本工件挂载到
 `/.artifacts/tool-results/`；任一步失败使调用方事务回滚。该端口未装配时，Runtime
 只保留资源名称、媒体类型与有界 preview，不自动序列化 `ResourceRef` 的瞬时 URI，也不阻塞 Thread 后续推进。
+
+### Cloud File System
+
+Cloud File System 是独立于 Project owner 的全局平台文件树。`CloudPath` 对绝对路径
+执行 NFC、严格 UTF-8、segment 与总字节上限校验，拒绝 `.`、`..`、反斜杠、控制字符
+和未配对 surrogate。虚拟 root 下预建 `/knowledge`、`/uploads` 与系统保留
+`/.artifacts/tool-results`；节点只有 `DIRECTORY`、`TEXT`、`BLOB` 三种。
+
+`CloudFileSystemServiceImpl` 在事务内实现目录创建、文本 CAS 写入/精确替换、
+节点移动/删除和 READY upload 挂载。TEXT 正文最大 1 MiB，每次写入保存不可变
+revision、严格字节大小与 SHA-256；BLOB 节点通过 `StorageBlobManager` 在同一事务
+retain/release。跨目录移动按 `CloudPath` 的 segment-wise 层级全序锁 source、
+target 与父目录，祖先严格早于后代，避免相反移动形成死锁；所有 mutation 都检查
+CAS 或受影响行数。
+
+`CloudQueryServiceImpl` 提供有界 `find`、`grep` 和文本窗口。Glob 与正则均使用
+RE2/J 线性执行，搜索支持 limit/timeout/cancel；普通列举和 find 永远跳过
+`/.artifacts`。Artifact 只能按
+`/.artifacts/tool-results/{threadId}/{invocationId}.{txt|json}` 精确读取，
+`grep` 还只允许精确 `.txt`；系统写入由 `CloudArtifactService` 单独持有，普通
+mkdir/write/edit/move/delete 都拒绝 artifact 子树。
+
+`CloudHarnessContributor` 注册 `cloud_read/write/edit/find/grep` 五个 INTERNAL
+工具，`DatabaseTurnResolver` 在每个普通 live turn 自动注入，不要求 Agent catalog
+显式选择。浏览器 REST 与工具复用同一 service/query 语义；`CloudFilesEventHub`
+只消费数据库 `cloud_files_changed` 提示并触发全局快照回读。
 
 ### Environment
 
@@ -324,7 +395,7 @@ Tool 的 `AppendCustomEntry` intent 必须属于自身 Contributor、命中已�
 4. skills、subagents 和内部 `load_skill` / `task`；
 5. Contributor context projector、system prompt、cache control、context window 和 output budget。
 
-Agent 配置有 skills 时按稳定 ID 追加 `LoadSkillTool`；subagents 非空且 Session depth 小于 `SubagentConfig.maxDepth` 时按稳定 ID 追加 `TaskTool`。每个 tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor；Environment tool 使用当前 Agent definition 选定的 Environment。Skill 严格按 `(sourceId, name)` 从该 Environment 的持久可用 inventory 解析并冻结来源、描述、基目录与内容 revision；Daemon 离线不阻止规划，缺失或陈旧引用返回 `AssistantError.code=PLANNING_FAILED`。当前 Environment 的系统与时区信息优先使用 live READY，离线时回退到持久 inventory。Repository/catalog 基础设施异常向上抛出，由 ThreadProcessor 按 runtime policy reschedule。
+Agent 配置有 skills 时按稳定 ID 追加 `LoadSkillTool`；subagents 非空且 Session depth 小于 `SubagentConfig.maxDepth` 时按稳定 ID 追加 `TaskTool`；随后总是追加五个 CloudFS 工具，并按 Thread owner 追加精确的 Project 角色工具。每个 tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor；Environment tool 使用当前 Agent definition 选定的 Environment。Skill 严格按 `(sourceId, name)` 从该 Environment 的持久可用 inventory 解析并冻结来源、描述、基目录与内容 revision；Daemon 离线不阻止规划，缺失或陈旧引用返回 `AssistantError.code=PLANNING_FAILED`。当前 Environment 的系统与时区信息优先使用 live READY，离线时回退到持久 inventory。Repository/catalog 基础设施异常向上抛出，由 ThreadProcessor 按 runtime policy reschedule。
 
 system prompt 由 `AgentPromptComposer` 拼接正文、当前 Environment、skill 和 subagent sections，并只替换已知的 `${date}` placeholder；其余 `${...}` 占位符与未闭合形式的原文保持不变。Contributor context projector 以 `BranchView` 追加 preamble。`DatabaseThreadSelectedSkillLookup` 从冻结 ModelRequestSpec 读取 skill binding，正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.load` 能力读取；不会用当前 Agent 配置扩张已冻结调用。
 
@@ -436,6 +507,20 @@ HTTP command-batch
   -> Work dispatcher / ThreadProcessor
 ```
 
+### Project Issue 调谐
+
+```text
+Project/Issue mutation or controller poll
+  -> issue_controller_work request / PostgreSQL wake hint
+  -> IssueControllerDispatcher claim (short transaction)
+  -> bounded worker handoff
+  -> IssueReconciler
+       -> fenced Project/Issue/Run/work locks
+       -> one bounded transition
+       -> optional atomic IssueRun Session bootstrap or Harness command
+       -> complete/reschedule work
+```
+
 ### Canvas Function output
 
 ```text
@@ -476,6 +561,16 @@ Function dispatcher claim + RUNNING lease
     `UNKNOWN`，不自动重发非幂等副作用。
 12. Canvas pin 不增加 Blob ref_count；Resource row、Session ref、upload owner 各自只维护一条明确引用边，任何 owner 删除
     都必须经过对应 manager。
+13. Project、Issue、Run、依赖、输入与 Controller work 都以 PostgreSQL 为事实源；
+    `issue_controller_work_due` 和 Project 浏览器 invalidation 只负责唤醒/回读。Project
+    与 IssueRun Session 继续服从全局单 owner guard 和统一深删除编排。
+14. Issue Controller claim/reconcile 由 lease token 与 claimed wake version 双重围栏；
+    每次 reconcile 只执行一个有界动作，worker 拒绝、处理失败、节点退出或通知丢失都由
+    归还、延迟重试、lease 过期和 periodic poll 收敛。
+15. CloudFS 路径、TEXT revision 与 BLOB 引用都是数据库事实；普通查询不能枚举
+    `/.artifacts`，系统 artifact 写入不能通过公共 mutation 绕过。移动锁序是
+    segment-wise 全序，文本与 Blob mutation 分别服从 revision/node CAS 和 Blob
+    retain/release 事务。
 
 ## 配置
 
@@ -505,6 +600,7 @@ key、H3 bearer token 或 OpenCLI instance identity。启用 S3 或 ComfyUI 时�
 | `kk-studio.harness.execution-admission.{model,tool,subagent}` | 进程级容量，默认 `16/64/10`；不进数据库、DTO 或 frontend |
 | `kk-studio.harness.runtime.{workers-enabled,environment-root,workdir}` | worker 开关与本地工作目录；`workdir`必须位于 root 内 |
 | `kk-studio.harness.environment-gateway.{max-message-bytes,queue-capacity,max-bytes,send-timeout}` | WebSocket 安全边界；默认 `16MiB/256/16MiB/10s` |
+| `kk-studio.project.controller.*` | Issue Controller lease/poll/retry/blocked/run timeout、continuation 上限与 bounded worker；默认 lease 30s、poll 1s、run 30m、worker `8 + queue 64` |
 | `kk-studio.storage.s3.{endpoint,public-endpoint,region,bucket,access-key,secret-key,public-base-url}` | S3/MinIO 服务端和 presign endpoint；bucket 只能由服务端配置 |
 | `kk-studio.storage.maintenance.{poll-delay,cleanup-lease}` | maintenance 唤醒轮询与 cleanup lease，默认 `30s/5m` |
 | `kk-studio.comfyui.api-key` | ComfyUI secret；非 SystemSettings |
@@ -525,12 +621,16 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 - `platform/pom.xml`
 - `schema/pom.xml`
 - `schema/src/main/resources/db/migration/V1__schema.sql`
+- `schema/src/main/resources/db/migration/V6__cloud_file_system.sql`
+- `schema/src/main/resources/db/migration/V7__project_issue.sql`
+- `schema/src/main/resources/db/migration/V8__project_change_notifications.sql`
 - `schema/src/main/resources/db/seed/dev/R__dev_seed.sql`
 - `schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql`
 - `schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql`
-- Schema 重点表：`agent_provider`、`agent_model`、`agent_definition`、`comfyui_workflow_api`、`chat`、
-  `chat_session`、`system_setting`、Canvas graph/function/resource 相关表、Harness 七张执行表、
-  `canvas_session`、`storage_blob`、`storage_upload`、`session_blob_ref`。
+- Schema 重点表：`agent_provider`、`agent_model`、`agent_definition`、
+  `comfyui_workflow_api`、`chat`、`system_setting`、Canvas graph/function/resource
+  相关表、Harness 执行表与 owner guard、Storage 表、CloudFS 两表，以及 Project/
+  Issue 八张业务与调度表。
 
 ### Architecture tests 与测试基座
 
@@ -548,6 +648,13 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 - Catalog：`CatalogParentLockIntegrationTest`及 definition/model/provider codec、mutation、service tests。
 - Chat/事务：`ChatServiceIntegrationTest`、`HarnessCommandAcceptanceOrchestratorTest`、
   `SessionDeletionOrchestratorTest`、`ChatSessionRepositoryIntegrationTest`、`CanvasSessionRepositoryIntegrationTest`。
+- Project/Issue：`ProjectServiceIntegrationTest`、`IssueServiceIntegrationTest`、
+  `IssueRunServiceIntegrationTest`、`ProjectHarnessSessionBootstrapServiceTest`、
+  `IssueReconcilerTest`、`IssueControllerDispatcherTest`、Project role tool tests 与
+  `ProjectChangeNotificationIntegrationTest`。
+- CloudFS：`CloudPathTest`、`CloudFileSystemSchemaIntegrationTest`、
+  `CloudFileSystemServiceIntegrationTest`、`CloudFileSystemConcurrencyIntegrationTest`、
+  `CloudArtifactServiceIntegrationTest`、`CloudQueryServiceTest` 与五个 Cloud tool tests。
 - Model/Provider：`GatewayExecutorSafetyTest`、`PlatformModelGatewayTest`、`DatabaseProviderResolutionServiceIntegrationTest`、
   `ProviderAdapterContractTest`、Provider error/stop-reason/terminal normalization tests。
 - Tool/gateway：`ToolExecutionGatewayAdmissionTest`、`ToolExecutionGatewayCallbackTest`、
@@ -568,11 +675,14 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 - Storage：`StorageBlobIngestServiceIntegrationTest`、`SessionBlobRefManagerIntegrationTest`、
   `StorageUploadServiceIntegrationTest`、`StorageUploadCleanupLeaseIntegrationTest`、
   `PostgresqlStorageBlobManagerTest`、`StorageMaintenanceTest`、S3 service/presign tests。
-- Schema：`PostgresqlSchemaStructureTest`、`PostgresqlBusinessSchemaTest`、`PostgresqlSchemaSeedTest`、
-  `PostgresqlStorageSchemaTest`。
+- Schema：`PostgresqlSchemaStructureTest`、`PostgresqlBusinessSchemaTest`、
+  `PostgresqlSchemaSeedTest`、`PostgresqlStorageSchemaTest`、
+  `CloudFileSystemSchemaIntegrationTest` 与 `ProjectSchemaPostgresTest`。
 
-这些测试覆盖的是当前 application layer 的可观察 contract：CAS、owner lock order、Blob ref 对账、S3 cleanup lease、
-Provider/Tool admission、terminal-once、Environment 路由冻结、Canvas resource pin、strict codec 与 schema 约束。
+这些测试覆盖的是当前 application layer 的可观察 contract：CAS、owner lock order、
+Project/Issue 调谐、CloudFS 路径与并发锁序、Blob ref 对账、S3 cleanup lease、
+Provider/Tool admission、terminal-once、Environment 路由冻结、Canvas resource pin、
+strict codec 与 schema 约束。
 
 ---
 

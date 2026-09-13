@@ -284,11 +284,23 @@
   gap: 12px;
 }
 
+.files-refresh-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  color: var(--danger);
+  background-color: var(--danger-soft);
+  border-bottom: 1px solid var(--danger-border);
+  font-size: 13px;
+}
+
 /* Text Editor View */
 .text-editor-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   width: 100%;
   overflow: hidden;
 }
@@ -402,6 +414,17 @@
   background-color: var(--danger-soft);
   border-bottom: 1px solid var(--danger-border);
   color: var(--danger);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.text-editor-preview-banner {
+  background-color: var(--warning-soft);
+  border-bottom: 1px solid var(--warning-border);
+  color: var(--warning);
   padding: 8px 16px;
   display: flex;
   align-items: center;

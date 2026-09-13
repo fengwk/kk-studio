@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type { CloudFilesChangedEventPayload } from './types'
 
 type InvalidationListener = (payload?: CloudFilesChangedEventPayload) => void
@@ -7,7 +7,7 @@ const listeners = new Set<InvalidationListener>()
 
 /**
  * Dispatches a cloud files invalidation notification to all active listeners.
- * Can be hooked up by I1 to the shared event manager when `cloud_files_changed` is received.
+ * The extension bridge calls this for Cloud Files resync signals.
  */
 export function notifyCloudFilesChanged(payload?: CloudFilesChangedEventPayload): void {
   for (const listener of listeners) {
@@ -26,13 +26,19 @@ export function notifyCloudFilesChanged(payload?: CloudFilesChangedEventPayload)
 export function useCloudFilesInvalidation(
   onInvalidate: (payload?: CloudFilesChangedEventPayload) => void,
 ): void {
+  const listenerRef = useRef(onInvalidate)
+
+  useEffect(() => {
+    listenerRef.current = onInvalidate
+  }, [onInvalidate])
+
   useEffect(() => {
     const listener: InvalidationListener = (payload) => {
-      onInvalidate(payload)
+      listenerRef.current(payload)
     }
     listeners.add(listener)
     return () => {
       listeners.delete(listener)
     }
-  }, [onInvalidate])
+  }, [])
 }

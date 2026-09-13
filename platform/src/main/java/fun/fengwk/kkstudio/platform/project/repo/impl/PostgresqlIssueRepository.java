@@ -62,7 +62,7 @@ public class PostgresqlIssueRepository implements IssueRepository {
   public long incrementInputSequence(UUID id) {
     Long seq = issueMapper.incrementInputSequence(id);
     if (seq == null) {
-      throw new IllegalStateException("Failed to increment input sequence for issue " + id);
+      throw new IllegalStateException("Failed to increment issue input sequence");
     }
     return seq;
   }

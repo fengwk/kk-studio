@@ -79,13 +79,9 @@ describe('projects codecs', () => {
       expect(decoded.archivedAt).toBeNull()
     })
 
-    it('decodeProject should default empty description if null', () => {
-      // 测试意图：验证 description 缺失或 null 时优雅降级为 ""，不崩溃
-      const decoded = decodeProject({
-        ...validProject,
-        description: null,
-      })
-      expect(decoded.description).toBe('')
+    it('decodeProject should reject a null description', () => {
+      // 测试意图：响应 description 是必需字符串；拒绝旧式空值而不是静默改写事实。
+      expect(() => decodeProject({ ...validProject, description: null })).toThrow(ApiError)
     })
 
     it('decodeProject should throw ApiError on invalid UUID or missing title', () => {
@@ -93,6 +89,7 @@ describe('projects codecs', () => {
       expect(() => decodeProject({ ...validProject, id: 'bad-id' })).toThrow(ApiError)
       expect(() => decodeProject({ ...validProject, title: 123 })).toThrow(ApiError)
       expect(() => decodeProject({ ...validProject, version: '-5' })).toThrow(ApiError)
+      expect(() => decodeProject({ ...validProject, coordinatorAgentName: null })).toThrow(ApiError)
       expect(() => decodeProject('not-an-object')).toThrow(ApiError)
     })
 
@@ -167,14 +164,14 @@ describe('projects codecs', () => {
         sequence: '1',
         kind: 'HUMAN',
         body: 'Please proceed with approach A',
-        idempotencyKey: 'c0000000-0000-0000-0000-000000000001',
+        idempotencyKey: 'input-key-1',
         createdAt: '2026-09-14T00:00:00Z',
       }
       const decoded = decodeIssueInput(input)
       expect(decoded.sequence).toBe('1')
       expect(decoded.kind).toBe('HUMAN')
       expect(decoded.body).toBe('Please proceed with approach A')
-      expect(decoded.idempotencyKey).toBe('c0000000-0000-0000-0000-000000000001')
+      expect(decoded.idempotencyKey).toBe('input-key-1')
     })
 
     it('decodeIssueRunSummary should decode summary with nullable timestamps and outcomes', () => {

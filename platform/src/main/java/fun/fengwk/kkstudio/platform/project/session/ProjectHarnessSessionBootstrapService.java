@@ -79,7 +79,7 @@ public class ProjectHarnessSessionBootstrapService {
 
     Project project = projectRepository.lockForShare(request.projectId());
     if (project == null) {
-      throw new AiResourceNotFoundException("project", "Project not found");
+      throw new AiResourceNotFoundException("project");
     }
     if (project.isArchived()) {
       throw new AiValidationException("project", "Cannot bootstrap session for archived project");
@@ -124,11 +124,11 @@ public class ProjectHarnessSessionBootstrapService {
     // 锁序必须严格保持 Project -> Issue -> IssueRun
     IssueRun runRef = issueRunRepository.getById(request.runId());
     if (runRef == null) {
-      throw new AiResourceNotFoundException("issue_run", "Issue run not found");
+      throw new AiResourceNotFoundException("issue_run");
     }
     Issue issueRef = issueRepository.getById(runRef.getIssueId());
     if (issueRef == null) {
-      throw new AiResourceNotFoundException("issue", "Issue not found");
+      throw new AiResourceNotFoundException("issue");
     }
 
     UUID projectId = issueRef.getProjectId();
@@ -136,15 +136,15 @@ public class ProjectHarnessSessionBootstrapService {
 
     Project project = projectRepository.lockForShare(projectId);
     if (project == null) {
-      throw new AiResourceNotFoundException("project", "Project not found");
+      throw new AiResourceNotFoundException("project");
     }
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
-      throw new AiResourceNotFoundException("issue", "Issue not found");
+      throw new AiResourceNotFoundException("issue");
     }
     IssueRun run = issueRunRepository.lockById(request.runId());
     if (run == null) {
-      throw new AiResourceNotFoundException("issue_run", "Issue run not found");
+      throw new AiResourceNotFoundException("issue_run");
     }
 
     // 锁下验证层级一致性（避免在加锁前被重定向或读锁竞态）

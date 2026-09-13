@@ -1,4 +1,14 @@
-import { Bot, Grid2X2, Menu, Settings, UserRound, Wrench, X } from 'lucide-react'
+import {
+  Bot,
+  Files,
+  FolderKanban,
+  Grid2X2,
+  Menu,
+  Settings,
+  UserRound,
+  Wrench,
+  X,
+} from 'lucide-react'
 import { useEffect, useRef, useState, type PropsWithChildren } from 'react'
 import { Link, useLocation } from 'react-router'
 import { isCanonicalUuid } from '@/features/canvas/uuid'
@@ -41,12 +51,29 @@ export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation()
   const { t } = useI18n()
   const canvasMode = location.pathname.startsWith('/canvas')
+  const projectsMode = location.pathname.startsWith('/projects')
+  const filesMode = location.pathname.startsWith('/files')
   const toolsMode = isToolsRoute(location.pathname)
   const settingsMode = location.pathname.startsWith('/settings')
   const chatWorkspaceMode = isChatWorkspaceRoute(location.pathname)
   const canvasWorkspaceMode = isCanvasWorkspaceRoute(location.pathname)
   const immersive = chatWorkspaceMode || canvasWorkspaceMode
-  const aiActive = !canvasMode && !toolsMode && !settingsMode && isAiRoute(location.pathname)
+  const aiActive =
+    !canvasMode
+    && !projectsMode
+    && !filesMode
+    && !toolsMode
+    && !settingsMode
+    && isAiRoute(location.pathname)
+  const homePath = projectsMode
+    ? '/projects'
+    : filesMode
+      ? '/files'
+      : canvasMode
+        ? '/canvas'
+        : toolsMode
+          ? '/comfyui'
+          : '/chats'
   const [navOpen, setNavOpen] = useState(false)
   const navToggleRef = useRef<HTMLButtonElement>(null)
 
@@ -94,7 +121,7 @@ export function AppShell({ children }: PropsWithChildren) {
         <header className="topbar">
           <div className="topbar-left">
             <Link
-              to={canvasMode ? '/canvas' : toolsMode ? '/comfyui' : '/chats'}
+              to={homePath}
               className="brand"
               aria-label="KK Studio"
               onClick={() => setNavOpen(false)}
@@ -127,6 +154,26 @@ export function AppShell({ children }: PropsWithChildren) {
                 <Bot aria-hidden="true" />
                 <span>{t('platform.nav.ai')}</span>
                 <small aria-hidden="true">AI</small>
+              </Link>
+              <Link
+                className={projectsMode ? 'active' : undefined}
+                to="/projects"
+                aria-label={t('platform.nav.projectsAria')}
+                onClick={() => setNavOpen(false)}
+              >
+                <FolderKanban aria-hidden="true" />
+                <span>{t('platform.nav.projects')}</span>
+                <small aria-hidden="true">Projects</small>
+              </Link>
+              <Link
+                className={filesMode ? 'active' : undefined}
+                to="/files"
+                aria-label={t('platform.nav.filesAria')}
+                onClick={() => setNavOpen(false)}
+              >
+                <Files aria-hidden="true" />
+                <span>{t('platform.nav.files')}</span>
+                <small aria-hidden="true">Files</small>
               </Link>
               <Link
                 className={canvasMode ? 'active' : undefined}

@@ -69,10 +69,10 @@ public class AgentProviderServiceImpl implements AgentProviderService {
     if (!agentProviderRepository.updateByName(provider, expected)) {
       AgentProvider reread = agentProviderRepository.getByName(name);
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
+        throw new AiResourceNotFoundException(RESOURCE);
       }
       throw new AiVersionConflictException(
-          RESOURCE, name, rawExpected, CatalogVersions.format(reread.getVersion()));
+          RESOURCE, rawExpected, CatalogVersions.format(reread.getVersion()));
     }
     AgentProvider reloaded = agentProviderRepository.getByName(name);
     return agentProviderConverter.convert(reloaded);
@@ -88,10 +88,10 @@ public class AgentProviderServiceImpl implements AgentProviderService {
     if (!agentProviderRepository.deleteByName(name, expected)) {
       AgentProvider reread = agentProviderRepository.getByName(name);
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
+        throw new AiResourceNotFoundException(RESOURCE);
       }
       throw new AiVersionConflictException(
-          RESOURCE, name, expectedVersion, CatalogVersions.format(reread.getVersion()));
+          RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
     }
   }
 
@@ -99,7 +99,7 @@ public class AgentProviderServiceImpl implements AgentProviderService {
       AgentProvider provider, String name, String expectedVersion, long expected) {
     if (provider.getVersion() != expected) {
       throw new AiVersionConflictException(
-          RESOURCE, name, expectedVersion, CatalogVersions.format(provider.getVersion()));
+          RESOURCE, expectedVersion, CatalogVersions.format(provider.getVersion()));
     }
   }
 }

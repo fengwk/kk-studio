@@ -28,8 +28,10 @@ import org.springframework.web.socket.adapter.NativeWebSocketSession;
 
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.platform.cloudfs.event.CloudFilesEventSource;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
+import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -54,6 +56,8 @@ class ApplicationEventWebSocketHandlerTest {
   private ThreadVersionEventSource threadVersionSource;
   private RealtimeEventSource realtimeSource;
   private CanvasVersionEventSource canvasVersionSource;
+  private ProjectInvalidationHub projectInvalidationHub;
+  private CloudFilesEventSource cloudFilesEventSource;
   private ApplicationEventHub hub;
   private ApplicationEventWebSocketHandler handler;
   private WebSocketSession springSession;
@@ -65,12 +69,23 @@ class ApplicationEventWebSocketHandlerTest {
     threadVersionSource = mock(ThreadVersionEventSource.class);
     realtimeSource = mock(RealtimeEventSource.class);
     canvasVersionSource = mock(CanvasVersionEventSource.class);
+    projectInvalidationHub = mock(ProjectInvalidationHub.class);
+    cloudFilesEventSource = mock(CloudFilesEventSource.class);
     when(threadVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(5L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn((AutoCloseable) () -> {});
     when(canvasVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(3L, () -> {}));
-    hub = new ApplicationEventHub(threadVersionSource, realtimeSource, canvasVersionSource, 512);
+    when(projectInvalidationHub.subscribe(any(), any())).thenReturn(() -> {});
+    when(cloudFilesEventSource.subscribe(any())).thenReturn(() -> {});
+    hub =
+        new ApplicationEventHub(
+            threadVersionSource,
+            realtimeSource,
+            canvasVersionSource,
+            projectInvalidationHub,
+            cloudFilesEventSource,
+            512);
     rebuildHandler(DEFAULT_SENDER_CAPACITY);
   }
 
@@ -180,9 +195,7 @@ class ApplicationEventWebSocketHandlerTest {
 
     assertEquals(1, recorder.sent.size());
     assertEquals(
-        "{\"version\":1,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"unknown thread: "
-            + THREAD
-            + "\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":1,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"}}",
         recorder.sent.get(0));

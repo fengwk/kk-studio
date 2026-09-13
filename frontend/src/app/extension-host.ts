@@ -1,6 +1,8 @@
 import { aiExtension } from '@/features/ai/extensions/ai-extension.definition'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
 import { comfyuiExtension } from '@/features/comfyui/extensions/comfyui-extension.definition'
+import { filesExtension } from '@/features/files/extensions/files-extension.definition'
+import { projectsExtension } from '@/features/projects/extensions/projects-extension.definition'
 import { settingsExtension } from '@/features/settings/settings-extension'
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
 
@@ -9,6 +11,8 @@ export function createApplicationExtensionHost() {
   host.register(aiExtension)
   host.register(canvasExtension)
   host.register(comfyuiExtension)
+  host.register(projectsExtension)
+  host.register(filesExtension)
   host.register(settingsExtension)
   return host
 }

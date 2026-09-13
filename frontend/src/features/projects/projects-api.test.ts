@@ -7,7 +7,7 @@ describe('projectsApi', () => {
     id: 'a0000000-0000-0000-0000-000000000001',
     title: 'P1',
     description: '',
-    coordinatorAgentName: null,
+    coordinatorAgentName: 'coordinator-agent',
     nextIssueNumber: '1',
     version: '0',
     archivedAt: null,

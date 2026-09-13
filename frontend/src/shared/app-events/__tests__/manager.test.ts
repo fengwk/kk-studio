@@ -6,6 +6,8 @@ const URL = 'ws://test/api/events/v1'
 const THREAD_A = { kind: 'thread', id: 'aaaaaaaa-0000-4000-8000-000000000001' } as const
 const THREAD_B = { kind: 'thread', id: 'bbbbbbbb-0000-4000-8000-000000000002' } as const
 const CANVAS_A = { kind: 'canvas', id: 'cccccccc-0000-4000-8000-000000000003' } as const
+const PROJECTS = { kind: 'projects' } as const
+const CLOUD_FILES = { kind: 'cloud-files' } as const
 
 function setup() {
   const harness = new FakeWebSocketHarness()
@@ -161,6 +163,34 @@ describe('ApplicationEventManager', () => {
     socket.emitServer({ type: 'error', code: 'INTERNAL', message: 'orphan' })
     expect(onSubscribed).toHaveBeenCalledTimes(1)
     expect(onError).toHaveBeenCalledTimes(1)
+  })
+
+  it('subscribes and dispatches global project and Cloud Files resources without synthetic ids', () => {
+    const { manager, harness } = setup()
+    const socket = harness.openLatest()
+    const projectChanged = vi.fn()
+    const filesResync = vi.fn()
+    manager.subscribe(PROJECTS, { onEvent: projectChanged })
+    manager.subscribe(CLOUD_FILES, { onResync: filesResync })
+
+    expect(socket.sentMessages()).toEqual([
+      { version: 1, type: 'subscribe', resource: PROJECTS },
+      { version: 1, type: 'subscribe', resource: CLOUD_FILES },
+    ])
+
+    socket.emitServer({
+      type: 'event',
+      resource: PROJECTS,
+      name: 'changed',
+      data: { projectId: THREAD_A.id },
+    })
+    socket.emitServer({ type: 'resync', resource: CLOUD_FILES })
+    expect(projectChanged).toHaveBeenCalledWith(
+      'changed',
+      { projectId: THREAD_A.id },
+      undefined,
+    )
+    expect(filesResync).toHaveBeenCalledTimes(1)
   })
 
   it('isolates listener callback exceptions so one consumer cannot block the others', () => {

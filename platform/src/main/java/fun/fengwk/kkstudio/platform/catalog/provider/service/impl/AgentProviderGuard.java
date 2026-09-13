@@ -20,7 +20,7 @@ final class AgentProviderGuard {
   AgentProvider requireProvider(String name) {
     AgentProvider provider = agentProviderRepository.getByName(name);
     if (provider == null) {
-      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
+      throw new AiResourceNotFoundException(RESOURCE);
     }
     return provider;
   }
@@ -28,7 +28,7 @@ final class AgentProviderGuard {
   AgentProvider requireProviderForUpdate(String name) {
     AgentProvider provider = agentProviderRepository.getByNameForUpdate(name);
     if (provider == null) {
-      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
+      throw new AiResourceNotFoundException(RESOURCE);
     }
     return provider;
   }

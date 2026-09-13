@@ -73,13 +73,9 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
         if (definition.getEnvironmentId() != null) {
-          throw new AiResourceNotFoundException(
-              ENVIRONMENT_RESOURCE,
-              ENVIRONMENT_RESOURCE + " not found: " + definition.getEnvironmentId(),
-              error);
+          throw new AiResourceNotFoundException(ENVIRONMENT_RESOURCE);
         }
-        throw new AiResourceNotFoundException(
-            MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelRef, error);
+        throw new AiResourceNotFoundException(MODEL_RESOURCE);
       }
       throw error;
     }
@@ -112,21 +108,17 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
       if (!agentDefinitionRepository.updateByName(definition, expected)) {
         AgentDefinition reread = agentDefinitionRepository.getByName(name);
         if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
+          throw new AiResourceNotFoundException(RESOURCE);
         }
         throw new AiVersionConflictException(
-            RESOURCE, name, rawExpected, CatalogVersions.format(reread.getVersion()));
+            RESOURCE, rawExpected, CatalogVersions.format(reread.getVersion()));
       }
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
         if (definition.getEnvironmentId() != null) {
-          throw new AiResourceNotFoundException(
-              ENVIRONMENT_RESOURCE,
-              ENVIRONMENT_RESOURCE + " not found: " + definition.getEnvironmentId(),
-              error);
+          throw new AiResourceNotFoundException(ENVIRONMENT_RESOURCE);
         }
-        throw new AiResourceNotFoundException(
-            MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelRef, error);
+        throw new AiResourceNotFoundException(MODEL_RESOURCE);
       }
       throw error;
     }
@@ -144,10 +136,10 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     if (!agentDefinitionRepository.deleteByName(name, expected)) {
       AgentDefinition reread = agentDefinitionRepository.getByName(name);
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
+        throw new AiResourceNotFoundException(RESOURCE);
       }
       throw new AiVersionConflictException(
-          RESOURCE, name, expectedVersion, CatalogVersions.format(reread.getVersion()));
+          RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
     }
   }
 
@@ -155,7 +147,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
       AgentDefinition definition, String name, String expectedVersion, long expected) {
     if (definition.getVersion() != expected) {
       throw new AiVersionConflictException(
-          RESOURCE, name, expectedVersion, CatalogVersions.format(definition.getVersion()));
+          RESOURCE, expectedVersion, CatalogVersions.format(definition.getVersion()));
     }
   }
 

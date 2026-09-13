@@ -36,11 +36,7 @@ registerCase({
     assert(chineseDomain.code === 'resource_not_found', JSON.stringify(chineseDomain))
     assert(chineseDomain.message === '未找到 chat。', JSON.stringify(chineseDomain))
     assert(chineseDomain.errors?.resource === 'chat', JSON.stringify(chineseDomain))
-    assert(
-      chineseDomain.errors?.detail ===
-        'chat not found: 00000000-0000-0000-0000-000000000999',
-      JSON.stringify(chineseDomain),
-    )
+    assert(chineseDomain.errors?.detail === 'chat not found', JSON.stringify(chineseDomain))
 
     // Catalog controller 的类型不匹配由 Domain advice 归一为 validation。
     const mismatchPath = '/api/ai/catalog/models?pageNumber=abc&pageSize=1'

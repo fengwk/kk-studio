@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Archive,
@@ -41,22 +41,33 @@ export function ProjectDetailPage({
   const [isDeleteProjectOpen, setIsDeleteProjectOpen] = useState(false)
   const [isCreateIssueOpen, setIsCreateIssueOpen] = useState(false)
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null)
+  const loadRequestIdRef = useRef(0)
 
   const loadSnapshot = useCallback(async () => {
+    const requestId = ++loadRequestIdRef.current
     setIsLoading(true)
     setErrorMessage(null)
     try {
       const data = await api.getProjectSnapshot(projectId)
-      setSnapshot(data)
+      if (loadRequestIdRef.current === requestId) {
+        setSnapshot(data)
+      }
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '获取项目 Snapshot 失败')
+      if (loadRequestIdRef.current === requestId) {
+        setErrorMessage(err instanceof Error ? err.message : '获取项目 Snapshot 失败')
+      }
     } finally {
-      setIsLoading(false)
+      if (loadRequestIdRef.current === requestId) {
+        setIsLoading(false)
+      }
     }
   }, [api, projectId])
 
   useEffect(() => {
     void loadSnapshot()
+    return () => {
+      loadRequestIdRef.current += 1
+    }
   }, [loadSnapshot])
 
   // Invalidation subscription
@@ -229,7 +240,7 @@ export function ProjectDetailPage({
             <Bot size={14} aria-hidden="true" />
             <span>Coordinator:</span>
             <strong style={{ color: 'var(--fg)' }}>
-              {project.coordinatorAgentName || '未指定'}
+              {project.coordinatorAgentName}
             </strong>
           </span>
 

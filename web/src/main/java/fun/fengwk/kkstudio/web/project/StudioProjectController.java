@@ -62,7 +62,6 @@ public class StudioProjectController {
   private final HarnessOwnerQueryService harnessOwnerQueryService;
   private final ProjectSnapshotAssembler projectSnapshotAssembler;
   private final ProjectDtoMapper mapper;
-  private final ProjectInvalidationHub invalidationHub;
 
   @GetMapping
   public Result<List<ProjectDTO>> listProjects(
@@ -79,7 +78,6 @@ public class StudioProjectController {
     Project created =
         projectService.createProject(
             request.getTitle(), request.getDescription(), request.getCoordinatorAgentName());
-    invalidationHub.publishChange(created.getId());
     return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(created)));
   }
 
@@ -88,7 +86,7 @@ public class StudioProjectController {
     UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
     Project project = projectService.getProject(projectId);
     if (project == null) {
-      throw new AiResourceNotFoundException("project", projectId.toString());
+      throw new AiResourceNotFoundException("project");
     }
     return Results.ok(mapper.toDto(project));
   }
@@ -107,7 +105,6 @@ public class StudioProjectController {
             request.getTitle(),
             request.getDescription(),
             request.getCoordinatorAgentName());
-    invalidationHub.publishChange(projectId);
     return Results.ok(mapper.toDto(updated));
   }
 
@@ -119,7 +116,6 @@ public class StudioProjectController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(expectedVersionStr, "expectedVersion");
     projectService.deleteProject(projectId, expectedVersion);
-    invalidationHub.publishChange(projectId);
     return ResponseEntity.noContent().build();
   }
 
@@ -131,7 +127,6 @@ public class StudioProjectController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Project archived = projectService.archiveProject(projectId, expectedVersion);
-    invalidationHub.publishChange(projectId);
     return Results.ok(mapper.toDto(archived));
   }
 
@@ -143,7 +138,6 @@ public class StudioProjectController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Project unarchived = projectService.unarchiveProject(projectId, expectedVersion);
-    invalidationHub.publishChange(projectId);
     return Results.ok(mapper.toDto(unarchived));
   }
 
@@ -180,9 +174,10 @@ public class StudioProjectController {
         List<HarnessThreadSummaryDTO> threads =
             harnessOwnerQueryService.listThreadSummaries(sessionId);
         if (threads.isEmpty()) {
-          throw new IllegalStateException("No thread found for project session: " + sessionId);
+          throw new IllegalStateException("No thread found for project session");
         }
-        targetThreadId = UUID.fromString(threads.get(0).getThreadId());
+        targetThreadId =
+            ProjectDtoMapper.parseUuid(threads.get(0).getThreadId(), "coordinatorThreadId");
       }
 
       ThreadSnapshot currentSnapshot = harnessRuntime.getThreadSnapshot(targetThreadId);
@@ -217,7 +212,6 @@ public class StudioProjectController {
     HarnessAcceptedCommandsDTO dto =
         HarnessRuntimeResponseMapper.toAcceptedCommandsDto(accepted, currentSnapshot);
 
-    invalidationHub.publishChange(projectId);
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(Results.ok(dto));
   }
 

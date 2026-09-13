@@ -61,9 +61,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
         .get(10, TimeUnit.SECONDS);
 
     assertEquals(
-        "{\"version\":1,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"unknown thread: "
-            + unknown
-            + "\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":1,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + unknown
             + "\"}}",
         collector.nextText());
@@ -78,9 +76,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
             true)
         .get(10, TimeUnit.SECONDS);
     assertEquals(
-        "{\"version\":1,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"unknown thread: "
-            + another
-            + "\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":1,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + another
             + "\"}}",
         collector.nextText());

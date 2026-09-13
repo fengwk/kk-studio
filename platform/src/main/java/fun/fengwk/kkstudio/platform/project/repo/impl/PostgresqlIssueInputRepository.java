@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.platform.project.repo.IssueInputRepository;
 import fun.fengwk.kkstudio.platform.project.repo.impl.mapper.IssueInputMapper;
 import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueInputDO;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -21,7 +22,12 @@ public class PostgresqlIssueInputRepository implements IssueInputRepository {
 
   @Override
   public boolean append(IssueInput input) {
-    return issueInputMapper.insert(toDO(input)) == 1;
+    Instant createdAt = issueInputMapper.insert(toDO(input));
+    if (createdAt == null) {
+      return false;
+    }
+    input.setCreatedAt(createdAt);
+    return true;
   }
 
   @Override

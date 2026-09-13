@@ -232,7 +232,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         } catch (IllegalArgumentException error) {
           // 资源不存在：只回资源级 error，保持连接。
           if (!sender.enqueue(
-              codec.error(EventFrameCodec.RESOURCE_NOT_FOUND, error.getMessage(), resource))) {
+              codec.error(EventFrameCodec.RESOURCE_NOT_FOUND, "Resource not found", resource))) {
             fail(
                 EventFrameCodec.BACKPRESSURE,
                 "event queue is full",

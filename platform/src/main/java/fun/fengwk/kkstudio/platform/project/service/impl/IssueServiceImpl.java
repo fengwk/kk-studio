@@ -61,7 +61,7 @@ public class IssueServiceImpl implements IssueService {
     // 先锁 Project 再检查 archived 与分配编号
     Project project = projectRepository.lockById(projectId);
     if (project == null) {
-      throw new AiResourceNotFoundException("project", projectId.toString());
+      throw new AiResourceNotFoundException("project");
     }
     if (project.isArchived()) {
       throw new AiValidationException("project", "Cannot create issue in an archived project");
@@ -121,20 +121,17 @@ public class IssueServiceImpl implements IssueService {
 
     Issue initial = issueRepository.getById(issueId);
     if (initial == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     projectRepository.lockById(initial.getProjectId());
 
     Issue current = issueRepository.lockById(issueId);
     if (current == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     if (current.getVersion() != expectedVersion) {
       throw new AiVersionConflictException(
-          "issue",
-          issueId.toString(),
-          String.valueOf(expectedVersion),
-          String.valueOf(current.getVersion()));
+          "issue", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
     }
     if (current.isArchived()) {
       throw new AiValidationException("issue", "Archived issue cannot be updated");
@@ -166,7 +163,6 @@ public class IssueServiceImpl implements IssueService {
       Issue latest = issueRepository.getById(issueId);
       throw new AiVersionConflictException(
           "issue",
-          issueId.toString(),
           String.valueOf(expectedVersion),
           String.valueOf(latest != null ? latest.getVersion() : -1));
     }
@@ -186,20 +182,17 @@ public class IssueServiceImpl implements IssueService {
 
     Issue initial = issueRepository.getById(issueId);
     if (initial == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     projectRepository.lockById(initial.getProjectId());
 
     Issue current = issueRepository.lockById(issueId);
     if (current == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     if (current.getVersion() != expectedVersion) {
       throw new AiVersionConflictException(
-          "issue",
-          issueId.toString(),
-          String.valueOf(expectedVersion),
-          String.valueOf(current.getVersion()));
+          "issue", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
     }
     if (current.isArchived()) {
       throw new AiValidationException("issue", "Archived issue cannot transition status");
@@ -243,7 +236,6 @@ public class IssueServiceImpl implements IssueService {
       Issue latest = issueRepository.getById(issueId);
       throw new AiVersionConflictException(
           "issue",
-          issueId.toString(),
           String.valueOf(expectedVersion),
           String.valueOf(latest != null ? latest.getVersion() : -1));
     }
@@ -265,21 +257,18 @@ public class IssueServiceImpl implements IssueService {
 
     Issue initial = issueRepository.getById(issueId);
     if (initial == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     projectRepository.lockById(initial.getProjectId());
 
     // 锁 Issue
     Issue current = issueRepository.lockById(issueId);
     if (current == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     if (current.getVersion() != expectedVersion) {
       throw new AiVersionConflictException(
-          "issue",
-          issueId.toString(),
-          String.valueOf(expectedVersion),
-          String.valueOf(current.getVersion()));
+          "issue", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
     }
     if (!IssueStatusTransition.isAllowed(
         current.getStatus(), IssueStatus.CANCELED, IssueTransitionAction.CANCEL)) {
@@ -308,7 +297,6 @@ public class IssueServiceImpl implements IssueService {
       Issue latest = issueRepository.getById(issueId);
       throw new AiVersionConflictException(
           "issue",
-          issueId.toString(),
           String.valueOf(expectedVersion),
           String.valueOf(latest != null ? latest.getVersion() : -1));
     }
@@ -324,20 +312,17 @@ public class IssueServiceImpl implements IssueService {
 
     Issue initial = issueRepository.getById(issueId);
     if (initial == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     projectRepository.lockById(initial.getProjectId());
 
     Issue current = issueRepository.lockById(issueId);
     if (current == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     if (current.getVersion() != expectedVersion) {
       throw new AiVersionConflictException(
-          "issue",
-          issueId.toString(),
-          String.valueOf(expectedVersion),
-          String.valueOf(current.getVersion()));
+          "issue", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
     }
     if (!current.canBeArchived()) {
       throw new AiValidationException(
@@ -355,7 +340,6 @@ public class IssueServiceImpl implements IssueService {
       Issue latest = issueRepository.getById(issueId);
       throw new AiVersionConflictException(
           "issue",
-          issueId.toString(),
           String.valueOf(expectedVersion),
           String.valueOf(latest != null ? latest.getVersion() : -1));
     }
@@ -370,20 +354,17 @@ public class IssueServiceImpl implements IssueService {
 
     Issue initial = issueRepository.getById(issueId);
     if (initial == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     projectRepository.lockById(initial.getProjectId());
 
     Issue current = issueRepository.lockById(issueId);
     if (current == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     if (current.getVersion() != expectedVersion) {
       throw new AiVersionConflictException(
-          "issue",
-          issueId.toString(),
-          String.valueOf(expectedVersion),
-          String.valueOf(current.getVersion()));
+          "issue", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
     }
     if (!current.isArchived()) {
       return current;
@@ -395,7 +376,6 @@ public class IssueServiceImpl implements IssueService {
       Issue latest = issueRepository.getById(issueId);
       throw new AiVersionConflictException(
           "issue",
-          issueId.toString(),
           String.valueOf(expectedVersion),
           String.valueOf(latest != null ? latest.getVersion() : -1));
     }
@@ -405,7 +385,7 @@ public class IssueServiceImpl implements IssueService {
 
   @Transactional
   @Override
-  public void addDependency(UUID issueId, UUID dependsOnIssueId, long expectedVersion) {
+  public IssueDependency addDependency(UUID issueId, UUID dependsOnIssueId, long expectedVersion) {
     Objects.requireNonNull(issueId, "issueId");
     Objects.requireNonNull(dependsOnIssueId, "dependsOnIssueId");
     if (issueId.equals(dependsOnIssueId)) {
@@ -415,14 +395,14 @@ public class IssueServiceImpl implements IssueService {
     // 1. 先预读 target 获得 projectId
     Issue targetPre = issueRepository.getById(issueId);
     if (targetPre == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     UUID projectId = targetPre.getProjectId();
 
     // 2. 锁 Project 行作为 per-project graph mutex
     Project project = projectRepository.lockById(projectId);
     if (project == null) {
-      throw new AiResourceNotFoundException("project", projectId.toString());
+      throw new AiResourceNotFoundException("project");
     }
     if (project.isArchived()) {
       throw new AiValidationException("project", "Cannot add dependency in an archived project");
@@ -438,10 +418,10 @@ public class IssueServiceImpl implements IssueService {
     Issue dependsOnIssue = dependsOnIssueId.equals(first) ? lockFirst : lockSecond;
 
     if (targetIssue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     if (dependsOnIssue == null) {
-      throw new AiResourceNotFoundException("issue", dependsOnIssueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     if (!targetIssue.getProjectId().equals(projectId)
         || !dependsOnIssue.getProjectId().equals(projectId)) {
@@ -450,10 +430,7 @@ public class IssueServiceImpl implements IssueService {
     }
     if (targetIssue.getVersion() != expectedVersion) {
       throw new AiVersionConflictException(
-          "issue",
-          issueId.toString(),
-          String.valueOf(expectedVersion),
-          String.valueOf(targetIssue.getVersion()));
+          "issue", String.valueOf(expectedVersion), String.valueOf(targetIssue.getVersion()));
     }
     if (targetIssue.isArchived() || dependsOnIssue.isArchived()) {
       throw new AiValidationException(
@@ -500,7 +477,6 @@ public class IssueServiceImpl implements IssueService {
       Issue latest = issueRepository.getById(issueId);
       throw new AiVersionConflictException(
           "issue",
-          issueId.toString(),
           String.valueOf(expectedVersion),
           String.valueOf(latest != null ? latest.getVersion() : -1));
     }
@@ -508,6 +484,7 @@ public class IssueServiceImpl implements IssueService {
     if (targetIssue.getStatus() == IssueStatus.TODO) {
       controllerWorkStore.requestWork(issueId, Instant.now());
     }
+    return dependency;
   }
 
   @Transactional
@@ -518,20 +495,17 @@ public class IssueServiceImpl implements IssueService {
 
     Issue initial = issueRepository.getById(issueId);
     if (initial == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     projectRepository.lockById(initial.getProjectId());
 
     Issue targetIssue = issueRepository.lockById(issueId);
     if (targetIssue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     if (targetIssue.getVersion() != expectedVersion) {
       throw new AiVersionConflictException(
-          "issue",
-          issueId.toString(),
-          String.valueOf(expectedVersion),
-          String.valueOf(targetIssue.getVersion()));
+          "issue", String.valueOf(expectedVersion), String.valueOf(targetIssue.getVersion()));
     }
     if (targetIssue.getStatus() != IssueStatus.BACKLOG
         && targetIssue.getStatus() != IssueStatus.TODO) {
@@ -552,7 +526,6 @@ public class IssueServiceImpl implements IssueService {
       Issue latest = issueRepository.getById(issueId);
       throw new AiVersionConflictException(
           "issue",
-          issueId.toString(),
           String.valueOf(expectedVersion),
           String.valueOf(latest != null ? latest.getVersion() : -1));
     }
@@ -576,13 +549,13 @@ public class IssueServiceImpl implements IssueService {
 
     Issue initial = issueRepository.getById(issueId);
     if (initial == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     projectRepository.lockById(initial.getProjectId());
 
     Issue current = issueRepository.lockById(issueId);
     if (current == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     if (current.isArchived()) {
       throw new AiValidationException("issue_input", "Cannot append input to an archived issue");
@@ -638,7 +611,7 @@ public class IssueServiceImpl implements IssueService {
     Objects.requireNonNull(issueId, "issueId");
     Issue issue = issueRepository.getById(issueId);
     if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     return issue;
   }
@@ -648,7 +621,7 @@ public class IssueServiceImpl implements IssueService {
     Objects.requireNonNull(projectId, "projectId");
     Issue issue = issueRepository.getByProjectAndNumber(projectId, number);
     if (issue == null) {
-      throw new AiResourceNotFoundException("issue", projectId + "#" + number);
+      throw new AiResourceNotFoundException("issue");
     }
     return issue;
   }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Archive,
@@ -41,22 +41,33 @@ export function ProjectsPage({
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<ProjectDTO | null>(null)
   const [deletingProject, setDeletingProject] = useState<ProjectDTO | null>(null)
+  const loadRequestIdRef = useRef(0)
 
   const loadProjects = useCallback(async () => {
+    const requestId = ++loadRequestIdRef.current
     setIsLoading(true)
     setErrorMessage(null)
     try {
       const data = await api.listProjects(includeArchived)
-      setProjects(data)
+      if (loadRequestIdRef.current === requestId) {
+        setProjects(data)
+      }
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '获取项目列表失败')
+      if (loadRequestIdRef.current === requestId) {
+        setErrorMessage(err instanceof Error ? err.message : '获取项目列表失败')
+      }
     } finally {
-      setIsLoading(false)
+      if (loadRequestIdRef.current === requestId) {
+        setIsLoading(false)
+      }
     }
   }, [api, includeArchived])
 
   useEffect(() => {
     void loadProjects()
+    return () => {
+      loadRequestIdRef.current += 1
+    }
   }, [loadProjects])
 
   // Invalidation subscription
@@ -73,7 +84,7 @@ export function ProjectsPage({
       (p) =>
         p.title.toLowerCase().includes(q) ||
         p.description.toLowerCase().includes(q) ||
-        (p.coordinatorAgentName && p.coordinatorAgentName.toLowerCase().includes(q)),
+        p.coordinatorAgentName.toLowerCase().includes(q),
     )
   }, [projects, searchQuery])
 
@@ -231,7 +242,7 @@ export function ProjectsPage({
                       <span>Coordinator:</span>
                     </span>
                     <strong style={{ color: 'var(--fg)' }}>
-                      {project.coordinatorAgentName || '未配置'}
+                      {project.coordinatorAgentName}
                     </strong>
                   </div>
 

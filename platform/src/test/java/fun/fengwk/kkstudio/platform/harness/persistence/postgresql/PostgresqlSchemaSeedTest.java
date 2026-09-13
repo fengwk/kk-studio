@@ -39,7 +39,7 @@ import java.util.Objects;
 class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-  private static final String VERSIONED_MIGRATIONS = "1,2,3,4,5,6,7";
+  private static final String VERSIONED_MIGRATIONS = "1,2,3,4,5,6,7,8";
 
   @BeforeEach
   void setup() throws Exception {

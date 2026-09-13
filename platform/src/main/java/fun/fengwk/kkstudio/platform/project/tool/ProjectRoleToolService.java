@@ -71,7 +71,7 @@ public class ProjectRoleToolService {
     if (issue == null
         || !issueId.equals(issue.getId())
         || !owner.projectId().equals(issue.getProjectId())) {
-      throw new AiResourceNotFoundException("issue", "Issue not found");
+      throw new AiResourceNotFoundException("issue");
     }
 
     boolean blocked = issueService.isBlocked(issueId);
@@ -178,7 +178,7 @@ public class ProjectRoleToolService {
     if (current == null
         || !issueId.equals(current.getId())
         || !owner.projectId().equals(current.getProjectId())) {
-      throw new AiResourceNotFoundException("issue", "Issue not found");
+      throw new AiResourceNotFoundException("issue");
     }
 
     String newTitle = current.getTitle();
@@ -235,7 +235,7 @@ public class ProjectRoleToolService {
         || depends == null
         || !dependsOnIssueId.equals(depends.getId())
         || !owner.projectId().equals(depends.getProjectId())) {
-      throw new AiResourceNotFoundException("issue", "Issue not found");
+      throw new AiResourceNotFoundException("issue");
     }
 
     issueService.addDependency(issueId, dependsOnIssueId, expectedVersion);
@@ -269,7 +269,7 @@ public class ProjectRoleToolService {
         || depends == null
         || !dependsOnIssueId.equals(depends.getId())
         || !owner.projectId().equals(depends.getProjectId())) {
-      throw new AiResourceNotFoundException("issue", "Issue not found");
+      throw new AiResourceNotFoundException("issue");
     }
 
     issueService.removeDependency(issueId, dependsOnIssueId, expectedVersion);
@@ -302,7 +302,7 @@ public class ProjectRoleToolService {
     if (current == null
         || !issueId.equals(current.getId())
         || !owner.projectId().equals(current.getProjectId())) {
-      throw new AiResourceNotFoundException("issue", "Issue not found");
+      throw new AiResourceNotFoundException("issue");
     }
 
     Issue updated = issueService.setStatus(issueId, expectedVersion, newStatus);
@@ -322,7 +322,7 @@ public class ProjectRoleToolService {
     if (current == null
         || !issueId.equals(current.getId())
         || !owner.projectId().equals(current.getProjectId())) {
-      throw new AiResourceNotFoundException("issue", "Issue not found");
+      throw new AiResourceNotFoundException("issue");
     }
 
     Issue updated = issueService.cancelIssue(issueId, expectedVersion, reason);

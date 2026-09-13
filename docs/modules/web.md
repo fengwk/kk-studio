@@ -13,7 +13,7 @@ SpringApplication.run(WebApplication.class, args);
 ```
 
 `web/src/test/java/fun/fengwk/kkstudio/web/WebTestApplication.java`仅用于 Spring integration tests，不是第二个生产
-composition root。Web 不实现 Catalog、Canvas、Harness、Storage 或 Environment 的领域规则；Controller 只做 DTO
+composition root。Web 不实现 Catalog、Project、CloudFS、Canvas、Harness、Storage 或 Environment 的领域规则；Controller 只做 DTO
 解析、调用 application service 和结果投影。
 
 ## Goals / Non-goals
@@ -89,8 +89,9 @@ composition 子根：
 - `HarnessWorkDispatcher`使用单线程 drain、bounded worker executor、poll scheduler 和 `harness_work` claim；
 - `HarnessRuntimeLifecycle`只控制 dispatcher 是否启动，Runtime control/query beans 始终由 context 持有。
 
-Platform 由 `PlatformAutoConfiguration`自动扫描，提供 Catalog、Chat、SystemSettings、Model/Tool gateway、Storage、
-Environment 和 Canvas application services。Canvas infra 通过 web 的直接依赖提供 PostgreSQL/MyBatis repository、
+Platform 由 `PlatformAutoConfiguration`自动扫描，提供 Catalog、Chat、Project/Issue、
+Cloud File System、SystemSettings、Model/Tool gateway、Storage、Environment 和 Canvas
+application services。Canvas infra 通过 web 的直接依赖提供 PostgreSQL/MyBatis repository、
 Canvas query projection 和 Function dispatcher。Web 的业务适配主要面向
 Platform/Core 接口；Canvas dispatcher 只在下述 composition seam 被直接引用。
 
@@ -117,10 +118,13 @@ PostgreSQL datasource placeholder、8080 port、gzip compression，以及 `healt
 actuator exposure。`StrictJacksonConfiguration`全局启用 `STRICT_DUPLICATE_DETECTION`；各 DTO/codec继续严格拒绝
 unknown fields 和 trailing tokens。
 
-Flyway 只有一个 baseline：
+Flyway 只有一个冻结 baseline，当前增量 migration 按版本顺序推进到 V8：
 
 ```text
 schema/src/main/resources/db/migration/V1__schema.sql
+schema/src/main/resources/db/migration/V2__model_identity_and_variant.sql
+...
+schema/src/main/resources/db/migration/V8__project_change_notifications.sql
 ```
 
 Profile locations 是：
@@ -169,6 +173,9 @@ Profile locations 是：
 | Canvas resource | `/api/canvases/{canvasId}/resources/{resourceId}/{download-url,preview-url}` | Blob original/preview presign |
 | Canvas Function | `/api/canvas-function-models`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel` | model catalog、run、query、cancel |
 | Storage | `/api/storage` | upload reserve/complete/delete、`POST /api/storage/blobs/{blobId}/download-url|preview-url` |
+| Cloud Files | `/api/cloud/files`、`/api/cloud/directories`、`/api/cloud/text`、`/api/cloud/nodes`、`/api/cloud/blobs`、`/api/cloud/find|grep` | 全局文件树 snapshot、目录、文本 revision CAS、移动/删除、READY upload 挂载与有界 RE2/J 查询；普通列举隐藏 `/.artifacts` |
+| Project | `/api/projects`、`/{projectId}`、`/{projectId}/archive|unarchive|snapshot|commands` | Project CRUD/CAS、归档、权威聚合 Snapshot 与 Coordinator Harness command |
+| Issue | `/api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/status|dependencies|inputs|review|cancel|retry|archive|unarchive` | Issue CRUD/CAS、六态迁移、依赖、追加输入、Run 人工动作与归档 |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
 | Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token`、`/{id}/skill-sources`、`/{id}/skill-sources/{srcId}`、`/{id}/skill-sources/{srcId}/refresh\|install\|update`、`/{id}/inventory`、`/{id}/inventory/skills`、`/{id}/operations`、`/{id}/operations/{opId}`、`/{id}/operations/{opId}/cancel` | Environment Card CRUD、rotate-token、只读 token、live projection；Skill 来源 CRUD、持久清单与技能查询、异步操作提交（202）、操作查询与取消（200）；无目录浏览端点 |
 | ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |
@@ -204,12 +211,19 @@ error/Tool approval/Tool result 分别经对应 JSON codec 编码；Thread statu
 duration 来自 `StorageBlob`权威行；TEXT Resource 没有 Blob。Canvas id、command id、resource id 和 graph version
 在这里做 canonical 解析和 wire 投影，不把 bucket/object key写入 DTO。
 
+`ProjectDtoMapper` 统一 Project/Issue/Run 的 canonical UUID、decimal 与时间投影；
+`ProjectSnapshotAssembler` 聚合未归档 Issues、依赖、blocked 状态、当前/最近 Run
+以及 Coordinator Session/Thread，并对每条跨表归属 fail closed。
+`CloudFilesDtoMapper` 投影节点、文本窗口、Blob metadata 和 find/grep 结果；
+`StudioCloudFilesController` 只接受 canonical CloudPath 与 decimal CAS，不直接操作
+repository 或对象 key。
+
 `StrictJacksonConfiguration`使 Boot `JsonMapper`默认省略 null 并按 DTO 声明顺序输出；只有显式
 `@JsonInclude(ALWAYS)`的 nullable wire 字段仍输出 null，同时继续拒绝重复键并把 Long 写为字符串。
 
 ### DTO error advice 与 i18n
 
-四个 `@Order(HIGHEST_PRECEDENCE)`、按 `assignableTypes`限定范围的 advice 保持稳定 error envelope：
+六个 `@Order(HIGHEST_PRECEDENCE)`、按 `assignableTypes`限定范围的 advice 保持稳定 error envelope：
 
 | advice | controller 范围 | HTTP 映射 |
 | --- | --- | --- |
@@ -217,6 +231,8 @@ duration 来自 `StorageBlob`权威行；TEXT Resource 没有 Blob。Canvas id�
 | `StudioResponseStatusErrorAdvice` | Canvas、Chat、ComfyUI、Harness | `ResponseStatusException`按 status 输出；Runtime not found 404、conflict 409、非法输入 400 |
 | `StudioStorageErrorAdvice` | Storage | validation 400、not found 404、verification/conflict 409 |
 | `StudioSystemSettingsErrorAdvice` | SystemSettings | validation 400、row missing 404、CAS conflict 409，并带 expected/actual version |
+| `StudioCloudFilesErrorAdvice` | Cloud Files | validation/edit 400、forbidden 403、not found 404、node/revision/version conflict 409；不回显正文或检索 pattern |
+| `StudioProjectErrorAdvice` | Project、Issue | validation 400、not found 404、Project/Runtime conflict 409；不回显 Issue input、幂等键或认证数据 |
 
 所有 advice 返回 convention `Result`和 stable machine-readable code；用户可见 message 由
 `StudioMessageService`按请求 locale 解析，支持 `en-US`、`zh-CN`，其它 locale fallback 到英文。Platform domain
@@ -236,6 +252,8 @@ SpringApplication.run(WebApplication)
        -> PostgresqlHarnessStore + LocalFileResourceStore
        -> Thread/Model/Tool processors + managed Model flush executor
        -> HarnessWorkDispatcher + realtime source/sink
+  -> IssueControllerRuntimeConfiguration
+       -> bounded Issue dispatcher + worker + poll lifecycle
   -> ContributorCatalogConfiguration
        -> Spring contributors + TrustedJarContributorLoader
        -> immutable HarnessCatalog
@@ -270,15 +288,25 @@ Controller 不创建 Thread、Session 或 Work；owner lock、Chat/Canvas relati
 command acceptance 都由 Platform application transaction 完成。Session/Thread `name` 是独立控制面：
 `PUT .../name` 只更新命名元数据（可含规范化同名 no-op），不产生 Command/Entry/Work。
 
+Project 首条 Coordinator command 使用独立的原子 bootstrap service；后续 command
+通过 `OwnerType.PROJECT` 进入同一 acceptance orchestrator。Project Snapshot 由 Web
+聚合 Platform Project/Issue/Run 与 Harness owner projection。Cloud Files Controller
+则直接复用 Platform CFS service/query：HTTP 层只做路径、窗口、CAS 和 DTO 映射，
+Blob 上传仍先走 Storage reserve/complete，再以 upload id 挂载。
+
 ### PostgresqlNotificationLoop：单连接、多 channel
 
 `ApplicationEventConfiguration`注册一个 `PostgresqlNotificationLoop`，固定监听：
 
 ```text
 harness_runtime_work
+issue_controller_work_due
 canvas_function_work
+environment_operation_pending
 harness_thread_version
 canvas_version
+cloud_files_changed
+project_issue_changed
 system_settings_changed
 harness_realtime
 ```
@@ -290,8 +318,10 @@ Loop 只拥有一个专用 JDBC connection 和一个 daemon platform thread。�
 某个 handler 抛错只隔离该 handler，不终止 loop。连接断开按 backoff 重连，重连成功再次 resync。
 
 关闭顺序是 `connection.abort` → interrupt loop thread → 最多 5s join；`SmartLifecycle.close`幂等。`harness_runtime_work`
-和 `canvas_function_work`只做 dispatcher wake；version/realtime/settings handler 负责各自 snapshot/resync 逻辑，
-NOTIFY 本身不成为 durable event log。
+、`issue_controller_work_due`、`canvas_function_work` 和
+`environment_operation_pending` 只做 dispatcher wake；version/realtime/settings/
+Project/Cloud Files handler 负责各自 snapshot/resync 逻辑，NOTIFY 本身不成为
+durable event log。
 
 ### Application Event WebSocket：snapshot / version / realtime / resync
 
@@ -306,18 +336,26 @@ NOTIFY 本身不成为 durable event log。
 ```json
 {"version":1,"type":"subscribe","resource":{"kind":"thread","id":"<canonical UUID>"}}
 {"version":1,"type":"unsubscribe","resource":{"kind":"canvas","id":"<canonical UUID>"}}
+{"version":1,"type":"subscribe","resource":{"kind":"projects"}}
+{"version":1,"type":"subscribe","resource":{"kind":"cloud-files"}}
 ```
 
 服务端帧有 `subscribed`、`event(version)`、`event(realtime)`、`resync`、`heartbeat`和`error`：
 
-- `subscribed.cursor`是建立订阅瞬间的 durable Thread/Canvas version；
+- Thread/Canvas resource 精确包含 `kind,id`；全局 `projects`/`cloud-files`
+  resource 精确只包含 `kind`，不得附加 synthetic id；
+- `subscribed.cursor`是建立订阅瞬间的 durable Thread/Canvas version；全局资源
+  使用 `0` 作为连接代际 ack cursor；
 - version event 的 cursor 与 `data.version`必须相等；
 - Thread realtime event 携带 Runtime realtime JSON，不携带 cursor；
+- Projects 的 `changed` event 携带单一 canonical `projectId`，不带 cursor；
+- Cloud Files 只发送 `resync`，提示读取当前文件树/文件 snapshot；
 - `resync`只表示客户端重新读取对应 REST snapshot；
 - heartbeat 不携带 resource/cursor/data。
 
-`ApplicationEventHub`按 `(kind, id)`维护共享上游：Thread 使用 version source + realtime source，Canvas 只使用
-version source。建立上游时先注册 consumer 再读取 cursor；fan-out 与 cursor/consumer registration 在 resource lock
+`ApplicationEventHub`按 resource key 维护共享上游：Thread 使用 version source +
+realtime source，Canvas 只使用 version source，Projects 与 Cloud Files 分别连接
+数据库失效 Hub。建立上游时先注册 consumer 再读取 cursor；fan-out 与 cursor/consumer registration 在 resource lock
 内互斥。WebSocket handler 先把 `subscribed` ack 入 `AsyncTextSender`，再 `subscription.activate()`，因此事件帧不会
 早于 ack。version <= ack cursor 的陈旧信号被过滤。
 
@@ -395,14 +433,17 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 1. `WebApplication`是唯一生产 Spring Boot root；Controller 只调用 Platform/Runtime/Core port，不复制领域事务或
    状态机。
 2. `V1__schema.sql`是全仓唯一 baseline，profile seed 只由 Flyway locations 选择；没有第二份 SQL bootstrap。
-3. REST snapshot 是 durable truth 的读取入口；Application Event WebSocket 只发送 version/realtime invalidation 和
-   resync signal，不保存事件记录、不替代 REST command/query。
+3. REST snapshot 是 durable truth 的读取入口；Application Event WebSocket 只发送
+   Thread/Canvas version、Thread realtime、Project changed 与全局 resync signal，
+   不保存事件记录、不替代 REST command/query。
 4. Event subscription 的上游注册先于 cursor 读取，ack 先于 activation，陈旧 version 按 cursor 过滤；buffer 溢出必然
    fold 成一个 resync，内存有界且可恢复。
 5. WebSocket 每连接发送链都有 frame count + UTF-8 bytes 上限、单一 in-flight 顺序和有限 send timeout；失败先停止入队，
    再清理订阅/registry，最后关闭 transport。
-6. PostgreSQL notification loop 的一个 handler 失败不影响其它 channel；连接丢失由 reconnect + resync 恢复，通知丢失
-   不改变 PostgreSQL durable truth。
+6. PostgreSQL notification loop 的一个 handler 失败不影响其它 channel；连接丢失由
+   reconnect + resync 恢复，通知丢失不改变 PostgreSQL durable truth。Project 与
+   Cloud Files 的跨节点/浏览器 invalidation 只来自数据库 trigger 提交事实，不在
+   Controller 额外广播。
 7. Harness worker dispatcher、processor、event loop、heartbeat scheduler 和 sender 都有明确 owner；worker 关闭不会
    释放 notification loop，事件 channel 关闭也不会留下 Runtime subscription。
 8. WebSocket 每连接发送链都有 frame count + UTF-8 bytes 上限、单一 in-flight 顺序和有限 send timeout；失败先停止入队，
@@ -429,6 +470,7 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 | `management.endpoints.web.exposure.include` | `health,prometheus,offline,online` |
 | `kk-studio.harness.runtime.workers-enabled` | 是否启动 Work dispatcher；可由 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED` 配置，默认 true，测试与 NAS Dev 显式关闭 |
 | `kk-studio.harness.dispatcher.*` | Work claim/handoff 租约、轮询、拒绝退避及 bounded worker 容量 |
+| `kk-studio.project.controller.*` | Issue Controller claim/reconcile 租约、poll/retry/blocked/run timeout、continuation 与 bounded worker 容量 |
 | `kk-studio.harness.contributors.directory` | trusted JAR 目录；空值不加载外部贡献者 |
 | `kk-studio.harness.environment-gateway.*` | 入站 frame 和出站 queue/bytes/send timeout |
 
@@ -456,6 +498,7 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 | 生命周期 | phase / owner | 关闭语义 |
 | --- | --- | --- |
 | Harness workers | `HarnessRuntimeLifecycle`，`MAX_VALUE - 1` | `workers-enabled=false`不启动；start 失败回滚 dispatcher；stop 幂等 |
+| Issue Controller | `IssueControllerRuntimeLifecycle`，`MAX_VALUE - 1` | 与 Harness workers 共用 `workers-enabled`；不启动时仍保留 REST 与 notification loop |
 | Browser heartbeat | `applicationEventHeartbeatScheduler` | Spring destroy `shutdown`，handler `@PreDestroy`先发 1012 `SEND_FAILED` |
 | Application Event Hub | `ApplicationEventHub`，destroy `close` | 关闭 resource upstream、标记 subscriptions closed |
 | PostgreSQL notifications | `PostgresqlNotificationLoop`，`MAX_VALUE` | abort connection、interrupt、bounded 5s join |
@@ -489,6 +532,10 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 - `web/src/test/java/fun/fengwk/kkstudio/web/advice/`
 - `web/src/test/java/fun/fengwk/kkstudio/web/StudioI18nIntegrationTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/FlywayAutoConfigurationIntegrationTest.java`
+- `web/src/main/java/fun/fengwk/kkstudio/web/project/`
+- `web/src/main/java/fun/fengwk/kkstudio/web/cloudfs/`
+- `web/src/test/java/fun/fengwk/kkstudio/web/project/`
+- `web/src/test/java/fun/fengwk/kkstudio/web/cloudfs/StudioCloudFilesControllerTest.java`
 
 ### Runtime、contributor 和 notification integration tests
 
@@ -505,6 +552,7 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 - `web/src/test/java/fun/fengwk/kkstudio/web/events/ApplicationEventHubTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/events/ApplicationEventWebSocketEndpointIntegrationTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/events/EventFrameCodecTest.java`
+- `platform/src/test/java/fun/fengwk/kkstudio/platform/project/ProjectChangeNotificationIntegrationTest.java`
 
 ### WebSocket、async 和静态资源 tests
 
@@ -523,10 +571,11 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 - `web/src/test/java/fun/fengwk/kkstudio/web/runtime/EnvironmentOperationPostgresCompositionIntegrationTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/SpaFallbackTest.java`
 
-这些测试覆盖 Web composition 的真实风险：唯一 root 与依赖方向、Flyway single baseline、PostgreSQL notification
-reconnect/resync、worker NOTIFY/poll 两条唤醒路径、ack-before-event、bounded sender、Environment large READY frame、
-bounded sender 的 fail-closed 行为、dynamic MCP discovery/planning/execution、strict DTO、trusted JAR classloader lifecycle、
-locale fallback 和静态 SPA fallback。
+这些测试覆盖 Web composition 的真实风险：唯一 root 与依赖方向、Flyway single
+baseline、PostgreSQL notification reconnect/resync、Harness/Issue worker
+NOTIFY+poll 唤醒、Project/Cloud Files trigger invalidation、ack-before-event、bounded
+sender、Environment large READY frame、dynamic MCP discovery/planning/execution、
+strict DTO、trusted JAR classloader lifecycle、locale fallback 和静态 SPA fallback。
 
 ---
 

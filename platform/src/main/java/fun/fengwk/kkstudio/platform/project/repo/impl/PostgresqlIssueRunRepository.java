@@ -68,7 +68,7 @@ public class PostgresqlIssueRunRepository implements IssueRunRepository {
   public long allocateNextOrdinal(UUID issueId) {
     Long next = issueRunMapper.allocateNextOrdinal(issueId);
     if (next == null) {
-      throw new IllegalStateException("Failed to allocate next ordinal for issue " + issueId);
+      throw new IllegalStateException("Failed to allocate next issue run ordinal");
     }
     return next;
   }

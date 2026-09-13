@@ -92,7 +92,7 @@ public class HarnessOwnerQueryService {
   public List<HarnessSessionSummaryDTO> listChatSessions(UUID chatId) {
     Objects.requireNonNull(chatId, "chatId");
     if (chatRepository.getById(chatId) == null) {
-      throw new AiResourceNotFoundException("chat", "chat not found: " + chatId);
+      throw new AiResourceNotFoundException("chat");
     }
     return listSessionSummaries(chatSessionRepository.listSessionIds(chatId));
   }
@@ -101,7 +101,7 @@ public class HarnessOwnerQueryService {
   public List<HarnessSessionSummaryDTO> listCanvasSessions(UUID canvasId) {
     Objects.requireNonNull(canvasId, "canvasId");
     if (canvasStore.findDocument(canvasId).isEmpty()) {
-      throw new AiResourceNotFoundException("canvas", "canvas not found: " + canvasId);
+      throw new AiResourceNotFoundException("canvas");
     }
     return listSessionSummaries(canvasSessionRepository.listSessionIds(canvasId));
   }
@@ -110,7 +110,7 @@ public class HarnessOwnerQueryService {
   public List<HarnessSessionSummaryDTO> listProjectSessions(UUID projectId) {
     Objects.requireNonNull(projectId, "projectId");
     if (projectRepository.getById(projectId) == null) {
-      throw new AiResourceNotFoundException("project", "project not found: " + projectId);
+      throw new AiResourceNotFoundException("project");
     }
     ProjectSession session = projectSessionRepository.findByProjectId(projectId);
     return session != null ? listSessionSummaries(List.of(session.getSessionId())) : List.of();
@@ -120,7 +120,7 @@ public class HarnessOwnerQueryService {
   public List<HarnessSessionSummaryDTO> listIssueRunSessions(UUID runId) {
     Objects.requireNonNull(runId, "runId");
     if (issueRunRepository.getById(runId) == null) {
-      throw new AiResourceNotFoundException("issue_run", "issue run not found: " + runId);
+      throw new AiResourceNotFoundException("issue_run");
     }
     IssueRunSession session = issueRunSessionRepository.findByRunId(runId);
     return session != null ? listSessionSummaries(List.of(session.getSessionId())) : List.of();

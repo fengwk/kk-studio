@@ -50,6 +50,7 @@ describe('cloud-files codecs', () => {
         mediaType: null,
         sizeBytes: null,
         sha256: null,
+        revision: null,
         createdAt: '2026-09-13T00:00:00Z',
         updatedAt: '2026-09-13T00:00:00Z',
       }
@@ -70,6 +71,7 @@ describe('cloud-files codecs', () => {
         mediaType: null,
         sizeBytes: null,
         sha256: null,
+        revision: null,
         createdAt: null,
         updatedAt: null,
       }
@@ -90,6 +92,7 @@ describe('cloud-files codecs', () => {
         mediaType: null,
         sizeBytes: null,
         sha256: null,
+        revision: null,
         createdAt: null,
         updatedAt: null,
       }
@@ -107,6 +110,7 @@ describe('cloud-files codecs', () => {
         mediaType: 'image/png',
         sizeBytes: '1024',
         sha256: VALID_SHA256,
+        revision: null,
         createdAt: null,
         updatedAt: null,
       }
@@ -228,6 +232,7 @@ describe('cloud-files codecs', () => {
           mediaType: null,
           sizeBytes: null,
           sha256: null,
+          revision: null,
           createdAt: null,
           updatedAt: null,
         },
@@ -242,6 +247,7 @@ describe('cloud-files codecs', () => {
             mediaType: 'text/markdown',
             sizeBytes: '100',
             sha256: null,
+            revision: '1',
             createdAt: null,
             updatedAt: null,
           },
@@ -265,6 +271,7 @@ describe('cloud-files codecs', () => {
           mediaType: 'text/markdown',
           sizeBytes: '20',
           sha256: null,
+          revision: '1',
           createdAt: null,
           updatedAt: null,
         },

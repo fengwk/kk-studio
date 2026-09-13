@@ -120,8 +120,7 @@ class StudioEnvironmentControllerTest {
   @Test
   void getMissingEnvironmentReturnsNotFound() throws Exception {
     when(environmentService.get(eq(EnvironmentId.of(ENV_ID))))
-        .thenThrow(
-            new AiResourceNotFoundException("environment", "environment not found: " + ENV_ID));
+        .thenThrow(new AiResourceNotFoundException("environment"));
 
     mockMvc
         .perform(get("/api/harness/environments/" + ENV_ID))
@@ -129,7 +128,7 @@ class StudioEnvironmentControllerTest {
         .andExpect(jsonPath("$.status").value(404))
         .andExpect(jsonPath("$.code").value("resource_not_found"))
         .andExpect(jsonPath("$.errors.resource").value("environment"))
-        .andExpect(jsonPath("$.errors.detail").value("environment not found: " + ENV_ID));
+        .andExpect(jsonPath("$.errors.detail").value("environment not found"));
   }
 
   /** 意图：验证 POST /api/harness/environments 创建环境成功返回 HTTP 201 Created，且携带凭据的响应禁止缓存。 */

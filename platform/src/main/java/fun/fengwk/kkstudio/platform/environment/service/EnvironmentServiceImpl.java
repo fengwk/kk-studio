@@ -86,7 +86,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     Objects.requireNonNull(id, "id");
     Environment env = environmentRepository.getById(id.value());
     if (env == null) {
-      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+      throw new AiResourceNotFoundException(RESOURCE);
     }
     return toCardDto(env, false);
   }
@@ -112,11 +112,11 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
-      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+      throw new AiResourceNotFoundException(RESOURCE);
     }
     if (env.getVersion() != expected) {
       throw new AiVersionConflictException(
-          RESOURCE, id.toString(), expectedVersion, CatalogVersions.format(env.getVersion()));
+          RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
     }
     String newName = validateName(dto.getName());
     if (environmentRepository.existsByNameExcludingId(newName, id.value())) {
@@ -127,10 +127,10 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       if (!environmentRepository.updateById(env, expected)) {
         Environment reread = environmentRepository.getById(id.value());
         if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+          throw new AiResourceNotFoundException(RESOURCE);
         }
         throw new AiVersionConflictException(
-            RESOURCE, id.toString(), expectedVersion, CatalogVersions.format(reread.getVersion()));
+            RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
       }
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(
@@ -145,7 +145,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     Objects.requireNonNull(id, "id");
     Environment env = environmentRepository.getById(id.value());
     if (env == null) {
-      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+      throw new AiResourceNotFoundException(RESOURCE);
     }
     EnvironmentRegistrationTokenDTO dto = new EnvironmentRegistrationTokenDTO();
     dto.setId(env.getId().toString());
@@ -161,20 +161,20 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
-      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+      throw new AiResourceNotFoundException(RESOURCE);
     }
     if (env.getVersion() != expected) {
       throw new AiVersionConflictException(
-          RESOURCE, id.toString(), expectedVersion, CatalogVersions.format(env.getVersion()));
+          RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
     }
     env.setRegistrationToken(UUID.randomUUID().toString());
     if (!environmentRepository.updateById(env, expected)) {
       Environment reread = environmentRepository.getById(id.value());
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+        throw new AiResourceNotFoundException(RESOURCE);
       }
       throw new AiVersionConflictException(
-          RESOURCE, id.toString(), expectedVersion, CatalogVersions.format(reread.getVersion()));
+          RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
     }
     Environment updated = environmentRepository.getById(id.value());
     return toCardDto(updated, true);
@@ -187,11 +187,11 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
-      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+      throw new AiResourceNotFoundException(RESOURCE);
     }
     if (env.getVersion() != expected) {
       throw new AiVersionConflictException(
-          RESOURCE, id.toString(), expectedVersion, CatalogVersions.format(env.getVersion()));
+          RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
     }
     if (environmentRegistry.hasActiveLease(id)) {
       throw new AiInUseException(
@@ -209,10 +209,10 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       if (!environmentRepository.deleteById(id.value(), expected)) {
         Environment reread = environmentRepository.getById(id.value());
         if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+          throw new AiResourceNotFoundException(RESOURCE);
         }
         throw new AiVersionConflictException(
-            RESOURCE, id.toString(), expectedVersion, CatalogVersions.format(reread.getVersion()));
+            RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
       }
     } catch (DataIntegrityViolationException error) {
       throw new AiInUseException(

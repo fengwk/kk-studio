@@ -90,14 +90,11 @@ public class ProjectServiceImpl implements ProjectService {
 
     Project current = projectRepository.lockById(id);
     if (current == null) {
-      throw new AiResourceNotFoundException("project", id.toString());
+      throw new AiResourceNotFoundException("project");
     }
     if (current.getVersion() != expectedVersion) {
       throw new AiVersionConflictException(
-          "project",
-          id.toString(),
-          String.valueOf(expectedVersion),
-          String.valueOf(current.getVersion()));
+          "project", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
     }
     if (current.isArchived()) {
       throw new AiValidationException("project", "Archived project cannot be modified");
@@ -110,7 +107,6 @@ public class ProjectServiceImpl implements ProjectService {
       Project latest = projectRepository.getById(id);
       throw new AiVersionConflictException(
           "project",
-          id.toString(),
           String.valueOf(expectedVersion),
           String.valueOf(latest != null ? latest.getVersion() : -1));
     }
@@ -123,14 +119,11 @@ public class ProjectServiceImpl implements ProjectService {
     Objects.requireNonNull(id, "id");
     Project current = projectRepository.lockById(id);
     if (current == null) {
-      throw new AiResourceNotFoundException("project", id.toString());
+      throw new AiResourceNotFoundException("project");
     }
     if (current.getVersion() != expectedVersion) {
       throw new AiVersionConflictException(
-          "project",
-          id.toString(),
-          String.valueOf(expectedVersion),
-          String.valueOf(current.getVersion()));
+          "project", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
     }
     if (current.isArchived()) {
       return current;
@@ -140,7 +133,6 @@ public class ProjectServiceImpl implements ProjectService {
       Project latest = projectRepository.getById(id);
       throw new AiVersionConflictException(
           "project",
-          id.toString(),
           String.valueOf(expectedVersion),
           String.valueOf(latest != null ? latest.getVersion() : -1));
     }
@@ -153,14 +145,11 @@ public class ProjectServiceImpl implements ProjectService {
     Objects.requireNonNull(id, "id");
     Project current = projectRepository.lockById(id);
     if (current == null) {
-      throw new AiResourceNotFoundException("project", id.toString());
+      throw new AiResourceNotFoundException("project");
     }
     if (current.getVersion() != expectedVersion) {
       throw new AiVersionConflictException(
-          "project",
-          id.toString(),
-          String.valueOf(expectedVersion),
-          String.valueOf(current.getVersion()));
+          "project", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
     }
     if (!current.isArchived()) {
       return current;
@@ -170,7 +159,6 @@ public class ProjectServiceImpl implements ProjectService {
       Project latest = projectRepository.getById(id);
       throw new AiVersionConflictException(
           "project",
-          id.toString(),
           String.valueOf(expectedVersion),
           String.valueOf(latest != null ? latest.getVersion() : -1));
     }
@@ -188,14 +176,11 @@ public class ProjectServiceImpl implements ProjectService {
     // 1. 锁 Project 行并校验存在性与版本
     Project project = projectRepository.lockById(id);
     if (project == null) {
-      throw new AiResourceNotFoundException("project", id.toString());
+      throw new AiResourceNotFoundException("project");
     }
     if (project.getVersion() != expectedVersion) {
       throw new AiVersionConflictException(
-          "project",
-          id.toString(),
-          String.valueOf(expectedVersion),
-          String.valueOf(project.getVersion()));
+          "project", String.valueOf(expectedVersion), String.valueOf(project.getVersion()));
     }
 
     // 2. 查出该 Project 下的所有 Issues，并按 UUID 升序锁定
@@ -207,7 +192,7 @@ public class ProjectServiceImpl implements ProjectService {
       Issue lockedIssue = issueRepository.lockById(issue.getId());
       if (lockedIssue == null || !lockedIssue.getProjectId().equals(id)) {
         throw new AiValidationException(
-            "issue", "Issue disappeared or belongs to different project: " + issue.getId());
+            "issue", "Issue disappeared or belongs to different project");
       }
     }
 
@@ -224,7 +209,7 @@ public class ProjectServiceImpl implements ProjectService {
     for (IssueRun run : sortedRuns) {
       IssueRun lockedRun = issueRunRepository.lockById(run.getId());
       if (lockedRun == null) {
-        throw new AiValidationException("issue_run", "Issue run disappeared: " + run.getId());
+        throw new AiValidationException("issue_run", "Issue run disappeared");
       }
     }
 
@@ -235,11 +220,7 @@ public class ProjectServiceImpl implements ProjectService {
           || status == IssueRunStatus.WAITING_HUMAN
           || status == IssueRunStatus.UNKNOWN) {
         throw new AiValidationException(
-            "issue_run",
-            "Cannot delete project with active or unknown runs: run "
-                + run.getId()
-                + " is "
-                + status);
+            "issue_run", "Cannot delete project with active or unknown runs");
       }
     }
 
@@ -265,14 +246,14 @@ public class ProjectServiceImpl implements ProjectService {
       boolean deleted = issueRunRepository.deleteById(run.getId(), run.getVersion());
       if (!deleted) {
         throw new AiVersionConflictException(
-            "issue_run", run.getId().toString(), String.valueOf(run.getVersion()), "unknown");
+            "issue_run", String.valueOf(run.getVersion()), "unknown");
       }
     }
     for (IssueRun run : executorRuns) {
       boolean deleted = issueRunRepository.deleteById(run.getId(), run.getVersion());
       if (!deleted) {
         throw new AiVersionConflictException(
-            "issue_run", run.getId().toString(), String.valueOf(run.getVersion()), "unknown");
+            "issue_run", String.valueOf(run.getVersion()), "unknown");
       }
     }
 
@@ -284,9 +265,7 @@ public class ProjectServiceImpl implements ProjectService {
         if (deleted != inputs.size()) {
           throw new AiValidationException(
               "issue_input",
-              "Deleted inputs count mismatch for issue "
-                  + issue.getId()
-                  + ": expected "
+              "Deleted issue inputs count mismatch: expected "
                   + inputs.size()
                   + ", actual "
                   + deleted);
@@ -301,12 +280,7 @@ public class ProjectServiceImpl implements ProjectService {
       if (deleted != deps.size()) {
         throw new AiValidationException(
             "issue_dependency",
-            "Deleted dependencies count mismatch for project "
-                + id
-                + ": expected "
-                + deps.size()
-                + ", actual "
-                + deleted);
+            "Deleted dependencies count mismatch: expected " + deps.size() + ", actual " + deleted);
       }
     }
 
@@ -315,7 +289,7 @@ public class ProjectServiceImpl implements ProjectService {
       boolean deleted = issueRepository.deleteById(issue.getId(), issue.getVersion());
       if (!deleted) {
         throw new AiVersionConflictException(
-            "issue", issue.getId().toString(), String.valueOf(issue.getVersion()), "unknown");
+            "issue", String.valueOf(issue.getVersion()), "unknown");
       }
     }
 
@@ -325,8 +299,7 @@ public class ProjectServiceImpl implements ProjectService {
     // (h) project CAS 删除
     boolean projectDeleted = projectRepository.deleteById(id, expectedVersion);
     if (!projectDeleted) {
-      throw new AiVersionConflictException(
-          "project", id.toString(), String.valueOf(expectedVersion), "unknown");
+      throw new AiVersionConflictException("project", String.valueOf(expectedVersion), "unknown");
     }
   }
 
@@ -335,7 +308,7 @@ public class ProjectServiceImpl implements ProjectService {
     Objects.requireNonNull(id, "id");
     Project project = projectRepository.getById(id);
     if (project == null) {
-      throw new AiResourceNotFoundException("project", id.toString());
+      throw new AiResourceNotFoundException("project");
     }
     return project;
   }

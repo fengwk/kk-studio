@@ -35,7 +35,7 @@ public interface IssueService {
 
   Issue unarchiveIssue(UUID issueId, long expectedVersion);
 
-  void addDependency(UUID issueId, UUID dependsOnIssueId, long expectedVersion);
+  IssueDependency addDependency(UUID issueId, UUID dependsOnIssueId, long expectedVersion);
 
   void removeDependency(UUID issueId, UUID dependsOnIssueId, long expectedVersion);
 

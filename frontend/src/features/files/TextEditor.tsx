@@ -11,7 +11,7 @@ interface TextEditorProps {
   snapshot: CloudFileSnapshotDTO
   api?: CloudFilesApi
   onSaveSuccess?: (path: string) => void
-  onReload?: () => void
+  onReload?: () => Promise<CloudFileSnapshotDTO | null>
 }
 
 function assembleTextContent(snapshot: CloudFileSnapshotDTO): string {
@@ -60,21 +60,23 @@ export function TextEditor({
       setConflict(null)
       setErrorMessage(null)
       setStatusMessage(null)
-    } else {
-      // Same path refreshed: only update revision and savedContent;
-      // If user hasn't modified content, sync content. If user has unsaved draft, retain it!
-      const oldSaved = savedContentRef.current
+    } else if (content === savedContentRef.current) {
       savedContentRef.current = newContent
-      setExpectedRevision(newRev)
+      setContent(newContent)
       setSavedContent(newContent)
-      setContent((prev) => (prev === oldSaved ? newContent : prev))
+      setExpectedRevision(newRev)
     }
-  }, [snapshot])
+  }, [content, snapshot])
 
   const isDirty = content !== savedContent
+  const hasCompleteText =
+    snapshot.text != null
+    && snapshot.text.offset === 1
+    && snapshot.text.nextOffset == null
+    && snapshot.text.lines.every((line) => !line.truncated)
 
   const handleSave = useCallback(async () => {
-    if (isSaving) {
+    if (isSaving || !hasCompleteText) {
       return
     }
     setIsSaving(true)
@@ -82,13 +84,14 @@ export function TextEditor({
     setStatusMessage(null)
 
     try {
-      await api.saveText({
+      const saved = await api.saveText({
         path: snapshot.node.path,
         content,
         expectedRevision,
       })
       savedContentRef.current = content
       setSavedContent(content)
+      setExpectedRevision(saved.revision ?? saved.version)
       setConflict(null)
       setStatusMessage('保存成功')
       onSaveSuccess?.(snapshot.node.path)
@@ -106,24 +109,33 @@ export function TextEditor({
     } finally {
       setIsSaving(false)
     }
-  }, [api, content, expectedRevision, isSaving, onSaveSuccess, snapshot.node.path])
+  }, [
+    api,
+    content,
+    expectedRevision,
+    hasCompleteText,
+    isSaving,
+    onSaveSuccess,
+    snapshot.node.path,
+  ])
 
   const handleDiscardAndReload = async () => {
-    setConflict(null)
     setErrorMessage(null)
-    if (onReload) {
-      onReload()
-    } else {
-      try {
-        const fresh = await api.getFileSnapshot(snapshot.node.path)
-        const freshContent = assembleTextContent(fresh)
-        savedContentRef.current = freshContent
-        setContent(freshContent)
-        setSavedContent(freshContent)
-        setExpectedRevision(fresh.text?.revision ?? fresh.node.version)
-      } catch (err) {
-        setErrorMessage(err instanceof Error ? err.message : '重新加载失败')
+    try {
+      const fresh = onReload
+        ? await onReload()
+        : await api.getFileSnapshot(snapshot.node.path)
+      if (!fresh) {
+        return
       }
+      const freshContent = assembleTextContent(fresh)
+      savedContentRef.current = freshContent
+      setContent(freshContent)
+      setSavedContent(freshContent)
+      setExpectedRevision(fresh.text?.revision ?? fresh.node.version)
+      setConflict(null)
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : '重新加载失败')
     }
   }
 
@@ -137,13 +149,14 @@ export function TextEditor({
       setExpectedRevision(latestRev)
 
       // 2. Resubmit with the latest revision and current draft
-      await api.saveText({
+      const saved = await api.saveText({
         path: snapshot.node.path,
         content,
         expectedRevision: latestRev,
       })
       savedContentRef.current = content
       setSavedContent(content)
+      setExpectedRevision(saved.revision ?? saved.version)
       setConflict(null)
       setStatusMessage('已强制保存最新版本')
       onSaveSuccess?.(snapshot.node.path)
@@ -220,7 +233,7 @@ export function TextEditor({
             type="button"
             className="btn-save"
             onClick={handleSave}
-            disabled={!isDirty || isSaving}
+            disabled={!hasCompleteText || !isDirty || isSaving}
             aria-label="保存文件"
           >
             <Save size={16} aria-hidden="true" />
@@ -265,6 +278,13 @@ export function TextEditor({
         </div>
       )}
 
+      {!hasCompleteText && (
+        <div className="text-editor-preview-banner" role="status">
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span>当前仅显示分段预览；为避免覆盖未显示内容，编辑和保存已禁用。</span>
+        </div>
+      )}
+
       {errorMessage && (
         <div className="text-editor-error-banner" role="alert">
           <AlertTriangle size={16} aria-hidden="true" />
@@ -288,8 +308,9 @@ export function TextEditor({
           ref={textareaRef}
           className="text-editor-textarea"
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          onChange={hasCompleteText ? (e) => setContent(e.target.value) : undefined}
           onKeyDown={handleKeyDown}
+          readOnly={!hasCompleteText}
           spellCheck={false}
           aria-label={`编辑 ${snapshot.node.name}`}
           data-testid="text-editor-textarea"
@@ -297,7 +318,9 @@ export function TextEditor({
       </div>
 
       <div className="text-editor-footer">
-        <span>{lineCount} 行</span>
+        <span>
+          {lineCount} / {snapshot.text?.totalLines ?? 0} 行
+        </span>
         <span>{charCount} 字符</span>
         <span>{formatBytes(snapshot.node.sizeBytes ?? charCount)}</span>
       </div>

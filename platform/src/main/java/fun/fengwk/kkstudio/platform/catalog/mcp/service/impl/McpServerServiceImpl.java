@@ -166,14 +166,10 @@ public class McpServerServiceImpl implements McpServerService {
               McpServer locked =
                   repository
                       .getByIdForUpdate(serverId)
-                      .orElseThrow(
-                          () ->
-                              new AiResourceNotFoundException(
-                                  RESOURCE, "mcp server not found: " + id));
+                      .orElseThrow(() -> new AiResourceNotFoundException(RESOURCE));
               if (locked.getVersion() != expectedVersion) {
                 throw new AiVersionConflictException(
                     RESOURCE,
-                    locked.getName(),
                     updateDTO.getExpectedVersion(),
                     CatalogVersions.format(locked.getVersion()));
               }
@@ -190,7 +186,6 @@ public class McpServerServiceImpl implements McpServerService {
               if (!updated) {
                 throw new AiVersionConflictException(
                     RESOURCE,
-                    locked.getName(),
                     updateDTO.getExpectedVersion(),
                     CatalogVersions.format(locked.getVersion()));
               }
@@ -209,10 +204,7 @@ public class McpServerServiceImpl implements McpServerService {
     McpServer server = requireServer(serverId);
     if (server.getVersion() != expectedVersion) {
       throw new AiVersionConflictException(
-          RESOURCE,
-          server.getName(),
-          rawExpectedVersion,
-          CatalogVersions.format(server.getVersion()));
+          RESOURCE, rawExpectedVersion, CatalogVersions.format(server.getVersion()));
     }
 
     if (server.getConnectionType() == McpConnectionType.REMOTE) {
@@ -242,16 +234,10 @@ public class McpServerServiceImpl implements McpServerService {
                 McpServer locked =
                     repository
                         .getByIdForUpdate(serverId)
-                        .orElseThrow(
-                            () ->
-                                new AiResourceNotFoundException(
-                                    RESOURCE, "mcp server not found: " + id));
+                        .orElseThrow(() -> new AiResourceNotFoundException(RESOURCE));
                 if (locked.getVersion() != expectedVersion) {
                   throw new AiVersionConflictException(
-                      RESOURCE,
-                      locked.getName(),
-                      rawExpectedVersion,
-                      CatalogVersions.format(locked.getVersion()));
+                      RESOURCE, rawExpectedVersion, CatalogVersions.format(locked.getVersion()));
                 }
 
                 for (McpTool candidate : discoveryResult.candidates()) {
@@ -316,15 +302,10 @@ public class McpServerServiceImpl implements McpServerService {
           McpServer locked =
               repository
                   .getByIdForUpdate(serverId)
-                  .orElseThrow(
-                      () ->
-                          new AiResourceNotFoundException(RESOURCE, "mcp server not found: " + id));
+                  .orElseThrow(() -> new AiResourceNotFoundException(RESOURCE));
           if (locked.getVersion() != expectedVersion) {
             throw new AiVersionConflictException(
-                RESOURCE,
-                locked.getName(),
-                rawExpectedVersion,
-                CatalogVersions.format(locked.getVersion()));
+                RESOURCE, rawExpectedVersion, CatalogVersions.format(locked.getVersion()));
           }
 
           List<String> referenced = repository.selectReferencedAgentToolIds();
@@ -339,19 +320,13 @@ public class McpServerServiceImpl implements McpServerService {
 
           if (!repository.deleteById(serverId, expectedVersion)) {
             throw new AiVersionConflictException(
-                RESOURCE,
-                locked.getName(),
-                rawExpectedVersion,
-                CatalogVersions.format(locked.getVersion()));
+                RESOURCE, rawExpectedVersion, CatalogVersions.format(locked.getVersion()));
           }
           return null;
         });
   }
 
   private McpServer requireServer(UUID id) {
-    return repository
-        .getById(id)
-        .orElseThrow(
-            () -> new AiResourceNotFoundException(RESOURCE, "mcp server not found: " + id));
+    return repository.getById(id).orElseThrow(() -> new AiResourceNotFoundException(RESOURCE));
   }
 }

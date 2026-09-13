@@ -224,6 +224,7 @@ class IssueServiceIntegrationTest extends ProjectTestSupport {
     assertEquals(1L, input1.getSequence());
     assertEquals("First input", input1.getBody());
     assertEquals("key-1", input1.getIdempotencyKey());
+    assertNotNull(input1.getCreatedAt());
 
     // 相同幂等键再次追加，必须幂等返回 input1，且序号不增加
     IssueInput input1Repeat =

@@ -69,32 +69,38 @@ export function FilesPage({
 
   // Stale async response tracking
   const selectionRequestIdRef = useRef(0)
+  const treeRefreshIdRef = useRef(0)
+  const directoryRequestIdsRef = useRef(new Map<string, number>())
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch directory contents
   const loadDirectory = useCallback(
     async (path: string, markLoading = false) => {
       const norm = normalizePath(path)
+      const requestId = (directoryRequestIdsRef.current.get(norm) ?? 0) + 1
+      directoryRequestIdsRef.current.set(norm, requestId)
       if (markLoading) {
         setLoadingPaths((prev) => new Set(prev).add(norm))
       }
       try {
         const snapshot = await api.getFileSnapshot(norm)
-        if (norm === '/') {
-          setRootSnapshot(snapshot)
+        if (directoryRequestIdsRef.current.get(norm) === requestId) {
+          if (norm === '/') {
+            setRootSnapshot(snapshot)
+          }
+          setDirectoryChildrenMap((prev) => ({
+            ...prev,
+            [norm]: snapshot.children ?? [],
+          }))
         }
-        setDirectoryChildrenMap((prev) => ({
-          ...prev,
-          [norm]: snapshot.children ?? [],
-        }))
         return snapshot
       } catch (err) {
-        if (norm === '/') {
+        if (norm === '/' && directoryRequestIdsRef.current.get(norm) === requestId) {
           setTreeError(err instanceof Error ? err.message : '加载文件目录失败')
         }
         throw err
       } finally {
-        if (markLoading) {
+        if (directoryRequestIdsRef.current.get(norm) === requestId) {
           setLoadingPaths((prev) => {
             const next = new Set(prev)
             next.delete(norm)
@@ -108,17 +114,22 @@ export function FilesPage({
 
   // Refresh tree root and all currently expanded directories
   const refreshTree = useCallback(async () => {
+    const refreshId = ++treeRefreshIdRef.current
     setTreeLoading(true)
     setTreeError(null)
     try {
       await loadDirectory('/')
-      for (const path of expandedPaths) {
-        if (path !== '/') {
-          void loadDirectory(path)
-        }
-      }
+      await Promise.all(
+        [...expandedPaths]
+          .filter((path) => path !== '/')
+          .map((path) => loadDirectory(path).catch(() => undefined)),
+      )
+    } catch {
+      // Root load already exposes the failure through treeError.
     } finally {
-      setTreeLoading(false)
+      if (treeRefreshIdRef.current === refreshId) {
+        setTreeLoading(false)
+      }
     }
   }, [expandedPaths, loadDirectory])
 
@@ -136,6 +147,7 @@ export function FilesPage({
         if (selectionRequestIdRef.current === requestId) {
           setSelectedSnapshot(snapshot)
           setSelectionLoading(false)
+          return snapshot
         }
       } catch (err) {
         if (selectionRequestIdRef.current === requestId) {
@@ -143,6 +155,7 @@ export function FilesPage({
           setSelectionLoading(false)
         }
       }
+      return null
     },
     [api],
   )
@@ -156,7 +169,7 @@ export function FilesPage({
       const parent = getParentPath(norm)
       if (parent && !parent.startsWith('/.artifacts')) {
         setExpandedPaths((prev) => new Set(prev).add(parent))
-        void loadDirectory(parent)
+        void loadDirectory(parent).catch(() => undefined)
       }
     },
     [loadDirectory, selectNodeByPath],
@@ -167,9 +180,9 @@ export function FilesPage({
 
   // Initial load
   useEffect(() => {
-    void loadDirectory('/', false)
+    void loadDirectory('/', false).catch(() => undefined)
     if (initialPath) {
-      void openPath(initialPath)
+      void openPath(initialPath).catch(() => undefined)
     }
   }, [initialPath, loadDirectory, openPath])
 
@@ -192,7 +205,7 @@ export function FilesPage({
       } else {
         next.add(path)
         if (!directoryChildrenMap[path]) {
-          void loadDirectory(path, true)
+          void loadDirectory(path, true).catch(() => undefined)
         }
       }
       return next
@@ -281,6 +294,7 @@ export function FilesPage({
   }
 
   const rootChildren = rootSnapshot?.children ?? []
+  const hasCurrentSelectionSnapshot = selectedSnapshot?.node.path === selectedPath
 
   return (
     <div className="files-page-container" data-testid="files-page">
@@ -407,14 +421,14 @@ export function FilesPage({
 
         {/* Right Column: Selected File Editor / Media Preview */}
         <main className="files-main-content">
-          {selectionLoading && (
+          {selectionLoading && !hasCurrentSelectionSnapshot && (
             <div className="files-loading-state" role="status">
               <RefreshCw className="spin" size={20} aria-hidden="true" />
               <span>正在加载文件内容...</span>
             </div>
           )}
 
-          {selectionError && !selectionLoading && (
+          {selectionError && !selectionLoading && !hasCurrentSelectionSnapshot && (
             <div className="files-error-state" role="alert">
               <AlertTriangle size={24} aria-hidden="true" />
               <span>{selectionError}</span>
@@ -428,7 +442,21 @@ export function FilesPage({
             </div>
           )}
 
-          {!selectionLoading && !selectionError && selectedSnapshot && (
+          {selectionError && hasCurrentSelectionSnapshot && (
+            <div className="files-refresh-error" role="alert">
+              <AlertTriangle size={20} aria-hidden="true" />
+              <span>{selectionError}</span>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => selectedPath && selectNodeByPath(selectedPath)}
+              >
+                重试加载
+              </button>
+            </div>
+          )}
+
+          {hasCurrentSelectionSnapshot && selectedSnapshot && (
             <>
               {selectedSnapshot.node.kind === 'TEXT' && (
                 <TextEditor
@@ -455,7 +483,7 @@ export function FilesPage({
             </>
           )}
 
-          {!selectionLoading && !selectionError && !selectedSnapshot && (
+          {!selectionLoading && !selectionError && !hasCurrentSelectionSnapshot && (
             <div className="files-empty-state" data-testid="files-empty-state">
               <Folder size={48} aria-hidden="true" />
               <p>请在左侧选择文件进行查看或编辑</p>

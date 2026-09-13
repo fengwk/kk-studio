@@ -1,38 +1,66 @@
 package fun.fengwk.kkstudio.web.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.context.ApplicationEventPublisher;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 class ProjectInvalidationHubTest {
 
   @Test
-  void publishesProjectChangedEventWithNonNullId() {
-    AtomicReference<Object> published = new AtomicReference<>();
-    ApplicationEventPublisher publisher = published::set;
-    ProjectInvalidationHub hub = new ProjectInvalidationHub(publisher);
-
+  void dispatchesCanonicalProjectIdsAndReleasesSubscription() throws Exception {
+    ProjectInvalidationHub hub = new ProjectInvalidationHub();
+    List<UUID> changed = new ArrayList<>();
+    AtomicInteger resyncs = new AtomicInteger();
+    AutoCloseable subscription = hub.subscribe(changed::add, resyncs::incrementAndGet);
     UUID projectId = UUID.randomUUID();
-    hub.publishChange(projectId);
 
-    assertNotNull(published.get());
-    assertInstanceOf(ProjectInvalidationHub.ProjectChangedEvent.class, published.get());
-    ProjectInvalidationHub.ProjectChangedEvent event =
-        (ProjectInvalidationHub.ProjectChangedEvent) published.get();
-    assertEquals(projectId, event.getProjectId());
-    assertEquals(hub, event.getSource());
+    hub.onNotification(projectId.toString());
+    assertEquals(List.of(projectId), changed);
+    assertEquals(0, resyncs.get());
+
+    subscription.close();
+    hub.onNotification(projectId.toString());
+    assertEquals(List.of(projectId), changed);
   }
 
   @Test
-  void rejectsNullProjectId() {
-    ProjectInvalidationHub hub = new ProjectInvalidationHub(event -> {});
-    assertThrows(NullPointerException.class, () -> hub.publishChange(null));
+  void invalidPayloadAndReconnectTriggerResync() {
+    ProjectInvalidationHub hub = new ProjectInvalidationHub();
+    AtomicInteger resyncs = new AtomicInteger();
+    hub.subscribe(ignored -> {}, resyncs::incrementAndGet);
+
+    hub.onNotification(null);
+    hub.onNotification("not-a-project-id");
+    hub.onNotification(UUID.randomUUID().toString().toUpperCase());
+    hub.broadcastResync();
+
+    assertEquals(4, resyncs.get());
+  }
+
+  @Test
+  void isolatesFailingSubscribers() {
+    ProjectInvalidationHub hub = new ProjectInvalidationHub();
+    hub.subscribe(
+        ignored -> {
+          throw new IllegalStateException("change failure");
+        },
+        () -> {
+          throw new IllegalStateException("resync failure");
+        });
+    List<UUID> changed = new ArrayList<>();
+    AtomicInteger resyncs = new AtomicInteger();
+    hub.subscribe(changed::add, resyncs::incrementAndGet);
+    UUID projectId = UUID.randomUUID();
+
+    hub.onNotification(projectId.toString());
+    hub.broadcastResync();
+
+    assertEquals(List.of(projectId), changed);
+    assertEquals(1, resyncs.get());
   }
 }
