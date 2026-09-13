@@ -44,7 +44,7 @@ JUnit 只在 test scope。源码只位于
 | --- | --- |
 | `ai.catalog` | Provider、Model、Agent、ModelRef、Tool catalog |
 | `ai.chat` | Chat 与 Chat defaults |
-| `ai.environment` | Environment Card CRUD、registration token 与 live capability/skill 投影 |
+| `ai.environment` | Environment Card CRUD、registration token 与 live capability 投影 |
 | `ai.runtime` | Session、Entry、Thread Snapshot、Command batch、Invocation、approval、stop、compaction |
 | `canvas` | Canvas document、Snapshot、Patch、typed command、Resource、Function 与 Run |
 | `comfyui` | Workflow API 与运行请求/结果 |

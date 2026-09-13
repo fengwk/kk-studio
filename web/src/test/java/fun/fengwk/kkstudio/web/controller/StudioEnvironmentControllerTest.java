@@ -92,7 +92,8 @@ class StudioEnvironmentControllerTest {
         .perform(get("/api/harness/environments"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].id").value(ENV_ID.toString()))
-        .andExpect(jsonPath("$.data[0].name").value("dev"));
+        .andExpect(jsonPath("$.data[0].name").value("dev"))
+        .andExpect(jsonPath("$.data[0].skills").doesNotExist());
   }
 
   /** 意图：验证 GET /api/harness/environments/{environmentId} 查询已存在的环境返回 200 与对应的卡片信息。 */
@@ -107,7 +108,8 @@ class StudioEnvironmentControllerTest {
         .perform(get("/api/harness/environments/" + ENV_ID))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
-        .andExpect(jsonPath("$.data.name").value("dev"));
+        .andExpect(jsonPath("$.data.name").value("dev"))
+        .andExpect(jsonPath("$.data.skills").doesNotExist());
   }
 
   /**
