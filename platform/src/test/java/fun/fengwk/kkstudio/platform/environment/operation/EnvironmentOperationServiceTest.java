@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceConfig;
@@ -39,6 +40,7 @@ class EnvironmentOperationServiceTest extends PostgresSpringTestSupport {
   @Autowired private SkillSourceRepository skillSourceRepository;
   @Autowired private EnvironmentOperationService operationService;
   @Autowired private EnvironmentOperationRepository operationRepository;
+  @Autowired private JdbcTemplate jdbcTemplate;
 
   private final DaemonSkillSourceConfigCodec configCodec = new DaemonSkillSourceConfigCodec();
 
@@ -299,5 +301,58 @@ class EnvironmentOperationServiceTest extends PostgresSpringTestSupport {
 
     // 已经处于 CANCELLED 状态再次取消抛出 AiValidationException
     assertThrows(AiValidationException.class, () -> operationService.cancel(environmentId, opId));
+  }
+
+  /** 测试意图：验证语义校验拒绝针对 PATH 来源发起 SKILL_UPDATE 操作。 */
+  @Test
+  void validateOperationSemantics_rejectsUpdateOnPathSource() {
+    EnvironmentOperationCreateDTO dto = new EnvironmentOperationCreateDTO();
+    dto.setTimeoutMillis(60000L);
+    AiValidationException ex =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                operationService.create(
+                    environmentId, pathSourceId, EnvironmentOperationType.SKILL_UPDATE, dto));
+    assertTrue(ex.getMessage().contains("operation UPDATE is only valid for GIT sources"));
+  }
+
+  /** 测试意图：验证语义校验拒绝针对未安装/无有效应用版本的 GIT 来源发起 SKILL_REFRESH 操作。 */
+  @Test
+  void validateOperationSemantics_rejectsRefreshOnUninstalledGitSource() {
+    EnvironmentOperationCreateDTO dto = new EnvironmentOperationCreateDTO();
+    dto.setTimeoutMillis(60000L);
+    AiValidationException ex =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                operationService.create(
+                    environmentId, gitSourceId, EnvironmentOperationType.SKILL_REFRESH, dto));
+    assertTrue(ex.getMessage().contains("install is required before refresh"));
+  }
+
+  /** 测试意图：验证 cancel 拒绝取消已经处于 RUNNING 状态的操作。 */
+  @Test
+  void cancel_whenRunning_throwsAiValidationException() {
+    EnvironmentOperationCreateDTO dto = new EnvironmentOperationCreateDTO();
+    dto.setTimeoutMillis(60000L);
+
+    EnvironmentOperationDTO created =
+        operationService.create(
+            environmentId, pathSourceId, EnvironmentOperationType.SKILL_REFRESH, dto);
+    UUID opId = UUID.fromString(created.getId());
+
+    // 模拟被调度节点认领变为 RUNNING
+    jdbcTemplate.update(
+        "UPDATE environment_operation SET status = 'RUNNING', owner_node_id = ?, lease_token = ?, started_at = now() WHERE id = ?",
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        opId);
+
+    AiValidationException ex =
+        assertThrows(
+            AiValidationException.class, () -> operationService.cancel(environmentId, opId));
+    assertTrue(
+        ex.getMessage().contains("operation cannot be cancelled because it is in status RUNNING"));
   }
 }

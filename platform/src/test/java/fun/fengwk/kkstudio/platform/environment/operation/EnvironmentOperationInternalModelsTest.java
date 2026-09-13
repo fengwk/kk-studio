@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment.operation;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -170,5 +171,56 @@ class EnvironmentOperationInternalModelsTest {
     assertFalse(json.contains("super_secret_ssh_key"), "arguments 绝不能被 Jackson 序列化");
     assertFalse(json.contains(leaseToken.toString()), "leaseToken 绝不能被 Jackson 序列化");
     assertFalse(json.contains("leaseToken"), "leaseToken 字段名绝不能出现在 JSON 中");
+  }
+
+  /** 测试意图：验证 DeadlineSweepResult.totalSwept 计算逻辑。 */
+  @Test
+  void deadlineSweepResultTotalSweptCalculatesSum() {
+    DeadlineSweepResult result = new DeadlineSweepResult(3, 7);
+    assertEquals(10, result.totalSwept());
+  }
+
+  /** 测试意图：验证 SafeEnvironmentOperation.isTerminal 委托状态机 terminal 判断。 */
+  @Test
+  void safeEnvironmentOperationIsTerminalReflectsStatus() {
+    SafeEnvironmentOperation running =
+        new SafeEnvironmentOperation(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationStatus.RUNNING,
+            1L,
+            0L,
+            "{}",
+            Instant.now(),
+            Instant.now(),
+            null,
+            null,
+            null,
+            null,
+            Instant.now(),
+            Instant.now());
+    assertFalse(running.isTerminal());
+
+    SafeEnvironmentOperation succeeded =
+        new SafeEnvironmentOperation(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationStatus.SUCCEEDED,
+            1L,
+            0L,
+            "{}",
+            Instant.now(),
+            Instant.now(),
+            Instant.now(),
+            "{}",
+            null,
+            null,
+            Instant.now(),
+            Instant.now());
+    assertTrue(succeeded.isTerminal());
   }
 }
