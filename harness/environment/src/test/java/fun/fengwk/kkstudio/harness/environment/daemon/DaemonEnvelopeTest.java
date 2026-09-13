@@ -57,6 +57,15 @@ class DaemonEnvelopeTest {
     assertNull(
         new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.ERROR, null, null, 0, "{}")
             .environmentId());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.HELLO, ID, null, 0, "{}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonEnvelope(
+                DaemonProtocol.VERSION, DaemonMessageType.READY, ID, "   ", 0, "{}"));
   }
 
   /** 其余 envelope 字段的构造期契约：版本、序号规则。 */
