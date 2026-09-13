@@ -861,11 +861,11 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     // 会让 ck_environment_operation_time_order 偶发失败。
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into environment_operation (id, environment_id, source_id, operation_type,"
-                + " status, source_version, source_set_version, arguments, parameter_summary,"
+            "insert into environment_operation (id, environment_id, resource_type, resource_id,"
+                + " operation_type, status, resource_version, arguments, parameter_summary,"
                 + " deadline_at, owner_node_id, lease_token, started_at, finished_at,"
                 + " result_summary, failure_code, failure_message)"
-                + " values (?, ?, ?, 'SKILL_REFRESH', ?, 3, 0, '{}'::jsonb, '{}'::jsonb,"
+                + " values (?, ?, 'SKILL_SOURCE', ?, 'SKILL_REFRESH', ?, 3, '{}'::jsonb, '{}'::jsonb,"
                 + " current_timestamp + interval '1 minute', ?, ?,"
                 + " case when ?::boolean then current_timestamp end,"
                 + " case when ?::boolean then current_timestamp end,"
@@ -895,11 +895,11 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       Connection conn, UUID operationId, UUID environmentId, UUID sourceId) throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into environment_operation (id, environment_id, source_id, operation_type,"
-                + " status, source_version, source_set_version, arguments, parameter_summary,"
+            "insert into environment_operation (id, environment_id, resource_type, resource_id,"
+                + " operation_type, status, resource_version, arguments, parameter_summary,"
                 + " deadline_at, owner_node_id, lease_token, started_at)"
-                + " values (?, ?, ?, 'SKILL_REFRESH', 'PENDING', 3, 0, '{}'::jsonb, '{}'::jsonb,"
-                + " current_timestamp + interval '1 minute', ?, ?, current_timestamp)")) {
+                + " values (?, ?, 'SKILL_SOURCE', ?, 'SKILL_REFRESH', 'PENDING', 3, '{}'::jsonb,"
+                + " '{}'::jsonb, current_timestamp + interval '1 minute', ?, ?, current_timestamp)")) {
       ps.setObject(1, operationId);
       ps.setObject(2, environmentId);
       ps.setObject(3, sourceId);
@@ -914,10 +914,10 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into environment_operation (id, environment_id, source_id, operation_type,"
-                + " status, source_version, source_set_version, arguments, parameter_summary,"
-                + " deadline_at) values (?, ?, ?, 'SKILL_REFRESH', ?, 3, 0, '{}'::jsonb,"
-                + " '{}'::jsonb, current_timestamp + interval '1 minute')")) {
+            "insert into environment_operation (id, environment_id, resource_type, resource_id,"
+                + " operation_type, status, resource_version, arguments, parameter_summary,"
+                + " deadline_at) values (?, ?, 'SKILL_SOURCE', ?, 'SKILL_REFRESH', ?, 3,"
+                + " '{}'::jsonb, '{}'::jsonb, current_timestamp + interval '1 minute')")) {
       ps.setObject(1, operationId);
       ps.setObject(2, environmentId);
       ps.setObject(3, sourceId);
@@ -931,9 +931,9 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into environment_operation (id, environment_id, source_id, operation_type,"
-                + " status, source_version, source_set_version, arguments, parameter_summary,"
-                + " deadline_at) values (?, ?, ?, ?, 'PENDING', 3, 0, '{}'::jsonb,"
+            "insert into environment_operation (id, environment_id, resource_type, resource_id,"
+                + " operation_type, status, resource_version, arguments, parameter_summary,"
+                + " deadline_at) values (?, ?, 'SKILL_SOURCE', ?, ?, 'PENDING', 3, '{}'::jsonb,"
                 + " '{}'::jsonb, current_timestamp + interval '1 minute')")) {
       ps.setObject(1, operationId);
       ps.setObject(2, environmentId);
@@ -948,9 +948,9 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into environment_operation (id, environment_id, source_id, operation_type,"
-                + " status, source_version, source_set_version, arguments, parameter_summary,"
-                + " deadline_at) values (?, ?, ?, 'SKILL_REFRESH', 'PENDING', 3, 0,"
+            "insert into environment_operation (id, environment_id, resource_type, resource_id,"
+                + " operation_type, status, resource_version, arguments, parameter_summary,"
+                + " deadline_at) values (?, ?, 'SKILL_SOURCE', ?, 'SKILL_REFRESH', 'PENDING', 3,"
                 + " ?::jsonb, '{}'::jsonb, current_timestamp + interval '1 minute')")) {
       ps.setObject(1, operationId);
       ps.setObject(2, environmentId);

@@ -245,7 +245,8 @@ class EnvironmentOperationServiceTest extends PostgresSpringTestSupport {
     assertNotNull(dto);
     assertNotNull(dto.getId());
     assertEquals(environmentId.value().toString(), dto.getEnvironmentId());
-    assertEquals(pathSourceId.toString(), dto.getSourceId());
+    assertEquals("SKILL_SOURCE", dto.getResourceType());
+    assertEquals(pathSourceId.toString(), dto.getResourceId());
     assertEquals("SKILL_REFRESH", dto.getOperationType());
     assertEquals("PENDING", dto.getStatus());
     assertNotNull(dto.getDeadlineAt());
@@ -257,6 +258,129 @@ class EnvironmentOperationServiceTest extends PostgresSpringTestSupport {
         () ->
             operationService.create(
                 environmentId, pathSourceId, EnvironmentOperationType.SKILL_REFRESH, validDto));
+  }
+
+  /**
+   * 测试意图：验证通用 createOperation 在同一套参数校验与能力描述符约束下成功创建 PENDING 操作，并复现边界：负 resourceVersion、非正
+   * timeoutMillis、超描述符上限 timeoutMillis 与环境不存在时均拒绝创建。
+   */
+  @Test
+  void createGenericOperationSuccessAndBoundaries() {
+    EnvironmentOperationDTO dto =
+        operationService.createOperation(
+            environmentId,
+            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.SKILL_SOURCE,
+            pathSourceId,
+            3L,
+            "{}",
+            "{\"type\":\"PATH\"}",
+            60000L);
+
+    assertEquals("SKILL_REFRESH", dto.getOperationType());
+    assertEquals("SKILL_SOURCE", dto.getResourceType());
+    assertEquals(pathSourceId.toString(), dto.getResourceId());
+    assertEquals("3", dto.getResourceVersion());
+    assertEquals("PENDING", dto.getStatus());
+    assertEquals("PATH", dto.getParameterSummary().get("type"));
+
+    // 负 resourceVersion 被拒绝
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            operationService.createOperation(
+                environmentId,
+                EnvironmentOperationType.SKILL_REFRESH,
+                EnvironmentOperationResourceType.SKILL_SOURCE,
+                UUID.randomUUID(),
+                -1L,
+                "{}",
+                "{}",
+                60000L));
+
+    // 非正 timeoutMillis 被拒绝
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            operationService.createOperation(
+                environmentId,
+                EnvironmentOperationType.SKILL_REFRESH,
+                EnvironmentOperationResourceType.SKILL_SOURCE,
+                UUID.randomUUID(),
+                0L,
+                "{}",
+                "{}",
+                0L));
+
+    // 超过 SKILL_SOURCE_REFRESH 描述符上限（5 分钟）的 timeoutMillis 被拒绝
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            operationService.createOperation(
+                environmentId,
+                EnvironmentOperationType.SKILL_REFRESH,
+                EnvironmentOperationResourceType.SKILL_SOURCE,
+                UUID.randomUUID(),
+                0L,
+                "{}",
+                "{}",
+                600001L));
+
+    // 环境不存在时拒绝创建
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () ->
+            operationService.createOperation(
+                EnvironmentId.of(UUID.randomUUID()),
+                EnvironmentOperationType.SKILL_REFRESH,
+                EnvironmentOperationResourceType.SKILL_SOURCE,
+                UUID.randomUUID(),
+                0L,
+                "{}",
+                "{}",
+                60000L));
+  }
+
+  /**
+   * 测试意图：验证通用 createOperation 对未在 harness capability catalog 注册 descriptor 的操作类型 fail
+   * closed，绝不产生无法分发/无法终结的悬挂操作（MCP 目录切片注册 mcp.local.discover 后自动放开）。
+   */
+  @Test
+  void createGenericOperationUnregisteredCapabilityFailsClosed() {
+    UUID mcpResourceId = UUID.randomUUID();
+    AiValidationException ex =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                operationService.createOperation(
+                    environmentId,
+                    EnvironmentOperationType.MCP_SERVER_DISCOVER,
+                    EnvironmentOperationResourceType.MCP_SERVER,
+                    mcpResourceId,
+                    0L,
+                    "{\"url\":\"http://localhost:8080\"}",
+                    "{\"type\":\"mcp\"}",
+                    60000L));
+    assertTrue(ex.getMessage().contains("is not registered"));
+  }
+
+  /** 测试意图：验证通用 createOperation 拒绝 operationType 与 resourceType 不匹配的组合。 */
+  @Test
+  void createGenericOperationRejectsResourceTypeMismatch() {
+    AiValidationException ex =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                operationService.createOperation(
+                    environmentId,
+                    EnvironmentOperationType.SKILL_REFRESH,
+                    EnvironmentOperationResourceType.MCP_SERVER,
+                    UUID.randomUUID(),
+                    0L,
+                    "{}",
+                    "{}",
+                    60000L));
+    assertTrue(ex.getMessage().contains("is incompatible with resourceType"));
   }
 
   /** 测试意图：验证 get 查询操作安全投影及环境隔离（错配环境返回 404）。 */

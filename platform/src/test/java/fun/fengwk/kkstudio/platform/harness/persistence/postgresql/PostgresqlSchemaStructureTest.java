@@ -326,11 +326,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "environment_operation",
         "id",
         "environment_id",
-        "source_id",
+        "resource_type",
+        "resource_id",
         "operation_type",
         "status",
-        "source_version",
-        "source_set_version",
+        "resource_version",
         "arguments",
         "parameter_summary",
         "deadline_at",
@@ -1066,7 +1066,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "environment_skill", "source_id");
     assertColumnType("uuid", "environment_operation", "id");
     assertColumnType("uuid", "environment_operation", "environment_id");
-    assertColumnType("uuid", "environment_operation", "source_id");
+    assertColumnType("uuid", "environment_operation", "resource_id");
   }
 
   @Test
@@ -1376,8 +1376,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   /**
-   * V4 Skill 表的结构契约：复合主键/复合 FK、级联删除、每环境至多一个缺省来源， 以及 environment_operation.source_id 故意不建
-   * FK（来源删除后历史必须保留）。
+   * V4 Skill 表的结构契约：复合主键/复合 FK、级联删除、每环境至多一个缺省来源， 以及 environment_operation.resource_id 故意不建
+   * FK（资源删除后历史必须保留）。
    */
   @Test
   void skillSourceTablesExposeCompositeKeysAndDeliberateCascades() throws SQLException {
@@ -1434,13 +1434,13 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         defaultIndex.contains("(environment_id)") && defaultIndex.contains("WHERE default_source"),
         () -> "default source uniqueness must be a partial unique index: " + defaultIndex);
 
-    // 未终结操作唯一性：只约束 PENDING/RUNNING。
+    // 未终结操作唯一性：按 (environment_id, resource_type, resource_id) 且只约束 PENDING/RUNNING。
     String activeIndex =
         singleString(
             "select indexdef from pg_indexes"
                 + " where schemaname = 'public' and indexname = 'uk_environment_operation_active'");
     assertTrue(
-        activeIndex.contains("(environment_id, source_id)")
+        activeIndex.contains("(environment_id, resource_type, resource_id)")
             && activeIndex.contains("'PENDING'")
             && activeIndex.contains("'RUNNING'"),
         () -> "active operation uniqueness must be partial over PENDING/RUNNING: " + activeIndex);
@@ -1453,7 +1453,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             && claimIndex.contains("WHERE"),
         () -> "claim index must be partial over PENDING: " + claimIndex);
 
-    // operation.source_id 故意没有外键：删除来源不得抹掉操作历史。
+    // operation.resource_id 故意没有外键：删除资源不得抹掉操作历史。
     assertEquals(
         0L,
         singleLong(
@@ -1463,7 +1463,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                 + " on attribute.attrelid = constraint_.conrelid and attribute.attnum = key.attnum"
                 + " where constraint_.contype = 'f'"
                 + " and constraint_.conrelid = 'environment_operation'::regclass"
-                + " and attribute.attname = 'source_id'"));
+                + " and attribute.attname = 'resource_id'"));
 
     // 级联删除行为：删除来源行会移除其持久 Skill inventory，但不影响 Environment 本身。
     UUID environmentId = uuid(970_001L);

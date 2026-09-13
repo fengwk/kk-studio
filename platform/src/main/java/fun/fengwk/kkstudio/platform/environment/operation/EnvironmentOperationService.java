@@ -7,11 +7,34 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentOperationDTO;
 import java.util.List;
 import java.util.UUID;
 
-/** Platform 侧异步 Environment Skill 来源管理操作服务接口。 */
+/** Platform 侧异步 Environment 管理操作服务接口。 */
 public interface EnvironmentOperationService {
 
   /**
-   * 创建异步 Skill 来源管理操作。
+   * 通用最小创建入口（供后续 MCP service 等使用）。
+   *
+   * @param environmentId 目标环境 ID
+   * @param operationType 操作类型
+   * @param resourceType 目标资源类型
+   * @param resourceId 目标资源 ID
+   * @param resourceVersion 目标资源行版本
+   * @param arguments 严格私有 JSON 参数
+   * @param parameterSummary 公开参数摘要 JSON（可为 null，默认 "{}"）
+   * @param timeoutMillis 超时毫秒数
+   * @return 创建成功的操作安全视图 DTO
+   */
+  EnvironmentOperationDTO createOperation(
+      EnvironmentId environmentId,
+      EnvironmentOperationType operationType,
+      EnvironmentOperationResourceType resourceType,
+      UUID resourceId,
+      long resourceVersion,
+      String arguments,
+      String parameterSummary,
+      long timeoutMillis);
+
+  /**
+   * 创建异步 Skill 来源管理操作（包装层）。
    *
    * @param environmentId 目标环境 ID
    * @param sourceId 目标来源 ID
