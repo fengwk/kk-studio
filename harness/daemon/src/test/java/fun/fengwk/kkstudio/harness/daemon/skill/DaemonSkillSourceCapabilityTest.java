@@ -173,9 +173,11 @@ class DaemonSkillSourceCapabilityTest {
               new EnvironmentCapabilityCall("call-1", loadArgs),
               Duration.ofSeconds(5));
 
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> capability.execute(request, new RecordingListener()));
+      IllegalArgumentException error =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> capability.execute(request, new RecordingListener()));
+      assertTrue(error.getMessage().contains("descriptor"));
     } finally {
       executor.shutdownNow();
     }
@@ -222,8 +224,7 @@ class DaemonSkillSourceCapabilityTest {
       EnvironmentCapabilityResult installResult = execute(installCap, arguments);
       assertTrue(installResult.error());
       assertEquals(
-          DaemonSkillSourceCapability.OPERATION_FAILED_MESSAGE,
-          text(installResult).substring("Error: ".length()));
+          "Error: " + DaemonSkillSourceCapability.OPERATION_FAILED_MESSAGE, text(installResult));
 
       // 3. UPDATE 针对 PATH 来源失败，同样返回固定的 OPERATION_FAILED_MESSAGE
       DaemonSkillSourceCapability updateCap =
@@ -232,8 +233,7 @@ class DaemonSkillSourceCapabilityTest {
       EnvironmentCapabilityResult updateResult = execute(updateCap, arguments);
       assertTrue(updateResult.error());
       assertEquals(
-          DaemonSkillSourceCapability.OPERATION_FAILED_MESSAGE,
-          text(updateResult).substring("Error: ".length()));
+          "Error: " + DaemonSkillSourceCapability.OPERATION_FAILED_MESSAGE, text(updateResult));
 
       // 4. INSTALL 针对 GIT 来源成功执行并返回快照
       Path control = Files.createDirectories(tempDir.resolve("fake-git-control"));
@@ -279,6 +279,12 @@ class DaemonSkillSourceCapabilityTest {
               DaemonSkillSourceCapability.Operation.UPDATE, gitRegistry, executor);
       EnvironmentCapabilityResult gitUpdateResult = execute(gitUpdateCap, updateArguments);
       assertFalse(gitUpdateResult.error());
+      DaemonSkillSourceSnapshot updateSnapshot =
+          new DaemonSkillSourceSnapshotCodec()
+              .decodeNode(MAPPER.readTree(json(gitUpdateResult)), "update-snapshot");
+      assertEquals(1, updateSnapshot.skills().size());
+      assertEquals("my-skill", updateSnapshot.skills().get(0).name());
+      assertEquals(2L, updateSnapshot.sourceVersion());
     } finally {
       executor.shutdownNow();
     }

@@ -270,7 +270,10 @@ class SkillFrontMatterParserTest {
         Body
         """;
     writeSkill(tempDir, emptyValueContent);
-    assertThrows(SkillParseException.class, () -> SkillFrontMatterParser.parse(tempDir, "test"));
+    SkillParseException emptyValError =
+        assertThrows(
+            SkillParseException.class, () -> SkillFrontMatterParser.parse(tempDir, "test"));
+    assertTrue(emptyValError.getMessage().contains("missing non-blank front matter name"));
 
     // 冒号前 key 为空
     String emptyKeyContent =
@@ -323,12 +326,14 @@ class SkillFrontMatterParserTest {
   /** 测试意图：SKILL.md 不存在或不可读时抛出清晰且脱敏的 SkillParseException。 */
   @Test
   void rejectsNonReadableSkillFile() {
+    Path missingDir = tempDir.resolve("missing");
     SkillParseException error =
         assertThrows(
             SkillParseException.class,
-            () -> SkillFrontMatterParser.parse(tempDir.resolve("missing"), "source-ctx"));
+            () -> SkillFrontMatterParser.parse(missingDir, "source-ctx"));
     assertTrue(error.getMessage().contains("not readable"));
     assertTrue(error.getMessage().contains("source-ctx"));
+    assertFalse(error.getMessage().contains(missingDir.toString()));
   }
 
   private void writeSkill(Path root, String content) throws IOException {

@@ -147,8 +147,7 @@ class SkillLoadCapabilityTest {
     for (String invalidJson : invalidCases) {
       EnvironmentCapabilityResult result = execute(capability, invalidJson);
       assertTrue(result.error(), "expected error for: " + invalidJson);
-      assertEquals(
-          SkillLoadCapability.INVALID_REQUEST_MESSAGE, text(result).substring("Error: ".length()));
+      assertEquals("Error: " + SkillLoadCapability.INVALID_REQUEST_MESSAGE, text(result));
     }
   }
 
@@ -216,8 +215,7 @@ class SkillLoadCapabilityTest {
 
     EnvironmentCapabilityResult result = execute(capability, arguments);
     assertTrue(result.error());
-    assertEquals(
-        SkillLoadCapability.LOAD_FAILED_MESSAGE, text(result).substring("Error: ".length()));
+    assertEquals("Error: " + SkillLoadCapability.LOAD_FAILED_MESSAGE, text(result));
   }
 
   /** 测试意图：请求未保留的 revision 时返回带 RESOURCE_CHANGED 错误码的不透明错误，避免以新正文冒充旧版本。 */
@@ -235,8 +233,7 @@ class SkillLoadCapabilityTest {
 
     EnvironmentCapabilityResult result = execute(capability, arguments);
     assertTrue(result.error());
-    assertEquals(
-        SkillLoadCapability.RESOURCE_CHANGED_MESSAGE, text(result).substring("Error: ".length()));
+    assertEquals("Error: " + SkillLoadCapability.RESOURCE_CHANGED_MESSAGE, text(result));
     JsonNode details = MAPPER.readTree(result.detailsJson());
     assertEquals(
         EnvironmentCapabilityResultCodes.RESOURCE_CHANGED, details.get("code").textValue());

@@ -347,45 +347,64 @@ class DaemonSkillManifestCodecTest {
     RetainedSkill retained = new RetainedSkill(SOURCE_ID, "alpha", REVISION, BASE_DIR);
 
     // version 不等于 1
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new DaemonSkillManifest(2, 0L, List.of(SOURCE_ID), List.of(source), List.of(retained)));
+    IllegalArgumentException errorVersion =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new DaemonSkillManifest(
+                    2, 0L, List.of(SOURCE_ID), List.of(source), List.of(retained)));
+    assertTrue(errorVersion.getMessage().contains("unsupported manifest version"));
 
     // sourceSetVersion 为负数
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new DaemonSkillManifest(
-                1, -1L, List.of(SOURCE_ID), List.of(source), List.of(retained)));
+    IllegalArgumentException errorSetVersion =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new DaemonSkillManifest(
+                    1, -1L, List.of(SOURCE_ID), List.of(source), List.of(retained)));
+    assertTrue(errorSetVersion.getMessage().contains("sourceSetVersion must not be negative"));
 
     // activeSourceIds 包含重复元素
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new DaemonSkillManifest(
-                1, 0L, List.of(SOURCE_ID, SOURCE_ID), List.of(source), List.of(retained)));
+    IllegalArgumentException errorDupActive =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new DaemonSkillManifest(
+                    1, 0L, List.of(SOURCE_ID, SOURCE_ID), List.of(source), List.of(retained)));
+    assertTrue(errorDupActive.getMessage().contains("activeSourceIds must not contain duplicates"));
 
     // published sources 不在 activeSourceIds 之中
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new DaemonSkillManifest(
-                1, 0L, List.of(OTHER_SOURCE_ID), List.of(source), List.of(retained)));
+    IllegalArgumentException errorInactive =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new DaemonSkillManifest(
+                    1, 0L, List.of(OTHER_SOURCE_ID), List.of(source), List.of(retained)));
+    assertTrue(errorInactive.getMessage().contains("published skill source must be active"));
 
     // current descriptor 缺少 retained 记录
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new DaemonSkillManifest(1, 0L, List.of(SOURCE_ID), List.of(source), List.of()));
+    IllegalArgumentException errorMissingRetained =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new DaemonSkillManifest(1, 0L, List.of(SOURCE_ID), List.of(source), List.of()));
+    assertTrue(
+        errorMissingRetained
+            .getMessage()
+            .contains("current skill descriptor must have a retained record"));
 
     // retained 记录的 baseDirectory 与 current descriptor 不一致
     RetainedSkill mismatchedBaseDir =
         new RetainedSkill(SOURCE_ID, "alpha", REVISION, "/other/path");
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new DaemonSkillManifest(
-                1, 0L, List.of(SOURCE_ID), List.of(source), List.of(mismatchedBaseDir)));
+    IllegalArgumentException errorMismatchedDir =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new DaemonSkillManifest(
+                    1, 0L, List.of(SOURCE_ID), List.of(source), List.of(mismatchedBaseDir)));
+    assertTrue(
+        errorMismatchedDir
+            .getMessage()
+            .contains("retained baseDirectory must match the current skill descriptor"));
 
     // 跨来源同名 skill 被拒绝
     DaemonSkillDescriptor otherDescriptorSameName =
@@ -395,24 +414,28 @@ class DaemonSkillManifestCodecTest {
             OTHER_SOURCE_ID, 1, REVISION, List.of(otherDescriptorSameName), List.of());
     RetainedSkill otherRetained =
         new RetainedSkill(OTHER_SOURCE_ID, "alpha", REVISION, "/srv/other");
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new DaemonSkillManifest(
-                1,
-                0L,
-                List.of(SOURCE_ID, OTHER_SOURCE_ID),
-                List.of(source, otherSource),
-                List.of(retained, otherRetained)));
+    IllegalArgumentException errorDupName =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new DaemonSkillManifest(
+                    1,
+                    0L,
+                    List.of(SOURCE_ID, OTHER_SOURCE_ID),
+                    List.of(source, otherSource),
+                    List.of(retained, otherRetained)));
+    assertTrue(errorDupName.getMessage().contains("duplicate manifest skill name"));
 
     // 来源数量超出 MAX_SOURCES
     List<UUID> tooManySourceIds = new ArrayList<>();
     for (int i = 0; i <= DaemonCapabilities.MAX_SOURCES; i++) {
       tooManySourceIds.add(UUID.nameUUIDFromBytes(("src-" + i).getBytes()));
     }
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new DaemonSkillManifest(1, 0L, tooManySourceIds, List.of(), List.of()));
+    IllegalArgumentException errorTooMany =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new DaemonSkillManifest(1, 0L, tooManySourceIds, List.of(), List.of()));
+    assertTrue(errorTooMany.getMessage().contains("skill source count exceeds"));
   }
 
   /** 测试意图：DaemonSkill 构造函数必须校验 name 非空、description 非空与 baseDirectory 必须是绝对路径。 */
