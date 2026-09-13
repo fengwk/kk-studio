@@ -15,6 +15,10 @@ public interface IssueRunRepository {
 
   IssueRun findActiveByIssueId(UUID issueId);
 
+  IssueRun lockActiveByIssueId(UUID issueId);
+
+  IssueRun findByTerminalActionId(String terminalActionId);
+
   IssueRun findLatestByIssueId(UUID issueId);
 
   List<IssueRun> listByIssueId(UUID issueId);

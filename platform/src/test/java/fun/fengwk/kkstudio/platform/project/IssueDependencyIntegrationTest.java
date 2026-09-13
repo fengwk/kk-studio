@@ -24,9 +24,12 @@ import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -260,5 +263,87 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
 
     List<IssueDependency> byProj = issueDependencyRepository.listByProjectId(proj.getId());
     assertEquals(1, byProj.size());
+  }
+
+  @Test
+  void testFourNodeDisjointConcurrentCycleDetection() throws Exception {
+    String agent = createTestAgent();
+    Project proj = projectService.createProject("4-Node Cycle Test", "Desc", agent);
+
+    // 四节点 DAG：预建 B -> C 以及 D -> A
+    Issue a = issueService.createIssue(proj.getId(), "A", "Desc", agent, null, IssueStatus.TODO);
+    Issue b = issueService.createIssue(proj.getId(), "B", "Desc", agent, null, IssueStatus.TODO);
+    Issue c = issueService.createIssue(proj.getId(), "C", "Desc", agent, null, IssueStatus.TODO);
+    Issue d = issueService.createIssue(proj.getId(), "D", "Desc", agent, null, IssueStatus.TODO);
+
+    // 预建: B depends on C (B -> C)
+    issueService.addDependency(b.getId(), c.getId(), 0L);
+    // 预建: D depends on A (D -> A)
+    issueService.addDependency(d.getId(), a.getId(), 0L);
+
+    // 并发新增两条端点完全不重叠的边：
+    // Task 1: A depends on B (A -> B)
+    // Task 2: C depends on D (C -> D)
+    // 若两者同时成功，将形成 D -> A -> B -> C -> D 的 4 节点死环！
+    // 得益于 Project 级排他锁互斥，两任务必被串行化，恰一个成功、另一个被环检测拦截抛出 AiValidationException。
+    CyclicBarrier barrier = new CyclicBarrier(2);
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+
+    try {
+      Callable<String> task1 =
+          () -> {
+            barrier.await();
+            try {
+              issueService.addDependency(a.getId(), b.getId(), 0L);
+              return "A_B_SUCCESS";
+            } catch (AiValidationException e) {
+              return "A_B_CYCLE";
+            }
+          };
+
+      Callable<String> task2 =
+          () -> {
+            barrier.await();
+            try {
+              issueService.addDependency(c.getId(), d.getId(), 0L);
+              return "C_D_SUCCESS";
+            } catch (AiValidationException e) {
+              return "C_D_CYCLE";
+            }
+          };
+
+      Future<String> f1 = executor.submit(task1);
+      Future<String> f2 = executor.submit(task2);
+
+      String r1 = f1.get(10, TimeUnit.SECONDS);
+      String r2 = f2.get(10, TimeUnit.SECONDS);
+
+      boolean abWon = "A_B_SUCCESS".equals(r1) && "C_D_CYCLE".equals(r2);
+      boolean cdWon = "C_D_SUCCESS".equals(r2) && "A_B_CYCLE".equals(r1);
+      assertTrue(
+          abWon || cdWon,
+          "Exactly one edge must succeed and the other must be rejected by cycle detection");
+
+      // 最终遍历/CTE 断言无任意自达环，不能只数边！
+      UUID[] allNodes = {a.getId(), b.getId(), c.getId(), d.getId()};
+      for (UUID node : allNodes) {
+        assertFalse(
+            issueDependencyRepository.checkHasPath(node, node),
+            "Node " + node + " must not have a path to itself (no cycle in DAG)");
+      }
+
+      // 有向可达性单向断言
+      if (abWon) {
+        // D -> A -> B -> C
+        assertTrue(issueDependencyRepository.checkHasPath(d.getId(), c.getId()));
+        assertFalse(issueDependencyRepository.checkHasPath(c.getId(), d.getId()));
+      } else {
+        // B -> C -> D -> A
+        assertTrue(issueDependencyRepository.checkHasPath(b.getId(), a.getId()));
+        assertFalse(issueDependencyRepository.checkHasPath(a.getId(), b.getId()));
+      }
+    } finally {
+      executor.shutdownNow();
+    }
   }
 }

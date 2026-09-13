@@ -4,6 +4,7 @@ import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Result;
 import org.apache.ibatis.annotations.ResultMap;
@@ -80,6 +81,18 @@ public interface IssueRunMapper extends BaseMapper {
           + " from issue_run where issue_id = #{issueId} and status in ('RUNNING', 'WAITING_HUMAN')")
   @ResultMap("issueRunResultMap")
   IssueRunDO findActiveByIssueId(@Param("issueId") UUID issueId);
+
+  @Select(
+      "select "
+          + COLUMNS
+          + " from issue_run where issue_id = #{issueId} and status in ('RUNNING', 'WAITING_HUMAN') for update")
+  @ResultMap("issueRunResultMap")
+  IssueRunDO lockActiveByIssueId(@Param("issueId") UUID issueId);
+
+  @Select("select " + COLUMNS + " from issue_run where terminal_action_id = #{terminalActionId}")
+  @Options(useCache = false, flushCache = Options.FlushCachePolicy.TRUE)
+  @ResultMap("issueRunResultMap")
+  IssueRunDO findByTerminalActionId(@Param("terminalActionId") String terminalActionId);
 
   @Select(
       "select "
