@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "CFS canonical absolute path to the text file to edit."
+    },
+    "old_string": {
+      "type": "string",
+      "description": "Exact non-empty text to replace. It must match file content exactly, including whitespace and indentation, and must occur exactly once unless replace_all is true."
+    },
+    "new_string": {
+      "type": "string",
+      "description": "Replacement text. It must differ from old_string and may be empty to delete the matched text."
+    },
+    "expected_revision": {
+      "type": "integer",
+      "description": "Expected current revision (>0) of the file to edit."
+    },
+    "replace_all": {
+      "type": "boolean",
+      "description": "Replace every exact occurrence of old_string. Defaults to false."
+    }
+  },
+  "required": [
+    "path",
+    "old_string",
+    "new_string",
+    "expected_revision"
+  ],
+  "additionalProperties": false
+}
