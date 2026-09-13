@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -108,6 +109,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.cloudfs.tool.CloudHarnessContributor;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
@@ -115,6 +117,14 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectHarnessContributor;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleContextProjector;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleTool;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolIds;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolSelector;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolService;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolType;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.math.BigDecimal;
@@ -124,6 +134,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -197,13 +208,15 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
     assertEquals(
-        List.of("read"),
+        withCloudTools("read"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
 
-    // 最新 Agent 已移除工具时，branch settings 不得继续扩权。
+    // 最新 Agent 已移除工具时，branch settings 不得继续扩权，仅保留 Cloud 五工具。
     fixture = new Fixture(List.of(), List.of(), List.of());
     requestSpec = fixture.resolved(fixture.path(settings("default")));
-    assertEquals(List.of(), requestSpec.toolBindings());
+    assertEquals(
+        withCloudTools(),
+        requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
   }
 
   @Test
@@ -283,7 +296,9 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
-    assertEquals(List.of(), requestSpec.toolBindings());
+    assertEquals(
+        withCloudTools(),
+        requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(List.of(), requestSpec.skillBindings());
     assertTrue(requestSpec.preambleMessages().getFirst().contents().toString().contains("date:"));
   }
@@ -534,12 +549,15 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings));
 
     assertEquals(
-        List.of("bash", "load_skill"),
+        withCloudTools("bash", "load_skill"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     List<EnvironmentId> boundRoutes =
         requestSpec.toolBindings().stream().map(ToolBinding::environmentId).toList();
     assertEquals(ENV_B, boundRoutes.get(0));
     assertNull(boundRoutes.get(1));
+    for (int i = 2; i < boundRoutes.size(); i++) {
+      assertNull(boundRoutes.get(i));
+    }
     assertEquals(
         List.of(new SkillBinding("dev-b", "dev-b description", ENV_B)),
         requestSpec.skillBindings());
@@ -559,12 +577,12 @@ class DatabaseTurnResolverTest {
 
     List<String> boundNames =
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList();
-    assertEquals(List.of("bash", "create_goal", "read"), boundNames);
+    assertEquals(withCloudTools("bash", "create_goal", "read"), boundNames);
     assertEquals(
-        List.of(true, false, true),
+        List.of(true, false, true, false, false, false, false, false),
         requestSpec.toolBindings().stream().map(ToolBinding::environmentRequired).toList());
     // Provider tools 与 bindings 一一对应且顺序一致。
-    assertEquals(List.of("bash", "create_goal", "read"), boundNames);
+    assertEquals(withCloudTools("bash", "create_goal", "read"), boundNames);
 
     Fixture missingFixture =
         new Fixture(List.of("missing"), List.of(), List.of(), HarnessCatalog.from(List.of()));
@@ -582,7 +600,7 @@ class DatabaseTurnResolverTest {
     when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
     when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
     BuiltinHarnessContributor builtin = new BuiltinHarnessContributor(dummyLoadSkill, dummyTask);
-    HarnessCatalog catalog = HarnessCatalog.from(List.of(builtin));
+    HarnessCatalog catalog = HarnessCatalog.from(List.of(builtin, defaultCloudContributor()));
     Fixture fixture = new Fixture(List.of("create_goal"), List.of(), List.of(), catalog);
     BranchSettings settings = settings("default");
     EntryPath path =
@@ -625,7 +643,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
     assertEquals(
-        List.of("load_skill"),
+        withCloudTools("load_skill"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(
         List.of(new SkillBinding("dev", "dev description", ENV_A)), requestSpec.skillBindings());
@@ -639,7 +657,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
     assertEquals(
-        List.of("load_skill"),
+        withCloudTools("load_skill"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertFalse(requestSpec.toolBindings().getFirst().environmentRequired());
     assertEquals(
@@ -688,7 +706,9 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
-    assertEquals(List.of(), requestSpec.toolBindings());
+    assertEquals(
+        withCloudTools(),
+        requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(List.of(), requestSpec.skillBindings());
   }
 
@@ -704,7 +724,7 @@ class DatabaseTurnResolverTest {
         List.of(new SubagentBinding("reviewer", "Review <carefully> & report.")),
         requestSpec.subagentBindings());
     assertEquals(
-        List.of(TaskTool.NAME),
+        withCloudTools(TaskTool.NAME),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertFalse(requestSpec.toolBindings().getFirst().environmentRequired());
     String system = preambleText(requestSpec);
@@ -732,13 +752,15 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec withTask = fixture.resolved(fixture.path(settings("default")));
     assertEquals(List.of(new SubagentBinding("reviewer", "Review")), withTask.subagentBindings());
     assertEquals(
-        List.of(TaskTool.NAME),
+        withCloudTools(TaskTool.NAME),
         withTask.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
 
     fixture.agentConfig.setSubagents(List.of());
     ModelRequestSpec withoutTask = fixture.resolved(fixture.path(settings("default")));
     assertEquals(List.of(), withoutTask.subagentBindings());
-    assertEquals(List.of(), withoutTask.toolBindings());
+    assertEquals(
+        withCloudTools(),
+        withoutTask.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertFalse(preambleText(withoutTask).contains("subagent"));
 
     fixture.agentConfig.setSubagents(List.of("reviewer"));
@@ -754,7 +776,11 @@ class DatabaseTurnResolverTest {
                     NOW)));
     ModelRequestSpec depthLimitedRequest = fixture.resolved(depthLimited);
     assertEquals(List.of(), depthLimitedRequest.subagentBindings());
-    assertEquals(List.of(), depthLimitedRequest.toolBindings());
+    assertEquals(
+        withCloudTools(),
+        depthLimitedRequest.toolBindings().stream()
+            .map(binding -> binding.descriptor().name())
+            .toList());
   }
 
   /** allowlist 指向不存在的 subagent 时立即拒绝，绝不静默跳过。 */
@@ -898,7 +924,8 @@ class DatabaseTurnResolverTest {
                     "meta",
                     branch -> List.of(new ContextFragment("projected-context-fragment")),
                     0));
-    HarnessCatalog catalogWithProjector = HarnessCatalog.from(List.of(projectorContributor));
+    HarnessCatalog catalogWithProjector =
+        HarnessCatalog.from(List.of(projectorContributor, defaultCloudContributor()));
 
     RuntimeToolCatalog composite =
         new CompositeRuntimeToolCatalog(
@@ -922,8 +949,11 @@ class DatabaseTurnResolverTest {
     EntryPath path = fixture.path(settings("default"));
     ModelRequestSpec spec = fixture.resolved(path);
 
-    // 验证 MCP 工具已成功解析为 ToolBinding
-    assertEquals(1, spec.toolBindings().size());
+    // 验证 MCP 工具已成功解析为 ToolBinding，位于 Cloud 五工具之前
+    assertEquals(6, spec.toolBindings().size());
+    assertEquals(
+        withCloudTools("mcp_srv_echo"),
+        spec.toolBindings().stream().map(b -> b.descriptor().name()).toList());
     ToolBinding toolBinding = spec.toolBindings().get(0);
     assertEquals(mcpAgentToolId, toolBinding.definition().id());
     assertEquals("mcp_srv_echo", toolBinding.definition().descriptor().name());
@@ -1157,12 +1187,14 @@ class DatabaseTurnResolverTest {
 
     fixture.agent.setSystemPrompt("changed system prompt");
     fixture.agentConfig.setToolIds(List.of());
-    fixture.modelSupportsTools(false);
 
     // 二次 resolve 证明 mutation 真实生效：live spec 的 preamble 与 tools 都变了，而 frozen spec 不受影响。
     ModelRequestSpec live = fixture.resolved(path);
     assertNotEquals(preamble, preambleText(live));
-    assertTrue(live.toolBindings().isEmpty());
+    assertNotEquals(tools, live.toolBindings());
+    assertEquals(
+        withCloudTools(),
+        live.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
 
     assertEquals(preamble, preambleText(frozen));
     assertEquals(model, frozen.model());
@@ -1170,12 +1202,13 @@ class DatabaseTurnResolverTest {
     assertEquals(tools, frozen.toolBindings());
     assertEquals("custom", frozen.variant().id());
     assertEquals(
-        List.of("create_goal"),
+        withCloudTools("create_goal"),
         tools.stream().map(binding -> binding.descriptor().name()).toList());
     ProviderRequest after = new ModelRequestMaterializer().materialize(path, frozen);
     assertEquals(before, after);
     assertEquals(preamble, textOf(after.messages().getFirst()));
-    assertEquals(List.of("create_goal"), after.tools().stream().map(tool -> tool.name()).toList());
+    assertEquals(
+        withCloudTools("create_goal"), after.tools().stream().map(tool -> tool.name()).toList());
   }
 
   private static String textOf(ProviderMessage message) {
@@ -1387,6 +1420,69 @@ class DatabaseTurnResolverTest {
                 new TurnEndPayload(
                     id(2), TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
                 NOW.plusSeconds(3))));
+  }
+
+  static final List<String> CLOUD_TOOL_NAMES =
+      List.of("cloud_read", "cloud_write", "cloud_edit", "cloud_find", "cloud_grep");
+
+  static List<String> withCloudTools(String... tools) {
+    List<String> list = new ArrayList<>(List.of(tools));
+    list.addAll(CLOUD_TOOL_NAMES);
+    return list;
+  }
+
+  static BuiltinHarnessContributor defaultBuiltinContributor() {
+    Tool dummyLoadSkill = mock(Tool.class);
+    when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill"));
+    when(dummyLoadSkill.requirements()).thenReturn(ToolRequirements.none());
+    Tool dummyTask = mock(Tool.class);
+    when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
+    when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
+    return new BuiltinHarnessContributor(dummyLoadSkill, dummyTask);
+  }
+
+  static CloudHarnessContributor defaultCloudContributor() {
+    return new CloudHarnessContributor(
+        dummyCloudTool("cloud_read"),
+        dummyCloudTool("cloud_write"),
+        dummyCloudTool("cloud_edit"),
+        dummyCloudTool("cloud_find"),
+        dummyCloudTool("cloud_grep"));
+  }
+
+  private static Tool dummyCloudTool(String name) {
+    Tool tool = mock(Tool.class);
+    ToolSideEffect sideEffect =
+        switch (name) {
+          case "cloud_write" -> ToolSideEffect.IDEMPOTENT;
+          case "cloud_edit" -> ToolSideEffect.NON_IDEMPOTENT;
+          default -> ToolSideEffect.READ_ONLY;
+        };
+    when(tool.descriptor())
+        .thenReturn(
+            new ToolDescriptor(
+                name,
+                "1",
+                name + " description",
+                name,
+                new InputSchema(null, Map.of(), Set.of(), false),
+                sideEffect,
+                Duration.ofSeconds(1)));
+    when(tool.requirements()).thenReturn(ToolRequirements.none());
+    return tool;
+  }
+
+  static ProjectHarnessContributor defaultProjectContributor() {
+    List<ProjectRoleTool> tools =
+        Arrays.stream(ProjectRoleToolType.values())
+            .map(
+                type ->
+                    new ProjectRoleTool(
+                        type,
+                        mock(ProjectThreadOwnerResolver.class),
+                        mock(ProjectRoleToolService.class)))
+            .toList();
+    return new ProjectHarnessContributor(tools);
   }
 
   private static ToolDescriptor hostDescriptor(String name) {
@@ -1701,6 +1797,260 @@ class DatabaseTurnResolverTest {
     assertEquals("third reply", textOf(messages.get(5)));
   }
 
+  @Test
+  void ordinaryAgentWithoutEnvironmentHasExactlyCloudFiveTools() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.agent.setEnvironmentId(null);
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+
+    assertEquals(
+        CLOUD_TOOL_NAMES, spec.toolBindings().stream().map(b -> b.descriptor().name()).toList());
+    for (ToolBinding binding : spec.toolBindings()) {
+      assertFalse(binding.environmentRequired());
+      assertNull(binding.environmentId());
+    }
+  }
+
+  @Test
+  void selectableToolsPreserveOrderAndBindingsBeforeCloudTools() {
+    Fixture fixture =
+        new Fixture(
+            List.of("bash", "create_goal", "read"),
+            List.of(),
+            List.of(hostDescriptor("create_goal")));
+    fixture.readyEnvironment(ENV_A);
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+
+    List<String> names = spec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
+    assertEquals(withCloudTools("bash", "create_goal", "read"), names);
+    assertEquals(
+        List.of(true, false, true, false, false, false, false, false),
+        spec.toolBindings().stream().map(ToolBinding::environmentRequired).toList());
+    assertEquals(ENV_A, spec.toolBindings().get(0).environmentId());
+    assertNull(spec.toolBindings().get(1).environmentId());
+    assertEquals(ENV_A, spec.toolBindings().get(2).environmentId());
+  }
+
+  @Test
+  void projectRoleThreadsInjectExactRoleTools() {
+    // 1. Coordinator: 包含所有 Coordinator 工具
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.roleTools(THREAD_ID, ProjectRoleToolIds.COORDINATOR);
+
+    ModelRequestSpec coordinatorSpec = fixture.resolved(fixture.path(settings("default")));
+    List<String> coordinatorTools =
+        coordinatorSpec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
+    List<String> expectedCoordinatorTools = new ArrayList<>(CLOUD_TOOL_NAMES);
+    expectedCoordinatorTools.addAll(
+        List.of(
+            "project_read",
+            "issue_read",
+            "issue_list",
+            "issue_create",
+            "issue_update",
+            "issue_add_dependency",
+            "issue_remove_dependency",
+            "issue_set_status",
+            "issue_cancel"));
+    assertEquals(expectedCoordinatorTools, coordinatorTools);
+
+    // 2. Executor: 仅 issue_submit 与 issue_request_input
+    fixture.roleTools(THREAD_ID, ProjectRoleToolIds.EXECUTOR);
+    ModelRequestSpec executorSpec = fixture.resolved(fixture.path(settings("default")));
+    List<String> executorTools =
+        executorSpec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
+    List<String> expectedExecutorTools = new ArrayList<>(CLOUD_TOOL_NAMES);
+    expectedExecutorTools.addAll(List.of("issue_submit", "issue_request_input"));
+    assertEquals(expectedExecutorTools, executorTools);
+
+    // 3. Reviewer: 仅 issue_review
+    fixture.roleTools(THREAD_ID, ProjectRoleToolIds.REVIEWER);
+    ModelRequestSpec reviewerSpec = fixture.resolved(fixture.path(settings("default")));
+    List<String> reviewerTools =
+        reviewerSpec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
+    List<String> expectedReviewerTools = new ArrayList<>(CLOUD_TOOL_NAMES);
+    expectedReviewerTools.addAll(List.of("issue_review"));
+    assertEquals(expectedReviewerTools, reviewerTools);
+  }
+
+  @Test
+  void ordinaryThreadHasZeroRoleTools() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.roleTools(THREAD_ID, List.of());
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+    assertEquals(
+        CLOUD_TOOL_NAMES, spec.toolBindings().stream().map(b -> b.descriptor().name()).toList());
+  }
+
+  @Test
+  void projectRoleDynamicContextAppendedInOrder() {
+    HarnessContributor contributorWithProjector =
+        HarnessContributor.of(
+            new ContributorDescriptor(new ContributorId("test"), "Test", "1", Set.of()),
+            registrar ->
+                registrar.registerContextProjector(
+                    "test.projector",
+                    branch -> List.of(new ContextFragment("contributor-fragment-text"))));
+    HarnessCatalog catalog =
+        HarnessCatalog.from(
+            List.of(
+                defaultBuiltinContributor(),
+                defaultCloudContributor(),
+                defaultProjectContributor(),
+                contributorWithProjector));
+
+    Fixture fixture =
+        new Fixture(
+            List.of(),
+            List.of(),
+            List.of(),
+            Set.of(),
+            ProviderType.OPENAI,
+            ProviderType.OPENAI,
+            PromptCacheCapability.unsupported(),
+            true,
+            catalog,
+            Clock.fixed(NOW, ZoneOffset.UTC));
+
+    String roleContextText = "# Issue Execution Context: Executor\n## Directives\n...";
+    fixture.roleContext(THREAD_ID, roleContextText);
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+    List<AgentMessage> preamble = spec.preambleMessages();
+
+    assertEquals(3, preamble.size());
+    // 消息 1: 普通 Agent prompt
+    assertTrue(preamble.get(0).contents().toString().contains("agent system prompt"));
+    // 消息 2: Project role dynamic context
+    assertTrue(preamble.get(1).contents().toString().contains(roleContextText));
+    // 消息 3: Contributor fragment
+    assertTrue(preamble.get(2).contents().toString().contains("contributor-fragment-text"));
+
+    // 普通 thread (Optional.empty): 零角色 context 消息
+    fixture.roleContext(THREAD_ID, null);
+    ModelRequestSpec ordinarySpec = fixture.resolved(fixture.path(settings("default")));
+    List<AgentMessage> ordinaryPreamble = ordinarySpec.preambleMessages();
+    assertEquals(2, ordinaryPreamble.size());
+    assertTrue(ordinaryPreamble.get(0).contents().toString().contains("agent system prompt"));
+    assertTrue(ordinaryPreamble.get(1).contents().toString().contains("contributor-fragment-text"));
+  }
+
+  @Test
+  void rejectsWhenCatalogMissingCloudToolOrRoleTool() {
+    // 1. Catalog 缺失 Cloud 五工具之一时 fail-closed
+    HarnessCatalog missingCloudCatalog = HarnessCatalog.from(List.of(defaultBuiltinContributor()));
+    Fixture fixtureWithoutCloud = new Fixture(List.of(), List.of(), List.of(), missingCloudCatalog);
+    TurnResolver.Rejected rejectedCloud =
+        fixtureWithoutCloud.rejected(fixtureWithoutCloud.path(settings("default")));
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejectedCloud.error().code());
+    assertEquals("tool not found: cloud.read", rejectedCloud.error().message());
+
+    // 2. Catalog 缺失角色工具时 fail-closed
+    HarnessCatalog catalogWithoutRoleTools =
+        HarnessCatalog.from(List.of(defaultBuiltinContributor(), defaultCloudContributor()));
+    Fixture fixtureWithoutRoleTools =
+        new Fixture(List.of(), List.of(), List.of(), catalogWithoutRoleTools);
+    fixtureWithoutRoleTools.roleTools(THREAD_ID, List.of(ProjectRoleToolIds.PROJECT_READ));
+    TurnResolver.Rejected rejectedRole =
+        fixtureWithoutRoleTools.rejected(fixtureWithoutRoleTools.path(settings("default")));
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejectedRole.error().code());
+    assertEquals("tool not found: project.read", rejectedRole.error().message());
+  }
+
+  @Test
+  void rejectsWhenAgentConfiguresInternalCloudOrProjectTool() {
+    Fixture cloudToolInConfig = new Fixture(List.of("cloud.read"), List.of(), List.of());
+    TurnResolver.Rejected rejectedCloud =
+        cloudToolInConfig.rejected(cloudToolInConfig.path(settings("default")));
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejectedCloud.error().code());
+    assertEquals(
+        "internal tool cannot be selected by an Agent: cloud.read",
+        rejectedCloud.error().message());
+
+    Fixture projectToolInConfig = new Fixture(List.of("project.read"), List.of(), List.of());
+    TurnResolver.Rejected rejectedProject =
+        projectToolInConfig.rejected(projectToolInConfig.path(settings("default")));
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejectedProject.error().code());
+    assertEquals(
+        "internal tool cannot be selected by an Agent: project.read",
+        rejectedProject.error().message());
+  }
+
+  @Test
+  void rejectsDuplicateToolIdInAgentConfig() {
+    Fixture fixture = new Fixture(List.of("bash"), List.of(), List.of());
+    fixture.agentConfig.setToolIds(
+        List.of(BuiltinToolIds.BASH.value(), BuiltinToolIds.BASH.value()));
+    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
+    assertEquals("duplicate agent tool id: base.bash", rejected.error().message());
+  }
+
+  @Test
+  void propagatesInconsistentOwnershipException() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.failRoleToolLookup(
+        THREAD_ID, new IllegalStateException("Project thread ownership is inconsistent"));
+
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () -> fixture.resolver.resolve(THREAD_ID, fixture.path(settings("default")), null));
+    assertEquals("Project thread ownership is inconsistent", error.getMessage());
+
+    Fixture contextFixture = new Fixture(List.of(), List.of(), List.of());
+    contextFixture.failRoleContextLookup(
+        THREAD_ID, new IllegalStateException("Project thread ownership is inconsistent"));
+
+    IllegalStateException contextError =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                contextFixture.resolver.resolve(
+                    THREAD_ID, contextFixture.path(settings("default")), null));
+    assertEquals("Project thread ownership is inconsistent", contextError.getMessage());
+  }
+
+  @Test
+  void compactionDoesNotInvokeSelectorOrProjectorAndHasZeroTools() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.roleTools(THREAD_ID, ProjectRoleToolIds.COORDINATOR);
+    fixture.roleContext(THREAD_ID, "role context");
+
+    List<AgentMessage> messages =
+        List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
+    CompactionPreparation preparation =
+        new CompactionPreparation(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            new ModelSelection("provider", "model", "default"),
+            id(4),
+            null,
+            null,
+            null,
+            messages,
+            123L);
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")), preparation);
+
+    verify(fixture.roleToolSelector, never()).select(any());
+    verify(fixture.roleContextProjector, never()).project(any());
+    assertEquals(List.of(), spec.toolBindings());
+    assertEquals(List.of(), spec.skillBindings());
+    assertEquals(List.of(), spec.preambleMessages());
+  }
+
+  @Test
+  void rejectsNullThreadIdOnLiveTurn() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    assertThrows(
+        NullPointerException.class,
+        () -> fixture.resolver.resolve(null, fixture.path(settings("default")), null));
+  }
+
   /** 完整压缩投影路径：ROOT + 两个关闭 turn，中间夹一个完成压缩 turn。 */
   private static EntryPath projectionPath(
       BranchSettings settings, String summary, UUID cutEntryId) {
@@ -1881,6 +2231,9 @@ class DatabaseTurnResolverTest {
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private final AgentProvider provider = new AgentProvider();
     private final ProviderFactory providerFactory = mock(ProviderFactory.class);
+    private final ProjectRoleToolSelector roleToolSelector = mock(ProjectRoleToolSelector.class);
+    private final ProjectRoleContextProjector roleContextProjector =
+        mock(ProjectRoleContextProjector.class);
     private final DatabaseTurnResolver resolver;
 
     private Fixture(List<String> tools, List<String> skills, List<ToolDescriptor> hostDescriptors) {
@@ -2033,6 +2386,8 @@ class DatabaseTurnResolverTest {
       when(providerFactory.providerType()).thenReturn(factoryType);
       when(providerFactory.promptCacheCapability()).thenReturn(cacheCapability);
       when(providerFactory.promptCacheCapability(any())).thenReturn(cacheCapability);
+      when(roleToolSelector.select(any())).thenReturn(List.of());
+      when(roleContextProjector.project(any())).thenReturn(Optional.empty());
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
       SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, Duration.ZERO, 50);
@@ -2042,13 +2397,9 @@ class DatabaseTurnResolverTest {
         catalog = providedCatalog;
       } else {
         List<HarnessContributor> contributors = new ArrayList<>();
-        Tool dummyLoadSkill = mock(Tool.class);
-        when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill"));
-        when(dummyLoadSkill.requirements()).thenReturn(ToolRequirements.none());
-        Tool dummyTask = mock(Tool.class);
-        when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
-        when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
-        contributors.add(new BuiltinHarnessContributor(dummyLoadSkill, dummyTask));
+        contributors.add(defaultBuiltinContributor());
+        contributors.add(defaultCloudContributor());
+        contributors.add(defaultProjectContributor());
 
         if (!hostDescriptors.isEmpty()) {
           contributors.add(
@@ -2107,7 +2458,25 @@ class DatabaseTurnResolverTest {
               () -> new CompactionConfig(20_000, null),
               () -> subagentConfig,
               new AgentPromptComposer(() -> subagentConfig),
+              roleToolSelector,
+              roleContextProjector,
               clock);
+    }
+
+    private void roleTools(UUID threadId, List<AgentToolId> tools) {
+      when(roleToolSelector.select(threadId)).thenReturn(tools);
+    }
+
+    private void roleContext(UUID threadId, String context) {
+      when(roleContextProjector.project(threadId)).thenReturn(Optional.ofNullable(context));
+    }
+
+    private void failRoleToolLookup(UUID threadId, RuntimeException error) {
+      when(roleToolSelector.select(threadId)).thenThrow(error);
+    }
+
+    private void failRoleContextLookup(UUID threadId, RuntimeException error) {
+      when(roleContextProjector.project(threadId)).thenThrow(error);
     }
 
     private void addModel(ModelSelection selection, ParsedAgentModelConfig parsedModel) {
