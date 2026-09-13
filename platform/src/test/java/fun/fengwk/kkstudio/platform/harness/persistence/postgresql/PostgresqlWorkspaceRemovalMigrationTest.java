@@ -104,7 +104,7 @@ class PostgresqlWorkspaceRemovalMigrationTest extends PostgresSchemaSupport {
 
         migrate(connection, "classpath:db/migration");
 
-        assertEquals(3, currentVersion(connection));
+        assertEquals(7, currentVersion(connection));
         assertFalse(columnExists(connection, "chat", "workspace_path"));
         assertNull(regclass(connection, "environment_directory_query"));
         assertEquals(

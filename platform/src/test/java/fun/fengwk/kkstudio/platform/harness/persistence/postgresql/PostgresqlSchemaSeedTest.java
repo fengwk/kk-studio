@@ -39,6 +39,7 @@ import java.util.Objects;
 class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final String VERSIONED_MIGRATIONS = "1,2,3,6,7";
 
   @BeforeEach
   void setup() throws Exception {
@@ -275,7 +276,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           conn,
           "select string_agg(version, ',' order by installed_rank)"
               + " from flyway_schema_history where version is not null",
-          "1,2,3");
+          VERSIONED_MIGRATIONS);
       assertDevSeedPresent(conn);
     }
 
@@ -292,7 +293,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           conn,
           "select string_agg(version, ',' order by installed_rank)"
               + " from flyway_schema_history where version is not null",
-          "1,2,3");
+          VERSIONED_MIGRATIONS);
       assertE2eSeedContent(conn);
     }
 
@@ -310,7 +311,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           conn,
           "select string_agg(version, ',' order by installed_rank)"
               + " from flyway_schema_history where version is not null",
-          "1,2,3");
+          VERSIONED_MIGRATIONS);
       assertDevSeedPresent(conn);
       assertSingleLong(conn, "select count(*) from system_setting where id = 1", 1L);
     }
