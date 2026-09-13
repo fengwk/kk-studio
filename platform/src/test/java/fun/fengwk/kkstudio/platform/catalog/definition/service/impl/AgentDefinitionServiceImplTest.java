@@ -29,9 +29,11 @@ import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 
 import java.sql.SQLException;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Agent 定义服务的契约测试：CAS 失败必须映射为 {@link AiResourceNotFoundException} / {@link
@@ -94,6 +96,67 @@ public class AgentDefinitionServiceImplTest {
     assertThrows(AiVersionConflictException.class, () -> service.updateAgent("agent", update));
     verify(resolver, never()).requireModelForUpdate("provider", "model");
     verify(factory, never()).update(definition, update);
+  }
+
+  /** 测试意图：验证创建 Agent 时，会通过 resolver.requireEnvironmentAndSkills 校验环境与 skills 引用。 */
+  @Test
+  public void createAgentValidatesEnvironmentAndSkills() {
+    AgentDefinitionRepository repository = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConverter converter = mock(AgentDefinitionConverter.class);
+    AgentDefinitionMutationFactory factory = mock(AgentDefinitionMutationFactory.class);
+    AgentDefinitionReferenceResolver resolver = mock(AgentDefinitionReferenceResolver.class);
+    AgentModelDefaultVariantResolver variants = mock(AgentModelDefaultVariantResolver.class);
+    AgentDefinitionServiceImpl service =
+        service(repository, converter, factory, resolver, variants);
+
+    AgentDefinition definition = definition();
+    UUID envId = UUID.randomUUID();
+    definition.setEnvironmentId(envId);
+    AgentDefinitionCreateDTO create = create();
+    create.setEnvironmentId(envId.toString());
+    AgentSkillRefDTO ref = new AgentSkillRefDTO(UUID.randomUUID().toString(), "dev");
+    create.getConfig().setSkills(List.of(ref));
+    definition.setConfigJson(
+        "{\"toolIds\":[],\"skills\":[{\"sourceId\":\""
+            + ref.getSourceId()
+            + "\",\"name\":\"dev\"}],\"subagents\":[]}");
+
+    when(factory.newAgent("agent", create)).thenReturn(definition);
+    when(repository.create(definition)).thenReturn(true);
+
+    service.createAgent(create);
+    verify(resolver).requireEnvironmentAndSkills(eq(envId), eq(List.of(ref)));
+  }
+
+  /** 测试意图：验证更新 Agent 时，会通过 resolver.requireEnvironmentAndSkills 校验环境与 skills 引用。 */
+  @Test
+  public void updateAgentValidatesEnvironmentAndSkills() {
+    AgentDefinitionRepository repository = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConverter converter = mock(AgentDefinitionConverter.class);
+    AgentDefinitionMutationFactory factory = mock(AgentDefinitionMutationFactory.class);
+    AgentDefinitionReferenceResolver resolver = mock(AgentDefinitionReferenceResolver.class);
+    AgentModelDefaultVariantResolver variants = mock(AgentModelDefaultVariantResolver.class);
+    AgentDefinitionServiceImpl service =
+        service(repository, converter, factory, resolver, variants);
+
+    AgentDefinition definition = definition();
+    UUID envId = UUID.randomUUID();
+    definition.setEnvironmentId(envId);
+    AgentSkillRefDTO ref = new AgentSkillRefDTO(UUID.randomUUID().toString(), "dev");
+    definition.setConfigJson(
+        "{\"toolIds\":[],\"skills\":[{\"sourceId\":\""
+            + ref.getSourceId()
+            + "\",\"name\":\"dev\"}],\"subagents\":[]}");
+    when(resolver.requireAgent("agent")).thenReturn(definition);
+    when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(definition);
+    when(repository.updateByName(definition, 0L)).thenReturn(true);
+
+    AgentDefinitionUpdateDTO update = update("0");
+    update.setEnvironmentId(envId.toString());
+    update.getConfig().setSkills(List.of(ref));
+
+    service.updateAgent("agent", update);
+    verify(resolver).requireEnvironmentAndSkills(eq(envId), eq(List.of(ref)));
   }
 
   @Test
@@ -190,6 +253,37 @@ public class AgentDefinitionServiceImplTest {
     assertSame(
         nonForeignKey,
         assertThrows(DataIntegrityViolationException.class, () -> service.createAgent(create)));
+  }
+
+  // 测试意图: 验证更新 Agent 时，数据库外键约束失败映射为环境/模型不存在异常，非外键失败原样抛出
+  @Test
+  public void shouldMapDataIntegrityViolationOnUpdateAgent() {
+    AgentDefinitionRepository repository = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConverter converter = mock(AgentDefinitionConverter.class);
+    AgentDefinitionMutationFactory factory = mock(AgentDefinitionMutationFactory.class);
+    AgentDefinitionReferenceResolver resolver = mock(AgentDefinitionReferenceResolver.class);
+    AgentModelDefaultVariantResolver variants = mock(AgentModelDefaultVariantResolver.class);
+    AgentDefinitionServiceImpl service =
+        service(repository, converter, factory, resolver, variants);
+
+    AgentDefinition definition = definition();
+    definition.setEnvironmentId(UUID.randomUUID());
+    when(resolver.requireAgent("agent")).thenReturn(definition);
+    when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(definition);
+    AgentDefinitionUpdateDTO update = update("0");
+
+    doThrow(integrityFailure("23503")).when(repository).updateByName(definition, 0L);
+    assertThrows(AiResourceNotFoundException.class, () -> service.updateAgent("agent", update));
+
+    definition.setEnvironmentId(null);
+    assertThrows(AiResourceNotFoundException.class, () -> service.updateAgent("agent", update));
+
+    DataIntegrityViolationException nonForeignKey = integrityFailure("22001");
+    doThrow(nonForeignKey).when(repository).updateByName(definition, 0L);
+    assertSame(
+        nonForeignKey,
+        assertThrows(
+            DataIntegrityViolationException.class, () -> service.updateAgent("agent", update)));
   }
 
   private AgentDefinitionServiceImpl service(
