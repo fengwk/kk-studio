@@ -9,8 +9,13 @@ import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.platform.environment.skill.model.EnvironmentInventory;
+import fun.fengwk.kkstudio.platform.environment.skill.model.SkillInventoryEntry;
+import fun.fengwk.kkstudio.platform.environment.skill.repo.SkillSourceRepository;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 
 import java.util.List;
 import java.util.TreeSet;
@@ -28,6 +33,7 @@ final class AgentDefinitionReferenceResolver {
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentModelRepository agentModelRepository;
   private final EnvironmentRepository environmentRepository;
+  private final SkillSourceRepository skillSourceRepository;
 
   AgentDefinition requireAgent(String name) {
     AgentDefinition definition = agentDefinitionRepository.getByName(name);
@@ -74,6 +80,56 @@ final class AgentDefinitionReferenceResolver {
         throw new AiResourceNotFoundException(
             ENVIRONMENT_RESOURCE, ENVIRONMENT_RESOURCE + " not found: " + environmentId);
       }
+    }
+  }
+
+  /**
+   * 锁定并校验 Environment 及 Agent 技能引用。
+   *
+   * <p>锁顺序严格遵循：{@code environment KEY SHARE} → {@code environment_inventory FOR UPDATE} → 全部 {@code
+   * environment_skill_source} 行升序 {@code FOR UPDATE}。 无配置技能时仅对存在的 environmentId 执行 KEY SHARE
+   * 锁，避免不必要的 inventory/source 锁竞争。
+   */
+  void requireEnvironmentAndSkills(UUID environmentId, List<AgentSkillRefDTO> skills) {
+    if (skills != null && !skills.isEmpty()) {
+      if (environmentId == null) {
+        throw new AiValidationException(
+            DEFINITION_RESOURCE, "skills require an environment to be configured");
+      }
+      Environment environment = environmentRepository.lockForKeyShare(environmentId);
+      if (environment == null) {
+        throw new AiResourceNotFoundException(
+            ENVIRONMENT_RESOURCE, ENVIRONMENT_RESOURCE + " not found: " + environmentId);
+      }
+      EnvironmentInventory inventory = skillSourceRepository.lockInventory(environmentId);
+      if (inventory == null) {
+        throw new AiResourceNotFoundException(
+            ENVIRONMENT_RESOURCE, ENVIRONMENT_RESOURCE + " not found: " + environmentId);
+      }
+      skillSourceRepository.lockAllSources(environmentId);
+      List<SkillInventoryEntry> usableSkills =
+          skillSourceRepository.listUsableSkills(environmentId);
+      for (AgentSkillRefDTO ref : skills) {
+        UUID sourceId = UUID.fromString(ref.getSourceId());
+        boolean matched =
+            usableSkills.stream()
+                .anyMatch(
+                    entry ->
+                        entry.getSourceId().equals(sourceId)
+                            && entry.getName().equals(ref.getName()));
+        if (!matched) {
+          throw new AiValidationException(
+              DEFINITION_RESOURCE,
+              "skill ref is not usable in environment "
+                  + environmentId
+                  + ": "
+                  + ref.getSourceId()
+                  + "/"
+                  + ref.getName());
+        }
+      }
+    } else {
+      requireEnvironmentForShare(environmentId);
     }
   }
 

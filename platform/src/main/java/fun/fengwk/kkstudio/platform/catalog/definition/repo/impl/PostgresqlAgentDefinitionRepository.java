@@ -45,6 +45,11 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
   }
 
   @Override
+  public boolean existsReferencingSkillSource(UUID environmentId, UUID sourceId) {
+    return agentDefinitionMapper.existsReferencingSkillSource(environmentId, sourceId);
+  }
+
+  @Override
   public boolean existsByEnvironmentId(UUID environmentId) {
     return agentDefinitionMapper.existsByEnvironmentId(environmentId);
   }

@@ -93,7 +93,7 @@ Provider、Model、Agent 的名称在记录存续期间不可修改；Model 对 
 - `AgentModelRuntimeConfigParser`严格解析 `limit`、`abilities`、`variants`、`defaultVariant` 和 `pricing`；
   context/output、variant id、temperature、reasoning effort 等不满足约束时拒绝。
 - `AgentDefinitionConfigCodec`严格解析去重的 `toolIds`、skill 和 subagent 配置；`toolIds` 必须是 canonical
-  `AgentToolId`，且只能引用运行时目录中的 selectable entry；skills/subagents 仍使用短名。
+  `AgentToolId`，且只能引用运行时目录中的 selectable entry；`skills` 使用强类型 `AgentSkillRefDTO`（包含小写 canonical UUID `sourceId` 与短名 `name`），并在 Environment 持久可用 inventory 锁保护下校验；subagents 仍使用短名。
 
 Provider type 的唯一 runtime enum 在
 `harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java`：

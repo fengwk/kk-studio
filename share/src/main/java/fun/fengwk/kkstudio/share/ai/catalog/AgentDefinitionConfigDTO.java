@@ -8,7 +8,8 @@ import java.util.List;
 /**
  * 持久化到 {@code agent_definition.config} JSONB 列的 Agent definition 执行配置。
  *
- * <p>{@code toolIds} 使用稳定 AgentToolId；{@code skills} 与 {@code subagents} 只接受短名。
+ * <p>{@code toolIds} 使用稳定 AgentToolId；{@code skills} 使用明确的 {@link AgentSkillRefDTO}；{@code
+ * subagents} 只接受短名。
  *
  * @author fengwk
  */
@@ -18,8 +19,8 @@ public class AgentDefinitionConfigDTO {
   /** 可选稳定 AgentToolId 列表；只允许选择离线 catalog 中的可选择工具，元素按声明顺序且不可重复。 */
   private List<String> toolIds;
 
-  /** Agent 技能短名列表；运行时须由选中的 live Environment 精确提供，元素须为非空白短名、去重、≤128 字符。 */
-  private List<String> skills;
+  /** Agent 技能引用列表；必须精确引用选定 Environment 的持久可用 Skill。 */
+  private List<AgentSkillRefDTO> skills;
 
   /** 当前 Agent 可通过 task 委派的 Agent 名称 allowlist；元素须为非空白短名、去重、≤64 字符。 */
   private List<String> subagents;
