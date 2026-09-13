@@ -203,7 +203,7 @@ class HarnessOwnerQueryServiceTest {
                 AgentMessageRole.USER,
                 List.of(
                     new TextMessageContent(""),
-                    new ResourceMessageContent(id(203), "resource-only.pdf", null))));
+                    ResourceMessageContent.media(id(203), "resource-only.pdf"))));
     when(runtime.getSessionEntries(resourceSession))
         .thenReturn(List.of(resourceMessage, resourceRoot));
     when(runtime.listThreadsBySession(resourceSession)).thenReturn(List.of());
@@ -346,8 +346,7 @@ class HarnessOwnerQueryServiceTest {
         new AgentMessage(
             AgentMessageRole.USER,
             List.of(
-                new ResourceMessageContent(
-                    id(900 + entryId.getLeastSignificantBits()), name, null))));
+                ResourceMessageContent.media(id(900 + entryId.getLeastSignificantBits()), name))));
   }
 
   private static Entry userMessage(

@@ -106,7 +106,8 @@ class CompactionPlannerTest {
     AgentMessageContent image = new ImageMessageContent("image/png", "image-source");
     AgentMessageContent audio = new AudioMessageContent("audio/mpeg", "audio-source");
     AgentMessageContent video = new VideoMessageContent("video/mp4", "video-source");
-    AgentMessageContent resource = new ResourceMessageContent(id(200L), "resource.bin", "preview");
+    AgentMessageContent resource =
+        ResourceMessageContent.media(id(200L), "resource.bin", "preview");
     Entry assistant =
         new Entry(
             id(2L),

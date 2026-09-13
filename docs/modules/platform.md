@@ -204,10 +204,13 @@ Blob 行。
 同时以 fixed-delay poll 驱动 upload expire 和 DELETING blob sweep。它的所有 S3 I/O都在事务外；数据库清理事实是唯一
 可恢复依据。
 
-Tool terminal 结果由 `ToolResultExternalizer`先做无副作用 plan，再按引用逐个写入 `ResourceStore`，返回引用必须与
-plan 完全一致；`GlobalStorageToolResultHistoryMaterializer`在调用方 mandatory transaction 中把
-Text/Json/Binary/Resource 物化为 blob-backed Harness history，任一步失败使调用方事务回滚。该端口未装配时，
-Runtime 只保留资源名称、媒体类型与有界 preview，不自动序列化 `ResourceRef` 的瞬时 URI，也不阻塞 Thread 后续推进。
+Tool terminal 结果由 `ToolResultFinalizer`先对完整投影做无副作用 plan 与 hard-limit 校验，再按引用逐个写入
+`ResourceStore`，返回引用必须与 plan 完全一致；已有 Resource 也必须经同一 Store 读取并复核 size/SHA-256。
+Daemon wire 内联传输受限的 Base64 bytes，Backend 校验后以瞬时 Binary 接收，不把 Daemon 本地 URI
+作为跨节点取数地址。`GlobalStorageToolResultHistoryMaterializer`在调用方 mandatory transaction
+中只通过同一 Store 读取已终态化 Resource，经完整性复核后物化为 blob-backed Harness history，并将文本工件挂载到
+`/.artifacts/tool-results/`；任一步失败使调用方事务回滚。该端口未装配时，Runtime
+只保留资源名称、媒体类型与有界 preview，不自动序列化 `ResourceRef` 的瞬时 URI，也不阻塞 Thread 后续推进。
 
 ### Environment
 

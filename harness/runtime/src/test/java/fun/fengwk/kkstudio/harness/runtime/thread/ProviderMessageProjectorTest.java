@@ -46,7 +46,8 @@ class ProviderMessageProjectorTest {
                         new TextMessageContent("answer"),
                         new ThinkingMessageContent("reasoning"),
                         new JsonMessageContent("{\"answer\":true}"),
-                        new ResourceMessageContent(new UUID(0L, 1L), "report", "resource preview"),
+                        ResourceMessageContent.media(
+                            new UUID(0L, 1L), "report", "resource preview"),
                         new TextMessageContent("second text"),
                         new ToolCallMessageContent(
                             "call-1", "lookup", "lookup", "{\"key\":\"value\"}"))),
@@ -133,13 +134,34 @@ class ProviderMessageProjectorTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(
-                        new ResourceMessageContent(new UUID(0L, 1L), "a.txt", null),
-                        new ResourceMessageContent(new UUID(0L, 2L), "b.txt", "preview")))));
+                        ResourceMessageContent.media(new UUID(0L, 1L), "a.txt"),
+                        ResourceMessageContent.media(new UUID(0L, 2L), "b.txt", "preview")))));
 
     assertEquals(
         List.of(
-            new ProviderResourceBlock(new UUID(0L, 1L), "a.txt", ""),
-            new ProviderResourceBlock(new UUID(0L, 2L), "b.txt", "preview")),
+            ProviderResourceBlock.media(new UUID(0L, 1L), "a.txt", ""),
+            ProviderResourceBlock.media(new UUID(0L, 2L), "b.txt", "preview")),
+        projected.get(0).contents());
+  }
+
+  @Test
+  void projectArtifactResourceCarriesStructureFacts() {
+    ProviderMessageProjector projector = new ProviderMessageProjector();
+    String path =
+        "/.artifacts/tool-results/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.txt";
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        ResourceMessageContent.artifact(
+                            new UUID(0L, 1L), "res.txt", path, 100L, 10L, "preview")))));
+
+    assertEquals(
+        List.of(
+            ProviderResourceBlock.artifact(
+                new UUID(0L, 1L), "res.txt", path, 100L, 10L, "preview")),
         projected.get(0).contents());
   }
 
