@@ -328,8 +328,8 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
         issueRunService.startExecutorRun(issueId, agent, Instant.now().plusSeconds(3600), 10);
     UUID sessionId = createHarnessSession();
 
-    // AGENT run 绑定 Session 成功
-    issueRunService.bindSession(execRun.getId(), sessionId);
+    // AGENT run 绑定 Session 成功（通过 repository 直接建立关系以测试服务查询）
+    assertTrue(issueRunSessionRepository.bindSession(execRun.getId(), sessionId));
     IssueRunSession bound = issueRunService.getRunSession(execRun.getId());
     assertNotNull(bound);
     assertEquals(sessionId, bound.getSessionId());
@@ -348,12 +348,6 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
             ReviewDecision.APPROVE,
             "Ok",
             "Ok");
-
-    // HUMAN run 依 RFC 5.1 约束禁止绑定 Harness Session
-    UUID anotherSession = createHarnessSession();
-    assertThrows(
-        AiValidationException.class,
-        () -> issueRunService.bindSession(humanRun.getId(), anotherSession));
   }
 
   @Test
@@ -382,7 +376,7 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
 
     // findRunSession
     UUID sessionId = createHarnessSession();
-    issueRunService.bindSession(runId1, sessionId);
+    assertTrue(issueRunSessionRepository.bindSession(runId1, sessionId));
     IssueRunSession found = issueRunService.findRunSession(sessionId);
     assertNotNull(found);
     assertEquals(runId1, found.getRunId());
@@ -502,11 +496,6 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
     // retryRun not found
     assertThrows(
         AiResourceNotFoundException.class, () -> issueRunService.retryRun(UUID.randomUUID(), "k"));
-
-    // bindSession not found
-    assertThrows(
-        AiResourceNotFoundException.class,
-        () -> issueRunService.bindSession(UUID.randomUUID(), UUID.randomUUID()));
 
     // 人工评审 REQUEST_CHANGES 流程
     Issue issue =

@@ -23,6 +23,16 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
+import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueRun;
+import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
+import fun.fengwk.kkstudio.platform.project.model.Project;
+import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
+import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
 import java.time.Instant;
@@ -42,13 +52,23 @@ class SessionDeletionOrchestratorTest {
   private static final UUID THREAD_2 = id(40);
   private static final UUID BLOB_1 = id(50);
   private static final UUID BLOB_2 = id(60);
+  private static final UUID PROJECT_ID = id(70);
+  private static final UUID RUN_ID = id(80);
+  private static final UUID ISSUE_ID = id(90);
   private static final OwnerRef CHAT_OWNER = new OwnerRef(OwnerType.CHAT, CHAT_ID);
   private static final OwnerRef CANVAS_OWNER = new OwnerRef(OwnerType.CANVAS, CANVAS_ID);
+  private static final OwnerRef PROJECT_OWNER = new OwnerRef(OwnerType.PROJECT, PROJECT_ID);
+  private static final OwnerRef ISSUE_RUN_OWNER = new OwnerRef(OwnerType.ISSUE_RUN, RUN_ID);
 
   private ChatSessionRepository chatSessionRepository;
   private CanvasSessionRepository canvasSessionRepository;
   private ChatRepository chatRepository;
   private CanvasStore canvasStore;
+  private ProjectRepository projectRepository;
+  private ProjectSessionRepository projectSessionRepository;
+  private IssueRepository issueRepository;
+  private IssueRunRepository issueRunRepository;
+  private IssueRunSessionRepository issueRunSessionRepository;
   private ObjectProvider<HarnessStore> stores;
   private ObjectProvider<SessionBlobRefManager> refManagers;
   private HarnessStore store;
@@ -63,6 +83,11 @@ class SessionDeletionOrchestratorTest {
     canvasSessionRepository = mock(CanvasSessionRepository.class);
     chatRepository = mock(ChatRepository.class);
     canvasStore = mock(CanvasStore.class);
+    projectRepository = mock(ProjectRepository.class);
+    projectSessionRepository = mock(ProjectSessionRepository.class);
+    issueRepository = mock(IssueRepository.class);
+    issueRunRepository = mock(IssueRunRepository.class);
+    issueRunSessionRepository = mock(IssueRunSessionRepository.class);
     stores = mock(ObjectProvider.class);
     refManagers = mock(ObjectProvider.class);
     store = mock(HarnessStore.class);
@@ -79,6 +104,17 @@ class SessionDeletionOrchestratorTest {
             });
     when(chatRepository.lockById(CHAT_ID)).thenReturn(mock(Chat.class));
     when(canvasStore.lockDocument(CANVAS_ID)).thenReturn(Optional.of(mock(CanvasDocument.class)));
+    when(projectRepository.lockById(PROJECT_ID)).thenReturn(mock(Project.class));
+
+    IssueRun run = mock(IssueRun.class);
+    when(run.getIssueId()).thenReturn(ISSUE_ID);
+    when(issueRunRepository.getById(RUN_ID)).thenReturn(run);
+    Issue issue = mock(Issue.class);
+    when(issue.getId()).thenReturn(ISSUE_ID);
+    when(issue.getProjectId()).thenReturn(PROJECT_ID);
+    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
+    when(issueRunRepository.lockById(RUN_ID)).thenReturn(run);
 
     service =
         new SessionDeletionOrchestrator(
@@ -86,6 +122,11 @@ class SessionDeletionOrchestratorTest {
             canvasSessionRepository,
             chatRepository,
             canvasStore,
+            projectRepository,
+            projectSessionRepository,
+            issueRepository,
+            issueRunRepository,
+            issueRunSessionRepository,
             stores,
             refManagers);
   }
@@ -205,6 +246,35 @@ class SessionDeletionOrchestratorTest {
     verify(transaction, never()).deleteEntries(SESSION_1);
     verify(chatSessionRepository, never()).deleteBySessionId(SESSION_1);
     verifyNoInteractions(refManager);
+  }
+
+  @Test
+  void deletesProjectAndIssueRunSessionsSuccessfully() {
+    // Project owner deletion
+    when(projectSessionRepository.findByProjectId(PROJECT_ID))
+        .thenReturn(ProjectSession.builder().projectId(PROJECT_ID).sessionId(SESSION_1).build());
+    when(transaction.lockSessionForUpdate(SESSION_1))
+        .thenReturn(Optional.of(new Session(SESSION_1, "project-session", NOW)));
+    when(transaction.listThreadsBySession(SESSION_1)).thenReturn(List.of());
+    when(refManager.listBlobIds(SESSION_1)).thenReturn(List.of());
+
+    service.deleteSessionsByOwner(PROJECT_OWNER);
+    verify(projectSessionRepository).deleteByProjectId(PROJECT_ID);
+    verify(transaction).deleteEntries(SESSION_1);
+    verify(transaction).deleteSession(SESSION_1);
+
+    // IssueRun owner deletion
+    when(issueRunSessionRepository.findByRunId(RUN_ID))
+        .thenReturn(IssueRunSession.builder().runId(RUN_ID).sessionId(SESSION_2).build());
+    when(transaction.lockSessionForUpdate(SESSION_2))
+        .thenReturn(Optional.of(new Session(SESSION_2, "run-session", NOW)));
+    when(transaction.listThreadsBySession(SESSION_2)).thenReturn(List.of());
+    when(refManager.listBlobIds(SESSION_2)).thenReturn(List.of());
+
+    service.deleteSessionsByOwner(ISSUE_RUN_OWNER);
+    verify(issueRunSessionRepository).deleteByRunId(RUN_ID);
+    verify(transaction).deleteEntries(SESSION_2);
+    verify(transaction).deleteSession(SESSION_2);
   }
 
   @Test

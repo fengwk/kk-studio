@@ -35,6 +35,16 @@ public class PostgresqlProjectRepository implements ProjectRepository {
   }
 
   @Override
+  public Project lockForShare(UUID id) {
+    return toModel(projectMapper.lockForShare(id));
+  }
+
+  @Override
+  public Project lockForKeyShare(UUID id) {
+    return toModel(projectMapper.lockForKeyShare(id));
+  }
+
+  @Override
   public boolean updateById(Project project, long expectedVersion) {
     return projectMapper.updateById(toDO(project), expectedVersion) == 1;
   }

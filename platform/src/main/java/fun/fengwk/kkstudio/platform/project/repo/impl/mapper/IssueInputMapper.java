@@ -63,4 +63,32 @@ public interface IssueInputMapper extends BaseMapper {
   @ResultMap("issueInputResultMap")
   List<IssueInputDO> listAfterSequence(
       @Param("issueId") UUID issueId, @Param("afterSequence") long afterSequence);
+
+  @Select(
+      """
+      select issue_id, sequence, kind, body, idempotency_key, created_at
+      from issue_input
+      where issue_id = #{issueId} and sequence > #{afterSequence}
+      order by sequence asc
+      limit 1
+      """)
+  @ResultMap("issueInputResultMap")
+  IssueInputDO findFirstAfterSequence(
+      @Param("issueId") UUID issueId, @Param("afterSequence") long afterSequence);
+
+  @Select(
+      """
+      select issue_id, sequence, kind, body, idempotency_key, created_at
+      from issue_input
+      where issue_id = #{issueId}
+        and kind = #{kind}
+        and sequence > #{afterSequence}
+      order by sequence asc
+      limit 1
+      """)
+  @ResultMap("issueInputResultMap")
+  IssueInputDO findFirstByKindAfterSequence(
+      @Param("issueId") UUID issueId,
+      @Param("kind") String kind,
+      @Param("afterSequence") long afterSequence);
 }
