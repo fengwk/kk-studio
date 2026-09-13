@@ -26,7 +26,7 @@ import java.util.TreeSet;
 import java.util.UUID;
 
 /**
- * 断言 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 infra 的七张表（业务表不得使用 harness_ 前缀），且结构化载荷使用
+ * 断言 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 infra 的七张表，并包含专用 Session 归属守卫表，且结构化载荷使用
  * jsonb。
  *
  * <p>public schema 的相等性校验是严格的：{@code public} 中 {@code BASE TABLE} 的集合必须与期望列表完全一致。
@@ -53,24 +53,47 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_session",
           "chat",
           "chat_session",
+          "cloud_node",
+          "cloud_text_revision",
           "environment",
           "environment_connection",
           "harness_session",
+          "harness_session_owner_guard",
           "harness_entry",
           "harness_thread",
           "harness_thread_command",
           "harness_model_invocation",
           "harness_tool_invocation",
           "harness_work",
+          "project",
+          "project_session",
+          "issue",
+          "issue_dependency",
+          "issue_input",
+          "issue_run",
+          "issue_run_session",
+          "issue_controller_work",
           "session_blob_ref",
           "storage_blob",
           "storage_upload",
           "system_setting");
 
   /** 精确的 infra 执行协议七表；业务表（如 session_blob_ref）不得使用 harness_ 前缀。 */
-  private static final Set<String> HARNESS_TABLES =
+  private static final Set<String> HARNESS_EXECUTION_TABLES =
       Set.of(
           "harness_session",
+          "harness_entry",
+          "harness_thread",
+          "harness_thread_command",
+          "harness_model_invocation",
+          "harness_tool_invocation",
+          "harness_work");
+
+  /** 所有允许使用 harness_ 前缀的基础设施表。 */
+  private static final Set<String> HARNESS_PREFIXED_TABLES =
+      Set.of(
+          "harness_session",
+          "harness_session_owner_guard",
           "harness_entry",
           "harness_thread",
           "harness_thread_command",
@@ -103,7 +126,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void harnessSchemaContainsExactlyTheRuntimeTables() throws SQLException {
+  void harnessPrefixIsRestrictedToDeclaredInfrastructureTables() throws SQLException {
     Set<String> harnessTables = new TreeSet<>();
     for (String table : tableNames()) {
       if (table.startsWith("harness_")) {
@@ -111,9 +134,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
     }
     assertEquals(
-        new TreeSet<>(HARNESS_TABLES),
+        new TreeSet<>(HARNESS_PREFIXED_TABLES),
         harnessTables,
-        "only the infra execution tables may use the harness_ prefix");
+        "only declared infrastructure tables may use the harness_ prefix");
   }
 
   @Test
@@ -272,11 +295,97 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "runtime_info",
         "last_seen_at",
         "lease_until");
+    assertColumns(
+        "cloud_node",
+        "id",
+        "parent_id",
+        "name",
+        "kind",
+        "version",
+        "blob_id",
+        "created_at",
+        "updated_at",
+        "parent_kind");
+    assertColumns(
+        "cloud_text_revision",
+        "node_id",
+        "revision",
+        "content",
+        "size_bytes",
+        "sha256",
+        "is_current",
+        "created_at",
+        "node_kind");
+    assertColumns(
+        "project",
+        "id",
+        "title",
+        "description",
+        "coordinator_agent_name",
+        "next_issue_number",
+        "version",
+        "archived_at",
+        "created_at",
+        "updated_at");
+    assertColumns("project_session", "project_id", "session_id", "created_at");
+    assertColumns(
+        "issue",
+        "id",
+        "project_id",
+        "number",
+        "title",
+        "description",
+        "status",
+        "assignee_agent_name",
+        "reviewer_agent_name",
+        "version",
+        "spec_revision",
+        "input_sequence",
+        "archived_at",
+        "created_at",
+        "updated_at");
+    assertColumns(
+        "issue_dependency", "issue_id", "depends_on_issue_id", "project_id", "created_at");
+    assertColumns(
+        "issue_input", "issue_id", "sequence", "kind", "body", "idempotency_key", "created_at");
+    assertColumns(
+        "issue_run",
+        "id",
+        "issue_id",
+        "ordinal",
+        "role",
+        "actor_type",
+        "agent_name",
+        "submission_run_id",
+        "status",
+        "outcome",
+        "observed_spec_revision",
+        "observed_input_sequence",
+        "continuation_count",
+        "max_continuations",
+        "deadline",
+        "waiting_reason",
+        "result",
+        "terminal_action_id",
+        "version",
+        "created_at",
+        "updated_at",
+        "completed_at");
+    assertColumns("issue_run_session", "run_id", "session_id", "created_at");
+    assertColumns(
+        "issue_controller_work",
+        "issue_id",
+        "wake_version",
+        "due_at",
+        "lease_token",
+        "lease_until",
+        "updated_at");
   }
 
   @Test
   void harnessExecutionTablesExposeExactColumnContracts() throws SQLException {
     assertColumns("harness_session", "id", "name", "created_at");
+    assertColumns("harness_session_owner_guard", "session_id");
     assertColumns(
         "harness_entry",
         "id",
@@ -368,6 +477,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "canvas_node", "function_config_json");
     assertColumnType("jsonb", "canvas_function_run", "state_json");
     assertColumnType("jsonb", "environment_connection", "runtime_info");
+    assertColumnType("jsonb", "issue_run", "result");
     assertColumnType("integer", "canvas_function_run", "attempt");
     assertColumnType("character varying", "canvas_function_run", "lease_token");
   }
@@ -740,8 +850,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void versionNotifyTriggersAreExactAndNeverMutateVersions() throws SQLException {
-    // 整个 public schema 中仅有四个用户 trigger：三个 version hint 与 Canvas Function work hint。
+  void userTriggersAreExactAndVersionNotifiersNeverMutateVersions() throws SQLException {
+    // 精确枚举通知与 Session 归属守卫 trigger，避免迁移留下隐式写入行为。
     Set<String> triggers = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -758,7 +868,17 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "trg_system_setting_version_notify",
             "trg_harness_thread_version_notify",
             "trg_canvas_document_version_notify",
-            "trg_canvas_function_work_notify"),
+            "trg_canvas_function_work_notify",
+            "trg_cloud_node_changed_notify",
+            "trg_issue_controller_work_due",
+            "trg_chat_session_acquire_guard",
+            "trg_chat_session_release_guard",
+            "trg_canvas_session_acquire_guard",
+            "trg_canvas_session_release_guard",
+            "trg_project_session_acquire_guard",
+            "trg_project_session_release_guard",
+            "trg_issue_run_session_acquire_guard",
+            "trg_issue_run_session_release_guard"),
         triggers,
         "public triggers must equal the exact set of user triggers");
 
@@ -858,7 +978,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertTrue(canvasWorkFunctionSource.contains("canvas_function_work"));
     assertTrue(canvasWorkFunctionSource.contains("new.status = 'READY'"));
 
-    // 除四个 notify 辅助函数外不存在其它 public 函数：version 自增函数已移除。
+    // public 函数严格限定为通知与 Session 归属守卫辅助函数；version 自增函数已移除。
     Set<String> functions = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -875,9 +995,13 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "system_setting_version_notify",
             "harness_thread_version_notify",
             "canvas_document_version_notify",
-            "canvas_function_work_notify"),
+            "canvas_function_work_notify",
+            "cloud_files_changed_notify",
+            "notify_issue_controller_work_due",
+            "acquire_harness_session_owner_guard",
+            "release_harness_session_owner_guard"),
         functions,
-        "the database must never mutate version; only the notify helpers may exist");
+        "only declared notification and ownership-guard helpers may exist");
 
     // 行为：trigger 在 INSERT 与 version 写入时触发，但绝不修改存储的
     // version 值；非 version 的应用层更新则完全不会动到 version。
@@ -949,7 +1073,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "canvas_link", "source_node_id");
     assertColumnType("uuid", "canvas_link", "target_node_id");
     assertColumnType("uuid", "canvas_function_resource_pin", "resource_id");
-    for (String table : HARNESS_TABLES) {
+    for (String table : HARNESS_EXECUTION_TABLES) {
       if (table.equals("harness_work") || table.equals("harness_thread_command")) {
         // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 身份为 (thread_id, sequence)。
         continue;
@@ -1043,7 +1167,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   void noColumnCarriesASequenceDefault() throws SQLException {
     // Canvas / Harness / Chat / Comfy 实体 id 均由应用侧 UUID 生成并显式插入；
     // 任何表都不得携带序列默认值。ThreadCommand 无代理主键（身份为 (thread_id, sequence)）。
-    for (String table : HARNESS_TABLES) {
+    for (String table : HARNESS_EXECUTION_TABLES) {
       if (table.equals("harness_work") || table.equals("harness_thread_command")) {
         // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 无代理主键。
         continue;
@@ -1171,7 +1295,19 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_storage_upload_candidate",
             "uk_mcp_server_name",
             "uk_mcp_tool_model_name",
-            "uk_mcp_tool_server_source_name"),
+            "uk_mcp_tool_server_source_name",
+            "uk_cloud_node_id_kind",
+            "uk_cloud_node_parent_name",
+            "uk_cloud_text_revision_current",
+            "uk_project_session_session",
+            "uk_issue_project_number",
+            "uk_issue_id_project",
+            "uk_issue_input_idempotency",
+            "uk_issue_run_issue_ordinal",
+            "uk_issue_run_id_issue",
+            "uk_issue_run_terminal_action",
+            "uk_issue_run_single_active",
+            "uk_issue_run_session_session"),
         indexes,
         "the final schema must expose only its declared domain unique keys");
 
@@ -1194,7 +1330,17 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " 'fk_canvas_function_run_node',"
                     + " 'fk_canvas_function_resource_pin_node',"
                     + " 'fk_chat_session_chat', 'fk_chat_session_session',"
-                    + " 'fk_canvas_session_canvas', 'fk_canvas_session_session', 'fk_mcp_tool_server')")) {
+                    + " 'fk_canvas_session_canvas', 'fk_canvas_session_session', 'fk_mcp_tool_server',"
+                    + " 'fk_cloud_node_parent', 'fk_cloud_node_blob',"
+                    + " 'fk_cloud_text_revision_node',"
+                    + " 'fk_project_coordinator', 'fk_project_session_project',"
+                    + " 'fk_project_session_session', 'fk_issue_project',"
+                    + " 'fk_issue_assignee', 'fk_issue_reviewer',"
+                    + " 'fk_issue_dependency_issue', 'fk_issue_dependency_depends_on',"
+                    + " 'fk_issue_input_issue', 'fk_issue_run_issue', 'fk_issue_run_agent',"
+                    + " 'fk_issue_run_submission', 'fk_issue_run_session_run',"
+                    + " 'fk_issue_run_session_session', 'fk_issue_controller_work_issue',"
+                    + " 'fk_harness_session_owner_guard_session')")) {
       while (rs.next()) {
         foreignKeys.add(rs.getString(1));
       }
@@ -1221,9 +1367,28 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_chat_session_session",
             "fk_canvas_session_canvas",
             "fk_canvas_session_session",
-            "fk_mcp_tool_server"),
+            "fk_mcp_tool_server",
+            "fk_cloud_node_parent",
+            "fk_cloud_node_blob",
+            "fk_cloud_text_revision_node",
+            "fk_project_coordinator",
+            "fk_project_session_project",
+            "fk_project_session_session",
+            "fk_issue_project",
+            "fk_issue_assignee",
+            "fk_issue_reviewer",
+            "fk_issue_dependency_issue",
+            "fk_issue_dependency_depends_on",
+            "fk_issue_input_issue",
+            "fk_issue_run_issue",
+            "fk_issue_run_agent",
+            "fk_issue_run_submission",
+            "fk_issue_run_session_run",
+            "fk_issue_run_session_session",
+            "fk_issue_controller_work_issue",
+            "fk_harness_session_owner_guard_session"),
         foreignKeys,
-        "all non-Harness ownership relations must be enforced by PostgreSQL");
+        "all declared ownership relations must be enforced by PostgreSQL");
   }
 
   @Test
