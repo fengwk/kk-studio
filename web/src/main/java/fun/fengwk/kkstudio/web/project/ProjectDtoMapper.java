@@ -31,28 +31,28 @@ public class ProjectDtoMapper {
 
   public static UUID parseUuid(String value, String fieldName) {
     if (value == null || !UUID_PATTERN.matcher(value.trim()).matches()) {
-      throw new IllegalArgumentException(fieldName + " must be a valid UUID string: " + value);
+      throw new IllegalArgumentException(fieldName + " must be a valid UUID string");
     }
     try {
       return UUID.fromString(value.trim().toLowerCase());
-    } catch (Exception e) {
-      throw new IllegalArgumentException(fieldName + " must be a valid UUID string: " + value, e);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(fieldName + " must be a valid UUID string");
     }
   }
 
   public static long parseNonNegativeLong(String value, String fieldName) {
     if (value == null || !DECIMAL_LONG_PATTERN.matcher(value.trim()).matches()) {
       throw new IllegalArgumentException(
-          fieldName + " must be a canonical non-negative decimal string: " + value);
+          fieldName + " must be a canonical non-negative decimal string");
     }
     try {
       long parsed = Long.parseLong(value.trim());
       if (parsed < 0) {
-        throw new IllegalArgumentException(fieldName + " must be non-negative: " + value);
+        throw new IllegalArgumentException(fieldName + " must be non-negative");
       }
       return parsed;
     } catch (NumberFormatException e) {
-      throw new IllegalArgumentException(fieldName + " exceeds long range: " + value, e);
+      throw new IllegalArgumentException(fieldName + " exceeds long range");
     }
   }
 

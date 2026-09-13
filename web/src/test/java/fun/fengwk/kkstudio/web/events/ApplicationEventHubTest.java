@@ -19,11 +19,13 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.platform.cloudfs.event.CloudFilesEventSource;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Sink;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Subscription;
+import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -47,6 +49,9 @@ class ApplicationEventHubTest {
   private static final UUID CANVAS = new UUID(0L, 2L);
   private static final ResourceKey THREAD_KEY = new ResourceKey(ResourceKind.THREAD, THREAD);
   private static final ResourceKey CANVAS_KEY = new ResourceKey(ResourceKind.CANVAS, CANVAS);
+  private static final ResourceKey PROJECTS_KEY = new ResourceKey(ResourceKind.PROJECTS, null);
+  private static final ResourceKey CLOUD_FILES_KEY =
+      new ResourceKey(ResourceKind.CLOUD_FILES, null);
 
   /** Hub 构造注入的缓冲上限：足够小以便测试溢出折叠路径，同时 > 1 覆盖多信号缓冲。 */
   private static final int BUFFER_CAPACITY = 8;
@@ -54,6 +59,8 @@ class ApplicationEventHubTest {
   private ThreadVersionEventSource threadVersionSource;
   private RealtimeEventSource realtimeSource;
   private CanvasVersionEventSource canvasVersionSource;
+  private ProjectInvalidationHub projectInvalidationHub;
+  private CloudFilesEventSource cloudFilesEventSource;
   private ApplicationEventHub hub;
 
   @BeforeEach
@@ -61,14 +68,23 @@ class ApplicationEventHubTest {
     threadVersionSource = mock(ThreadVersionEventSource.class);
     realtimeSource = mock(RealtimeEventSource.class);
     canvasVersionSource = mock(CanvasVersionEventSource.class);
+    projectInvalidationHub = mock(ProjectInvalidationHub.class);
+    cloudFilesEventSource = mock(CloudFilesEventSource.class);
     when(threadVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(5L, () -> {}));
     when(canvasVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(3L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(() -> {});
+    when(projectInvalidationHub.subscribe(any(), any())).thenReturn(() -> {});
+    when(cloudFilesEventSource.subscribe(any())).thenReturn(() -> {});
     hub =
         new ApplicationEventHub(
-            threadVersionSource, realtimeSource, canvasVersionSource, BUFFER_CAPACITY);
+            threadVersionSource,
+            realtimeSource,
+            canvasVersionSource,
+            projectInvalidationHub,
+            cloudFilesEventSource,
+            BUFFER_CAPACITY);
   }
 
   @Test
@@ -241,6 +257,58 @@ class ApplicationEventHubTest {
     canvasConsumer.get().accept(new CanvasVersionEventSource.Event(4L, false));
     assertEquals(List.of(new Signal.Version("6")), threadSignals);
     assertEquals(List.of(new Signal.Version("4")), canvasSignals);
+  }
+
+  @Test
+  void globalInvalidationResourcesFanOutAndReleaseTheirUpstreams() throws Exception {
+    AtomicReference<Consumer<UUID>> projectConsumer = new AtomicReference<>();
+    AtomicReference<Runnable> projectResync = new AtomicReference<>();
+    AtomicReference<Runnable> filesResync = new AtomicReference<>();
+    AutoCloseable projectHandle = mock(AutoCloseable.class);
+    AutoCloseable filesHandle = mock(AutoCloseable.class);
+    when(projectInvalidationHub.subscribe(any(), any()))
+        .thenAnswer(
+            inv -> {
+              projectConsumer.set(inv.getArgument(0));
+              projectResync.set(inv.getArgument(1));
+              return projectHandle;
+            });
+    when(cloudFilesEventSource.subscribe(any()))
+        .thenAnswer(
+            inv -> {
+              filesResync.set(inv.getArgument(0));
+              return filesHandle;
+            });
+
+    List<Signal> projectSignals = new ArrayList<>();
+    List<Signal> filesSignals = new ArrayList<>();
+    Subscription projectSubscription = hub.subscribe(PROJECTS_KEY, projectSignals::add);
+    Subscription filesSubscription = hub.subscribe(CLOUD_FILES_KEY, filesSignals::add);
+    assertEquals(0L, projectSubscription.cursor());
+    assertEquals(0L, filesSubscription.cursor());
+    projectSubscription.activate();
+    filesSubscription.activate();
+
+    UUID projectId = UUID.randomUUID();
+    projectConsumer.get().accept(projectId);
+    projectResync.get().run();
+    filesResync.get().run();
+    assertEquals(
+        List.of(new Signal.ProjectChanged(projectId), new Signal.Resync()), projectSignals);
+    assertEquals(List.of(new Signal.Resync()), filesSignals);
+
+    projectSubscription.close();
+    filesSubscription.close();
+    verify(projectHandle).close();
+    verify(filesHandle).close();
+  }
+
+  @Test
+  void resourceKeysEnforceVersionedAndGlobalShapes() {
+    assertThrows(NullPointerException.class, () -> new ResourceKey(ResourceKind.THREAD, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ResourceKey(ResourceKind.PROJECTS, UUID.randomUUID()));
   }
 
   @Test

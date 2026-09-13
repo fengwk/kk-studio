@@ -10,6 +10,7 @@ export interface CloudNodeDTO {
   mediaType: string | null
   sizeBytes: string | null
   sha256: string | null
+  revision: string | null
   createdAt: string | null
   updatedAt: string | null
 }

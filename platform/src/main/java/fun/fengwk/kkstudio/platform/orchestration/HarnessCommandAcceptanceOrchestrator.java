@@ -152,44 +152,42 @@ public class HarnessCommandAcceptanceOrchestrator {
     switch (owner.type()) {
       case CHAT -> {
         if (chatRepository.lockForKeyShare(owner.id()) == null) {
-          throw new IllegalArgumentException("chat " + owner.id() + " does not exist");
+          throw new IllegalArgumentException("Chat owner does not exist");
         }
       }
       case CANVAS -> {
         if (canvasStore.lockDocumentForKeyShare(owner.id()).isEmpty()) {
-          throw new IllegalArgumentException("canvas " + owner.id() + " does not exist");
+          throw new IllegalArgumentException("Canvas owner does not exist");
         }
       }
       case PROJECT -> {
         if (projectRepository.lockForKeyShare(owner.id()) == null) {
-          throw new IllegalArgumentException("project " + owner.id() + " does not exist");
+          throw new IllegalArgumentException("Project owner does not exist");
         }
       }
       case ISSUE_RUN -> {
         IssueRun run = issueRunRepository.getById(owner.id());
         if (run == null) {
-          throw new IllegalArgumentException("issue run " + owner.id() + " does not exist");
+          throw new IllegalArgumentException("Issue run owner does not exist");
         }
         Issue issue = issueRepository.getById(run.getIssueId());
         if (issue == null) {
-          throw new IllegalArgumentException("issue " + run.getIssueId() + " does not exist");
+          throw new IllegalArgumentException("Issue owner does not exist");
         }
         UUID projectId = issue.getProjectId();
         if (projectRepository.lockForKeyShare(projectId) == null) {
-          throw new IllegalArgumentException("project " + projectId + " does not exist");
+          throw new IllegalArgumentException("Project owner does not exist");
         }
         Issue lockedIssue = issueRepository.lockById(issue.getId());
         if (lockedIssue == null || !lockedIssue.getProjectId().equals(projectId)) {
-          throw new IllegalArgumentException(
-              "issue " + issue.getId() + " does not belong to project " + projectId);
+          throw new IllegalArgumentException("Issue owner hierarchy is inconsistent");
         }
         IssueRun lockedRun = issueRunRepository.lockById(owner.id());
         if (lockedRun == null || !lockedRun.getIssueId().equals(issue.getId())) {
-          throw new IllegalArgumentException(
-              "issue run " + owner.id() + " does not belong to issue " + issue.getId());
+          throw new IllegalArgumentException("Issue run owner hierarchy is inconsistent");
         }
         if (lockedRun.getActorType() != IssueRunActorType.AGENT) {
-          throw new IllegalArgumentException("issue run " + owner.id() + " is not an AGENT run");
+          throw new IllegalArgumentException("Issue run owner is not an AGENT run");
         }
       }
     }
@@ -199,7 +197,7 @@ public class HarnessCommandAcceptanceOrchestrator {
   private UUID findSessionId(UUID threadId) {
     return requireStore()
         .transaction(tx -> tx.findThread(threadId).map(ThreadState::sessionId))
-        .orElseThrow(() -> new IllegalArgumentException("thread " + threadId + " does not exist"));
+        .orElseThrow(() -> new IllegalArgumentException("Thread does not exist"));
   }
 
   /** 归属校验：目标 Session 必须已由该 owner 的 relation 行持有（四类互斥由 relation 唯一存在性保证）。 */
@@ -208,25 +206,25 @@ public class HarnessCommandAcceptanceOrchestrator {
       case CHAT -> {
         ChatSession relation = chatSessionRepository.findBySessionId(sessionId);
         if (relation == null || !relation.chatId().equals(owner.id())) {
-          throw new IllegalArgumentException("session " + sessionId + " is not owned by " + owner);
+          throw new IllegalArgumentException("Session ownership is inconsistent");
         }
       }
       case CANVAS -> {
         CanvasSession relation = canvasSessionRepository.findBySessionId(sessionId);
         if (relation == null || !relation.canvasId().equals(owner.id())) {
-          throw new IllegalArgumentException("session " + sessionId + " is not owned by " + owner);
+          throw new IllegalArgumentException("Session ownership is inconsistent");
         }
       }
       case PROJECT -> {
         ProjectSession relation = projectSessionRepository.findBySessionId(sessionId);
         if (relation == null || !relation.getProjectId().equals(owner.id())) {
-          throw new IllegalArgumentException("session " + sessionId + " is not owned by " + owner);
+          throw new IllegalArgumentException("Session ownership is inconsistent");
         }
       }
       case ISSUE_RUN -> {
         IssueRunSession relation = issueRunSessionRepository.findBySessionId(sessionId);
         if (relation == null || !relation.getRunId().equals(owner.id())) {
-          throw new IllegalArgumentException("session " + sessionId + " is not owned by " + owner);
+          throw new IllegalArgumentException("Session ownership is inconsistent");
         }
       }
     }
@@ -265,12 +263,10 @@ public class HarnessCommandAcceptanceOrchestrator {
             case ISSUE_RUN -> issueRunSessionRepository.bindSession(owner.id(), sessionId);
           };
     } catch (DataIntegrityViolationException e) {
-      throw new IllegalStateException(
-          "session " + sessionId + " is already owned or could not be bound to " + owner, e);
+      throw new IllegalStateException("Session is already owned or could not be bound");
     }
     if (!bound) {
-      throw new IllegalStateException(
-          "session " + sessionId + " is already owned or could not be bound to " + owner);
+      throw new IllegalStateException("Session is already owned or could not be bound");
     }
   }
 
@@ -322,8 +318,7 @@ public class HarnessCommandAcceptanceOrchestrator {
     try {
       ready = uploadService.lockReady(uploadId);
     } catch (StorageResourceNotFoundException | StorageVerificationException error) {
-      throw new IllegalArgumentException(
-          "attachment upload " + uploadId + " cannot be consumed: " + error.getMessage(), error);
+      throw new IllegalArgumentException("Attachment upload cannot be consumed");
     }
     refManager.retainRef(sessionId, ready.blobId());
     uploadService.delete(uploadId);
@@ -339,8 +334,7 @@ public class HarnessCommandAcceptanceOrchestrator {
           "global storage is not enabled; resource content is unavailable");
     }
     if (!refManager.contains(sessionId, resource.blobId())) {
-      throw new IllegalArgumentException(
-          "resource blob " + resource.blobId() + " is not owned by session " + sessionId);
+      throw new IllegalArgumentException("Resource is not owned by the current session");
     }
     return resource;
   }

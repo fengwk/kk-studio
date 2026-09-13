@@ -1,8 +1,9 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
 import { storageService, type StorageService } from '@/shared/api/storage-service'
-import { decodeCloudFileSnapshot } from './codecs'
+import { decodeCloudFileSnapshot, decodeCloudNode } from './codecs'
 import type {
   CloudFileSnapshotDTO,
+  CloudNodeDTO,
   CreateDirectoryRequest,
   DeleteNodeParams,
   MountBlobRequest,
@@ -36,8 +37,9 @@ export function createCloudFilesApi(options: CloudFilesApiOptions = {}) {
       return decodeCloudFileSnapshot(raw)
     },
 
-    saveText: async (request: SaveTextRequest): Promise<void> => {
-      await client.put('/cloud/text', request)
+    saveText: async (request: SaveTextRequest): Promise<CloudNodeDTO> => {
+      const raw = await client.put<unknown>('/cloud/text', request)
+      return decodeCloudNode(raw)
     },
 
     patchText: async (request: PatchTextRequest): Promise<void> => {

@@ -45,9 +45,9 @@ import fun.fengwk.kkstudio.share.project.ReviewIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateIssueRequestDTO;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -61,7 +61,6 @@ public class StudioIssueController {
   private final IssueRunService issueRunService;
   private final HarnessOwnerQueryService harnessOwnerQueryService;
   private final ProjectDtoMapper mapper;
-  private final ProjectInvalidationHub invalidationHub;
 
   @PostMapping("/api/projects/{projectId}/issues")
   public ResponseEntity<Result<IssueDTO>> createIssue(
@@ -70,7 +69,7 @@ public class StudioIssueController {
     UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
     IssueStatus initialStatus =
         request.getInitialStatus() != null && !request.getInitialStatus().isBlank()
-            ? IssueStatus.valueOf(request.getInitialStatus().trim().toUpperCase())
+            ? parseEnum(request.getInitialStatus(), IssueStatus.class, "initialStatus")
             : null;
 
     Issue created =
@@ -82,7 +81,6 @@ public class StudioIssueController {
             request.getReviewerAgentName(),
             initialStatus);
 
-    invalidationHub.publishChange(projectId);
     return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(created)));
   }
 
@@ -91,7 +89,7 @@ public class StudioIssueController {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     Issue issue = issueService.getIssue(issueId);
     if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
 
     boolean blocked = issueService.isBlocked(issueId);
@@ -146,7 +144,6 @@ public class StudioIssueController {
             request.getAssigneeAgentName(),
             request.getReviewerAgentName());
 
-    invalidationHub.publishChange(updated.getProjectId());
     return Results.ok(mapper.toDto(updated));
   }
 
@@ -160,10 +157,9 @@ public class StudioIssueController {
     if (request.getStatus() == null || request.getStatus().isBlank()) {
       throw new IllegalArgumentException("status must not be blank");
     }
-    IssueStatus targetStatus = IssueStatus.valueOf(request.getStatus().trim().toUpperCase());
+    IssueStatus targetStatus = parseEnum(request.getStatus(), IssueStatus.class, "status");
     Issue updated = issueService.setStatus(issueId, expectedVersion, targetStatus);
 
-    invalidationHub.publishChange(updated.getProjectId());
     return Results.ok(mapper.toDto(updated));
   }
 
@@ -177,21 +173,8 @@ public class StudioIssueController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
 
-    Issue issue = issueService.getIssue(issueId);
-    if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
-    }
-    issueService.addDependency(issueId, dependsOnIssueId, expectedVersion);
-    invalidationHub.publishChange(issue.getProjectId());
-
-    IssueDependencyDTO added =
-        IssueDependencyDTO.builder()
-            .issueId(ProjectDtoMapper.formatUuid(issueId))
-            .dependsOnIssueId(ProjectDtoMapper.formatUuid(dependsOnIssueId))
-            .projectId(ProjectDtoMapper.formatUuid(issue.getProjectId()))
-            .createdAt(ProjectDtoMapper.formatInstant(Instant.now()))
-            .build();
-    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(added));
+    IssueDependency added = issueService.addDependency(issueId, dependsOnIssueId, expectedVersion);
+    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(added)));
   }
 
   @DeleteMapping("/api/issues/{issueId}/dependencies/{dependsOnIssueId}")
@@ -204,12 +187,7 @@ public class StudioIssueController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(expectedVersionStr, "expectedVersion");
 
-    Issue issue = issueService.getIssue(issueId);
-    if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
-    }
     issueService.removeDependency(issueId, dependsOnIssueId, expectedVersion);
-    invalidationHub.publishChange(issue.getProjectId());
     return ResponseEntity.noContent().build();
   }
 
@@ -222,17 +200,13 @@ public class StudioIssueController {
     }
     IssueInputKind kind =
         request.getKind() != null && !request.getKind().isBlank()
-            ? IssueInputKind.valueOf(request.getKind().trim().toUpperCase())
+            ? parseEnum(request.getKind(), IssueInputKind.class, "kind")
             : IssueInputKind.HUMAN;
 
     IssueInput input =
         issueService.appendInput(
             issueId, kind, request.getBody().trim(), request.getIdempotencyKey());
 
-    Issue issue = issueService.getIssue(issueId);
-    if (issue != null) {
-      invalidationHub.publishChange(issue.getProjectId());
-    }
     return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(input)));
   }
 
@@ -243,11 +217,11 @@ public class StudioIssueController {
     if (request.getDecision() == null || request.getDecision().isBlank()) {
       throw new IllegalArgumentException("decision must not be blank");
     }
-    ReviewDecision decision = ReviewDecision.valueOf(request.getDecision().trim().toUpperCase());
+    ReviewDecision decision = parseEnum(request.getDecision(), ReviewDecision.class, "decision");
 
     Issue issue = issueService.getIssue(issueId);
     if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
 
     long observedSpec =
@@ -275,7 +249,6 @@ public class StudioIssueController {
             request.getSummary(),
             request.getVerification());
 
-    invalidationHub.publishChange(issue.getProjectId());
     return Results.ok(mapper.toSummaryDto(reviewerRun));
   }
 
@@ -286,7 +259,6 @@ public class StudioIssueController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue cancelled = issueService.cancelIssue(issueId, expectedVersion, request.getReason());
-    invalidationHub.publishChange(cancelled.getProjectId());
     return Results.ok(mapper.toDto(cancelled));
   }
 
@@ -295,10 +267,6 @@ public class StudioIssueController {
       @PathVariable("issueId") String issueIdStr, @RequestBody RetryIssueRequestDTO request) {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     IssueInput input = issueRunService.retryRun(issueId, request.getIdempotencyKey());
-    Issue issue = issueService.getIssue(issueId);
-    if (issue != null) {
-      invalidationHub.publishChange(issue.getProjectId());
-    }
     return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(input)));
   }
 
@@ -309,7 +277,6 @@ public class StudioIssueController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue archived = issueService.archiveIssue(issueId, expectedVersion);
-    invalidationHub.publishChange(archived.getProjectId());
     return Results.ok(mapper.toDto(archived));
   }
 
@@ -320,7 +287,6 @@ public class StudioIssueController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue unarchived = issueService.unarchiveIssue(issueId, expectedVersion);
-    invalidationHub.publishChange(unarchived.getProjectId());
     return Results.ok(mapper.toDto(unarchived));
   }
 
@@ -329,6 +295,16 @@ public class StudioIssueController {
       return null;
     }
     List<HarnessSessionSummaryDTO> sessions = harnessOwnerQueryService.listIssueRunSessions(runId);
-    return sessions.isEmpty() ? null : UUID.fromString(sessions.get(0).getSessionId());
+    return sessions.isEmpty()
+        ? null
+        : ProjectDtoMapper.parseUuid(sessions.get(0).getSessionId(), "sessionId");
+  }
+
+  private static <E extends Enum<E>> E parseEnum(String value, Class<E> type, String fieldName) {
+    try {
+      return Enum.valueOf(type, value.trim().toUpperCase(Locale.ROOT));
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(fieldName + " is invalid");
+    }
   }
 }

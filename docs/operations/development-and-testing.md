@@ -517,13 +517,13 @@ python3 scripts/security/check-sensitive-data.py
 git diff --check
 ```
 
-`--docs` 必须以 `Total registered: 95` 结束；精确 case inventory、标题和
+`--docs` 必须以 `Total registered: 98` 结束；精确 case inventory、标题和
 requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局、Markdown
 链接、H1、源码路径和旧词守卫。敏感数据门禁扫描当前 tracked 文件和非 ignored
 未跟踪文件，覆盖高置信密钥、Webhook、个人绝对路径和已知私有环境标识；命中时
 只输出规则与 `path:line`。该入口不扫描 Git 历史，历史审计是公开策略中的独立步骤。
 
-## 8. E2E：API levels、flags 和当前 95-case matrix
+## 8. E2E：API levels、flags 和当前 98-case matrix
 
 ### 8.1 入口和 flags
 
@@ -607,7 +607,7 @@ Daemon environment root 默认是其下的 `environment`，可由
 
 | Level | 注册数 | 默认/开关 | 当前覆盖 |
 | --- | ---: | --- | --- |
-| L1 | 75 | 默认执行 71（单实例带 `--frontend-url`；distributed 模式不含 `frontend.proxy_model_contract`，为 68）；storage/function/attachment case 需显式开关 | 免费 API contract、CRUD、Environment Skill 来源/操作、MCP JSON/Local 发现操作、Session/Thread（含默认名派生与重命名持久化）、command batch、CAS、idempotency、i18n、model attempt、Canvas API |
+| L1 | 78 | 默认执行 74（单实例带 `--frontend-url`；distributed 模式不含 frontend proxy 与两个 host-mock case，为 71）；storage/function/attachment case 需显式开关 | 免费 API contract、CRUD、Project/Issue、Cloud Files、Environment Skill 来源/操作、MCP JSON/Local 发现操作、Session/Thread（含默认名派生与重命名持久化）、command batch、CAS、idempotency、i18n、全局 invalidation、model attempt、Canvas API |
 | L2 | 10 | `--real` 默认选择四模型文本缓存、多推理级别烟雾与 stop；task delegation 还需 `--with-tools` | 四模型文本与 Prompt Cache、四模型多推理级别烟雾、真实 task delegation、stop partial/replay/continue |
 | L3 | 1 | `--real --with-branch` | 同 Session `NEW_THREAD` 分支 Thread |
 | L4 | 6 | `--with-tools`；四模型 Tool 需再加 `--real`，Resource 外部化需再加 `--with-canvas-storage` | Environment READY 与 capability 投影、四模型 terminal replay、approval 后 Resource 外部化 |
@@ -618,12 +618,13 @@ L1 的默认关闭 categories 是 storage upload、attachment 和 fake Function�
 它们分别需要 `--with-canvas-storage` 或 `--with-canvas-function`。
 
 因此 `--with-canvas-function` 会同时打开 storage、fake Function、rebuild，
-让 L1 的 75 个 case 都可选择；它不等于真实 Provider。
+让 L1 的 78 个 case 都可选择；它不等于真实 Provider。
 
 ### 8.3 API categories 与精确 inventory
 
-L1 的 categories 是 seed/catalog、Thread command、CRUD、Environment Skill 来源/操作、MCP JSON/Local 发现操作、i18n、settings/events、
-model attempt 和 Canvas API；storage、attachment 和 fake Function 由显式开关
+L1 的 categories 是 seed/catalog、Thread command、CRUD、Project/Issue、
+Cloud Files、Environment Skill 来源/操作、MCP JSON/Local 发现操作、i18n、
+settings/events、model attempt 和 Canvas API；storage、attachment 和 fake Function 由显式开关
 启用。L2 的 categories 是真实文本 turn、多推理级别烟雾、task delegation 和 stop/partial/replay；
 L3 是同一 Session 的 `NEW_THREAD` 分支；L4 是 Environment READY 与原子 capability
 投影、approval 和 Resource externalization；L5 是双节点分布式 mock topology，
@@ -636,7 +637,7 @@ L3 是同一 Session 的 `NEW_THREAD` 分支；L4 是 Environment READY 与原�
 ### 8.4 UI matrix：注册 39，默认 36
 
 UI 由 `scripts/e2e/ui-smoke.mjs`、`scripts/e2e/ui/composer-matrix.mjs` 和
-`scripts/e2e/ui/workspace-contracts.mjs` 注册；它不是 95 个 API case 的一部分。
+`scripts/e2e/ui/workspace-contracts.mjs` 注册；它不是 98 个 API case 的一部分。
 UI categories 是页面/runtime、Composer/debug 和 Workspace contract；`--ui` 是
 总 gate，默认执行 36 项无成本/无 daemon 用例；`--with-tools` 增加 2 项
 （Agent-owned Environment Chat 创建与 ToolCard approval/layout），`--real` 增加 1 项真实

@@ -464,7 +464,7 @@ class IssueRunServiceDefensiveUnitTest {
     when(activeRun.runs.lockActiveByIssueId(issueId))
         .thenReturn(run(UUID.randomUUID(), issueId, IssueRunRole.EXECUTOR));
     assertValidation(
-        "Cannot retry while an active run exists for issue " + issueId,
+        "Cannot retry while an active run exists",
         () -> activeRun.service.retryRun(issueId, "retry"));
 
     Fixture sequenceFailure = retryFixture(issueId);

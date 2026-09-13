@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
 import fun.fengwk.kkstudio.platform.project.model.IssueInput;
 import fun.fengwk.kkstudio.platform.project.model.IssueInputKind;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
@@ -57,7 +58,6 @@ class StudioIssueControllerTest {
   private IssueService issueService;
   private IssueRunService issueRunService;
   private HarnessOwnerQueryService queryService;
-  private ProjectInvalidationHub invalidationHub;
 
   private MockMvc mockMvc;
   private final ObjectMapper objectMapper = ObjectMapperHolder.getInstance();
@@ -70,11 +70,10 @@ class StudioIssueControllerTest {
     issueService = mock(IssueService.class);
     issueRunService = mock(IssueRunService.class);
     queryService = mock(HarnessOwnerQueryService.class);
-    invalidationHub = mock(ProjectInvalidationHub.class);
 
     StudioIssueController controller =
         new StudioIssueController(
-            issueService, issueRunService, queryService, new ProjectDtoMapper(), invalidationHub);
+            issueService, issueRunService, queryService, new ProjectDtoMapper());
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
@@ -111,8 +110,6 @@ class StudioIssueControllerTest {
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.data.id").value(issueId.toString().toLowerCase()))
         .andExpect(jsonPath("$.data.number").value("1"));
-
-    verify(invalidationHub).publishChange(projectId);
   }
 
   @Test
@@ -194,7 +191,7 @@ class StudioIssueControllerTest {
 
     // CAS 409
     when(issueService.updateIssue(eq(issueId), eq(99L), any(), any(), any(), any()))
-        .thenThrow(new AiVersionConflictException("issue", issueId.toString(), "99", "100"));
+        .thenThrow(new AiVersionConflictException("issue", "99", "100"));
 
     mockMvc
         .perform(
@@ -231,16 +228,37 @@ class StudioIssueControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("DONE"));
+  }
 
-    verify(invalidationHub).publishChange(projectId);
+  @Test
+  void rejectsInvalidEnumWithoutEchoingTheInput() throws Exception {
+    // 测试意图：非法枚举输入返回固定诊断，异常链与响应均不得回显原始输入。
+    ChangeIssueStatusRequestDTO request =
+        ChangeIssueStatusRequestDTO.builder()
+            .expectedVersion("2")
+            .status("sensitive-status-value")
+            .build();
+
+    mockMvc
+        .perform(
+            post("/api/issues/" + issueId + "/status")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsBytes(request)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errors.detail").value("status is invalid"));
   }
 
   @Test
   void testDependenciesAddAndRemove() throws Exception {
-    Issue issue = Issue.builder().id(issueId).projectId(projectId).version(1L).build();
-    when(issueService.getIssue(issueId)).thenReturn(issue);
-
     UUID depId = UUID.randomUUID();
+    IssueDependency dependency =
+        IssueDependency.builder()
+            .issueId(issueId)
+            .dependsOnIssueId(depId)
+            .projectId(projectId)
+            .createdAt(now)
+            .build();
+    when(issueService.addDependency(issueId, depId, 1L)).thenReturn(dependency);
     AddIssueDependencyRequestDTO addReq =
         AddIssueDependencyRequestDTO.builder()
             .dependsOnIssueId(depId.toString())
@@ -257,7 +275,6 @@ class StudioIssueControllerTest {
         .andExpect(jsonPath("$.data.dependsOnIssueId").value(depId.toString().toLowerCase()));
 
     verify(issueService).addDependency(issueId, depId, 1L);
-    verify(invalidationHub).publishChange(projectId);
 
     mockMvc
         .perform(delete("/api/issues/" + issueId + "/dependencies/" + depId + "?expectedVersion=1"))
@@ -293,8 +310,6 @@ class StudioIssueControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.data.body").value("Please check logs"));
-
-    verify(invalidationHub).publishChange(projectId);
   }
 
   @Test
@@ -347,8 +362,6 @@ class StudioIssueControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.role").value("REVIEWER"))
         .andExpect(jsonPath("$.data.outcome").value("APPROVED"));
-
-    verify(invalidationHub).publishChange(projectId);
   }
 
   @Test

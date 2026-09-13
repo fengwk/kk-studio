@@ -155,6 +155,7 @@ export function decodeCloudNode(value: unknown, pathContext = 'node'): CloudNode
   const mediaType = requireNullableString(obj.mediaType, `${pathContext}.mediaType`)
   const sizeBytes = requireNullableDecimalLong(obj.sizeBytes, `${pathContext}.sizeBytes`)
   const sha256 = requireNullableSha256(obj.sha256, `${pathContext}.sha256`)
+  const revision = requireNullableDecimalLong(obj.revision, `${pathContext}.revision`)
   const createdAt = requireNullableString(obj.createdAt, `${pathContext}.createdAt`)
   const updatedAt = requireNullableString(obj.updatedAt, `${pathContext}.updatedAt`)
 
@@ -168,6 +169,7 @@ export function decodeCloudNode(value: unknown, pathContext = 'node'): CloudNode
     mediaType,
     sizeBytes,
     sha256,
+    revision,
     createdAt,
     updatedAt,
   }

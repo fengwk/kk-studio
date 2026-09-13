@@ -24,8 +24,7 @@ import java.util.Map;
 /**
  * Project / Issue REST 控制器全局统一错误处理器。
  *
- * <p>安全契约：严禁在响应或日志中回显 issue input 正文、幂等键、认证凭证或非预期的敏感属性。 409 冲突响应仅透出资源类型、资源 ID 以及期望与实际版本对比，协助前端判断
- * CAS 重试。
+ * <p>安全契约：严禁在响应或日志中回显 issue input 正文、幂等键、认证凭证或非预期的敏感属性。409 冲突响应仅透出资源类型以及期望与实际版本对比，协助前端判断 CAS 重试。
  */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(
@@ -78,15 +77,22 @@ public class StudioProjectErrorAdvice {
         ctx);
   }
 
-  @ExceptionHandler({
-    AiValidationException.class,
-    IllegalArgumentException.class,
-    IllegalStateException.class
-  })
+  @ExceptionHandler({AiValidationException.class, IllegalArgumentException.class})
   public ResponseEntity<Result<Void>> handleValidation(RuntimeException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("detail", error.getMessage());
     return build(HttpStatus.BAD_REQUEST, "PROJECT_VALIDATION_ERROR", error.getMessage(), ctx);
+  }
+
+  @ExceptionHandler(IllegalStateException.class)
+  public ResponseEntity<Result<Void>> handleIllegalState(IllegalStateException error) {
+    Map<String, Object> ctx = new LinkedHashMap<>();
+    ctx.put("detail", "Project operation failed");
+    return build(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        "PROJECT_INTERNAL_ERROR",
+        "Project operation failed",
+        ctx);
   }
 
   @ExceptionHandler({MethodArgumentNotValidException.class, BindException.class})

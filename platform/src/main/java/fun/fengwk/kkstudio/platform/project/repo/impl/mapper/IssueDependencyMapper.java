@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.platform.project.repo.impl.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import org.apache.ibatis.annotations.Delete;
-import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Result;
 import org.apache.ibatis.annotations.ResultMap;
@@ -12,18 +12,21 @@ import org.apache.ibatis.annotations.Select;
 
 import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueDependencyDO;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
 @Mapper
 public interface IssueDependencyMapper extends BaseMapper {
 
-  @Insert(
+  @Select(
       """
       insert into issue_dependency (issue_id, depends_on_issue_id, project_id, created_at)
       values (#{issueId}, #{dependsOnIssueId}, #{projectId}, clock_timestamp())
+      returning created_at
       """)
-  int insert(IssueDependencyDO dependency);
+  @Options(useCache = false, flushCache = Options.FlushCachePolicy.TRUE)
+  Instant insert(IssueDependencyDO dependency);
 
   @Delete(
       """

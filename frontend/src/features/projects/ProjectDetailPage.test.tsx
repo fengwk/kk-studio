@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ApiError } from '@/shared/api/client'
 import { ProjectDetailPage } from './ProjectDetailPage'
 import type { ProjectsApi } from './projects-api'
 import type { IssueDetailDTO, ProjectSnapshotDTO } from './types'
+import { notifyProjectsChanged } from './useProjectsInvalidation'
 
 describe('ProjectDetailPage', () => {
   const projectId = 'a0000000-0000-0000-0000-000000000001'
@@ -411,6 +412,47 @@ describe('ProjectDetailPage', () => {
     })
   })
 
+  it('preserves an Issue spec draft while project invalidation refreshes its detail', async () => {
+    // 测试意图：跨节点 Issue 失效应刷新详情，但编辑中的规格草稿继续使用原 CAS 基线。
+    const refreshedDetail: IssueDetailDTO = {
+      ...mockIssueDetail,
+      issue: {
+        ...mockIssueDetail.issue,
+        title: 'Server-side issue title',
+        version: '3',
+      },
+    }
+    const api = createMockApi({
+      getIssue: vi.fn()
+        .mockResolvedValueOnce(mockIssueDetail)
+        .mockResolvedValue(refreshedDetail),
+      updateIssue: vi.fn().mockResolvedValue(mockIssueDetail.issue),
+    })
+    render(<ProjectDetailPage projectId={projectId} api={api} />)
+
+    await screen.findByText('Implement REST API')
+    fireEvent.click(screen.getByLabelText('Issue #2 Implement REST API'))
+    await screen.findByText('编辑规格')
+    fireEvent.click(screen.getByText('编辑规格'))
+    const titleInput = screen.getByLabelText(/标题/i)
+    fireEvent.change(titleInput, { target: { value: 'Unsaved Issue draft' } })
+
+    act(() => notifyProjectsChanged({ projectId }))
+    await waitFor(() => expect(api.getIssue).toHaveBeenCalledTimes(2))
+    expect(titleInput).toHaveValue('Unsaved Issue draft')
+
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
+    await waitFor(() => {
+      expect(api.updateIssue).toHaveBeenCalledWith(
+        mockIssueDetail.issue.id,
+        expect.objectContaining({
+          expectedVersion: mockIssueDetail.issue.version,
+          title: 'Unsaved Issue draft',
+        }),
+      )
+    })
+  })
+
   it('sends command in CoordinatorConversation with canonical UUID idempotencyKey', async () => {
     // 测试意图：验证 Coordinator 对话框发送命令时构造正确的 UUID 幂等键并调用 sendProjectCommand
     const api = createMockApi()
@@ -618,6 +660,73 @@ describe('ProjectDetailPage', () => {
     expect(onBack).toHaveBeenCalledTimes(1)
   })
 
+  it('preserves the project edit draft when an invalidation refreshes the snapshot', async () => {
+    // 测试意图：后台变更只刷新权威页面快照，不得重置正在编辑的项目草稿或偷换 CAS 基线。
+    const refreshedSnapshot: ProjectSnapshotDTO = {
+      ...mockSnapshot,
+      project: {
+        ...mockSnapshot.project,
+        title: 'Server-side title',
+        version: '3',
+      },
+    }
+    const api = createMockApi({
+      getProjectSnapshot: vi.fn()
+        .mockResolvedValueOnce(mockSnapshot)
+        .mockResolvedValue(refreshedSnapshot),
+    })
+    render(<ProjectDetailPage projectId={projectId} api={api} />)
+
+    await screen.findByText('Awesome Platform')
+    fireEvent.click(screen.getByRole('button', { name: /编辑/i }))
+    const titleInput = screen.getByLabelText(/项目名称/i)
+    fireEvent.change(titleInput, { target: { value: 'Unsaved project draft' } })
+
+    act(() => notifyProjectsChanged({ projectId }))
+    await waitFor(() => expect(api.getProjectSnapshot).toHaveBeenCalledTimes(2))
+    expect(titleInput).toHaveValue('Unsaved project draft')
+
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
+    await waitFor(() => {
+      expect(api.updateProject).toHaveBeenCalledWith(
+        projectId,
+        expect.objectContaining({
+          expectedVersion: mockSnapshot.project.version,
+          title: 'Unsaved project draft',
+        }),
+      )
+    })
+  })
+
+  it('ignores a stale snapshot response after a newer invalidation reload', async () => {
+    // 测试意图：并发 Snapshot 请求乱序完成时，只允许最新请求更新页面。
+    let resolveInitial!: (snapshot: ProjectSnapshotDTO) => void
+    const initial = new Promise<ProjectSnapshotDTO>((resolve) => {
+      resolveInitial = resolve
+    })
+    const latestSnapshot: ProjectSnapshotDTO = {
+      ...mockSnapshot,
+      project: { ...mockSnapshot.project, title: 'Latest Snapshot' },
+    }
+    const api = createMockApi({
+      getProjectSnapshot: vi.fn().mockReturnValueOnce(initial).mockResolvedValue(latestSnapshot),
+    })
+    render(<ProjectDetailPage projectId={projectId} api={api} />)
+
+    act(() => notifyProjectsChanged({ projectId }))
+    expect(await screen.findByText('Latest Snapshot')).toBeInTheDocument()
+
+    await act(async () => {
+      resolveInitial({
+        ...mockSnapshot,
+        project: { ...mockSnapshot.project, title: 'Stale Snapshot' },
+      })
+      await initial
+    })
+    expect(screen.getByText('Latest Snapshot')).toBeInTheDocument()
+    expect(screen.queryByText('Stale Snapshot')).not.toBeInTheDocument()
+  })
+
   it('edits and deletes project from detail page header actions', async () => {
     // 测试意图：验证在详情页顶部直接编辑项目与删除项目（级联触发 onBack）流程
     const onBack = vi.fn()
@@ -755,5 +864,8 @@ describe('ProjectDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Coordinator offline')).toBeInTheDocument()
     })
+    expect(
+      screen.queryByText('Trigger prompt', { selector: '.coordinator-bubble' }),
+    ).not.toBeInTheDocument()
   })
 })

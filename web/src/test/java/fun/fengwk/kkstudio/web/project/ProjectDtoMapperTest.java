@@ -42,8 +42,11 @@ class ProjectDtoMapperTest {
 
     assertThrows(IllegalArgumentException.class, () -> ProjectDtoMapper.parseUuid(null, "id"));
     assertThrows(IllegalArgumentException.class, () -> ProjectDtoMapper.parseUuid("", "id"));
-    assertThrows(
-        IllegalArgumentException.class, () -> ProjectDtoMapper.parseUuid("invalid-uuid", "id"));
+    IllegalArgumentException invalidUuid =
+        assertThrows(
+            IllegalArgumentException.class, () -> ProjectDtoMapper.parseUuid("invalid-uuid", "id"));
+    assertEquals("id must be a valid UUID string", invalidUuid.getMessage());
+    assertNull(invalidUuid.getCause());
   }
 
   @Test
@@ -66,9 +69,12 @@ class ProjectDtoMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> ProjectDtoMapper.parseNonNegativeLong("1.5", "version"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ProjectDtoMapper.parseNonNegativeLong("9999999999999999999999999999", "version"));
+    IllegalArgumentException overflow =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> ProjectDtoMapper.parseNonNegativeLong("9999999999999999999999999999", "version"));
+    assertEquals("version exceeds long range", overflow.getMessage());
+    assertNull(overflow.getCause());
   }
 
   @Test

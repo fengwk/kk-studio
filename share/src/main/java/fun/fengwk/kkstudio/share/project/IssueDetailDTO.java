@@ -30,6 +30,6 @@ public class IssueDetailDTO {
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("unknown field: " + name);
+    throw new IllegalArgumentException("Unknown response field");
   }
 }

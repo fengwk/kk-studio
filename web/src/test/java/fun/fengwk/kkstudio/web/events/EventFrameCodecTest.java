@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.events;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,9 @@ class EventFrameCodecTest {
   private static final UUID CANVAS = new UUID(0L, 2L);
   private static final ResourceKey THREAD_KEY = new ResourceKey(ResourceKind.THREAD, THREAD);
   private static final ResourceKey CANVAS_KEY = new ResourceKey(ResourceKind.CANVAS, CANVAS);
+  private static final ResourceKey PROJECTS_KEY = new ResourceKey(ResourceKind.PROJECTS, null);
+  private static final ResourceKey CLOUD_FILES_KEY =
+      new ResourceKey(ResourceKind.CLOUD_FILES, null);
   private static final EventFrameCodec CODEC = new EventFrameCodec(new RealtimeEventJsonCodec());
 
   @Test
@@ -38,6 +42,15 @@ class EventFrameCodecTest {
             "{\"version\":1,\"type\":\"unsubscribe\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
                 + CANVAS
                 + "\"}}"));
+    assertEquals(
+        new EventFrameCodec.ClientFrame(EventFrameCodec.ClientFrame.Type.SUBSCRIBE, PROJECTS_KEY),
+        CODEC.decode(
+            "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"projects\"}}"));
+    assertEquals(
+        new EventFrameCodec.ClientFrame(
+            EventFrameCodec.ClientFrame.Type.UNSUBSCRIBE, CLOUD_FILES_KEY),
+        CODEC.decode(
+            "{\"version\":1,\"type\":\"unsubscribe\",\"resource\":{\"kind\":\"cloud-files\"}}"));
   }
 
   @Test
@@ -111,9 +124,12 @@ class EventFrameCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.decode(prefix + "{\"kind\":\"agent\",\"id\":\"" + THREAD + "\"}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> CODEC.decode(prefix + "{\"kind\":\"thread\",\"id\":\"not-a-uuid\"}}"));
+    IllegalArgumentException invalidId =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> CODEC.decode(prefix + "{\"kind\":\"thread\",\"id\":\"not-a-uuid\"}}"));
+    assertEquals("frame.resource.id must be a canonical UUID", invalidId.getMessage());
+    assertNull(invalidId.getCause());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -128,6 +144,9 @@ class EventFrameCodecTest {
             CODEC.decode(
                 prefix + "{\"kind\":\"thread\",\"id\":\"" + THREAD + "\",\"extra\":true}}"));
     assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.decode(prefix + "{\"kind\":\"projects\",\"id\":\"" + THREAD + "\"}}"));
+    assertThrows(
         IllegalArgumentException.class, () -> CODEC.decode(prefix + "{\"kind\":\"thread\"}}"));
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(prefix + "\"nope\"}"));
   }
@@ -138,7 +157,10 @@ class EventFrameCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.decode("{\"version\":1,\"type\":\"ping\",\"resource\":" + resource + "}"));
-    assertThrows(IllegalArgumentException.class, () -> CODEC.decode("{not json"));
+    IllegalArgumentException invalidJson =
+        assertThrows(IllegalArgumentException.class, () -> CODEC.decode("{not json"));
+    assertEquals("malformed client frame JSON", invalidJson.getMessage());
+    assertNull(invalidJson.getCause());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -162,6 +184,11 @@ class EventFrameCodecTest {
             + THREAD
             + "\"},\"cursor\":\"7\"}",
         CODEC.subscribed(THREAD_KEY, 7L));
+    assertEquals(
+        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"projects\"},\"cursor\":\"0\"}",
+        CODEC.subscribed(PROJECTS_KEY, 0L));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(THREAD_KEY, -1L));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(PROJECTS_KEY, 1L));
   }
 
   @Test
@@ -192,6 +219,13 @@ class EventFrameCodecTest {
             + new RealtimeEventJsonCodec().encode(delta)
             + "}",
         CODEC.event(THREAD_KEY, new Signal.Realtime(delta)));
+
+    UUID projectId = new UUID(0L, 8L);
+    assertEquals(
+        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"projects\"},\"name\":\"changed\",\"data\":{\"projectId\":\""
+            + projectId
+            + "\"}}",
+        CODEC.event(PROJECTS_KEY, new Signal.ProjectChanged(projectId)));
   }
 
   @Test
@@ -201,6 +235,9 @@ class EventFrameCodecTest {
             + CANVAS
             + "\"}}",
         CODEC.resync(CANVAS_KEY));
+    assertEquals(
+        "{\"version\":1,\"type\":\"resync\",\"resource\":{\"kind\":\"cloud-files\"}}",
+        CODEC.resync(CLOUD_FILES_KEY));
     assertEquals("{\"version\":1,\"type\":\"heartbeat\"}", CODEC.heartbeat());
     assertEquals(
         "{\"version\":1,\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"boom\"}",

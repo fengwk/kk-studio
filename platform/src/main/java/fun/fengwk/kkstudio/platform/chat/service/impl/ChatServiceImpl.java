@@ -92,10 +92,10 @@ public class ChatServiceImpl implements ChatService {
     if (!repository.updateById(existing, expected)) {
       Chat reread = repository.getById(existing.getId());
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+        throw new AiResourceNotFoundException(RESOURCE);
       }
       throw new AiVersionConflictException(
-          RESOURCE, id, rawExpected, CatalogVersions.format(reread.getVersion()));
+          RESOURCE, rawExpected, CatalogVersions.format(reread.getVersion()));
     }
     return converter.convert(repository.getById(existing.getId()));
   }
@@ -112,7 +112,7 @@ public class ChatServiceImpl implements ChatService {
     UUID parsed = ChatIds.parseUuid(id, "id");
     Chat locked = repository.lockById(parsed);
     if (locked == null) {
-      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+      throw new AiResourceNotFoundException(RESOURCE);
     }
     ensureExpectedVersion(locked, id, expectedVersion, expected);
     sessionDeletionService.deleteSessionsByOwner(new OwnerRef(OwnerType.CHAT, locked.getId()));
@@ -125,7 +125,7 @@ public class ChatServiceImpl implements ChatService {
       Chat chat, String id, String expectedVersion, long expected) {
     if (chat.getVersion() != expected) {
       throw new AiVersionConflictException(
-          RESOURCE, id, expectedVersion, CatalogVersions.format(chat.getVersion()));
+          RESOURCE, expectedVersion, CatalogVersions.format(chat.getVersion()));
     }
   }
 }

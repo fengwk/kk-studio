@@ -964,7 +964,7 @@ class ProjectRoleToolTest {
     Issue issue = Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).number(1L).build();
     when(issueService.getIssue(ISSUE_ID)).thenReturn(issue);
     when(issueService.setStatus(ISSUE_ID, 0L, IssueStatus.TODO))
-        .thenThrow(new AiVersionConflictException("issue", ISSUE_ID.toString(), "0", "1"));
+        .thenThrow(new AiVersionConflictException("issue", "0", "1"));
 
     String args =
         String.format("{\"issue_id\":\"%s\",\"status\":\"TODO\",\"expected_version\":0}", ISSUE_ID);

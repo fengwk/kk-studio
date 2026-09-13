@@ -105,6 +105,7 @@ class ProjectServiceDefensiveUnitTest {
             () -> service.updateProject(updateId, 0L, "New", null, "coordinator"));
     assertEquals("0", updateConflict.expectedVersion());
     assertEquals("7", updateConflict.actualVersion());
+    assertEquals("project version conflict: expected=0 actual=7", updateConflict.getMessage());
 
     UUID archiveId = UUID.randomUUID();
     when(projectRepository.lockById(archiveId)).thenReturn(project(archiveId, 2L, false));
@@ -168,7 +169,10 @@ class ProjectServiceDefensiveUnitTest {
 
     // 分支 1: locked issue 为空
     when(issueRepository.lockById(issueId)).thenReturn(null);
-    assertThrows(AiValidationException.class, () -> service.deleteProject(projectId, 0L));
+    assertEquals(
+        "Issue disappeared or belongs to different project",
+        assertThrows(AiValidationException.class, () -> service.deleteProject(projectId, 0L))
+            .getMessage());
 
     // 分支 2: locked issue 所属 projectId 不匹配
     Issue foreignIssue =
@@ -182,7 +186,10 @@ class ProjectServiceDefensiveUnitTest {
             .version(0L)
             .build();
     when(issueRepository.lockById(issueId)).thenReturn(foreignIssue);
-    assertThrows(AiValidationException.class, () -> service.deleteProject(projectId, 0L));
+    assertEquals(
+        "Issue disappeared or belongs to different project",
+        assertThrows(AiValidationException.class, () -> service.deleteProject(projectId, 0L))
+            .getMessage());
 
     // 恢复 normal locked issue
     when(issueRepository.lockById(issueId)).thenReturn(issue);
@@ -211,7 +218,10 @@ class ProjectServiceDefensiveUnitTest {
 
     when(issueRunRepository.listByIssueId(issueId)).thenReturn(List.of(executorRun, reviewerRun));
     when(issueRunRepository.lockById(executorRunId)).thenReturn(null);
-    assertThrows(AiValidationException.class, () -> service.deleteProject(projectId, 0L));
+    assertEquals(
+        "Issue run disappeared",
+        assertThrows(AiValidationException.class, () -> service.deleteProject(projectId, 0L))
+            .getMessage());
 
     // 恢复 normal locked run
     when(issueRunRepository.lockById(executorRunId)).thenReturn(executorRun);

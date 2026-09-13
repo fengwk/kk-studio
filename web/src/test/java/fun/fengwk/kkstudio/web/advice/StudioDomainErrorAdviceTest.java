@@ -71,8 +71,7 @@ class StudioDomainErrorAdviceTest {
 
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
     ResponseEntity<Result<Void>> conflict =
-        advice.handleVersionConflict(
-            new AiVersionConflictException("agent_model", "provider/model", "3", "4"));
+        advice.handleVersionConflict(new AiVersionConflictException("agent_model", "3", "4"));
     assertEquals(409, conflict.getStatusCode().value());
     assertNotNull(conflict.getBody());
     Result<Void> conflictBody = conflict.getBody();
@@ -87,7 +86,7 @@ class StudioDomainErrorAdviceTest {
             "actualVersion",
             "4",
             "detail",
-            "agent_model version conflict: expected=3 actual=4 id=provider/model"),
+            "agent_model version conflict: expected=3 actual=4"),
         conflictBody.getErrors());
   }
 
@@ -116,12 +115,12 @@ class StudioDomainErrorAdviceTest {
     LocaleContextHolder.setLocale(Locale.US);
 
     assertError(
-        advice.handleNotFound(new AiResourceNotFoundException("agent", "missing agent")),
+        advice.handleNotFound(new AiResourceNotFoundException("agent")),
         404,
         "resource_not_found",
         "The agent was not found.",
         "agent",
-        "missing agent");
+        "agent not found");
     assertError(
         advice.handleDuplicate(new AiDuplicateException("model", "duplicate model")),
         409,

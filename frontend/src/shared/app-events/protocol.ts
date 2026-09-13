@@ -3,37 +3,40 @@
  *
  * client -> server（JSON 文本，所有帧带 version=1）：
  * - {"version":1,"type":"subscribe","resource":{"kind":"thread"|"canvas","id":"<UUID>"}}
+ * - {"version":1,"type":"subscribe","resource":{"kind":"projects"|"cloud-files"}}
  * - {"version":1,"type":"unsubscribe","resource":{...}}
  *
  * server -> client（JSON 文本，所有帧带 version=1）：
  * - {"version":1,"type":"subscribed","resource":{...},"cursor":"<canonical>"}
  *   订阅已在 wire 上建立（首次与重连后都会发送）；cursor 是资源当前游标。
- * - {"version":1,"type":"event","resource":{...},"name":"version"|"realtime"|"version","data":{...},"cursor":"<canonical>"}
+ * - {"version":1,"type":"event","resource":{...},"name":"version"|"realtime"|"changed","data":{...},"cursor":"<canonical>"}
  *   - thread version：data {"version":"N"}，cursor 必带且与 data.version 完全相等；服务端通过
  *     PostgreSQL notification 感知持久化变更，浏览器只依赖此 version/cursor 契约。
  *   - thread realtime：data 为 lossy realtime delta envelope 的 JSON 对象（如 MODEL_DELTA），
  *     绝不携带 cursor。
  *   - canvas version：data {"version":"N"}，cursor 必带且与 data.version 完全相等。
+ *   - projects changed：data {"projectId":"<UUID>"}，只提示回读 Project Snapshot，不带 cursor。
  * - {"version":1,"type":"resync","resource":{...}}：需要整体替换为全量快照。
  * - {"version":1,"type":"heartbeat"}：连接级保活；客户端严格解码后静默消费。
  * - {"version":1,"type":"error","resource"?:{...},"code":"<string>","message":"<string>"}
  *
  * 解码是真正严格的：version 必须为 1、每种 type/name 只接受精确字段集、
  * 多余/未知字段一律拒绝；resource 精确只有 kind+id 且 id 必须是 canonical
- * UUID（小写十六进制）；resource/name 组合必须合法（thread 仅 version|realtime，
- * canvas 仅 version）；cursor 与 version data 必须是 canonical 非负
+ * UUID（小写十六进制）；全局 projects/cloud-files resource 不带 id；resource/name
+ * 组合必须合法（thread 仅 version|realtime，canvas 仅 version，projects 仅
+ * changed，cloud-files 只接收 resync）；cursor 与 version data 必须是 canonical 非负
  * 十进制字符串，durable 事件的 cursor 必须存在且与 data 值完全相等；realtime
  * data 必须是非数组 JSON 对象且不得携带 cursor。畸形消息永远不会到达 listeners。
  */
 
-export type ApplicationEventResourceKind = 'thread' | 'canvas'
+export type ApplicationEventResourceKind = 'thread' | 'canvas' | 'projects' | 'cloud-files'
 
-export interface ApplicationEventResource {
-  kind: ApplicationEventResourceKind
-  id: string
-}
+export type ApplicationEventResource =
+  | { kind: 'thread' | 'canvas'; id: string }
+  | { kind: 'projects' }
+  | { kind: 'cloud-files' }
 
-export type ApplicationEventName = 'version' | 'realtime'
+export type ApplicationEventName = 'version' | 'realtime' | 'changed'
 
 /** canonical 非负十进制字符串：'0' 或非零开头，无前导零、无符号、无空白。 */
 export type ApplicationEventCursor = string
@@ -68,12 +71,20 @@ type ApplicationEventCanvasVersionEvent = {
   cursor: ApplicationEventCursor
 }
 
+type ApplicationEventProjectChangedEvent = {
+  type: 'event'
+  resource: ApplicationEventResource & { kind: 'projects' }
+  name: 'changed'
+  data: { projectId: string }
+}
+
 export type ApplicationEventServerMessage =
   | { type: 'heartbeat' }
   | { type: 'subscribed'; resource: ApplicationEventResource; cursor: ApplicationEventCursor }
   | ApplicationEventThreadVersionEvent
   | ApplicationEventThreadRealtimeEvent
   | ApplicationEventCanvasVersionEvent
+  | ApplicationEventProjectChangedEvent
   | { type: 'resync'; resource: ApplicationEventResource }
   | { type: 'error'; resource?: ApplicationEventResource; code: string; message: string }
 
@@ -112,6 +123,9 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
       }
       const cursor = parseCursor(parsed.cursor)
       if (cursor == null) {
+        return null
+      }
+      if ((resource.kind === 'projects' || resource.kind === 'cloud-files') && cursor !== '0') {
         return null
       }
       return { type: 'subscribed', resource, cursor }
@@ -156,6 +170,13 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
         }
         const data = { version }
         return { type: 'event', resource, name: 'version', data, cursor: data.version }
+      }
+      if (resource.kind === 'projects' && parsed.name === 'changed') {
+        const projectId = parseSingleUuidField(parsed.data, 'projectId')
+        if (projectId == null || parsed.cursor !== undefined) {
+          return null
+        }
+        return { type: 'event', resource, name: 'changed', data: { projectId } }
       }
       return null
     }
@@ -209,20 +230,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseResource(value: unknown): ApplicationEventResource | null {
-  if (!isRecord(value) || !hasOnlyFields(value, ['kind', 'id']) || typeof value.id !== 'string') {
+  if (!isRecord(value) || typeof value.kind !== 'string') {
     return null
   }
-  if (value.kind !== 'thread' && value.kind !== 'canvas') {
-    return null
+  if (value.kind === 'projects' || value.kind === 'cloud-files') {
+    return hasExactFields(value, ['kind']) ? { kind: value.kind } : null
   }
-  if (!CANONICAL_UUID.test(value.id)) {
+  if (
+    (value.kind !== 'thread' && value.kind !== 'canvas')
+    || !hasExactFields(value, ['kind', 'id'])
+    || typeof value.id !== 'string'
+    || !CANONICAL_UUID.test(value.id)
+  ) {
     return null
   }
   return { kind: value.kind, id: value.id }
 }
 
 function isEventName(value: unknown): value is ApplicationEventName {
-  return value === 'version' || value === 'realtime'
+  return value === 'version' || value === 'realtime' || value === 'changed'
 }
 
 /** resource.kind 判别守卫：保证 thread/canvas 各自的事件组合在类型层面也合法。 */
@@ -251,4 +277,16 @@ function parseSingleCursorField(
     return null
   }
   return parseCursor(data[key])
+}
+
+function parseSingleUuidField(data: unknown, key: 'projectId'): string | null {
+  if (!isRecord(data) || !hasExactFields(data, [key])) {
+    return null
+  }
+  const value = data[key]
+  return typeof value === 'string' && CANONICAL_UUID.test(value) ? value : null
+}
+
+function hasExactFields(value: Record<string, unknown>, fields: readonly string[]): boolean {
+  return Object.keys(value).length === fields.length && hasOnlyFields(value, fields)
 }

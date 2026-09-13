@@ -36,8 +36,7 @@ public class EnvironmentSkillInventoryQueryService {
     requireEnvironment(environmentId);
     EnvironmentInventory inventory = skillSourceRepository.getInventory(environmentId.value());
     if (inventory == null) {
-      throw new AiResourceNotFoundException(
-          "environment_inventory", "environment inventory not found: " + environmentId);
+      throw new AiResourceNotFoundException("environment_inventory");
     }
     return toDto(inventory);
   }
@@ -74,8 +73,7 @@ public class EnvironmentSkillInventoryQueryService {
 
   private void requireEnvironment(EnvironmentId environmentId) {
     if (environmentRepository.getById(environmentId.value()) == null) {
-      throw new AiResourceNotFoundException(
-          "environment", "environment not found: " + environmentId);
+      throw new AiResourceNotFoundException("environment");
     }
   }
 

@@ -68,14 +68,14 @@ public class IssueRunServiceImpl implements IssueRunService {
     // 1. 预读 Issue 获取不可变 projectId
     Issue initialIssue = issueRepository.getById(issueId);
     if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     UUID projectId = initialIssue.getProjectId();
 
     // 2. 锁 Project（拒绝 archived）
     Project project = projectRepository.lockById(projectId);
     if (project == null) {
-      throw new AiResourceNotFoundException("project", projectId.toString());
+      throw new AiResourceNotFoundException("project");
     }
     if (project.isArchived()) {
       throw new AiValidationException("project", "Cannot start run in an archived project");
@@ -84,7 +84,7 @@ public class IssueRunServiceImpl implements IssueRunService {
     // 3. 锁 Issue
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     if (!issue.getProjectId().equals(projectId)) {
       throw new AiValidationException("issue", "Issue project mismatch");
@@ -172,14 +172,14 @@ public class IssueRunServiceImpl implements IssueRunService {
     // 1. 预读 Issue 获取不可变 projectId
     Issue initialIssue = issueRepository.getById(issueId);
     if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     UUID projectId = initialIssue.getProjectId();
 
     // 2. 锁 Project（拒绝 archived）
     Project project = projectRepository.lockById(projectId);
     if (project == null) {
-      throw new AiResourceNotFoundException("project", projectId.toString());
+      throw new AiResourceNotFoundException("project");
     }
     if (project.isArchived()) {
       throw new AiValidationException("project", "Cannot start run in an archived project");
@@ -188,7 +188,7 @@ public class IssueRunServiceImpl implements IssueRunService {
     // 3. 锁 Issue
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     if (!issue.getProjectId().equals(projectId)) {
       throw new AiValidationException("issue", "Issue project mismatch");
@@ -284,24 +284,24 @@ public class IssueRunServiceImpl implements IssueRunService {
     // 仅有 runId 的命令先无锁读取 Run 的不可变 issueId，获取 projectId，再锁 Project，再锁 Issue，最后锁 Run
     IssueRun initialRun = issueRunRepository.getById(runId);
     if (initialRun == null) {
-      throw new AiResourceNotFoundException("issue_run", runId.toString());
+      throw new AiResourceNotFoundException("issue_run");
     }
     UUID issueId = initialRun.getIssueId();
 
     Issue initialIssue = issueRepository.getById(issueId);
     if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     projectRepository.lockById(initialIssue.getProjectId());
 
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
 
     IssueRun run = issueRunRepository.lockById(runId);
     if (run == null) {
-      throw new AiResourceNotFoundException("issue_run", runId.toString());
+      throw new AiResourceNotFoundException("issue_run");
     }
     if (!issueId.equals(run.getIssueId())) {
       throw new AiValidationException("issue_run", "Run issue mismatch");
@@ -404,24 +404,24 @@ public class IssueRunServiceImpl implements IssueRunService {
     // 仅有 runId 的命令先无锁读取 Run 的不可变 issueId，获取 projectId，再锁 Project，再锁 Issue，最后锁 Run
     IssueRun initialRun = issueRunRepository.getById(runId);
     if (initialRun == null) {
-      throw new AiResourceNotFoundException("issue_run", runId.toString());
+      throw new AiResourceNotFoundException("issue_run");
     }
     UUID issueId = initialRun.getIssueId();
 
     Issue initialIssue = issueRepository.getById(issueId);
     if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     projectRepository.lockById(initialIssue.getProjectId());
 
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
 
     IssueRun run = issueRunRepository.lockById(runId);
     if (run == null) {
-      throw new AiResourceNotFoundException("issue_run", runId.toString());
+      throw new AiResourceNotFoundException("issue_run");
     }
     if (!issueId.equals(run.getIssueId())) {
       throw new AiValidationException("issue_run", "Run issue mismatch");
@@ -523,13 +523,13 @@ public class IssueRunServiceImpl implements IssueRunService {
 
     Issue initialIssue = issueRepository.getById(issueId);
     if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     projectRepository.lockById(initialIssue.getProjectId());
 
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
 
     // 锁内再次检查 actionId，关闭 precheck 与写入之间竞态
@@ -562,7 +562,7 @@ public class IssueRunServiceImpl implements IssueRunService {
     if (actorType == IssueRunActorType.AGENT) {
       IssueRun run = issueRunRepository.lockById(runId);
       if (run == null) {
-        throw new AiResourceNotFoundException("issue_run", runId.toString());
+        throw new AiResourceNotFoundException("issue_run");
       }
       if (!run.getIssueId().equals(issueId)) {
         throw new AiValidationException("issue_run", "Run does not belong to the target issue");
@@ -726,24 +726,24 @@ public class IssueRunServiceImpl implements IssueRunService {
     // 仅有 runId 的命令先无锁读取 Run 的不可变 issueId，获取 projectId，再锁 Project，再锁 Issue，最后锁 Run
     IssueRun initialRun = issueRunRepository.getById(runId);
     if (initialRun == null) {
-      throw new AiResourceNotFoundException("issue_run", runId.toString());
+      throw new AiResourceNotFoundException("issue_run");
     }
     UUID issueId = initialRun.getIssueId();
 
     Issue initialIssue = issueRepository.getById(issueId);
     if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     projectRepository.lockById(initialIssue.getProjectId());
 
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
 
     IssueRun run = issueRunRepository.lockById(runId);
     if (run == null) {
-      throw new AiResourceNotFoundException("issue_run", runId.toString());
+      throw new AiResourceNotFoundException("issue_run");
     }
     if (!issueId.equals(run.getIssueId())) {
       throw new AiValidationException("issue_run", "Run issue mismatch");
@@ -783,13 +783,13 @@ public class IssueRunServiceImpl implements IssueRunService {
 
     Issue initialIssue = issueRepository.getById(issueId);
     if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     projectRepository.lockById(initialIssue.getProjectId());
 
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
+      throw new AiResourceNotFoundException("issue");
     }
     if (issue.isArchived()) {
       throw new AiValidationException("issue_run", "Cannot retry archived issue");
@@ -816,8 +816,7 @@ public class IssueRunServiceImpl implements IssueRunService {
 
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
     if (activeRun != null) {
-      throw new AiValidationException(
-          "issue_run", "Cannot retry while an active run exists for issue " + issueId);
+      throw new AiValidationException("issue_run", "Cannot retry while an active run exists");
     }
 
     long newSequence = issueRepository.incrementInputSequence(issueId);
@@ -847,7 +846,7 @@ public class IssueRunServiceImpl implements IssueRunService {
     Objects.requireNonNull(runId, "runId");
     IssueRun run = issueRunRepository.getById(runId);
     if (run == null) {
-      throw new AiResourceNotFoundException("issue_run", runId.toString());
+      throw new AiResourceNotFoundException("issue_run");
     }
     return run;
   }

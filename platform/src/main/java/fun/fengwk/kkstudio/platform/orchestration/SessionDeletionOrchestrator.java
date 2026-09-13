@@ -174,12 +174,7 @@ public class SessionDeletionOrchestrator {
     for (ThreadState thread : threads) {
       tx.lockThread(thread.id())
           .orElseThrow(
-              () ->
-                  new IllegalStateException(
-                      "thread "
-                          + thread.id()
-                          + " disappeared while deleting session "
-                          + thread.sessionId()));
+              () -> new IllegalStateException("Thread disappeared while deleting session"));
     }
     if (!threadIds.isEmpty() && tx.deleteThreads(threadIds) != threadIds.size()) {
       throw new IllegalStateException("not all locked threads were deleted");

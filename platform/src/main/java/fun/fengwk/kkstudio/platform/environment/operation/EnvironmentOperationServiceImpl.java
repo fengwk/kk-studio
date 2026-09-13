@@ -113,7 +113,7 @@ public class EnvironmentOperationServiceImpl implements EnvironmentOperationServ
 
     UUID envId = environmentId.value();
     if (environmentRepository.lockForKeyShare(envId) == null) {
-      throw new AiResourceNotFoundException("environment", envId.toString());
+      throw new AiResourceNotFoundException("environment");
     }
 
     String safeSummary =
@@ -168,19 +168,18 @@ public class EnvironmentOperationServiceImpl implements EnvironmentOperationServ
 
     UUID envId = environmentId.value();
     if (environmentRepository.lockForKeyShare(envId) == null) {
-      throw new AiResourceNotFoundException("environment", envId.toString());
+      throw new AiResourceNotFoundException("environment");
     }
     EnvironmentInventory inventory = skillSourceRepository.lockInventory(envId);
     if (inventory == null) {
-      throw new AiResourceNotFoundException("environment", envId.toString());
+      throw new AiResourceNotFoundException("environment");
     }
     List<SkillSource> lockedSources = skillSourceRepository.lockAllSources(envId);
     SkillSource source =
         lockedSources.stream()
             .filter(s -> s.getSourceId().equals(sourceId))
             .findFirst()
-            .orElseThrow(
-                () -> new AiResourceNotFoundException("skill_source", sourceId.toString()));
+            .orElseThrow(() -> new AiResourceNotFoundException("skill_source"));
 
     validateOperationSemantics(source, operationType);
 
@@ -253,7 +252,7 @@ public class EnvironmentOperationServiceImpl implements EnvironmentOperationServ
     int boundedLimit = Math.min(limit, 100);
     UUID envId = environmentId.value();
     if (environmentRepository.getById(envId) == null) {
-      throw new AiResourceNotFoundException("environment", envId.toString());
+      throw new AiResourceNotFoundException("environment");
     }
     List<SafeEnvironmentOperation> safeList =
         environmentOperationRepository.listSafeByEnvironment(envId, boundedLimit);

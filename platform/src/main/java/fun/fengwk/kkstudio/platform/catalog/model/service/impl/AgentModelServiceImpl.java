@@ -60,8 +60,7 @@ public class AgentModelServiceImpl implements AgentModelService {
           RESOURCE, RESOURCE + " name already exists under this provider: " + ref, error);
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
-        throw new AiResourceNotFoundException(
-            PROVIDER_RESOURCE, PROVIDER_RESOURCE + " not found: " + ref.providerName(), error);
+        throw new AiResourceNotFoundException(PROVIDER_RESOURCE);
       }
       throw error;
     }
@@ -87,10 +86,10 @@ public class AgentModelServiceImpl implements AgentModelService {
       AgentModel reread =
           agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + ref);
+        throw new AiResourceNotFoundException(RESOURCE);
       }
       throw new AiVersionConflictException(
-          RESOURCE, ref.toString(), rawExpected, CatalogVersions.format(reread.getVersion()));
+          RESOURCE, rawExpected, CatalogVersions.format(reread.getVersion()));
     }
     AgentModel reloaded =
         agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
@@ -109,10 +108,10 @@ public class AgentModelServiceImpl implements AgentModelService {
       AgentModel reread =
           agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + ref);
+        throw new AiResourceNotFoundException(RESOURCE);
       }
       throw new AiVersionConflictException(
-          RESOURCE, ref.toString(), expectedVersion, CatalogVersions.format(reread.getVersion()));
+          RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
     }
   }
 
@@ -120,7 +119,7 @@ public class AgentModelServiceImpl implements AgentModelService {
       AgentModel model, ModelRef ref, String expectedVersion, long expected) {
     if (model.getVersion() != expected) {
       throw new AiVersionConflictException(
-          RESOURCE, ref.toString(), expectedVersion, CatalogVersions.format(model.getVersion()));
+          RESOURCE, expectedVersion, CatalogVersions.format(model.getVersion()));
     }
   }
 

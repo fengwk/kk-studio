@@ -2471,9 +2471,7 @@ class DatabaseTurnResolverTest {
       agentConfig.setSubagents(List.of());
       when(agentConfigCodec.decode("agent-config")).thenReturn(agentConfig);
       when(skillInventoryQueryService.listUsableSkills(ENV_MISSING))
-          .thenThrow(
-              new AiResourceNotFoundException(
-                  "environment", "environment not found: " + ENV_MISSING));
+          .thenThrow(new AiResourceNotFoundException("environment"));
 
       modelSupportsTools(true);
       modelSupportsReasoning(true);

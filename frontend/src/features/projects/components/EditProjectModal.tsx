@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X, Pencil, AlertTriangle, RefreshCw } from 'lucide-react'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict } from '@/shared/conflict/conflict-presenter'
@@ -32,16 +32,23 @@ export function EditProjectModal({
     reason: string
     detail: string
   } | null>(null)
+  const initializedProjectIdRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (isOpen && project) {
-      setTitle(project.title)
-      setDescription(project.description)
-      setCoordinatorAgentName(project.coordinatorAgentName ?? '')
-      setExpectedVersion(project.version)
-      setErrorMessage(null)
-      setConflictDetail(null)
+    if (!isOpen || !project) {
+      initializedProjectIdRef.current = null
+      return
     }
+    if (initializedProjectIdRef.current === project.id) {
+      return
+    }
+    initializedProjectIdRef.current = project.id
+    setTitle(project.title)
+    setDescription(project.description)
+    setCoordinatorAgentName(project.coordinatorAgentName)
+    setExpectedVersion(project.version)
+    setErrorMessage(null)
+    setConflictDetail(null)
   }, [isOpen, project])
 
   useEffect(() => {
@@ -84,7 +91,7 @@ export function EditProjectModal({
       const fresh = await api.getProject(project.id)
       setTitle(fresh.title)
       setDescription(fresh.description)
-      setCoordinatorAgentName(fresh.coordinatorAgentName ?? '')
+      setCoordinatorAgentName(fresh.coordinatorAgentName)
       setExpectedVersion(fresh.version)
       setConflictDetail(null)
     } catch (err) {
@@ -101,6 +108,11 @@ export function EditProjectModal({
       setErrorMessage('项目名称不能为空')
       return
     }
+    const trimmedCoordinatorAgentName = coordinatorAgentName.trim()
+    if (!trimmedCoordinatorAgentName) {
+      setErrorMessage('Coordinator Agent 名称不能为空')
+      return
+    }
 
     setIsSubmitting(true)
     setErrorMessage(null)
@@ -109,7 +121,7 @@ export function EditProjectModal({
         expectedVersion,
         title: trimmedTitle,
         description: description.trim() || null,
-        coordinatorAgentName: coordinatorAgentName.trim() || null,
+        coordinatorAgentName: trimmedCoordinatorAgentName,
       })
       onSuccess(updated)
       onClose()
@@ -225,13 +237,16 @@ export function EditProjectModal({
             </div>
 
             <div className="form-group">
-              <label htmlFor="edit-project-coordinator">Coordinator Agent 名称</label>
+              <label htmlFor="edit-project-coordinator">
+                Coordinator Agent 名称 <span style={{ color: 'var(--danger)' }}>*</span>
+              </label>
               <input
                 id="edit-project-coordinator"
                 type="text"
                 value={coordinatorAgentName}
                 onChange={(e) => setCoordinatorAgentName(e.target.value)}
-                placeholder="可选，指定负责编排的 Coordinator Agent 名称"
+                placeholder="输入负责编排的 Coordinator Agent 名称"
+                required
               />
             </div>
           </div>
@@ -248,7 +263,7 @@ export function EditProjectModal({
             <button
               type="submit"
               className="btn-primary"
-              disabled={isSubmitting || !title.trim()}
+              disabled={isSubmitting || !title.trim() || !coordinatorAgentName.trim()}
             >
               {isSubmitting ? '保存中...' : '保存修改'}
             </button>

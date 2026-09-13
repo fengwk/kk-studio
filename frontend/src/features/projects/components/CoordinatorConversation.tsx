@@ -168,6 +168,7 @@ export function CoordinatorConversation({
         void loadThreadHistory()
       }, 500)
     } catch (err) {
+      setMessages((prev) => prev.filter((message) => message.id !== tempUserMessage.id))
       setErrorMessage(err instanceof Error ? err.message : '发送指令失败')
     } finally {
       setIsSending(false)
@@ -186,7 +187,7 @@ export function CoordinatorConversation({
       <div className="coordinator-header">
         <div className="coordinator-header-title">
           <Bot size={18} color="var(--green-primary)" aria-hidden="true" />
-          <span>Coordinator: {project.coordinatorAgentName || '未指定'}</span>
+          <span>Coordinator: {project.coordinatorAgentName}</span>
         </div>
         {coordinatorThread && (
           <span className="badge badge-status" style={{ fontSize: '0.75rem' }}>

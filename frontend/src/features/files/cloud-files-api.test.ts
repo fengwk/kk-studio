@@ -26,6 +26,7 @@ describe('cloud-files-api', () => {
           mediaType: null,
           sizeBytes: null,
           sha256: null,
+          revision: null,
           createdAt: null,
           updatedAt: null,
         },
@@ -44,6 +45,37 @@ describe('cloud-files-api', () => {
     })
     expect(snapshot.node.path).toBe('/')
     expect(snapshot.children).toEqual([])
+  })
+
+  it('returns the authoritative revision from a text write', async () => {
+    // 测试意图：写入调用方应立即获得服务端推进后的 CAS revision。
+    const writtenNode = {
+      id: VALID_UUID,
+      path: '/notes.md',
+      name: 'notes.md',
+      kind: 'TEXT',
+      version: '3',
+      blobId: null,
+      mediaType: 'text/plain; charset=utf-8',
+      sizeBytes: '5',
+      sha256: null,
+      revision: '3',
+      createdAt: null,
+      updatedAt: null,
+    }
+    const fakeClient: HttpClient = {
+      get: vi.fn(),
+      post: vi.fn(),
+      put: vi.fn().mockResolvedValue(writtenNode),
+      delete: vi.fn(),
+    }
+    const api = createCloudFilesApi({ client: fakeClient })
+    const request = { path: '/notes.md', content: 'hello', expectedRevision: '2' }
+
+    const result = await api.saveText(request)
+
+    expect(fakeClient.put).toHaveBeenCalledWith('/cloud/text', request)
+    expect(result.revision).toBe('3')
   })
 
   it('runs the full upload flow: reserve -> direct PUT -> complete -> mount blob', async () => {

@@ -15,7 +15,7 @@ export interface HarnessThreadSummaryDTO {
   createdAt: string
   updatedAt: string
   status: string
-  model?: HarnessModelSelectionDTO
+  model: HarnessModelSelectionDTO
   headMessagePreview: string | null
 }
 
@@ -30,7 +30,7 @@ export interface ProjectDTO {
   id: string
   title: string
   description: string
-  coordinatorAgentName: string | null
+  coordinatorAgentName: string
   nextIssueNumber: string
   version: string
   archivedAt: string | null
@@ -41,14 +41,14 @@ export interface ProjectDTO {
 export interface CreateProjectRequest {
   title: string
   description?: string | null
-  coordinatorAgentName?: string | null
+  coordinatorAgentName: string
 }
 
 export interface UpdateProjectRequest {
   expectedVersion: string
   title: string
   description?: string | null
-  coordinatorAgentName?: string | null
+  coordinatorAgentName: string
 }
 
 export interface ProjectArchiveRequest {
@@ -125,7 +125,7 @@ export interface AddIssueDependencyRequest {
   dependsOnIssueId: string
 }
 
-export type IssueInputKind = 'HUMAN' | 'SYSTEM' | string
+export type IssueInputKind = 'HUMAN' | 'REVIEW_FEEDBACK' | 'RETRY' | 'SYSTEM'
 
 export interface IssueInputDTO {
   issueId: string
@@ -142,27 +142,27 @@ export interface AppendIssueInputRequest {
   kind?: IssueInputKind | null
 }
 
-export type IssueRunRole = 'EXECUTOR' | 'REVIEWER' | string
-export type IssueRunActorType = 'AGENT' | 'HUMAN' | string
+export type IssueRunRole = 'EXECUTOR' | 'REVIEWER'
+export type IssueRunActorType = 'AGENT' | 'HUMAN'
 export type IssueRunStatus =
   | 'RUNNING'
   | 'WAITING_HUMAN'
   | 'COMPLETED'
   | 'FAILED'
+  | 'CANCELLED'
   | 'UNKNOWN'
-  | string
-export type IssueRunOutcome = 'SUBMITTED' | 'APPROVED' | 'CHANGES_REQUESTED' | string | null
+export type IssueRunOutcome = 'SUBMITTED' | 'APPROVED' | 'CHANGES_REQUESTED' | null
 
 export interface IssueRunSummaryDTO {
   id: string
   issueId: string
   ordinal: string
-  role: string
-  actorType: string
+  role: IssueRunRole
+  actorType: IssueRunActorType
   agentName: string | null
   submissionRunId: string | null
-  status: string
-  outcome: string | null
+  status: IssueRunStatus
+  outcome: IssueRunOutcome
   waitingReason: string | null
   createdAt: string | null
   completedAt: string | null
@@ -172,12 +172,12 @@ export interface IssueRunDTO {
   id: string
   issueId: string
   ordinal: string
-  role: string
-  actorType: string
+  role: IssueRunRole
+  actorType: IssueRunActorType
   agentName: string | null
   submissionRunId: string | null
-  status: string
-  outcome: string | null
+  status: IssueRunStatus
+  outcome: IssueRunOutcome
   observedSpecRevision: string
   observedInputSequence: string
   continuationCount: number

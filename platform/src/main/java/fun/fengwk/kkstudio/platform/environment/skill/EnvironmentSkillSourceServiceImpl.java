@@ -122,7 +122,6 @@ public class EnvironmentSkillSourceServiceImpl implements EnvironmentSkillSource
     if (current.getVersion() != expected) {
       throw new AiVersionConflictException(
           SkillSourceConfigValidator.RESOURCE,
-          sourceId.toString(),
           request.getExpectedVersion(),
           CatalogVersions.format(current.getVersion()));
     }
@@ -157,7 +156,6 @@ public class EnvironmentSkillSourceServiceImpl implements EnvironmentSkillSource
     if (current.getVersion() != expected) {
       throw new AiVersionConflictException(
           SkillSourceConfigValidator.RESOURCE,
-          sourceId.toString(),
           expectedVersion,
           CatalogVersions.format(current.getVersion()));
     }
@@ -232,24 +230,20 @@ public class EnvironmentSkillSourceServiceImpl implements EnvironmentSkillSource
     SkillSource reread = skillSourceRepository.getSource(environmentId.value(), sourceId);
     if (reread == null) {
       return new AiVersionConflictException(
-          SkillSourceConfigValidator.RESOURCE, sourceId.toString(), rawExpected, rawExpected);
+          SkillSourceConfigValidator.RESOURCE, rawExpected, rawExpected);
     }
     return new AiVersionConflictException(
         SkillSourceConfigValidator.RESOURCE,
-        sourceId.toString(),
         rawExpected,
         CatalogVersions.format(reread.getVersion()));
   }
 
   private static AiResourceNotFoundException environmentNotFound(EnvironmentId environmentId) {
-    return new AiResourceNotFoundException(
-        "environment", "environment not found: " + environmentId);
+    return new AiResourceNotFoundException("environment");
   }
 
   private static AiResourceNotFoundException notFound(EnvironmentId environmentId, UUID sourceId) {
-    return new AiResourceNotFoundException(
-        SkillSourceConfigValidator.RESOURCE,
-        "skill source not found: " + sourceId + " in environment " + environmentId);
+    return new AiResourceNotFoundException(SkillSourceConfigValidator.RESOURCE);
   }
 
   static EnvironmentSkillSourceDTO toDto(SkillSource source) {

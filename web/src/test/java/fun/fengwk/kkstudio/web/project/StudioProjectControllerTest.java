@@ -70,7 +70,6 @@ class StudioProjectControllerTest {
   private HarnessRuntime runtime;
   private HarnessOwnerQueryService queryService;
   private ProjectSnapshotAssembler snapshotAssembler;
-  private ProjectInvalidationHub invalidationHub;
 
   private MockMvc mockMvc;
   private final ObjectMapper objectMapper = ObjectMapperHolder.getInstance();
@@ -85,7 +84,6 @@ class StudioProjectControllerTest {
     runtime = mock(HarnessRuntime.class);
     queryService = mock(HarnessOwnerQueryService.class);
     snapshotAssembler = mock(ProjectSnapshotAssembler.class);
-    invalidationHub = mock(ProjectInvalidationHub.class);
 
     StudioProjectController controller =
         new StudioProjectController(
@@ -95,8 +93,7 @@ class StudioProjectControllerTest {
             runtime,
             queryService,
             snapshotAssembler,
-            new ProjectDtoMapper(),
-            invalidationHub);
+            new ProjectDtoMapper());
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
@@ -154,8 +151,6 @@ class StudioProjectControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.data.id").value(projectId.toString().toLowerCase()));
-
-    verify(invalidationHub).publishChange(projectId);
   }
 
   @Test
@@ -184,7 +179,7 @@ class StudioProjectControllerTest {
 
     // CAS 冲突测试
     when(projectService.updateProject(eq(projectId), eq(5L), any(), any(), any()))
-        .thenThrow(new AiVersionConflictException("project", projectId.toString(), "5", "6"));
+        .thenThrow(new AiVersionConflictException("project", "5", "6"));
 
     UpdateProjectRequestDTO conflictReq =
         UpdateProjectRequestDTO.builder().expectedVersion("5").title("Conflict").build();
@@ -206,7 +201,6 @@ class StudioProjectControllerTest {
         .andExpect(status().isNoContent());
 
     verify(projectService).deleteProject(projectId, 1L);
-    verify(invalidationHub).publishChange(projectId);
   }
 
   @Test
@@ -312,8 +306,6 @@ class StudioProjectControllerTest {
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.session.sessionId").value(sessionId.toString().toLowerCase()))
         .andExpect(jsonPath("$.data.thread.threadId").value(threadId.toString().toLowerCase()));
-
-    verify(invalidationHub).publishChange(projectId);
   }
 
   @Test
@@ -388,8 +380,6 @@ class StudioProjectControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.session.sessionId").value(sessionId.toString().toLowerCase()));
-
-    verify(invalidationHub).publishChange(projectId);
   }
 
   @Test
@@ -412,7 +402,7 @@ class StudioProjectControllerTest {
   @Test
   void testResourceNotFoundAdvice() throws Exception {
     when(projectService.getProject(projectId))
-        .thenThrow(new AiResourceNotFoundException("project", projectId.toString()));
+        .thenThrow(new AiResourceNotFoundException("project"));
 
     mockMvc.perform(get("/api/projects/" + projectId)).andExpect(status().isNotFound());
   }

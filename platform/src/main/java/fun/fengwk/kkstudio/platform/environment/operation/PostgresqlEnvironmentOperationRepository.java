@@ -588,11 +588,7 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
 
   @Override
   public EnvironmentOperation getById(UUID id) {
-    return findById(id)
-        .orElseThrow(
-            () ->
-                new AiResourceNotFoundException(
-                    "environment_operation", "operation not found: " + id));
+    return findById(id).orElseThrow(() -> new AiResourceNotFoundException("environment_operation"));
   }
 
   @Override
@@ -608,10 +604,7 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
   @Override
   public SafeEnvironmentOperation getSafe(UUID environmentId, UUID operationId) {
     return findSafe(environmentId, operationId)
-        .orElseThrow(
-            () ->
-                new AiResourceNotFoundException(
-                    "environment_operation", "operation not found: " + operationId));
+        .orElseThrow(() -> new AiResourceNotFoundException("environment_operation"));
   }
 
   @Override
@@ -898,8 +891,7 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
           "environment_operation", "operation unique constraint violation");
     }
     if ("23503".equals(sqlState)) {
-      return new AiResourceNotFoundException(
-          "environment", "environment not found: " + command.environmentId());
+      return new AiResourceNotFoundException("environment");
     }
     if ("23514".equals(sqlState)) {
       return new AiValidationException("environment_operation", "operation constraint violation");
@@ -927,8 +919,7 @@ class PostgresqlEnvironmentOperationRepository implements EnvironmentOperationRe
           "environment_operation", "operation unique constraint violation");
     }
     if ("23503".equals(sqlState)) {
-      return new AiResourceNotFoundException(
-          "environment", "environment not found: " + command.environmentId());
+      return new AiResourceNotFoundException("environment");
     }
     if ("23514".equals(sqlState)) {
       return new AiValidationException("environment_operation", "operation constraint violation");

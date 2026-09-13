@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationHandler;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
+import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
 
 import javax.sql.DataSource;
 
@@ -70,6 +71,7 @@ public class ApplicationEventConfiguration {
       ThreadVersionHub threadVersionHub,
       CanvasVersionHub canvasVersionHub,
       CloudFilesEventHub cloudFilesEventHub,
+      ProjectInvalidationHub projectInvalidationHub,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
       PostgresqlRealtimeEventSource realtimeEventSource,
       SystemSettingsSnapshot systemSettingsSnapshot) {
@@ -111,12 +113,17 @@ public class ApplicationEventConfiguration {
                 CloudFilesEventHub.CHANNEL,
                 cloudFilesEventHub::onNotification,
                 cloudFilesEventHub::broadcastResync),
-            // 8. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
+            // 8. Project/Issue 失效：数据库事实提交后按 projectId 提示浏览器回读权威 Snapshot
+            new PostgresqlNotificationHandler(
+                ProjectInvalidationHub.CHANNEL,
+                projectInvalidationHub::onNotification,
+                projectInvalidationHub::broadcastResync),
+            // 9. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
             new PostgresqlNotificationHandler(
                 SystemSettingsChangeHandler.CHANNEL,
                 systemSettingsChangeHandler::onNotification,
                 systemSettingsChangeHandler::onResync),
-            // 9. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
+            // 10. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
             new PostgresqlNotificationHandler(
                 PostgresqlRealtimeEventSource.CHANNEL,
                 realtimeEventSource::onNotification,
@@ -130,9 +137,16 @@ public class ApplicationEventConfiguration {
       ThreadVersionEventSource threadVersionSource,
       RealtimeEventSource realtimeSource,
       CanvasVersionEventSource canvasVersionSource,
+      ProjectInvalidationHub projectInvalidationHub,
+      CloudFilesEventHub cloudFilesEventHub,
       ApplicationEventSettings settings) {
     return new ApplicationEventHub(
-        threadVersionSource, realtimeSource, canvasVersionSource, settings.queueCapacity());
+        threadVersionSource,
+        realtimeSource,
+        canvasVersionSource,
+        projectInvalidationHub,
+        cloudFilesEventHub,
+        settings.queueCapacity());
   }
 
   /** 全应用事件连接共享一个 heartbeat scheduler；每次 tick 只做异步发送队列入队。 */

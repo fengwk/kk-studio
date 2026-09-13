@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
   AlertTriangle,
@@ -23,6 +23,7 @@ import type {
   ProjectIssueSnapshotDTO,
   ReviewDecision,
 } from '../types'
+import { useProjectsInvalidation } from '../useProjectsInvalidation'
 
 export interface IssueDetailModalProps {
   isOpen: boolean
@@ -82,22 +83,33 @@ export function IssueDetailModal({
 
   // Retry state
   const [isRetrying, setIsRetrying] = useState(false)
+  const loadRequestIdRef = useRef(0)
 
-  const loadDetail = useCallback(async (id: string) => {
+  const loadDetail = useCallback(async (id: string, preserveSpecDraft = false) => {
+    const requestId = ++loadRequestIdRef.current
     setIsLoading(true)
     setErrorMessage(null)
     try {
       const data = await api.getIssue(id)
+      if (loadRequestIdRef.current !== requestId) {
+        return
+      }
       setDetail(data)
-      setDraftTitle(data.issue.title)
-      setDraftDescription(data.issue.description)
-      setDraftAssignee(data.issue.assigneeAgentName ?? '')
-      setDraftReviewer(data.issue.reviewerAgentName ?? '')
-      setDraftExpectedVersion(data.issue.version)
+      if (!preserveSpecDraft) {
+        setDraftTitle(data.issue.title)
+        setDraftDescription(data.issue.description)
+        setDraftAssignee(data.issue.assigneeAgentName ?? '')
+        setDraftReviewer(data.issue.reviewerAgentName ?? '')
+        setDraftExpectedVersion(data.issue.version)
+      }
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '获取 Issue 详情失败')
+      if (loadRequestIdRef.current === requestId) {
+        setErrorMessage(err instanceof Error ? err.message : '获取 Issue 详情失败')
+      }
     } finally {
-      setIsLoading(false)
+      if (loadRequestIdRef.current === requestId) {
+        setIsLoading(false)
+      }
     }
   }, [api])
 
@@ -126,6 +138,16 @@ export function IssueDetailModal({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, isEditingSpec, onClose])
+
+  useProjectsInvalidation((payload) => {
+    if (
+      isOpen
+      && issueId
+      && (!payload?.projectId || !detail || payload.projectId === detail.issue.projectId)
+    ) {
+      void loadDetail(issueId, isEditingSpec)
+    }
+  })
 
   if (!isOpen || !issueId) {
     return null

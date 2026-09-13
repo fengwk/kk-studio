@@ -68,7 +68,7 @@ public class IssueControllerWorkStoreImpl implements IssueControllerWorkStore {
     Objects.requireNonNull(newLeaseUntil, "newLeaseUntil");
     IssueControllerWork work = repository.lockById(issueId);
     if (work == null) {
-      throw new AiResourceNotFoundException("controller_work", issueId.toString());
+      throw new AiResourceNotFoundException("controller_work");
     }
     if (work.getLeaseToken() == null || !work.getLeaseToken().equals(trimmedToken)) {
       throw new AiValidationException("controller_work", "Lease token mismatch for renewal");
@@ -98,7 +98,7 @@ public class IssueControllerWorkStoreImpl implements IssueControllerWorkStore {
     Objects.requireNonNull(now, "now");
     IssueControllerWork work = repository.lockById(issueId);
     if (work == null) {
-      throw new AiResourceNotFoundException("controller_work", issueId.toString());
+      throw new AiResourceNotFoundException("controller_work");
     }
     if (work.getLeaseToken() == null || !work.getLeaseToken().equals(trimmedToken)) {
       throw new AiValidationException("controller_work", "Lease token mismatch for completion");
@@ -141,7 +141,7 @@ public class IssueControllerWorkStoreImpl implements IssueControllerWorkStore {
     Objects.requireNonNull(requestedAt, "requestedAt");
     IssueControllerWork work = repository.lockById(issueId);
     if (work == null) {
-      throw new AiResourceNotFoundException("controller_work", issueId.toString());
+      throw new AiResourceNotFoundException("controller_work");
     }
     if (work.getLeaseToken() == null || !work.getLeaseToken().equals(trimmedToken)) {
       throw new AiValidationException("controller_work", "Lease token mismatch for rescheduling");

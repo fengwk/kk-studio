@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.platform.project.repo.impl.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import org.apache.ibatis.annotations.Delete;
-import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Result;
 import org.apache.ibatis.annotations.ResultMap;
@@ -12,6 +12,7 @@ import org.apache.ibatis.annotations.Select;
 
 import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueInputDO;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,15 +21,17 @@ public interface IssueInputMapper extends BaseMapper {
 
   String COLUMNS = "issue_id, sequence, kind, body, idempotency_key, created_at";
 
-  @Insert(
+  @Select(
       """
       insert into issue_input (
           issue_id, sequence, kind, body, idempotency_key, created_at
       ) values (
           #{issueId}, #{sequence}, #{kind}, #{body}, #{idempotencyKey}, clock_timestamp()
       )
+      returning created_at
       """)
-  int insert(IssueInputDO input);
+  @Options(useCache = false, flushCache = Options.FlushCachePolicy.TRUE)
+  Instant insert(IssueInputDO input);
 
   @Select(
       """

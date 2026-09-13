@@ -33,8 +33,7 @@ class StudioProjectErrorAdviceTest {
 
   @Test
   void handlesVersionConflict() {
-    AiVersionConflictException ex =
-        new AiVersionConflictException("project", "00000000-0000-0000-0000-000000000001", "1", "2");
+    AiVersionConflictException ex = new AiVersionConflictException("project", "1", "2");
     ResponseEntity<Result<Void>> response = advice.handleVersionConflict(ex);
 
     assertEquals(409, response.getStatusCode().value());
@@ -63,8 +62,7 @@ class StudioProjectErrorAdviceTest {
 
   @Test
   void handlesResourceNotFound() {
-    AiResourceNotFoundException ex =
-        new AiResourceNotFoundException("issue", "00000000-0000-0000-0000-000000000001");
+    AiResourceNotFoundException ex = new AiResourceNotFoundException("issue");
     ResponseEntity<Result<Void>> response = advice.handleResourceNotFound(ex);
 
     assertEquals(404, response.getStatusCode().value());
@@ -96,6 +94,14 @@ class StudioProjectErrorAdviceTest {
     assertNotNull(body);
     assertEquals("PROJECT_VALIDATION_ERROR", body.getCode());
     assertEquals(Map.of("detail", "title is required"), body.getErrors());
+
+    ResponseEntity<Result<Void>> internal =
+        advice.handleIllegalState(new IllegalStateException("sensitive internal state"));
+    assertEquals(500, internal.getStatusCode().value());
+    Result<Void> internalBody = internal.getBody();
+    assertNotNull(internalBody);
+    assertEquals("PROJECT_INTERNAL_ERROR", internalBody.getCode());
+    assertEquals(Map.of("detail", "Project operation failed"), internalBody.getErrors());
   }
 
   @Test

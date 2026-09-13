@@ -58,8 +58,7 @@ public class PostgresqlProjectRepository implements ProjectRepository {
   public long allocateNextIssueNumber(UUID projectId) {
     Long allocated = projectMapper.allocateNextIssueNumber(projectId);
     if (allocated == null) {
-      throw new IllegalStateException(
-          "Failed to allocate next issue number for project " + projectId);
+      throw new IllegalStateException("Failed to allocate next project issue number");
     }
     return allocated;
   }

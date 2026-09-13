@@ -2,7 +2,7 @@
 
 ## 定位
 
-`schema` 是唯一的 V1 baseline 与 profile seed 纯资源模块。它不包含 Java
+`schema` 是唯一的 V1 baseline、增量 migration 与 profile seed 纯资源模块。它不包含 Java
 源码、Spring bean 或运行时 repository；Flyway 从该模块加载 PostgreSQL DDL
 和 profile 数据，应用与集成测试共享同一资源事实源。
 
@@ -30,8 +30,8 @@ flowchart LR
 
 ## Goals
 
-- 以一份 `V1__schema.sql` 定义所有应用 durable 表、约束、索引、触发器和
-  默认 `system_setting` 行。
+- 以冻结的 `V1__schema.sql` 建立基础 durable 结构，并只通过有序增量 migration
+  推进当前 schema。
 - 以 profile seed 分离 dev、e2e、canvas-test 的可重复数据和运行开关。
 - 让生产 Web、Platform/Harness/Canvas 集成测试使用同一 PostgreSQL 形状。
 - 由架构测试保证 V1 冻结、增量 migration 命名规范、profile seed 清单受限、
@@ -55,6 +55,9 @@ schema/src/main/resources/db/migration/V2__model_identity_and_variant.sql
 schema/src/main/resources/db/migration/V3__remove_workspace.sql
 schema/src/main/resources/db/migration/V4__skill_sources_and_operations.sql
 schema/src/main/resources/db/migration/V5__mcp_json_and_local.sql
+schema/src/main/resources/db/migration/V6__cloud_file_system.sql
+schema/src/main/resources/db/migration/V7__project_issue.sql
+schema/src/main/resources/db/migration/V8__project_change_notifications.sql
 schema/src/main/resources/db/seed/dev/R__dev_seed.sql
 schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql
 schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql
@@ -129,6 +132,26 @@ Web 依赖 `spring-boot-starter-flyway`、`flyway-database-postgresql` 以及 ru
   `enabled`（公共启用开关）、`discovery_status`（`UNVERIFIED`、`AVAILABLE`、`FAILED`）、
   `discovered_version`（成功发现的配置代际，`<= version`）；为 `mcp_tool` 增加 `schema_revision`（模式代际，非负，
   模式变更或重新上线时递增）与 `available`（可用性标志，远端工具下线时作为 tombstone 置为 false，保留稳定 UUID 与历史引用）。
+- V6 引入全局 Cloud File System：`cloud_node` 以虚拟 root 和
+  `(parent_id, name) NULLS NOT DISTINCT` 唯一约束表达 `DIRECTORY`、`TEXT`、`BLOB`
+  层级；复合外键保证 parent 必为目录，BLOB 以 `ON DELETE RESTRICT` 引用
+  `storage_blob`。`cloud_text_revision` 保存最大 1 MiB 的不可变 UTF-8 历史，
+  每个 TEXT 节点至多一条 current revision。迁移预建 `/knowledge`、`/uploads`、
+  `/.artifacts`、`/.artifacts/tool-results`，并由 `cloud_files_changed_notify()`
+  在 `cloud_node` 提交变更后向 `cloud_files_changed` 发送失效提示。
+- V7 引入 Project/Issue 编排事实：`project`、`project_session`、`issue`、
+  `issue_dependency`、`issue_input`、`issue_run`、`issue_run_session` 与
+  `issue_controller_work`。Issue 使用六态生命周期、项目内单调编号、行
+  `version`、`spec_revision` 与 `input_sequence`；依赖边通过复合外键限制在
+  同一 Project，应用层负责 DAG 环检测。Run 表以单活跃 partial unique index、
+  actor/role/lifecycle checks、终态 action 唯一键和 continuation/deadline 围栏
+  固定执行事实；`issue_controller_work_due` 只提示 dispatcher 回读。
+  `harness_session_owner_guard` 与四组触发器让 Chat、Canvas、Project 和 IssueRun
+  的 Session 归属全局互斥，已有 Chat/Canvas 归属在 migration 内回填。
+- V8 为浏览器 Project Snapshot 失效增加 `project_issue_changed_notify()`：
+  Project、Project Session、Issue、依赖、输入、Run、Run Session 与其 Harness
+  Thread 的提交变更统一归一为 `projectId`，通过 `project_issue_changed` 通道提示
+  回读；payload 不是事件日志。
 
 ### Profile seeds
 
@@ -168,9 +191,10 @@ Testcontainers 测试在每个测试隔离数据库后重新执行 Flyway。
   `IF NOT EXISTS` 隐藏形状错误。
 - DDL、seed、业务写入和 trigger 的可见性服从 PostgreSQL transaction。事务
   rollback 不产生可观察的 Work/Canvas Function NOTIFY，也不暴露半成品行。
-- `harness_thread_version`、`canvas_version`、`canvas_function_work` 和
-  `system_settings_changed` 是提交后的提示，不保存通知记录。消费方分别通过
-  Harness/Canvas poll、Snapshot 或 Settings resync 恢复。
+- `harness_thread_version`、`canvas_version`、`canvas_function_work`、
+  `issue_controller_work_due`、`cloud_files_changed`、`project_issue_changed` 和
+  `system_settings_changed` 都只是提交后的提示，不保存通知记录。消费方分别通过
+  dispatcher、Harness/Canvas/Project/Cloud Files Snapshot 或 Settings resync 恢复。
 - `ON DELETE RESTRICT` 保留跨域引用错误，让应用按 Session Blob ref、Canvas
   pins/Resource、Harness facts 的顺序完成删除。
 - `storage_blob` 的字节清理不由 DDL cascade 完成；元数据状态与 S3 object
@@ -194,6 +218,9 @@ profile seed，也没有生产凭据默认值。
 - `schema/src/main/resources/db/migration/V3__remove_workspace.sql`
 - `schema/src/main/resources/db/migration/V4__skill_sources_and_operations.sql`
 - `schema/src/main/resources/db/migration/V5__mcp_json_and_local.sql`
+- `schema/src/main/resources/db/migration/V6__cloud_file_system.sql`
+- `schema/src/main/resources/db/migration/V7__project_issue.sql`
+- `schema/src/main/resources/db/migration/V8__project_change_notifications.sql`
 - `schema/src/main/resources/db/seed/dev/R__dev_seed.sql`
 - `schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql`
 - `schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql`
@@ -207,6 +234,9 @@ profile seed，也没有生产凭据默认值。
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSkillSourceMigrationTest.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlMcpMigrationTest.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java`
+- `platform/src/test/java/fun/fengwk/kkstudio/platform/cloudfs/repository/CloudFileSystemSchemaIntegrationTest.java`
+- `platform/src/test/java/fun/fengwk/kkstudio/platform/project/ProjectSchemaPostgresTest.java`
+- `platform/src/test/java/fun/fengwk/kkstudio/platform/project/ProjectChangeNotificationIntegrationTest.java`
 - `canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresCanvasInfraTestSupport.java`
 
 ---

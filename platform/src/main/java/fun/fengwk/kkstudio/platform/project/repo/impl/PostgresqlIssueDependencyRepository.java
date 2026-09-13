@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
 import fun.fengwk.kkstudio.platform.project.repo.impl.mapper.IssueDependencyMapper;
 import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueDependencyDO;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -20,7 +21,12 @@ public class PostgresqlIssueDependencyRepository implements IssueDependencyRepos
 
   @Override
   public boolean addDependency(IssueDependency dependency) {
-    return issueDependencyMapper.insert(toDO(dependency)) == 1;
+    Instant createdAt = issueDependencyMapper.insert(toDO(dependency));
+    if (createdAt == null) {
+      return false;
+    }
+    dependency.setCreatedAt(createdAt);
+    return true;
   }
 
   @Override

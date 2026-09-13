@@ -131,6 +131,26 @@ describe('AppShell settings navigation', () => {
   })
 })
 
+describe('AppShell platform feature navigation', () => {
+  it.each([
+    ['/projects', '项目 Projects', '/projects'],
+    ['/projects/123', '项目 Projects', '/projects'],
+    ['/files', '文件 Files', '/files'],
+  ])('activates the feature link and keeps the brand in that feature for %s', (path, label, href) => {
+    render(
+      <MemoryRouter initialEntries={[path]}>
+        <AppShell>
+          <div>Feature content</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('link', { name: label })).toHaveClass('active')
+    expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', href)
+    expect(screen.getByRole('link', { name: '智能 AI' })).not.toHaveClass('active')
+  })
+})
+
 describe('AppShell nav Escape priority guards', () => {
   it('closes the nav on Escape outside modals and editable targets', async () => {
     const user = userEvent.setup()

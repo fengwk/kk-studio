@@ -4,6 +4,8 @@ import { createApplicationExtensionHost } from '@/app/extension-host'
 import { aiExtension } from '@/features/ai/extensions/ai-extension.definition'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
 import { comfyuiExtension } from '@/features/comfyui/extensions/comfyui-extension.definition'
+import { filesExtension } from '@/features/files/extensions/files-extension.definition'
+import { projectsExtension } from '@/features/projects/extensions/projects-extension.definition'
 import { settingsExtension } from '@/features/settings/settings-extension'
 
 describe('AI extension composition architecture', () => {
@@ -41,6 +43,13 @@ describe('AI extension composition architecture', () => {
     expect(settingsExtension.pages?.map((page) => [page.id, page.path])).toEqual([
       ['settings.page', 'settings'],
     ])
+    expect(projectsExtension.pages?.map((page) => [page.id, page.path])).toEqual([
+      ['projects.home', 'projects'],
+      ['projects.detail', 'projects/:projectId'],
+    ])
+    expect(filesExtension.pages?.map((page) => [page.id, page.path])).toEqual([
+      ['files.home', 'files'],
+    ])
 
     const host = createApplicationExtensionHost()
     expect(host.pages.list().map((page) => page.id)).toEqual([
@@ -55,10 +64,17 @@ describe('AI extension composition architecture', () => {
       'settings.page',
       'canvas.home',
       'canvas.editor',
+      'projects.home',
+      'projects.detail',
+      'files.home',
     ])
     expect(host.dialogs.list().map((dialog) => dialog.id)).toEqual([
       ...aiExtension.dialogs!.map((dialog) => dialog.id),
       ...comfyuiExtension.dialogs!.map((dialog) => dialog.id),
+    ])
+    expect(host.overlays.list().map((overlay) => overlay.id)).toEqual([
+      'projects.invalidation',
+      'files.invalidation',
     ])
     expect(host.pages.get('canvas.home')?.component).toBe(
       canvasExtension.pages?.[0].component,
