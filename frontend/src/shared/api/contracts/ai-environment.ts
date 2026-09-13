@@ -5,11 +5,6 @@ export interface LiveEnvironmentCapabilityDTO {
   version: string
 }
 
-export interface LiveEnvironmentSkillDTO {
-  name: string
-  description: string | null
-}
-
 /**
  * Environment Card DTO（包含稳定 Card 属性与当前 live 连接投影）。
  *
@@ -29,8 +24,6 @@ export interface EnvironmentCardDTO {
   lastSeen: InstantTimestamp
   /** 支持的原子能力列表。 */
   capabilities: LiveEnvironmentCapabilityDTO[]
-  /** daemon 通告的技能列表。 */
-  skills: LiveEnvironmentSkillDTO[]
   /** daemon 实际 root display path。 */
   rootPath: string | null
   /** CAS 版本。 */
