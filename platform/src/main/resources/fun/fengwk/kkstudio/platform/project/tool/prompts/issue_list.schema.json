@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "BACKLOG",
+        "TODO",
+        "IN_PROGRESS",
+        "IN_REVIEW",
+        "DONE",
+        "CANCELED"
+      ],
+      "description": "Optional filter by issue status."
+    },
+    "include_archived": {
+      "type": "boolean",
+      "description": "Whether to include archived issues. Defaults to false."
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}

@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "properties": {
+    "observed_spec_revision": {
+      "type": "integer",
+      "description": "Observed issue specification revision cursor."
+    },
+    "observed_input_sequence": {
+      "type": "integer",
+      "description": "Observed issue input sequence cursor."
+    },
+    "question": {
+      "type": "string",
+      "description": "Question or input requested from the user or coordinator."
+    },
+    "context": {
+      "type": "string",
+      "description": "Optional context or background explanation for the request."
+    }
+  },
+  "required": [
+    "observed_spec_revision",
+    "observed_input_sequence",
+    "question"
+  ],
+  "additionalProperties": false
+}
