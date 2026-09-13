@@ -39,7 +39,7 @@ import java.util.Objects;
 class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-  private static final String VERSIONED_MIGRATIONS = "1,2,3,6,7";
+  private static final String VERSIONED_MIGRATIONS = "1,2,3,4,5,6,7";
 
   @BeforeEach
   void setup() throws Exception {
@@ -675,6 +675,21 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
               st,
               "select string_agg(name || '|' || coalesce(system_prompt, ''), ';' order by name)"
                   + " from agent_definition"));
+      sb.append('|');
+      sb.append(
+          singleString(
+              st,
+              "select string_agg(environment_id::text || '|' || source_set_version || '|' ||"
+                  + " coalesce(applied_source_set_version::text, '') || '|' ||"
+                  + " coalesce(reported_at::text, '') || '|' || updated_at, ';'"
+                  + " order by environment_id) from environment_inventory"));
+      sb.append('|');
+      sb.append(
+          singleString(
+              st,
+              "select string_agg(source_id::text || '|' || path || '|' || default_source || '|' ||"
+                  + " version || '|' || status || '|' || updated_at, ';' order by source_id)"
+                  + " from environment_skill_source"));
     }
     return sb.toString();
   }

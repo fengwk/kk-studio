@@ -4,7 +4,6 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -36,10 +35,6 @@ public record EnvironmentConnection(
 
   public List<EnvironmentCapabilityDescriptor> capabilities() {
     return EnvironmentCapabilityCatalog.descriptors();
-  }
-
-  public List<DaemonSkillDescriptor> skills() {
-    return daemonCapabilities == null ? List.of() : daemonCapabilities.skills();
   }
 
   public String rootPath() {

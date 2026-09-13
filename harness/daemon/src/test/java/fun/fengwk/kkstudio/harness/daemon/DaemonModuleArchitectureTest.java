@@ -199,6 +199,7 @@ class DaemonModuleArchitectureTest {
         || imported.startsWith("fun.fengwk.kkstudio.harness.common.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.environment.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.daemon.")
+        || imported.startsWith("fun.fengwk.kkstudio.harness.mcp.")
         || imported.equals(FastIgnoreRule.class.getName());
   }
 

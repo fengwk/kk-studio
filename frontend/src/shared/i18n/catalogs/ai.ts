@@ -1969,13 +1969,281 @@ export const aiCatalog = {
     'en-US': 'Capabilities',
     'zh-CN': 'Capabilities',
   },
-  'ai.environment.skills': {
-    'en-US': 'Skills',
-    'zh-CN': 'Skills',
-  },
   'ai.environment.rootPath': {
     'en-US': 'Root Path',
     'zh-CN': 'Root 路径',
+  },
+  'ai.environment.manage': {
+    'en-US': 'Manage',
+    'zh-CN': '管理',
+  },
+  'ai.environment.managementTitle': {
+    'en-US': 'Manage Environment',
+    'zh-CN': '管理环境',
+  },
+  'ai.environment.sources.title': {
+    'en-US': 'Skill Sources',
+    'zh-CN': 'Skill 来源',
+  },
+  'ai.environment.sources.create': {
+    'en-US': 'Add Source',
+    'zh-CN': '添加来源',
+  },
+  'ai.environment.sources.edit': {
+    'en-US': 'Edit Source',
+    'zh-CN': '编辑来源',
+  },
+  'ai.environment.sources.delete': {
+    'en-US': 'Delete Source',
+    'zh-CN': '删除来源',
+  },
+  'ai.environment.sources.deleteConfirm': {
+    'en-US': 'Are you sure you want to delete this skill source?',
+    'zh-CN': '确认删除该 Skill 来源？',
+  },
+  'ai.environment.sources.type': {
+    'en-US': 'Source Type',
+    'zh-CN': '来源类型',
+  },
+  'ai.environment.sources.typePath': {
+    'en-US': 'PATH Directory',
+    'zh-CN': 'PATH 目录',
+  },
+  'ai.environment.sources.typeGit': {
+    'en-US': 'GIT Repository',
+    'zh-CN': 'GIT 仓库',
+  },
+  'ai.environment.sources.path': {
+    'en-US': 'Host Directory Path',
+    'zh-CN': '宿主目录路径',
+  },
+  'ai.environment.sources.pathPlaceholder': {
+    'en-US': 'e.g. ~/skills or /opt/skills',
+    'zh-CN': '如 ~/skills 或 /opt/skills',
+  },
+  'ai.environment.sources.gitUrl': {
+    'en-US': 'Git Repository URL',
+    'zh-CN': 'Git 仓库 URL',
+  },
+  'ai.environment.sources.gitUrlPlaceholder': {
+    'en-US': 'https://github.com/org/repo.git',
+    'zh-CN': 'https://github.com/org/repo.git',
+  },
+  'ai.environment.sources.gitRef': {
+    'en-US': 'Git Ref',
+    'zh-CN': 'Git Ref',
+  },
+  'ai.environment.sources.gitRefPlaceholder': {
+    'en-US': 'Default HEAD if empty',
+    'zh-CN': '缺省跟踪默认 HEAD',
+  },
+  'ai.environment.sources.scanPath': {
+    'en-US': 'Relative Scan Path',
+    'zh-CN': '相对扫描路径',
+  },
+  'ai.environment.sources.scanPathPlaceholder': {
+    'en-US': 'Default repo root if empty',
+    'zh-CN': '缺省仓库根目录',
+  },
+  'ai.environment.sources.defaultBadge': {
+    'en-US': 'Default',
+    'zh-CN': '缺省',
+  },
+  'ai.environment.sources.version': {
+    'en-US': 'Config Version',
+    'zh-CN': '配置版本',
+  },
+  'ai.environment.sources.appliedVersion': {
+    'en-US': 'Applied Version',
+    'zh-CN': '应用版本',
+  },
+  'ai.environment.sources.appliedRevision': {
+    'en-US': 'Applied Revision',
+    'zh-CN': '应用 Revision',
+  },
+  'ai.environment.sources.lastAppliedAt': {
+    'en-US': 'Last Applied',
+    'zh-CN': '最近应用',
+  },
+  'ai.environment.sources.diagnostics': {
+    'en-US': 'Diagnostics',
+    'zh-CN': '扫描诊断',
+  },
+  'ai.environment.sources.empty': {
+    'en-US': 'No skill sources configured',
+    'zh-CN': '暂未配置 Skill 来源',
+  },
+  'ai.environment.sources.loading': {
+    'en-US': 'Loading skill sources...',
+    'zh-CN': '正在加载 Skill 来源...',
+  },
+  'ai.environment.sources.defaultTypeImmutable': {
+    'en-US': 'Default source type cannot be changed to GIT',
+    'zh-CN': '缺省来源类型不可变更为 GIT',
+  },
+  'ai.environment.sources.pathRequired': {
+    'en-US': 'Host directory path is required',
+    'zh-CN': '必须填写宿主目录路径',
+  },
+  'ai.environment.sources.gitUrlRequired': {
+    'en-US': 'Git repository URL is required',
+    'zh-CN': '必须填写 Git 仓库 URL',
+  },
+  'ai.environment.action.refresh': {
+    'en-US': 'Refresh',
+    'zh-CN': 'Refresh',
+  },
+  'ai.environment.action.install': {
+    'en-US': 'Install',
+    'zh-CN': 'Install',
+  },
+  'ai.environment.action.update': {
+    'en-US': 'Update',
+    'zh-CN': 'Update',
+  },
+  'ai.environment.action.dialogTitle': {
+    'en-US': '{{action}} Skill Source',
+    'zh-CN': '{{action}} Skill 来源',
+  },
+  'ai.environment.action.dialogDescription': {
+    'en-US': 'Execute {{action}} on source "{{target}}".',
+    'zh-CN': '对来源「{{target}}」执行 {{action}} 操作。',
+  },
+  'ai.environment.action.timeoutMillis': {
+    'en-US': 'Timeout (ms)',
+    'zh-CN': '超时时间 (毫秒)',
+  },
+  'ai.environment.action.timeoutInvalid': {
+    'en-US': 'Timeout must be a positive safe integer',
+    'zh-CN': '超时时间必须为正安全整数',
+  },
+  'ai.environment.inventory.title': {
+    'en-US': 'Durable Inventory',
+    'zh-CN': '持久化 Inventory',
+  },
+  'ai.environment.inventory.loading': {
+    'en-US': 'Loading inventory...',
+    'zh-CN': '正在加载 Inventory...',
+  },
+  'ai.environment.inventory.sourceSetVersion': {
+    'en-US': 'Desired Source Set (sourceSetVersion)',
+    'zh-CN': '期望来源代际 (sourceSetVersion)',
+  },
+  'ai.environment.inventory.appliedSourceSetVersion': {
+    'en-US': 'Applied Source Set (appliedSourceSetVersion)',
+    'zh-CN': '已接受代际 (appliedSourceSetVersion)',
+  },
+  'ai.environment.inventory.operatingSystem': {
+    'en-US': 'Operating System',
+    'zh-CN': '操作系统',
+  },
+  'ai.environment.inventory.timeZone': {
+    'en-US': 'Timezone',
+    'zh-CN': '时区',
+  },
+  'ai.environment.inventory.note': {
+    'en-US': 'Note',
+    'zh-CN': '备注',
+  },
+  'ai.environment.inventory.rootPath': {
+    'en-US': 'Root Path',
+    'zh-CN': 'Root 路径',
+  },
+  'ai.environment.inventory.reportedAt': {
+    'en-US': 'Reported At',
+    'zh-CN': '上报时间',
+  },
+  'ai.environment.inventory.persistedSkills': {
+    'en-US': 'Persisted Skills List',
+    'zh-CN': '已持久化 Skill 列表',
+  },
+  'ai.environment.inventory.noSkills': {
+    'en-US': 'No skills discovered in inventory',
+    'zh-CN': '未发现任何持久化 Skill',
+  },
+  'ai.environment.inventory.skillName': {
+    'en-US': 'Skill Name',
+    'zh-CN': 'Skill 名称',
+  },
+  'ai.environment.inventory.sourceId': {
+    'en-US': 'Source ID',
+    'zh-CN': '来源 ID',
+  },
+  'ai.environment.inventory.description': {
+    'en-US': 'Description',
+    'zh-CN': '描述',
+  },
+  'ai.environment.inventory.baseDirectory': {
+    'en-US': 'Base Directory',
+    'zh-CN': '宿主目录',
+  },
+  'ai.environment.inventory.contentRevision': {
+    'en-US': 'Content Revision',
+    'zh-CN': '内容 Revision',
+  },
+  'ai.environment.operations.title': {
+    'en-US': 'Operations',
+    'zh-CN': '异步操作记录',
+  },
+  'ai.environment.operations.loading': {
+    'en-US': 'Loading operations...',
+    'zh-CN': '正在加载操作记录...',
+  },
+  'ai.environment.operations.empty': {
+    'en-US': 'No operation records',
+    'zh-CN': '暂无操作记录',
+  },
+  'ai.environment.operations.targetResource': {
+    'en-US': 'Target Resource',
+    'zh-CN': '目标资源',
+  },
+  'ai.environment.operations.resourceVersionLabel': {
+    'en-US': 'Version',
+    'zh-CN': '版本',
+  },
+  'ai.environment.operations.resourceVersion': {
+    'en-US': 'v{{version}}',
+    'zh-CN': '版本 v{{version}}',
+  },
+  'ai.environment.operations.created': {
+    'en-US': 'Created',
+    'zh-CN': '创建',
+  },
+  'ai.environment.operations.started': {
+    'en-US': 'Started',
+    'zh-CN': '开始',
+  },
+  'ai.environment.operations.finished': {
+    'en-US': 'Finished',
+    'zh-CN': '完成',
+  },
+  'ai.environment.operations.times': {
+    'en-US': 'Times',
+    'zh-CN': '时间',
+  },
+  'ai.environment.operations.deadline': {
+    'en-US': 'Deadline',
+    'zh-CN': '截止',
+  },
+  'ai.environment.operations.cancel': {
+    'en-US': 'Cancel',
+    'zh-CN': '取消操作',
+  },
+  'ai.environment.operations.cancelConfirm': {
+    'en-US': 'Are you sure you want to cancel pending operation "{{id}}"?',
+    'zh-CN': '确认取消该等待中的操作「{{id}}」？',
+  },
+  'ai.environment.operations.failure': {
+    'en-US': 'Failure',
+    'zh-CN': '失败信息',
+  },
+  'ai.environment.operations.parameterSummary': {
+    'en-US': 'Parameters',
+    'zh-CN': '参数摘要',
+  },
+  'ai.environment.operations.resultSummary': {
+    'en-US': 'Result',
+    'zh-CN': '结果摘要',
   },
   'ai.mcp.title': {
     'en-US': 'MCP Servers',
@@ -1997,13 +2265,13 @@ export const aiCatalog = {
     'en-US': 'Are you sure you want to delete MCP server "{name}"?',
     'zh-CN': '确认删除 MCP 服务「{name}」？',
   },
-  'ai.mcp.refresh': {
-    'en-US': 'Refresh Tools',
-    'zh-CN': '刷新工具',
+  'ai.mcp.discover': {
+    'en-US': 'Discover Tools',
+    'zh-CN': '发现工具',
   },
-  'ai.mcp.refreshSuccess': {
-    'en-US': 'Tools refreshed successfully',
-    'zh-CN': '工具刷新成功',
+  'ai.mcp.unsavedDiscoverBlocked': {
+    'en-US': 'Unsaved configuration changes. Please save before discovering tools.',
+    'zh-CN': '存在未保存的配置更改，请先保存再发现工具。',
   },
   'ai.mcp.empty': {
     'en-US': 'No MCP servers configured',
@@ -2013,41 +2281,81 @@ export const aiCatalog = {
     'en-US': 'Server Name',
     'zh-CN': '服务名称',
   },
-  'ai.mcp.url': {
-    'en-US': 'Endpoint URL',
-    'zh-CN': 'Endpoint URL',
+  'ai.mcp.configJson': {
+    'en-US': 'Configuration JSON',
+    'zh-CN': '配置 JSON',
   },
-  'ai.mcp.bearerToken': {
-    'en-US': 'Bearer Token',
-    'zh-CN': 'Bearer Token',
+  'ai.mcp.remoteTemplate': {
+    'en-US': 'Remote Template',
+    'zh-CN': 'Remote 模板',
   },
-  'ai.mcp.tokenMode': {
-    'en-US': 'Token Setting',
-    'zh-CN': 'Token 设置',
+  'ai.mcp.localTemplate': {
+    'en-US': 'Local Template',
+    'zh-CN': 'Local 模板',
   },
-  'ai.mcp.tokenKeep': {
-    'en-US': 'Keep current token',
-    'zh-CN': '保留当前 Token',
+  'ai.mcp.formatJson': {
+    'en-US': 'Format',
+    'zh-CN': '格式化',
   },
-  'ai.mcp.tokenClear': {
-    'en-US': 'Clear token (anonymous)',
-    'zh-CN': '清除 Token (匿名访问)',
+  'ai.mcp.validateJson': {
+    'en-US': 'Validate',
+    'zh-CN': '校验',
   },
-  'ai.mcp.tokenSet': {
-    'en-US': 'Replace token',
-    'zh-CN': '替换新 Token',
+  'ai.mcp.validationPassed': {
+    'en-US': 'Configuration is valid',
+    'zh-CN': '配置格式校验通过',
   },
-  'ai.mcp.timeout': {
-    'en-US': 'Timeout (ms)',
-    'zh-CN': '超时时间 (毫秒)',
+  'ai.mcp.envSelect': {
+    'en-US': 'Environment',
+    'zh-CN': '关联环境',
   },
-  'ai.mcp.configured': {
-    'en-US': 'Configured',
-    'zh-CN': '已配置',
+  'ai.mcp.type': {
+    'en-US': 'Connection Type',
+    'zh-CN': '连接类型',
   },
-  'ai.mcp.anonymous': {
-    'en-US': 'Anonymous',
-    'zh-CN': '匿名访问',
+  'ai.mcp.typeRemote': {
+    'en-US': 'Remote',
+    'zh-CN': '远程 (Remote)',
+  },
+  'ai.mcp.typeLocal': {
+    'en-US': 'Local',
+    'zh-CN': '本地 (Local)',
+  },
+  'ai.mcp.toolCount': {
+    'en-US': 'Tools',
+    'zh-CN': '工具数量',
+  },
+  'ai.mcp.status': {
+    'en-US': 'Status',
+    'zh-CN': '状态',
+  },
+  'ai.mcp.statusAvailable': {
+    'en-US': 'Available',
+    'zh-CN': '可用',
+  },
+  'ai.mcp.statusUnverified': {
+    'en-US': 'Unverified',
+    'zh-CN': '未验证',
+  },
+  'ai.mcp.statusFailed': {
+    'en-US': 'Failed',
+    'zh-CN': '失败',
+  },
+  'ai.mcp.discoveredVersion': {
+    'en-US': 'Discovered Version',
+    'zh-CN': '已验证版本',
+  },
+  'ai.mcp.enabledState': {
+    'en-US': 'Enabled State',
+    'zh-CN': '启用状态',
+  },
+  'ai.mcp.enabled': {
+    'en-US': 'Enabled',
+    'zh-CN': '已启用',
+  },
+  'ai.mcp.disabled': {
+    'en-US': 'Disabled',
+    'zh-CN': '已禁用',
   },
   'ai.mcp.loading': {
     'en-US': 'Loading MCP servers',
@@ -2056,6 +2364,14 @@ export const aiCatalog = {
   'ai.mcp.loadFailed': {
     'en-US': 'Failed to load MCP servers',
     'zh-CN': '加载 MCP 服务失败',
+  },
+  'ai.mcp.loadingConfig': {
+    'en-US': 'Loading configuration...',
+    'zh-CN': '正在读取配置...',
+  },
+  'ai.mcp.loadConfigFailed': {
+    'en-US': 'Failed to load configuration',
+    'zh-CN': '读取配置失败',
   },
   'ai.mcp.version': {
     'en-US': 'Version',

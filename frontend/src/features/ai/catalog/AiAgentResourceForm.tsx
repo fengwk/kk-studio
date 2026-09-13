@@ -3,8 +3,11 @@ import {
   buildSkillCandidates,
   buildSubagentCandidates,
   buildToolCandidates,
+  toggleSkillRef,
   withSelectedOrphans,
+  withSelectedSkillOrphans,
   type CapabilityOption,
+  type SkillCandidateOption,
 } from '@/features/ai/catalog/agent-capability-candidates'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
 import { applyAgentModelSelection, variantOptionsFromModel } from '@/features/ai/catalog/ai-draft-normalizers'
@@ -14,13 +17,19 @@ import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-va
 import { Select } from '@/shared/ui/console/Select'
 import type {
   AgentDefinitionDTO,
+  AgentSkillRefDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO, EnvironmentSkillDTO } from '@/shared/api/contracts/ai-environment'
 import { translate, useI18n } from '@/shared/i18n'
 
 function toggleValue(items: string[], value: string): string[] {
   return items.includes(value) ? items.filter((item) => item !== value) : [...items, value]
+}
+
+function shortSourceId(sourceId: string): string {
+  const trimmed = sourceId.trim()
+  return trimmed.length > 8 ? trimmed.slice(0, 8) : trimmed
 }
 
 export function AgentForm({
@@ -30,6 +39,9 @@ export function AgentForm({
   toolCatalog = [],
   agents = [],
   environments = [],
+  inventorySkills = [],
+  inventorySkillsLoading = false,
+  inventorySkillsError = null,
   fieldErrors = {},
   onChange,
 }: {
@@ -39,6 +51,9 @@ export function AgentForm({
   toolCatalog?: ToolCatalogEntryDTO[]
   agents?: AgentDefinitionDTO[]
   environments?: EnvironmentCardDTO[]
+  inventorySkills?: EnvironmentSkillDTO[]
+  inventorySkillsLoading?: boolean
+  inventorySkillsError?: unknown
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>
   onChange: (draft: AgentDraft) => void
 }) {
@@ -94,12 +109,12 @@ export function AgentForm({
       : []),
     ...environments.map((env) => ({
       value: env.id,
-      label: env.ready ? env.name : `${env.name} (${t('ai.catalog.form.unavailable')})`,
+      label: env.ready ? env.name : `${env.name} (${t('ai.catalog.form.offline')})`,
     })),
   ]
 
-  const skillCandidates = withSelectedOrphans(
-    buildSkillCandidates(selectedEnvironment),
+  const skillCandidates = withSelectedSkillOrphans(
+    buildSkillCandidates(inventorySkills),
     draft.skills,
   )
 
@@ -177,7 +192,17 @@ export function AgentForm({
           aria-label={t('ai.catalog.form.environment')}
           value={draft.environmentId}
           options={environmentOptions}
-          onChange={(environmentId) => onChange({ ...draft, environmentId })}
+          onChange={(newEnvironmentId) => {
+            const nextId = newEnvironmentId.trim()
+            const currentId = (draft.environmentId ?? '').trim()
+            if (nextId !== currentId) {
+              onChange({
+                ...draft,
+                environmentId: newEnvironmentId,
+                skills: [],
+              })
+            }
+          }}
         />
       </label>
       <label className="form-group">
@@ -203,11 +228,13 @@ export function AgentForm({
 
       <fieldset className={`form-group capability-picker${fieldErrors.skills ? ' is-error' : ''}`}>
         <legend>{t('ai.catalog.card.skills')}</legend>
-        <CapabilityChecklist
+        <SkillChecklist
           options={skillCandidates}
           selected={draft.skills}
           emptyText={t('ai.catalog.form.noCandidateSkills')}
-          onToggle={(value) => onChange({ ...draft, skills: toggleValue(draft.skills, value) })}
+          statusText={inventorySkillsLoading ? t('ai.common.loadingResources') : null}
+          errorText={inventorySkillsError ? t('ai.environment.loadFailed') : null}
+          onToggle={(ref) => onChange({ ...draft, skills: toggleSkillRef(draft.skills, ref) })}
         />
         {fieldErrors.skills ? <span className="field-error">{fieldErrors.skills}</span> : null}
       </fieldset>
@@ -236,6 +263,101 @@ export function AgentForm({
         </button>
       )}
     </>
+  )
+}
+
+function SkillChecklist({
+  options,
+  selected,
+  emptyText,
+  statusText,
+  errorText,
+  onToggle,
+}: {
+  options: SkillCandidateOption[]
+  selected: AgentSkillRefDTO[]
+  emptyText?: string
+  statusText?: string | null
+  errorText?: string | null
+  onToggle: (ref: AgentSkillRefDTO) => void
+}) {
+  const { t } = useI18n()
+
+  if (options.length === 0) {
+    if (statusText) {
+      return (
+        <div className="capability-options" role="status">
+          <div className="inline-hint">{statusText}</div>
+        </div>
+      )
+    }
+    if (errorText) {
+      return (
+        <div className="capability-options" role="alert">
+          <div className="inline-hint">{errorText}</div>
+        </div>
+      )
+    }
+    return (
+      <div className="capability-options">
+        {emptyText ? <div className="inline-hint">{emptyText}</div> : null}
+      </div>
+    )
+  }
+
+  const selectedKeySet = new Set(
+    selected.map((item) => `${item.sourceId.trim()}::${item.name.trim()}`),
+  )
+
+  return (
+    <div className="capability-options">
+      {statusText ? (
+        <div className="inline-hint" role="status">
+          {statusText}
+        </div>
+      ) : null}
+      {errorText ? (
+        <div className="inline-hint" role="alert">
+          {errorText}
+        </div>
+      ) : null}
+      {options.map((option) => {
+        const optionKey = `${option.sourceId}::${option.name}`
+        const checked = selectedKeySet.has(optionKey)
+        const stateClass = option.missing ? ' is-offline is-missing' : ''
+        return (
+          <label
+            key={optionKey}
+            className={`capability-option capability-option-detailed${checked ? ' is-selected' : ''}${stateClass}`}
+          >
+            <input
+              type="checkbox"
+              value={optionKey}
+              checked={checked}
+              onChange={() => onToggle(option.ref)}
+            />
+            <span className="capability-option-body">
+              <span className="capability-option-heading">
+                <code className="capability-name">{option.name}</code>
+                <span className="capability-option-meta" title={option.sourceId}>
+                  {shortSourceId(option.sourceId)}
+                </span>
+                {option.missing ? (
+                  <span className="capability-option-status">
+                    {t('ai.catalog.form.unavailable')}
+                  </span>
+                ) : null}
+              </span>
+              {option.description ? (
+                <span className="capability-option-description" title={option.description}>
+                  {option.description}
+                </span>
+              ) : null}
+            </span>
+          </label>
+        )
+      })}
+    </div>
   )
 }
 

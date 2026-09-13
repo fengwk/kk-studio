@@ -11,8 +11,10 @@ import org.postgresql.PGNotification;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -323,6 +325,295 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     }
   }
 
+  /**
+   * V4 来源配置的业务契约：path/git 形状互斥、每 Environment 至多一个缺省来源、applied 围栏、 状态与已应用事实一致，以及 UNAPPLIED
+   * 允许保留旧的已应用事实但不允许残留错误。
+   */
+  @Test
+  void skillSourceKeepsTypeShapeAndAppliedFence() throws SQLException {
+    UUID environmentId = uuid();
+    insertEnvironment(environmentId);
+
+    // path 与 git 字段互斥：两种类型的理想行都能插入。
+    try (Connection conn = newConnection()) {
+      insertSource(conn, uuid(), environmentId, "path", "/skills", false, 0L, "UNAPPLIED", null);
+    }
+    try (Connection conn = newConnection()) {
+      insertGitSource(
+          conn, uuid(), environmentId, "https://git.example/repo.git", "main", "skills", 0L);
+    }
+
+    // path 来源必须且只能携带 path。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_skill_source_type_shape",
+          () ->
+              insertPathSourceWithGitUrl(
+                  conn, uuid(), environmentId, "/skills", "https://git.example/repo.git"));
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_skill_source_type_shape",
+          () ->
+              conn.prepareStatement(
+                      "insert into environment_skill_source"
+                          + " (source_id, environment_id, source_type, default_source)"
+                          + " values ('"
+                          + uuid()
+                          + "', '"
+                          + environmentId
+                          + "', 'path', false)")
+                  .executeUpdate());
+    }
+    // git 来源不能是缺省来源：缺省发现只允许平台约定的 PATH。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_skill_source_type_shape",
+          () ->
+              insertGitSource(
+                  conn,
+                  uuid(),
+                  environmentId,
+                  "https://git.example/repo.git",
+                  null,
+                  null,
+                  0L,
+                  true));
+    }
+    // 空白 path 与未知来源类型都被拒绝。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_skill_source_path",
+          () ->
+              insertSource(
+                  conn, uuid(), environmentId, "path", "  ", false, 0L, "UNAPPLIED", null));
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_skill_source_type",
+          () ->
+              insertSource(conn, uuid(), environmentId, "http", "x", false, 0L, "UNAPPLIED", null));
+    }
+
+    // 每个 Environment 至多一个缺省来源。
+    UUID defaultEnvironmentId = uuid();
+    insertEnvironment(defaultEnvironmentId);
+    try (Connection conn = newConnection()) {
+      insertSource(
+          conn, uuid(), defaultEnvironmentId, "path", "/skills", true, 0L, "UNAPPLIED", null);
+      assertTransactionConstraintViolation(
+          conn,
+          "uk_environment_skill_source_default",
+          () ->
+              insertSource(
+                  conn,
+                  uuid(),
+                  defaultEnvironmentId,
+                  "path",
+                  "/other",
+                  true,
+                  0L,
+                  "UNAPPLIED",
+                  null));
+    }
+  }
+
+  /** V4 来源应用状态机：READY 必须命中当前版本，FAILED 必须带错误，UNAPPLIED 不得残留错误。 */
+  @Test
+  void skillSourceStatusMatchesAppliedFacts() throws SQLException {
+    UUID environmentId = uuid();
+    insertEnvironment(environmentId);
+
+    // READY 的 applied_version 必须等于 version。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_skill_source_state",
+          () ->
+              insertSource(conn, uuid(), environmentId, "path", "/skills", false, 2L, "READY", 1L));
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_skill_source_state",
+          () ->
+              insertSource(
+                  conn, uuid(), environmentId, "path", "/skills", false, 2L, "READY", null));
+    }
+    // 被应用事实不得超过配置版本。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_skill_source_applied_fence",
+          () ->
+              insertSource(
+                  conn, uuid(), environmentId, "path", "/skills", false, 1L, "UNAPPLIED", 2L));
+    }
+    // FAILED 必须携带非空错误码与描述。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_skill_source_state",
+          () ->
+              insertSource(
+                  conn, uuid(), environmentId, "path", "/skills", false, 1L, "FAILED", null));
+    }
+    // UNAPPLIED 不允许残留错误（配置刚改后错误必须先被清空）。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_skill_source_state",
+          () ->
+              insertSourceWithError(
+                  conn, uuid(), environmentId, "UNAPPLIED", 1L, "SCAN_FAILED", "boom"));
+    }
+    // 未知状态被拒绝。status 与 state 两个 check 都只接受同样三个值，PostgreSQL 报出先命中者，
+    // 因此这里按 state 断言；两个约束存在是为了让错误信息定位到“取值”还是“状态组合”。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_skill_source_state",
+          () ->
+              insertSource(
+                  conn, uuid(), environmentId, "path", "/skills", false, 0L, "PENDING", null));
+    }
+    // 合法 FAILED 行可以插入：状态与错误并存是唯一允许的错误形状。
+    try (Connection conn = newConnection()) {
+      insertSourceWithError(conn, uuid(), environmentId, "FAILED", 1L, "SCAN_FAILED", "boom");
+    }
+  }
+
+  /** V4 操作信箱契约：同一来源至多一个未终结操作、终态事实与状态一致、参数必须是 object， 且 source_id 故意不建外键，来源删除后历史仍可读。 */
+  @Test
+  void skillOperationKeepsLifecycleAndSurvivesSourceDeletion() throws SQLException {
+    UUID environmentId = uuid();
+    UUID sourceId = uuid();
+    insertEnvironment(environmentId);
+    try (Connection conn = newConnection()) {
+      insertSource(conn, sourceId, environmentId, "path", "/skills", true, 3L, "UNAPPLIED", null);
+    }
+
+    // 同一来源的第二个未终结操作被拒绝：PENDING 与 RUNNING 都不能并存。
+    try (Connection conn = newConnection()) {
+      insertOperation(conn, uuid(), environmentId, sourceId, "PENDING");
+      assertTransactionConstraintViolation(
+          conn,
+          "uk_environment_operation_active",
+          () -> insertOperation(conn, uuid(), environmentId, sourceId, "PENDING"));
+      assertTransactionConstraintViolation(
+          conn,
+          "uk_environment_operation_active",
+          () -> insertOperation(conn, uuid(), environmentId, sourceId, "RUNNING"));
+    }
+    // 终态不佔用未终结名额：失败历史之后仍可为同一来源新建操作。
+    UUID terminalSourceId = uuid();
+    try (Connection conn = newConnection()) {
+      insertSource(
+          conn, terminalSourceId, environmentId, "path", "/terminal", false, 0L, "UNAPPLIED", null);
+      insertOperation(conn, uuid(), environmentId, terminalSourceId, "FAILED");
+      insertOperation(conn, uuid(), environmentId, terminalSourceId, "PENDING");
+    }
+    // 终态事实必须与状态一致：PENDING 不得携带认领事实。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_operation_state",
+          () -> insertClaimedPendingOperation(conn, uuid(), environmentId, sourceId));
+    }
+    // arguments 必须是 JSON object。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_operation_arguments_object",
+          () -> insertOperationWithArguments(conn, uuid(), environmentId, sourceId, "[]"));
+    }
+    // 未知操作类型被拒绝。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_operation_type",
+          () -> insertOperationWithType(conn, uuid(), environmentId, sourceId, "SKILL_UNINSTALL"));
+    }
+    // 未知状态被拒绝（status 与 state 都只接受同一组终态值，报出先命中者）。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_operation_state",
+          () -> insertOperationWithStatus(conn, uuid(), environmentId, sourceId, "CLAIMED"));
+    }
+
+    // source_id 没有外键：删除来源后操作历史仍然存在且可读。
+    UUID historyOperationId = uuid();
+    try (Connection conn = newConnection()) {
+      insertOperation(conn, historyOperationId, environmentId, sourceId, "FAILED");
+      try (PreparedStatement ps =
+          conn.prepareStatement("delete from environment_skill_source where source_id = ?")) {
+        ps.setObject(1, sourceId);
+        assertEquals(1, ps.executeUpdate(), "source deletion must succeed while history exists");
+      }
+    }
+    assertEquals(
+        1L,
+        queryLong("select count(*) from environment_operation where id = ?", historyOperationId),
+        "operation history must survive source deletion");
+  }
+
+  /** V4 持久 inventory：来源删除级联清理 Skill，且同一 Environment 内 Skill 名全局唯一。 */
+  @Test
+  void skillInventoryFollowsItsSourceAndKeepsNameUnique() throws SQLException {
+    UUID environmentId = uuid();
+    UUID sourceId = uuid();
+    UUID otherSourceId = uuid();
+    insertEnvironment(environmentId);
+    try (Connection conn = newConnection()) {
+      insertSource(conn, sourceId, environmentId, "path", "/skills", true, 0L, "UNAPPLIED", null);
+      insertSource(
+          conn, otherSourceId, environmentId, "path", "/other", false, 0L, "UNAPPLIED", null);
+    }
+
+    try (Connection conn = newConnection()) {
+      insertSkill(conn, environmentId, sourceId, "review");
+    }
+    // 同一 Environment 内 Skill 名不能重复，即使是不同来源。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "uk_environment_skill_environment_name",
+          () -> insertSkill(conn, environmentId, otherSourceId, "review"));
+    }
+    // 复合 FK 阻止把 Skill 挂到不属于该 Environment 的来源上。
+    try (Connection conn = newConnection()) {
+      UUID foreignEnvironmentId = uuid();
+      insertEnvironment(foreignEnvironmentId);
+      assertTransactionConstraintViolation(
+          conn,
+          "fk_environment_skill_source",
+          () -> insertSkill(conn, foreignEnvironmentId, sourceId, "orphan"));
+    }
+    // 非 64 位小写十六进制 revision 被拒绝：正文只能由精确 revision 定位。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_environment_skill_content_revision",
+          () ->
+              insertSkillWithRevision(conn, environmentId, otherSourceId, "audit", "A".repeat(64)));
+    }
+
+    // 删除来源级联清理它的持久 inventory，但不影响同 Environment 的其它来源。
+    try (Connection conn = newConnection()) {
+      try (PreparedStatement ps =
+          conn.prepareStatement("delete from environment_skill_source where source_id = ?")) {
+        ps.setObject(1, sourceId);
+        assertEquals(1, ps.executeUpdate());
+      }
+    }
+    assertEquals(
+        0L, queryLong("select count(*) from environment_skill where source_id = ?", sourceId));
+    assertEquals(
+        0L, queryLong("select count(*) from environment_skill where source_id = ?", otherSourceId));
+  }
+
   @Test
   void canvasNodeDeletionIsRestrictedUntilApplicationCleanup() throws SQLException {
     UUID canvasId = uuid();
@@ -430,6 +721,268 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     return new UUID(0L, FIXTURE_IDS.incrementAndGet());
   }
 
+  private void insertEnvironment(UUID environmentId) throws SQLException {
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "insert into environment (id, name, registration_token) values (?, ?, ?)")) {
+      ps.setObject(1, environmentId);
+      ps.setString(2, "skill-source-env-" + FIXTURE_IDS.incrementAndGet());
+      ps.setString(3, "skill-source-token-" + FIXTURE_IDS.incrementAndGet());
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private void insertSource(
+      Connection conn,
+      UUID sourceId,
+      UUID environmentId,
+      String sourceType,
+      String path,
+      boolean defaultSource,
+      long version,
+      String status,
+      Long appliedVersion)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into environment_skill_source (source_id, environment_id, source_type, path,"
+                + " default_source, version, status, applied_version, applied_revision,"
+                + " last_applied_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?,"
+                + " case when ?::bigint is null then null else current_timestamp end)")) {
+      ps.setObject(1, sourceId);
+      ps.setObject(2, environmentId);
+      ps.setString(3, sourceType);
+      ps.setString(4, path);
+      ps.setBoolean(5, defaultSource);
+      ps.setLong(6, version);
+      ps.setString(7, status);
+      if (appliedVersion == null) {
+        ps.setNull(8, Types.BIGINT);
+        ps.setNull(9, Types.VARCHAR);
+        ps.setNull(10, Types.BIGINT);
+      } else {
+        ps.setLong(8, appliedVersion);
+        ps.setString(9, "a".repeat(40));
+        ps.setLong(10, appliedVersion);
+      }
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  /** 插入一行失败的来源配置：FAILED 状态必须携带非空错误码与描述。 */
+  private void insertSourceWithError(
+      Connection conn,
+      UUID sourceId,
+      UUID environmentId,
+      String status,
+      long version,
+      String errorCode,
+      String errorMessage)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into environment_skill_source (source_id, environment_id, source_type, path,"
+                + " version, status, last_error_code, last_error_message)"
+                + " values (?, ?, 'path', '/skills', ?, ?, ?, ?)")) {
+      ps.setObject(1, sourceId);
+      ps.setObject(2, environmentId);
+      ps.setLong(3, version);
+      ps.setString(4, status);
+      ps.setString(5, errorCode);
+      ps.setString(6, errorMessage);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private void insertGitSource(
+      Connection conn,
+      UUID sourceId,
+      UUID environmentId,
+      String gitUrl,
+      String gitRef,
+      String scanPath,
+      long version)
+      throws SQLException {
+    insertGitSource(conn, sourceId, environmentId, gitUrl, gitRef, scanPath, version, false);
+  }
+
+  private void insertGitSource(
+      Connection conn,
+      UUID sourceId,
+      UUID environmentId,
+      String gitUrl,
+      String gitRef,
+      String scanPath,
+      long version,
+      boolean defaultSource)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into environment_skill_source (source_id, environment_id, source_type,"
+                + " default_source, git_url, git_ref, scan_path, version, status)"
+                + " values (?, ?, 'git', ?, ?, ?, ?, ?, 'UNAPPLIED')")) {
+      ps.setObject(1, sourceId);
+      ps.setObject(2, environmentId);
+      ps.setBoolean(3, defaultSource);
+      ps.setString(4, gitUrl);
+      ps.setString(5, gitRef);
+      ps.setString(6, scanPath);
+      ps.setLong(7, version);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private void insertPathSourceWithGitUrl(
+      Connection conn, UUID sourceId, UUID environmentId, String path, String gitUrl)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into environment_skill_source (source_id, environment_id, source_type, path,"
+                + " git_url, version, status) values (?, ?, 'path', ?, ?, 0, 'UNAPPLIED')")) {
+      ps.setObject(1, sourceId);
+      ps.setObject(2, environmentId);
+      ps.setString(3, path);
+      ps.setString(4, gitUrl);
+      ps.executeUpdate();
+    }
+  }
+
+  /** 插入一行操作，认领与终态事实严格按状态给出；PENDING 不携带任何认领事实。 */
+  private void insertOperation(
+      Connection conn, UUID operationId, UUID environmentId, UUID sourceId, String status)
+      throws SQLException {
+    boolean claimed =
+        "RUNNING".equals(status) || "SUCCEEDED".equals(status) || "UNKNOWN".equals(status);
+    boolean finished =
+        "SUCCEEDED".equals(status) || "FAILED".equals(status) || "UNKNOWN".equals(status);
+    boolean failed = "FAILED".equals(status) || "UNKNOWN".equals(status);
+    // 认领与终态时刻都用数据库时间：与列默认值 created_at 同源，否则 JVM 时钟相对数据库的毫秒级偏差
+    // 会让 ck_environment_operation_time_order 偶发失败。
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into environment_operation (id, environment_id, resource_type, resource_id,"
+                + " operation_type, status, resource_version, arguments, parameter_summary,"
+                + " deadline_at, owner_node_id, lease_token, started_at, finished_at,"
+                + " result_summary, failure_code, failure_message)"
+                + " values (?, ?, 'SKILL_SOURCE', ?, 'SKILL_REFRESH', ?, 3, '{}'::jsonb, '{}'::jsonb,"
+                + " current_timestamp + interval '1 minute', ?, ?,"
+                + " case when ?::boolean then current_timestamp end,"
+                + " case when ?::boolean then current_timestamp end,"
+                + " ?::jsonb, ?, ?)")) {
+      ps.setObject(1, operationId);
+      ps.setObject(2, environmentId);
+      ps.setObject(3, sourceId);
+      ps.setString(4, status);
+      if (claimed) {
+        ps.setObject(5, uuid());
+        ps.setObject(6, uuid());
+      } else {
+        ps.setNull(5, Types.OTHER);
+        ps.setNull(6, Types.OTHER);
+      }
+      ps.setBoolean(7, claimed);
+      ps.setBoolean(8, finished);
+      ps.setObject(9, "SUCCEEDED".equals(status) ? "{}" : null, Types.OTHER);
+      ps.setObject(10, failed ? "REFRESH_FAILED" : null, Types.VARCHAR);
+      ps.setObject(11, failed ? "refresh failed" : null, Types.VARCHAR);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  /** 插入一行已认领的 PENDING 操作：用于证明状态与认领事实必须一致。 */
+  private void insertClaimedPendingOperation(
+      Connection conn, UUID operationId, UUID environmentId, UUID sourceId) throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into environment_operation (id, environment_id, resource_type, resource_id,"
+                + " operation_type, status, resource_version, arguments, parameter_summary,"
+                + " deadline_at, owner_node_id, lease_token, started_at)"
+                + " values (?, ?, 'SKILL_SOURCE', ?, 'SKILL_REFRESH', 'PENDING', 3, '{}'::jsonb,"
+                + " '{}'::jsonb, current_timestamp + interval '1 minute', ?, ?, current_timestamp)")) {
+      ps.setObject(1, operationId);
+      ps.setObject(2, environmentId);
+      ps.setObject(3, sourceId);
+      ps.setObject(4, uuid());
+      ps.setObject(5, uuid());
+      ps.executeUpdate();
+    }
+  }
+
+  private void insertOperationWithStatus(
+      Connection conn, UUID operationId, UUID environmentId, UUID sourceId, String status)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into environment_operation (id, environment_id, resource_type, resource_id,"
+                + " operation_type, status, resource_version, arguments, parameter_summary,"
+                + " deadline_at) values (?, ?, 'SKILL_SOURCE', ?, 'SKILL_REFRESH', ?, 3,"
+                + " '{}'::jsonb, '{}'::jsonb, current_timestamp + interval '1 minute')")) {
+      ps.setObject(1, operationId);
+      ps.setObject(2, environmentId);
+      ps.setObject(3, sourceId);
+      ps.setString(4, status);
+      ps.executeUpdate();
+    }
+  }
+
+  private void insertOperationWithType(
+      Connection conn, UUID operationId, UUID environmentId, UUID sourceId, String type)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into environment_operation (id, environment_id, resource_type, resource_id,"
+                + " operation_type, status, resource_version, arguments, parameter_summary,"
+                + " deadline_at) values (?, ?, 'SKILL_SOURCE', ?, ?, 'PENDING', 3, '{}'::jsonb,"
+                + " '{}'::jsonb, current_timestamp + interval '1 minute')")) {
+      ps.setObject(1, operationId);
+      ps.setObject(2, environmentId);
+      ps.setObject(3, sourceId);
+      ps.setString(4, type);
+      ps.executeUpdate();
+    }
+  }
+
+  private void insertOperationWithArguments(
+      Connection conn, UUID operationId, UUID environmentId, UUID sourceId, String argumentsJson)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into environment_operation (id, environment_id, resource_type, resource_id,"
+                + " operation_type, status, resource_version, arguments, parameter_summary,"
+                + " deadline_at) values (?, ?, 'SKILL_SOURCE', ?, 'SKILL_REFRESH', 'PENDING', 3,"
+                + " ?::jsonb, '{}'::jsonb, current_timestamp + interval '1 minute')")) {
+      ps.setObject(1, operationId);
+      ps.setObject(2, environmentId);
+      ps.setObject(3, sourceId);
+      ps.setString(4, argumentsJson);
+      ps.executeUpdate();
+    }
+  }
+
+  private void insertSkill(Connection conn, UUID environmentId, UUID sourceId, String name)
+      throws SQLException {
+    insertSkillWithRevision(conn, environmentId, sourceId, name, "a".repeat(64));
+  }
+
+  private void insertSkillWithRevision(
+      Connection conn, UUID environmentId, UUID sourceId, String name, String contentRevision)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into environment_skill (environment_id, source_id, name, source_version,"
+                + " description, base_directory, content_revision, discovered_at)"
+                + " values (?, ?, ?, 0, 'Skill description', '/skills/' || ?, ?,"
+                + " current_timestamp)")) {
+      ps.setObject(1, environmentId);
+      ps.setObject(2, sourceId);
+      ps.setString(3, name);
+      ps.setString(4, name);
+      ps.setString(5, contentRevision);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
   private void insertChat(Connection conn, UUID id) throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
@@ -513,6 +1066,17 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     assertTrue(
         notifications == null || notifications.length == 0,
         "rolled-back or uncommitted writes must not notify");
+  }
+
+  private static long queryLong(String sql, UUID id) throws SQLException {
+    try (Connection conn = newConnection();
+        PreparedStatement ps = conn.prepareStatement(sql)) {
+      ps.setObject(1, id);
+      try (ResultSet rs = ps.executeQuery()) {
+        assertTrue(rs.next());
+        return rs.getLong(1);
+      }
+    }
   }
 
   private long queryLong(Connection conn, String sql, UUID id) throws SQLException {

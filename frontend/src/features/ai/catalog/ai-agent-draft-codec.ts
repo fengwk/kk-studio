@@ -4,6 +4,7 @@ import type {
   AgentDefinitionDTO,
   AgentDefinitionEditablePropertiesDTO,
   AgentModelDTO,
+  AgentSkillRefDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
 import { modelRef } from '@/features/ai/catalog/AgentModelView'
@@ -19,7 +20,7 @@ function normalizeNames(items: string[] | null | undefined): string[] {
 
 function normalizeCapabilityValues(
   items: string[] | null | undefined,
-  kind: 'toolIds' | 'skills' | 'subagents',
+  kind: 'toolIds' | 'subagents',
 ): string[] {
   const values = normalizeNames(items)
   const seen = new Set<string>()
@@ -41,10 +42,47 @@ function normalizeCapabilityValues(
   return values
 }
 
+function normalizeSkillRefs(
+  items: AgentSkillRefDTO[] | null | undefined,
+): AgentSkillRefDTO[] {
+  if (!items?.length) {
+    return []
+  }
+  const seen = new Set<string>()
+  const duplicates = new Set<string>()
+  const result: AgentSkillRefDTO[] = []
+
+  for (const item of items) {
+    const sourceId = (item?.sourceId ?? '').trim()
+    const name = (item?.name ?? '').trim()
+    if (!sourceId || !name) {
+      throw new Error('skills ref sourceId and name must not be blank')
+    }
+    const key = `${sourceId}::${name}`
+    if (seen.has(key)) {
+      duplicates.add(name)
+    } else {
+      seen.add(key)
+      result.push({ sourceId, name })
+    }
+  }
+
+  if (duplicates.size > 0) {
+    throw new Error(
+      translate('ai.catalog.validation.capabilityDuplicate', {
+        kind: 'skills',
+        names: [...duplicates].join(', '),
+      }),
+    )
+  }
+
+  return result
+}
+
 function toConfig(draft: AgentDraft): AgentDefinitionConfigDTO {
   return {
     toolIds: normalizeCapabilityValues(draft.toolIds, 'toolIds'),
-    skills: normalizeCapabilityValues(draft.skills, 'skills'),
+    skills: normalizeSkillRefs(draft.skills),
     subagents: normalizeCapabilityValues(draft.subagents, 'subagents'),
   }
 }
@@ -74,7 +112,7 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     variant: agent.variant?.trim() || '',
     environmentId: agent.environmentId || '',
     toolIds: normalizeNames(config.toolIds),
-    skills: normalizeNames(config.skills),
+    skills: normalizeSkillRefs(config.skills),
     subagents: normalizeNames(config.subagents),
   }
 }

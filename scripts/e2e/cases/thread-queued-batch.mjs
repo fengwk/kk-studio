@@ -100,7 +100,8 @@ registerCase({
         description: 'Local queued command batch E2E model.',
         config: baseModelConfig({
           limit: { context: 4096, output: 128 },
-          abilities: { tools: false, reasoning: false, inputModalities: ['TEXT'] },
+          // Production planning always contributes the CloudFS tool set.
+          abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
           variants: [{ id: 'default' }],
         }),
       })

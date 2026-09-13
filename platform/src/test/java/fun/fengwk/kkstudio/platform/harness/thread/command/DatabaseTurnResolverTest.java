@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshot;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
@@ -98,9 +99,10 @@ import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
-import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolClientFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
@@ -113,6 +115,8 @@ import fun.fengwk.kkstudio.platform.cloudfs.tool.CloudHarnessContributor;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
+import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
@@ -126,6 +130,9 @@ import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolService;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolType;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInventoryDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillDTO;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -140,6 +147,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -162,6 +170,16 @@ class DatabaseTurnResolverTest {
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
   private static final EnvironmentId ENV_MISSING =
       EnvironmentId.parse("33333333-3333-3333-3333-333333333333");
+  private static final UUID SKILL_SOURCE_ID =
+      UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  private static final String CONTENT_REVISION =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+  private static DaemonSkillDescriptor descriptor(
+      UUID sourceId, long sourceVersion, String name, String description) {
+    return new DaemonSkillDescriptor(
+        sourceId, sourceVersion, name, description, "/home/dev/skills/" + name, CONTENT_REVISION);
+  }
 
   @Test
   void resolvesExactBranchModelReferencesWithoutFallback() {
@@ -491,49 +509,74 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void skillsRequireTheLatestSelectedEnvironmentPrecisely() {
-    // skills 需要 live descriptors：latest 环境缺失时精确拒绝，绝不回看更旧的 branch settings。
+  void skillsRequireTheSelectedEnvironmentToExist() {
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
     fixture.agent.setEnvironmentId(ENV_MISSING.value());
     assertEquals(
-        "agent skills require the selected environment which is not live: " + ENV_MISSING,
-        fixture.rejected(fixture.path(settings("default"))).error().message());
-
-    // latest 环境未 READY：同样精确拒绝。
-    fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
-    fixture.connectingEnvironment(ENV_A);
-    assertEquals(
-        "agent skills require the selected environment which is not ready: " + ENV_A,
+        "environment not found: " + ENV_MISSING,
         fixture.rejected(fixture.path(settings("default"))).error().message());
   }
 
   /**
-   * 测试意图：证明当应用注入的时钟 (Clock) 滞后、EnvironmentConnection 内存快照看似 READY 且未超时， 但数据库中
-   * hasReadyLease=false（实际已过期或无活跃 READY 租约）时， DatabaseTurnResolver 依据 PostgreSQL DB 权威谓词确定性拒绝 Agent
-   * skills 规划（返回 not ready）， 绝不依赖滞后的应用时钟错误放行。
+   * 测试意图：验证即使 Daemon 离线（无 live connection 或 lease 过期），只要持久 usable inventory 存在该技能，
+   * 规划依然能够成功（离线规划），并冻结完整的六元组事实；同时 environment 上下文回退到持久元数据。
    */
   @Test
-  void
-      skillsPlanningRejectsWhenDatabaseReadyLeaseIsFalseEvenIfConnectionSnapshotIsReadyAndClockIsLagging() {
+  void skillsPlanningSucceedsFromDurableInventoryWhenDaemonIsOffline() {
     Fixture fixture =
         new Fixture(
             List.of(),
             List.of("dev"),
             List.of(hostDescriptor("load_skill")),
-            Clock.fixed(NOW.minus(Duration.ofMinutes(10)), ZoneOffset.UTC));
+            Clock.fixed(NOW, ZoneOffset.UTC));
 
-    // 设置快照为 READY，但 stub DB hasReadyLease 为 false
-    fixture.readyEnvironment(ENV_A, List.of("dev"));
+    fixture.readyEnvironmentWithSkills(ENV_A, List.of(fixture.skillDescriptor("dev")));
+    when(fixture.environmentRegistry.find(ENV_A)).thenReturn(Optional.empty());
     when(fixture.environmentRegistry.hasReadyLease(ENV_A)).thenReturn(false);
-    fixture.agent.setEnvironmentId(ENV_A.value());
 
-    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
+    EnvironmentInventoryDTO fallbackInventory = new EnvironmentInventoryDTO();
+    fallbackInventory.setOperatingSystem("linux");
+    fallbackInventory.setTimeZone("UTC");
+    fallbackInventory.setNote("Persisted offline note");
+    when(fixture.skillInventoryQueryService.getInventory(ENV_A)).thenReturn(fallbackInventory);
+
+    ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
     assertEquals(
-        "agent skills require the selected environment which is not ready: " + ENV_A,
-        rejected.error().message());
+        List.of(
+            new SkillBinding(
+                ENV_A,
+                SKILL_SOURCE_ID,
+                "dev",
+                "dev description",
+                "/home/dev/skills/dev",
+                CONTENT_REVISION)),
+        requestSpec.skillBindings());
+    assertTrue(preambleText(requestSpec).contains("- note: Persisted offline note"));
+  }
 
-    // 验证确实调用了 DB-authoritative 权威谓词
-    verify(fixture.environmentRegistry).hasReadyLease(ENV_A);
+  /** 测试意图：验证即使持久化 inventory 中的 note 为 null，只要 operatingSystem 非空，依然能正确解析出操作系统上下文。 */
+  @Test
+  void resolvesPersistedOsEvenWhenNoteIsNull() {
+    Fixture fixture =
+        new Fixture(
+            List.of(),
+            List.of("dev"),
+            List.of(hostDescriptor("load_skill")),
+            Clock.fixed(NOW, ZoneOffset.UTC));
+
+    fixture.readyEnvironmentWithSkills(ENV_A, List.of(fixture.skillDescriptor("dev")));
+    when(fixture.environmentRegistry.find(ENV_A)).thenReturn(Optional.empty());
+    when(fixture.environmentRegistry.hasReadyLease(ENV_A)).thenReturn(false);
+
+    EnvironmentInventoryDTO fallbackInventory = new EnvironmentInventoryDTO();
+    fallbackInventory.setOperatingSystem("wsl");
+    fallbackInventory.setTimeZone("UTC");
+    fallbackInventory.setNote(null);
+    when(fixture.skillInventoryQueryService.getInventory(ENV_A)).thenReturn(fallbackInventory);
+
+    ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
+    assertTrue(preambleText(requestSpec).contains("- system: wsl"));
+    assertFalse(preambleText(requestSpec).contains("- note:"));
   }
 
   @Test
@@ -559,7 +602,14 @@ class DatabaseTurnResolverTest {
       assertNull(boundRoutes.get(i));
     }
     assertEquals(
-        List.of(new SkillBinding("dev-b", "dev-b description", ENV_B)),
+        List.of(
+            new SkillBinding(
+                ENV_B,
+                SKILL_SOURCE_ID,
+                "dev-b",
+                "dev-b description",
+                "/home/dev/skills/dev-b",
+                CONTENT_REVISION)),
         requestSpec.skillBindings());
   }
 
@@ -646,7 +696,15 @@ class DatabaseTurnResolverTest {
         withCloudTools("load_skill"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(
-        List.of(new SkillBinding("dev", "dev description", ENV_A)), requestSpec.skillBindings());
+        List.of(
+            new SkillBinding(
+                ENV_A,
+                SKILL_SOURCE_ID,
+                "dev",
+                "dev description",
+                "/home/dev/skills/dev",
+                CONTENT_REVISION)),
+        requestSpec.skillBindings());
   }
 
   @Test
@@ -661,14 +719,37 @@ class DatabaseTurnResolverTest {
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertFalse(requestSpec.toolBindings().getFirst().environmentRequired());
     assertEquals(
-        List.of(new SkillBinding("dev", "dev description", ENV_A)), requestSpec.skillBindings());
+        List.of(
+            new SkillBinding(
+                ENV_A,
+                SKILL_SOURCE_ID,
+                "dev",
+                "dev description",
+                "/home/dev/skills/dev",
+                CONTENT_REVISION)),
+        requestSpec.skillBindings());
 
     // Environment 缺少该 skill：不静默丢弃，typed 拒绝。
     fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of());
     assertEquals(
-        "skill not found on the latest environment " + ENV_A + ": dev",
+        "skill ref not usable in environment " + ENV_A + ": " + SKILL_SOURCE_ID + "/dev",
         fixture.rejected(fixture.path(settings("default"))).error().message());
+  }
+
+  /** 测试意图：验证即使 Environment 中存在同名技能但来源于不同的 sourceId 时， 规划依然确定性拒绝，绝不跨 sourceId 静默匹配。 */
+  @Test
+  void rejectsSameNameSkillFromDifferentSourceId() {
+    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
+    // usable inventory 中注册名为 dev 的技能，但来自于另一个 sourceId
+    UUID otherSourceId = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    fixture.readyEnvironmentWithSourceSkills(
+        ENV_A, otherSourceId, List.of(descriptor(otherSourceId, 1, "dev", "dev description")));
+
+    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
+    assertEquals(
+        "skill ref not usable in environment " + ENV_A + ": " + SKILL_SOURCE_ID + "/dev",
+        rejected.error().message());
   }
 
   @Test
@@ -890,16 +971,19 @@ class DatabaseTurnResolverTest {
     // 意图：验证动态 MCP 工具能通过 RuntimeToolCatalog 正常解析到 ModelRequestSpec 的 tool bindings 中，同时
     // HarnessCatalog 中的静态 context projectors 依然正常工作
     McpServerRepository repo = mock(McpServerRepository.class);
-    McpToolClientFactory factory = mock(McpToolClientFactory.class);
-    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, factory);
+    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
 
     UUID serverId = UUID.randomUUID();
     McpServer server = new McpServer();
     server.setId(serverId);
     server.setName("srv");
-    server.setUrl("http://localhost:8080");
-    server.setTimeoutMillis(5000L);
+    server.setConnectionType(McpConnectionType.REMOTE);
+    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
+    server.setDiscoveredVersion(1L);
+    server.setEnabled(true);
     server.setVersion(1L);
+    server.setConnectionConfig("{\"url\":\"http://localhost:8080\",\"headers\":{}}");
+    server.setTimeoutMillis(5000L);
 
     UUID toolId = UUID.randomUUID();
     McpTool mcpTool = new McpTool();
@@ -910,6 +994,8 @@ class DatabaseTurnResolverTest {
     mcpTool.setDescription("echo tool");
     mcpTool.setInputSchemaJson(
         "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    mcpTool.setAvailable(true);
+    mcpTool.setSchemaRevision(1L);
 
     when(repo.getToolById(toolId)).thenReturn(Optional.of(mcpTool));
     when(repo.getById(serverId)).thenReturn(Optional.of(server));
@@ -971,7 +1057,8 @@ class DatabaseTurnResolverTest {
   void escapesXmlInAvailableSkillsSection() {
     Fixture fixture =
         new Fixture(List.of(), List.of("a&b<c>"), List.of(hostDescriptor("load_skill")));
-    fixture.readyEnvironmentWithSkills(ENV_A, List.of(new DaemonSkillDescriptor("a&b<c>", "d&e")));
+    fixture.readyEnvironmentWithSkills(
+        ENV_A, List.of(descriptor(SKILL_SOURCE_ID, 1, "a&b<c>", "d&e")));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
@@ -2227,6 +2314,8 @@ class DatabaseTurnResolverTest {
     private final AgentModelRuntimeConfigParser modelConfigParser =
         mock(AgentModelRuntimeConfigParser.class);
     private final EnvironmentRegistry environmentRegistry = mock(EnvironmentRegistry.class);
+    private final EnvironmentSkillInventoryQueryService skillInventoryQueryService =
+        mock(EnvironmentSkillInventoryQueryService.class);
     private final AgentDefinition agent = new AgentDefinition();
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private final AgentProvider provider = new AgentProvider();
@@ -2377,9 +2466,14 @@ class DatabaseTurnResolverTest {
 
       agentConfig.setToolIds(
           tools.stream().map(DatabaseTurnResolverTest::toolId).map(AgentToolId::value).toList());
-      agentConfig.setSkills(skills);
+      agentConfig.setSkills(
+          skills.stream().map(s -> new AgentSkillRefDTO(SKILL_SOURCE_ID.toString(), s)).toList());
       agentConfig.setSubagents(List.of());
       when(agentConfigCodec.decode("agent-config")).thenReturn(agentConfig);
+      when(skillInventoryQueryService.listUsableSkills(ENV_MISSING))
+          .thenThrow(
+              new AiResourceNotFoundException(
+                  "environment", "environment not found: " + ENV_MISSING));
 
       modelSupportsTools(true);
       modelSupportsReasoning(true);
@@ -2455,6 +2549,7 @@ class DatabaseTurnResolverTest {
               toolCatalog,
               catalog,
               environmentRegistry,
+              skillInventoryQueryService,
               () -> new CompactionConfig(20_000, null),
               () -> subagentConfig,
               new AgentPromptComposer(() -> subagentConfig),
@@ -2657,12 +2752,7 @@ class DatabaseTurnResolverTest {
     private void readyEnvironment(
         EnvironmentId environmentId, List<String> skills, DaemonEnvironmentInfo environmentInfo) {
       readyEnvironmentWithSkills(
-          environmentId,
-          skills.stream()
-              .map(name -> new DaemonSkillDescriptor(name, name + " description"))
-              .toList(),
-          environmentInfo,
-          NOW);
+          environmentId, skills.stream().map(this::skillDescriptor).toList(), environmentInfo, NOW);
     }
 
     private void readyEnvironmentWithSkills(
@@ -2675,6 +2765,11 @@ class DatabaseTurnResolverTest {
           NOW);
     }
 
+    /** 冻结的六字段 skill descriptor fixture：来源、描述、宿主目录与内容 revision 全部必填。 */
+    private DaemonSkillDescriptor skillDescriptor(String name) {
+      return descriptor(SKILL_SOURCE_ID, 1, name, name + " description");
+    }
+
     private void staleEnvironment(
         EnvironmentId environmentId, DaemonEnvironmentInfo environmentInfo) {
       readyEnvironmentWithSkills(
@@ -2682,18 +2777,75 @@ class DatabaseTurnResolverTest {
       when(environmentRegistry.hasReadyLease(environmentId)).thenReturn(false);
     }
 
-    private void readyEnvironmentWithSkills(
-        EnvironmentId environmentId,
-        List<DaemonSkillDescriptor> skills,
-        DaemonEnvironmentInfo environmentInfo,
-        Instant lastSeenAt) {
+    private void readyEnvironmentWithSourceSkills(
+        EnvironmentId environmentId, UUID sourceId, List<DaemonSkillDescriptor> skills) {
+      List<EnvironmentSkillDTO> dtos =
+          skills.stream()
+              .map(
+                  s -> {
+                    EnvironmentSkillDTO dto = new EnvironmentSkillDTO();
+                    dto.setSourceId(s.sourceId().toString());
+                    dto.setName(s.name());
+                    dto.setSourceVersion(String.valueOf(s.sourceVersion()));
+                    dto.setDescription(s.description());
+                    dto.setBaseDirectory(s.baseDirectory());
+                    dto.setContentRevision(s.contentRevision());
+                    return dto;
+                  })
+              .toList();
+      when(skillInventoryQueryService.listUsableSkills(environmentId)).thenReturn(dtos);
+
+      DaemonSkillSourceSnapshot source =
+          new DaemonSkillSourceSnapshot(sourceId, 1, CONTENT_REVISION, skills, List.of());
       EnvironmentConnection env =
           new EnvironmentConnection(
               environmentId,
               UUID.randomUUID(),
               UUID.randomUUID(),
               LiveEnvironmentStatus.READY,
-              new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo, skills),
+              new DaemonCapabilities(
+                  DaemonCapabilities.VERSION,
+                  new DaemonEnvironmentInfo(
+                      DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"),
+                  1,
+                  List.of(source)),
+              NOW,
+              NOW.plusSeconds(60));
+      when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));
+      when(environmentRegistry.hasReadyLease(environmentId)).thenReturn(true);
+    }
+
+    private void readyEnvironmentWithSkills(
+        EnvironmentId environmentId,
+        List<DaemonSkillDescriptor> skills,
+        DaemonEnvironmentInfo environmentInfo,
+        Instant lastSeenAt) {
+      List<EnvironmentSkillDTO> dtos =
+          skills.stream()
+              .map(
+                  s -> {
+                    EnvironmentSkillDTO dto = new EnvironmentSkillDTO();
+                    dto.setSourceId(s.sourceId().toString());
+                    dto.setName(s.name());
+                    dto.setSourceVersion(String.valueOf(s.sourceVersion()));
+                    dto.setDescription(s.description());
+                    dto.setBaseDirectory(s.baseDirectory());
+                    dto.setContentRevision(s.contentRevision());
+                    return dto;
+                  })
+              .toList();
+      when(skillInventoryQueryService.listUsableSkills(environmentId)).thenReturn(dtos);
+
+      DaemonSkillSourceSnapshot source =
+          new DaemonSkillSourceSnapshot(SKILL_SOURCE_ID, 1, CONTENT_REVISION, skills, List.of());
+      EnvironmentConnection env =
+          new EnvironmentConnection(
+              environmentId,
+              UUID.randomUUID(),
+              UUID.randomUUID(),
+              LiveEnvironmentStatus.READY,
+              new DaemonCapabilities(
+                  DaemonCapabilities.VERSION, environmentInfo, 1, List.of(source)),
               lastSeenAt,
               lastSeenAt.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));

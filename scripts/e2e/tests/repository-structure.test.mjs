@@ -81,6 +81,7 @@ test('repository structure guard verifies root and harness POM module lists', ()
   const harnessModules = [...harnessPom.matchAll(/<module>\s*([^<\s]+)\s*<\/module>/gu)].map((m) => m[1])
   assert.deepEqual(harnessModules, [
     'common',
+    'mcp',
     'tool',
     'environment',
     'environment-server',

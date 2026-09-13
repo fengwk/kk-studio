@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Agent 正文 + current environment + skills + subagents 唯一 system prompt 边界的组合语义。 */
@@ -28,7 +29,13 @@ class AgentPromptComposerTest {
       new AgentPromptComposer(() -> new SubagentConfig(2, 10, 0, Duration.ZERO, DEFAULT_MAX_TURNS));
 
   private static SkillBinding skill(String name, String description) {
-    return new SkillBinding(name, description, null);
+    return new SkillBinding(
+        TestEnvironments.environmentId("env-1"),
+        UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        name,
+        description,
+        "/home/dev/skills/" + name,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
   }
 
   /** 空正文 + 无 Environment 只保留有值的 date，不输出 none 字段。 */

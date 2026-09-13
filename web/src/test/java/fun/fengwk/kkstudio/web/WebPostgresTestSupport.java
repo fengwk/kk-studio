@@ -12,6 +12,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
+import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationDispatcher;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -34,6 +35,7 @@ public abstract class WebPostgresTestSupport {
   private static final String WORKERS_DISABLED = "false";
 
   @MockitoBean private CanvasFunctionDispatcher canvasFunctionDispatcher;
+  @MockitoBean protected EnvironmentOperationDispatcher environmentOperationDispatcher;
 
   @SuppressWarnings("resource")
   private static final PostgreSQLContainer POSTGRES =

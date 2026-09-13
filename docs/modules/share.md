@@ -43,8 +43,9 @@ JUnit 只在 test scope。源码只位于
 | 包 | 当前 wire |
 | --- | --- |
 | `ai.catalog` | Provider、Model、Agent、ModelRef、Tool catalog |
+| `ai.mcp` | MCP Server 安全 DTO、全量配置 DTO、创建/更新与统一发现 DTO |
 | `ai.chat` | Chat 与 Chat defaults |
-| `ai.environment` | Environment Card CRUD、registration token 与 live capability/skill 投影 |
+| `ai.environment` | Environment Card CRUD、registration token、live capability 投影、Skill 来源与通用管理操作 DTO |
 | `ai.runtime` | Session、Entry、Thread Snapshot、Command batch、Invocation、approval、stop、compaction |
 | `canvas` | Canvas document、Snapshot、Patch、typed command、Resource、Function 与 Run |
 | `comfyui` | Workflow API 与运行请求/结果 |
@@ -155,6 +156,8 @@ Thread 或 Canvas；这些动作由调用方在 DTO 已经严格解析后完成�
 - `share/src/test/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessRuntimeDtoContractTest.java`
 - `share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/ModelRefTest.java`
 - `share/src/test/java/fun/fengwk/kkstudio/share/ai/chat/ChatDtoContractTest.java`
+- `share/src/test/java/fun/fengwk/kkstudio/share/ai/mcp/McpServerDtoContractTest.java`
+- `share/src/test/java/fun/fengwk/kkstudio/share/ai/environment/EnvironmentOperationDtoContractTest.java`
 - `share/src/test/java/fun/fengwk/kkstudio/share/storage/StorageDtoContractTest.java`
 - `share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java`
 

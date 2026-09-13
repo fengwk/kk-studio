@@ -44,6 +44,8 @@ const REPO_ROOT = path.resolve(__dirname, '../..')
 // 加载全部 case 模块（注册副作用）
 await import('./cases/seed-and-harness.mjs')
 await import('./cases/crud.mjs')
+await import('./cases/environment-skill-operations.mjs')
+await import('./cases/mcp-json-local.mjs')
 await import('./cases/i18n.mjs')
 await import('./cases/config-matrix.mjs')
 await import('./cases/system-settings.mjs')

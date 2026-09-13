@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationDispatcher;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.resource.ManagedResourceDownloadService;
@@ -328,11 +329,30 @@ public class HarnessRuntimeConfiguration {
         toolProcessor);
   }
 
-  /** READY 事件唤醒 Runtime 侧 Work dispatcher；实际 Environment 事实由 {@link TurnResolver} 在 resolve 时读取。 */
+  /**
+   * READY 事件作为唤醒提示：独立唤醒 EnvironmentOperationDispatcher 与可选的 HarnessWorkDispatcher；
+   * 委托调用相互隔离，单方异常不影响另一方唤醒，且不记录异常堆栈。
+   */
   @Bean
-  public EnvironmentSessionListener harnessEnvironmentSessionListener(
+  public EnvironmentSessionListener compositeEnvironmentSessionListener(
+      ObjectProvider<EnvironmentOperationDispatcher> operationDispatcherProvider,
       ObjectProvider<HarnessWorkDispatcher> dispatcherProvider) {
-    return ignoredEnvironmentId -> dispatcherProvider.ifAvailable(HarnessWorkDispatcher::wake);
+    return ignoredEnvironmentId -> {
+      try {
+        operationDispatcherProvider.ifAvailable(EnvironmentOperationDispatcher::wake);
+      } catch (RuntimeException ignored) {
+      }
+      try {
+        dispatcherProvider.ifAvailable(HarnessWorkDispatcher::wake);
+      } catch (RuntimeException ignored) {
+      }
+    };
+  }
+
+  @Bean(name = "environmentOperationDispatcherLifecycle")
+  public SmartLifecycle environmentOperationDispatcherLifecycle(
+      EnvironmentOperationDispatcher dispatcher) {
+    return new EnvironmentOperationDispatcherLifecycle(dispatcher);
   }
 
   @Bean

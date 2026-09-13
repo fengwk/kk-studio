@@ -63,6 +63,19 @@ public record EnvironmentCapabilityResult(
         callId, List.of(new TextResultContent("Error: " + detail)), true, "{}");
   }
 
+  /**
+   * 创建带稳定错误码的错误结果：文本仍可读，同时 details 携带机器可判定的 {@code code}。
+   *
+   * <p>details 形状固定为 {@code {"code":"<UPPER_SNAKE>"}}，不携带任何本地事实（路径、URL、正文）；{@code code} 必须满足受限语法。
+   */
+  public static EnvironmentCapabilityResult codedError(String callId, String code, String message) {
+    String validated = EnvironmentCapabilityResultCodes.requireCode(code);
+    String detail = message == null || message.isBlank() ? "capability execution failed" : message;
+    String detailsJson = "{\"code\":\"" + validated + "\"}";
+    return new EnvironmentCapabilityResult(
+        callId, List.of(new TextResultContent("Error: " + detail)), true, detailsJson);
+  }
+
   /** 创建结构化 JSON 成功结果。 */
   public static EnvironmentCapabilityResult json(String callId, String json) {
     return new EnvironmentCapabilityResult(

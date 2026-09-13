@@ -40,18 +40,15 @@ class DaemonEnvelopeCodecTest {
   /** 未知版本、未知类型、负序号、非对象 payload 和未知字段必须分别在 wire 边界拒绝。 */
   @Test
   void rejectsUnsupportedOrMalformedWireEnvelope() {
-    assertProtocolError(
-        "{\"protocolVersion\":3,\"messageType\":\"READY\",\"environmentId\":\""
-            + ID_TEXT
-            + "\",\"sequence\":0,\"payload\":{}}");
-    assertProtocolError(
-        "{\"protocolVersion\":4,\"messageType\":\"READY\",\"environmentId\":\""
-            + ID_TEXT
-            + "\",\"sequence\":0,\"payload\":{}}");
-    assertProtocolError(
-        "{\"protocolVersion\":7,\"messageType\":\"READY\",\"environmentId\":\""
-            + ID_TEXT
-            + "\",\"sequence\":0,\"payload\":{}}");
+    // 相对当前版本的前后版本都必须被拒绝：v3 之前的 v2 与之后的 v4 都不是可接受协议。
+    for (int unsupported : new int[] {DaemonProtocol.VERSION - 1, DaemonProtocol.VERSION + 1}) {
+      assertProtocolError(
+          "{\"protocolVersion\":"
+              + unsupported
+              + ",\"messageType\":\"READY\",\"environmentId\":\""
+              + ID_TEXT
+              + "\",\"sequence\":0,\"payload\":{}}");
+    }
     assertProtocolError(
         current("\"messageType\":\"FUTURE\",\"environmentId\":\"" + ID_TEXT + "\",")
             + "\"sequence\":0,\"payload\":{}}");
@@ -64,6 +61,23 @@ class DaemonEnvelopeCodecTest {
     assertProtocolError(
         current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
             + "\"sequence\":0,\"payload\":{},\"unexpected\":true}");
+    assertProtocolError(
+        current("\"environmentId\":\"" + ID_TEXT + "\",") + "\"sequence\":0,\"payload\":{}}");
+    assertProtocolError(
+        current("\"messageType\":123,\"environmentId\":\"" + ID_TEXT + "\",")
+            + "\"sequence\":0,\"payload\":{}}");
+    assertProtocolError(
+        current("\"messageType\":\"   \",\"environmentId\":\"" + ID_TEXT + "\",")
+            + "\"sequence\":0,\"payload\":{}}");
+    assertProtocolError(
+        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
+            + "\"sequence\":\"0\",\"payload\":{}}");
+    assertProtocolError(
+        current(
+                "\"messageType\":\"INVOKE\",\"environmentId\":\""
+                    + ID_TEXT
+                    + "\",\"invocationId\":\"   \",")
+            + "\"sequence\":0,\"payload\":{}}");
   }
 
   /** READY 等 connection 消息必须携带 canonical UUID scope。 */

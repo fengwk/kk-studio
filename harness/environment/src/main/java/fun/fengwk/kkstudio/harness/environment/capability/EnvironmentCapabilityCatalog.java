@@ -20,18 +20,30 @@ import java.util.Set;
  * Atomic Environment Capability execution descriptors.
  *
  * <p>This catalog is independent of model tool names, prompts, renderers and side-effect labels.
- * Its order is the stable order used by the shared capability contract.
+ * Its order is the stable order used by the shared capability contract. Management-only
+ * capabilities ({@link EnvironmentCapabilityIds#MANAGEMENT_ONLY}) are listed after model-visible
+ * capabilities and are never registered as model Tool contributions.
  */
 public final class EnvironmentCapabilityCatalog {
 
-  /** 未改变形态的能力版本（{@code skill.load} 等）。 */
+  /** capability catalog 版本：v3 新增 local MCP 执行与发现能力。 */
+  public static final String CATALOG_VERSION = "3";
+
+  /** 基础 capability 版本。 */
   public static final String VERSION = "1";
 
   /** 引入必填绝对 workdir 的 coding/process/LSP 能力版本。 */
   public static final String WORKDIR_VERSION = "2";
 
+  /** {@code skill.load} 的 arguments 从 {@code {name}} 变为 {@code {sourceId,name,revision}}，属不兼容变更。 */
+  public static final String SKILL_LOAD_VERSION = "2";
+
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/environment/capability/schemas/";
+
+  /** 三个管理能力共享的 arguments schema 资源名。 */
+  private static final String SHARED_SOURCE_SCHEMA = "skill.source.schema.json";
+
   private static final SchemaJsonCodec CODEC = new SchemaJsonCodec();
   private static final Set<EnvironmentCapabilityId> WORKDIR_CAPABILITY_IDS =
       Set.of(
@@ -45,18 +57,26 @@ public final class EnvironmentCapabilityCatalog {
           EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
           EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
   private static final List<EnvironmentCapabilityDescriptor> DESCRIPTORS = createDescriptors();
+  private static final List<EnvironmentCapabilityDescriptor> MANAGEMENT_DESCRIPTORS =
+      createManagementDescriptors();
   private static final Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> BY_ID =
       indexById(DESCRIPTORS);
 
   private EnvironmentCapabilityCatalog() {}
 
+  /** 返回当前 capability catalog 版本，用于 HELLO 与 Platform 对齐判定。 */
   public static String version() {
-    return VERSION;
+    return CATALOG_VERSION;
   }
 
   /** 返回按固定 canonical 顺序排列的不可变 capability descriptor 列表。 */
   public static List<EnvironmentCapabilityDescriptor> descriptors() {
     return DESCRIPTORS;
+  }
+
+  /** 返回仅供管理执行器使用、绝不成为模型 Tool 的 capability descriptor 列表。 */
+  public static List<EnvironmentCapabilityDescriptor> managementDescriptors() {
+    return MANAGEMENT_DESCRIPTORS;
   }
 
   public static Optional<EnvironmentCapabilityDescriptor> find(EnvironmentCapabilityId id) {
@@ -79,7 +99,54 @@ public final class EnvironmentCapabilityCatalog {
         workdirDescriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
         workdirDescriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),
         workdirDescriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)),
-        descriptor(EnvironmentCapabilityIds.SKILL_LOAD, Duration.ofMinutes(1)));
+        // skill.load 的 arguments 形状已不兼容变更，因此使用自己的能力版本而不是共享的 VERSION。
+        new EnvironmentCapabilityDescriptor(
+            EnvironmentCapabilityIds.SKILL_LOAD,
+            SKILL_LOAD_VERSION,
+            loadSchema(EnvironmentCapabilityIds.SKILL_LOAD),
+            Duration.ofMinutes(1)),
+        descriptor(EnvironmentCapabilityIds.MCP_LOCAL_CALL, Duration.ofHours(1)));
+  }
+
+  /**
+   * 管理专用能力：只复用 INVOKE/CANCEL/终态通道，不注册为模型 Tool，也不接受 workdir。
+   *
+   * <p>refresh 只扫描本地已发布 revision；install/update 允许一次普通 Git 获取，执行时间预算高于普通读取。
+   */
+  private static List<EnvironmentCapabilityDescriptor> createManagementDescriptors() {
+    return List.of(
+        descriptor(EnvironmentCapabilityIds.SKILL_SOURCE_REFRESH, Duration.ofMinutes(5)),
+        descriptor(EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL, Duration.ofMinutes(30)),
+        descriptor(EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE, Duration.ofMinutes(30)),
+        descriptor(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER, Duration.ofMinutes(5)));
+  }
+
+  /** 全部已注册 descriptor：模型可见能力在前，管理专用能力在后。 */
+  private static Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> indexById(
+      List<EnvironmentCapabilityDescriptor> descriptors) {
+    Objects.requireNonNull(descriptors, "descriptors");
+    Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> result = new LinkedHashMap<>();
+    Set<EnvironmentCapabilityDescriptor> uniqueDescriptors = new HashSet<>();
+    for (EnvironmentCapabilityDescriptor descriptor : descriptors) {
+      Objects.requireNonNull(descriptor, "descriptors[]");
+      if (!uniqueDescriptors.add(descriptor)) {
+        throw new IllegalStateException(
+            "duplicate Environment capability descriptor: " + descriptor.id());
+      }
+      if (result.putIfAbsent(descriptor.id(), descriptor) != null) {
+        throw new IllegalStateException("duplicate Environment capability id: " + descriptor.id());
+      }
+    }
+    for (EnvironmentCapabilityDescriptor descriptor : MANAGEMENT_DESCRIPTORS) {
+      if (result.putIfAbsent(descriptor.id(), descriptor) != null) {
+        throw new IllegalStateException("duplicate Environment capability id: " + descriptor.id());
+      }
+      if (!EnvironmentCapabilityIds.MANAGEMENT_ONLY.contains(descriptor.id())) {
+        throw new IllegalStateException(
+            "management descriptor must be management-only: " + descriptor.id());
+      }
+    }
+    return Map.copyOf(result);
   }
 
   private static EnvironmentCapabilityDescriptor descriptor(
@@ -99,26 +166,15 @@ public final class EnvironmentCapabilityCatalog {
     return WORKDIR_CAPABILITY_IDS.contains(id);
   }
 
-  private static Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> indexById(
-      List<EnvironmentCapabilityDescriptor> descriptors) {
-    Objects.requireNonNull(descriptors, "descriptors");
-    Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> result = new LinkedHashMap<>();
-    Set<EnvironmentCapabilityDescriptor> uniqueDescriptors = new HashSet<>();
-    for (EnvironmentCapabilityDescriptor descriptor : descriptors) {
-      Objects.requireNonNull(descriptor, "descriptors[]");
-      if (!uniqueDescriptors.add(descriptor)) {
-        throw new IllegalStateException(
-            "duplicate Environment capability descriptor: " + descriptor.id());
-      }
-      if (result.putIfAbsent(descriptor.id(), descriptor) != null) {
-        throw new IllegalStateException("duplicate Environment capability id: " + descriptor.id());
-      }
-    }
-    return Map.copyOf(result);
-  }
-
   private static InputSchema loadSchema(EnvironmentCapabilityId id) {
-    return CODEC.decode(loadText(id.value() + ".schema.json"));
+    // 三个 skill.source 管理能力共用同一份冻结来源配置 arguments schema：它们只差执行语义，不差 wire 形状。
+    String fileName =
+        (id.equals(EnvironmentCapabilityIds.SKILL_SOURCE_REFRESH)
+                || id.equals(EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL)
+                || id.equals(EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE))
+            ? SHARED_SOURCE_SCHEMA
+            : id.value() + ".schema.json";
+    return CODEC.decode(loadText(fileName));
   }
 
   private static String loadText(String fileName) {

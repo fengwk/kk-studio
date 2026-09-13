@@ -122,10 +122,15 @@ export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {
   expectedVersion: CatalogVersion
 }
 
+export interface AgentSkillRefDTO {
+  sourceId: string
+  name: string
+}
+
 export interface AgentDefinitionConfigDTO {
   /** Stable AgentToolId values selected from the tool catalog. */
   toolIds: string[]
-  skills: string[]
+  skills: AgentSkillRefDTO[]
   /** 可通过 task 委派的 Agent 名称 allowlist；只接受短名。 */
   subagents: string[]
 }

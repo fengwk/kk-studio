@@ -1,18 +1,33 @@
 import type { BackendLong, CatalogVersion, InstantTimestamp } from '@/shared/api/contracts/base'
+import type { EnvironmentOperationDTO } from '@/shared/api/contracts/ai-environment'
 
-/** 不含 Bearer token 的 MCP Server 公开表示；token 是只写敏感字段，任何响应都不回显。 */
+export type McpConnectionType = 'remote' | 'local'
+export type McpDiscoveryStatus = 'UNVERIFIED' | 'AVAILABLE' | 'FAILED'
+
+/**
+ * Platform MCP Server 公开安全表示。
+ * 安全边界：仅暴露安全的元数据，绝不包含 URL、headers、env、command、cwd、bearer token 或完整配置 JSON。
+ */
 export interface McpServerDTO {
   /** Server 稳定 UUID（canonical 小写字符串形式）。 */
   id: string
   /** 唯一名：^[a-z][a-z0-9_]*$ 且 <=32 字符，创建后不可变。 */
   name: string
-  /** Streamable HTTP MCP endpoint URL（<=2048 字符）。 */
-  url: string
-  /** 是否已配置 Bearer token（token 本身永不进入公开 DTO）。 */
-  bearerTokenConfigured: boolean
-  /** 正整数毫秒超时；连接、发现与工具调用共用。 */
+  /** 连接类型：remote 或 local。 */
+  type: McpConnectionType
+  /** 目标 Environment UUID（local 类型必填，remote 类型为 null）。 */
+  environmentId: string | null
+  /** 公共启用状态。 */
+  enabled: boolean
+  /** 正整数毫秒超时。 */
   timeoutMillis: BackendLong
-  /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */
+  /** 发现状态：UNVERIFIED、AVAILABLE、FAILED。 */
+  discoveryStatus: McpDiscoveryStatus
+  /** 最近一次成功验证的配置版本（非负十进制字符串；未验证或变更后为 null）。 */
+  discoveredVersion: CatalogVersion | null
+  /** 当前 server 下持久工具数量（仅统计可用工具）。 */
+  toolCount: number
+  /** 当前配置的非负十进制字符串版本号；客户端每次更新/发现时必须回传。 */
   version: CatalogVersion
   /** 创建时间（UTC Instant）。 */
   createTime: InstantTimestamp
@@ -20,28 +35,46 @@ export interface McpServerDTO {
   updateTime: InstantTimestamp
 }
 
-export interface McpServerCreateDTO {
-  /** 必填唯一名：^[a-z][a-z0-9_]*$ 且 <=32 字符，创建后不可变。 */
+/**
+ * GET /api/ai/mcp-servers/{id}/config 显式配置响应 DTO。
+ * 强制 Cache-Control: no-store，绝不放入通用 React Query 缓存或 LocalStorage。
+ */
+export interface McpServerConfigDTO {
+  id: string
   name: string
-  /** 必填 Streamable HTTP MCP endpoint URL（<=2048 字符）。 */
-  url: string
-  /** 可选 Bearer token；null 表示匿名访问。 */
-  bearerToken?: string | null
-  /** 必填正整数毫秒超时；连接、发现与工具调用共用。 */
-  timeoutMillis: BackendLong
+  version: CatalogVersion
+  configJson: string
+}
+
+/**
+ * POST /api/ai/mcp-servers 请求体。
+ */
+export interface McpServerCreateDTO {
+  name: string
+  configJson: string
 }
 
 /**
  * PUT /api/ai/mcp-servers/{id} 请求体。
- * bearerToken 是显式三态：null / undefined 保留现有值、空字符串清除、非空字符串替换。
  */
 export interface McpServerUpdateDTO {
-  /** 可选新 endpoint URL；null / undefined 表示不修改。 */
-  url?: string | null
-  /** Bearer token 三态更新。 */
-  bearerToken?: string | null
-  /** 可选新超时（正整数毫秒）；null / undefined 表示不修改。 */
-  timeoutMillis?: BackendLong | null
-  /** 必填非负十进制字符串；必须与当前 Server 版本一致。 */
+  configJson: string
   expectedVersion: CatalogVersion
+}
+
+/**
+ * POST /api/ai/mcp-servers/{id}/discover 请求体。
+ */
+export interface McpServerDiscoverDTO {
+  expectedVersion: CatalogVersion
+}
+
+/**
+ * POST /api/ai/mcp-servers/{id}/discover 响应体（HTTP 202 Accepted）。
+ * Remote 返回同步完成后的 server 投影且 operation 为 null；
+ * Local 返回异步 EnvironmentOperationDTO。
+ */
+export interface McpServerDiscoveryResponseDTO {
+  server: McpServerDTO
+  operation: EnvironmentOperationDTO | null
 }

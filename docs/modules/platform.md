@@ -47,7 +47,7 @@ Platform 不是 HTTP composition root，也不承载浏览器协议、Spring Boo
 | Contributor port | `kk-studio-harness-contributor-api`、`kk-studio-harness-builtin` | `HarnessCatalog`、`ToolContribution`、`BranchView` 与 Builtin 贡献者 |
 | HTTP share | `kk-studio-share` | Platform service 使用的 DTO 与 JSON wire 类型 |
 | Persistence | MyBatis、PostgreSQL、`convention4j-spring-boot-starter` | Catalog、Chat、Settings、Storage 和 ComfyUI workflow API |
-| Model/third-party | LangChain4j MCP module、`convention4j-comfyui`、AWS SDK S3、JsonPath | MCP、ComfyUI、S3 和 selector |
+| MCP / third-party | `kk-studio-harness-mcp`、`convention4j-comfyui`、AWS SDK S3、JsonPath | MCP、ComfyUI、S3 和 selector |
 
 `kk-studio-schema`、`kk-studio-canvas-infra`、Harness runtime `test-jar`、Flyway 和
 Testcontainers 都是 test scope；Platform main 不直接依赖 `harness-infra`、`web` 或 `harness-daemon`。这些边界由
@@ -62,7 +62,7 @@ Testcontainers 都是 test scope；Platform main 不直接依赖 `harness-infra`
 web composition root
   -> platform application services
        -> PostgreSQL repositories / Canvas ports / Harness Store ports
-       -> harness-common / harness-runtime / harness-tool / harness-environment / contributor-api / builtin
+       -> harness-common / harness-mcp / harness-runtime / harness-tool / harness-environment / contributor-api / builtin
        -> S3 / Model Provider / Environment Daemon / ComfyUI / OpenCLI Hub
 ```
 
@@ -93,7 +93,7 @@ Provider、Model、Agent 的名称在记录存续期间不可修改；Model 对 
 - `AgentModelRuntimeConfigParser`严格解析 `limit`、`abilities`、`variants`、`defaultVariant` 和 `pricing`；
   context/output、variant id、temperature、reasoning effort 等不满足约束时拒绝。
 - `AgentDefinitionConfigCodec`严格解析去重的 `toolIds`、skill 和 subagent 配置；`toolIds` 必须是 canonical
-  `AgentToolId`，且只能引用运行时目录中的 selectable entry；skills/subagents 仍使用短名。
+  `AgentToolId`，且只能引用运行时目录中的 selectable entry；`skills` 使用强类型 `AgentSkillRefDTO`（包含小写 canonical UUID `sourceId` 与短名 `name`），并在 Environment 持久可用 inventory 锁保护下校验；subagents 仍使用短名。
 
 Provider type 的唯一 runtime enum 在
 `harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java`：
@@ -110,11 +110,21 @@ config、名称和版本，不暴露 credential。
 
 ### MCP server 与运行时工具目录
 
-MCP server 配置与发现结果保存于 `mcp_server`、`mcp_tool`。create/update/refresh
-先在事务外通过 Streamable HTTP 完成握手、`tools/list` 与完整 schema/name 校验，
-再在短事务内锁 server 行、校验 CAS version 并原子更新工具行；发现失败时数据库
-不变。工具 UUID 派生稳定 `AgentToolId=mcp.<32hex>` 与 Contributor identity，
-server version 成为冻结 Tool descriptor version。
+MCP server 配置与发现结果保存于 `mcp_server`、`mcp_tool`。创建和更新只严格解析一份
+Remote/Local 配置 JSON 并将状态置为 `UNVERIFIED`；标准列表和详情只返回安全投影，
+完整 `configJson` 仅经显式配置查询返回。显式发现统一返回 `202 Accepted`：
+
+- Remote 在请求线程的事务外通过 `harness-mcp` Streamable HTTP client 完成握手、
+  `tools/list` 与 schema/name 校验，再在短事务中锁 server、校验 CAS version 并原子
+  更新目录；失败时将当前版本标记为 `FAILED`。
+- Local 创建持久 `MCP_SERVER_DISCOVER` Environment operation，由目标 Daemon 的
+  `mcp.local.discover` 执行。结果发布器按固定锁顺序验证 READY route lease、
+  Environment 归属、server/version 与严格结果 envelope，再把目录更新、Server
+  `AVAILABLE` 状态和操作终态提交在同一事务中。
+
+工具 UUID 派生稳定 `AgentToolId=mcp.<32hex>` 与 Contributor identity。工具消失时保留
+稳定身份并将 `available=false`；schema 改变或工具重新出现时推进
+`schemaRevision`。运行时 descriptor version 为 `<serverVersion>.<schemaRevision>`。
 
 `RuntimeToolCatalogConfiguration` 生产三个明确 bean：
 
@@ -130,10 +140,14 @@ PostgreSQL ----> McpToolCatalog --------------/
 `ToolExecutionGateway` 只通过该统一目录列出或查找工具。`HarnessCatalog`
 仍单独保存 Contributor context projector 与 custom entry type 元数据。
 
-`McpExecutableTool` 的 requirements 为 none、side effect 为
-`NON_IDEMPOTENT`。每次 execute 创建并关闭一个 MCP client，直接调用持久化的
-source name；连接、协议和远端失败只向 Tool result 暴露稳定通用文本，不泄漏
-URL、Bearer token 或 header。
+`McpToolCatalog` 仅选拔 `enabled=true`、`AVAILABLE`、
+`discoveredVersion==version` 且工具 `available=true` 的记录。Remote Tool 的
+requirements 为 none，在受管 `toolGatewayExecutor` 中以 per-call client 执行；
+Local Tool 要求 Agent 精确绑定 Server 所属 Environment，并将冻结配置包装为
+`mcp.local.call` capability。两条路径的 side effect 都是 `NON_IDEMPOTENT`，发送前
+重新围栏 server version、tool schema revision 与可用状态；一次绝对 deadline 覆盖
+client 初始化和调用，取消只作用于当前调用。连接、协议和执行失败只向 Tool result
+暴露稳定通用文本，不泄漏 URL、headers、env、command 或 cwd。
 
 ### Chat 与 owner
 
@@ -216,7 +230,7 @@ skill 正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.lo
 也不存在环境级容量或排队。唯一拒绝重复的规则是同一 Environment 内重用相同的活动 `invocationId`（调用方错误）。发送前按该连接
 READY 中冻结的目标 Daemon OS 对 `arguments.workdir` 做纯词法校验；真实存在性、目录类型与可访问性由 Daemon 判定。
 
-会话核心只接受 protocol v2 HELLO 和严格的 `capabilityCatalogVersion`。INVOKE payload 使用
+会话核心只接受 protocol v3 HELLO、capability catalog `"2"` 与 READY capabilities v2。INVOKE payload 使用
 `capabilityId`、`capabilityVersion`、`arguments`、`timeoutMillis`，不携带 model
 Tool name，也不携带第二份目录字段；所有结果通过通用 `STARTED/PARTIAL/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
 `invocationId` 关联。发送不确定时关闭连接并把在途 invocation 收敛为 uncertain，不重发可能已经产生副作用的请求。
@@ -307,7 +321,7 @@ Tool 的 `AppendCustomEntry` intent 必须属于自身 Contributor、命中已�
 4. skills、subagents 和内部 `load_skill` / `task`；
 5. Contributor context projector、system prompt、cache control、context window 和 output budget。
 
-Agent 配置有 skills 时按稳定 ID 追加 `LoadSkillTool`；subagents 非空且 Session depth 小于 `SubagentConfig.maxDepth` 时按稳定 ID 追加 `TaskTool`。每个 tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor；Environment tool 使用当前 Agent definition 选定的 Environment。Skill 必须由当前选中的 live Environment 提供，且 Environment 必须 READY；缺失、未 READY、能力或 Model 不支持时返回统一 `AssistantError.code=PLANNING_FAILED`。Repository/catalog 基础设施异常向上抛出，由 ThreadProcessor 按 runtime policy reschedule。
+Agent 配置有 skills 时按稳定 ID 追加 `LoadSkillTool`；subagents 非空且 Session depth 小于 `SubagentConfig.maxDepth` 时按稳定 ID 追加 `TaskTool`。每个 tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor；Environment tool 使用当前 Agent definition 选定的 Environment。Skill 严格按 `(sourceId, name)` 从该 Environment 的持久可用 inventory 解析并冻结来源、描述、基目录与内容 revision；Daemon 离线不阻止规划，缺失或陈旧引用返回 `AssistantError.code=PLANNING_FAILED`。当前 Environment 的系统与时区信息优先使用 live READY，离线时回退到持久 inventory。Repository/catalog 基础设施异常向上抛出，由 ThreadProcessor 按 runtime policy reschedule。
 
 system prompt 由 `AgentPromptComposer` 拼接正文、当前 Environment、skill 和 subagent sections，并只替换已知的 `${date}` placeholder；其余 `${...}` 占位符与未闭合形式的原文保持不变。Contributor context projector 以 `BranchView` 追加 preamble。`DatabaseThreadSelectedSkillLookup` 从冻结 ModelRequestSpec 读取 skill binding，正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.load` 能力读取；不会用当前 Agent 配置扩张已冻结调用。
 
@@ -542,8 +556,10 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 - Canvas/ComfyUI：`PlatformCanvasCommandServiceTest`、`PlatformCanvasResourceLifecycleTest`、
   `PlatformCanvasFunctionBlobAccessTest`、`OpenCliCanvasFunctionAdaptersTest`、
   `MiniMaxH3CanvasFunctionAdapterTest`、`ComfyuiRuntimeServiceTest`、`ComfyuiWorkflowApiBindingsParserTest`。
-- MCP：`McpServerServiceTest`、`McpToolCatalogTest`、`McpExecutableToolTest`、
-  `LangChainMcpToolClientFactoryTest`。
+- MCP：`McpServerServiceTest`、`McpServerMutationValidatorTest`、
+  `McpToolCatalogTest`、`McpExecutableToolTest`、
+  `DefaultMcpDiscoveryResultPublisherTest`、`McpSchemaBusinessTest` 与
+  `PostgresqlMcpMigrationTest`。
 - Environment：`EnvironmentRegistryTest`、`PostgresEnvironmentRoutingIntegrationTest`、
   `EnvironmentServiceImplTest`。
 - Storage：`StorageBlobIngestServiceIntegrationTest`、`SessionBlobRefManagerIntegrationTest`、

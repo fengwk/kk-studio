@@ -522,7 +522,6 @@ describe('AgentPane orchestration', () => {
       status: 'READY',
       lastSeen: null,
       capabilities: [],
-      skills: [],
       version: '1',
       createTime: null,
       updateTime: null,

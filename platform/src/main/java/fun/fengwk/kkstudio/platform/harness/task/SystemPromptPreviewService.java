@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.task;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -16,7 +16,12 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
+import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInventoryDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillDTO;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -37,6 +42,7 @@ public final class SystemPromptPreviewService {
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentDefinitionConfigCodec agentConfigCodec;
   private final EnvironmentRegistry environmentRegistry;
+  private final EnvironmentSkillInventoryQueryService skillInventoryQueryService;
   private final SubagentConfigProvider configProvider;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
@@ -46,6 +52,7 @@ public final class SystemPromptPreviewService {
       AgentDefinitionRepository agentDefinitionRepository,
       AgentDefinitionConfigCodec agentConfigCodec,
       EnvironmentRegistry environmentRegistry,
+      EnvironmentSkillInventoryQueryService skillInventoryQueryService,
       SubagentConfigProvider configProvider,
       AgentPromptComposer promptComposer,
       Clock clock) {
@@ -54,6 +61,8 @@ public final class SystemPromptPreviewService {
         Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
+    this.skillInventoryQueryService =
+        Objects.requireNonNull(skillInventoryQueryService, "skillInventoryQueryService");
     this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.clock = Objects.requireNonNull(clock, "clock");
@@ -102,31 +111,73 @@ public final class SystemPromptPreviewService {
         liveEnvironment == null || liveEnvironment.daemonCapabilities() == null
             ? null
             : liveEnvironment.daemonCapabilities().environment();
-    ZoneId zone = environmentInfo == null ? clock.getZone() : ZoneId.of(environmentInfo.timeZone());
-    return new CurrentEnvironmentContext(
-        environmentId,
-        environmentInfo == null ? null : environmentInfo.operatingSystem(),
-        now.atZone(zone).toLocalDate(),
-        environmentInfo == null ? null : environmentInfo.note());
+    EnvironmentInventoryDTO inventory = null;
+    if (environmentInfo == null) {
+      try {
+        inventory = skillInventoryQueryService.getInventory(environmentId);
+      } catch (AiResourceNotFoundException ignored) {
+        // 离线且环境/inventory不存在时按预览宽容契约忽略
+      }
+    }
+    DaemonOperatingSystem os = environmentInfo != null ? environmentInfo.operatingSystem() : null;
+    String note = environmentInfo != null ? environmentInfo.note() : null;
+    if (os == null && inventory != null && inventory.getOperatingSystem() != null) {
+      try {
+        os = DaemonOperatingSystem.fromWireValue(inventory.getOperatingSystem());
+      } catch (IllegalArgumentException ignored) {
+        os = null;
+      }
+    }
+    if (note == null && inventory != null) {
+      note = inventory.getNote();
+    }
+    String timeZone =
+        environmentInfo != null
+            ? environmentInfo.timeZone()
+            : (inventory != null ? inventory.getTimeZone() : null);
+    ZoneId zone;
+    if (timeZone != null) {
+      try {
+        zone = ZoneId.of(timeZone);
+      } catch (Exception ex) {
+        zone = clock.getZone();
+      }
+    } else {
+      zone = clock.getZone();
+    }
+    return new CurrentEnvironmentContext(environmentId, os, now.atZone(zone).toLocalDate(), note);
   }
 
-  private List<SkillBinding> previewSkills(List<String> skillNames, EnvironmentId environmentId) {
-    if (skillNames == null || skillNames.isEmpty() || environmentId == null) {
+  private List<SkillBinding> previewSkills(
+      List<AgentSkillRefDTO> skillRefs, EnvironmentId environmentId) {
+    if (skillRefs == null || skillRefs.isEmpty() || environmentId == null) {
       return List.of();
     }
-    EnvironmentConnection environment = environmentRegistry.find(environmentId).orElse(null);
-    if (environment == null) {
+    List<EnvironmentSkillDTO> usable;
+    try {
+      usable = skillInventoryQueryService.listUsableSkills(environmentId);
+    } catch (RuntimeException error) {
       return List.of();
     }
     List<SkillBinding> bindings = new ArrayList<>();
-    for (String skillName : skillNames) {
-      DaemonSkillDescriptor skill =
-          environment.skills().stream()
-              .filter(candidate -> candidate.name().equals(skillName))
+    for (AgentSkillRefDTO ref : skillRefs) {
+      EnvironmentSkillDTO matched =
+          usable.stream()
+              .filter(
+                  candidate ->
+                      candidate.getSourceId().equals(ref.getSourceId())
+                          && candidate.getName().equals(ref.getName()))
               .findFirst()
               .orElse(null);
-      if (skill != null) {
-        bindings.add(new SkillBinding(skill.name(), skill.description(), environmentId));
+      if (matched != null) {
+        bindings.add(
+            new SkillBinding(
+                environmentId,
+                UUID.fromString(matched.getSourceId()),
+                matched.getName(),
+                matched.getDescription(),
+                matched.getBaseDirectory(),
+                matched.getContentRevision()));
       }
     }
     return List.copyOf(bindings);
