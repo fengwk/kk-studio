@@ -126,6 +126,18 @@ public interface CloudFileSystemService {
   CloudNode createBlobNode(CloudPath path, UUID blobId);
 
   /**
+   * 挂载/消费 READY 上传并创建 BLOB 节点。
+   *
+   * <p>在事务内锁定 READY upload、自动创建缺失父目录、创建 BLOB 节点、同事务 retain 底层 Blob 并 release 上传 owner。
+   *
+   * @param path 目标路径（不可位于 {@code /.artifacts} 下）
+   * @param uploadId 关联的 READY 状态 storage_upload UUID
+   * @param expectedAbsent 是否断言目标节点当前不存在（必须为 true）
+   * @return 创建的 BLOB 节点
+   */
+  CloudNode attachBlobUpload(CloudPath path, UUID uploadId, boolean expectedAbsent);
+
+  /**
    * 读取文本节点的当前活跃版本。
    *
    * @param path 文本文件绝对路径

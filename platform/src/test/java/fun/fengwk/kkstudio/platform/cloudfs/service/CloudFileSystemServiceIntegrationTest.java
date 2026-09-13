@@ -685,4 +685,74 @@ class CloudFileSystemServiceIntegrationTest extends S3PostgresSpringTestSupport 
         CloudNodeAlreadyExistsException.class,
         () -> fileSystemService.createBlobNode(CloudPath.of("/src.txt"), blobId));
   }
+
+  @Test
+  void testAttachBlobUploadSuccessAndRefCountMaintained() {
+    // 意图：验证 attachBlobUpload 成功消费 READY 上传、创建 BLOB 节点并原子保持 blob 引用计数为 1
+    UUID blobId = seedActiveBlob("blob payload for attach");
+    UUID uploadId = seedReadyUpload(blobId);
+
+    CloudNode node =
+        fileSystemService.attachBlobUpload(CloudPath.of("/media/photo.png"), uploadId, true);
+
+    assertNotNull(node);
+    assertTrue(node.isBlob());
+    assertEquals("photo.png", node.getName());
+    assertEquals(blobId, node.getBlobId());
+
+    // 验证 upload 被标记请求清理
+    int cleanupRequested =
+        jdbc.queryForObject(
+            "select count(1) from storage_upload where id = ? and cleanup_requested_at is not null",
+            Integer.class,
+            uploadId);
+    assertEquals(1, cleanupRequested);
+
+    // 验证 blob 净引用计数仍为 1（CFS +1, upload -1）
+    int refCount =
+        jdbc.queryForObject(
+            "select ref_count from storage_blob where id = ?", Integer.class, blobId);
+    assertEquals(1, refCount);
+  }
+
+  @Test
+  void testAttachBlobUploadRollbackPreservesUploadAndRefCount() {
+    // 意图：当 attachBlobUpload 遇到冲突事务回滚时，upload 与 blob 引用计数保持原状
+    UUID blobId = seedActiveBlob("blob payload for rollback");
+    UUID uploadId = seedReadyUpload(blobId);
+
+    CloudPath conflictPath = CloudPath.of("/conflict_target.png");
+    fileSystemService.createBlobNode(conflictPath, blobId);
+
+    // 重复挂载导致 CloudNodeAlreadyExistsException 事务回滚
+    assertThrows(
+        CloudNodeAlreadyExistsException.class,
+        () -> fileSystemService.attachBlobUpload(conflictPath, uploadId, true));
+
+    // 验证 upload 未被标记清理
+    int cleanupCount =
+        jdbc.queryForObject(
+            "select count(1) from storage_upload where id = ? and cleanup_requested_at is not null",
+            Integer.class,
+            uploadId);
+    assertEquals(0, cleanupCount);
+
+    // 验证 blob 引用计数回滚保持为 2（原始 1 + createBlobNode 1）
+    int refCount =
+        jdbc.queryForObject(
+            "select ref_count from storage_blob where id = ?", Integer.class, blobId);
+    assertEquals(2, refCount);
+  }
+
+  private UUID seedReadyUpload(UUID blobId) {
+    UUID uploadId = UUID.randomUUID();
+    jdbc.update(
+        "insert into storage_upload (id, candidate_blob_id, blob_id, filename, declared_media_type, declared_size, declared_sha256, expires_at) "
+            + "values (?, ?, ?, 'image.png', 'image/png', 100, ?, current_timestamp + interval '1 hour')",
+        uploadId,
+        blobId,
+        blobId,
+        "a".repeat(64));
+    return uploadId;
+  }
 }

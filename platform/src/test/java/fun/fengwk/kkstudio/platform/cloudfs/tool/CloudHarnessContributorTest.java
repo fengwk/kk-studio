@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.cloudfs.blob.StorageBlobFileReader;
 import fun.fengwk.kkstudio.platform.cloudfs.service.CloudFileSystemService;
+import fun.fengwk.kkstudio.platform.cloudfs.service.CloudQueryService;
 
 import java.util.List;
 
@@ -27,11 +28,12 @@ class CloudHarnessContributorTest {
   void setUp() {
     CloudFileSystemService mockFs = mock(CloudFileSystemService.class);
     StorageBlobFileReader mockBlob = mock(StorageBlobFileReader.class);
-    CloudReadTool readTool = new CloudReadTool(mockFs, mockBlob);
+    CloudQueryService mockQuery = mock(CloudQueryService.class);
+    CloudReadTool readTool = new CloudReadTool(mockFs, mockBlob, mockQuery);
     CloudWriteTool writeTool = new CloudWriteTool(mockFs);
     CloudEditTool editTool = new CloudEditTool(mockFs);
-    CloudFindTool findTool = new CloudFindTool(mockFs);
-    CloudGrepTool grepTool = new CloudGrepTool(mockFs, mockBlob);
+    CloudFindTool findTool = new CloudFindTool(mockQuery);
+    CloudGrepTool grepTool = new CloudGrepTool(mockQuery);
 
     contributor = new CloudHarnessContributor(readTool, writeTool, editTool, findTool, grepTool);
   }

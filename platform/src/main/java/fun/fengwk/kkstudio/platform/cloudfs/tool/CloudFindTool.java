@@ -11,11 +11,9 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNode;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudFileSystemException;
-import fun.fengwk.kkstudio.platform.cloudfs.domain.error.CloudPathForbiddenException;
-import fun.fengwk.kkstudio.platform.cloudfs.service.CloudFileSystemService;
+import fun.fengwk.kkstudio.platform.cloudfs.service.CloudQueryService;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -47,10 +45,10 @@ public final class CloudFindTool implements Tool {
           ToolSideEffect.READ_ONLY,
           Duration.ofHours(1));
 
-  private final CloudFileSystemService fileSystemService;
+  private final CloudQueryService queryService;
 
-  public CloudFindTool(CloudFileSystemService fileSystemService) {
-    this.fileSystemService = Objects.requireNonNull(fileSystemService, "fileSystemService");
+  public CloudFindTool(CloudQueryService queryService) {
+    this.queryService = Objects.requireNonNull(queryService, "queryService");
   }
 
   @Override
@@ -123,17 +121,6 @@ public final class CloudFindTool implements Tool {
                 args, "timeout_seconds", DEFAULT_TIMEOUT_SECONDS, 1, MAX_TIMEOUT_SECONDS);
 
         CloudPath rootPath = CloudPath.of(rawPath);
-        if (rootPath.isArtifactPath()) {
-          throw new CloudPathForbiddenException(
-              rootPath, "Enumeration of /.artifacts is forbidden: " + rootPath);
-        }
-
-        CloudNode rootNode = fileSystemService.getNode(rootPath);
-        if (!rootNode.isDirectory()) {
-          throw new IllegalArgumentException("path must be a directory: " + rootPath);
-        }
-
-        CloudGlobMatcher matcher = CloudGlobMatcher.compile(pattern);
         SearchControl searchControl =
             SearchControl.of(Duration.ofSeconds(timeoutSeconds), request.effectiveTimeout());
         this.control = searchControl;
@@ -144,9 +131,8 @@ public final class CloudFindTool implements Tool {
           }
         }
 
-        int targetCount = limit + 1;
-        List<String> matches = new ArrayList<>();
-        walk(rootPath, rootPath, matcher, matches, targetCount, searchControl);
+        CloudQueryService.FindResult findResult =
+            queryService.find(rootPath, pattern, limit, searchControl);
 
         synchronized (lock) {
           if (state != State.RUNNING) {
@@ -154,10 +140,8 @@ public final class CloudFindTool implements Tool {
           }
         }
 
-        boolean limitReached = matches.size() > limit;
-        List<String> outputLines =
-            new ArrayList<>(limitReached ? matches.subList(0, limit) : matches);
-        if (limitReached) {
+        List<String> outputLines = new ArrayList<>(findResult.paths());
+        if (findResult.limited()) {
           outputLines.add("");
           outputLines.add(
               "[" + limit + " results limit reached. Refine the pattern or raise limit.]");
@@ -224,59 +208,6 @@ public final class CloudFindTool implements Tool {
     public boolean isCancelled() {
       synchronized (lock) {
         return state == State.CANCELLED;
-      }
-    }
-  }
-
-  private void walk(
-      CloudPath searchRoot,
-      CloudPath currentDir,
-      CloudGlobMatcher matcher,
-      List<String> matches,
-      int targetCount,
-      SearchControl control)
-      throws InterruptedException {
-    control.check();
-    if (matches.size() >= targetCount) {
-      return;
-    }
-
-    List<CloudNode> children = fileSystemService.listChildren(currentDir);
-    for (CloudNode child : children) {
-      control.check();
-      if (matches.size() >= targetCount) {
-        return;
-      }
-      if (currentDir.isRoot() && ".artifacts".equals(child.getName())) {
-        continue;
-      }
-
-      CloudPath childPath =
-          currentDir.isRoot()
-              ? CloudPath.of("/" + child.getName())
-              : CloudPath.of(currentDir.value() + "/" + child.getName());
-
-      // 计算相对搜索根的路径
-      String relativePath;
-      if (searchRoot.isRoot()) {
-        relativePath = childPath.value().substring(1);
-      } else {
-        relativePath = childPath.value().substring(searchRoot.value().length() + 1);
-      }
-
-      if (matcher.matches(relativePath, child.getName())) {
-        String display = childPath.value() + (child.isDirectory() ? "/" : "");
-        matches.add(display);
-        if (matches.size() >= targetCount) {
-          return;
-        }
-      }
-
-      if (child.isDirectory()) {
-        walk(searchRoot, childPath, matcher, matches, targetCount, control);
-        if (matches.size() >= targetCount) {
-          return;
-        }
       }
     }
   }

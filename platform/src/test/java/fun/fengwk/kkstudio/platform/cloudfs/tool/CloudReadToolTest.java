@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudTextRevision;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.ToolArtifactPath;
 import fun.fengwk.kkstudio.platform.cloudfs.service.CloudFileSystemService;
+import fun.fengwk.kkstudio.platform.cloudfs.service.impl.CloudQueryServiceImpl;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.CodingErrorAction;
@@ -35,6 +36,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -50,7 +52,11 @@ class CloudReadToolTest {
   void setUp() {
     mockService = mock(CloudFileSystemService.class);
     mockBlobReader = mock(StorageBlobFileReader.class);
-    readTool = new CloudReadTool(mockService, mockBlobReader);
+    readTool =
+        new CloudReadTool(
+            mockService,
+            mockBlobReader,
+            new CloudQueryServiceImpl(mockService, Optional.of(mockBlobReader)));
   }
 
   @Test
@@ -601,7 +607,9 @@ class CloudReadToolTest {
             UUID.randomUUID(),
             Instant.now(),
             Instant.now());
-    CloudReadTool toolWithoutReader = new CloudReadTool(mockService, null);
+    CloudReadTool toolWithoutReader =
+        new CloudReadTool(
+            mockService, null, new CloudQueryServiceImpl(mockService, Optional.empty()));
     when(mockService.getNode(artPath)).thenReturn(blobNode);
     CaptureListener listener = new CaptureListener();
     ToolCall call =
@@ -653,7 +661,9 @@ class CloudReadToolTest {
             UUID.randomUUID(),
             Instant.now(),
             Instant.now());
-    CloudReadTool toolWithoutReader = new CloudReadTool(mockService, null);
+    CloudReadTool toolWithoutReader =
+        new CloudReadTool(
+            mockService, null, new CloudQueryServiceImpl(mockService, Optional.empty()));
     when(mockService.getNode(blobPath)).thenReturn(blobNode);
     CaptureListener listener = new CaptureListener();
     ToolCall call =

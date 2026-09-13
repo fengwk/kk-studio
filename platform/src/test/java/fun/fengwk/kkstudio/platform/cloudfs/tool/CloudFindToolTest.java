@@ -25,10 +25,12 @@ import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNode;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNodeKind;
 import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
 import fun.fengwk.kkstudio.platform.cloudfs.service.CloudFileSystemService;
+import fun.fengwk.kkstudio.platform.cloudfs.service.impl.CloudQueryServiceImpl;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -43,7 +45,7 @@ class CloudFindToolTest {
   @BeforeEach
   void setUp() {
     mockService = mock(CloudFileSystemService.class);
-    findTool = new CloudFindTool(mockService);
+    findTool = new CloudFindTool(new CloudQueryServiceImpl(mockService, Optional.empty()));
   }
 
   @Test
