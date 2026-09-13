@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -25,11 +26,22 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.environment.operation.DuplicateActiveOperationException;
+import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationService;
+import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationType;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
+import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
+import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSourceService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInventoryDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentOperationDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillSourceCreateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillSourceDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillSourceUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
@@ -40,14 +52,25 @@ import java.util.UUID;
 class StudioEnvironmentControllerTest {
 
   private static final UUID ENV_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+  private static final UUID SOURCE_ID = UUID.fromString("22222222-2222-2222-2222-222222222222");
+  private static final UUID OP_ID = UUID.fromString("33333333-3333-3333-3333-333333333333");
 
   private EnvironmentService environmentService;
+  private EnvironmentSkillSourceService skillSourceService;
+  private EnvironmentSkillInventoryQueryService skillInventoryQueryService;
+  private EnvironmentOperationService operationService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     environmentService = mock(EnvironmentService.class);
-    StudioEnvironmentController controller = new StudioEnvironmentController(environmentService);
+    skillSourceService = mock(EnvironmentSkillSourceService.class);
+    skillInventoryQueryService = mock(EnvironmentSkillInventoryQueryService.class);
+    operationService = mock(EnvironmentOperationService.class);
+
+    StudioEnvironmentController controller =
+        new StudioEnvironmentController(
+            environmentService, skillSourceService, skillInventoryQueryService, operationService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -230,5 +253,290 @@ class StudioEnvironmentControllerTest {
         .andExpect(status().isNoContent());
 
     verify(environmentService).delete(EnvironmentId.of(ENV_ID), "0");
+  }
+
+  /** 意图：验证 GET /api/harness/environments/{envId}/skill-sources 成功返回 200 与来源列表。 */
+  @Test
+  void listSkillSourcesReturnsOk() throws Exception {
+    EnvironmentSkillSourceDTO source = new EnvironmentSkillSourceDTO();
+    source.setSourceId(SOURCE_ID.toString());
+    source.setType("git");
+    when(skillSourceService.list(eq(EnvironmentId.of(ENV_ID)))).thenReturn(List.of(source));
+
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/skill-sources"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].sourceId").value(SOURCE_ID.toString()))
+        .andExpect(jsonPath("$.data[0].type").value("git"));
+  }
+
+  /** 意图：验证 GET /api/harness/environments/{envId}/skill-sources/{srcId} 成功返回 200 与来源详情。 */
+  @Test
+  void getSkillSourceReturnsOk() throws Exception {
+    EnvironmentSkillSourceDTO source = new EnvironmentSkillSourceDTO();
+    source.setSourceId(SOURCE_ID.toString());
+    source.setType("git");
+    when(skillSourceService.get(eq(EnvironmentId.of(ENV_ID)), eq(SOURCE_ID))).thenReturn(source);
+
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/skill-sources/" + SOURCE_ID))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.sourceId").value(SOURCE_ID.toString()))
+        .andExpect(jsonPath("$.data.type").value("git"));
+  }
+
+  /** 意图：验证 POST /api/harness/environments/{envId}/skill-sources 注册新来源返回 201 Created。 */
+  @Test
+  void registerSkillSourceReturnsCreated() throws Exception {
+    EnvironmentSkillSourceDTO source = new EnvironmentSkillSourceDTO();
+    source.setSourceId(SOURCE_ID.toString());
+    source.setType("git");
+    when(skillSourceService.create(
+            eq(EnvironmentId.of(ENV_ID)), any(EnvironmentSkillSourceCreateDTO.class)))
+        .thenReturn(source);
+
+    mockMvc
+        .perform(
+            post("/api/harness/environments/" + ENV_ID + "/skill-sources")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"type\":\"git\",\"gitUrl\":\"https://github.com/example/skills\"}"))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.sourceId").value(SOURCE_ID.toString()))
+        .andExpect(jsonPath("$.data.type").value("git"));
+  }
+
+  /** 意图：验证 PUT /api/harness/environments/{envId}/skill-sources/{srcId} 更新来源返回 200 OK。 */
+  @Test
+  void updateSkillSourceReturnsOk() throws Exception {
+    EnvironmentSkillSourceDTO source = new EnvironmentSkillSourceDTO();
+    source.setSourceId(SOURCE_ID.toString());
+    source.setType("git");
+    when(skillSourceService.update(
+            eq(EnvironmentId.of(ENV_ID)),
+            eq(SOURCE_ID),
+            any(EnvironmentSkillSourceUpdateDTO.class)))
+        .thenReturn(source);
+
+    mockMvc
+        .perform(
+            put("/api/harness/environments/" + ENV_ID + "/skill-sources/" + SOURCE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"gitRef\":\"main\",\"expectedVersion\":\"1\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.sourceId").value(SOURCE_ID.toString()));
+  }
+
+  /** 意图：验证 DELETE /api/harness/environments/{envId}/skill-sources/{srcId} 删除来源返回 204 No Content。 */
+  @Test
+  void deleteSkillSourceReturnsNoContent() throws Exception {
+    mockMvc
+        .perform(
+            delete("/api/harness/environments/" + ENV_ID + "/skill-sources/" + SOURCE_ID)
+                .param("expectedVersion", "1"))
+        .andExpect(status().isNoContent());
+
+    verify(skillSourceService).delete(EnvironmentId.of(ENV_ID), SOURCE_ID, "1");
+  }
+
+  /** 意图：验证非规范 UUID（包含大写字母）由严格校验拦截并返回 400 Bad Request，且不回显非法值。 */
+  @Test
+  void nonCanonicalUuidReturnsBadRequestWithoutEchoingInput() throws Exception {
+    String invalidSourceId = "22222222-2222-2222-2222-22222222222A"; // uppercase 'A'
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/skill-sources/" + invalidSourceId))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.status").value(400))
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(
+            result ->
+                assertFalse(result.getResponse().getContentAsString().contains(invalidSourceId)));
+  }
+
+  /** 意图：验证 GET /api/harness/environments/{envId}/inventory 查询全量持久化清单返回 200 OK。 */
+  @Test
+  void getInventoryReturnsOk() throws Exception {
+    EnvironmentInventoryDTO inventory = new EnvironmentInventoryDTO();
+    inventory.setEnvironmentId(ENV_ID.toString());
+    when(skillInventoryQueryService.getInventory(eq(EnvironmentId.of(ENV_ID))))
+        .thenReturn(inventory);
+
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/inventory"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.environmentId").value(ENV_ID.toString()));
+  }
+
+  /**
+   * 意图：验证 GET /api/harness/environments/{envId}/inventory/skills 默认查询（usableOnly=false）调用
+   * listSkills。
+   */
+  @Test
+  void listSkillsDefaultUsableOnlyCallsListSkills() throws Exception {
+    EnvironmentSkillDTO skill = new EnvironmentSkillDTO();
+    skill.setName("bash");
+    when(skillInventoryQueryService.listSkills(eq(EnvironmentId.of(ENV_ID))))
+        .thenReturn(List.of(skill));
+
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/inventory/skills"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].name").value("bash"));
+
+    verify(skillInventoryQueryService).listSkills(EnvironmentId.of(ENV_ID));
+    verify(skillInventoryQueryService, never()).listUsableSkills(any());
+  }
+
+  /**
+   * 意图：验证 GET /api/harness/environments/{envId}/inventory/skills?usableOnly=true 调用
+   * listUsableSkills。
+   */
+  @Test
+  void listSkillsUsableOnlyCallsListUsableSkills() throws Exception {
+    EnvironmentSkillDTO skill = new EnvironmentSkillDTO();
+    skill.setName("bash");
+    when(skillInventoryQueryService.listUsableSkills(eq(EnvironmentId.of(ENV_ID))))
+        .thenReturn(List.of(skill));
+
+    mockMvc
+        .perform(
+            get("/api/harness/environments/" + ENV_ID + "/inventory/skills")
+                .param("usableOnly", "true"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].name").value("bash"));
+
+    verify(skillInventoryQueryService).listUsableSkills(EnvironmentId.of(ENV_ID));
+    verify(skillInventoryQueryService, never()).listSkills(any());
+  }
+
+  /** 意图：验证 POST /api/harness/environments/{envId}/skill-sources/{srcId}/refresh 返回 202 Accepted。 */
+  @Test
+  void refreshSkillSourceReturnsAccepted() throws Exception {
+    EnvironmentOperationDTO op = new EnvironmentOperationDTO();
+    op.setId(OP_ID.toString());
+    op.setStatus("PENDING");
+    op.setOperationType("SKILL_REFRESH");
+    when(operationService.create(
+            eq(EnvironmentId.of(ENV_ID)),
+            eq(SOURCE_ID),
+            eq(EnvironmentOperationType.SKILL_REFRESH),
+            any()))
+        .thenReturn(op);
+
+    mockMvc
+        .perform(
+            post("/api/harness/environments/" + ENV_ID + "/skill-sources/" + SOURCE_ID + "/refresh")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.id").value(OP_ID.toString()))
+        .andExpect(jsonPath("$.data.operationType").value("SKILL_REFRESH"));
+  }
+
+  /** 意图：验证 POST /api/harness/environments/{envId}/skill-sources/{srcId}/install 返回 202 Accepted。 */
+  @Test
+  void installSkillSourceReturnsAccepted() throws Exception {
+    EnvironmentOperationDTO op = new EnvironmentOperationDTO();
+    op.setId(OP_ID.toString());
+    op.setStatus("PENDING");
+    op.setOperationType("SKILL_INSTALL");
+    when(operationService.create(
+            eq(EnvironmentId.of(ENV_ID)),
+            eq(SOURCE_ID),
+            eq(EnvironmentOperationType.SKILL_INSTALL),
+            any()))
+        .thenReturn(op);
+
+    mockMvc
+        .perform(
+            post("/api/harness/environments/" + ENV_ID + "/skill-sources/" + SOURCE_ID + "/install")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.id").value(OP_ID.toString()))
+        .andExpect(jsonPath("$.data.operationType").value("SKILL_INSTALL"));
+  }
+
+  /** 意图：验证 POST /api/harness/environments/{envId}/skill-sources/{srcId}/update 返回 202 Accepted。 */
+  @Test
+  void updateSkillSourceOpReturnsAccepted() throws Exception {
+    EnvironmentOperationDTO op = new EnvironmentOperationDTO();
+    op.setId(OP_ID.toString());
+    op.setStatus("PENDING");
+    op.setOperationType("SKILL_UPDATE");
+    when(operationService.create(
+            eq(EnvironmentId.of(ENV_ID)),
+            eq(SOURCE_ID),
+            eq(EnvironmentOperationType.SKILL_UPDATE),
+            any()))
+        .thenReturn(op);
+
+    mockMvc
+        .perform(
+            post("/api/harness/environments/" + ENV_ID + "/skill-sources/" + SOURCE_ID + "/update")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.id").value(OP_ID.toString()))
+        .andExpect(jsonPath("$.data.operationType").value("SKILL_UPDATE"));
+  }
+
+  /** 意图：验证提交操作发生并发冲突时（DuplicateActiveOperationException），返回 409 Conflict。 */
+  @Test
+  void submitOperationDuplicateReturnsConflict() throws Exception {
+    when(operationService.create(
+            eq(EnvironmentId.of(ENV_ID)),
+            eq(SOURCE_ID),
+            eq(EnvironmentOperationType.SKILL_REFRESH),
+            any()))
+        .thenThrow(new DuplicateActiveOperationException(ENV_ID, SOURCE_ID));
+
+    mockMvc
+        .perform(
+            post("/api/harness/environments/" + ENV_ID + "/skill-sources/" + SOURCE_ID + "/refresh")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.status").value(409))
+        .andExpect(jsonPath("$.code").value("duplicate"));
+  }
+
+  /** 意图：验证 GET /api/harness/environments/{envId}/operations 查询操作列表返回 200 OK。 */
+  @Test
+  void listOperationsReturnsOk() throws Exception {
+    EnvironmentOperationDTO op = new EnvironmentOperationDTO();
+    op.setId(OP_ID.toString());
+    when(operationService.list(eq(EnvironmentId.of(ENV_ID)), eq(50))).thenReturn(List.of(op));
+
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/operations"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].id").value(OP_ID.toString()));
+  }
+
+  /** 意图：验证 GET /api/harness/environments/{envId}/operations/{opId} 查询单个操作返回 200 OK。 */
+  @Test
+  void getOperationReturnsOk() throws Exception {
+    EnvironmentOperationDTO op = new EnvironmentOperationDTO();
+    op.setId(OP_ID.toString());
+    when(operationService.get(eq(EnvironmentId.of(ENV_ID)), eq(OP_ID))).thenReturn(op);
+
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/operations/" + OP_ID))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.id").value(OP_ID.toString()));
+  }
+
+  /** 意图：验证 POST /api/harness/environments/{envId}/operations/{opId}/cancel 取消操作返回 200 OK。 */
+  @Test
+  void cancelOperationReturnsOk() throws Exception {
+    EnvironmentOperationDTO op = new EnvironmentOperationDTO();
+    op.setId(OP_ID.toString());
+    op.setStatus("CANCELLED");
+    when(operationService.cancel(eq(EnvironmentId.of(ENV_ID)), eq(OP_ID))).thenReturn(op);
+
+    mockMvc
+        .perform(post("/api/harness/environments/" + ENV_ID + "/operations/" + OP_ID + "/cancel"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("CANCELLED"));
   }
 }
