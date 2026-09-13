@@ -84,17 +84,17 @@ export function EnvironmentOperationsSection({
 
                 <div className="env-op-details">
                   <div className="env-meta-row">
-                    <span className="lbl">{t('ai.environment.operations.sourceId')}</span>
+                    <span className="lbl">{t('ai.environment.operations.targetResource')}</span>
                     <span className="val">
-                      <code>{op.sourceId}</code>
+                      <span className="meta-chip is-resource">{op.resourceType}</span>{' '}
+                      <code>{op.resourceId}</code>
                     </span>
                   </div>
 
                   <div className="env-meta-row">
-                    <span className="lbl">{t('ai.environment.operations.versions')}</span>
+                    <span className="lbl">{t('ai.environment.operations.resourceVersionLabel')}</span>
                     <span className="val">
-                      {t('ai.environment.operations.sourceVersion', { version: op.sourceVersion })} ·{' '}
-                      {t('ai.environment.operations.sourceSetVersion', { version: op.sourceSetVersion })}
+                      {t('ai.environment.operations.resourceVersion', { version: op.resourceVersion })}
                     </span>
                   </div>
 

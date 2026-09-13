@@ -2193,21 +2193,17 @@ export const aiCatalog = {
     'en-US': 'No operation records',
     'zh-CN': '暂无操作记录',
   },
-  'ai.environment.operations.sourceId': {
-    'en-US': 'Target Source',
-    'zh-CN': '目标来源',
+  'ai.environment.operations.targetResource': {
+    'en-US': 'Target Resource',
+    'zh-CN': '目标资源',
   },
-  'ai.environment.operations.versions': {
-    'en-US': 'Source / Set Version',
-    'zh-CN': '来源版本 / 代际',
+  'ai.environment.operations.resourceVersionLabel': {
+    'en-US': 'Version',
+    'zh-CN': '版本',
   },
-  'ai.environment.operations.sourceVersion': {
-    'en-US': 'Source v{{version}}',
-    'zh-CN': '来源 v{{version}}',
-  },
-  'ai.environment.operations.sourceSetVersion': {
-    'en-US': 'Set v{{version}}',
-    'zh-CN': '代际 v{{version}}',
+  'ai.environment.operations.resourceVersion': {
+    'en-US': 'v{{version}}',
+    'zh-CN': '版本 v{{version}}',
   },
   'ai.environment.operations.created': {
     'en-US': 'Created',
@@ -2269,13 +2265,21 @@ export const aiCatalog = {
     'en-US': 'Are you sure you want to delete MCP server "{name}"?',
     'zh-CN': '确认删除 MCP 服务「{name}」？',
   },
-  'ai.mcp.refresh': {
-    'en-US': 'Refresh Tools',
-    'zh-CN': '刷新工具',
+  'ai.mcp.discover': {
+    'en-US': 'Discover Tools',
+    'zh-CN': '发现工具',
   },
-  'ai.mcp.refreshSuccess': {
-    'en-US': 'Tools refreshed successfully',
-    'zh-CN': '工具刷新成功',
+  'ai.mcp.discoverScheduled': {
+    'en-US': 'Discovery operation scheduled',
+    'zh-CN': '发现操作已进入后台队列',
+  },
+  'ai.mcp.discoverSuccess': {
+    'en-US': 'Tools discovered successfully',
+    'zh-CN': '工具发现成功',
+  },
+  'ai.mcp.unsavedDiscoverBlocked': {
+    'en-US': 'Unsaved configuration changes. Please save before discovering tools.',
+    'zh-CN': '存在未保存的配置更改，请先保存再发现工具。',
   },
   'ai.mcp.empty': {
     'en-US': 'No MCP servers configured',
@@ -2285,41 +2289,81 @@ export const aiCatalog = {
     'en-US': 'Server Name',
     'zh-CN': '服务名称',
   },
-  'ai.mcp.url': {
-    'en-US': 'Endpoint URL',
-    'zh-CN': 'Endpoint URL',
+  'ai.mcp.configJson': {
+    'en-US': 'Configuration JSON',
+    'zh-CN': '配置 JSON',
   },
-  'ai.mcp.bearerToken': {
-    'en-US': 'Bearer Token',
-    'zh-CN': 'Bearer Token',
+  'ai.mcp.remoteTemplate': {
+    'en-US': 'Remote Template',
+    'zh-CN': 'Remote 模板',
   },
-  'ai.mcp.tokenMode': {
-    'en-US': 'Token Setting',
-    'zh-CN': 'Token 设置',
+  'ai.mcp.localTemplate': {
+    'en-US': 'Local Template',
+    'zh-CN': 'Local 模板',
   },
-  'ai.mcp.tokenKeep': {
-    'en-US': 'Keep current token',
-    'zh-CN': '保留当前 Token',
+  'ai.mcp.formatJson': {
+    'en-US': 'Format',
+    'zh-CN': '格式化',
   },
-  'ai.mcp.tokenClear': {
-    'en-US': 'Clear token (anonymous)',
-    'zh-CN': '清除 Token (匿名访问)',
+  'ai.mcp.validateJson': {
+    'en-US': 'Validate',
+    'zh-CN': '校验',
   },
-  'ai.mcp.tokenSet': {
-    'en-US': 'Replace token',
-    'zh-CN': '替换新 Token',
+  'ai.mcp.validationPassed': {
+    'en-US': 'Configuration is valid',
+    'zh-CN': '配置格式校验通过',
+  },
+  'ai.mcp.envSelect': {
+    'en-US': 'Environment',
+    'zh-CN': '关联环境',
+  },
+  'ai.mcp.type': {
+    'en-US': 'Connection Type',
+    'zh-CN': '连接类型',
+  },
+  'ai.mcp.typeRemote': {
+    'en-US': 'Remote',
+    'zh-CN': '远程 (Remote)',
+  },
+  'ai.mcp.typeLocal': {
+    'en-US': 'Local',
+    'zh-CN': '本地 (Local)',
+  },
+  'ai.mcp.toolCount': {
+    'en-US': 'Tools',
+    'zh-CN': '工具数量',
+  },
+  'ai.mcp.status': {
+    'en-US': 'Status',
+    'zh-CN': '状态',
+  },
+  'ai.mcp.statusAvailable': {
+    'en-US': 'Available',
+    'zh-CN': '可用',
+  },
+  'ai.mcp.statusUnverified': {
+    'en-US': 'Unverified',
+    'zh-CN': '未验证',
+  },
+  'ai.mcp.statusFailed': {
+    'en-US': 'Failed',
+    'zh-CN': '失败',
   },
   'ai.mcp.timeout': {
     'en-US': 'Timeout (ms)',
     'zh-CN': '超时时间 (毫秒)',
   },
-  'ai.mcp.configured': {
-    'en-US': 'Configured',
-    'zh-CN': '已配置',
+  'ai.mcp.discoveredVersion': {
+    'en-US': 'Discovered Version',
+    'zh-CN': '已验证版本',
   },
-  'ai.mcp.anonymous': {
-    'en-US': 'Anonymous',
-    'zh-CN': '匿名访问',
+  'ai.mcp.enabled': {
+    'en-US': 'Enabled',
+    'zh-CN': '已启用',
+  },
+  'ai.mcp.disabled': {
+    'en-US': 'Disabled',
+    'zh-CN': '已禁用',
   },
   'ai.mcp.loading': {
     'en-US': 'Loading MCP servers',
@@ -2328,6 +2372,14 @@ export const aiCatalog = {
   'ai.mcp.loadFailed': {
     'en-US': 'Failed to load MCP servers',
     'zh-CN': '加载 MCP 服务失败',
+  },
+  'ai.mcp.loadingConfig': {
+    'en-US': 'Loading configuration...',
+    'zh-CN': '正在读取配置...',
+  },
+  'ai.mcp.loadConfigFailed': {
+    'en-US': 'Failed to load configuration',
+    'zh-CN': '读取配置失败',
   },
   'ai.mcp.version': {
     'en-US': 'Version',

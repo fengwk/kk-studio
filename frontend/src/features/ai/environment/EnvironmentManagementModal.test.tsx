@@ -106,11 +106,11 @@ function testOperation(overrides: Partial<EnvironmentOperationDTO> = {}): Enviro
   return {
     id: 'op-1',
     environmentId: 'env-test-1',
-    sourceId: 'src-1',
+    resourceType: 'SKILL_SOURCE',
+    resourceId: 'src-1',
     operationType: 'SKILL_REFRESH',
     status: 'SUCCEEDED',
-    sourceVersion: '1',
-    sourceSetVersion: '3',
+    resourceVersion: '1',
     parameterSummary: { timeoutMillis: 60000 },
     deadlineAt: '2026-07-20T01:01:00.000Z',
     startedAt: '2026-07-20T01:00:01.000Z',
@@ -829,6 +829,16 @@ describe('EnvironmentManagementModal', () => {
           failureCode: 'DAEMON_DISCONNECTED',
           failureMessage: 'Connection dropped during sync',
         }),
+        testOperation({
+          id: 'op-mcp-5',
+          resourceType: 'MCP_SERVER',
+          resourceId: 'mcp-srv-1',
+          operationType: 'MCP_SERVER_DISCOVER',
+          status: 'SUCCEEDED',
+          resourceVersion: '2',
+          parameterSummary: { timeoutMillis: 60000 },
+          resultSummary: { toolCount: 5 },
+        }),
       ])
       vi.mocked(environmentService.cancelOperation).mockResolvedValue(
         testOperation({ id: 'op-pending-1', status: 'CANCELLED' }),
@@ -839,16 +849,21 @@ describe('EnvironmentManagementModal', () => {
       expect(screen.getByText('op-running-2')).toBeInTheDocument()
       expect(screen.getByText('op-succeeded-3')).toBeInTheDocument()
       expect(screen.getByText('op-failed-4')).toBeInTheDocument()
+      expect(screen.getByText('op-mcp-5')).toBeInTheDocument()
 
       // 验证呈现服务端安全参数摘要 (parameterSummary) 与结果摘要 (resultSummary)，不含原始 arguments
       expect(screen.getByText(/"type": "git"/)).toBeInTheDocument()
       expect(screen.getByText(/"defaultSource": false/)).toBeInTheDocument()
       expect(screen.queryByText(/arguments/i)).toBeNull()
       expect(screen.getByText(/"discoveredSkills": 3/)).toBeInTheDocument()
+      expect(screen.getByText(/"toolCount": 5/)).toBeInTheDocument()
       expect(screen.getByText(/Connection dropped during sync/)).toBeInTheDocument()
 
-      // 验证时间标签与代际标签
-      expect(screen.getAllByText(/来源 v1 · 代际 v3/).length).toBeGreaterThan(0)
+      // 验证泛化资源类型与版本标签
+      expect(screen.getAllByText('SKILL_SOURCE').length).toBeGreaterThan(0)
+      expect(screen.getByText('MCP_SERVER')).toBeInTheDocument()
+      expect(screen.getByText('MCP_SERVER_DISCOVER')).toBeInTheDocument()
+      expect(screen.getAllByText(/版本 v1/).length).toBeGreaterThan(0)
       expect(screen.getAllByText(/创建:/).length).toBeGreaterThan(0)
 
       // 仅 PENDING 状态允许取消
@@ -858,6 +873,7 @@ describe('EnvironmentManagementModal', () => {
       // RUNNING 与 SUCCEEDED 绝不呈现取消按钮
       expect(screen.queryByRole('button', { name: /op-running-2/ })).toBeNull()
       expect(screen.queryByRole('button', { name: /op-succeeded-3/ })).toBeNull()
+      expect(screen.queryByRole('button', { name: /op-mcp-5/ })).toBeNull()
 
       // 点击取消 PENDING 操作
       await user.click(cancelBtn)

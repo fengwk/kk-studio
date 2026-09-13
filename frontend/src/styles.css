@@ -7330,3 +7330,39 @@ select.settings-input option {
     font-size: 14px;
   }
 }
+
+/* MCP Server JSON-only editor & Environment operations */
+.mcp-modal-card {
+  width: min(640px, 100%);
+}
+
+.mcp-json-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.mcp-config-json-textarea {
+  min-height: 240px !important;
+  resize: vertical;
+}
+
+.mcp-validation-msg {
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.mcp-validation-msg.is-success {
+  color: var(--success, #10b981);
+}
+
+.mcp-validation-msg.is-error {
+  color: var(--danger, #ef4444);
+}
+
+.meta-chip.is-resource {
+  font-weight: 600;
+}
+
