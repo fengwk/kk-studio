@@ -194,6 +194,7 @@ errors；`409` 由 `isConflictError` 识别，只有 `errors.reason` 精确匹�
 | [ai-runtime.ts](../../frontend/src/shared/api/contracts/ai-runtime.ts) | Session/Entry/Thread、branch settings、command、stop、approval、model/tool invocation、snapshot、command batch |
 | [ai-catalog.ts](../../frontend/src/shared/api/contracts/ai-catalog.ts) | Provider、Model、Agent、Tool catalog 与 config |
 | [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | Environment Card/live Capability、Skill 来源、持久 inventory 与异步操作 |
+| [ai-mcp.ts](../../frontend/src/shared/api/contracts/ai-mcp.ts) | MCP Server 安全投影、显式配置、JSON-only mutation 与统一发现响应 |
 | [studio.ts](../../frontend/src/shared/api/contracts/studio.ts) | Canvas document、node/resource/group/link、snapshot、patch、version event、typed command |
 | [storage.ts](../../frontend/src/shared/api/contracts/storage.ts) | PENDING/READY upload、presigned PUT、render-time presigned URL |
 | [comfyui.ts](../../frontend/src/shared/api/contracts/comfyui.ts) | Workflow、input binding、run、job、cancel |
@@ -209,7 +210,7 @@ errors；`409` 由 `isConflictError` 识别，只有 `errors.reason` 精确匹�
 | --- | --- | --- |
 | [agent-service.ts](../../frontend/src/shared/api/agent-service.ts) | `/ai/catalog/providers|models|agents|tools` | Provider/Model/Agent CRUD，删除使用 `expectedVersion` CAS |
 | [chat-service.ts](../../frontend/src/shared/api/chat-service.ts) | `/ai/chats` | Chat list/create/get/update/delete 与 owner Session 查询 |
-| [mcp-server-service.ts](../../frontend/src/shared/api/mcp-server-service.ts) | `/ai/mcp-servers` | MCP Server CRUD、refresh 与 `expectedVersion` CAS |
+| [mcp-server-service.ts](../../frontend/src/shared/api/mcp-server-service.ts) | `/ai/mcp-servers` | MCP Server CRUD、显式完整配置查询、Remote/Local discover 与 `expectedVersion` CAS |
 | [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/harness/environments`、`/{id}/token`、`/{id}/skill-sources`、`/{id}/inventory`、`/{id}/operations` | Environment Card CRUD、token、Skill 来源、持久 inventory 与异步管理操作；无目录查询 |
 | [harness-service.ts](../../frontend/src/shared/api/harness-service.ts) | `/harness/command-batches|sessions|threads` | Harness command、Session 查询、Thread 快照与运行控制 |
 | [studio-service.ts](../../frontend/src/shared/api/studio-service.ts) | `/canvases` | Canvas CRUD/命令/资源/Function Run 与 owner Session 查询；自有 `canvasRequest`、strict envelope、AbortSignal、ApiError |
@@ -240,7 +241,7 @@ props。
 
 ## 7. AI feature
 
-### 7.1 Catalog、Chat 和 Environment
+### 7.1 Catalog、Chat、Environment 和 MCP
 
 AI feature 由 `CatalogRuntime`、`ChatRuntime` 和 `AgentPane` 组成：
 
@@ -260,6 +261,12 @@ AI feature 由 `CatalogRuntime`、`ChatRuntime` 和 `AgentPane` 组成：
   2 秒轮询，进入终态后停止并刷新来源与 inventory；只有 `PENDING` 操作可取消。
   持久 inventory 不依赖 live 连接。不存在目录浏览器：工具调用的目标目录由模型
   在 arguments 中显式给出，前端不注入默认目录。
+- MCP Server 卡片只消费不含连接细节的安全投影。创建和编辑共用严格 JSON editor，
+  支持 Remote/Local 模板、格式化、重复键拦截与目标 Environment 选择；完整配置只在
+  打开编辑弹窗时通过 `no-store` 端点读取，递增 generation fence 防止关闭、重开时的
+  迟到响应覆盖当前弹窗。更新或发现请求进行中时所有 JSON mutation 控件保持禁用。
+  Remote 与 Local discover 都按 202 响应处理；Local 返回的 operation 会显示状态，
+  仅在 `PENDING/RUNNING` 时轮询并在终态刷新 Server 列表。
 - `builtin.ai` 的 `task` renderer 只展示宿主投影的 message；approval 和
   状态机操作仍由宿主 controller 负责。
 

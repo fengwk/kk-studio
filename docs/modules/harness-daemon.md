@@ -50,6 +50,7 @@ Daemon 的生产依赖止于 `harness-common` 与 `harness-environment`；`harne
 | `fun.fengwk.kkstudio.harness.daemon.coding` | 具体编码能力实现（文件读写与编辑、命令执行、原生文本检索与 LSP 桥接）。`EnvironmentPaths` 只解析本次调用 arguments 中的显式绝对 `workdir` 与目标路径，绝不把它当作文件系统沙箱或会话默认目录；大文本与二进制结果写入本地内容寻址存储（`ResourceStore`）；调用之间不继承目录。 |
 | `fun.fengwk.kkstudio.harness.daemon.journal` | 进程内调用执行事实与去重日志。跟踪 Invocation 的运行态与终态（RUNNING、COMPLETED、FAILED、CANCELLED），通过原子操作确保单次执行并记录终态结果；在网络重连时支持针对重复 `INVOKE` 幂等重放 STARTED 与终态消息，确保单次终态（terminal-once）契约。执行日志在整个进程生命周期中持续生效，网络断开时维持执行状态。 |
 | `fun.fengwk.kkstudio.harness.daemon.skill` | Platform-owned PATH/GIT Skill 来源的发现、持久化与精确加载。完整候选快照经校验后原子发布到 `--data-dir`；READY 按来源通告版本、revision、Skill 描述与诊断；`skill.load` 按 `(sourceId, name, revision)` 返回正文与基目录。该包不接受会话 `workdir`。 |
+| `fun.fengwk.kkstudio.harness.daemon.mcp` | Local stdio MCP 执行基础与子进程生命周期管理。严格解析 Platform 下发的本地 MCP 配置（`type=local`、`environmentId`、`command`、`cwd` 必填，整值 `${VAR}` 由 Daemon 运行时通过 `System.getenv` 解析，`cwd` 仅强制目标操作系统词法绝对路径，受信任执行且无路径白名单）；`DaemonLocalMcpManager` 按 `(serverId, configVersion)` 懒共享子进程，新版本自动 fencing 旧版本并在活动调用归零后关闭（drain），同版本配置漂移时 fail-closed；对外注册管理专用 `mcp.local.discover`（返回工具 envelope）与模型运行时 `mcp.local.call` 能力，使用单一绝对 deadline 覆盖 lazy 初始化与执行，支持单调用精确取消且不打断并发调用。 |
 | `fun.fengwk.kkstudio.harness.daemon.transport` | 底层网络传输抽象与基于 JDK `HttpClient` WebSocket 的生产实现。提供连接管理、报文收发及传输监听机制；强制执行文本帧检查与单消息累积上限（默认 16 MiB），遇到二进制帧或报文超限时按照 RFC 6455 发送 close code 1008 并关闭连接。 |
 
 ## 核心模型 / API
@@ -91,18 +92,19 @@ fs.search, fs.find,
 lsp.goto-definition, lsp.workspace-symbols, lsp.java-decompile
 ```
 
-[`SkillLoadCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillLoadCapability.java) 注册 `skill.load`；三个 `DaemonSkillSourceCapability` 实例注册 `skill.source.refresh/install/update`。Daemon 共注册 catalog 的 10 项模型可见能力和 3 项管理专用能力，统一使用 INVOKE/CANCEL/结果通道并在装配后冻结 descriptor 集合。管理能力不会注册为模型 Tool；各能力的版本与 schema 都从 catalog 取用。
+[`SkillLoadCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillLoadCapability.java) 注册 `skill.load`；[`McpLocalCallCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpLocalCallCapability.java) 注册 `mcp.local.call`；三个 `DaemonSkillSourceCapability` 实例注册 `skill.source.refresh/install/update`；[`McpLocalDiscoverCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpLocalDiscoverCapability.java) 注册 `mcp.local.discover`。Daemon 共注册 catalog 的 11 项模型可见能力和 4 项管理专用能力，统一使用 INVOKE/CANCEL/结果通道并在装配后冻结 descriptor 集合。管理能力不会注册为模型 Tool；各能力的版本与 schema 都从 catalog 取用。
 
-### 双 executor lifecycle
+### 双 executor lifecycle 与 MCP 进程管理
 
-`DaemonRuntime` 统一管理两个专用执行资源：
+`DaemonRuntime` 统一管理执行与子进程资源：
 
 | 资源 | 所有者 | 用途 |
 | --- | --- | --- |
 | `ScheduledThreadPoolExecutor(1)` | `DaemonRuntime` | 心跳定时、重连调度、能力调用超时控制 |
-| `Executors.newThreadPerTaskExecutor(Thread.ofVirtual())` | `DaemonRuntime` | 编码能力的阻塞任务执行 |
+| `Executors.newThreadPerTaskExecutor(Thread.ofVirtual())` | `DaemonRuntime` | 编码能力与 Local MCP 调用的阻塞任务执行 |
+| `DaemonLocalMcpManager` | `DaemonRuntime` | 本地 MCP stdio 子进程生命周期、版本隔离与优雅排空 |
 
-初始化顺序为调度器 → 虚拟线程执行器 → 传输层与能力注册表 → 运行时实例；装配过程中任一步失败都会尝试释放已创建的资源。调用 `start()` 后，运行时启动心跳定时任务并立即尝试连接，重复调用保持幂等。关闭或致命失败时，运行时先停止传输接入，再取消运行中的 Invocation 并将 CANCELLED 终态写入 journal，最后对两个线程池执行 `shutdownNow`；每个线程池最多等待 5 秒，各清理步骤互不阻断。
+初始化顺序为调度器 → 虚拟线程执行器 → MCP 管理器与能力注册表 → 运行时实例；装配过程中任一步失败都会尝试释放已创建的资源。调用 `start()` 后，运行时启动心跳定时任务并立即尝试连接，重复调用保持幂等。关闭或致命失败时，运行时先停止传输接入，再取消运行中的 Invocation 并将 CANCELLED 终态写入 journal，关闭 `DaemonLocalMcpManager` 强制终止所有 MCP 子进程树，最后对两个线程池执行 `shutdownNow`；每个线程池最多等待 5 秒，各清理步骤互不阻断。
 
 ### WebSocket protocol
 
