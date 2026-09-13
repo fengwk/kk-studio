@@ -1,4 +1,4 @@
-import { assert, cid, envelopeData } from '../lib/http.mjs'
+import { assert, cid, envelopeData, expectHttpError } from '../lib/http.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 registerCase({
@@ -140,11 +140,14 @@ registerCase({
       assert(delRes.status === 204, `expected 204 for source delete, got ${delRes.status}`)
       sourceId = null
 
-      const postDelRes = await ctx.call(
-        'GET',
-        `/api/harness/environments/${encodeURIComponent(envId)}/skill-sources/${encodeURIComponent(srcData.sourceId)}`,
+      await expectHttpError(
+        () =>
+          ctx.call(
+            'GET',
+            `/api/harness/environments/${encodeURIComponent(envId)}/skill-sources/${encodeURIComponent(srcData.sourceId)}`,
+          ),
+        { status: 404 },
       )
-      assert(postDelRes.status === 404, `expected 404 after source delete, got ${postDelRes.status}`)
     } finally {
       if (envId && sourceId) {
         try {
