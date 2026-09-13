@@ -56,12 +56,16 @@ Harness terminal commit
   `--> compaction: retain Cloud path placeholder
 ```
 
-`ToolResultFinalizer` 是唯一拥有模型展示策略的组件。Daemon 的 producer-side spool 只负责有界内存和跨 wire 搬运，不生成另一套大 preview 或终态文案。
+`ToolResultFinalizer` 是唯一拥有模型展示策略的组件。Daemon 的 producer-side spool
+只负责有界内存和跨 wire 搬运，不生成另一套大 preview 或终态文案。
 
 为了让已在 Daemon spool 的完整文本与 Platform 本地文本使用相同策略，通用结果协议增加可选
 `TextArtifactMetadata(totalBytes, totalLines)`：
 
-- `ResourceResultContent` 携带完整 Resource、小 prefix 和该 metadata；
+- Daemon wire 携带完整 Base64 bytes、size、SHA-256 和该 metadata；Backend
+  校验后解码为 transient `BinaryResultContent`，不保留 Daemon 本地 URI；
+- `ToolResultFinalizer` 将 bytes 写入 Platform `ResourceStore` 后才产生
+  `ResourceResultContent`，其 preview 必须从已校验 bytes 重新计算；
 - durable `ResourceMessageContent` 额外携带 `artifactPath`；
 - 普通 image/audio/binary Resource 没有该 metadata；
 - finalizer 校验 producer 声明与实际可知的 size，history materializer 在摄入时复核 bytes、UTF-8 和 line count。
@@ -185,14 +189,16 @@ write chunk
   -> complete: inline bytes or immutable Daemon ResourceRef + exact counts/raw prefix
 ```
 
-- temp 只用于 transport，不是 durable 或模型可见路径。
+- temp 只用于 transport，不是 durable 或模型可见路径；Daemon 本地 URI
+  到 Backend 解码边界即终止，不能作为 Backend 取数地址。
 - publish 继续使用 content-addressed、NOFOLLOW、size/sha 验证的本地 ResourceStore。
 - `bash` 不再使用无界 `ByteArrayOutputStream`。
 - read/find/grep 自己生成低于 inline limit 的有界 page/result，正常情况下不触发 spool。
 - Daemon terminal result 不返回“50 KiB preview + full resource”两个 content。
-- Daemon 只计算 raw prefix、bytes 和 lines；外部化声明、Cloud path 和 prompt
+- Daemon 只计算 bytes 和 lines；preview、外部化声明、Cloud path 和 prompt
   formatter 都由 Platform 决定。
-- Daemon wire 可以继续把有界 Resource bytes 编码传给 Backend；超过协商 hard limit 明确失败，不引入第二套上传协议。
+- Daemon wire 直接把有界 Resource bytes 编码传给 Backend；Backend 必须保留并消费这些
+  bytes，不能回读跨节点 `file://` URI。超过协商 hard limit 明确失败，不引入第二套上传协议。
 
 ### 7.2 Host/MCP
 
@@ -240,7 +246,8 @@ Partial 是瞬态进度，不是 terminal full output：
 
 ### 11.1 Durable history
 
-- Tool terminal commit 前摄入全局 Blob。
+- Tool terminal commit 前只通过 Platform `ResourceStore` 读取其拥有的 Resource，
+  完成 size/SHA-256 复核后摄入全局 Blob；不得自行解引用 data/file/http/https/s3 URI。
 - Durable `ResourceMessageContent` 只保存 `blobId`、name、Artifact path、小 preview 和
   必要的 bytes/lines metadata。
 - URI、S3 key 和预签 URL 不进入 Entry payload。
@@ -284,9 +291,9 @@ Compaction 对 Resource 至少保留：
 
 | 组件 | 职责 |
 | --- | --- |
-| Daemon `OutputSpool` | 有界 capture、private temp、ResourceRef；不决定模型 preview。 |
-| Platform `ToolResultFinalizer` | 唯一 inline/externalize policy、精确 projection、all-or-nothing plan。 |
-| `GlobalStorageToolResultHistoryMaterializer` | Resource bytes → storage_blob + session ref + durable Resource content。 |
+| Daemon `OutputSpool` | 有界 capture、private temp、精确 bytes/lines；不决定模型 preview。 |
+| Platform `ToolResultFinalizer` | 唯一 inline/externalize policy、精确 projection、受管 Resource 与 all-or-nothing plan。 |
+| `GlobalStorageToolResultHistoryMaterializer` | 受管 Resource bytes → storage_blob + session ref + durable Resource content。 |
 | `ToolArtifactPath` | `threadId + invocationId + media kind` 的 canonical CFS path formatter/parser。 |
 | `ProviderResourceMaterializer` | Resource → text path或 attempt-only media。 |
 | Frontend Resource renderer | 小 preview、大小、打开/下载 Artifact。 |

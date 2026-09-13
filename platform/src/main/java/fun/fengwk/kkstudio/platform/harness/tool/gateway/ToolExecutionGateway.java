@@ -112,7 +112,7 @@ public final class ToolExecutionGateway implements ToolGateway {
   private final EnvironmentCapabilityTransport capabilityTransport;
   private final PermissionEvaluator permissionEvaluator;
   private final ToolSettingsProvider toolSettingsProvider;
-  private final ToolResultExternalizer externalizer;
+  private final ToolResultFinalizer finalizer;
   private final ExecutorService executor;
   private final Supplier<Duration> retryDelay;
   private final Clock clock;
@@ -139,8 +139,8 @@ public final class ToolExecutionGateway implements ToolGateway {
     this.permissionEvaluator = Objects.requireNonNull(permissionEvaluator, "permissionEvaluator");
     this.toolSettingsProvider =
         Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
-    this.externalizer =
-        new ToolResultExternalizer(
+    this.finalizer =
+        new ToolResultFinalizer(
             Objects.requireNonNull(resourceStore, "resourceStore"), resourceMaxBytes);
     this.executor = Objects.requireNonNull(executor, "executor");
     this.retryDelay = Objects.requireNonNull(retryDelay, "retryDelay");
@@ -310,7 +310,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       GatedToolExecutionListener bridge =
           new GatedToolExecutionListener(
               listener,
-              externalizer,
+              finalizer,
               currentDescriptor.name(),
               toolRequest.call().id(),
               lease,
@@ -608,7 +608,7 @@ public final class ToolExecutionGateway implements ToolGateway {
   /** 在激活前缓冲回调，激活后串行派发，并将一次终态作为租约释放边界。 */
   private static final class GatedToolExecutionListener implements ToolExecutionListener {
     private final ToolGateway.Listener listener;
-    private final ToolResultExternalizer externalizer;
+    private final ToolResultFinalizer finalizer;
     private final String toolName;
     private final String expectedCallId;
     private final ConcurrencyAdmission.Lease lease;
@@ -626,7 +626,7 @@ public final class ToolExecutionGateway implements ToolGateway {
 
     GatedToolExecutionListener(
         ToolGateway.Listener listener,
-        ToolResultExternalizer externalizer,
+        ToolResultFinalizer finalizer,
         String toolName,
         String expectedCallId,
         ConcurrencyAdmission.Lease lease,
@@ -634,7 +634,7 @@ public final class ToolExecutionGateway implements ToolGateway {
         ToolContribution contribution,
         ToolBinding binding) {
       this.listener = Objects.requireNonNull(listener, "listener");
-      this.externalizer = Objects.requireNonNull(externalizer, "externalizer");
+      this.finalizer = Objects.requireNonNull(finalizer, "finalizer");
       this.toolName = Objects.requireNonNull(toolName, "toolName");
       this.expectedCallId = Objects.requireNonNull(expectedCallId, "expectedCallId");
       this.lease = Objects.requireNonNull(lease, "lease");
@@ -817,13 +817,13 @@ public final class ToolExecutionGateway implements ToolGateway {
       if (outcome == null || outcome.result() == null) {
         return fail(
             new ToolInvocationError(
-                ToolResultExternalizer.INVALID_RESULT_KIND, "terminal result must not be null"));
+                ToolResultFinalizer.INVALID_RESULT_KIND, "terminal result must not be null"));
       }
       ToolResult result = outcome.result();
       if (!result.toolCallId().equals(expectedCallId)) {
         return fail(
             new ToolInvocationError(
-                ToolResultExternalizer.INVALID_RESULT_KIND,
+                ToolResultFinalizer.INVALID_RESULT_KIND,
                 "terminal result toolCallId does not match the request call"));
       }
       ToolEffectBatch effects;
@@ -835,19 +835,19 @@ public final class ToolExecutionGateway implements ToolGateway {
                 CONTRIBUTOR_CONTRACT_VIOLATION_KIND,
                 failureMessage(invalid, "Tool outcome returned invalid custom entries.")));
       }
-      ToolResultExternalizer.Outcome externalized;
+      ToolResultFinalizer.Outcome finalized;
       try {
-        externalized = externalizer.externalize(toolName, result);
+        finalized = finalizer.finalizeResult(toolName, result);
       } catch (RuntimeException failure) {
-        return unknown(failure, "tool result externalization failed; outcome cannot be confirmed");
+        return unknown(failure, "tool result finalization failed; outcome cannot be confirmed");
       }
-      return switch (externalized) {
-        case ToolResultExternalizer.Outcome.Success success -> {
+      return switch (finalized) {
+        case ToolResultFinalizer.Outcome.Success success -> {
           deliverTerminal(() -> listener.onSucceeded(new ToolSuccess(success.result(), effects)));
           yield true;
         }
-        case ToolResultExternalizer.Outcome.Invalid invalid -> fail(invalid.error());
-        case ToolResultExternalizer.Outcome.StoreFailed storeFailed -> {
+        case ToolResultFinalizer.Outcome.Failed failed -> fail(failed.error());
+        case ToolResultFinalizer.Outcome.StoreFailed storeFailed -> {
           deliverTerminal(() -> listener.onUnknown(storeFailed.error()));
           yield true;
         }

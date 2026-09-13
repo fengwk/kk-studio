@@ -1148,13 +1148,14 @@ class DaemonRuntimeTest {
     String base64 = content.get("contentBase64").asText();
     assertEquals(Base64.getEncoder().encodeToString(data), base64);
 
-    // 接收端解码为不可变 Resource 引用。
+    // 接收端直接保留已校验 bytes，不传播仅在 Daemon 本地可用的 URI。
     DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
     EnvironmentCapabilityResult decoded = resultCodec.decodeResult(payload);
     assertEquals(1, decoded.contents().size());
-    ResourceResultContent resource = (ResourceResultContent) decoded.contents().get(0);
-    assertEquals(stored.uri(), resource.resource().uri());
-    assertEquals(stored.mediaType(), resource.resource().mediaType());
+    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
+    assertEquals(stored.mediaType(), binary.mediaType());
+    assertArrayEquals(data, binary.content());
+    assertNull(binary.textMetadata());
   }
 
   /** BinaryResultContent 必须先经 resource store 落盘再编码为 wire resource，wire ref 可被 store 读回。 */
@@ -1398,7 +1399,7 @@ class DaemonRuntimeTest {
     List<DaemonEnvelope> resultTerminal = transport.takeMessages(1);
     assertMessageTypes(resultTerminal, DaemonMessageType.FAILED);
     assertEquals(
-        "{\"message\":\"cannot complete capability result: capability execution failed\"}",
+        "{\"message\":\"cannot complete capability result: cannot read resource bytes\"}",
         resultTerminal.get(0).payloadJson());
     assertEquals(
         DaemonInvocationState.FAILED, journal.find("adversarial-result").orElseThrow().state());

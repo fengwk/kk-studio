@@ -342,7 +342,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
             "cannot read H3 reference media " + item.reference().resourceId(), error);
       }
       UUID blobId = ingestService.ingest(sessionId, bytes, item.reference().mediaType());
-      return new ResourceMessageContent(blobId, item.reference().name(), null);
+      return ResourceMessageContent.media(blobId, item.reference().name());
     } catch (IOException error) {
       throw new IllegalArgumentException(
           "cannot close H3 reference media " + item.reference().resourceId(), error);

@@ -84,6 +84,7 @@ class ResultContentTest {
     BinaryResultContent binary = new BinaryResultContent("application/octet-stream", original);
     assertEquals(3, binary.size());
     assertArrayEquals(new byte[] {1, 2, 3}, binary.content());
+    assertNull(binary.textMetadata());
 
     // 防御性复制：修改外部原始数组不影响内部。
     original[0] = 99;
@@ -102,6 +103,16 @@ class ResultContentTest {
     assertThrows(
         IllegalArgumentException.class, () -> new BinaryResultContent(null, new byte[] {1}));
     assertThrows(NullPointerException.class, () -> new BinaryResultContent("text/plain", null));
+
+    TextArtifactMetadata metadata = new TextArtifactMetadata(3, 1);
+    BinaryResultContent textBinary =
+        new BinaryResultContent("text/plain", new byte[] {1, 2, 3}, metadata);
+    assertSame(metadata, textBinary.textMetadata());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new BinaryResultContent(
+                "text/plain", new byte[] {1, 2, 3}, new TextArtifactMetadata(2, 1)));
   }
 
   /** 验证 TextArtifactMetadata 校验非负字节数与行数。 */

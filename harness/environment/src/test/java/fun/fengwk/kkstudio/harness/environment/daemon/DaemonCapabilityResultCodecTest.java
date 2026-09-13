@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.environment.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -102,13 +103,13 @@ class DaemonCapabilityResultCodecTest {
     EnvironmentCapabilityResult decoded =
         codec.decodeCompletedForInvocation(payload, "call-2", 1024);
     assertEquals(1, decoded.contents().size());
-    ResourceResultContent resource = (ResourceResultContent) decoded.contents().get(0);
-    assertEquals(local, resource.resource());
-    assertNull(resource.preview());
-    assertNull(resource.textMetadata());
+    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
+    assertEquals(local.mediaType(), binary.mediaType());
+    assertArrayEquals(data, binary.content());
+    assertNull(binary.textMetadata());
   }
 
-  /** resource 携带 preview 与 TextArtifactMetadata 时必须严格在 wire 上编码并解码还原。 */
+  /** resource 的完整 bytes 与 TextArtifactMetadata 必须跨 wire 保留；Daemon 本地 URI 和 preview 不进入接收结果。 */
   @Test
   void resourcePayloadRoundTripsWithPreviewAndTextArtifactMetadata() {
     byte[] data = "hello world\nsecond line\n".getBytes(StandardCharsets.UTF_8);
@@ -127,9 +128,9 @@ class DaemonCapabilityResultCodecTest {
     EnvironmentCapabilityResult decoded =
         codec.decodeCompletedForInvocation(payload, "call-rt", 1024);
     assertEquals(1, decoded.contents().size());
-    ResourceResultContent decodedContent = (ResourceResultContent) decoded.contents().get(0);
-    assertEquals(local, decodedContent.resource());
-    assertEquals("hello world\n", decodedContent.preview());
+    BinaryResultContent decodedContent = (BinaryResultContent) decoded.contents().get(0);
+    assertEquals(local.mediaType(), decodedContent.mediaType());
+    assertArrayEquals(data, decodedContent.content());
     assertEquals(metadata, decodedContent.textMetadata());
   }
 
@@ -182,6 +183,18 @@ class DaemonCapabilityResultCodecTest {
             + "\",\"textMetadata\":{\"totalBytes\":1,\"totalLines\":1,\"extra\":true}}]}}";
 
     assertThrows(DaemonProtocolException.class, () -> codec.decodeResult(unknownField));
+
+    String mismatchedBytes =
+        "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},\"contents\":["
+            + "{\"type\":\"resource\",\"uri\":\""
+            + EXPORT_URI
+            + "\",\"mediaType\":\"text/plain\",\"name\":null,\"size\":1,\"sha256\":\""
+            + sha256Hex(data)
+            + "\",\"contentBase64\":\""
+            + validBase64
+            + "\",\"textMetadata\":{\"totalBytes\":2,\"totalLines\":1}}]}}";
+
+    assertThrows(DaemonProtocolException.class, () -> codec.decodeResult(mismatchedBytes));
   }
 
   /** 编码 ResourceResultContent 时 store 返回字节必须通过 size/sha 复核；读取失败确定性抛协议异常。 */
@@ -228,8 +241,10 @@ class DaemonCapabilityResultCodecTest {
                 codec.encodeCompleted(
                     new EnvironmentCapabilityResult(
                         "c", List.of(new ResourceResultContent(ref)), false, "{}"),
-                    new StubStore(null, new IOException("resource gone"))));
+                    new StubStore(
+                        null, new IOException("resource gone at file:///private/secret"))));
     assertTrue(readFailure.getMessage().contains("cannot read resource bytes"));
+    assertNoThrowableMessageContains(readFailure, "file:///private/secret");
   }
 
   /** 编码 BinaryResultContent 必须先经 store 落盘，再编码返回的 resource 引用。 */
@@ -270,8 +285,9 @@ class DaemonCapabilityResultCodecTest {
     assertTrue(payload.contains("\"type\":\"resource\""));
     assertTrue(payload.contains("\"uri\":\"" + EXPORT_URI + "\""));
     EnvironmentCapabilityResult decoded = codec.decodeResult(payload);
-    ResourceResultContent resource = (ResourceResultContent) decoded.contents().get(0);
-    assertEquals(stored, resource.resource());
+    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
+    assertEquals(stored.mediaType(), binary.mediaType());
+    assertArrayEquals(data, binary.content());
 
     DaemonProtocolException storeFailure =
         assertThrows(
@@ -281,7 +297,7 @@ class DaemonCapabilityResultCodecTest {
     assertTrue(storeFailure.getMessage().contains("cannot store binary result content"));
   }
 
-  /** http(s) resource 的 size/sha256 同样是必填 wire 字段；解码仍返回内联字节。 */
+  /** http(s) resource 的 size/sha256 同样是必填 wire 字段；解码只保留已校验字节，不传播外部 URI。 */
   @Test
   void decodesHttpResourceWithRequiredSizeAndSha() {
     byte[] data = "x".getBytes(StandardCharsets.UTF_8);
@@ -302,12 +318,10 @@ class DaemonCapabilityResultCodecTest {
                 + segment
                 + "]}}");
 
-    ResourceResultContent resource = (ResourceResultContent) decoded.contents().get(0);
-    assertEquals("https://example.com/a", resource.resource().uri());
-    assertEquals("text/plain", resource.resource().mediaType());
-    assertNull(resource.resource().name());
-    assertEquals((long) data.length, resource.resource().size());
-    assertEquals(sha256Hex(data), resource.resource().sha256());
+    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
+    assertEquals("text/plain", binary.mediaType());
+    assertArrayEquals(data, binary.content());
+    assertNull(binary.textMetadata());
 
     // size/sha256 缺失或为 null 必须拒绝，不允许以 null 声明绕过大小预检。
     assertThrows(
@@ -1030,6 +1044,15 @@ class DaemonCapabilityResultCodecTest {
       return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
     } catch (NoSuchAlgorithmException error) {
       throw new IllegalStateException(error);
+    }
+  }
+
+  private static void assertNoThrowableMessageContains(Throwable error, String sensitive) {
+    Throwable current = error;
+    while (current != null) {
+      String message = current.getMessage();
+      assertFalse(message != null && message.contains(sensitive));
+      current = current.getCause();
     }
   }
 }

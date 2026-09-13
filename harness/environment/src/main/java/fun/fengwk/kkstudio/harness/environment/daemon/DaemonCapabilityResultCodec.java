@@ -53,10 +53,10 @@ import java.util.Set;
  * #MAX_PAYLOAD_UTF8_BYTES}（16 MiB），由 bounded 输出辅助在物化前中止。
  *
  * <p>解码侧：{@link ResourceResultContent} 通过 {@link DaemonResourceStore#read} 读取字节并复核 size/sha； {@link
- * BinaryResultContent} 先经 {@link DaemonResourceStore#store} 落盘再编码返回的 resource。解码将 resource 还原为内联
- * {@link BinaryResultContent}，不在 codec 边界持久化（入站 daemon URI 永远不是 durable 目的地）。解码先施加原始 payload 的
- * UTF-8 上限（{@link #MAX_PAYLOAD_UTF8_BYTES}），再在 Base64 分配前按“当前 size 是否超过剩余聚合预算”拒绝超限条目， 并配置 Jackson
- * {@link StreamReadConstraints} 限制字符串/嵌套/数字长度以防解析放大。
+ * BinaryResultContent} 先经 {@link DaemonResourceStore#store} 落盘再编码返回的 resource。解码将 resource bytes
+ * 还原为内联 {@link BinaryResultContent} 并保留可复核的文本 metadata，不传播 preview，也不在 codec 边界持久化（入站 daemon URI
+ * 永远不是 durable 目的地）。解码先施加原始 payload 的 UTF-8 上限（{@link #MAX_PAYLOAD_UTF8_BYTES}），再在 Base64 分配前按“当前
+ * size 是否超过剩余聚合预算”拒绝超限条目， 并配置 Jackson {@link StreamReadConstraints} 限制字符串/嵌套/数字长度以防解析放大。
  */
 public final class DaemonCapabilityResultCodec {
 
@@ -144,7 +144,7 @@ public final class DaemonCapabilityResultCodec {
         ResourceRef ref = resource.resource();
         if (ref.size() == null || ref.sha256() == null) {
           throw new DaemonProtocolException(
-              "resource ref must declare size and sha256 for the daemon wire: " + ref.uri());
+              "resource ref must declare size and sha256 for the daemon wire");
         }
         size = ref.size();
       } else if (content instanceof BinaryResultContent binary) {
@@ -217,7 +217,7 @@ public final class DaemonCapabilityResultCodec {
     } catch (DaemonProtocolException error) {
       throw error;
     } catch (IllegalArgumentException error) {
-      throw new DaemonProtocolException("payload is not valid Unicode", error);
+      throw new DaemonProtocolException("payload is not valid Unicode");
     }
     ObjectNode root = readRootObject(payloadJson, "result");
     Set<String> allowedTop = Set.of("result");
@@ -325,9 +325,11 @@ public final class DaemonCapabilityResultCodec {
             new ResourceRef(
                 stored.uri(), stored.mediaType(), stored.name(), stored.size(), stored.sha256());
       } catch (IOException error) {
-        throw new DaemonProtocolException("cannot store binary result content", error);
+        throw new DaemonProtocolException("cannot store binary result content");
+      } catch (RuntimeException error) {
+        throw new DaemonProtocolException("cannot store binary result content");
       }
-      writeResource(wireContent, ref, binary.content(), null, null);
+      writeResource(wireContent, ref, binary.content(), null, binary.textMetadata());
     } else {
       throw new DaemonProtocolException("unsupported result content: " + content.getClass());
     }
@@ -354,7 +356,7 @@ public final class DaemonCapabilityResultCodec {
           // JsonResultContent 构造期的 1 MiB 上限校验：超限/非法 Unicode 按协议错误拒绝。
           return new DecodedContent(new JsonResultContent(writeJson(value)), 0);
         } catch (IllegalArgumentException error) {
-          throw new DaemonProtocolException(context + " 'json' is invalid or too large", error);
+          throw new DaemonProtocolException(context + " 'json' is invalid or too large");
         }
       }
       case "resource" -> {
@@ -404,7 +406,7 @@ public final class DaemonCapabilityResultCodec {
         try {
           ref = new ResourceRef(uri, mediaType, name, size, sha256);
         } catch (IllegalArgumentException error) {
-          throw new DaemonProtocolException(context + " resource fields are invalid", error);
+          throw new DaemonProtocolException(context + " resource fields are invalid");
         }
         // 聚合预检先于 Base64 校验/分配：即使 contentBase64 非法，预算耗尽也必须报聚合错误。
         if (size > remainingResourceBytes) {
@@ -424,8 +426,7 @@ public final class DaemonCapabilityResultCodec {
         try {
           bytes = Base64.getDecoder().decode(contentBase64);
         } catch (IllegalArgumentException error) {
-          throw new DaemonProtocolException(
-              context + " 'contentBase64' is not valid Base64", error);
+          throw new DaemonProtocolException(context + " 'contentBase64' is not valid Base64");
         }
         if (!Base64.getEncoder().encodeToString(bytes).equals(contentBase64)) {
           throw new DaemonProtocolException(context + " 'contentBase64' must use canonical Base64");
@@ -442,8 +443,13 @@ public final class DaemonCapabilityResultCodec {
           throw new DaemonProtocolException(
               context + " 'sha256' does not match decoded 'contentBase64' bytes");
         }
-        return new DecodedContent(
-            new ResourceResultContent(ref, preview, textMetadata), bytes.length);
+        try {
+          return new DecodedContent(
+              new BinaryResultContent(mediaType, bytes, textMetadata), bytes.length);
+        } catch (IllegalArgumentException invalid) {
+          throw new DaemonProtocolException(
+              context + " text metadata does not match decoded resource bytes");
+        }
       }
       default -> throw new DaemonProtocolException(context + " unknown content type: " + type);
     }
@@ -454,23 +460,18 @@ public final class DaemonCapabilityResultCodec {
     byte[] bytes;
     try {
       bytes = store.read(dRef);
-    } catch (IOException error) {
-      throw new DaemonProtocolException("cannot read resource bytes for " + ref.uri(), error);
+    } catch (IOException | RuntimeException error) {
+      throw new DaemonProtocolException("cannot read resource bytes");
     }
     if (bytes == null) {
-      throw new DaemonProtocolException("resource store returned null bytes for " + ref.uri());
+      throw new DaemonProtocolException("resource store returned null bytes");
     }
     if (ref.size() != null && bytes.length != ref.size()) {
       throw new DaemonProtocolException(
-          "resource store size mismatch for "
-              + ref.uri()
-              + ": declared="
-              + ref.size()
-              + " actual="
-              + bytes.length);
+          "resource store size mismatch: declared=" + ref.size() + " actual=" + bytes.length);
     }
     if (ref.sha256() != null && !ref.sha256().equals(sha256Hex(bytes))) {
-      throw new DaemonProtocolException("resource store sha256 mismatch for " + ref.uri());
+      throw new DaemonProtocolException("resource store sha256 mismatch");
     }
     return bytes;
   }
@@ -483,19 +484,14 @@ public final class DaemonCapabilityResultCodec {
       TextArtifactMetadata textMetadata) {
     if (ref.size() == null || ref.sha256() == null) {
       throw new DaemonProtocolException(
-          "resource ref must declare size and sha256 for the daemon wire: " + ref.uri());
+          "resource ref must declare size and sha256 for the daemon wire");
     }
     if (bytes.length != ref.size()) {
       throw new DaemonProtocolException(
-          "resource size mismatch for "
-              + ref.uri()
-              + ": declared="
-              + ref.size()
-              + " actual="
-              + bytes.length);
+          "resource size mismatch: declared=" + ref.size() + " actual=" + bytes.length);
     }
     if (!ref.sha256().equals(sha256Hex(bytes))) {
-      throw new DaemonProtocolException("resource sha256 mismatch for " + ref.uri());
+      throw new DaemonProtocolException("resource sha256 mismatch");
     }
     wireContent.put("type", "resource");
     wireContent.put("uri", ref.uri());
@@ -526,7 +522,7 @@ public final class DaemonCapabilityResultCodec {
       }
       return value;
     } catch (JsonProcessingException error) {
-      throw new DaemonProtocolException("result 'details' must be valid JSON", error);
+      throw new DaemonProtocolException("result 'details' must be valid JSON");
     }
   }
 
@@ -538,7 +534,7 @@ public final class DaemonCapabilityResultCodec {
       }
       return value;
     } catch (JsonProcessingException error) {
-      throw new DaemonProtocolException("json must be valid", error);
+      throw new DaemonProtocolException("json must be valid");
     }
   }
 
@@ -550,7 +546,7 @@ public final class DaemonCapabilityResultCodec {
       }
       return (ObjectNode) value;
     } catch (JsonProcessingException error) {
-      throw new DaemonProtocolException(name + " must be valid JSON", error);
+      throw new DaemonProtocolException(name + " must be valid JSON");
     }
   }
 
@@ -558,7 +554,7 @@ public final class DaemonCapabilityResultCodec {
     try {
       return OBJECT_MAPPER.writeValueAsString(node);
     } catch (JsonProcessingException error) {
-      throw new DaemonProtocolException("cannot encode daemon payload", error);
+      throw new DaemonProtocolException("cannot encode daemon payload");
     }
   }
 

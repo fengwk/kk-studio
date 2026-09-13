@@ -476,6 +476,7 @@ final class ToolGatewayTestSupport {
   /** 内存 ResourceStore：记录 put 参数，可按需抛确定性 / IO 失败；reference 与 put 返回同一规范引用。 */
   static final class FakeResourceStore implements ResourceStore {
     final List<PutRecord> puts = new CopyOnWriteArrayList<>();
+    final List<PutRecord> resources = new CopyOnWriteArrayList<>();
     volatile RuntimeException referenceFailure;
     volatile RuntimeException putFailure;
     volatile boolean mismatchReturnedRef;
@@ -490,7 +491,9 @@ final class ToolGatewayTestSupport {
       }
       byte[] payload = content.clone();
       String sha = sha256(payload);
-      puts.add(new PutRecord(mediaType, name, payload));
+      PutRecord stored = new PutRecord(mediaType, name, payload);
+      puts.add(stored);
+      resources.add(stored);
       ResourceRef planned = reference(mediaType, name, payload.length, sha);
       if (mismatchReturnedRef) {
         return new ResourceRef(
@@ -515,13 +518,19 @@ final class ToolGatewayTestSupport {
     @Override
     public byte[] read(ResourceRef resource) {
       byte[] payload = null;
-      for (PutRecord put : puts) {
+      for (PutRecord put : resources) {
         if (put.content().length == resource.size()
             && sha256(put.content()).equals(resource.sha256())) {
           payload = put.content();
         }
       }
       return payload == null ? null : payload.clone();
+    }
+
+    ResourceRef seed(String mediaType, String name, byte[] content) {
+      byte[] payload = content.clone();
+      resources.add(new PutRecord(mediaType, name, payload));
+      return reference(mediaType, name, payload.length, sha256(payload));
     }
   }
 

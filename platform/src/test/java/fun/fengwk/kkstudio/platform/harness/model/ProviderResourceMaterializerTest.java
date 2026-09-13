@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -315,6 +317,37 @@ class ProviderResourceMaterializerTest {
     assertSame(original, materialized);
     assertSame(first, materialized.contents().get(0));
     assertSame(second, materialized.contents().get(1));
+  }
+
+  @Test
+  void textArtifactAlwaysProducesModelNoticeWithoutStorageAccess() {
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    S3StorageService storageService = mock(S3StorageService.class);
+    ProviderResourceMaterializer materializer =
+        ProviderResourceMaterializer.withStorage(blobManager, storageService);
+
+    String artifactPath =
+        "/.artifacts/tool-results/00000000-0000-0000-0000-000000000010/00000000-0000-0000-0000-000000000020.txt";
+    ProviderResourceBlock textArtifact =
+        new ProviderResourceBlock(
+            BLOB_ID, "demo.txt", artifactPath, 12345L, 100L, "first 20 lines");
+
+    List<ProviderMessage> result =
+        materializer.materialize(
+            List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(textArtifact))),
+            Set.of(ModelInputModality.IMAGE, ModelInputModality.TEXT));
+
+    ProviderTextBlock text =
+        assertInstanceOf(ProviderTextBlock.class, result.get(0).contents().get(0));
+    String notice = text.text();
+    assertTrue(notice.contains("Full output: " + artifactPath), notice);
+    assertTrue(notice.contains("Size: 12345 bytes, 100 lines"), notice);
+    assertTrue(notice.contains("--- preview ---"), notice);
+    assertTrue(notice.contains("first 20 lines"), notice);
+
+    // 绝不查询 blob 或调用存储服务
+    verify(blobManager, never()).getBlob(BLOB_ID);
+    verify(storageService, never()).download(any(), anyLong());
   }
 
   private static StorageBlob activeBlob(String mediaType, long sizeBytes) {

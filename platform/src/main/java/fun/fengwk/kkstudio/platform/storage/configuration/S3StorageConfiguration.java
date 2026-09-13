@@ -15,6 +15,8 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
+import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
+import fun.fengwk.kkstudio.platform.cloudfs.service.CloudArtifactService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.harness.tool.gateway.GlobalStorageToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -274,16 +276,17 @@ public class S3StorageConfiguration {
   @ConditionalOnMissingBean(GlobalStorageToolResultHistoryMaterializer.class)
   public GlobalStorageToolResultHistoryMaterializer globalStorageToolResultHistoryMaterializer(
       ObjectProvider<StorageBlobIngestService> ingestService,
-      ObjectProvider<S3StorageService> s3StorageService,
-      S3StorageProperties s3Properties,
+      ObjectProvider<CloudArtifactService> cloudArtifactService,
+      ObjectProvider<ResourceStore> resourceStore,
       SystemSettingsSnapshot snapshot) {
     if (!s3Enabled(snapshot)) {
       return null;
     }
     return new GlobalStorageToolResultHistoryMaterializer(
         Objects.requireNonNull(ingestService.getIfAvailable(), "ingestService"),
-        Objects.requireNonNull(s3StorageService.getIfAvailable(), "s3StorageService"),
-        s3Properties);
+        Objects.requireNonNull(cloudArtifactService.getIfAvailable(), "cloudArtifactService"),
+        Objects.requireNonNull(resourceStore.getIfAvailable(), "resourceStore"),
+        Math.toIntExact(snapshot.get().advanced().resourceMaxBytes()));
   }
 
   private static boolean s3Enabled(SystemSettingsSnapshot snapshot) {
