@@ -128,6 +128,8 @@ describe('McpServersPage', () => {
     expect(screen.getByText('prod-linux-node')).toBeInTheDocument()
     expect(screen.getByText('45000ms')).toBeInTheDocument()
     expect(screen.getByText('60000ms')).toBeInTheDocument()
+    expect(screen.getAllByText('启用状态')).toHaveLength(2)
+    expect(screen.getAllByText('已启用')).toHaveLength(2)
 
     // 验证绝不包含 URL、bearerToken 或命令内容
     expect(screen.queryByText(/localhost/i)).toBeNull()
@@ -287,9 +289,10 @@ describe('McpServersPage', () => {
   })
 
   /**
-   * 测试意图：验证编辑弹窗关闭后迟到的异步 getServerConfig 响应被围栏拦截，不重新打开或污染弹窗状态。
+   * 测试意图：验证单调递增代际 token 解决针对同一 Server 的 ABA 竞态：
+   * 打开同一 server 后关闭并立即重新打开，第一个请求的延迟响应绝不能覆写第二个请求的状态。
    */
-  it('fences late getServerConfig response when edit modal is closed before response resolves', async () => {
+  it('fences ABA race with generation token when closing and reopening the same server', async () => {
     const user = userEvent.setup()
     vi.mocked(mcpServerService.pageServers).mockResolvedValue({
       pageNumber: 1,
@@ -298,38 +301,69 @@ describe('McpServersPage', () => {
       results: [server({ id: 'srv-1', name: 'filesystem' })],
     })
 
-    let resolveConfig!: (value: McpServerConfigDTO) => void
-    vi.mocked(mcpServerService.getServerConfig).mockReturnValue(
-      new Promise((resolve) => {
-        resolveConfig = resolve
-      }),
-    )
+    let resolveFirstConfig!: (value: McpServerConfigDTO) => void
+    let resolveSecondConfig!: (value: McpServerConfigDTO) => void
+    let callCount = 0
+
+    vi.mocked(mcpServerService.getServerConfig).mockImplementation(() => {
+      callCount++
+      if (callCount === 1) {
+        return new Promise((resolve) => {
+          resolveFirstConfig = resolve
+        })
+      }
+      return new Promise((resolve) => {
+        resolveSecondConfig = resolve
+      })
+    })
 
     renderPage()
 
     const editBtn = await screen.findByRole('button', { name: /编辑 MCP 服务/ })
+    // 第一次打开编辑（Generation 1）
     await user.click(editBtn)
-
     expect(await screen.findByRole('dialog', { name: /编辑 MCP 服务/ })).toBeInTheDocument()
     expect(screen.getByText('正在读取配置...')).toBeInTheDocument()
 
-    // 在配置响应到达前用户主动点击关闭
+    // 关闭弹窗（Generation 失效）
     const closeBtn = screen.getByRole('button', { name: '关闭' })
     await user.click(closeBtn)
     expect(screen.queryByRole('dialog', { name: /编辑 MCP 服务/ })).toBeNull()
 
-    // 异步响应迟到到达
-    resolveConfig({
+    // 重新打开同一 server 的编辑（Generation 2）
+    await user.click(editBtn)
+    expect(await screen.findByRole('dialog', { name: /编辑 MCP 服务/ })).toBeInTheDocument()
+    expect(screen.getByText('正在读取配置...')).toBeInTheDocument()
+
+    // 第一次请求的响应现在迟到返回
+    resolveFirstConfig({
       id: 'srv-1',
       name: 'filesystem',
       version: '1',
-      configJson: '{"type":"remote","url":"https://example.com/mcp"}',
+      configJson: '{"type":"remote","url":"https://example.com/first"}',
     })
 
-    // 验证弹窗依然保持关闭
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: /编辑 MCP 服务/ })).toBeNull()
+    // 验证代际已失效：第一次请求的响应被丢弃，弹窗仍然处于第二次请求的加载中状态，未被 /first 污染
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.getByText('正在读取配置...')).toBeInTheDocument()
+    expect(screen.queryByText(/https:\/\/example\.com\/first/)).toBeNull()
+
+    // 第二次请求的响应返回
+    resolveSecondConfig({
+      id: 'srv-1',
+      name: 'filesystem',
+      version: '2',
+      configJson: '{"type":"remote","url":"https://example.com/second"}',
     })
+
+    // 验证代际匹配：第二次请求的响应正确生效展示
+    const textarea = await screen.findByRole('textbox', { name: /配置 JSON/ })
+    expect((textarea as HTMLTextAreaElement).value).toContain('https://example.com/second')
+
+    // 再次验证：如果用户在请求未完成前关闭弹窗，后续到达的响应不会重新拉起弹窗
+    const closeBtn2 = screen.getByRole('button', { name: '关闭' })
+    await user.click(closeBtn2)
+    expect(screen.queryByRole('dialog', { name: /编辑 MCP 服务/ })).toBeNull()
   })
 
   /**
@@ -679,5 +713,118 @@ describe('McpServersPage', () => {
     await waitFor(() => {
       expect(screen.queryByRole('alertdialog', { name: '持久状态已变化' })).toBeNull()
     })
+  })
+
+  /**
+   * 测试意图：验证在 update 或 discover 异步请求进行中时，所有 JSON 编辑修改控件（文本域、模板按钮、环境下拉、格式化、校验）
+   * 均处于 disabled 禁用状态，防止用户在请求期间输入的修改被请求完成静默丢弃。
+   */
+  it('disables all JSON editor mutating controls while update or discover is pending', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 100,
+      totalCount: 1,
+      results: [
+        server({
+          id: 'srv-1',
+          name: 'filesystem',
+          type: 'local',
+          environmentId: mockEnvironment.id,
+          version: '1',
+        }),
+      ],
+    })
+    vi.mocked(mcpServerService.getServerConfig).mockResolvedValue({
+      id: 'srv-1',
+      name: 'filesystem',
+      version: '1',
+      configJson: createLocalConfigTemplate(mockEnvironment.id),
+    })
+
+    let resolveUpdate!: () => void
+    vi.mocked(mcpServerService.updateServer).mockReturnValue(
+      new Promise((resolve) => {
+        resolveUpdate = resolve
+      }),
+    )
+
+    renderPage()
+    const editBtn = await screen.findByRole('button', { name: /编辑 MCP 服务/ })
+    await user.click(editBtn)
+
+    const dialog = await screen.findByRole('dialog', { name: /编辑 MCP 服务/ })
+    const textarea = await within(dialog).findByRole('textbox', { name: /配置 JSON/ })
+    const remoteTplBtn = within(dialog).getByRole('button', { name: 'Remote 模板' })
+    const localTplBtn = within(dialog).getByRole('button', { name: 'Local 模板' })
+    const formatBtn = within(dialog).getByRole('button', { name: '格式化' })
+    const validateBtn = within(dialog).getByRole('button', { name: '校验' })
+    const envSelect = within(dialog).getByRole('combobox', { name: /关联环境/ })
+
+    // 初始状态下控件均可用
+    expect(textarea).not.toBeDisabled()
+    expect(remoteTplBtn).not.toBeDisabled()
+    expect(localTplBtn).not.toBeDisabled()
+    expect(formatBtn).not.toBeDisabled()
+    expect(validateBtn).not.toBeDisabled()
+    expect(envSelect).not.toBeDisabled()
+
+    // 触发保存提交
+    const submitBtn = within(dialog).getByRole('button', { name: '确认' })
+    await user.click(submitBtn)
+
+    // 验证请求挂起时所有修改控件全部被禁用
+    expect(textarea).toBeDisabled()
+    expect(remoteTplBtn).toBeDisabled()
+    expect(localTplBtn).toBeDisabled()
+    expect(formatBtn).toBeDisabled()
+    expect(validateBtn).toBeDisabled()
+    expect(envSelect).toBeDisabled()
+    expect(submitBtn).toBeDisabled()
+
+    // 结束 update
+    resolveUpdate()
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /编辑 MCP 服务/ })).toBeNull()
+    })
+  })
+
+  /**
+   * 测试意图：验证读取 MCP 配置失败时呈现真实的本地化「重试」按钮，点击后能再次发起直读请求。
+   */
+  it('renders truthful localized retry button on getServerConfig failure and retries on click', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 100,
+      totalCount: 1,
+      results: [server({ id: 'srv-1', name: 'filesystem' })],
+    })
+
+    vi.mocked(mcpServerService.getServerConfig)
+      .mockRejectedValueOnce(new Error('Network error loading config'))
+      .mockResolvedValueOnce({
+        id: 'srv-1',
+        name: 'filesystem',
+        version: '1',
+        configJson: '{"type":"remote","url":"https://example.com/retried"}',
+      })
+
+    renderPage()
+    const editBtn = await screen.findByRole('button', { name: /编辑 MCP 服务/ })
+    await user.click(editBtn)
+
+    const dialog = await screen.findByRole('dialog', { name: /编辑 MCP 服务/ })
+    expect(await within(dialog).findByText('Network error loading config')).toBeInTheDocument()
+
+    // 验证按钮显示真实本地化重试文案「重试」而非模棱两可的「确认」
+    const retryBtn = within(dialog).getByRole('button', { name: '重试' })
+    expect(retryBtn).toBeInTheDocument()
+
+    await user.click(retryBtn)
+    expect(mcpServerService.getServerConfig).toHaveBeenCalledTimes(2)
+
+    const textarea = await within(dialog).findByRole('textbox', { name: /配置 JSON/ })
+    expect((textarea as HTMLTextAreaElement).value).toContain('https://example.com/retried')
   })
 })

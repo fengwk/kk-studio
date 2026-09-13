@@ -229,11 +229,11 @@ export interface EnvironmentOperationDTO {
   /** 所属 Environment UUID。 */
   environmentId: string
   /** 目标资源类型：SKILL_SOURCE / MCP_SERVER。 */
-  resourceType: EnvironmentOperationResourceType | string
+  resourceType: EnvironmentOperationResourceType
   /** 目标资源 UUID。 */
   resourceId: string
   /** 操作类型：SKILL_REFRESH / SKILL_INSTALL / SKILL_UPDATE / MCP_SERVER_DISCOVER。 */
-  operationType: EnvironmentOperationType | string
+  operationType: EnvironmentOperationType
   /** 生命周期状态：PENDING / RUNNING / SUCCEEDED / FAILED / UNKNOWN / CANCELLED。 */
   status: EnvironmentOperationStatus
   /** 冻结的目标资源版本（canonical 非负十进制字符串）。 */
