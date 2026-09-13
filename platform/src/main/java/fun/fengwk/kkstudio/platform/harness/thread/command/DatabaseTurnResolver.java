@@ -56,20 +56,25 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.cloudfs.tool.CloudHarnessContributor;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.harness.contributor.ScopedBranchView;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleContextProjector;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolSelector;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -91,6 +96,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
   /** 所有确定性拒绝共用的稳定 AssistantError code。 */
   public static final String REJECTION_CODE = "PLANNING_FAILED";
 
+  private static final List<AgentToolId> CLOUD_TOOL_IDS =
+      List.of(
+          CloudHarnessContributor.TOOL_ID_READ,
+          CloudHarnessContributor.TOOL_ID_WRITE,
+          CloudHarnessContributor.TOOL_ID_EDIT,
+          CloudHarnessContributor.TOOL_ID_FIND,
+          CloudHarnessContributor.TOOL_ID_GREP);
+
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentModelRepository modelRepository;
   private final AgentProviderRepository providerRepository;
@@ -103,6 +116,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final CompactionConfigProvider compactionConfigProvider;
   private final SubagentConfigProvider subagentConfigProvider;
   private final AgentPromptComposer promptComposer;
+  private final ProjectRoleToolSelector roleToolSelector;
+  private final ProjectRoleContextProjector roleContextProjector;
   private final Clock clock;
   private final ProviderMessageProjector messageProjector;
   private final SchemaJsonCodec schemaCodec;
@@ -121,6 +136,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
       CompactionConfigProvider compactionConfigProvider,
       SubagentConfigProvider subagentConfigProvider,
       AgentPromptComposer promptComposer,
+      ProjectRoleToolSelector roleToolSelector,
+      ProjectRoleContextProjector roleContextProjector,
       Clock clock) {
     this.agentDefinitionRepository =
         Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
@@ -137,6 +154,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.subagentConfigProvider =
         Objects.requireNonNull(subagentConfigProvider, "subagentConfigProvider");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
+    this.roleToolSelector = Objects.requireNonNull(roleToolSelector, "roleToolSelector");
+    this.roleContextProjector =
+        Objects.requireNonNull(roleContextProjector, "roleContextProjector");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.messageProjector = new ProviderMessageProjector();
     this.schemaCodec = new SchemaJsonCodec();
@@ -148,16 +168,18 @@ public final class DatabaseTurnResolver implements TurnResolver {
       UUID threadId, EntryPath path, CompactionPreparation compactionPreparation) {
     Objects.requireNonNull(path, "path");
     try {
-      return compactionPreparation == null
-          ? resolveLive(path)
-          : resolveCompaction(path, compactionPreparation);
+      if (compactionPreparation != null) {
+        return resolveCompaction(path, compactionPreparation);
+      }
+      Objects.requireNonNull(threadId, "threadId");
+      return resolveLive(threadId, path);
     } catch (Rejection rejection) {
       // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常原样传播。
       return rejected(rejection.getMessage());
     }
   }
 
-  private Result resolveLive(EntryPath path) {
+  private Result resolveLive(UUID threadId, EntryPath path) {
     BranchSettings settings = path.baseSettings();
     UUID sessionId = path.root().sessionId();
 
@@ -210,7 +232,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     CurrentEnvironmentContext currentEnvironment = resolveCurrentEnvironment(environmentId, now);
     List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), environmentId);
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents(), path);
-    List<AgentToolId> toolIds = resolveToolIds(agentConfig, path);
+    List<AgentToolId> toolIds = resolveToolIds(agentConfig, path, threadId);
     List<ToolBinding> toolBindings = resolveTools(environmentId, toolIds);
 
     if (!toolBindings.isEmpty() && !parsedModel.tools()) {
@@ -239,7 +261,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
             parsedModel.pricing());
     List<AgentMessage> preamble =
         preambleMessages(
-            agent.getSystemPrompt(), currentEnvironment, skillBindings, subagentBindings, path);
+            threadId,
+            agent.getSystemPrompt(),
+            currentEnvironment,
+            skillBindings,
+            subagentBindings,
+            path);
     int outputTokens =
         outputTokens(
             parsedModel,
@@ -406,9 +433,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
   }
 
-  /** 从最新 Agent 配置派生本 turn 的稳定工具身份；内部工具只在对应能力当前启用时追加。 */
-  private List<AgentToolId> resolveToolIds(AgentDefinitionConfigDTO config, EntryPath path) {
-    List<AgentToolId> toolIds = new ArrayList<>(config.getToolIds().size() + 2);
+  /** 从最新 Agent 配置派生本 turn 的稳定工具身份；随后注入 Cloud 五工具与 Project 角色工具。 */
+  private List<AgentToolId> resolveToolIds(
+      AgentDefinitionConfigDTO config, EntryPath path, UUID threadId) {
+    LinkedHashSet<AgentToolId> toolIds = new LinkedHashSet<>();
     for (String value : config.getToolIds()) {
       AgentToolId id;
       try {
@@ -423,7 +451,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
       if (contribution.definition().visibility() != ToolVisibility.SELECTABLE) {
         throw rejection("internal tool cannot be selected by an Agent: " + id);
       }
-      toolIds.add(id);
+      if (!toolIds.add(id)) {
+        throw rejection("duplicate agent tool id: " + id);
+      }
     }
     if (!config.getSkills().isEmpty()) {
       toolIds.add(BuiltinToolIds.LOAD_SKILL);
@@ -431,6 +461,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (!config.getSubagents().isEmpty()
         && sessionDepth(path) < subagentConfigProvider.subagentConfig().maxDepth()) {
       toolIds.add(BuiltinToolIds.TASK);
+    }
+    for (AgentToolId cloudToolId : CLOUD_TOOL_IDS) {
+      toolIds.add(cloudToolId);
+    }
+    List<AgentToolId> roleTools =
+        Objects.requireNonNull(roleToolSelector.select(threadId), "role tools");
+    for (AgentToolId roleToolId : roleTools) {
+      toolIds.add(roleToolId);
     }
     return List.copyOf(toolIds);
   }
@@ -579,6 +617,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   private List<AgentMessage> preambleMessages(
+      UUID threadId,
       String systemPrompt,
       CurrentEnvironmentContext currentEnvironment,
       List<SkillBinding> skillBindings,
@@ -589,6 +628,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
         promptComposer.compose(systemPrompt, currentEnvironment, skillBindings, subagentBindings);
     if (!composedPrompt.isBlank()) {
       preamble.add(AgentMessage.system(composedPrompt));
+    }
+    Optional<String> roleContext =
+        Objects.requireNonNull(roleContextProjector.project(threadId), "role context");
+    if (roleContext.isPresent()) {
+      preamble.add(AgentMessage.system(roleContext.get()));
     }
     for (ContextProjectorContribution contribution : harnessCatalog.contextProjectors()) {
       String contributorId = contribution.id().contributorId().value();

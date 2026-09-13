@@ -6,9 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -22,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.chat.service.ChatService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -39,7 +45,9 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 import java.sql.Connection;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
 /** PostgreSQL 后端的 Chat 覆盖：可见名称配置、yolo、过时 Agent 和 CAS。 */
 class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
@@ -50,6 +58,19 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
   @Autowired private ChatService chatService;
   @Autowired private AgentDefinitionService agentDefinitionService;
   @Autowired private DatabaseTurnResolver turnResolver;
+  @MockitoBean private HarnessStore harnessStore;
+
+  @BeforeEach
+  void configureThreadWithoutProjectOwner() {
+    HarnessStore.Transaction transaction = mock(HarnessStore.Transaction.class);
+    when(transaction.findThread(any())).thenReturn(Optional.empty());
+    when(harnessStore.transaction(any()))
+        .thenAnswer(
+            invocation -> {
+              Function<HarnessStore.Transaction, ?> callback = invocation.getArgument(0);
+              return callback.apply(transaction);
+            });
+  }
 
   @Override
   protected void migrateDatabase(Connection conn) {
