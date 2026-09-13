@@ -37,7 +37,7 @@ registerCase({
       assert(srcData.status === 'UNAPPLIED', `expected UNAPPLIED, got ${srcData.status}`)
       let currentSourceVersion = srcData.version
 
-      // 3. 读取来源列表与持久清单，断言 HTTP 状态码
+      // 3. 读取来源列表与持久清单，断言 HTTP 状态码与默认来源满足性
       const listRes = await ctx.call(
         'GET',
         `/api/harness/environments/${encodeURIComponent(envId)}/skill-sources`,
@@ -45,6 +45,11 @@ registerCase({
       assert(listRes.status === 200, `expected 200 for skill sources list, got ${listRes.status}`)
       const sources = envelopeData(listRes.json)
       assert(Array.isArray(sources) && sources.length >= 2, 'expected at least 2 sources')
+      const defaultSources = sources.filter((s) => s.defaultSource === true)
+      assert(
+        defaultSources.length === 1,
+        `expected exactly one default source, found ${defaultSources.length}`,
+      )
 
       const invRes = await ctx.call(
         'GET',
@@ -67,15 +72,19 @@ registerCase({
         'PUT',
         `/api/harness/environments/${encodeURIComponent(envId)}/skill-sources/${encodeURIComponent(sourceId)}`,
         {
+          type: 'git',
           gitUrl: 'https://example.invalid/test-skills.git',
-          gitBranch: 'develop',
+          gitRef: 'develop',
           expectedVersion: currentSourceVersion,
         },
       )
       assert(putRes.status === 200, `expected 200 for source PUT update, got ${putRes.status}`)
       const updatedSrc = envelopeData(putRes.json)
-      assert(updatedSrc.version > currentSourceVersion, 'expected version increment after PUT')
-      assert(updatedSrc.gitBranch === 'develop', `expected gitBranch develop, got ${updatedSrc.gitBranch}`)
+      assert(
+        BigInt(updatedSrc.version) > BigInt(currentSourceVersion),
+        'expected numerical version increment after PUT',
+      )
+      assert(updatedSrc.gitRef === 'develop', `expected gitRef develop, got ${updatedSrc.gitRef}`)
       currentSourceVersion = updatedSrc.version
 
       // 5. 提交异步 INSTALL 操作，断言 202 与 PENDING
