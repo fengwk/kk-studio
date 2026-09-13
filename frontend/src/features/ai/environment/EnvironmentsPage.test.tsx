@@ -41,7 +41,6 @@ function environment(overrides: Partial<EnvironmentCardDTO>): EnvironmentCardDTO
     ready: true,
     lastSeen: null,
     capabilities: [],
-    skills: [],
     version: '1',
     createTime: '2026-07-20T00:00:00.000Z',
     updateTime: '2026-07-20T00:00:00.000Z',
@@ -68,8 +67,8 @@ describe('EnvironmentsPage', () => {
     vi.clearAllMocks()
   })
 
-  // 验证渲染环境卡片及其状态、能力与技能，且卡片底部仅有通用编辑与删除动作，绝不暴露轮换 Token 动作
-  it('renders environment cards with status capabilities and skills, with only edit and delete actions in footer', async () => {
+  // 验证渲染环境卡片及其状态与能力，底部提供「复制 Token / 管理 / 编辑 / 删除」动作
+  it('renders environment cards with status and capabilities, with manage, copy token, edit and delete actions in footer', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       {
         id: 'env-1',
@@ -79,7 +78,6 @@ describe('EnvironmentsPage', () => {
         ready: true,
         lastSeen: '2026-07-20T01:02:03.000Z',
         capabilities: [{ id: 'process.exec', version: '1' }],
-        skills: [{ name: 'dev', description: 'dev skill' }],
         version: '1',
         createTime: '2026-07-20T00:00:00.000Z',
         updateTime: '2026-07-20T00:00:00.000Z',
@@ -92,7 +90,6 @@ describe('EnvironmentsPage', () => {
         ready: false,
         lastSeen: '2026-07-19T00:00:00.000Z',
         capabilities: [],
-        skills: [],
         version: '1',
         createTime: '2026-07-19T00:00:00.000Z',
         updateTime: '2026-07-19T00:00:00.000Z',
@@ -105,7 +102,6 @@ describe('EnvironmentsPage', () => {
         ready: false,
         lastSeen: null,
         capabilities: [],
-        skills: [],
         version: '1',
         createTime: '2026-07-20T00:00:00.000Z',
         updateTime: '2026-07-20T00:00:00.000Z',
@@ -117,19 +113,20 @@ describe('EnvironmentsPage', () => {
     expect(screen.getAllByText('READY').length).toBe(1)
     expect(screen.getByText('UNAVAILABLE')).toBeInTheDocument()
     expect(screen.getByText('process.exec')).toBeInTheDocument()
-    expect(screen.getByText('dev')).toBeInTheDocument()
+    // 卡片不展示 skills 字段
+    expect(screen.queryByText('dev')).toBeNull()
     expect(screen.getByText('CONNECTING')).toBeInTheDocument()
     expect(screen.getAllByText('Capabilities').length).toBe(3)
-    expect(screen.getAllByText('Skills').length).toBe(3)
 
-    // 验证每个环境卡片底部仅有「复制 Token / 编辑 / 删除」三个动作，绝不暴露轮换 Token 动作；
+    // 验证每个环境卡片底部有「复制 Token / 管理 / 编辑 / 删除」四个动作，绝不暴露轮换 Token 动作；
     // 且加载列表后不得预取 token（点击才请求）。
     const cards = screen.getAllByRole('article')
     expect(cards).toHaveLength(3)
     for (const card of cards) {
       const footerButtons = within(card).getAllByRole('button')
-      expect(footerButtons).toHaveLength(3)
+      expect(footerButtons).toHaveLength(4)
       expect(within(card).getByRole('button', { name: /复制 Token/ })).toBeInTheDocument()
+      expect(within(card).getByRole('button', { name: /管理/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /编辑环境/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /删除环境/ })).toBeInTheDocument()
       expect(within(card).queryByRole('button', { name: /重新生成 Token/ })).toBeNull()
@@ -154,7 +151,6 @@ describe('EnvironmentsPage', () => {
       ready: false,
       lastSeen: null,
       capabilities: [],
-      skills: [],
       rootPath: null,
       version: '1',
       createTime: '2026-07-20T00:00:00.000Z',
