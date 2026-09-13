@@ -60,9 +60,9 @@ class CodingCapabilitiesTest {
         List.of(
             "fs.read",
             "fs.write",
-            "fs.apply-edit",
+            "fs.edit",
             "process.exec",
-            "fs.search",
+            "fs.grep",
             "fs.find",
             "lsp.goto-definition",
             "lsp.workspace-symbols",
@@ -318,11 +318,13 @@ class CodingCapabilitiesTest {
   @Test
   void readReturnsDirectoryWindowAndBinaryResource() throws Exception {
     Files.writeString(environmentRoot.resolve("many.txt"), "one\ntwo\nthree\n");
+    Files.write(
+        environmentRoot.resolve("image.png"),
+        new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3});
     Files.write(environmentRoot.resolve("binary.bin"), new byte[] {1, 0, 2});
     Files.createDirectory(environmentRoot.resolve("directory"));
     Files.writeString(environmentRoot.resolve("directory/a.txt"), "a");
     ReadCapability read = read(config());
-    ReadCapability constrainedRead = read(config(1, 16));
 
     EnvironmentCapabilityResult window =
         invoke(
@@ -333,14 +335,18 @@ class CodingCapabilitiesTest {
     EnvironmentCapabilityResult directory =
         invoke(
             read, "{\"path\":\"directory\",\"workdir\":" + json(environmentRoot.toString()) + "}");
+    EnvironmentCapabilityResult image =
+        invoke(
+            read, "{\"path\":\"image.png\",\"workdir\":" + json(environmentRoot.toString()) + "}");
     EnvironmentCapabilityResult binary =
         invoke(
-            constrainedRead,
-            "{\"path\":\"binary.bin\",\"workdir\":" + json(environmentRoot.toString()) + "}");
+            read, "{\"path\":\"binary.bin\",\"workdir\":" + json(environmentRoot.toString()) + "}");
 
     assertTrue(text(window).contains("Showing lines 1-1 of 3"));
     assertTrue(directory.contents().stream().anyMatch(content -> text(content).contains("a.txt")));
-    assertTrue(binary.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
+    assertTrue(image.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
+    assertTrue(binary.error());
+    assertTrue(text(binary).contains("binary"));
   }
 
   @Test
@@ -438,6 +444,48 @@ class CodingCapabilitiesTest {
     cancelled.handle.cancel();
     assertTrue(cancelled.await());
     assertTrue(text(cancelled.result).contains("Operation cancelled"));
+  }
+
+  /** 验证 Bash 大输出跨越 2000 行内联限制后，生成包含 preview 与 TextArtifactMetadata 的单个 ResourceResultContent。 */
+  @Test
+  void bashSpoolsLargeOutputToSingleResourceResultWithPreviewAndMetadata() throws Exception {
+    BashCapability bash = bash(config());
+    RecordingListener listener =
+        invokeAsync(
+            bash,
+            "{\"command\":\"seq 1 2500\",\"workdir\":" + json(environmentRoot.toString()) + "}",
+            Duration.ofSeconds(5));
+    assertTrue(listener.await());
+    assertFalse(listener.result.error());
+    assertEquals(1, listener.result.contents().size());
+    assertTrue(listener.result.contents().getFirst() instanceof ResourceResultContent);
+
+    ResourceResultContent content = (ResourceResultContent) listener.result.contents().getFirst();
+    assertNotNull(content.preview());
+    assertTrue(content.preview().startsWith("1\n2\n"));
+    assertNotNull(content.textMetadata());
+    assertEquals(2500, content.textMetadata().totalLines());
+    assertTrue(content.resource().size() > 0);
+  }
+
+  /** 验证 Bash 输出超过 16 MiB 硬上限时立即停止并返回 OUTPUT_TOO_LARGE 错误。 */
+  @Test
+  void bashEnforcesHardLimitAndReturnsOutputTooLargeError() throws Exception {
+    BashCapability bash = bash(config());
+    RecordingListener listener =
+        invokeAsync(
+            bash,
+            "{\"command\":\"head -c 17000000 /dev/zero | tr '\\\\0' 'a'\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
+            Duration.ofSeconds(5));
+    assertTrue(listener.await());
+    assertTrue(listener.result.error());
+    assertEquals(1, listener.result.contents().size());
+    assertTrue(listener.result.contents().getFirst() instanceof TextResultContent);
+    assertTrue(text(listener.result).contains("OUTPUT_TOO_LARGE"));
+    assertFalse(
+        listener.result.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
   }
 
   @Test

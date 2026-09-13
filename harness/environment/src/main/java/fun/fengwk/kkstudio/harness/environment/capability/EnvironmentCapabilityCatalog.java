@@ -37,9 +37,9 @@ public final class EnvironmentCapabilityCatalog {
       Set.of(
           EnvironmentCapabilityIds.FS_READ,
           EnvironmentCapabilityIds.FS_WRITE,
-          EnvironmentCapabilityIds.FS_APPLY_EDIT,
+          EnvironmentCapabilityIds.FS_EDIT,
           EnvironmentCapabilityIds.PROCESS_EXEC,
-          EnvironmentCapabilityIds.FS_SEARCH,
+          EnvironmentCapabilityIds.FS_GREP,
           EnvironmentCapabilityIds.FS_FIND,
           EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
           EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
@@ -72,9 +72,9 @@ public final class EnvironmentCapabilityCatalog {
     return List.of(
         workdirDescriptor(EnvironmentCapabilityIds.FS_READ, Duration.ofMinutes(1)),
         workdirDescriptor(EnvironmentCapabilityIds.FS_WRITE, Duration.ofMinutes(1)),
-        workdirDescriptor(EnvironmentCapabilityIds.FS_APPLY_EDIT, Duration.ofMinutes(1)),
+        workdirDescriptor(EnvironmentCapabilityIds.FS_EDIT, Duration.ofMinutes(1)),
         workdirDescriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofHours(1)),
-        workdirDescriptor(EnvironmentCapabilityIds.FS_SEARCH, Duration.ofHours(1)),
+        workdirDescriptor(EnvironmentCapabilityIds.FS_GREP, Duration.ofHours(1)),
         workdirDescriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofHours(1)),
         workdirDescriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
         workdirDescriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),

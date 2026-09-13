@@ -20,9 +20,9 @@ class EnvironmentCapabilityCatalogTest {
         List.of(
             EnvironmentCapabilityIds.FS_READ,
             EnvironmentCapabilityIds.FS_WRITE,
-            EnvironmentCapabilityIds.FS_APPLY_EDIT,
+            EnvironmentCapabilityIds.FS_EDIT,
             EnvironmentCapabilityIds.PROCESS_EXEC,
-            EnvironmentCapabilityIds.FS_SEARCH,
+            EnvironmentCapabilityIds.FS_GREP,
             EnvironmentCapabilityIds.FS_FIND,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
@@ -34,9 +34,9 @@ class EnvironmentCapabilityCatalogTest {
         List.of(
             "fs.read",
             "fs.write",
-            "fs.apply-edit",
+            "fs.edit",
             "process.exec",
-            "fs.search",
+            "fs.grep",
             "fs.find",
             "lsp.goto-definition",
             "lsp.workspace-symbols",

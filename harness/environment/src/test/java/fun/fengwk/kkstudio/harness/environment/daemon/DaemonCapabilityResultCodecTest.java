@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.environment.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,6 +13,7 @@ import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
@@ -100,9 +102,86 @@ class DaemonCapabilityResultCodecTest {
     EnvironmentCapabilityResult decoded =
         codec.decodeCompletedForInvocation(payload, "call-2", 1024);
     assertEquals(1, decoded.contents().size());
-    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
-    assertEquals("text/plain", binary.mediaType());
-    assertArrayEquals(data, binary.content());
+    ResourceResultContent resource = (ResourceResultContent) decoded.contents().get(0);
+    assertEquals(local, resource.resource());
+    assertNull(resource.preview());
+    assertNull(resource.textMetadata());
+  }
+
+  /** resource 携带 preview 与 TextArtifactMetadata 时必须严格在 wire 上编码并解码还原。 */
+  @Test
+  void resourcePayloadRoundTripsWithPreviewAndTextArtifactMetadata() {
+    byte[] data = "hello world\nsecond line\n".getBytes(StandardCharsets.UTF_8);
+    ResourceRef local =
+        new ResourceRef(EXPORT_URI, "text/plain", "log.txt", (long) data.length, sha256Hex(data));
+    TextArtifactMetadata metadata = new TextArtifactMetadata(data.length, 2);
+    ResourceResultContent content = new ResourceResultContent(local, "hello world\n", metadata);
+    EnvironmentCapabilityResult result =
+        new EnvironmentCapabilityResult("call-rt", List.of(content), false, "{}");
+
+    String payload = codec.encodeCompleted(result, new StubStore(data, null));
+    assertTrue(payload.contains("\"preview\":\"hello world\\n\""));
+    assertTrue(
+        payload.contains("\"textMetadata\":{\"totalBytes\":" + data.length + ",\"totalLines\":2}"));
+
+    EnvironmentCapabilityResult decoded =
+        codec.decodeCompletedForInvocation(payload, "call-rt", 1024);
+    assertEquals(1, decoded.contents().size());
+    ResourceResultContent decodedContent = (ResourceResultContent) decoded.contents().get(0);
+    assertEquals(local, decodedContent.resource());
+    assertEquals("hello world\n", decodedContent.preview());
+    assertEquals(metadata, decodedContent.textMetadata());
+  }
+
+  /** resource 的 preview 超限或包含非法 Unicode 时在解码期被协议异常拒绝。 */
+  @Test
+  void rejectsOversizedOrInvalidPreviewOnDecode() {
+    byte[] data = "x".getBytes(StandardCharsets.UTF_8);
+    String validBase64 = Base64.getEncoder().encodeToString(data);
+    String hugePreview = "a".repeat(ResourceRef.MAX_PREVIEW_UTF8_BYTES + 1);
+    String payload =
+        "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},\"contents\":["
+            + "{\"type\":\"resource\",\"uri\":\""
+            + EXPORT_URI
+            + "\",\"mediaType\":\"text/plain\",\"name\":null,\"size\":1,\"sha256\":\""
+            + sha256Hex(data)
+            + "\",\"contentBase64\":\""
+            + validBase64
+            + "\",\"preview\":\""
+            + hugePreview
+            + "\"}]}}";
+
+    assertThrows(DaemonProtocolException.class, () -> codec.decodeResult(payload));
+  }
+
+  /** resource 的 textMetadata 字段包含负数或未知字段时被严格拒绝。 */
+  @Test
+  void rejectsInvalidTextMetadataOnDecode() {
+    byte[] data = "x".getBytes(StandardCharsets.UTF_8);
+    String validBase64 = Base64.getEncoder().encodeToString(data);
+    String negativeBytes =
+        "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},\"contents\":["
+            + "{\"type\":\"resource\",\"uri\":\""
+            + EXPORT_URI
+            + "\",\"mediaType\":\"text/plain\",\"name\":null,\"size\":1,\"sha256\":\""
+            + sha256Hex(data)
+            + "\",\"contentBase64\":\""
+            + validBase64
+            + "\",\"textMetadata\":{\"totalBytes\":-1,\"totalLines\":1}}]}}";
+
+    assertThrows(DaemonProtocolException.class, () -> codec.decodeResult(negativeBytes));
+
+    String unknownField =
+        "{\"result\":{\"callId\":\"c\",\"error\":false,\"details\":{},\"contents\":["
+            + "{\"type\":\"resource\",\"uri\":\""
+            + EXPORT_URI
+            + "\",\"mediaType\":\"text/plain\",\"name\":null,\"size\":1,\"sha256\":\""
+            + sha256Hex(data)
+            + "\",\"contentBase64\":\""
+            + validBase64
+            + "\",\"textMetadata\":{\"totalBytes\":1,\"totalLines\":1,\"extra\":true}}]}}";
+
+    assertThrows(DaemonProtocolException.class, () -> codec.decodeResult(unknownField));
   }
 
   /** 编码 ResourceResultContent 时 store 返回字节必须通过 size/sha 复核；读取失败确定性抛协议异常。 */
@@ -191,8 +270,8 @@ class DaemonCapabilityResultCodecTest {
     assertTrue(payload.contains("\"type\":\"resource\""));
     assertTrue(payload.contains("\"uri\":\"" + EXPORT_URI + "\""));
     EnvironmentCapabilityResult decoded = codec.decodeResult(payload);
-    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
-    assertArrayEquals(data, binary.content());
+    ResourceResultContent resource = (ResourceResultContent) decoded.contents().get(0);
+    assertEquals(stored, resource.resource());
 
     DaemonProtocolException storeFailure =
         assertThrows(
@@ -223,8 +302,12 @@ class DaemonCapabilityResultCodecTest {
                 + segment
                 + "]}}");
 
-    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
-    assertArrayEquals(data, binary.content());
+    ResourceResultContent resource = (ResourceResultContent) decoded.contents().get(0);
+    assertEquals("https://example.com/a", resource.resource().uri());
+    assertEquals("text/plain", resource.resource().mediaType());
+    assertNull(resource.resource().name());
+    assertEquals((long) data.length, resource.resource().size());
+    assertEquals(sha256Hex(data), resource.resource().sha256());
 
     // size/sha256 缺失或为 null 必须拒绝，不允许以 null 声明绕过大小预检。
     assertThrows(
