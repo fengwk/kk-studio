@@ -6,28 +6,47 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueInputKind;
+import fun.fengwk.kkstudio.platform.project.model.IssueRun;
+import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
+import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
+import fun.fengwk.kkstudio.platform.project.repo.IssueControllerWorkRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
+import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
+import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 
+import java.time.Instant;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -39,6 +58,47 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
   @Autowired private ProjectService projectService;
   @Autowired private ProjectRepository projectRepository;
   @Autowired private ProjectSessionRepository projectSessionRepository;
+  @Autowired private IssueService issueService;
+  @Autowired private IssueRunService issueRunService;
+  @Autowired private IssueControllerWorkRepository issueControllerWorkRepository;
+  @MockitoBean private HarnessStore harnessStore;
+
+  @BeforeEach
+  void setUpHarnessStore() {
+    if (harnessStore != null) {
+      HarnessStore.Transaction tx = mock(HarnessStore.Transaction.class);
+      when(harnessStore.transaction(any()))
+          .thenAnswer(
+              inv -> {
+                Function<HarnessStore.Transaction, ?> fn = inv.getArgument(0);
+                return fn.apply(tx);
+              });
+      when(tx.lockSessionForUpdate(any()))
+          .thenAnswer(
+              inv -> {
+                UUID sessionId = inv.getArgument(0);
+                Integer count =
+                    jdbcTemplate.queryForObject(
+                        "select count(*) from harness_session where id = ?",
+                        Integer.class,
+                        sessionId);
+                if (count != null && count > 0) {
+                  Session s = new Session(sessionId, "mock", Instant.now());
+                  return Optional.of(s);
+                }
+                return Optional.empty();
+              });
+      when(tx.listThreadsBySession(any())).thenReturn(List.of());
+      doAnswer(
+              inv -> {
+                UUID sessionId = inv.getArgument(0);
+                jdbcTemplate.update("delete from harness_session where id = ?", sessionId);
+                return null;
+              })
+          .when(tx)
+          .deleteSession(any());
+    }
+  }
 
   @Test
   void testCreateProjectSuccessAndValidation() {
@@ -265,5 +325,132 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
     assertFalse(projectRepository.deleteById(id, 999L));
     assertTrue(projectRepository.deleteById(id, 0L));
     assertNull(projectRepository.getById(id));
+  }
+
+  @Test
+  void testDeleteProjectCasAndNotFound() {
+    String agentName = createTestAgent();
+    Project project = projectService.createProject("Delete CAS Test", "Desc", agentName);
+    UUID projectId = project.getId();
+
+    // 测试意图：验证删除不存在的 Project 抛出 AiResourceNotFoundException
+    UUID notFoundId = UUID.randomUUID();
+    assertThrows(
+        AiResourceNotFoundException.class, () -> projectService.deleteProject(notFoundId, 0L));
+
+    // 测试意图：验证 expectedVersion 负数抛出校验异常
+    assertThrows(AiValidationException.class, () -> projectService.deleteProject(projectId, -1L));
+
+    // 测试意图：验证 expectedVersion CAS 冲突拒绝删除，且项目未被删除
+    assertThrows(
+        AiVersionConflictException.class, () -> projectService.deleteProject(projectId, 100L));
+    assertNotNull(projectService.getProject(projectId));
+  }
+
+  @Test
+  void testDeleteProjectRefusesActiveOrUnknownRuns() {
+    String agentName = createTestAgent();
+    Project project = projectService.createProject("Active Run Delete Guard", "Desc", agentName);
+    UUID projectId = project.getId();
+
+    Issue issue =
+        issueService.createIssue(
+            projectId, "Issue with run", "Desc", agentName, null, IssueStatus.TODO);
+
+    // 启动一个 RUNNING 的 run
+    IssueRun activeRun =
+        issueRunService.startExecutorRun(
+            issue.getId(), agentName, Instant.now().plusSeconds(60), 5);
+    assertEquals(IssueRunStatus.RUNNING, activeRun.getStatus());
+
+    // 测试意图：存在 RUNNING 状态的 run 时，必须明确拒绝删除，且无数据被孤立清理
+    AiValidationException ex =
+        assertThrows(
+            AiValidationException.class, () -> projectService.deleteProject(projectId, 0L));
+    assertTrue(ex.getMessage().contains("Cannot delete project with active or unknown runs"));
+    assertNotNull(projectService.getProject(projectId));
+
+    // 将 run 设为 UNKNOWN
+    issueRunService.failRun(activeRun.getId(), IssueRunStatus.UNKNOWN, "uncertain network failure");
+
+    // 测试意图：存在 UNKNOWN 状态的 run 时，必须明确拒绝删除
+    AiValidationException exUnknown =
+        assertThrows(
+            AiValidationException.class, () -> projectService.deleteProject(projectId, 0L));
+    assertTrue(
+        exUnknown.getMessage().contains("Cannot delete project with active or unknown runs"));
+    assertNotNull(projectService.getProject(projectId));
+  }
+
+  @Test
+  void testDeleteProjectFullSuccessCleansAllOrphans() {
+    String agentName = createTestAgent();
+    Project project = projectService.createProject("Full Deep Delete Proj", "Desc", agentName);
+    UUID projectId = project.getId();
+
+    // 绑定 Coordinator session
+    UUID coordSessionId = createHarnessSession();
+    projectSessionRepository.bindSession(projectId, coordSessionId);
+
+    // 创建两个 Issue 并建立依赖关系
+    Issue issue1 =
+        issueService.createIssue(projectId, "Issue 1", "Desc", agentName, null, IssueStatus.TODO);
+    Issue issue2 =
+        issueService.createIssue(projectId, "Issue 2", "Desc", agentName, null, IssueStatus.TODO);
+    issueService.addDependency(issue2.getId(), issue1.getId(), issue2.getVersion());
+
+    // 追加 issue input
+    issueService.appendInput(issue1.getId(), IssueInputKind.HUMAN, "test input", "key-1");
+
+    // 创建 controller work
+    issueControllerWorkRepository.requestWork(issue1.getId(), Instant.now());
+
+    // 启动 run 并将其终态置为 FAILED
+    IssueRun run =
+        issueRunService.startExecutorRun(
+            issue1.getId(), agentName, Instant.now().plusSeconds(60), 5);
+    issueRunService.failRun(run.getId(), IssueRunStatus.FAILED, "intentional failure");
+
+    // 测试意图：验证深删除完整成功，按设计顺序删除各表记录并清理 Harness Session，不留任何孤儿数据
+    projectService.deleteProject(projectId, 0L);
+
+    // 验证 Project 事实被删除
+    assertThrows(AiResourceNotFoundException.class, () -> projectService.getProject(projectId));
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from project where id = ?", Integer.class, projectId));
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from project_session where project_id = ?", Integer.class, projectId));
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from issue where project_id = ?", Integer.class, projectId));
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from issue_dependency where project_id = ?",
+            Integer.class,
+            projectId));
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from issue_input where issue_id = ?", Integer.class, issue1.getId()));
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from issue_run where issue_id = ?", Integer.class, issue1.getId()));
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from issue_controller_work where issue_id = ?",
+            Integer.class,
+            issue1.getId()));
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from harness_session where id = ?", Integer.class, coordSessionId));
   }
 }

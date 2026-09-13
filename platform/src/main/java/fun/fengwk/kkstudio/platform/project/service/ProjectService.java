@@ -17,6 +17,8 @@ public interface ProjectService {
 
   Project unarchiveProject(UUID id, long expectedVersion);
 
+  void deleteProject(UUID id, long expectedVersion);
+
   Project getProject(UUID id);
 
   List<Project> listProjects(boolean includeArchived);

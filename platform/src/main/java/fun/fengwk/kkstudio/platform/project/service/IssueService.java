@@ -51,5 +51,7 @@ public interface IssueService {
 
   List<IssueDependency> listDependencies(UUID issueId);
 
+  List<IssueDependency> listProjectDependencies(UUID projectId);
+
   List<IssueInput> listInputs(UUID issueId);
 }

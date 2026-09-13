@@ -55,6 +55,11 @@ public class PostgresqlIssueInputRepository implements IssueInputRepository {
         issueInputMapper.findFirstByKindAfterSequence(issueId, kind.name(), afterSequence));
   }
 
+  @Override
+  public int deleteByIssueId(UUID issueId) {
+    return issueInputMapper.deleteByIssueId(issueId);
+  }
+
   private IssueInputDO toDO(IssueInput input) {
     if (input == null) {
       return null;
