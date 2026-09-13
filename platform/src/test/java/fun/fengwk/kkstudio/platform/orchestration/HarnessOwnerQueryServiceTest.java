@@ -37,6 +37,14 @@ import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.project.model.IssueRun;
+import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
+import fun.fengwk.kkstudio.platform.project.model.Project;
+import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
+import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 
@@ -60,6 +68,10 @@ class HarnessOwnerQueryServiceTest {
   private ChatSessionRepository chatSessionRepository;
   private CanvasStore canvasStore;
   private CanvasSessionRepository canvasSessionRepository;
+  private ProjectRepository projectRepository;
+  private ProjectSessionRepository projectSessionRepository;
+  private IssueRunRepository issueRunRepository;
+  private IssueRunSessionRepository issueRunSessionRepository;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private HarnessOwnerQueryService service;
@@ -71,12 +83,24 @@ class HarnessOwnerQueryServiceTest {
     chatSessionRepository = mock(ChatSessionRepository.class);
     canvasStore = mock(CanvasStore.class);
     canvasSessionRepository = mock(CanvasSessionRepository.class);
+    projectRepository = mock(ProjectRepository.class);
+    projectSessionRepository = mock(ProjectSessionRepository.class);
+    issueRunRepository = mock(IssueRunRepository.class);
+    issueRunSessionRepository = mock(IssueRunSessionRepository.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
     service =
         new HarnessOwnerQueryService(
-            chatRepository, chatSessionRepository, canvasStore, canvasSessionRepository, runtimes);
+            chatRepository,
+            chatSessionRepository,
+            canvasStore,
+            canvasSessionRepository,
+            projectRepository,
+            projectSessionRepository,
+            issueRunRepository,
+            issueRunSessionRepository,
+            runtimes);
   }
 
   @Test
@@ -84,11 +108,63 @@ class HarnessOwnerQueryServiceTest {
     // Owner 不存在时不能枚举或读取任何 Session/Harness 事实。
     UUID chatId = id(1);
     UUID canvasId = id(2);
+    UUID projectId = id(3);
+    UUID runId = id(4);
 
     assertThrows(AiResourceNotFoundException.class, () -> service.listChatSessions(chatId));
     assertThrows(AiResourceNotFoundException.class, () -> service.listCanvasSessions(canvasId));
+    assertThrows(AiResourceNotFoundException.class, () -> service.listProjectSessions(projectId));
+    assertThrows(AiResourceNotFoundException.class, () -> service.listIssueRunSessions(runId));
 
-    verifyNoInteractions(chatSessionRepository, canvasSessionRepository, runtime);
+    verifyNoInteractions(
+        chatSessionRepository,
+        canvasSessionRepository,
+        projectSessionRepository,
+        issueRunSessionRepository,
+        runtime);
+  }
+
+  @Test
+  void projectAndIssueRunSessionsQueryAndUnifiedOwnerQuery() {
+    UUID projectId = id(20);
+    UUID runId = id(21);
+    UUID projectSessionId = id(22);
+    UUID runSessionId = id(23);
+
+    when(projectRepository.getById(projectId)).thenReturn(mock(Project.class));
+    when(projectSessionRepository.findByProjectId(projectId))
+        .thenReturn(
+            ProjectSession.builder().projectId(projectId).sessionId(projectSessionId).build());
+    when(runtime.getSession(projectSessionId))
+        .thenReturn(new Session(projectSessionId, "project session", T0));
+    when(runtime.getSessionEntries(projectSessionId)).thenReturn(List.of());
+    when(runtime.listThreadsBySession(projectSessionId)).thenReturn(List.of());
+
+    when(issueRunRepository.getById(runId)).thenReturn(mock(IssueRun.class));
+    when(issueRunSessionRepository.findByRunId(runId))
+        .thenReturn(IssueRunSession.builder().runId(runId).sessionId(runSessionId).build());
+    when(runtime.getSession(runSessionId)).thenReturn(new Session(runSessionId, "run session", T1));
+    when(runtime.getSessionEntries(runSessionId)).thenReturn(List.of());
+    when(runtime.listThreadsBySession(runSessionId)).thenReturn(List.of());
+
+    List<HarnessSessionSummaryDTO> projectSummaries = service.listProjectSessions(projectId);
+    assertEquals(1, projectSummaries.size());
+    assertEquals(projectSessionId.toString(), projectSummaries.get(0).getSessionId());
+
+    List<HarnessSessionSummaryDTO> runSummaries = service.listIssueRunSessions(runId);
+    assertEquals(1, runSummaries.size());
+    assertEquals(runSessionId.toString(), runSummaries.get(0).getSessionId());
+
+    // 统一查询
+    List<HarnessSessionSummaryDTO> byOwnerProject =
+        service.listSessionsByOwner(new OwnerRef(OwnerType.PROJECT, projectId));
+    assertEquals(1, byOwnerProject.size());
+    assertEquals(projectSessionId.toString(), byOwnerProject.get(0).getSessionId());
+
+    List<HarnessSessionSummaryDTO> byOwnerRun =
+        service.listSessionsByOwner(new OwnerRef(OwnerType.ISSUE_RUN, runId));
+    assertEquals(1, byOwnerRun.size());
+    assertEquals(runSessionId.toString(), byOwnerRun.get(0).getSessionId());
   }
 
   @Test

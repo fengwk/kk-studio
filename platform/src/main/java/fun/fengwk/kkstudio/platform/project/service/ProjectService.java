@@ -21,8 +21,6 @@ public interface ProjectService {
 
   List<Project> listProjects(boolean includeArchived);
 
-  void bindCoordinatorSession(UUID projectId, UUID sessionId);
-
   ProjectSession getCoordinatorSession(UUID projectId);
 
   ProjectSession findProjectSession(UUID sessionId);

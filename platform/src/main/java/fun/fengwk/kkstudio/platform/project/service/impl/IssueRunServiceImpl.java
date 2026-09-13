@@ -870,78 +870,6 @@ public class IssueRunServiceImpl implements IssueRunService {
     return issueRunRepository.listByIssueId(issueId);
   }
 
-  @Transactional
-  @Override
-  public void bindSession(UUID runId, UUID sessionId) {
-    Objects.requireNonNull(runId, "runId");
-    Objects.requireNonNull(sessionId, "sessionId");
-
-    // 仅有 runId 的命令先无锁读取 Run 的不可变 issueId，获取 projectId，再锁 Project，再锁 Issue，最后锁 Run
-    IssueRun initialRun = issueRunRepository.getById(runId);
-    if (initialRun == null) {
-      throw new AiResourceNotFoundException("issue_run", runId.toString());
-    }
-    UUID issueId = initialRun.getIssueId();
-
-    Issue initialIssue = issueRepository.getById(issueId);
-    if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
-    }
-    projectRepository.lockById(initialIssue.getProjectId());
-
-    Issue issue = issueRepository.lockById(issueId);
-    if (issue == null) {
-      throw new AiResourceNotFoundException("issue", issueId.toString());
-    }
-
-    IssueRun run = issueRunRepository.lockById(runId);
-    if (run == null) {
-      throw new AiResourceNotFoundException("issue_run", runId.toString());
-    }
-    if (!issueId.equals(run.getIssueId())) {
-      throw new AiValidationException("issue_run", "Run issue mismatch");
-    }
-
-    // 同 relation 同 session 幂等：已有相同 relation 的 replay 可返回
-    IssueRunSession existingForRun = issueRunSessionRepository.findByRunId(runId);
-    if (existingForRun != null) {
-      if (existingForRun.getSessionId().equals(sessionId)) {
-        return;
-      }
-      throw new AiValidationException(
-          "issue_run_session", "Run is already bound to a different session");
-    }
-
-    IssueRunSession existingForSession = issueRunSessionRepository.findBySessionId(sessionId);
-    if (existingForSession != null) {
-      throw new AiValidationException(
-          "issue_run_session", "Session is already bound to another run");
-    }
-
-    // 新 Run session 只允许 AGENT active Run
-    if (run.getActorType() != IssueRunActorType.AGENT) {
-      throw new AiValidationException(
-          "issue_run_session", "Only AGENT run can be bound to a harness session");
-    }
-    if (!run.getStatus().isActive()) {
-      throw new AiValidationException(
-          "issue_run_session", "Cannot bind session to inactive run, status is " + run.getStatus());
-    }
-
-    try {
-      boolean bound = issueRunSessionRepository.bindSession(runId, sessionId);
-      if (!bound) {
-        throw new AiValidationException("issue_run_session", "Failed to bind run session");
-      }
-    } catch (DataIntegrityViolationException e) {
-      if (isSingleOwnerConflict(e)) {
-        throw new AiValidationException(
-            "issue_run_session", "Session is already owned by another entity");
-      }
-      throw e;
-    }
-  }
-
   @Override
   public IssueRunSession getRunSession(UUID runId) {
     Objects.requireNonNull(runId, "runId");
@@ -1052,23 +980,5 @@ public class IssueRunServiceImpl implements IssueRunService {
     }
     String message = e.getMessage();
     return message != null && message.contains("uk_issue_run_terminal_action");
-  }
-
-  private boolean isSingleOwnerConflict(DataIntegrityViolationException e) {
-    Throwable root = e.getRootCause();
-    if (root instanceof PSQLException pe) {
-      String constraint =
-          pe.getServerErrorMessage() != null ? pe.getServerErrorMessage().getConstraint() : null;
-      if ("chk_harness_session_single_owner".equals(constraint)
-          || "pk_harness_session_owner_guard".equals(constraint)
-          || "uk_issue_run_session_session".equals(constraint)) {
-        return true;
-      }
-    }
-    String message = e.getMessage();
-    return message != null
-        && (message.contains("chk_harness_session_single_owner")
-            || message.contains("pk_harness_session_owner_guard")
-            || message.contains("uk_issue_run_session_session"));
   }
 }

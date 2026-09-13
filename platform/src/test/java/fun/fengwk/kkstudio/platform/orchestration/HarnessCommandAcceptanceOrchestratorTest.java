@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasSession;
@@ -48,6 +49,15 @@ import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
+import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueRun;
+import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
+import fun.fengwk.kkstudio.platform.project.model.Project;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
+import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -69,8 +79,13 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private static final UUID ENTRY_ID = id(5);
   private static final UUID UPLOAD_ID = id(6);
   private static final UUID BLOB_ID = id(7);
+  private static final UUID PROJECT_ID = id(8);
+  private static final UUID RUN_ID = id(9);
+  private static final UUID ISSUE_ID = id(10);
   private static final OwnerRef CHAT_OWNER = new OwnerRef(OwnerType.CHAT, CHAT_ID);
   private static final OwnerRef CANVAS_OWNER = new OwnerRef(OwnerType.CANVAS, CANVAS_ID);
+  private static final OwnerRef PROJECT_OWNER = new OwnerRef(OwnerType.PROJECT, PROJECT_ID);
+  private static final OwnerRef ISSUE_RUN_OWNER = new OwnerRef(OwnerType.ISSUE_RUN, RUN_ID);
   private static final BranchSettings SETTINGS =
       new BranchSettings("assistant", new ModelSelection("provider", "model", "default"));
 
@@ -78,6 +93,11 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private CanvasSessionRepository canvasSessionRepository;
   private ChatRepository chatRepository;
   private CanvasStore canvasStore;
+  private ProjectRepository projectRepository;
+  private ProjectSessionRepository projectSessionRepository;
+  private IssueRepository issueRepository;
+  private IssueRunRepository issueRunRepository;
+  private IssueRunSessionRepository issueRunSessionRepository;
   private ObjectProvider<HarnessStore> stores;
   private ObjectProvider<HarnessRuntime> runtimes;
   private ObjectProvider<StorageUploadService> uploadServices;
@@ -97,6 +117,11 @@ class HarnessCommandAcceptanceOrchestratorTest {
     canvasSessionRepository = mock(CanvasSessionRepository.class);
     chatRepository = mock(ChatRepository.class);
     canvasStore = mock(CanvasStore.class);
+    projectRepository = mock(ProjectRepository.class);
+    projectSessionRepository = mock(ProjectSessionRepository.class);
+    issueRepository = mock(IssueRepository.class);
+    issueRunRepository = mock(IssueRunRepository.class);
+    issueRunSessionRepository = mock(IssueRunSessionRepository.class);
     stores = mock(ObjectProvider.class);
     runtimes = mock(ObjectProvider.class);
     uploadServices = mock(ObjectProvider.class);
@@ -122,6 +147,19 @@ class HarnessCommandAcceptanceOrchestratorTest {
     when(chatRepository.lockForKeyShare(CHAT_ID)).thenReturn(mock(Chat.class));
     when(canvasStore.lockDocumentForKeyShare(CANVAS_ID))
         .thenReturn(Optional.of(mock(CanvasDocument.class)));
+    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(mock(Project.class));
+
+    IssueRun run = mock(IssueRun.class);
+    when(run.getIssueId()).thenReturn(ISSUE_ID);
+    when(run.getActorType()).thenReturn(IssueRunActorType.AGENT);
+    when(issueRunRepository.getById(RUN_ID)).thenReturn(run);
+    Issue issue = mock(Issue.class);
+    when(issue.getId()).thenReturn(ISSUE_ID);
+    when(issue.getProjectId()).thenReturn(PROJECT_ID);
+    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
+    when(issueRunRepository.lockById(RUN_ID)).thenReturn(run);
+
     when(runtime.acceptCommands(any(), any())).thenReturn(accepted);
 
     service =
@@ -130,6 +168,11 @@ class HarnessCommandAcceptanceOrchestratorTest {
             canvasSessionRepository,
             chatRepository,
             canvasStore,
+            projectRepository,
+            projectSessionRepository,
+            issueRepository,
+            issueRunRepository,
+            issueRunSessionRepository,
             stores,
             runtimes,
             uploadServices,
@@ -388,6 +431,59 @@ class HarnessCommandAcceptanceOrchestratorTest {
         assertInstanceOf(UserMessageCommandPayload.class, prepared.getFirst().payload());
     assertSame(resource, payload.message().contents().getFirst());
     verify(refManager, never()).retainRef(any(), any());
+  }
+
+  @Test
+  void createsProjectAndIssueRunOwnershipSuccessfully() {
+    AcceptCommandsCommand projectCmd = newSession(user(new TextMessageContent("project")));
+    when(projectSessionRepository.bindSession(PROJECT_ID, SESSION_ID)).thenReturn(true);
+    AcceptancePreflight projectPreflight = acceptAndCapturePreflight(PROJECT_OWNER, projectCmd);
+    projectPreflight.prepare(
+        transaction, new Session(SESSION_ID, "proj", NOW), projectCmd.commands());
+    verify(projectSessionRepository).bindSession(PROJECT_ID, SESSION_ID);
+
+    AcceptCommandsCommand runCmd = newSession(user(new TextMessageContent("run")));
+    when(issueRunSessionRepository.bindSession(RUN_ID, SESSION_ID)).thenReturn(true);
+    AcceptancePreflight runPreflight = acceptAndCapturePreflight(ISSUE_RUN_OWNER, runCmd);
+    runPreflight.prepare(transaction, new Session(SESSION_ID, "run", NOW), runCmd.commands());
+    verify(issueRunSessionRepository).bindSession(RUN_ID, SESSION_ID);
+  }
+
+  @Test
+  void authorizesProjectAndIssueRunWithCorrectLockOrder() {
+    // 验证 ISSUE_RUN 严格按 Project -> Issue -> IssueRun 加锁并校验
+    AcceptCommandsCommand runCmd = newSession(user(new TextMessageContent("run")));
+    service.accept(ISSUE_RUN_OWNER, runCmd);
+
+    InOrder lockOrder = inOrder(projectRepository, issueRepository, issueRunRepository);
+    lockOrder.verify(projectRepository).lockForKeyShare(PROJECT_ID);
+    lockOrder.verify(issueRepository).lockById(ISSUE_ID);
+    lockOrder.verify(issueRunRepository).lockById(RUN_ID);
+  }
+
+  @Test
+  void rejectsHumanIssueRunForSessionAcceptance() {
+    IssueRun humanRun = mock(IssueRun.class);
+    when(humanRun.getIssueId()).thenReturn(ISSUE_ID);
+    when(humanRun.getActorType()).thenReturn(IssueRunActorType.HUMAN);
+    when(issueRunRepository.getById(RUN_ID)).thenReturn(humanRun);
+    when(issueRunRepository.lockById(RUN_ID)).thenReturn(humanRun);
+
+    AcceptCommandsCommand runCmd = newSession(user(new TextMessageContent("run")));
+    assertThrows(IllegalArgumentException.class, () -> service.accept(ISSUE_RUN_OWNER, runCmd));
+  }
+
+  @Test
+  void wrapsDataIntegrityViolationInCreateOwnership() {
+    AcceptCommandsCommand projectCmd = newSession(user(new TextMessageContent("project")));
+    when(projectSessionRepository.bindSession(PROJECT_ID, SESSION_ID))
+        .thenThrow(new DataIntegrityViolationException("duplicate"));
+    AcceptancePreflight projectPreflight = acceptAndCapturePreflight(PROJECT_OWNER, projectCmd);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            projectPreflight.prepare(
+                transaction, new Session(SESSION_ID, "proj", NOW), projectCmd.commands()));
   }
 
   @Test
