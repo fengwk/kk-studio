@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
@@ -17,6 +18,8 @@ class DaemonSkillSourceConfigCodecTest {
   private static final UUID SOURCE_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
   private static final UUID OTHER_SOURCE_ID =
       UUID.fromString("22222222-2222-2222-2222-222222222222");
+  private static final UUID LETTER_SOURCE_ID =
+      UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   private static final String REVISION = "b".repeat(64);
 
   private final DaemonSkillSourceConfigCodec codec = new DaemonSkillSourceConfigCodec();
@@ -281,6 +284,232 @@ class DaemonSkillSourceConfigCodecTest {
             () -> codec.decode(json.replace("\"sourceVersion\":1", "\"sourceVersion\":\"1\"")));
 
     assertFalse(error.getMessage().contains("secret-token"), error.getMessage());
+  }
+
+  /** 测试解码未知来源类型时被严格拒绝。 */
+  @Test
+  void rejectsUnknownSourceTypeDuringDecode() {
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode(baseJson().replace("\"type\":\"path\"", "\"type\":\"unknown-type\"")));
+  }
+
+  /** 测试解码非规范大写 UUID 或非法 UUID 格式时被严格拒绝。 */
+  @Test
+  void rejectsNonCanonicalSourceIdDuringDecode() {
+    String uppercaseIdJson =
+        baseJson()
+            .replace(SOURCE_ID.toString(), LETTER_SOURCE_ID.toString().toUpperCase())
+            .replace(
+                "\"activeSourceIds\":[\"" + SOURCE_ID + "\"]",
+                "\"activeSourceIds\":[\"" + LETTER_SOURCE_ID.toString().toUpperCase() + "\"]");
+    assertThrows(DaemonProtocolException.class, () -> codec.decode(uppercaseIdJson));
+  }
+
+  /** 测试 activeSourceIds 边界：超过配额上限、非字符串元素、空白元素、格式错误及大写 UUID 均被拒绝。 */
+  @Test
+  void rejectsActiveSourceIdsBoundariesDuringDecode() {
+    StringBuilder sb = new StringBuilder("[");
+    for (int i = 0; i < DaemonSkillSourceConfig.MAX_ACTIVE_SOURCES + 1; i++) {
+      if (i > 0) {
+        sb.append(",");
+      }
+      sb.append("\"").append(UUID.randomUUID()).append("\"");
+    }
+    sb.append("]");
+    String oversized = baseJson().replace("[\"" + SOURCE_ID + "\"]", sb.toString());
+    assertThrows(DaemonProtocolException.class, () -> codec.decode(oversized));
+
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode(baseJson().replace("[\"" + SOURCE_ID + "\"]", "[123]")));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode(baseJson().replace("[\"" + SOURCE_ID + "\"]", "[\"   \"]")));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode(baseJson().replace("[\"" + SOURCE_ID + "\"]", "[\"not-a-uuid\"]")));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                baseJson()
+                    .replace(
+                        "[\"" + SOURCE_ID + "\"]",
+                        "[\"" + LETTER_SOURCE_ID.toString().toUpperCase() + "\"]")));
+  }
+
+  /** 测试 defaultSource 为非 boolean 类型（如字符串或数字）时在解码时被拒绝。 */
+  @Test
+  void rejectsInvalidDefaultSourceTypeDuringDecode() {
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                baseJson().replace("\"defaultSource\":false", "\"defaultSource\":\"false\"")));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode(baseJson().replace("\"defaultSource\":false", "\"defaultSource\":1")));
+  }
+
+  /** 测试 defaultSource 字段缺省或显式 null 时，正确归一化为 false。 */
+  @Test
+  void decodesOmittedOrNullDefaultSource() {
+    String omitted = baseJson().replace("\"defaultSource\":false,", "");
+    assertFalse(codec.decode(omitted).defaultSource());
+
+    String nullDefaultSource =
+        baseJson().replace("\"defaultSource\":false", "\"defaultSource\":null");
+    assertFalse(codec.decode(nullDefaultSource).defaultSource());
+  }
+
+  /** 测试必填文本字段（如 path）为空白文本时被拒绝。 */
+  @Test
+  void rejectsNonBlankTextViolationsDuringDecode() {
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decode(baseJson().replace("\"path\":\"/srv/skills\"", "\"path\":\"   \"")));
+  }
+
+  /** 测试模型层构造校验失败（如 ref 以 - 开头、非法 revision、来源类型互斥字段）在解码时被转译为 DaemonProtocolException。 */
+  @Test
+  void rejectsConfigValidationFailuresDuringDecode() {
+    String gitDashRef =
+        "{\"sourceId\":\""
+            + SOURCE_ID
+            + "\",\"sourceVersion\":1,\"sourceSetVersion\":1,\"type\":\"git\","
+            + "\"path\":null,\"defaultSource\":false,\"url\":\"https://git.example/repo.git\","
+            + "\"ref\":\"-invalid-flag\",\"scanPath\":null,\"currentlyAppliedRevision\":null,"
+            + "\"activeSourceIds\":[\""
+            + SOURCE_ID
+            + "\"]}";
+    assertThrows(DaemonProtocolException.class, () -> codec.decode(gitDashRef));
+
+    String gitBadRev =
+        "{\"sourceId\":\""
+            + SOURCE_ID
+            + "\",\"sourceVersion\":1,\"sourceSetVersion\":1,\"type\":\"git\","
+            + "\"path\":null,\"defaultSource\":false,\"url\":\"https://git.example/repo.git\","
+            + "\"ref\":null,\"scanPath\":null,\"currentlyAppliedRevision\":\"bad-revision-chars\","
+            + "\"activeSourceIds\":[\""
+            + SOURCE_ID
+            + "\"]}";
+    assertThrows(DaemonProtocolException.class, () -> codec.decode(gitBadRev));
+
+    String missingSelfActiveSource =
+        "{\"sourceId\":\""
+            + SOURCE_ID
+            + "\",\"sourceVersion\":1,\"sourceSetVersion\":1,\"type\":\"path\","
+            + "\"path\":\"/srv/skills\",\"defaultSource\":false,\"url\":null,\"ref\":null,"
+            + "\"scanPath\":null,\"currentlyAppliedRevision\":null,\"activeSourceIds\":[\""
+            + OTHER_SOURCE_ID
+            + "\"]}";
+    assertThrows(DaemonProtocolException.class, () -> codec.decode(missingSelfActiveSource));
+  }
+
+  /** 测试 DaemonSkillSourceConfig 模型的直接防御校验（负版本、配额、ref/rev/location 格式）。 */
+  @Test
+  void rejectsInvalidConfigModelParameters() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            DaemonSkillSourceConfig.path(
+                SOURCE_ID, -1, 0, "/srv/skills", false, Set.of(SOURCE_ID)));
+
+    Set<UUID> oversizedActiveSources = new HashSet<>();
+    oversizedActiveSources.add(SOURCE_ID);
+    for (int i = 0; i < DaemonSkillSourceConfig.MAX_ACTIVE_SOURCES; i++) {
+      oversizedActiveSources.add(UUID.randomUUID());
+    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            DaemonSkillSourceConfig.path(
+                SOURCE_ID, 0, 0, "/srv/skills", false, oversizedActiveSources));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            DaemonSkillSourceConfig.git(
+                SOURCE_ID,
+                0,
+                0,
+                "https://git.example/repo.git",
+                "-branch",
+                null,
+                null,
+                Set.of(SOURCE_ID)));
+
+    for (String invalidRev :
+        new String[] {
+          "short",
+          "g".repeat(40),
+          "A".repeat(40),
+          "g".repeat(64),
+          "A".repeat(64),
+          "a".repeat(39),
+          "a".repeat(41)
+        }) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              DaemonSkillSourceConfig.git(
+                  SOURCE_ID,
+                  0,
+                  0,
+                  "https://git.example/repo.git",
+                  "main",
+                  null,
+                  invalidRev,
+                  Set.of(SOURCE_ID)));
+    }
+
+    for (String invalidRef :
+        new String[] {
+          "",
+          "   ",
+          " main",
+          "main ",
+          "a".repeat(DaemonSkillSourceConfig.MAX_REFERENCE_CHARS + 1),
+          "ref\u0000val"
+        }) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              DaemonSkillSourceConfig.git(
+                  SOURCE_ID,
+                  0,
+                  0,
+                  "https://git.example/repo.git",
+                  invalidRef,
+                  null,
+                  null,
+                  Set.of(SOURCE_ID)));
+    }
+
+    for (String invalidPath :
+        new String[] {
+          "",
+          "   ",
+          " /srv",
+          "/srv ",
+          "/" + "a".repeat(DaemonSkillSourceConfig.MAX_LOCATION_CHARS),
+          "/srv\u0000dir"
+        }) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              DaemonSkillSourceConfig.path(SOURCE_ID, 0, 0, invalidPath, false, Set.of(SOURCE_ID)));
+    }
+  }
+
+  /** 测试 DaemonSkillSourceType 枚举的 wire 转换及未知类型拒绝行为。 */
+  @Test
+  void testsSkillSourceTypeFromWireValue() {
+    assertEquals(DaemonSkillSourceType.PATH, DaemonSkillSourceType.fromWireValue("path"));
+    assertEquals(DaemonSkillSourceType.GIT, DaemonSkillSourceType.fromWireValue("git"));
+    assertThrows(
+        IllegalArgumentException.class, () -> DaemonSkillSourceType.fromWireValue("unknown-type"));
   }
 
   private static String baseJson() {
