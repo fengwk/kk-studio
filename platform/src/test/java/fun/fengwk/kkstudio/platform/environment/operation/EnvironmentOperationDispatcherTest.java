@@ -1126,7 +1126,7 @@ class EnvironmentOperationDispatcherTest {
         .thenAnswer(
             invocation -> {
               coordinated.countDown();
-              return null;
+              return true;
             });
 
     dispatcher.start();
@@ -1151,7 +1151,7 @@ class EnvironmentOperationDispatcherTest {
         .thenAnswer(
             invocation -> {
               coordinated.countDown();
-              return null;
+              return true;
             });
 
     dispatcher.start();
