@@ -159,7 +159,7 @@ Profile locations 是：
 | Agent Model | `/api/ai/catalog/models`、`/{providerName}/{modelName...}` | page、create；路径参数复合 `(providerName, modelName)` update/delete，`modelName` 为可含 `/` 的尾部路径 |
 | Agent Definition | `/api/ai/catalog/agents` | page、create、update、expectedVersion delete |
 | Tool catalog | `GET /api/ai/catalog/tools` | Platform/Environment 可选工具目录投影 |
-| MCP Server | `/api/ai/mcp-servers`、`/{id}`、`/{id}/refresh` | CRUD、refresh 工具发现（expectedVersion 在 JSON body） |
+| MCP Server | `/api/ai/mcp-servers`、`/{id}`、`/{id}/config`、`/{id}/discover` | JSON-only CRUD；显式配置查询附带 `Cache-Control: no-store`；Remote/Local 发现统一返回 202（expectedVersion 在 JSON body） |
 | Chat | `/api/ai/chats` | Chat CRUD、Chat Session summary |
 | Harness command | `POST /api/harness/command-batches` | Chat/Canvas 唯一用户 command write path（202 accepted） |
 | Harness Session | `/api/harness/sessions/{sessionId}/{threads,entries}`、`PUT /api/harness/sessions/{sessionId}/name` | Thread summary 和 Session Entry tree 查询；Session 重命名（body `{name}`，返回权威 `HarnessSessionDTO`） |

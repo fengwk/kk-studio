@@ -25,7 +25,7 @@
 - 连接管理与寻址租约：活跃连接注册表、心跳超时判定、数据库路由租约（lease）及跨节点路由由 Platform 统一管理；本模块提供无状态的协议值对象。
 - 真实环境执行：本地文件系统操作、进程启动、LSP 服务及技能加载的具体实现由 Daemon 进程承载；本模块仅定义抽象执行接口与调用参数约束。
 - 工具编排与权限准入：面向模型的 Tool 包装、参数准入（admission）与权限决策由 Runtime 与 Contributor API 承载；本模块聚焦原子能力描述。
-- MCP 外部工具：平台在每次调用时通过 HTTP 访问外部 MCP 服务，采用独立于 Environment Daemon protocol 的接入路径。
+- MCP 外部工具：区分 Remote 与 Local 接入。Remote MCP 由 Platform 在 Backend 进程中通过 Streamable HTTP 独立调用；Local MCP 则基于 stdio 在其绑定的目标 Environment Daemon 中通过通用 capability 契约（`mcp.local.call` / `mcp.local.discover`）接入并执行，与文件和进程能力共享同一套 Daemon 会话通道。
 - 状态管理：Daemon 以进程内 journal 管理执行日志，Platform 管理连接与路由状态，Runtime 管理持久化调用快照；本模块提供这些边界共享的值契约。
 
 ## 依赖边界
