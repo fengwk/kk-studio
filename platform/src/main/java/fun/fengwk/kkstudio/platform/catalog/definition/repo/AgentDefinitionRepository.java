@@ -18,6 +18,8 @@ public interface AgentDefinitionRepository {
 
   boolean existsReferencingSubagent(String name);
 
+  boolean existsReferencingSkillSource(UUID environmentId, UUID sourceId);
+
   boolean existsByEnvironmentId(UUID environmentId);
 
   boolean create(AgentDefinition agentDefinition);

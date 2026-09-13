@@ -11,12 +11,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.skill.model.EnvironmentInventory;
 import fun.fengwk.kkstudio.platform.environment.skill.repo.SkillSourceRepository;
 import fun.fengwk.kkstudio.platform.environment.skill.repo.impl.mapper.EnvironmentSkillSourceMapper;
+import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -49,6 +53,9 @@ class SkillSourceCrudIntegrationTest extends PostgresSpringTestSupport {
   @Autowired private EnvironmentSkillSourceService sourceService;
   @Autowired private SkillSourceRepository skillSourceRepository;
   @Autowired private EnvironmentSkillSourceMapper sourceMapper;
+  @Autowired private AgentDefinitionRepository agentDefinitionRepository;
+  @Autowired private EnvironmentRepository environmentRepository;
+  @Autowired private TransactionTemplate transactionTemplate;
   @Autowired private JdbcTemplate jdbcTemplate;
 
   private EnvironmentId environmentId;
@@ -372,6 +379,175 @@ class SkillSourceCrudIntegrationTest extends PostgresSpringTestSupport {
         jdbcTemplate.queryForObject(
             "select count(*) from environment_skill where source_id = ?", Integer.class, sourceId);
     return count == null ? 0 : count;
+  }
+
+  private void ensureTestModel() {
+    jdbcTemplate.update(
+        "insert into agent_provider (name, provider_type, config, connection_generation_id) "
+            + "values ('test_p', 'openai', '{}'::jsonb, '00000000-0000-0000-0000-000000000001'::uuid) on conflict do nothing");
+    jdbcTemplate.update(
+        "insert into agent_model (provider_name, name, model_id, config) "
+            + "values ('test_p', 'test_m', 'test_m', '{}'::jsonb) on conflict do nothing");
+  }
+
+  /**
+   * 测试意图：验证 PostgreSQL 中基于 JSONB lateral elements 的 existsReferencingSkillSource 查询， 必须精确匹配
+   * environment_id 与 skills 数组中每个对象的 sourceId，不同环境或未被引用的 sourceId 返回 false。
+   */
+  @Test
+  void existsReferencingSkillSourceExactEnvironmentAndSourceMatching() {
+    ensureTestModel();
+    UUID env1 = environmentId.value();
+    UUID sourceA = UUID.randomUUID();
+    UUID sourceB = UUID.randomUUID();
+    UUID sourceC = UUID.randomUUID();
+
+    EnvironmentCreateDTO otherCreate = new EnvironmentCreateDTO();
+    otherCreate.setName("other-env-" + System.nanoTime());
+    UUID env2 = UUID.fromString(environmentService.create(otherCreate).getId());
+
+    // 在 env1 中创建 Agent，引用 sourceA 与 sourceB
+    String configJson =
+        "{\"toolIds\":[],\"skills\":["
+            + "{\"sourceId\":\""
+            + sourceA
+            + "\",\"name\":\"skill-a\"},"
+            + "{\"sourceId\":\""
+            + sourceB
+            + "\",\"name\":\"skill-b\"}"
+            + "],\"subagents\":[]}";
+    jdbcTemplate.update(
+        "insert into agent_definition (name, model_provider_name, model_name, environment_id, config) "
+            + "values (?, 'test_p', 'test_m', ?, ?::jsonb)",
+        "agent-in-env1",
+        env1,
+        configJson);
+
+    // 在 env2 中创建 Agent，引用空 skills
+    jdbcTemplate.update(
+        "insert into agent_definition (name, model_provider_name, model_name, environment_id, config) "
+            + "values (?, 'test_p', 'test_m', ?, ?::jsonb)",
+        "agent-in-env2",
+        env2,
+        "{\"toolIds\":[],\"skills\":[],\"subagents\":[]}");
+
+    // env1 应该精确命中 sourceA 与 sourceB，但不命中 sourceC
+    assertTrue(agentDefinitionRepository.existsReferencingSkillSource(env1, sourceA));
+    assertTrue(agentDefinitionRepository.existsReferencingSkillSource(env1, sourceB));
+    assertFalse(agentDefinitionRepository.existsReferencingSkillSource(env1, sourceC));
+
+    // env2 不应该命中 sourceA
+    assertFalse(agentDefinitionRepository.existsReferencingSkillSource(env2, sourceA));
+  }
+
+  /**
+   * 测试意图：验证当某个 SkillSource 被当前环境的 Agent 引用时，调用 sourceService.delete 必须抛出 AiInUseException 且数据不被删除。
+   */
+  @Test
+  void deleteSourceFailsWithAiInUseExceptionWhenReferencedByAgent() {
+    ensureTestModel();
+    EnvironmentSkillSourceDTO source = sourceService.list(environmentId).get(0);
+    UUID sourceId = UUID.fromString(source.getSourceId());
+
+    // 插入引用该 sourceId 的 AgentDefinition
+    String configJson =
+        "{\"toolIds\":[],\"skills\":[{\"sourceId\":\""
+            + sourceId
+            + "\",\"name\":\"default-skill\"}],\"subagents\":[]}";
+    jdbcTemplate.update(
+        "insert into agent_definition (name, model_provider_name, model_name, environment_id, config) "
+            + "values (?, 'test_p', 'test_m', ?, ?::jsonb)",
+        "agent-referencing-source-" + System.nanoTime(),
+        environmentId.value(),
+        configJson);
+
+    AiInUseException ex =
+        assertThrows(
+            AiInUseException.class,
+            () -> sourceService.delete(environmentId, sourceId, source.getVersion()));
+    assertTrue(ex.getMessage().contains("referenced by an agent"));
+
+    // 验证该 source 依然完好存在
+    assertNotNull(sourceService.get(environmentId, sourceId));
+  }
+
+  /**
+   * 测试意图：证明 Agent 引用校验（获取 inventory + source 锁）与来源删除（同样获取 inventory + source 锁） 在真实 PostgreSQL
+   * 上由于锁排他互斥，无法发生竞态穿透：持有锁时尝试删除会被阻塞，事务提交后删除检测到新引用确定性抛出 AiInUseException。
+   */
+  @Test
+  void concurrentAgentCreateReferenceAndSourceDeleteSerializeOnSharedLocks() throws Exception {
+    ensureTestModel();
+    EnvironmentSkillSourceDTO source = sourceService.list(environmentId).get(0);
+    UUID sourceId = UUID.fromString(source.getSourceId());
+
+    CountDownLatch lockAcquired = new CountDownLatch(1);
+    CountDownLatch deleteStarted = new CountDownLatch(1);
+
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      // 线程 1：模拟 Agent 保存流程获取锁
+      Future<Void> agentThread =
+          executor.submit(
+              () -> {
+                transactionTemplate.execute(
+                    status -> {
+                      // 按照引用锁协议取锁
+                      environmentRepository.lockForKeyShare(environmentId.value());
+                      skillSourceRepository.lockInventory(environmentId.value());
+                      skillSourceRepository.lockAllSources(environmentId.value());
+
+                      lockAcquired.countDown();
+
+                      // 等待删除线程已启动并进入等待锁状态
+                      try {
+                        deleteStarted.await(5, TimeUnit.SECONDS);
+                        Thread.sleep(100); // 确保删除线程已在 DB 等待行锁
+                      } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                      }
+
+                      // 在事务中插入引用了 sourceId 的 Agent
+                      String configJson =
+                          "{\"toolIds\":[],\"skills\":[{\"sourceId\":\""
+                              + sourceId
+                              + "\",\"name\":\"dev\"}],\"subagents\":[]}";
+                      jdbcTemplate.update(
+                          "insert into agent_definition (name, model_provider_name, model_name, environment_id, config) "
+                              + "values (?, 'test_p', 'test_m', ?, ?::jsonb)",
+                          "agent-concurrent-" + System.nanoTime(),
+                          environmentId.value(),
+                          configJson);
+                      return null;
+                    });
+                return null;
+              });
+
+      // 线程 2：尝试删除 source
+      Future<Throwable> deleteThread =
+          executor.submit(
+              () -> {
+                try {
+                  lockAcquired.await(5, TimeUnit.SECONDS);
+                  deleteStarted.countDown();
+                  sourceService.delete(environmentId, sourceId, source.getVersion());
+                  return null;
+                } catch (Throwable t) {
+                  return t;
+                }
+              });
+
+      agentThread.get(10, TimeUnit.SECONDS);
+      Throwable deleteError = deleteThread.get(10, TimeUnit.SECONDS);
+
+      assertNotNull(deleteError, "删除操作在持有锁的事务提交后必须被拒绝");
+      assertTrue(
+          deleteError instanceof AiInUseException,
+          "删除操作必须因检测到新创建的 Agent 引用而抛出 AiInUseException，但捕获到: " + deleteError);
+      assertNotNull(sourceService.get(environmentId, sourceId), "SkillSource 必须依然存在于数据库中");
+    } finally {
+      executor.shutdownNow();
+    }
   }
 
   private int countSources(UUID environmentValue) {

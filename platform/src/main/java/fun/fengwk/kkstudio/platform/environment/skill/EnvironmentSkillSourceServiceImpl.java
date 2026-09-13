@@ -7,12 +7,14 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDiagnostic;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceType;
+import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillSourceConfigValidator.NormalizedConfig;
 import fun.fengwk.kkstudio.platform.environment.skill.model.EnvironmentInventory;
 import fun.fengwk.kkstudio.platform.environment.skill.model.SkillSource;
 import fun.fengwk.kkstudio.platform.environment.skill.repo.SkillSourceRepository;
+import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -30,10 +32,10 @@ import java.util.UUID;
 /**
  * Skill 来源配置 CRUD 实现。
  *
- * <p>写事务按固定顺序取锁：{@code environment} 行（{@code for key share}）→ {@code environment_skill_source} 行（按
- * {@code source_id} 升序 {@code for update}）。key share 允许并发的来源读取与其它 key share 事务共存，但会阻塞正在删除该
- * Environment 的冲突事务，因此不会出现"来源写入落在正在删除的环境上"。<b>不涉及</b> {@code environment_inventory} 行锁的
- * 地方（get/list）完全不取锁。
+ * <p>写事务按固定顺序取锁：{@code environment} 行（{@code for key share}）→ {@code environment_inventory}
+ * 行（{@code for update}） → 该 Environment 的全部 {@code environment_skill_source} 行（按 {@code source_id}
+ * 升序 {@code for update}）。 key share 允许并发的来源读取与其它 key share 事务共存，但会阻塞正在删除该 Environment 的冲突事务； 与
+ * inventory 的排他锁协同，保证来源变更、版本推进、Agent 技能引用校验与删除操作按全局一致的锁顺序互斥，杜绝死锁与并发悬空引用。 只读查询（get/list）完全不取锁。
  */
 @AllArgsConstructor
 @Service
@@ -41,6 +43,7 @@ public class EnvironmentSkillSourceServiceImpl implements EnvironmentSkillSource
 
   private final EnvironmentRepository environmentRepository;
   private final SkillSourceRepository skillSourceRepository;
+  private final AgentDefinitionRepository agentDefinitionRepository;
 
   @Override
   public List<EnvironmentSkillSourceDTO> list(EnvironmentId environmentId) {
@@ -157,6 +160,11 @@ public class EnvironmentSkillSourceServiceImpl implements EnvironmentSkillSource
           sourceId.toString(),
           expectedVersion,
           CatalogVersions.format(current.getVersion()));
+    }
+    if (agentDefinitionRepository.existsReferencingSkillSource(environmentId.value(), sourceId)) {
+      throw new AiInUseException(
+          SkillSourceConfigValidator.RESOURCE,
+          "skill source is referenced by an agent: " + sourceId);
     }
     if (!skillSourceRepository.deleteSourceByVersion(environmentId.value(), sourceId, expected)) {
       throw versionConflict(environmentId, sourceId, expectedVersion);

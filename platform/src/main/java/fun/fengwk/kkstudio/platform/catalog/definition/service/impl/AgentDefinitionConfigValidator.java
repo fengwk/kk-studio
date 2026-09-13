@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 
 import java.util.List;
 import java.util.Objects;
@@ -46,10 +47,14 @@ final class AgentDefinitionConfigValidator {
     }
   }
 
-  private static void validateSkills(List<String> names) {
-    for (String name : names) {
-      if (name.length() > 128) {
-        throw new IllegalArgumentException("agent skill name must be <= 128 characters: " + name);
+  private static void validateSkills(List<AgentSkillRefDTO> refs) {
+    if (refs == null) {
+      return;
+    }
+    for (AgentSkillRefDTO ref : refs) {
+      if (ref != null && ref.getName() != null && ref.getName().length() > 128) {
+        throw new IllegalArgumentException(
+            "agent skill name must be <= 128 characters: " + ref.getName());
       }
     }
   }

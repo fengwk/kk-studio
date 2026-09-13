@@ -10,13 +10,16 @@ import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /** Agent Definition 结构化配置的唯一持久化 JSON 边界。 */
 @Component
@@ -75,8 +78,65 @@ public class AgentDefinitionConfigCodec {
       throw new IllegalArgumentException("agent definition config is required");
     }
     validateToolIds(config.getToolIds());
-    validateNames(config.getSkills(), "skills");
+    validateSkillRefs(config.getSkills());
     validateNames(config.getSubagents(), "subagents");
+  }
+
+  private static void validateSkillRefs(List<AgentSkillRefDTO> refs) {
+    if (refs == null) {
+      throw new IllegalArgumentException("agent definition config skills is required");
+    }
+    Set<String> seen = new HashSet<>();
+    for (AgentSkillRefDTO ref : refs) {
+      if (ref == null) {
+        throw new IllegalArgumentException(
+            "agent definition config skills must not contain null elements");
+      }
+      String sourceId = ref.getSourceId();
+      if (sourceId == null || sourceId.isBlank()) {
+        throw new IllegalArgumentException(
+            "agent definition config skills must contain non-blank sourceId");
+      }
+      UUID parsedSourceId;
+      try {
+        parsedSourceId = UUID.fromString(sourceId);
+      } catch (IllegalArgumentException error) {
+        throw new IllegalArgumentException(
+            "agent definition config skills sourceId must be a canonical UUID: " + sourceId, error);
+      }
+      if (!parsedSourceId.toString().equals(sourceId)) {
+        throw new IllegalArgumentException(
+            "agent definition config skills sourceId must be a canonical UUID: " + sourceId);
+      }
+      String name = ref.getName();
+      if (name == null || name.isBlank()) {
+        throw new IllegalArgumentException(
+            "agent definition config skills must contain non-blank names");
+      }
+      if (!name.equals(name.trim())) {
+        throw new IllegalArgumentException(
+            "agent definition config skills must not contain surrounding whitespace");
+      }
+      if (name.length() > 128
+          || name.indexOf(':') >= 0
+          || name.indexOf('/') >= 0
+          || name.indexOf('@') >= 0
+          || name.indexOf('\\') >= 0) {
+        throw new IllegalArgumentException(
+            "agent definition config skills must contain short names only: " + name);
+      }
+      try {
+        DaemonSkillDescriptor.canonicalName(name);
+      } catch (IllegalArgumentException error) {
+        throw new IllegalArgumentException(
+            "agent definition config skills must contain canonical short names: " + name, error);
+      }
+      String identity = sourceId + ":" + name;
+      if (!seen.add(identity)) {
+        throw new IllegalArgumentException(
+            "agent definition config skills must not contain duplicates: " + identity);
+      }
+    }
   }
 
   private static void validateToolIds(List<String> values) {

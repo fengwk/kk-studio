@@ -66,6 +66,24 @@ public interface AgentDefinitionMapper extends BaseMapper {
       """)
   boolean existsReferencingSubagent(@Param("name") String name);
 
+  @Select(
+      """
+      select exists (
+          select 1
+          from agent_definition,
+               lateral jsonb_array_elements(
+                   case when jsonb_typeof(config -> 'skills') = 'array'
+                        then config -> 'skills'
+                        else '[]'::jsonb
+                   end
+               ) as skill_ref
+          where environment_id = #{environmentId}
+            and skill_ref ->> 'sourceId' = cast(#{sourceId} as text)
+      )
+      """)
+  boolean existsReferencingSkillSource(
+      @Param("environmentId") UUID environmentId, @Param("sourceId") UUID sourceId);
+
   @Select("select count(1) > 0 from agent_definition where environment_id = #{environmentId}")
   boolean existsByEnvironmentId(@Param("environmentId") UUID environmentId);
 
