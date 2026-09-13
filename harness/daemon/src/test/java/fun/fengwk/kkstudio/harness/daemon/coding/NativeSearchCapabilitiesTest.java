@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -331,9 +330,9 @@ class NativeSearchCapabilitiesTest {
     assertFalse(GlobPattern.compile("foo**bar").matches("foo/deep/bar"));
   }
 
-  /** limit、500 code-point 行截断与 preview 上限都必须保留完整 resource。 */
+  /** 验证 limit 与 500 code-point 行截断保持有界内联文本，不附加无意义完整 resource。 */
   @Test
-  void searchLimitsAttachCompleteDeterministicallyOrderedResources() throws Exception {
+  void searchLimitsStayInlineAndTruncateLongLines() throws Exception {
     InMemoryResourceStore store = new InMemoryResourceStore();
     String longLine = "😀".repeat(600);
     write("a.txt", longLine + "\n");
@@ -349,11 +348,7 @@ class NativeSearchCapabilitiesTest {
                 + "}");
     assertTrue(text(grepResult).contains("line truncated to 500 chars"));
     assertTrue(text(grepResult).contains("1 results limit reached"));
-    ResourceResultContent grepResource = resource(grepResult);
-    String completeGrep =
-        new String(store.get(grepResource.resource().sha256()), StandardCharsets.UTF_8);
-    assertTrue(completeGrep.startsWith("a.txt:1:" + longLine));
-    assertTrue(completeGrep.endsWith("b.txt:1:needle\nc.txt:1:needle"));
+    assertFalse(grepResult.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
 
     EnvironmentCapabilityResult findResult =
         invoke(
@@ -362,33 +357,7 @@ class NativeSearchCapabilitiesTest {
                 + json(environmentRoot.toString())
                 + "}");
     assertTrue(text(findResult).contains("1 results limit reached"));
-    String completeFind =
-        new String(store.get(resource(findResult).resource().sha256()), StandardCharsets.UTF_8);
-    assertEquals("a.txt\nb.txt\nc.txt", completeFind);
-
-    EnvironmentCapabilityResult previewLimitedGrep =
-        invoke(
-            grep(config(1, 20, store)),
-            "{\"pattern\":\"needle\",\"path\":\".\",\"limit\":10,\"workdir\":"
-                + json(environmentRoot.toString())
-                + "}");
-    assertTrue(text(previewLimitedGrep).contains("configured preview limits"));
-    assertEquals(
-        "b.txt:1:needle\nc.txt:1:needle",
-        new String(
-            store.get(resource(previewLimitedGrep).resource().sha256()), StandardCharsets.UTF_8));
-
-    EnvironmentCapabilityResult previewLimitedFind =
-        invoke(
-            find(config(1, 5, store)),
-            "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":10,\"workdir\":"
-                + json(environmentRoot.toString())
-                + "}");
-    assertTrue(text(previewLimitedFind).contains("Output truncated"));
-    assertEquals(
-        "a.txt\nb.txt\nc.txt",
-        new String(
-            store.get(resource(previewLimitedFind).resource().sha256()), StandardCharsets.UTF_8));
+    assertFalse(findResult.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
   }
 
   /** 搜索控制器使用可控时钟验证 deadline，并用 cancellation supplier 验证主动取消检查。 */

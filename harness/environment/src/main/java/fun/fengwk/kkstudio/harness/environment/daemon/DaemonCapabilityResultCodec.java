@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
@@ -84,7 +85,16 @@ public final class DaemonCapabilityResultCodec {
   }
 
   private static final Set<String> RESOURCE_FIELDS =
-      Set.of("type", "uri", "mediaType", "name", "size", "sha256", "contentBase64");
+      Set.of(
+          "type",
+          "uri",
+          "mediaType",
+          "name",
+          "size",
+          "sha256",
+          "contentBase64",
+          "preview",
+          "textMetadata");
 
   /**
    * 编码 PARTIAL 结果：只允许 text/json 内容；任何 {@link ResourceResultContent}/{@link BinaryResultContent} 都在
@@ -306,7 +316,7 @@ public final class DaemonCapabilityResultCodec {
       DaemonResourceRef dRef =
           new DaemonResourceRef(ref.uri(), ref.mediaType(), ref.name(), ref.size(), ref.sha256());
       byte[] bytes = readAndVerify(store, dRef, ref);
-      writeResource(wireContent, ref, bytes);
+      writeResource(wireContent, ref, bytes, resource.preview(), resource.textMetadata());
     } else if (content instanceof BinaryResultContent binary) {
       ResourceRef ref;
       try {
@@ -317,7 +327,7 @@ public final class DaemonCapabilityResultCodec {
       } catch (IOException error) {
         throw new DaemonProtocolException("cannot store binary result content", error);
       }
-      writeResource(wireContent, ref, binary.content());
+      writeResource(wireContent, ref, binary.content(), null, null);
     } else {
       throw new DaemonProtocolException("unsupported result content: " + content.getClass());
     }
@@ -359,9 +369,40 @@ public final class DaemonCapabilityResultCodec {
         long size = requiredLong(obj, "size", context);
         String sha256 = requiredText(obj, "sha256", context);
         String contentBase64 = requiredString(obj, "contentBase64", context);
+        String preview = null;
+        JsonNode previewNode = obj.get("preview");
+        if (previewNode != null && !previewNode.isNull()) {
+          if (!previewNode.isTextual()) {
+            throw new DaemonProtocolException(context + " 'preview' must be a string or null");
+          }
+          preview = previewNode.textValue();
+          if (ResourceRef.utf8LengthUpTo(preview, "preview", ResourceRef.MAX_PREVIEW_UTF8_BYTES)
+              > ResourceRef.MAX_PREVIEW_UTF8_BYTES) {
+            throw new DaemonProtocolException(
+                context
+                    + " 'preview' exceeds "
+                    + ResourceRef.MAX_PREVIEW_UTF8_BYTES
+                    + " UTF-8 bytes");
+          }
+        }
+        TextArtifactMetadata textMetadata = null;
+        JsonNode metaNode = obj.get("textMetadata");
+        if (metaNode != null && !metaNode.isNull()) {
+          ObjectNode metaObj = requiredObject(metaNode, context + ".textMetadata");
+          rejectUnknownFields(
+              metaObj, Set.of("totalBytes", "totalLines"), context + ".textMetadata");
+          long totalBytes = requiredLong(metaObj, "totalBytes", context + ".textMetadata");
+          long totalLines = requiredLong(metaObj, "totalLines", context + ".textMetadata");
+          if (totalBytes < 0 || totalLines < 0) {
+            throw new DaemonProtocolException(
+                context + ".textMetadata totalBytes and totalLines must not be negative");
+          }
+          textMetadata = new TextArtifactMetadata(totalBytes, totalLines);
+        }
+        ResourceRef ref;
         // 先完成全量字段/URI 校验，再进行任何 Base64 分配。
         try {
-          new ResourceRef(uri, mediaType, name, size, sha256);
+          ref = new ResourceRef(uri, mediaType, name, size, sha256);
         } catch (IllegalArgumentException error) {
           throw new DaemonProtocolException(context + " resource fields are invalid", error);
         }
@@ -401,7 +442,8 @@ public final class DaemonCapabilityResultCodec {
           throw new DaemonProtocolException(
               context + " 'sha256' does not match decoded 'contentBase64' bytes");
         }
-        return new DecodedContent(new BinaryResultContent(mediaType, bytes), bytes.length);
+        return new DecodedContent(
+            new ResourceResultContent(ref, preview, textMetadata), bytes.length);
       }
       default -> throw new DaemonProtocolException(context + " unknown content type: " + type);
     }
@@ -433,7 +475,12 @@ public final class DaemonCapabilityResultCodec {
     return bytes;
   }
 
-  private void writeResource(ObjectNode wireContent, ResourceRef ref, byte[] bytes) {
+  private void writeResource(
+      ObjectNode wireContent,
+      ResourceRef ref,
+      byte[] bytes,
+      String preview,
+      TextArtifactMetadata textMetadata) {
     if (ref.size() == null || ref.sha256() == null) {
       throw new DaemonProtocolException(
           "resource ref must declare size and sha256 for the daemon wire: " + ref.uri());
@@ -457,6 +504,14 @@ public final class DaemonCapabilityResultCodec {
     putNullableLong(wireContent, "size", ref.size());
     putNullableText(wireContent, "sha256", ref.sha256());
     wireContent.put("contentBase64", Base64.getEncoder().encodeToString(bytes));
+    if (preview != null) {
+      wireContent.put("preview", preview);
+    }
+    if (textMetadata != null) {
+      ObjectNode meta = wireContent.putObject("textMetadata");
+      meta.put("totalBytes", textMetadata.totalBytes());
+      meta.put("totalLines", textMetadata.totalLines());
+    }
   }
 
   private JsonNode readDetails(String detailsJson) {

@@ -9,9 +9,9 @@
  * <p>{@code grep}/{@code find} 使用 Java NIO 原生遍历，不跟随符号链接，并由包内规则实现稳定排序、glob 与分层 {@code .gitignore}
  * 语义；它们不启动外部搜索命令。
  *
- * <p>稳定的能力集合：{@code fs.read}、{@code fs.write}、{@code fs.apply-edit}、{@code process.exec}、{@code
- * fs.search}、{@code fs.find}、{@code lsp.goto-definition}、{@code lsp.workspace-symbols}、{@code
- * lsp.java-decompile}。{@code fs.write} 与 {@code fs.apply-edit} 只处理 UTF-8 文本并保留既有编码、BOM 与行尾表示；LSP
+ * <p>稳定的能力集合：{@code fs.read}、{@code fs.write}、{@code fs.edit}、{@code process.exec}、{@code
+ * fs.grep}、{@code fs.find}、{@code lsp.goto-definition}、{@code lsp.workspace-symbols}、{@code
+ * lsp.java-decompile}。{@code fs.write} 与 {@code fs.edit} 只处理 UTF-8 文本并保留既有编码、BOM 与行尾表示；LSP
  * capabilities 使用可选的本机命令 bridge（{@code kkstudio.daemon.lsp-bridge}）； 未配置时返回明确的不可用错误，但 {@code
  * lsp_java_decompile} 对可解析的 class 目标可回退到 {@code javap}。
  *

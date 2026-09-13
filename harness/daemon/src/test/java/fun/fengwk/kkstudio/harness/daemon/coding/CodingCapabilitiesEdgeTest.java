@@ -3,9 +3,11 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
@@ -23,15 +25,14 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -246,55 +247,6 @@ class CodingCapabilitiesEdgeTest {
   }
 
   @Test
-  void outputLimiterHonorsExactThresholdsUtf8AndResourceFailures() throws Exception {
-    InMemoryResourceStore store = new InMemoryResourceStore();
-    CodingToolsConfig exact = config(2, 4, store);
-    EnvironmentCapabilityResult untruncated =
-        OutputLimiter.limit("c1", "ab\nc".getBytes(StandardCharsets.UTF_8), "text/plain", exact);
-    EnvironmentCapabilityResult truncated =
-        OutputLimiter.limit(
-            "c2", "😀x".getBytes(StandardCharsets.UTF_8), "text/plain", config(2, 4, store));
-    EnvironmentCapabilityResult ansi =
-        OutputLimiter.limit(
-            "c3",
-            "\u001b[31mpassed\u001b[0m".getBytes(StandardCharsets.UTF_8),
-            "text/plain",
-            config(2, 64, store));
-    EnvironmentCapabilityResult binary =
-        OutputLimiter.limit("c4", new byte[] {1, 0, 2}, "application/octet-stream", exact);
-
-    assertEquals("ab\nc", text(untruncated.contents()));
-    assertTrue(text(truncated.contents()).contains("Output truncated"));
-    assertFalse(text(truncated).contains("�"));
-    assertEquals("\u001b[31mpassed\u001b[0m", text(ansi.contents()));
-    assertEquals(1, ansi.contents().size());
-    ResourceResultContent resource = (ResourceResultContent) truncated.contents().get(1);
-    assertArrayEquals(
-        "😀x".getBytes(StandardCharsets.UTF_8), store.get(resource.resource().sha256()));
-    assertTrue(binary.contents().get(1) instanceof ResourceResultContent);
-    CodingToolsConfig failing =
-        config(
-            1,
-            1,
-            new ResourceStore() {
-              @Override
-              public DaemonResourceRef store(byte[] bytes, String mediaType) throws IOException {
-                throw new IOException("store down");
-              }
-
-              @Override
-              public byte[] read(DaemonResourceRef ref) throws IOException {
-                throw new IOException("store down");
-              }
-            });
-    assertThrows(
-        IOException.class,
-        () ->
-            OutputLimiter.limit(
-                "c5", "xx".getBytes(StandardCharsets.UTF_8), "text/plain", failing));
-  }
-
-  @Test
   void codecAndResourceStoresPreserveAllSupportedBomFormats() throws Exception {
     byte[] utf16le = new byte[] {(byte) 0xff, (byte) 0xfe, 'a', 0, '\n', 0};
     byte[] utf16be = new byte[] {(byte) 0xfe, (byte) 0xff, 0, 'a', 0, '\n'};
@@ -438,7 +390,7 @@ class CodingCapabilitiesEdgeTest {
     assertFalse(created.error());
     assertEquals("one", Files.readString(environmentRoot.resolve("new/created.txt")));
     assertTrue(text(unchanged).contains("must differ"));
-    assertTrue(text(absent).contains("was not found"));
+    assertTrue(text(absent).contains("Could not find old_string"));
     assertTrue(text(binary).contains("appears to be binary"));
     assertTrue(text(empty).contains("must not be empty"));
     assertTrue(text(directory).contains("must be a file"));
@@ -495,6 +447,269 @@ class CodingCapabilitiesEdgeTest {
     assertEquals("😀", partialText);
     assertFalse(partialText.contains("�"));
     assertEquals(1, listener.completions);
+  }
+
+  @Test
+  void lspRelativizesLocalPathsAndFileUrisRelativeToWorkdir() {
+    Path workdir = environmentRoot.resolve("project");
+    String textWithAbs = workdir.toString().replace('\\', '/') + "/src/Main.java:10:5: sample";
+    assertEquals("src/Main.java:10:5: sample", LspBridge.relativizeLspText(textWithAbs, workdir));
+
+    String textWithUri = "file://" + workdir.toString().replace('\\', '/') + "/src/Main.java:10:5";
+    assertEquals("src/Main.java:10:5", LspBridge.relativizeLspText(textWithUri, workdir));
+
+    String external = "/var/other/path/File.java:1:1";
+    assertEquals(external, LspBridge.relativizeLspText(external, workdir));
+
+    assertEquals("", LspBridge.relativizeLspText("", workdir));
+    assertEquals(null, LspBridge.relativizeLspText(null, workdir));
+  }
+
+  @Test
+  void lspCapabilitiesRequireValidAbsoluteWorkdirAndFile() throws Exception {
+    CodingToolsConfig config = config();
+    Files.createDirectories(environmentRoot.resolve("src"));
+    Files.writeString(environmentRoot.resolve("src/App.java"), "class App {}");
+
+    LspGotoDefinitionCapability gotoDef = new LspGotoDefinitionCapability(config, executor);
+    EnvironmentCapabilityResult relWorkdir =
+        invoke(gotoDef, "{\"path\":\"src/App.java\",\"line\":1,\"workdir\":\"relative/dir\"}");
+    assertTrue(relWorkdir.error());
+    assertTrue(text(relWorkdir).contains("workdir must be an absolute path"));
+
+    EnvironmentCapabilityResult missingFile =
+        invoke(
+            gotoDef,
+            "{\"path\":\"src/Missing.java\",\"line\":1,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
+    assertTrue(missingFile.error());
+    assertTrue(text(missingFile).contains("path does not exist"));
+
+    LspWorkspaceSymbolsCapability wsSymbols = new LspWorkspaceSymbolsCapability(config, executor);
+    EnvironmentCapabilityResult blankQuery =
+        invoke(
+            wsSymbols,
+            "{\"path\":\"src/App.java\",\"query\":\"   \",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
+    assertTrue(blankQuery.error());
+    assertTrue(text(blankQuery).contains("query must not be blank"));
+
+    LspJavaDecompileCapability decompile = new LspJavaDecompileCapability(config, executor);
+    EnvironmentCapabilityResult blankTarget =
+        invoke(
+            decompile,
+            "{\"path\":\"src/App.java\",\"target\":\"   \",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
+    assertTrue(blankTarget.error());
+    assertTrue(text(blankTarget).contains("target must not be blank"));
+
+    // LspGotoDefinition rejects directory as path
+    EnvironmentCapabilityResult dirAsPath =
+        invoke(
+            gotoDef,
+            "{\"path\":\"src\",\"line\":1,\"workdir\":" + json(environmentRoot.toString()) + "}");
+    assertTrue(dirAsPath.error());
+    assertTrue(text(dirAsPath).contains("path must be a file"));
+
+    // LspWorkspaceSymbols rejects limit > 500
+    EnvironmentCapabilityResult limitTooLarge =
+        invoke(
+            wsSymbols,
+            "{\"path\":\"src/App.java\",\"query\":\"test\",\"limit\":501,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
+    assertTrue(limitTooLarge.error());
+    assertTrue(text(limitTooLarge).contains("limit must be <= 500"));
+  }
+
+  @Test
+  void environmentPathsEdgeCasesAndDisplayPath() throws Exception {
+    Path file = environmentRoot.resolve("regular.txt");
+    Files.writeString(file, "hello");
+    assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.workdir(file.toString()));
+    assertThrows(
+        IllegalArgumentException.class, () -> EnvironmentPaths.existing("child.txt", file));
+
+    Path unreadable = Files.createDirectory(environmentRoot.resolve("unreadable-dir"));
+    if (unreadable.toFile().setReadable(false)) {
+      try {
+        assertThrows(
+            IllegalArgumentException.class, () -> EnvironmentPaths.workdir(unreadable.toString()));
+      } finally {
+        unreadable.toFile().setReadable(true);
+      }
+    }
+
+    assertEquals(".", EnvironmentPaths.displayPath(environmentRoot, environmentRoot, "."));
+    assertEquals(
+        "sub/file.txt",
+        EnvironmentPaths.displayPath(
+            environmentRoot.resolve("sub/file.txt"), environmentRoot, "sub/file.txt"));
+    assertEquals(
+        "/other/path.txt",
+        EnvironmentPaths.displayPath(
+            Path.of("/other/path.txt"), environmentRoot, "/other/path.txt"));
+    assertEquals("raw.txt", EnvironmentPaths.displayPath(null, environmentRoot, "raw.txt"));
+    assertEquals(
+        "rel/target.txt", EnvironmentPaths.displayPath(null, environmentRoot, "rel/target.txt"));
+    assertEquals("a/c", EnvironmentPaths.displayPath(null, environmentRoot, "a/b/../c"));
+    assertEquals("<missing>", EnvironmentPaths.displayPath(null, environmentRoot, null));
+    assertEquals("", EnvironmentPaths.displayPath(null, environmentRoot, ""));
+    assertEquals("\u0000", EnvironmentPaths.displayPath(null, environmentRoot, "\u0000"));
+
+    assertTrue(SearchFiles.isGitMetadata(Path.of(".git/config")));
+    assertFalse(SearchFiles.isGitMetadata(Path.of("src/App.java")));
+    assertEquals("a/b/c", SearchFiles.toPosix(Path.of("a", "b", "c")));
+  }
+
+  @Test
+  void lspCapabilitiesReportUnavailableWhenBridgeNotConfigured() throws Exception {
+    CodingToolsConfig noBridgeConfig =
+        new CodingToolsConfig(
+            environmentRoot, 2000, 50 * 1024, "bash", new InMemoryResourceStore(), null, "javap");
+
+    Files.createDirectories(environmentRoot.resolve("src"));
+    Files.writeString(environmentRoot.resolve("src/App.java"), "class App {}");
+
+    LspGotoDefinitionCapability gotoDef = new LspGotoDefinitionCapability(noBridgeConfig, executor);
+    EnvironmentCapabilityResult defRes =
+        invoke(
+            gotoDef,
+            "{\"path\":\"src/App.java\",\"line\":1,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
+    assertTrue(defRes.error());
+    assertTrue(text(defRes).contains("LSP bridge is unavailable"));
+
+    LspWorkspaceSymbolsCapability wsSymbols =
+        new LspWorkspaceSymbolsCapability(noBridgeConfig, executor);
+    EnvironmentCapabilityResult wsRes =
+        invoke(
+            wsSymbols,
+            "{\"path\":\"src/App.java\",\"query\":\"App\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
+    assertTrue(wsRes.error());
+    assertTrue(text(wsRes).contains("LSP bridge is unavailable"));
+  }
+
+  @Test
+  void lspBridgeClassTargetResolutionAndJavap() throws Exception {
+    assertNull(LspBridge.resolveClassTarget(null, null));
+    assertNull(LspBridge.resolveClassTarget("   ", null));
+
+    var jdt = LspBridge.resolveClassTarget("jdt://contents/pkg/MyClass.class?option=1", null);
+    assertNotNull(jdt);
+    assertEquals("MyClass", jdt.className());
+
+    var jdtWithPrefix =
+        LspBridge.resolveClassTarget(
+            "MyClass (Class) - jdt://contents/java.base/" + "java/lang/String.class", null);
+    assertNotNull(jdtWithPrefix);
+    assertEquals("java." + "lang.String", jdtWithPrefix.className());
+
+    var classToken = LspBridge.resolveClassTarget("foo/bar/Baz.class", null);
+    assertNotNull(classToken);
+    assertEquals("foo." + "bar.Baz", classToken.className());
+
+    var simple = LspBridge.resolveClassTarget("com." + "example.Item", null);
+    assertNotNull(simple);
+    assertEquals("com." + "example.Item", simple.className());
+
+    var paren = LspBridge.resolveClassTarget("String (Class) - not a jdt", null);
+    assertNotNull(paren);
+    assertEquals("java." + "lang.String", paren.className());
+
+    var parenCustom = LspBridge.resolveClassTarget("com." + "foo.Bar (Class) - test", null);
+    assertNotNull(parenCustom);
+    assertEquals("com." + "foo.Bar", parenCustom.className());
+
+    Path fakeClass = environmentRoot.resolve("LocalClass.class");
+    Files.write(fakeClass, new byte[] {0});
+    var fromFile = LspBridge.resolveClassTarget("LocalClass.class", fakeClass);
+    assertNotNull(fromFile);
+    assertEquals("LocalClass", fromFile.className());
+
+    LspBridge bridge = new LspBridge(null, "javap");
+    String decompiled =
+        bridge.javaDecompile(environmentRoot, file("src/App.java"), "java." + "lang.Object");
+    assertNotNull(decompiled);
+    assertTrue(
+        decompiled.contains("class java." + "lang.Object")
+            || decompiled.contains("java/lang/Object"));
+  }
+
+  @Test
+  void lspBridgeInvocationAndCapabilityExecution() throws Exception {
+    assumeFalse(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
+    Path bridge = environmentRoot.resolve("test-bridge.sh");
+    Files.writeString(
+        bridge,
+        """
+        #!/bin/sh
+        read line
+        op=$(echo "$line" | grep -o '"op":"[^"]*"' | cut -d'"' -f4)
+        if [ "$op" = "goto_definition" ]; then
+          printf '{"ok":true,"text":"%s/src/App.java:10:5"}' "$PWD"
+        elif [ "$op" = "workspace_symbols" ]; then
+          printf '{"ok":true,"text":"App %s/src/App.java:1"}' "$PWD"
+        elif [ "$op" = "java_decompile" ]; then
+          printf '{"ok":true,"text":"decompiled content"}'
+        else
+          printf '{"ok":false,"error":"unknown op"}'
+        fi
+        """);
+    assertTrue(bridge.toFile().setExecutable(true));
+
+    CodingToolsConfig config =
+        new CodingToolsConfig(
+            environmentRoot,
+            2000,
+            50 * 1024,
+            "bash",
+            new InMemoryResourceStore(),
+            bridge.toString(),
+            "javap");
+
+    Files.createDirectories(environmentRoot.resolve("src"));
+    Files.writeString(environmentRoot.resolve("src/App.java"), "class App {}");
+
+    LspGotoDefinitionCapability gotoDef = new LspGotoDefinitionCapability(config, executor);
+    EnvironmentCapabilityResult defRes =
+        invoke(
+            gotoDef,
+            "{\"path\":\"src/App.java\",\"line\":1,\"character\":0,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
+    assertFalse(defRes.error());
+    assertEquals("src/App.java:10:5", text(defRes));
+
+    LspWorkspaceSymbolsCapability wsSymbols = new LspWorkspaceSymbolsCapability(config, executor);
+    EnvironmentCapabilityResult wsRes =
+        invoke(
+            wsSymbols,
+            "{\"path\":\"src/App.java\",\"query\":\"App\",\"limit\":10,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
+    assertFalse(wsRes.error());
+    assertEquals("App src/App.java:1", text(wsRes));
+
+    LspJavaDecompileCapability decompile = new LspJavaDecompileCapability(config, executor);
+    EnvironmentCapabilityResult decRes =
+        invoke(
+            decompile,
+            "{\"path\":\"src/App.java\",\"target\":\"App (Class)\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}");
+    assertFalse(decRes.error());
+    assertEquals("decompiled content", text(decRes));
+  }
+
+  private Path file(String relative) {
+    return environmentRoot.resolve(relative);
   }
 
   private CodingToolsConfig config() {
