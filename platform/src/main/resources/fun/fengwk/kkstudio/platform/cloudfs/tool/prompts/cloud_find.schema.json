@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "pattern": {
+      "type": "string",
+      "description": "Glob pattern to match paths, e.g. '*.md', '**/*.json', or 'sub/**/*.txt'."
+    },
+    "path": {
+      "type": "string",
+      "description": "CFS canonical absolute directory path to search from."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum number of results to return. Defaults to 200."
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "description": "Positive timeout in seconds. Defaults to 15."
+    }
+  },
+  "required": [
+    "pattern",
+    "path"
+  ],
+  "additionalProperties": false
+}
