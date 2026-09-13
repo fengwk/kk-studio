@@ -88,7 +88,7 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
         "environment.edit",
         BuiltinToolIds.EDIT,
         "edit",
-        EnvironmentCapabilityIds.FS_APPLY_EDIT,
+        EnvironmentCapabilityIds.FS_EDIT,
         ToolSideEffect.NON_IDEMPOTENT);
     registerEnvironment(
         registrar,
@@ -102,7 +102,7 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
         "environment.grep",
         BuiltinToolIds.GREP,
         "grep",
-        EnvironmentCapabilityIds.FS_SEARCH,
+        EnvironmentCapabilityIds.FS_GREP,
         ToolSideEffect.READ_ONLY);
     registerEnvironment(
         registrar,

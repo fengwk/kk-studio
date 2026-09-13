@@ -103,4 +103,32 @@ class ResultContentTest {
         IllegalArgumentException.class, () -> new BinaryResultContent(null, new byte[] {1}));
     assertThrows(NullPointerException.class, () -> new BinaryResultContent("text/plain", null));
   }
+
+  /** 验证 TextArtifactMetadata 校验非负字节数与行数。 */
+  @Test
+  void textArtifactMetadataValidatesNonNegative() {
+    TextArtifactMetadata meta = new TextArtifactMetadata(100, 10);
+    assertEquals(100, meta.totalBytes());
+    assertEquals(10, meta.totalLines());
+    assertThrows(IllegalArgumentException.class, () -> new TextArtifactMetadata(-1, 0));
+    assertThrows(IllegalArgumentException.class, () -> new TextArtifactMetadata(0, -1));
+  }
+
+  /** 验证 ResourceResultContent 兼容构造器与 textMetadata 字段保持。 */
+  @Test
+  void resourceResultContentCompatibilityAndTextMetadata() {
+    ResourceRef ref = new ResourceRef("https://example.com/a", "text/plain", "a", null, null);
+    ResourceResultContent noPreview = new ResourceResultContent(ref);
+    assertNull(noPreview.preview());
+    assertNull(noPreview.textMetadata());
+
+    ResourceResultContent withPreview = new ResourceResultContent(ref, "preview");
+    assertEquals("preview", withPreview.preview());
+    assertNull(withPreview.textMetadata());
+
+    TextArtifactMetadata meta = new TextArtifactMetadata(1024, 25);
+    ResourceResultContent withMeta = new ResourceResultContent(ref, "preview", meta);
+    assertEquals("preview", withMeta.preview());
+    assertSame(meta, withMeta.textMetadata());
+  }
 }

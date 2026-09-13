@@ -6,13 +6,11 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityC
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
@@ -20,6 +18,7 @@ import java.util.concurrent.ExecutorService;
 /** 使用 Java NIO 查找遵守分层 {@code .gitignore} 的 environment 文件。 */
 public final class FindCapability extends AbstractCodingCapability {
 
+  static final int DEFAULT_TIMEOUT_SECONDS = 15;
   static final int MAX_TIMEOUT_SECONDS = 3600;
 
   public FindCapability(CodingToolsConfig config, ExecutorService executor) {
@@ -40,20 +39,46 @@ public final class FindCapability extends AbstractCodingCapability {
     control.check();
     GlobPattern pattern = GlobPattern.compile(sourcePattern);
     control.check();
-    List<String> completeLines = new ArrayList<>();
-    for (Path file : SearchFiles.collect(workdir, path, control)) {
-      control.check();
-      String searchRelative = SearchFiles.toPosix(path.relativize(file));
-      String basename = file.getFileName().toString();
-      if (pattern.matches(pathPattern ? searchRelative : basename)) {
-        completeLines.add(SearchFiles.toPosix(workdir.relativize(file)));
-      }
-    }
-    completeLines.sort(Comparator.naturalOrder());
-    if (completeLines.isEmpty()) {
+
+    List<String> matchedPaths = new ArrayList<>();
+    SearchFiles.walk(
+        workdir,
+        path,
+        control,
+        file -> {
+          control.check();
+          String searchRelative = SearchFiles.toPosix(path.relativize(file));
+          String basename = file.getFileName().toString();
+          if (pattern.matches(pathPattern ? searchRelative : basename)) {
+            matchedPaths.add(SearchFiles.toPosix(workdir.relativize(file)));
+            if (matchedPaths.size() > limit) {
+              return false;
+            }
+          }
+          return true;
+        });
+
+    if (matchedPaths.isEmpty()) {
       return success(request.call().id(), "No files found matching pattern");
     }
-    return result(request.call().id(), completeLines, limit);
+
+    boolean limitReached = matchedPaths.size() > limit;
+    int displayCount = Math.min(limit, matchedPaths.size());
+
+    try (OutputSpool spool = new OutputSpool()) {
+      for (int i = 0; i < displayCount; i++) {
+        if (i > 0) {
+          spool.write((int) '\n');
+        }
+        spool.write(matchedPaths.get(i).getBytes(StandardCharsets.UTF_8));
+      }
+      if (limitReached) {
+        spool.write(
+            ("\n\n[" + limit + " results limit reached. Refine the pattern or raise limit.]")
+                .getBytes(StandardCharsets.UTF_8));
+      }
+      return spool.finish(request.call().id(), false, config.resourceStore(), "text/plain");
+    }
   }
 
   static Duration effectiveSearchTimeout(Duration invocationTimeout, JsonNode args) {
@@ -65,35 +90,5 @@ public final class FindCapability extends AbstractCodingCapability {
     Duration requestedTimeout =
         Duration.ofSeconds(optionalPositiveInt(args, "timeout_seconds", 1, MAX_TIMEOUT_SECONDS));
     return outerTimeout.compareTo(requestedTimeout) > 0 ? requestedTimeout : outerTimeout;
-  }
-
-  private EnvironmentCapabilityResult result(String callId, List<String> completeLines, int limit)
-      throws Exception {
-    boolean limited = completeLines.size() > limit;
-    List<String> previewLines =
-        new ArrayList<>(completeLines.subList(0, Math.min(limit, completeLines.size())));
-    if (limited) {
-      previewLines.add("");
-      previewLines.add("[" + limit + " results limit reached. Refine the pattern or raise limit.]");
-    }
-    if (!limited) {
-      return OutputLimiter.limit(
-          callId,
-          String.join("\n", previewLines).getBytes(StandardCharsets.UTF_8),
-          "text/plain",
-          config);
-    }
-    String preview = String.join("\n", previewLines);
-    byte[] previewBytes = preview.getBytes(StandardCharsets.UTF_8);
-    if (OutputLimiter.exceeds(preview, previewBytes.length, config)) {
-      preview =
-          OutputLimiter.preview(preview, config)
-              + "\n\n[Output truncated to the configured preview limits.]";
-    }
-    DaemonResourceRef ref =
-        config
-            .resourceStore()
-            .store(String.join("\n", completeLines).getBytes(StandardCharsets.UTF_8), "text/plain");
-    return EnvironmentCapabilityResult.resource(callId, preview, ref);
   }
 }

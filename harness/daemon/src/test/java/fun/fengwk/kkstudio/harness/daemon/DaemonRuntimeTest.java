@@ -1148,12 +1148,13 @@ class DaemonRuntimeTest {
     String base64 = content.get("contentBase64").asText();
     assertEquals(Base64.getEncoder().encodeToString(data), base64);
 
-    // 接收端解码为内联二进制内容；持久化外部存储由 ToolGateway 负责。
+    // 接收端解码为不可变 Resource 引用。
     DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
     EnvironmentCapabilityResult decoded = resultCodec.decodeResult(payload);
     assertEquals(1, decoded.contents().size());
-    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
-    assertArrayEquals(data, binary.content());
+    ResourceResultContent resource = (ResourceResultContent) decoded.contents().get(0);
+    assertEquals(stored.uri(), resource.resource().uri());
+    assertEquals(stored.mediaType(), resource.resource().mediaType());
   }
 
   /** BinaryResultContent 必须先经 resource store 落盘再编码为 wire resource，wire ref 可被 store 读回。 */
