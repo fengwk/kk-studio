@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.platform.cloudfs.repository.CloudTextRevisionReposito
 import fun.fengwk.kkstudio.platform.cloudfs.service.CloudFileSystemService;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
@@ -54,14 +55,18 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
   private final CloudNodeRepository nodeRepository;
   private final CloudTextRevisionRepository revisionRepository;
   private final ObjectProvider<StorageBlobManager> blobManagerProvider;
+  private final ObjectProvider<StorageUploadService> uploadServiceProvider;
 
   public CloudFileSystemServiceImpl(
       CloudNodeRepository nodeRepository,
       CloudTextRevisionRepository revisionRepository,
-      ObjectProvider<StorageBlobManager> blobManagerProvider) {
+      ObjectProvider<StorageBlobManager> blobManagerProvider,
+      ObjectProvider<StorageUploadService> uploadServiceProvider) {
     this.nodeRepository = Objects.requireNonNull(nodeRepository, "nodeRepository");
     this.revisionRepository = Objects.requireNonNull(revisionRepository, "revisionRepository");
     this.blobManagerProvider = Objects.requireNonNull(blobManagerProvider, "blobManagerProvider");
+    this.uploadServiceProvider =
+        Objects.requireNonNull(uploadServiceProvider, "uploadServiceProvider");
   }
 
   private StorageBlobManager requireBlobManager() {
@@ -71,6 +76,15 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
           "StorageBlobManager is not available (S3 storage is not enabled)");
     }
     return manager;
+  }
+
+  private StorageUploadService requireUploadService() {
+    StorageUploadService service = uploadServiceProvider.getIfAvailable();
+    if (service == null) {
+      throw new IllegalStateException(
+          "StorageUploadService is not available (S3 storage is not enabled)");
+    }
+    return service;
   }
 
   @Override
@@ -551,6 +565,67 @@ public class CloudFileSystemServiceImpl implements CloudFileSystemService {
       throw new CloudNodeAlreadyExistsException(path);
     }
     requireBlobManager().retain(blobId);
+    return node;
+  }
+
+  @Override
+  @Transactional
+  public CloudNode attachBlobUpload(CloudPath path, UUID uploadId, boolean expectedAbsent) {
+    Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(uploadId, "uploadId");
+    if (!expectedAbsent) {
+      throw new CloudFileSystemValidationException("expectedAbsent must be true");
+    }
+    if (path.isRoot()) {
+      throw new CloudPathForbiddenException(path, "Cannot create blob at root directory");
+    }
+    if (path.isArtifactPath()) {
+      throw new CloudPathForbiddenException(path, "Public mutation forbidden under /.artifacts");
+    }
+
+    StorageUploadService uploadService = requireUploadService();
+    StorageBlobManager blobManager = requireBlobManager();
+
+    // 1. 事务内锁定 READY upload
+    StorageUploadService.ReadyUpload readyUpload = uploadService.lockReady(uploadId);
+    UUID blobId = readyUpload.blobId();
+
+    // 2. 保证父级目录存在
+    UUID parentId = null;
+    if (!path.parent().isRoot()) {
+      CloudNode parentDir = ensureDirectories(path.parent());
+      parentId = parentDir.getId();
+    }
+
+    // 3. 校验目标节点不存在
+    Optional<CloudNode> existing =
+        nodeRepository.findByParentIdAndNameForUpdate(parentId, path.name());
+    if (existing.isPresent()) {
+      throw new CloudNodeAlreadyExistsException(path);
+    }
+
+    // 4. 插入 BLOB 节点
+    CloudNode node =
+        CloudNode.builder()
+            .id(UUID.randomUUID())
+            .parentId(parentId)
+            .name(path.name())
+            .kind(CloudNodeKind.BLOB)
+            .version(0L)
+            .blobId(blobId)
+            .build();
+
+    boolean inserted = nodeRepository.insertIfAbsent(node);
+    if (!inserted) {
+      throw new CloudNodeAlreadyExistsException(path);
+    }
+
+    // 5. 为 CFS 节点 retain blob
+    blobManager.retain(blobId);
+
+    // 6. 消费并释放 upload 引用
+    uploadService.delete(uploadId);
+
     return node;
   }
 

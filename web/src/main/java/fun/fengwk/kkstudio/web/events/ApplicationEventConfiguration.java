@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSourc
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.platform.cloudfs.event.CloudFilesEventHub;
 import fun.fengwk.kkstudio.platform.project.controller.IssueControllerDispatcher;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
@@ -66,6 +67,7 @@ public class ApplicationEventConfiguration {
       CanvasFunctionDispatcher canvasFunctionDispatcher,
       ThreadVersionHub threadVersionHub,
       CanvasVersionHub canvasVersionHub,
+      CloudFilesEventHub cloudFilesEventHub,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
       PostgresqlRealtimeEventSource realtimeEventSource,
       SystemSettingsSnapshot systemSettingsSnapshot) {
@@ -97,12 +99,17 @@ public class ApplicationEventConfiguration {
                 CanvasVersionHub.CHANNEL,
                 canvasVersionHub::onNotification,
                 canvasVersionHub::broadcastResync),
-            // 6. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
+            // 6. Cloud Files 失效：任一节点提交 CFS 变更后，通知浏览器事件层回读权威快照
+            new PostgresqlNotificationHandler(
+                CloudFilesEventHub.CHANNEL,
+                cloudFilesEventHub::onNotification,
+                cloudFilesEventHub::broadcastResync),
+            // 7. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
             new PostgresqlNotificationHandler(
                 SystemSettingsChangeHandler.CHANNEL,
                 systemSettingsChangeHandler::onNotification,
                 systemSettingsChangeHandler::onResync),
-            // 7. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
+            // 8. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
             new PostgresqlNotificationHandler(
                 PostgresqlRealtimeEventSource.CHANNEL,
                 realtimeEventSource::onNotification,
