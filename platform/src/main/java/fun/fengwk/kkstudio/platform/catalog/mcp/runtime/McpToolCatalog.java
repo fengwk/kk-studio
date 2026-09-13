@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.catalog.mcp.runtime;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
@@ -10,9 +11,9 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
-import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpConnectionSpec;
-import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolClientFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
@@ -22,31 +23,30 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
 
 /**
- * 动态 MCP 工具目录：每次调用现读 DB 中全部 mcp_server / mcp_tool 行并映射为可执行 {@link ToolContribution}。
+ * 动态 MCP 工具目录：每次调用现读 DB 中符合条件的 mcp_server / mcp_tool 行并映射为可执行 {@link ToolContribution}。
  *
- * <p>映射合同：AgentToolId 与 ContributionId 由 mcp_tool 稳定 UUID 派生；ToolDescriptor.version 是 server
- * version 的稳定十进制字符串；rendererKey 恒为 {@code tool}；requirements 为 none（environmentRequired=false）；
- * sideEffect 恒为 NON_IDEMPOTENT；timeout 来自 server 配置。Tool execute 使用 per-call MCP client 调用
- * source_name（见 {@link McpExecutableTool}）。目录本身绝不缓存连接或工具行。
+ * <p>选拔条件：仅当 Server enabled=true、status=AVAILABLE、discoveredVersion==version 且 Tool available=true
+ * 时方可进入目录。
  */
 public final class McpToolCatalog implements RuntimeToolCatalog {
 
-  /** MCP 工具贡献的稳定 rendererKey。 */
   public static final String RENDERER_KEY = "tool";
 
   private final McpServerRepository repository;
-  private final McpToolClientFactory clientFactory;
+  private final ExecutorService executor;
 
-  public McpToolCatalog(McpServerRepository repository, McpToolClientFactory clientFactory) {
+  public McpToolCatalog(McpServerRepository repository, ExecutorService executor) {
     this.repository = Objects.requireNonNull(repository, "repository");
-    this.clientFactory = Objects.requireNonNull(clientFactory, "clientFactory");
+    this.executor = Objects.requireNonNull(executor, "executor");
   }
 
   @Override
   public List<ToolContribution> selectableTools() {
     return repository.listAllServers().stream()
+        .filter(this::isServerSelectable)
         .flatMap(server -> serverTools(server).stream())
         .sorted(Comparator.comparing(contribution -> contribution.definition().id().value()))
         .toList();
@@ -57,22 +57,34 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
     Objects.requireNonNull(id, "id");
     return McpStableIds.parseAgentToolId(id.value())
         .flatMap(repository::getToolById)
+        .filter(McpTool::isAvailable)
         .flatMap(
             tool ->
-                repository.getById(tool.getServerId()).map(server -> contribution(server, tool)));
+                repository
+                    .getById(tool.getServerId())
+                    .filter(this::isServerSelectable)
+                    .map(server -> contribution(server, tool)));
+  }
+
+  private boolean isServerSelectable(McpServer server) {
+    return server != null
+        && server.isEnabled()
+        && server.getDiscoveryStatus() == McpDiscoveryStatus.AVAILABLE
+        && Objects.equals(server.getDiscoveredVersion(), server.getVersion());
   }
 
   private List<ToolContribution> serverTools(McpServer server) {
-    return repository.listTools(server.getId()).stream()
+    return repository.listAvailableTools(server.getId()).stream()
         .map(tool -> contribution(server, tool))
         .toList();
   }
 
   private ToolContribution contribution(McpServer server, McpTool tool) {
+    String descriptorVersion = server.getVersion() + "." + tool.getSchemaRevision();
     ToolDescriptor descriptor =
         new ToolDescriptor(
             tool.getModelName(),
-            Long.toString(server.getVersion()),
+            descriptorVersion,
             tool.getDescription(),
             RENDERER_KEY,
             decodeSchema(tool),
@@ -81,13 +93,32 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
     AgentToolDefinition definition =
         new AgentToolDefinition(
             McpStableIds.agentToolId(tool.getId()), descriptor, ToolVisibility.SELECTABLE);
-    McpExecutableTool executable =
-        new McpExecutableTool(
-            descriptor,
-            tool.getSourceName(),
-            new McpConnectionSpec(
-                server.getUrl(), server.getBearerToken(), server.getTimeoutMillis()),
-            clientFactory);
+
+    Tool executable;
+    if (server.getConnectionType() == McpConnectionType.REMOTE) {
+      executable =
+          new RemoteMcpExecutableTool(
+              descriptor,
+              server.getId(),
+              tool.getId(),
+              tool.getSourceName(),
+              server.getVersion(),
+              tool.getSchemaRevision(),
+              repository,
+              executor);
+    } else {
+      executable =
+          new LocalMcpExecutableTool(
+              descriptor,
+              server.getId(),
+              tool.getId(),
+              tool.getSourceName(),
+              server.getEnvironmentId(),
+              server.getVersion(),
+              tool.getSchemaRevision(),
+              repository);
+    }
+
     return new ToolContribution(
         new ContributionId(McpStableIds.CONTRIBUTOR_ID, McpStableIds.localName(tool.getId())),
         definition,

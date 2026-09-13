@@ -7,11 +7,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
-import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolClientFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 /**
  * 生产 {@link RuntimeToolCatalog} 聚合装配。
@@ -32,8 +32,9 @@ public class RuntimeToolCatalogConfiguration {
   @Bean(name = "mcpToolCatalog")
   @ConditionalOnMissingBean(name = "mcpToolCatalog")
   public McpToolCatalog mcpToolCatalog(
-      McpServerRepository repository, McpToolClientFactory clientFactory) {
-    return new McpToolCatalog(repository, clientFactory);
+      McpServerRepository repository,
+      @Qualifier("toolGatewayExecutor") ExecutorService toolGatewayExecutor) {
+    return new McpToolCatalog(repository, toolGatewayExecutor);
   }
 
   @Primary

@@ -97,9 +97,10 @@ import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
-import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolClientFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
@@ -134,6 +135,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -942,16 +944,19 @@ class DatabaseTurnResolverTest {
     // 意图：验证动态 MCP 工具能通过 RuntimeToolCatalog 正常解析到 ModelRequestSpec 的 tool bindings 中，同时
     // HarnessCatalog 中的静态 context projectors 依然正常工作
     McpServerRepository repo = mock(McpServerRepository.class);
-    McpToolClientFactory factory = mock(McpToolClientFactory.class);
-    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, factory);
+    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
 
     UUID serverId = UUID.randomUUID();
     McpServer server = new McpServer();
     server.setId(serverId);
     server.setName("srv");
-    server.setUrl("http://localhost:8080");
-    server.setTimeoutMillis(5000L);
+    server.setConnectionType(McpConnectionType.REMOTE);
+    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
+    server.setDiscoveredVersion(1L);
+    server.setEnabled(true);
     server.setVersion(1L);
+    server.setConnectionConfig("{\"url\":\"http://localhost:8080\",\"headers\":{}}");
+    server.setTimeoutMillis(5000L);
 
     UUID toolId = UUID.randomUUID();
     McpTool mcpTool = new McpTool();
@@ -962,6 +967,8 @@ class DatabaseTurnResolverTest {
     mcpTool.setDescription("echo tool");
     mcpTool.setInputSchemaJson(
         "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    mcpTool.setAvailable(true);
+    mcpTool.setSchemaRevision(1L);
 
     when(repo.getToolById(toolId)).thenReturn(Optional.of(mcpTool));
     when(repo.getById(serverId)).thenReturn(Optional.of(server));

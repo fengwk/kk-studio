@@ -9,9 +9,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
-import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolClientFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
+
+import java.util.concurrent.ExecutorService;
 
 /**
  * {@link RuntimeToolCatalogConfiguration} 的 Spring 装配测试： 验证两个源 bean（静态适配器与 MCP 动态目录）与唯一的 @Primary
@@ -23,7 +24,7 @@ class RuntimeToolCatalogConfigurationTest {
       new ApplicationContextRunner()
           .withBean(HarnessCatalog.class, () -> mock(HarnessCatalog.class))
           .withBean(McpServerRepository.class, () -> mock(McpServerRepository.class))
-          .withBean(McpToolClientFactory.class, () -> mock(McpToolClientFactory.class))
+          .withBean("toolGatewayExecutor", ExecutorService.class, () -> mock(ExecutorService.class))
           .withUserConfiguration(RuntimeToolCatalogConfiguration.class);
 
   @Test
@@ -54,7 +55,7 @@ class RuntimeToolCatalogConfigurationTest {
     HarnessToolCatalogAdapter otherAdapter =
         new HarnessToolCatalogAdapter(mock(HarnessCatalog.class));
     McpToolCatalog otherMcp =
-        new McpToolCatalog(mock(McpServerRepository.class), mock(McpToolClientFactory.class));
+        new McpToolCatalog(mock(McpServerRepository.class), mock(ExecutorService.class));
 
     runner
         .withBean(

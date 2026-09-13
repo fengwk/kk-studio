@@ -471,12 +471,22 @@ public final class DatabaseTurnResolver implements TurnResolver {
               contribution.id().localName(),
               stateAccesses);
       boolean environmentRequired = contribution.requirements().environmentRequired();
+      EnvironmentId toolRequiredEnv = contribution.requirements().requiredEnvironmentId();
       EnvironmentId requiredEnvironmentId = environmentRequired ? environmentId : null;
       if (environmentRequired && requiredEnvironmentId == null) {
         throw rejection(
             "environment tool "
                 + id
                 + " requires an environment binding but the agent has no environment");
+      }
+      if (toolRequiredEnv != null && !toolRequiredEnv.equals(environmentId)) {
+        throw rejection(
+            "tool "
+                + id
+                + " requires environment "
+                + toolRequiredEnv
+                + " but agent has environment "
+                + environmentId);
       }
       bindings.add(
           new ToolBinding(

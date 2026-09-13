@@ -3,60 +3,149 @@ package fun.fengwk.kkstudio.platform.catalog.mcp.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpConnectionSpec;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.LocalConnectionConfig;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.RemoteConnectionConfig;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
 
+import java.util.List;
+import java.util.UUID;
+
 /**
  * MCP Server 创建与更新输入校验器测试。
  *
- * <p>验证 name（^[a-z][a-z0-9_]*$ ≤32）、url（非空白 ≤2048）、bearerToken（≤2048 且无首尾空白）、
- * timeoutMillis（正整数）的严格规则。
+ * <p>验证 name（^[a-z][a-z0-9_]*$ ≤32）以及 configJson 的解析与校验。
  */
 class McpServerMutationValidatorTest {
 
+  private static final String REMOTE_CONFIG =
+      """
+      {
+        "type": "remote",
+        "url": "https://mcp.github.com/api",
+        "headers": {
+          "Authorization": "Bearer my-secret-token"
+        },
+        "timeoutMillis": 30000
+      }
+      """;
+
+  private static final String LOCAL_CONFIG =
+      """
+      {
+        "type": "local",
+        "environmentId": "11111111-1111-1111-1111-111111111111",
+        "command": ["node", "server.js"],
+        "cwd": "/app",
+        "env": {"NODE_ENV": "production"},
+        "timeoutMillis": 15000
+      }
+      """;
+
   @Test
-  void normalizesValidCreateDTO() {
-    // 意图：验证合法的创建输入被正常接受
+  void normalizesValidRemoteCreateDTO() {
+    // 意图：验证合法的 Remote 创建输入被正常接受
     McpServerCreateDTO dto = new McpServerCreateDTO();
     dto.setName("github_mcp");
-    dto.setUrl("https://mcp.github.com/api");
-    dto.setBearerToken("ghp_secretToken123");
-    dto.setTimeoutMillis(30000L);
+    dto.setConfigJson(REMOTE_CONFIG);
 
     McpServerMutationValidator.NormalizedCreate normalized =
         McpServerMutationValidator.normalizeCreate(dto);
     assertNotNull(normalized);
     assertEquals("github_mcp", normalized.name());
-    assertEquals("https://mcp.github.com/api", normalized.url());
-    assertEquals("ghp_secretToken123", normalized.bearerToken());
-    assertEquals(30000L, normalized.timeoutMillis());
+    assertEquals(McpConnectionType.REMOTE, normalized.config().connectionType());
+    assertEquals(30000L, normalized.config().timeoutMillis());
+    RemoteConnectionConfig remote = (RemoteConnectionConfig) normalized.config().connectionConfig();
+    assertEquals("https://mcp.github.com/api", remote.url());
   }
 
   @Test
-  void createAllowsNullOrEmptyBearerToken() {
-    // 意图：验证创建时允许不传 bearerToken（null）或传空串（视为无 token）
+  void normalizesValidLocalCreateDTO() {
+    // 意图：验证合法的 Local 创建输入被正常接受
     McpServerCreateDTO dto = new McpServerCreateDTO();
-    dto.setName("local_mcp");
-    dto.setUrl("http://127.0.0.1:8080/mcp");
-    dto.setTimeoutMillis(5000L);
+    dto.setName("local_node");
+    dto.setConfigJson(LOCAL_CONFIG);
 
     McpServerMutationValidator.NormalizedCreate normalized =
         McpServerMutationValidator.normalizeCreate(dto);
-    assertNull(normalized.bearerToken());
+    assertNotNull(normalized);
+    assertEquals("local_node", normalized.name());
+    assertEquals(McpConnectionType.LOCAL, normalized.config().connectionType());
+    assertEquals(
+        UUID.fromString("11111111-1111-1111-1111-111111111111"),
+        normalized.config().environmentId());
+    assertEquals(15000L, normalized.config().timeoutMillis());
+    LocalConnectionConfig local = (LocalConnectionConfig) normalized.config().connectionConfig();
+    assertEquals(List.of("node", "server.js"), local.command());
+    assertEquals("/app", local.cwd());
+  }
 
-    dto.setBearerToken("   ");
-    McpServerMutationValidator.NormalizedCreate normalizedEmpty =
-        McpServerMutationValidator.normalizeCreate(dto);
-    assertEquals("", normalizedEmpty.bearerToken());
+  @Test
+  void appliesDocumentedOptionalDefaults() {
+    // 意图：验证 enabled 与 timeoutMillis 省略时严格使用协议默认 true/60000
+    McpServerCreateDTO dto = new McpServerCreateDTO();
+    dto.setName("defaulted_mcp");
+    dto.setConfigJson(
+        """
+        {
+          "type": "remote",
+          "url": "https://example.com/mcp"
+        }
+        """);
+
+    McpConfigParser.ParsedMcpConfig config =
+        McpServerMutationValidator.normalizeCreate(dto).config();
+
+    assertEquals(true, config.enabled());
+    assertEquals(60_000L, config.timeoutMillis());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "/workspace/project",
+        "C:\\workspace\\project",
+        "C:/workspace/project",
+        "\\\\server\\share\\project",
+        "//server/share/project",
+        "${MCP_CWD}"
+      })
+  void acceptsTargetOsAbsoluteOrWholeVariableCwd(String cwd) {
+    // 意图：Platform 不借用 Backend 文件系统解析远端路径，接受 Unix、Windows drive/UNC 与整值变量
+    McpServerCreateDTO dto = localCreateWithCwd(cwd);
+
+    LocalConnectionConfig config =
+        (LocalConnectionConfig)
+            McpServerMutationValidator.normalizeCreate(dto).config().connectionConfig();
+
+    assertEquals(cwd, config.cwd());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "relative/path",
+        "C:relative",
+        "\\root-relative",
+        "~/.agents",
+        "$MCP_CWD",
+        "/workspace/${PROJECT}",
+        "C:\\workspace\\%PROJECT%"
+      })
+  void rejectsRelativeOrPartiallyExpandedCwd(String cwd) {
+    // 意图：保存边界拒绝目标 OS 上不绝对或无法按整值规则解析的 cwd
+    McpServerCreateDTO dto = localCreateWithCwd(cwd);
+
+    assertThrows(
+        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
   }
 
   @Test
@@ -72,8 +161,7 @@ class McpServerMutationValidatorTest {
     // 意图：验证非法名称模式在创建时被拒绝
     McpServerCreateDTO dto = new McpServerCreateDTO();
     dto.setName(invalidName);
-    dto.setUrl("http://localhost/mcp");
-    dto.setTimeoutMillis(5000L);
+    dto.setConfigJson(REMOTE_CONFIG);
 
     assertThrows(
         AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
@@ -84,126 +172,36 @@ class McpServerMutationValidatorTest {
     // 意图：验证名称超过 32 字符被拒绝
     McpServerCreateDTO dto = new McpServerCreateDTO();
     dto.setName("a".repeat(33));
-    dto.setUrl("http://localhost/mcp");
-    dto.setTimeoutMillis(5000L);
+    dto.setConfigJson(REMOTE_CONFIG);
 
     assertThrows(
         AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
   }
 
   @Test
-  void rejectsInvalidUrlsOnCreate() {
-    // 意图：验证空白 URL、带首尾空格的 URL 或超长 URL 被拒绝
+  void rejectsInvalidConfigOnCreate() {
+    // 意图：验证非法 configJson 在创建时被拒绝且不泄露敏感信息
     McpServerCreateDTO dto = new McpServerCreateDTO();
     dto.setName("mcp_test");
-    dto.setTimeoutMillis(5000L);
-
-    dto.setUrl(null);
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
-
-    dto.setUrl("   ");
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
-
-    dto.setUrl(" http://localhost/mcp ");
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
-
-    dto.setUrl("http://example.com/" + "a".repeat(2048));
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
-  }
-
-  @ParameterizedTest
-  @ValueSource(
-      strings = {
-        "ftp://example.com/mcp",
-        "file:///tmp/mcp",
-        "ws://example.com/mcp",
-        "http:///path",
-        "http://user:secret@example.com/mcp",
-        "https://token@example.com/mcp",
-        "invalid-url-without-scheme",
-        "://missing-scheme"
-      })
-  void rejectsNonHttpUrlsOrUrlsWithUserInfoAndDoesNotEchoUrl(String invalidUrl) {
-    // 意图：验证非 http(s)、无 host、含 user-info 或无效语法的 URL 均被拒绝，且错误信息绝不回显该 URL
-    McpServerCreateDTO dto = new McpServerCreateDTO();
-    dto.setName("mcp_test");
-    dto.setUrl(invalidUrl);
-    dto.setTimeoutMillis(5000L);
+    dto.setConfigJson("{invalid-json}");
 
     AiValidationException ex =
         assertThrows(
             AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
-    assertFalse(ex.getMessage().contains(invalidUrl));
-
-    // 同时验证 McpConnectionSpec 防御校验
-    IllegalArgumentException specEx =
-        assertThrows(
-            IllegalArgumentException.class, () -> new McpConnectionSpec(invalidUrl, null, 5000L));
-    assertFalse(specEx.getMessage().contains(invalidUrl));
+    assertFalse(ex.getMessage().contains("invalid-json"));
   }
 
   @Test
-  void rejectsInvalidBearerTokenOnCreate() {
-    // 意图：验证 bearerToken 带首尾空白或超长被拒绝
-    McpServerCreateDTO dto = new McpServerCreateDTO();
-    dto.setName("mcp_test");
-    dto.setUrl("http://localhost/mcp");
-    dto.setTimeoutMillis(5000L);
-
-    dto.setBearerToken(" token_with_surrounding_space ");
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
-
-    dto.setBearerToken("a".repeat(2049));
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
-  }
-
-  @Test
-  void rejectsInvalidTimeoutOnCreate() {
-    // 意图：验证 timeoutMillis 为 null、0 或负数时被拒绝
-    McpServerCreateDTO dto = new McpServerCreateDTO();
-    dto.setName("mcp_test");
-    dto.setUrl("http://localhost/mcp");
-
-    dto.setTimeoutMillis(null);
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
-
-    dto.setTimeoutMillis(0L);
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
-
-    dto.setTimeoutMillis(-100L);
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
-  }
-
-  @Test
-  void normalizesUpdateDTOWithNullsAndValues() {
-    // 意图：验证更新时允许字段为 null（表示不修改），有值时严格校验
+  void normalizesValidUpdateDTO() {
+    // 意图：验证合法更新输入被正常接受
     McpServerUpdateDTO dto = new McpServerUpdateDTO();
     dto.setExpectedVersion("1");
+    dto.setConfigJson(REMOTE_CONFIG);
 
     McpServerMutationValidator.NormalizedUpdate normalized =
         McpServerMutationValidator.normalizeUpdate(dto);
-    assertNull(normalized.url());
-    assertNull(normalized.bearerToken());
-    assertNull(normalized.timeoutMillis());
-
-    dto.setUrl("https://new.url.com/mcp");
-    dto.setBearerToken("new_token");
-    dto.setTimeoutMillis(10000L);
-
-    McpServerMutationValidator.NormalizedUpdate updated =
-        McpServerMutationValidator.normalizeUpdate(dto);
-    assertEquals("https://new.url.com/mcp", updated.url());
-    assertEquals("new_token", updated.bearerToken());
-    assertEquals(10000L, updated.timeoutMillis());
+    assertNotNull(normalized);
+    assertEquals(McpConnectionType.REMOTE, normalized.config().connectionType());
   }
 
   @Test
@@ -211,5 +209,25 @@ class McpServerMutationValidatorTest {
     // 意图：验证 null 更新请求体抛出异常
     assertThrows(
         AiValidationException.class, () -> McpServerMutationValidator.normalizeUpdate(null));
+  }
+
+  private static McpServerCreateDTO localCreateWithCwd(String cwd) {
+    McpServerCreateDTO dto = new McpServerCreateDTO();
+    dto.setName("local_path_test");
+    dto.setConfigJson(
+        """
+        {
+          "type": "local",
+          "environmentId": "11111111-1111-1111-1111-111111111111",
+          "command": ["node", "server.js"],
+          "cwd": %s
+        }
+        """
+            .formatted(quoteJson(cwd)));
+    return dto;
+  }
+
+  private static String quoteJson(String value) {
+    return '"' + value.replace("\\", "\\\\").replace("\"", "\\\"") + '"';
   }
 }

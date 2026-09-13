@@ -87,7 +87,7 @@ class PostgresqlSkillSourceMigrationTest extends PostgresSchemaSupport {
       migrateTo(connection, "3");
       seedLegacyData(connection, emptySkillBindings());
 
-      migrate(connection, "classpath:db/migration");
+      migrateTo(connection, "4");
 
       assertEquals(4, currentVersion(connection));
       for (String table : V4_TABLES) {
@@ -329,7 +329,7 @@ class PostgresqlSkillSourceMigrationTest extends PostgresSchemaSupport {
                   + "'");
       String configBefore = singleString(connection, "select config::text from agent_definition");
 
-      migrate(connection, "classpath:db/migration");
+      migrateTo(connection, "4");
 
       assertEquals(4, currentVersion(connection));
       assertEquals(
