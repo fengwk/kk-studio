@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "properties": {
+    "issue_id": {
+      "type": "string",
+      "description": "ID of the issue to change status."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "BACKLOG",
+        "TODO"
+      ],
+      "description": "Target status. Only BACKLOG or TODO is allowed."
+    },
+    "expected_version": {
+      "type": "integer",
+      "description": "Expected current version of the issue for optimistic concurrency control."
+    }
+  },
+  "required": [
+    "issue_id",
+    "status",
+    "expected_version"
+  ],
+  "additionalProperties": false
+}
