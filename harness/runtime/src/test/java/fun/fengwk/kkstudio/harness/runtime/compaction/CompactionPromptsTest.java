@@ -131,7 +131,7 @@ class CompactionPromptsTest {
                 new ImageMessageContent("image/png", "image-data"),
                 new AudioMessageContent("audio/mp3", "audio-data"),
                 new VideoMessageContent("video/mp4", "video-data"),
-                new ResourceMessageContent(new UUID(0L, 1L), "res.png", null)));
+                ResourceMessageContent.media(new UUID(0L, 1L), "res.png")));
     AgentMessage assistant =
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
@@ -141,6 +141,22 @@ class CompactionPromptsTest {
         "[User]: [Image: image/png]\n[Audio: audio/mp3]\n[Video: video/mp4]\n"
             + "[Resource: res.png]\n\n[Assistant]: [Video: video/webm]",
         CompactionPrompts.serializeConversation(List.of(user, assistant)));
+  }
+
+  @Test
+  void artifactResourceRetainsCloudPathInCompaction() {
+    String path =
+        "/.artifacts/tool-results/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.txt";
+    AgentMessage user =
+        new AgentMessage(
+            AgentMessageRole.USER,
+            List.of(
+                ResourceMessageContent.artifact(
+                    new UUID(0L, 1L), "bash-result.txt", path, 1000L, 50L, "preview text")));
+
+    assertEquals(
+        "[User]: [Resource: bash-result.txt, path:\n" + path + "]",
+        CompactionPrompts.serializeConversation(List.of(user)));
   }
 
   @Test

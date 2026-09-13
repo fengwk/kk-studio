@@ -23,9 +23,16 @@ class AgentMessageJsonCodecTest {
                 new ThinkingMessageContent("reasoning"),
                 new JsonMessageContent("[1,{\"ok\":true}]"),
                 new ToolCallMessageContent("call-1", "read", "read", "{\"path\":\"README.md\"}"),
-                new ResourceMessageContent(
+                ResourceMessageContent.media(
                     UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
                     "hello.txt",
+                    "preview"),
+                ResourceMessageContent.artifact(
+                    UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
+                    "tool-result.txt",
+                    "/.artifacts/tool-results/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.txt",
+                    100L,
+                    5L,
                     "preview")));
 
     assertEquals(message, codec.decode(codec.encode(message)));
@@ -44,10 +51,8 @@ class AgentMessageJsonCodecTest {
                     "read",
                     List.of(
                         new TextMessageContent("ok"),
-                        new ResourceMessageContent(
-                            UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
-                            "result.txt",
-                            null),
+                        ResourceMessageContent.media(
+                            UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"), "result.txt"),
                         new JsonMessageContent("{}")),
                     false,
                     "{\"exitCode\":0}")));
@@ -87,17 +92,17 @@ class AgentMessageJsonCodecTest {
                         List.of(new TextMessageContent("ok")),
                         false,
                         "{}")))));
-    // resource 是扁平精确字段：blobId/name 必须显式写出，可空 preview 显式写出为 JSON null。
+    // resource 是扁平精确字段：blobId/name 必须显式写出，可空 preview/artifact 字段显式写出为 JSON null。
     assertEquals(
         "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"resource\","
             + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-            + "\"name\":\"a.txt\",\"preview\":null}]}",
+            + "\"name\":\"a.txt\",\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}",
         codec.encode(
             new AgentMessage(
                 AgentMessageRole.ASSISTANT,
                 List.of(
-                    new ResourceMessageContent(
-                        UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"), "a.txt", null)))));
+                    ResourceMessageContent.media(
+                        UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"), "a.txt")))));
   }
 
   @Test
@@ -106,7 +111,7 @@ class AgentMessageJsonCodecTest {
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
             List.of(
-                new ResourceMessageContent(
+                ResourceMessageContent.media(
                     UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
                     "hello.txt",
                     "preview")));
@@ -244,42 +249,50 @@ class AgentMessageJsonCodecTest {
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\",\"blobId\":\"x\","
+                    + "\"name\":\"a\",\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
+                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+                    + "\"name\":null,\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
+                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+                    + "\"name\":\"\",\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
+                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+                    + "\"name\":5,\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
+                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+                    + "\"name\":\"a\",\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":5}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
+                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+                    + "\"name\":\"a\",\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null,\"extra\":1}]}"));
+    // 遗漏或多余字段
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
+                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
                     + "\"name\":\"a\",\"preview\":null}]}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
-                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-                    + "\"name\":null,\"preview\":null}]}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
-                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-                    + "\"name\":\"\",\"preview\":null}]}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
-                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-                    + "\"name\":5,\"preview\":null}]}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
-                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-                    + "\"name\":\"a\",\"preview\":5}]}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
-                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-                    + "\"name\":\"a\",\"preview\":null,\"extra\":1}]}"));
   }
 
   @Test

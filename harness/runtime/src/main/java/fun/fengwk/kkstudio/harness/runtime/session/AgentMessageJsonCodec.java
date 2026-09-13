@@ -48,7 +48,7 @@ public final class AgentMessageJsonCodec {
       orderedSet(
           "type", "toolCallId", "toolName", "rendererKey", "contents", "error", "detailsJson");
   private static final Set<String> RESOURCE_FIELDS =
-      orderedSet("type", "blobId", "name", "preview");
+      orderedSet("type", "blobId", "name", "artifactPath", "totalBytes", "totalLines", "preview");
 
   static {
     MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -181,6 +181,9 @@ public final class AgentMessageJsonCodec {
         node.put("type", "resource");
         node.put("blobId", value.blobId().toString());
         putNullableText(node, "name", value.name());
+        putNullableText(node, "artifactPath", value.artifactPath());
+        putNullableLong(node, "totalBytes", value.totalBytes());
+        putNullableLong(node, "totalLines", value.totalLines());
         putNullableText(node, "preview", value.preview());
       }
       case AttachmentMessageContent value -> throw new IllegalArgumentException(
@@ -245,6 +248,9 @@ public final class AgentMessageJsonCodec {
         yield new ResourceMessageContent(
             canonicalUuid(node, "blobId", "content"),
             nullableText(node, "name", "content"),
+            nullableText(node, "artifactPath", "content"),
+            nullableLong(node, "totalBytes", "content"),
+            nullableLong(node, "totalLines", "content"),
             nullableText(node, "preview", "content"));
       }
       default -> throw new IllegalArgumentException(
@@ -395,6 +401,25 @@ public final class AgentMessageJsonCodec {
     } else {
       node.put(field, value);
     }
+  }
+
+  private static void putNullableLong(ObjectNode node, String field, Long value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
+  }
+
+  private static Long nullableLong(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber()) {
+      throw new IllegalArgumentException(context + "." + field + " must be integer or null");
+    }
+    return value.longValue();
   }
 
   private static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {

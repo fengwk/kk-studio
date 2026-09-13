@@ -400,7 +400,7 @@ class HarnessRuntimeResponseMapperTest {
                 new CancelledUserMessage(
                     2,
                     id(51),
-                    List.of(new ResourceMessageContent(id(70), "report.txt", "preview")))));
+                    List.of(ResourceMessageContent.media(id(70), "report.txt", "preview")))));
     HarnessThreadStopResultDTO stoppedDto =
         HarnessRuntimeResponseMapper.toStopResultDto(
             stopped, HarnessRuntimeTestFixtures.idleSnapshot());

@@ -159,7 +159,7 @@ class HarnessRuntimeAcceptThreadTest {
                 new AgentMessage(
                     AgentMessageRole.USER,
                     List.of(
-                        new ResourceMessageContent(TestIds.id(88), "photo.png", null),
+                        ResourceMessageContent.media(TestIds.id(88), "photo.png"),
                         new TextMessageContent("please summarize")))));
     AcceptancePreflight materialize = (tx, session, commands) -> List.of(durable);
 

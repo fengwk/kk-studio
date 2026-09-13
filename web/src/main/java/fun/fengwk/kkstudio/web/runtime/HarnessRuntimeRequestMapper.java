@@ -347,7 +347,7 @@ public final class HarnessRuntimeRequestMapper {
       case "RESOURCE" -> {
         requireForbidden(dto.hasTextField(), context + ".text", "content type " + type);
         requireForbidden(dto.hasUploadIdField(), context + ".uploadId", "content type " + type);
-        yield new ResourceMessageContent(
+        yield ResourceMessageContent.media(
             parseUuid(dto.getBlobId(), context + ".blobId"),
             requireText(dto.getName(), context + ".name"),
             dto.getPreview());
