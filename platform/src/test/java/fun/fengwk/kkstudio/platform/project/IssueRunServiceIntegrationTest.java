@@ -175,7 +175,7 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
     IssueRun waiting =
         issueRunService.requestInput(runId, 1L, 0L, "Need clarification?", "Detail context");
     assertEquals(IssueRunStatus.WAITING_HUMAN, waiting.getStatus());
-    assertEquals("Need clarification?", waiting.getWaitingReason());
+    assertEquals("Need clarification?\n\nContext:\nDetail context", waiting.getWaitingReason());
     assertEquals(IssueStatus.IN_PROGRESS, issueService.getIssue(issueId).getStatus());
   }
 
@@ -342,7 +342,7 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
             null,
             IssueRunActorType.HUMAN,
             null,
-            null,
+            "human-action-approve",
             1L,
             0L,
             ReviewDecision.APPROVE,
@@ -525,7 +525,7 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
             null,
             IssueRunActorType.HUMAN,
             null,
-            null,
+            "human-action-changes",
             1L,
             0L,
             ReviewDecision.REQUEST_CHANGES,

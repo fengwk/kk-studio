@@ -29,6 +29,9 @@ create table project (
     constraint pk_project primary key (id),
     constraint fk_project_coordinator foreign key (coordinator_agent_name)
         references agent_definition (name) on delete restrict,
+    constraint chk_project_title_not_blank check (length(trim(title)) > 0 and title = btrim(title)),
+    constraint chk_project_description_len check (octet_length(description) <= 65536),
+    constraint chk_project_coordinator_not_blank check (length(trim(coordinator_agent_name)) > 0 and coordinator_agent_name = btrim(coordinator_agent_name)),
     constraint chk_project_next_issue_number check (next_issue_number >= 1),
     constraint chk_project_version check (version >= 0)
 );
@@ -91,6 +94,10 @@ create table issue (
         references agent_definition (name) on delete restrict,
     constraint uk_issue_project_number unique (project_id, number),
     constraint uk_issue_id_project unique (id, project_id),
+    constraint chk_issue_title_not_blank check (length(trim(title)) > 0 and title = btrim(title)),
+    constraint chk_issue_description_len check (octet_length(description) <= 65536),
+    constraint chk_issue_assignee_not_blank check (assignee_agent_name is null or (length(trim(assignee_agent_name)) > 0 and assignee_agent_name = btrim(assignee_agent_name))),
+    constraint chk_issue_reviewer_not_blank check (reviewer_agent_name is null or (length(trim(reviewer_agent_name)) > 0 and reviewer_agent_name = btrim(reviewer_agent_name))),
     constraint chk_issue_number check (number >= 1),
     constraint chk_issue_status check (status in ('BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE', 'CANCELED')),
     constraint chk_issue_version check (version >= 0),
@@ -155,14 +162,17 @@ create table issue_input (
         references issue (id) on delete restrict,
     constraint uk_issue_input_idempotency unique (issue_id, idempotency_key),
     constraint chk_issue_input_sequence check (sequence >= 1),
-    constraint chk_issue_input_kind check (kind in ('HUMAN', 'REVIEW_FEEDBACK', 'RETRY', 'SYSTEM'))
+    constraint chk_issue_input_kind check (kind in ('HUMAN', 'REVIEW_FEEDBACK', 'RETRY', 'SYSTEM')),
+    constraint chk_issue_input_body_not_blank check (length(trim(body)) > 0),
+    constraint chk_issue_input_body_len check (octet_length(body) <= 1048576),
+    constraint chk_issue_input_idempotency_not_blank check (idempotency_key is null or (length(trim(idempotency_key)) > 0 and idempotency_key = btrim(idempotency_key)))
 );
 
 comment on table issue_input is 'Issue 追加输入流：人类输入、评审反馈、重试标记与系统指令';
 comment on column issue_input.issue_id is '关联 Issue UUID';
 comment on column issue_input.sequence is 'Issue 内单调递增序号，>= 1';
 comment on column issue_input.kind is '输入类别：HUMAN, REVIEW_FEEDBACK, RETRY, SYSTEM';
-comment on column issue_input.body is '输入正文纯文本';
+comment on column issue_input.body is '输入正文纯文本（最大 1 MiB）';
 comment on column issue_input.idempotency_key is '同 Issue 幂等键';
 
 ------------------------------------------------------------------------------
@@ -203,19 +213,72 @@ create table issue_run (
     constraint chk_issue_run_ordinal check (ordinal >= 1),
     constraint chk_issue_run_role check (
         (role = 'EXECUTOR' and actor_type = 'AGENT' and submission_run_id is null) or
-        (role = 'REVIEWER' and submission_run_id is not null)
+        (role = 'REVIEWER' and submission_run_id is not null and (actor_type <> 'HUMAN' or status = 'COMPLETED'))
     ),
     constraint chk_issue_run_actor_agent check (
-        (actor_type = 'AGENT' and agent_name is not null) or
+        (actor_type = 'AGENT' and agent_name is not null and length(trim(agent_name)) > 0 and agent_name = btrim(agent_name)) or
         (actor_type = 'HUMAN' and agent_name is null)
     ),
     constraint chk_issue_run_status check (status in ('RUNNING', 'WAITING_HUMAN', 'COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN')),
     constraint chk_issue_run_outcome check (outcome is null or outcome in ('SUBMITTED', 'APPROVED', 'CHANGES_REQUESTED')),
     constraint chk_issue_run_observed_spec check (observed_spec_revision >= 0),
     constraint chk_issue_run_observed_input check (observed_input_sequence >= 0),
-    constraint chk_issue_run_continuation_count check (continuation_count >= 0),
-    constraint chk_issue_run_max_continuations check (max_continuations >= 0),
-    constraint chk_issue_run_version check (version >= 0)
+    constraint chk_issue_run_continuation_limit check (
+        continuation_count >= 0 and max_continuations >= 0 and continuation_count <= max_continuations
+    ),
+    constraint chk_issue_run_version check (version >= 0),
+    constraint chk_issue_run_terminal_action_not_blank check (
+        terminal_action_id is null or (length(trim(terminal_action_id)) > 0 and terminal_action_id = btrim(terminal_action_id))
+    ),
+    constraint chk_issue_run_waiting_reason_len check (
+        waiting_reason is null or (length(trim(waiting_reason)) > 0 and octet_length(waiting_reason) <= 16384 and waiting_reason = btrim(waiting_reason))
+    ),
+    constraint chk_issue_run_result_len check (result is null or octet_length(result::text) <= 65536),
+    constraint chk_issue_run_lifecycle check (
+        (
+            status = 'RUNNING' and
+            waiting_reason is null and
+            completed_at is null and
+            terminal_action_id is null and
+            outcome is null and
+            result is null
+        ) or
+        (
+            status = 'WAITING_HUMAN' and
+            waiting_reason is not null and
+            length(trim(waiting_reason)) > 0 and
+            waiting_reason = btrim(waiting_reason) and
+            completed_at is null and
+            terminal_action_id is null and
+            outcome is null and
+            result is null
+        ) or
+        (
+            status = 'COMPLETED' and
+            waiting_reason is null and
+            completed_at is not null and
+            terminal_action_id is not null and
+            length(trim(terminal_action_id)) > 0 and
+            terminal_action_id = btrim(terminal_action_id) and
+            outcome is not null and
+            result is not null and
+            jsonb_typeof(result) = 'object' and
+            (
+                (role = 'EXECUTOR' and outcome = 'SUBMITTED') or
+                (role = 'REVIEWER' and outcome in ('APPROVED', 'CHANGES_REQUESTED'))
+            )
+        ) or
+        (
+            status in ('FAILED', 'CANCELLED', 'UNKNOWN') and
+            waiting_reason is not null and
+            length(trim(waiting_reason)) > 0 and
+            waiting_reason = btrim(waiting_reason) and
+            completed_at is not null and
+            outcome is null and
+            terminal_action_id is null and
+            result is null
+        )
+    )
 );
 
 create unique index uk_issue_run_single_active on issue_run (issue_id)
@@ -237,8 +300,8 @@ comment on column issue_run.observed_input_sequence is '观察到的 input seque
 comment on column issue_run.continuation_count is '已投递 continuation 计数';
 comment on column issue_run.max_continuations is '允许最大 continuation 计数';
 comment on column issue_run.deadline is 'Run 绝对截止时间戳';
-comment on column issue_run.waiting_reason is '等待或失败原因说明';
-comment on column issue_run.result is '终态结构化结果 JSONB';
+comment on column issue_run.waiting_reason is '等待或失败原因说明（最大 16 KiB）';
+comment on column issue_run.result is '终态结构化结果 JSONB（最大 64 KiB）';
 comment on column issue_run.terminal_action_id is '终态动作唯一幂等标识';
 
 ------------------------------------------------------------------------------
@@ -273,15 +336,129 @@ create table issue_controller_work (
     constraint pk_issue_controller_work primary key (issue_id),
     constraint fk_issue_controller_work_issue foreign key (issue_id)
         references issue (id) on delete restrict,
-    constraint chk_issue_controller_work_wake check (wake_version >= 0)
+    constraint chk_issue_controller_work_wake check (wake_version > 0),
+    constraint chk_issue_controller_work_lease check (
+        (lease_token is null and lease_until is null) or
+        (lease_token is not null and lease_until is not null and length(trim(lease_token)) > 0 and length(trim(lease_token)) <= 128 and lease_token = btrim(lease_token))
+    )
 );
 
 create index idx_issue_controller_work_due on issue_controller_work (due_at);
 
 comment on table issue_controller_work is 'Issue Controller 调度工作：每 Issue 最多单行，确定性 lease/wake 围栏';
 comment on column issue_controller_work.issue_id is '所属 Issue UUID（主键）';
-comment on column issue_controller_work.wake_version is '唤醒版本号，每次请求唤醒递增，>= 0';
+comment on column issue_controller_work.wake_version is '唤醒版本号，每次请求唤醒递增，> 0';
 comment on column issue_controller_work.due_at is '下次可调度时间戳';
 comment on column issue_controller_work.lease_token is '当前持有节点租约令牌';
 comment on column issue_controller_work.lease_until is '租约截止时间戳';
 comment on column issue_controller_work.updated_at is '更新时间戳';
+
+------------------------------------------------------------------------------
+-- 9. NOTIFY trigger: due-work hint notification
+------------------------------------------------------------------------------
+create or replace function notify_issue_controller_work_due()
+returns trigger as $$
+begin
+    if new.due_at <= clock_timestamp() and (new.lease_until is null or new.lease_until <= clock_timestamp()) then
+        perform pg_notify('issue_controller_work_due', new.issue_id::text);
+    end if;
+    return new;
+end;
+$$ language plpgsql;
+
+create trigger trg_issue_controller_work_due
+    after insert or update on issue_controller_work
+    for each row execute function notify_issue_controller_work_due();
+
+------------------------------------------------------------------------------
+-- 10. Global Session Single-Owner guard infrastructure across chat, canvas, project, run
+------------------------------------------------------------------------------
+create table harness_session_owner_guard (
+    session_id uuid not null,
+    constraint pk_harness_session_owner_guard primary key (session_id),
+    constraint fk_harness_session_owner_guard_session foreign key (session_id)
+        references harness_session (id) on delete restrict
+);
+
+comment on table harness_session_owner_guard is 'Infrastructure table: 全局 Session 单一归属互斥 guard，非多态 owner 事实源';
+
+-- Backfill existing chat_session and canvas_session relations into guard.
+-- If duplicate relations already exist across tables, migration will fail immediately.
+insert into harness_session_owner_guard (session_id)
+select session_id from chat_session;
+
+insert into harness_session_owner_guard (session_id)
+select session_id from canvas_session;
+
+create or replace function acquire_harness_session_owner_guard()
+returns trigger as $$
+begin
+    if tg_op = 'UPDATE' then
+        if new.session_id <> old.session_id then
+            raise exception 'updating session_id is not permitted on harness session relation'
+                using errcode = 'check_violation',
+                      constraint = 'chk_harness_session_no_session_update';
+        end if;
+        return new;
+    end if;
+
+    begin
+        insert into harness_session_owner_guard (session_id) values (new.session_id);
+    exception
+        when unique_violation then
+            raise exception 'harness session already owned by another product entity'
+                using errcode = 'check_violation',
+                      constraint = 'chk_harness_session_single_owner';
+    end;
+
+    return new;
+end;
+$$ language plpgsql;
+
+create or replace function release_harness_session_owner_guard()
+returns trigger as $$
+declare
+    deleted_rows integer;
+begin
+    delete from harness_session_owner_guard where session_id = old.session_id;
+    get diagnostics deleted_rows = row_count;
+    if deleted_rows <> 1 then
+        raise exception 'Invariant check violation: expected 1 owner guard released, got %', deleted_rows
+            using errcode = 'check_violation',
+                  constraint = 'chk_harness_session_single_owner';
+    end if;
+    return old;
+end;
+$$ language plpgsql;
+
+create trigger trg_chat_session_acquire_guard
+    before insert or update of session_id on chat_session
+    for each row execute function acquire_harness_session_owner_guard();
+
+create trigger trg_chat_session_release_guard
+    after delete on chat_session
+    for each row execute function release_harness_session_owner_guard();
+
+create trigger trg_canvas_session_acquire_guard
+    before insert or update of session_id on canvas_session
+    for each row execute function acquire_harness_session_owner_guard();
+
+create trigger trg_canvas_session_release_guard
+    after delete on canvas_session
+    for each row execute function release_harness_session_owner_guard();
+
+create trigger trg_project_session_acquire_guard
+    before insert or update of session_id on project_session
+    for each row execute function acquire_harness_session_owner_guard();
+
+create trigger trg_project_session_release_guard
+    after delete on project_session
+    for each row execute function release_harness_session_owner_guard();
+
+create trigger trg_issue_run_session_acquire_guard
+    before insert or update of session_id on issue_run_session
+    for each row execute function acquire_harness_session_owner_guard();
+
+create trigger trg_issue_run_session_release_guard
+    after delete on issue_run_session
+    for each row execute function release_harness_session_owner_guard();

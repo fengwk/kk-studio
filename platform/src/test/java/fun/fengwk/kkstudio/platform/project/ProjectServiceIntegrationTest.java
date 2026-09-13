@@ -227,6 +227,73 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
   }
 
   @Test
+  void testProjectValidationBoundariesAndErrors() {
+    String agentName = createTestAgent();
+    // Description > 65536 bytes
+    String oversizedDesc = "d".repeat(65537);
+    assertThrows(
+        AiValidationException.class,
+        () -> projectService.createProject("Title", oversizedDesc, agentName));
+
+    // Title > 255 chars
+    String oversizedTitle = "t".repeat(256);
+    assertThrows(
+        AiValidationException.class,
+        () -> projectService.createProject(oversizedTitle, "desc", agentName));
+
+    // Optional oversized blank description (e.g. 70000 spaces) 前置拒绝且不落库
+    String oversizedBlankDesc = " ".repeat(70000);
+    assertThrows(
+        AiValidationException.class,
+        () -> projectService.createProject("Valid Title", oversizedBlankDesc, agentName));
+
+    // Not found errors
+    UUID nonExistent = UUID.randomUUID();
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> projectService.updateProject(nonExistent, 0L, "T", "D", agentName));
+    assertThrows(
+        AiResourceNotFoundException.class, () -> projectService.archiveProject(nonExistent, 0L));
+    assertThrows(
+        AiResourceNotFoundException.class, () -> projectService.unarchiveProject(nonExistent, 0L));
+  }
+
+  @Test
+  void testCoordinatorSessionBindingEdgeCases() {
+    String agentName = createTestAgent();
+    Project project1 = projectService.createProject("Proj 1", "Desc", agentName);
+    Project project2 = projectService.createProject("Proj 2", "Desc", agentName);
+    UUID s1 = createHarnessSession();
+    UUID s2 = createHarnessSession();
+
+    // 1. 成功绑定
+    projectService.bindCoordinatorSession(project1.getId(), s1);
+
+    // 2. 幂等重复绑定相同 session -> 成功
+    projectService.bindCoordinatorSession(project1.getId(), s1);
+
+    // 3. 同一项目尝试绑定不同 session -> 拒绝
+    AiValidationException ex1 =
+        assertThrows(
+            AiValidationException.class,
+            () -> projectService.bindCoordinatorSession(project1.getId(), s2));
+    assertTrue(ex1.getMessage().contains("already bound to a different session"));
+
+    // 4. 不同项目尝试绑定相同 session (existingForSession) -> 拒绝
+    AiValidationException ex2 =
+        assertThrows(
+            AiValidationException.class,
+            () -> projectService.bindCoordinatorSession(project2.getId(), s1));
+    assertTrue(ex2.getMessage().contains("Session is already bound to another project"));
+
+    // 5. 归档项目禁止绑定 session -> 拒绝
+    projectService.archiveProject(project2.getId(), 0L);
+    assertThrows(
+        AiValidationException.class,
+        () -> projectService.bindCoordinatorSession(project2.getId(), s2));
+  }
+
+  @Test
   void testRepositoryDirectOperations() {
     String agentName = createTestAgent();
     Project project = projectService.createProject("Repo Test", "Desc", agentName);

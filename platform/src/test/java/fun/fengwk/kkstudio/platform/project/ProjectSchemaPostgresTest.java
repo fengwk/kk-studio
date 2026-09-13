@@ -303,8 +303,8 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status) "
-                        + "values (?, ?, 2, 'EXECUTOR', 'AGENT', ?, 'WAITING_HUMAN')")) {
+                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, waiting_reason) "
+                        + "values (?, ?, 2, 'EXECUTOR', 'AGENT', ?, 'WAITING_HUMAN', 'need input')")) {
               stmt.setObject(1, secondRunId);
               stmt.setObject(2, issueId);
               stmt.setString(3, agentName);
@@ -322,8 +322,8 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, status) "
-                        + "values (?, ?, 3, 'EXECUTOR', 'HUMAN', 'COMPLETED')")) {
+                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, status, completed_at, terminal_action_id, outcome, result) "
+                        + "values (?, ?, 3, 'EXECUTOR', 'HUMAN', 'COMPLETED', clock_timestamp(), 'act-3', 'SUBMITTED', '{\"summary\":\"s\"}'::jsonb)")) {
               stmt.setObject(1, invalidExecId);
               stmt.setObject(2, issueId);
               stmt.executeUpdate();
@@ -340,8 +340,8 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status) "
-                        + "values (?, ?, 4, 'REVIEWER', 'AGENT', ?, 'COMPLETED')")) {
+                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, completed_at, terminal_action_id, outcome, result) "
+                        + "values (?, ?, 4, 'REVIEWER', 'AGENT', ?, 'COMPLETED', clock_timestamp(), 'act-4', 'APPROVED', '{\"summary\":\"s\"}'::jsonb)")) {
               stmt.setObject(1, invalidRevId);
               stmt.setObject(2, issueId);
               stmt.setString(3, agentName);
@@ -355,7 +355,7 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection();
         PreparedStatement stmt =
             conn.prepareStatement(
-                "update issue_run set status = 'COMPLETED', outcome = 'SUBMITTED' where id = ?")) {
+                "update issue_run set status = 'COMPLETED', outcome = 'SUBMITTED', completed_at = clock_timestamp(), terminal_action_id = 'act-exec-1', result = '{\"summary\":\"done\"}'::jsonb where id = ?")) {
       stmt.setObject(1, execRunId);
       assertEquals(1, stmt.executeUpdate());
     }
@@ -364,8 +364,8 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection();
         PreparedStatement stmt =
             conn.prepareStatement(
-                "insert into issue_run (id, issue_id, ordinal, role, actor_type, submission_run_id, status, outcome) "
-                    + "values (?, ?, 2, 'REVIEWER', 'HUMAN', ?, 'COMPLETED', 'APPROVED')")) {
+                "insert into issue_run (id, issue_id, ordinal, role, actor_type, submission_run_id, status, outcome, completed_at, terminal_action_id, result) "
+                    + "values (?, ?, 2, 'REVIEWER', 'HUMAN', ?, 'COMPLETED', 'APPROVED', clock_timestamp(), 'act-rev-1', '{\"summary\":\"approved\"}'::jsonb)")) {
       stmt.setObject(1, revRunId);
       stmt.setObject(2, issueId);
       stmt.setObject(3, execRunId);
@@ -437,6 +437,268 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
                 conn.prepareStatement(
                     "insert into issue_controller_work (issue_id, wake_version) values (?, 1)")) {
               stmt.setObject(1, nonExistentIssueId);
+              stmt.executeUpdate();
+            }
+          });
+    }
+  }
+
+  @Test
+  void testHarnessSessionSingleOwnerGuard() throws SQLException {
+    String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
+    insertAgentDefinition(agentName);
+    UUID proj = UUID.randomUUID();
+    insertProject(proj, agentName);
+    UUID issueId = UUID.randomUUID();
+    insertIssue(issueId, proj, 1, "IN_PROGRESS");
+    UUID runId = UUID.randomUUID();
+    try (Connection conn = newConnection();
+        PreparedStatement stmt =
+            conn.prepareStatement(
+                "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status) "
+                    + "values (?, ?, 1, 'EXECUTOR', 'AGENT', ?, 'RUNNING')")) {
+      stmt.setObject(1, runId);
+      stmt.setObject(2, issueId);
+      stmt.setString(3, agentName);
+      assertEquals(1, stmt.executeUpdate());
+    }
+
+    UUID sessionId = UUID.randomUUID();
+    try (Connection conn = newConnection();
+        PreparedStatement stmt =
+            conn.prepareStatement(
+                "insert into harness_session (id, name, created_at) values (?, 'session-1', current_timestamp)")) {
+      stmt.setObject(1, sessionId);
+      assertEquals(1, stmt.executeUpdate());
+    }
+
+    // 1. 绑定 project_session
+    try (Connection conn = newConnection();
+        PreparedStatement stmt =
+            conn.prepareStatement(
+                "insert into project_session (project_id, session_id) values (?, ?)")) {
+      stmt.setObject(1, proj);
+      stmt.setObject(2, sessionId);
+      assertEquals(1, stmt.executeUpdate());
+    }
+
+    // 2. 尝试将相同 session_id 绑定到 issue_run_session，必须触发 chk_harness_session_single_owner 冲突
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_harness_session_single_owner",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into issue_run_session (run_id, session_id) values (?, ?)")) {
+              stmt.setObject(1, runId);
+              stmt.setObject(2, sessionId);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // 3. 禁止直接 UPDATE session_id
+    UUID otherSessionId = UUID.randomUUID();
+    try (Connection conn = newConnection();
+        PreparedStatement stmt =
+            conn.prepareStatement(
+                "insert into harness_session (id, name, created_at) values (?, 'session-2', current_timestamp)")) {
+      stmt.setObject(1, otherSessionId);
+      assertEquals(1, stmt.executeUpdate());
+    }
+
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_harness_session_no_session_update",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "update project_session set session_id = ? where project_id = ?")) {
+              stmt.setObject(1, otherSessionId);
+              stmt.setObject(2, proj);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // 4. 删除 project_session 后，guard 记录被释放，允许 issue_run_session 绑定该 sessionId
+    try (Connection conn = newConnection();
+        PreparedStatement stmt =
+            conn.prepareStatement("delete from project_session where project_id = ?")) {
+      stmt.setObject(1, proj);
+      assertEquals(1, stmt.executeUpdate());
+    }
+
+    try (Connection conn = newConnection();
+        PreparedStatement stmt =
+            conn.prepareStatement(
+                "insert into issue_run_session (run_id, session_id) values (?, ?)")) {
+      stmt.setObject(1, runId);
+      stmt.setObject(2, sessionId);
+      assertEquals(1, stmt.executeUpdate());
+    }
+  }
+
+  @Test
+  void testProjectAndIssueDescriptionLengthConstraints() throws SQLException {
+    String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
+    insertAgentDefinition(agentName);
+    UUID proj = UUID.randomUUID();
+
+    // 超过 65536 字节的 project description 被拒绝
+    String oversizedDesc = "a".repeat(65537);
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_project_description_len",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into project (id, title, description, coordinator_agent_name) "
+                        + "values (?, 'Proj', ?, ?)")) {
+              stmt.setObject(1, proj);
+              stmt.setString(2, oversizedDesc);
+              stmt.setString(3, agentName);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // 恰好 65536 字节成功
+    String exactDesc = "a".repeat(65536);
+    try (Connection conn = newConnection();
+        PreparedStatement stmt =
+            conn.prepareStatement(
+                "insert into project (id, title, description, coordinator_agent_name) "
+                    + "values (?, 'Proj', ?, ?)")) {
+      stmt.setObject(1, proj);
+      stmt.setString(2, exactDesc);
+      stmt.setString(3, agentName);
+      assertEquals(1, stmt.executeUpdate());
+    }
+
+    // 超过 65536 字节的 issue description 被拒绝
+    UUID issueId = UUID.randomUUID();
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_issue_description_len",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into issue (id, project_id, number, title, description, status) "
+                        + "values (?, ?, 1, 'Issue', ?, 'TODO')")) {
+              stmt.setObject(1, issueId);
+              stmt.setObject(2, proj);
+              stmt.setString(3, oversizedDesc);
+              stmt.executeUpdate();
+            }
+          });
+    }
+  }
+
+  @Test
+  void testIssueRunLifecycleConstraints() throws SQLException {
+    String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
+    insertAgentDefinition(agentName);
+    UUID proj = UUID.randomUUID();
+    insertProject(proj, agentName);
+    UUID issueId = UUID.randomUUID();
+    insertIssue(issueId, proj, 1, "IN_PROGRESS");
+
+    // RUNNING 状态必须 waiting_reason is null
+    UUID run1 = UUID.randomUUID();
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_issue_run_lifecycle",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, waiting_reason) "
+                        + "values (?, ?, 1, 'EXECUTOR', 'AGENT', ?, 'RUNNING', 'some reason')")) {
+              stmt.setObject(1, run1);
+              stmt.setObject(2, issueId);
+              stmt.setString(3, agentName);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // WAITING_HUMAN 状态必须有 non-blank waiting_reason
+    UUID run2 = UUID.randomUUID();
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_issue_run_lifecycle",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, waiting_reason) "
+                        + "values (?, ?, 2, 'EXECUTOR', 'AGENT', ?, 'WAITING_HUMAN', '   ')")) {
+              stmt.setObject(1, run2);
+              stmt.setObject(2, issueId);
+              stmt.setString(3, agentName);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // COMPLETED 状态必须 result is not null 且 waiting_reason is null
+    UUID run3 = UUID.randomUUID();
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_issue_run_lifecycle",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, result) "
+                        + "values (?, ?, 3, 'EXECUTOR', 'AGENT', ?, 'COMPLETED', null)")) {
+              stmt.setObject(1, run3);
+              stmt.setObject(2, issueId);
+              stmt.setString(3, agentName);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // FAILED 状态必须有 non-blank waiting_reason
+    UUID run4 = UUID.randomUUID();
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_issue_run_lifecycle",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, waiting_reason, completed_at) "
+                        + "values (?, ?, 4, 'EXECUTOR', 'AGENT', ?, 'FAILED', null, clock_timestamp())")) {
+              stmt.setObject(1, run4);
+              stmt.setObject(2, issueId);
+              stmt.setString(3, agentName);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // FAILED 状态仅 waiting_reason > 16384 bytes，稳定违背 chk_issue_run_waiting_reason_len
+    String oversizedReason = "f".repeat(16385);
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_issue_run_waiting_reason_len",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, waiting_reason, completed_at) "
+                        + "values (?, ?, 5, 'EXECUTOR', 'AGENT', ?, 'FAILED', ?, clock_timestamp())")) {
+              stmt.setObject(1, UUID.randomUUID());
+              stmt.setObject(2, issueId);
+              stmt.setString(3, agentName);
+              stmt.setString(4, oversizedReason);
               stmt.executeUpdate();
             }
           });

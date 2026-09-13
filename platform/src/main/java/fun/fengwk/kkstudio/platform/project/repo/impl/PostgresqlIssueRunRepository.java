@@ -43,6 +43,16 @@ public class PostgresqlIssueRunRepository implements IssueRunRepository {
   }
 
   @Override
+  public IssueRun lockActiveByIssueId(UUID issueId) {
+    return toModel(issueRunMapper.lockActiveByIssueId(issueId));
+  }
+
+  @Override
+  public IssueRun findByTerminalActionId(String terminalActionId) {
+    return toModel(issueRunMapper.findByTerminalActionId(terminalActionId));
+  }
+
+  @Override
   public IssueRun findLatestByIssueId(UUID issueId) {
     return toModel(issueRunMapper.findLatestByIssueId(issueId));
   }
