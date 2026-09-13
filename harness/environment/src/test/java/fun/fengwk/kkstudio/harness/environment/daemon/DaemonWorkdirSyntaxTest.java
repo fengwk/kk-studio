@@ -32,7 +32,16 @@ class DaemonWorkdirSyntaxTest {
 
   private static Stream<Arguments> acceptedUnixCases() {
     String[] accepted = {
-      "/", "//", "///", "/tmp/work", "/a b/c", "/srv/a$/b", "/srv/$1", "/srv/100%", "/srv/a%-b"
+      "/",
+      "//",
+      "///",
+      "/tmp/work",
+      "/a b/c",
+      "/srv/a$/b",
+      "/srv/$1",
+      "/srv/100%",
+      "/srv/a%-b",
+      "/srv/%a-b%/dir"
     };
     return Stream.of(UNIX_FAMILIES)
         .flatMap(os -> Stream.of(accepted).map(path -> Arguments.of(os, path)));

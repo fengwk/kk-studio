@@ -61,6 +61,23 @@ class DaemonEnvelopeCodecTest {
     assertProtocolError(
         current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
             + "\"sequence\":0,\"payload\":{},\"unexpected\":true}");
+    assertProtocolError(
+        current("\"environmentId\":\"" + ID_TEXT + "\",") + "\"sequence\":0,\"payload\":{}}");
+    assertProtocolError(
+        current("\"messageType\":123,\"environmentId\":\"" + ID_TEXT + "\",")
+            + "\"sequence\":0,\"payload\":{}}");
+    assertProtocolError(
+        current("\"messageType\":\"   \",\"environmentId\":\"" + ID_TEXT + "\",")
+            + "\"sequence\":0,\"payload\":{}}");
+    assertProtocolError(
+        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
+            + "\"sequence\":\"0\",\"payload\":{}}");
+    assertProtocolError(
+        current(
+                "\"messageType\":\"INVOKE\",\"environmentId\":\""
+                    + ID_TEXT
+                    + "\",\"invocationId\":\"   \",")
+            + "\"sequence\":0,\"payload\":{}}");
   }
 
   /** READY 等 connection 消息必须携带 canonical UUID scope。 */

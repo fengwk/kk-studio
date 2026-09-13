@@ -2,11 +2,13 @@ package fun.fengwk.kkstudio.harness.environment.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -444,6 +446,17 @@ class DaemonCapabilitiesCodecTest {
     assertInvalidRootPath(" /home/dev");
     assertInvalidRootPath("/home/dev ");
     assertInvalidRootPath("/home/dev\u0000x");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "UTC", "Note", null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "UTC", "Note", " /home/dev"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonEnvironmentInfo(
+                DaemonOperatingSystem.LINUX, "UTC", "Note", "/home/dev\u0000x"));
   }
 
   @Test
@@ -451,6 +464,184 @@ class DaemonCapabilitiesCodecTest {
     assertThrows(DaemonProtocolException.class, () -> codec.decode("not-json"));
     assertThrows(DaemonProtocolException.class, () -> codec.decode("[]"));
     assertThrows(DaemonProtocolException.class, () -> codec.decode("null"));
+  }
+
+  /** 测试意图：测试模型构造时非法 capabilities 协议版本被直接拒绝。 */
+  @Test
+  void rejectsUnsupportedCapabilitiesVersionInModel() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DaemonCapabilities(1, ENVIRONMENT, SOURCE_SET_VERSION, List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DaemonCapabilities(3, ENVIRONMENT, SOURCE_SET_VERSION, List.of()));
+  }
+
+  /** 测试意图：测试来源数量超过 512 上限时，在模型构造与解码时均被严格拒绝。 */
+  @Test
+  void rejectsCapabilitiesExceedingMaxSources() {
+    List<DaemonSkillSourceSnapshot> sources = new ArrayList<>();
+    StringBuilder sb = new StringBuilder("[");
+    for (int i = 0; i < DaemonCapabilities.MAX_SOURCES + 1; i++) {
+      UUID id = UUID.randomUUID();
+      sources.add(new DaemonSkillSourceSnapshot(id, 0, REVISION, List.of(), List.of()));
+      if (i > 0) {
+        sb.append(",");
+      }
+      sb.append("{\"sourceId\":\"")
+          .append(id)
+          .append("\",\"sourceVersion\":0,\"sourceRevision\":\"")
+          .append(REVISION)
+          .append("\",\"skills\":[],\"diagnostics\":[]}");
+    }
+    sb.append("]");
+
+    IllegalArgumentException modelError =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new DaemonCapabilities(
+                    DaemonCapabilities.VERSION, ENVIRONMENT, SOURCE_SET_VERSION, sources));
+    assertTrue(modelError.getMessage().contains("skillSources must not exceed"));
+
+    String payload = payload("", sb.toString());
+    DaemonProtocolException codecError =
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(payload));
+    assertTrue(codecError.getMessage().contains("READY skillSources must not exceed"));
+  }
+
+  /** 测试意图：测试技能总数超过 4096 上限时，在模型构造与解码时均被严格拒绝。 */
+  @Test
+  void rejectsCapabilitiesExceedingMaxSkillsTotal() {
+    UUID id1 = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    UUID id2 = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    List<DaemonSkillDescriptor> skills1 = new ArrayList<>();
+    StringBuilder skillsJson1 = new StringBuilder("[");
+    for (int i = 0; i < 2049; i++) {
+      skills1.add(new DaemonSkillDescriptor(id1, 0, "s1-" + i, "desc", "/abs", REVISION));
+      if (i > 0) {
+        skillsJson1.append(",");
+      }
+      skillsJson1
+          .append("{\"sourceId\":\"")
+          .append(id1)
+          .append("\",\"sourceVersion\":0,\"name\":\"s1-")
+          .append(i)
+          .append("\",\"description\":\"desc\",\"baseDirectory\":\"/abs\",\"contentRevision\":\"")
+          .append(REVISION)
+          .append("\"}");
+    }
+    skillsJson1.append("]");
+
+    List<DaemonSkillDescriptor> skills2 = new ArrayList<>();
+    StringBuilder skillsJson2 = new StringBuilder("[");
+    for (int i = 0; i < 2048; i++) {
+      skills2.add(new DaemonSkillDescriptor(id2, 0, "s2-" + i, "desc", "/abs", REVISION));
+      if (i > 0) {
+        skillsJson2.append(",");
+      }
+      skillsJson2
+          .append("{\"sourceId\":\"")
+          .append(id2)
+          .append("\",\"sourceVersion\":0,\"name\":\"s2-")
+          .append(i)
+          .append("\",\"description\":\"desc\",\"baseDirectory\":\"/abs\",\"contentRevision\":\"")
+          .append(REVISION)
+          .append("\"}");
+    }
+    skillsJson2.append("]");
+
+    DaemonSkillSourceSnapshot snap1 =
+        new DaemonSkillSourceSnapshot(id1, 0, REVISION, skills1, List.of());
+    DaemonSkillSourceSnapshot snap2 =
+        new DaemonSkillSourceSnapshot(id2, 0, REVISION, skills2, List.of());
+
+    IllegalArgumentException modelError =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new DaemonCapabilities(
+                    DaemonCapabilities.VERSION,
+                    ENVIRONMENT,
+                    SOURCE_SET_VERSION,
+                    List.of(snap1, snap2)));
+    assertTrue(
+        modelError.getMessage().contains("must not exceed " + DaemonCapabilities.MAX_SKILLS));
+
+    String payload =
+        payload(
+            "",
+            "[{\"sourceId\":\""
+                + id1
+                + "\",\"sourceVersion\":0,\"sourceRevision\":\""
+                + REVISION
+                + "\",\"skills\":"
+                + skillsJson1
+                + ",\"diagnostics\":[]},"
+                + "{\"sourceId\":\""
+                + id2
+                + "\",\"sourceVersion\":0,\"sourceRevision\":\""
+                + REVISION
+                + "\",\"skills\":"
+                + skillsJson2
+                + ",\"diagnostics\":[]}]");
+    DaemonProtocolException codecError =
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(payload));
+    assertTrue(codecError.getMessage().contains("READY skills must not exceed"));
+  }
+
+  /** 测试意图：测试解码时跨来源同名冲突被正确捕获并抛出 DaemonProtocolException。 */
+  @Test
+  void rejectsDuplicateSkillNamesAcrossSourcesInDecode() {
+    UUID id1 = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    UUID id2 = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    String payload =
+        payload(
+            "",
+            "[{\"sourceId\":\""
+                + id1
+                + "\",\"sourceVersion\":0,\"sourceRevision\":\""
+                + REVISION
+                + "\",\"skills\":[{\"sourceId\":\""
+                + id1
+                + "\",\"sourceVersion\":0,\"name\":\"same-skill\",\"description\":\"d\",\"baseDirectory\":\"/abs\",\"contentRevision\":\""
+                + REVISION
+                + "\"}],\"diagnostics\":[]},"
+                + "{\"sourceId\":\""
+                + id2
+                + "\",\"sourceVersion\":0,\"sourceRevision\":\""
+                + REVISION
+                + "\",\"skills\":[{\"sourceId\":\""
+                + id2
+                + "\",\"sourceVersion\":0,\"name\":\"same-skill\",\"description\":\"d\",\"baseDirectory\":\"/abs\",\"contentRevision\":\""
+                + REVISION
+                + "\"}],\"diagnostics\":[]}]");
+    DaemonProtocolException error =
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(payload));
+    assertTrue(
+        error.getMessage().contains("duplicate READY skill name across sources: same-skill"));
+  }
+
+  /** 测试意图：测试解码时重复来源 ID 被立即捕获并拒绝。 */
+  @Test
+  void rejectsDuplicateSourceIdsInDecode() {
+    UUID id1 = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    String payload =
+        payload(
+            "",
+            "[{\"sourceId\":\""
+                + id1
+                + "\",\"sourceVersion\":0,\"sourceRevision\":\""
+                + REVISION
+                + "\",\"skills\":[],\"diagnostics\":[]},"
+                + "{\"sourceId\":\""
+                + id1
+                + "\",\"sourceVersion\":1,\"sourceRevision\":\""
+                + REVISION
+                + "\",\"skills\":[],\"diagnostics\":[]}]");
+    DaemonProtocolException error =
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(payload));
+    assertTrue(error.getMessage().contains("duplicate READY skill source: " + id1));
   }
 
   private static String payload(String prefix, String skillSources) {
