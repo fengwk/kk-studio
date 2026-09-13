@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "properties": {
+    "pattern": {
+      "type": "string",
+      "description": "Regular-expression pattern (RE2 linear syntax) to search for by default; use literal=true to treat it as exact text."
+    },
+    "path": {
+      "type": "string",
+      "description": "CFS canonical absolute directory or file path to search."
+    },
+    "include": {
+      "type": "string",
+      "description": "Optional file filter glob such as '**/*.md'."
+    },
+    "ignore_case": {
+      "type": "boolean",
+      "description": "Case-insensitive search. Defaults to false."
+    },
+    "literal": {
+      "type": "boolean",
+      "description": "Treat the pattern literally instead of as a regular expression. Defaults to false."
+    },
+    "multiline": {
+      "type": "boolean",
+      "description": "Allow matches to span multiple lines. Defaults to false."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Positive maximum number of matches to return. Defaults to 100."
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "description": "Positive search timeout in seconds. Defaults to 15."
+    }
+  },
+  "required": [
+    "pattern",
+    "path"
+  ],
+  "additionalProperties": false
+}
