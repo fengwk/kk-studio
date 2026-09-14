@@ -311,6 +311,33 @@ final class OpenAiResponsesStreamAccumulator {
     return null;
   }
 
+  private static void retainStreamedReasoningEncryptedContent(
+      ObjectNode terminalItem, List<JsonNode> streamedItems) {
+    if (terminalItem.has("encrypted_content")) {
+      return;
+    }
+
+    JsonNode terminalId = terminalItem.get("id");
+    if (terminalId == null || !terminalId.isTextual() || terminalId.textValue().isBlank()) {
+      return;
+    }
+
+    for (JsonNode streamedItem : streamedItems) {
+      if (!streamedItem.isObject()
+          || !"reasoning".equals(streamedItem.path("type").asText())
+          || !terminalId.textValue().equals(streamedItem.path("id").asText(null))) {
+        continue;
+      }
+      JsonNode encryptedContent = streamedItem.get("encrypted_content");
+      if (encryptedContent != null
+          && encryptedContent.isTextual()
+          && !encryptedContent.textValue().isBlank()) {
+        terminalItem.set("encrypted_content", encryptedContent.deepCopy());
+      }
+      return;
+    }
+  }
+
   private void syncToolFromItem(JsonNode item) {
     String itemId = item.path("id").asText(null);
     String callId = item.path("call_id").asText(null);
@@ -484,42 +511,51 @@ final class OpenAiResponsesStreamAccumulator {
       }
       if (isTerminal) {
         explicitTerminalOutputProcessed = true;
+        List<JsonNode> priorStreamedItems = new ArrayList<>(rawOutputItems);
         rawOutputItems.clear();
         toolsById.clear();
         nextToolOrdinal = 0;
         textBuffer.setLength(0);
         thinkingBuffer.setLength(0);
-        for (JsonNode item : outputNode) {
-          rawOutputItems.add(item.deepCopy());
-          if (item.isObject()) {
-            String itemType = item.path("type").asText();
-            if ("function_call".equals(itemType)) {
-              syncToolFromItem(item);
-            } else if ("message".equals(itemType)) {
-              JsonNode content = item.get("content");
-              if (content != null) {
-                if (content.isArray()) {
-                  for (JsonNode c : content) {
-                    if (c.isObject() && "output_text".equals(c.path("type").asText())) {
-                      textBuffer.append(c.path("text").asText(""));
-                    }
+        for (JsonNode itemNode : outputNode) {
+          if (!itemNode.isObject()) {
+            rawOutputItems.add(itemNode.deepCopy());
+            continue;
+          }
+
+          ObjectNode item = (ObjectNode) itemNode.deepCopy();
+          String itemType = item.path("type").asText();
+          if ("reasoning".equals(itemType)) {
+            retainStreamedReasoningEncryptedContent(item, priorStreamedItems);
+          }
+
+          rawOutputItems.add(item);
+          if ("function_call".equals(itemType)) {
+            syncToolFromItem(item);
+          } else if ("message".equals(itemType)) {
+            JsonNode content = item.get("content");
+            if (content != null) {
+              if (content.isArray()) {
+                for (JsonNode c : content) {
+                  if (c.isObject() && "output_text".equals(c.path("type").asText())) {
+                    textBuffer.append(c.path("text").asText(""));
                   }
-                } else if (content.isTextual()) {
-                  textBuffer.append(content.asText());
                 }
+              } else if (content.isTextual()) {
+                textBuffer.append(content.asText());
               }
-            } else if ("reasoning".equals(itemType)) {
-              JsonNode summary = item.get("summary");
-              if (summary != null) {
-                if (summary.isArray()) {
-                  for (JsonNode s : summary) {
-                    if (s.isObject() && "summary_text".equals(s.path("type").asText())) {
-                      thinkingBuffer.append(s.path("text").asText(""));
-                    }
+            }
+          } else if ("reasoning".equals(itemType)) {
+            JsonNode summary = item.get("summary");
+            if (summary != null) {
+              if (summary.isArray()) {
+                for (JsonNode s : summary) {
+                  if (s.isObject() && "summary_text".equals(s.path("type").asText())) {
+                    thinkingBuffer.append(s.path("text").asText(""));
                   }
-                } else if (summary.isTextual()) {
-                  thinkingBuffer.append(summary.asText());
                 }
+              } else if (summary.isTextual()) {
+                thinkingBuffer.append(summary.asText());
               }
             }
           }

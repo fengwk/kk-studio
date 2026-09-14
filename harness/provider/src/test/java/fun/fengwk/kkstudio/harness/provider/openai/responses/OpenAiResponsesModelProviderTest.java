@@ -192,9 +192,10 @@ class OpenAiResponsesModelProviderTest {
         new OpenAiResponsesProviderAdapter(
             stubTransport((req, cb) -> capturedRequest.set(req)), "sk-valid-key");
     assertEquals(ProviderType.OPENAI_RESPONSES, adapter.providerType());
-    // 缺省即 Pi-like AUTOMATIC：能力层声明 AFFINITY/SHORT，才能在 wire 上带出稳定 prompt_cache_key。
-    assertEquals(PromptCacheMode.AFFINITY, adapter.promptCacheCapability().mode());
-    assertTrue(adapter.promptCacheCapability().supports(PromptCacheRetention.SHORT));
+    // 缺省即 AUTOMATIC：不发送任何 cache hint。
+    assertEquals(PromptCacheMode.AUTOMATIC, adapter.promptCacheCapability().mode());
+    assertFalse(adapter.promptCacheCapability().supports(PromptCacheRetention.SHORT));
+    assertTrue(adapter.promptCacheCapability().supports(PromptCacheRetention.NONE));
 
     ModelProvider provider = adapter.create(createDescriptor());
     ProviderStream stream = provider.stream(createRequest(), new RecordingHandler());
@@ -326,7 +327,7 @@ class OpenAiResponsesModelProviderTest {
     // 3. 构造器传入 null OpenAiResponsesConfig 自动回退为默认配置
     OpenAiResponsesProviderAdapter adapterWithNullConfig =
         new OpenAiResponsesProviderAdapter(transport, "key", (OpenAiResponsesConfig) null);
-    assertEquals(PromptCacheMode.AFFINITY, adapterWithNullConfig.promptCacheCapability().mode());
+    assertEquals(PromptCacheMode.AUTOMATIC, adapterWithNullConfig.promptCacheCapability().mode());
 
     // 4. descriptor 为空或 ProviderType 不匹配时抛出异常
     assertThrows(NullPointerException.class, () -> adapterWithJson.create(null));

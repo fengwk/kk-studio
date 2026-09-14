@@ -17,16 +17,18 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 /** 验证 OpenAI Responses 配置解析与 PromptCacheCapability 映射规则。 */
 class OpenAiResponsesConfigTest {
 
-  /** 验证缺省或空白配置解析为 AUTOMATIC 模式，且能力映射为 affinity（仅 SHORT）。 */
+  /** 验证缺省或空白配置解析为 AUTOMATIC 模式，且能力映射为 automatic（无缓存提示）。 */
   @Test
   void test_defaultAndBlankConfig() {
     OpenAiResponsesConfig defaultConfig = OpenAiResponsesConfig.defaultConfig();
     assertEquals(OpenAiPromptCacheMode.AUTOMATIC, defaultConfig.openAiPromptCacheMode());
 
-    // Pi-like 缺省：声明 AFFINITY 能力以保留 runtime 派生的 prompt_cache_key，但不宣称 LONG retention。
+    // 默认 AUTOMATIC 模式：Provider 自治管理缓存，不发送任何 cache hint
     PromptCacheCapability defaultCap = defaultConfig.promptCacheCapability();
-    assertEquals(PromptCacheMode.AFFINITY, defaultCap.mode());
-    assertTrue(defaultCap.supports(PromptCacheRetention.SHORT));
+    assertEquals(PromptCacheMode.AUTOMATIC, defaultCap.mode());
+    assertEquals(PromptCacheCapability.automatic(), defaultCap);
+    assertTrue(defaultCap.supports(PromptCacheRetention.NONE));
+    assertFalse(defaultCap.supports(PromptCacheRetention.SHORT));
     assertFalse(defaultCap.supports(PromptCacheRetention.LONG));
     assertTrue(defaultCap.supportedBreakpoints().isEmpty());
 

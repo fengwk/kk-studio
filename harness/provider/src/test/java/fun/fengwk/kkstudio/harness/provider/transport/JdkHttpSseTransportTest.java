@@ -693,6 +693,73 @@ class JdkHttpSseTransportTest {
     assertTrue(callback.error.getMessage().contains("SSE line size exceeded limit"));
   }
 
+  /** 验证默认 HttpSseLimits 下单行超过 64KB 但在 1MB 预算内的合法数据行正常传输和消费。 */
+  @Test
+  void default_limits_accepts_transport_line_larger_than_64k_and_within_1m() throws Exception {
+    int dataSize = 128 * 1024;
+    httpServer.createContext(
+        "/large-line-stream",
+        exchange -> {
+          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+          exchange.sendResponseHeaders(200, 0);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write("data: ".getBytes(StandardCharsets.UTF_8));
+            byte[] big = new byte[dataSize];
+            Arrays.fill(big, (byte) 'k');
+            os.write(big);
+            os.write("\n\n".getBytes(StandardCharsets.UTF_8));
+            os.flush();
+          } catch (Exception ignored) {
+          }
+        });
+
+    RecordingCallback callback = new RecordingCallback();
+    HttpRequest request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/large-line-stream"))
+            .GET()
+            .build();
+    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
+
+    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
+    assertNull(callback.error);
+    assertTrue(callback.completed);
+    assertEquals(1, callback.events.size());
+    assertEquals(dataSize, callback.events.get(0).data().length());
+  }
+
+  /** 验证默认 HttpSseLimits 下单行超过 1MB 预算时立即被拒绝并中止连接（fail closed）。 */
+  @Test
+  void default_limits_rejects_transport_line_larger_than_1m() throws Exception {
+    int dataSize = 1024 * 1024 + 10;
+    httpServer.createContext(
+        "/overflow-1m-stream",
+        exchange -> {
+          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+          exchange.sendResponseHeaders(200, 0);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write("data: ".getBytes(StandardCharsets.UTF_8));
+            byte[] big = new byte[dataSize];
+            Arrays.fill(big, (byte) 'x');
+            os.write(big);
+            os.write("\n\n".getBytes(StandardCharsets.UTF_8));
+            os.flush();
+          } catch (Exception ignored) {
+          }
+        });
+
+    RecordingCallback callback = new RecordingCallback();
+    HttpRequest request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/overflow-1m-stream"))
+            .GET()
+            .build();
+    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
+
+    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
+    assertNotNull(callback.error);
+    assertEquals(TransportErrorKind.INVALID_RESPONSE, callback.error.kind());
+    assertTrue(callback.error.getMessage().contains("SSE line size exceeded limit"));
+  }
+
   /**
    * 契约测试（对应上游 shouldHandleIOException 的传输层映射）： 验证底层 HTTP 响应体流在读取过程中发生 I/O 故障时，精准且仅触发一次
    * onFailure(TransportErrorKind.IO)，且绝不触发 onComplete。

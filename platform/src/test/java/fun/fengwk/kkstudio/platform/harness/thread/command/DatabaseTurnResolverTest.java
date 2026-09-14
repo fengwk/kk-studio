@@ -1115,11 +1115,11 @@ class DatabaseTurnResolverTest {
   }
 
   /**
-   * 意图：Responses 缺省的 AUTOMATIC（Pi-like）配置下，planner 必须冻结稳定 affinity key（同 session 同前缀稳定、跨 session
-   * 不同），防止 Provider 编码前已经静默退化为无缓存。
+   * 意图：Responses 缺省为 AUTOMATIC，planner 规划产出 ProviderCacheControl.none()； 而显式 LEGACY 模式下必须冻结稳定
+   * affinity key（同 session 同前缀稳定、跨 session 不同）。
    */
   @Test
-  void defaultResponsesConfigFreezesStableAffinityCacheKey() {
+  void defaultResponsesConfigResolvesAutomaticAndLegacyFreezesStableAffinityCacheKey() {
     Fixture fixture =
         new Fixture(
             List.of(),
@@ -1132,6 +1132,17 @@ class DatabaseTurnResolverTest {
             OpenAiResponsesProviderAdapter.resolvePromptCacheCapability(null),
             true);
     EntryPath path = fixture.path(settings("default"));
+
+    ModelRequestSpec defaultSpec = fixture.resolved(path);
+    assertEquals(PromptCacheRetention.NONE, defaultSpec.cacheControl().retention());
+    assertEquals(ProviderCacheControl.none(), defaultSpec.cacheControl());
+
+    // 显式 LEGACY 配置下：planner 必须冻结稳定 affinity key
+    String legacyConfig = "{\"openAiPromptCacheMode\":\"LEGACY\"}";
+    fixture.provider.setConfigJson(legacyConfig);
+    ProviderFactory factory = fixture.resolverProviderFactory();
+    when(factory.promptCacheCapability(legacyConfig))
+        .thenReturn(OpenAiResponsesProviderAdapter.resolvePromptCacheCapability(legacyConfig));
 
     ModelRequestSpec first = fixture.resolved(path);
     ModelRequestSpec sameSessionAgain = fixture.resolved(fixture.path(settings("default")));

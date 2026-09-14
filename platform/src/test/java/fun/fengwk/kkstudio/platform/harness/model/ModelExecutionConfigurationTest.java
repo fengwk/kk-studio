@@ -183,14 +183,15 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
   /** 意图：验证 OpenAI Responses 工厂基于 configJson 正确解析 AUTOMATIC、LEGACY 与 GPT_5_6_EXPLICIT 三种模式。 */
   @Test
   void openAiResponsesFactoryResolvesDynamicPromptCacheCapabilities() {
-    // Pi-like 默认空配置 -> AFFINITY (SHORT)，用于发送稳定 prompt_cache_key。
+    // 默认空配置 -> AUTOMATIC（Provider 自治管理，不发送 cache hint）
     for (PromptCacheCapability automatic :
         List.of(
             openaiResponsesProviderFactory.promptCacheCapability(),
             openaiResponsesProviderFactory.promptCacheCapability(null),
             openaiResponsesProviderFactory.promptCacheCapability("{}"))) {
-      assertEquals(PromptCacheMode.AFFINITY, automatic.mode());
-      assertEquals(Set.of(PromptCacheRetention.SHORT), automatic.supportedRetentions());
+      assertEquals(PromptCacheMode.AUTOMATIC, automatic.mode());
+      assertEquals(Set.of(), automatic.supportedRetentions());
+      assertEquals(Set.of(), automatic.supportedBreakpoints());
     }
 
     // LEGACY -> AFFINITY (SHORT, LONG)

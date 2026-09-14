@@ -703,10 +703,7 @@ final class OpenAiResponsesRequestEncoder {
       List<ObjectNode> systemContentBlocks,
       List<ObjectNode> conversationContentBlocks) {
     if (cacheMode == OpenAiPromptCacheMode.AUTOMATIC) {
-      // Pi-like 缺省：只在 runtime 决定启用缓存时发送稳定亲和键，不带 retention/options/breakpoint。
-      if (cacheControl.retention() != PromptCacheRetention.NONE) {
-        root.put("prompt_cache_key", cacheControl.affinityKey());
-      }
+      // AUTOMATIC: 不发任何 cache hint（防御性忽略可能传入的非 none cacheControl），匹配 OpenAI Chat 行为
       return;
     }
 

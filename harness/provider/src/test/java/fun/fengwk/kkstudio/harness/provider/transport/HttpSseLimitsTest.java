@@ -26,6 +26,14 @@ class HttpSseLimitsTest {
   }
 
   @Test
+  void defaultLimitsValues() {
+    assertEquals(1024 * 1024, HttpSseLimits.DEFAULT.maxLineBytes());
+    assertEquals(1024 * 1024, HttpSseLimits.DEFAULT.maxEventBytes());
+    assertEquals(128L * 1024 * 1024, HttpSseLimits.DEFAULT.maxSuccessBodyBytes());
+    assertEquals(64 * 1024, HttpSseLimits.DEFAULT.maxErrorBodyBytes());
+  }
+
+  @Test
   void illegalLimitsThrowException() {
     assertThrows(IllegalArgumentException.class, () -> new HttpSseLimits(0, 10, 10, 10));
     assertThrows(IllegalArgumentException.class, () -> new HttpSseLimits(10, 0, 10, 10));

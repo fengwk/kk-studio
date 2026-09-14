@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
 /** OpenAI Responses 提示缓存控制模式枚举。 */
 public enum OpenAiPromptCacheMode {
-  /** 缺省（Pi-like）模式：仅发送 runtime 派生的 prompt_cache_key，不发送 retention/options/breakpoint。 */
+  /** 缺省模式：由 Provider 自主管理缓存，不发送任何 cache hint。 */
   AUTOMATIC,
 
   /** Legacy 缓存模式：非 NONE 时发送 prompt_cache_key 与 prompt_cache_retention。 */

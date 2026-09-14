@@ -362,6 +362,50 @@ class IncrementalSseParserTest {
     assertEquals(TransportErrorKind.INVALID_RESPONSE, ex.kind());
   }
 
+  /** 边界测试：默认配置允许 >64 KiB 且 <=1 MiB 的单行合法 UTF-8 数据行正常解析。 */
+  @Test
+  void default_limits_accepts_single_line_larger_than_64k_and_within_1m() {
+    int payloadBytes = 128 * 1024; // 128 KiB > 64 KiB 且 < 1 MiB
+    String longData = "a".repeat(payloadBytes);
+    String ssePayload = "data: " + longData + "\n\n";
+
+    List<ServerSentEvent> events = new ArrayList<>();
+    IncrementalSseParser parser = new IncrementalSseParser(HttpSseLimits.DEFAULT, events::add);
+    feedString(parser, ssePayload);
+    parser.flush();
+
+    assertEquals(1, events.size());
+    assertEquals(longData, events.get(0).data());
+  }
+
+  /** 边界测试：默认配置下超过 1 MiB 的单行数据行立即被拒绝（fail closed）。 */
+  @Test
+  void default_limits_rejects_single_line_larger_than_1m() {
+    int payloadBytes = 1024 * 1024 + 10; // > 1 MiB
+    String longData = "b".repeat(payloadBytes);
+    String ssePayload = "data: " + longData + "\n\n";
+
+    IncrementalSseParser parser = new IncrementalSseParser(HttpSseLimits.DEFAULT, event -> {});
+    TransportException ex =
+        assertThrows(TransportException.class, () -> feedString(parser, ssePayload));
+    assertEquals(TransportErrorKind.INVALID_RESPONSE, ex.kind());
+    assertTrue(ex.getMessage().contains("SSE line size exceeded limit"));
+  }
+
+  /** 边界测试：默认配置下跨多行但累计超过 1 MiB 事件上限的数据立即被拒绝（fail closed）。 */
+  @Test
+  void default_limits_rejects_multiline_event_exceeding_1m() {
+    int lineBytes = 600 * 1024; // 600 KiB，两行合计 1.2 MiB > 1 MiB event bound
+    String line1 = "data: " + "c".repeat(lineBytes) + "\n";
+    String line2 = "data: " + "d".repeat(lineBytes) + "\n\n";
+
+    IncrementalSseParser parser = new IncrementalSseParser(HttpSseLimits.DEFAULT, event -> {});
+    feedString(parser, line1);
+    TransportException ex = assertThrows(TransportException.class, () -> feedString(parser, line2));
+    assertEquals(TransportErrorKind.INVALID_RESPONSE, ex.kind());
+    assertTrue(ex.getMessage().contains("SSE event size exceeded limit"));
+  }
+
   /** 强化测试：遇到 NUL 字节时确定性失败。 */
   @Test
   void nul_byte_causes_invalid_response_failure() {

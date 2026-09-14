@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
@@ -306,5 +307,128 @@ class OpenAiResponsesThinkingTest {
     assertEquals("reasoning", input.get(1).path("type").asText());
     assertEquals("c1", input.get(2).path("call_id").asText());
     assertEquals("c2", input.get(3).path("call_id").asText());
+  }
+
+  /**
+   * 精确非对称回归测试： output_item.done 包含 encrypted_content，而 terminal response.completed 包含相同的 reasoning
+   * id 与 summary， 但省略了 encrypted_content；验证持久化 replay state 与下一轮请求中均完整保留并回传该 encrypted_content
+   * blob。
+   */
+  @Test
+  void preservesStreamedEncryptedReasoningAcrossTerminalAndReplay() throws Exception {
+    ProviderDescriptor desc = createDescriptor();
+    OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
+
+    ProviderRequest req1 =
+        request(
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("asymmetric test")))));
+    OpenAiResponsesEncodedRequest encReq1 =
+        encoder.encode(req1, desc, OpenAiResponsesConfig.defaultConfig());
+
+    OpenAiResponsesStreamAccumulator acc =
+        new OpenAiResponsesStreamAccumulator(req1, desc, encReq1.sourcePrefixHash(), e -> {});
+
+    // 1. 流式阶段：created -> reasoning added -> summary delta -> reasoning output_item.done (带
+    // encrypted_content)
+    acc.processEvent(
+        MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_asym\"}}"));
+    acc.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"output_index\":0,"
+                + "\"item\":{\"id\":\"rs_asym_1\",\"type\":\"reasoning\",\"encrypted_content\":\"enc_blob_asym_999\",\"summary\":[]}}"));
+    acc.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"summary_index\":0,\"delta\":\"Deliberating deeply\"}"));
+    acc.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,"
+                + "\"item\":{\"id\":\"rs_asym_1\",\"type\":\"reasoning\",\"encrypted_content\":\"enc_blob_asym_999\","
+                + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"Deliberating deeply\"}]}}"));
+
+    // 2. 工具调用阶段：added -> arguments.done -> output_item.done
+    acc.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"output_index\":1,"
+                + "\"item\":{\"id\":\"fc_asym\",\"type\":\"function_call\",\"call_id\":\"call_asym\",\"name\":\"do_search\"}}"));
+    acc.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.function_call_arguments.done\",\"output_index\":1,\"call_id\":\"call_asym\",\"arguments\":\"{\\\"q\\\":\\\"test\\\"}\"}"));
+    acc.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":1,"
+                + "\"item\":{\"id\":\"fc_asym\",\"type\":\"function_call\",\"call_id\":\"call_asym\",\"name\":\"do_search\",\"arguments\":\"{\\\"q\\\":\\\"test\\\"}\"}}"));
+
+    // 3. 终态 completed：显式提供 output 数组，包含同 id + summary 的 reasoning，但省略 encrypted_content！
+    acc.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_asym\",\"status\":\"completed\","
+                + "\"output\":["
+                + "{\"type\":\"reasoning\",\"id\":\"rs_asym_1\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Deliberating deeply\"}]},"
+                + "{\"type\":\"function_call\",\"id\":\"fc_asym\",\"call_id\":\"call_asym\",\"name\":\"do_search\",\"arguments\":\"{\\\"q\\\":\\\"test\\\"}\"}"
+                + "]}}"));
+
+    ProviderResponse resp = acc.response();
+    assertEquals("Deliberating deeply", resp.thinking());
+    assertEquals(1, resp.toolCalls().size());
+    assertEquals("call_asym", resp.toolCalls().get(0).id());
+
+    // 4. 验证 durable replayState 必须包含从流式中保留的 encrypted_content
+    ProviderReplayState replayState = acc.replayState();
+    assertNotNull(replayState);
+    JsonNode replayOutput = replayState.payload().get("output");
+    assertEquals(2, replayOutput.size());
+    assertEquals("reasoning", replayOutput.get(0).path("type").asText());
+    assertEquals("enc_blob_asym_999", replayOutput.get(0).path("encrypted_content").asText());
+    assertEquals(
+        "Deliberating deeply", replayOutput.get(0).path("summary").get(0).path("text").asText());
+    assertEquals("function_call", replayOutput.get(1).path("type").asText());
+    assertEquals("call_asym", replayOutput.get(1).path("call_id").asText());
+
+    // 5. 下一轮对话携带该 replayState 发起请求，验证 wire 编码中 encrypted_content 成功被回传
+    ProviderMessage assistantMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderThinkingBlock("Deliberating deeply"),
+                new ProviderToolCallBlock(
+                    new ProviderToolCall("call_asym", "do_search", "{\"q\":\"test\"}"))),
+            replayState);
+
+    ProviderMessage toolResultMsg =
+        new ProviderMessage(
+            ProviderMessageRole.TOOL,
+            List.of(
+                new ProviderToolResultBlock(
+                    "call_asym",
+                    "do_search",
+                    List.of(new ProviderTextBlock("search result")),
+                    false,
+                    null)));
+
+    ProviderRequest req2 =
+        request(
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("asymmetric test"))),
+                assistantMsg,
+                toolResultMsg));
+
+    OpenAiResponsesEncodedRequest encReq2 =
+        encoder.encode(req2, desc, OpenAiResponsesConfig.defaultConfig());
+    JsonNode root2 = MAPPER.readTree(encReq2.bodyUtf8Bytes());
+
+    JsonNode input2 = root2.get("input");
+    assertEquals(4, input2.size());
+    assertEquals("message", input2.get(0).path("type").asText());
+    // input2[1] 必须是带有 encrypted_content 的 reasoning 回放项
+    assertEquals("reasoning", input2.get(1).path("type").asText());
+    assertEquals("enc_blob_asym_999", input2.get(1).path("encrypted_content").asText());
+    assertEquals("Deliberating deeply", input2.get(1).path("summary").get(0).path("text").asText());
+    // input2[2] 是 function_call，input2[3] 是 function_call_output
+    assertEquals("function_call", input2.get(2).path("type").asText());
+    assertEquals("call_asym", input2.get(2).path("call_id").asText());
+    assertEquals("function_call_output", input2.get(3).path("type").asText());
   }
 }

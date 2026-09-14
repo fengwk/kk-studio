@@ -1553,4 +1553,183 @@ class OpenAiResponsesStreamAccumulatorTest {
     }
     return deltas;
   }
+
+  /** 意图：验证当 terminal output 显式包含 encrypted_content 时，终端值优先级高于流式接收的值（Terminal Precedence）。 */
+  @Test
+  void test_terminalReasoningEncryptedContentTakesPrecedenceOverStreamed() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            e -> {});
+
+    accumulator.processEvent(
+        MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_prec_1\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,"
+                + "\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"enc_stream\","
+                + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"s1\"}]}}"));
+
+    // terminal 显式提供不同的 encrypted_content
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_prec_1\",\"status\":\"completed\","
+                + "\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"enc_terminal\","
+                + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"s1\"}]}]}}"));
+
+    JsonNode replayOutput = accumulator.replayState().payload().get("output");
+    assertEquals(1, replayOutput.size());
+    assertEquals("enc_terminal", replayOutput.get(0).path("encrypted_content").asText());
+  }
+
+  /** 意图：验证 terminal output 的 reasoning summary 权威覆盖流式累积的 summary 内容。 */
+  @Test
+  void test_terminalReasoningSummaryTakesPrecedenceOverStreamed() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            e -> {});
+
+    accumulator.processEvent(
+        MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_prec_2\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,"
+                + "\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"enc_s\","
+                + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"stream summary\"}]}}"));
+
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_prec_2\",\"status\":\"completed\","
+                + "\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_1\","
+                + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"terminal summary\"}]}]}}"));
+
+    ProviderResponse resp = accumulator.response();
+    assertEquals("terminal summary", resp.thinking());
+    JsonNode replayOutput = accumulator.replayState().payload().get("output");
+    assertEquals(
+        "terminal summary", replayOutput.get(0).path("summary").get(0).path("text").asText());
+    // 同时保留了未被 terminal 显式覆盖的流式 encrypted_content
+    assertEquals("enc_s", replayOutput.get(0).path("encrypted_content").asText());
+  }
+
+  /** 意图：验证当 terminal output 的 reasoning id 与流式不同时判定为冲突，流式项被替换且不继承其 encrypted_content。 */
+  @Test
+  void test_terminalReasoningIdConflictPurgesStreamedAndDoesNotInherit() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            e -> {});
+
+    accumulator.processEvent(
+        MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_prec_3\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,"
+                + "\"item\":{\"id\":\"rs_stream\",\"type\":\"reasoning\",\"encrypted_content\":\"enc_stream\","
+                + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"stream summary\"}]}}"));
+
+    // terminal 拥有不同的 ID：rs_terminal
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_prec_3\",\"status\":\"completed\","
+                + "\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_terminal\","
+                + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"term summary\"}]}]}}"));
+
+    JsonNode replayOutput = accumulator.replayState().payload().get("output");
+    assertEquals(1, replayOutput.size());
+    assertEquals("term summary", replayOutput.get(0).path("summary").get(0).path("text").asText());
+    // 由于 ID 冲突，不得继承 rs_stream 的 encrypted_content
+    assertFalse(replayOutput.get(0).has("encrypted_content"));
+  }
+
+  /** 意图：验证 terminal output 的 message content 权威覆盖流式 text delta。 */
+  @Test
+  void test_terminalMessageContentTakesPrecedenceOverStreamedTextDelta() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            e -> {});
+
+    accumulator.processEvent(
+        MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_prec_5\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_text.delta\",\"delta\":\"draft delta text\"}"));
+
+    // terminal output 给出权威 final content
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_prec_5\",\"status\":\"completed\","
+                + "\"output\":[{\"type\":\"message\",\"role\":\"assistant\","
+                + "\"content\":[{\"type\":\"output_text\",\"text\":\"authoritative final text\"}]}]}}"));
+
+    ProviderResponse resp = accumulator.response();
+    assertEquals("authoritative final text", resp.text());
+  }
+
+  /** 意图：验证 terminal output 中的 function_call 缺失 call_id 或 name 时严格拒绝，绝不从流式草稿中继承工具标识字段。 */
+  @Test
+  void test_terminalToolMissingCallIdOrNameRemainsRejectedEvenIfStreamHadValue() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator1 =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            e -> {});
+
+    // 流中给出完整的 tool 增量
+    accumulator1.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.created\",\"response\":{\"id\":\"resp_fc_missing_1\"}}"));
+    accumulator1.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"output_index\":0,"
+                + "\"item\":{\"id\":\"fc_item_1\",\"type\":\"function_call\",\"call_id\":\"call_orig\",\"name\":\"do_search\"}}"));
+    accumulator1.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,"
+                + "\"item\":{\"id\":\"fc_item_1\",\"type\":\"function_call\",\"call_id\":\"call_orig\",\"name\":\"do_search\",\"arguments\":\"{\\\"q\\\":\\\"test\\\"}\"}}"));
+
+    // 终端 output 缺失 call_id
+    accumulator1.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fc_missing_1\",\"status\":\"completed\","
+                + "\"output\":[{\"type\":\"function_call\",\"name\":\"do_search\",\"arguments\":\"{\\\"q\\\":\\\"test\\\"}\"}]}}"));
+
+    ProviderException ex1 = assertThrows(ProviderException.class, accumulator1::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex1.kind());
+
+    OpenAiResponsesStreamAccumulator accumulator2 =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            e -> {});
+
+    accumulator2.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.created\",\"response\":{\"id\":\"resp_fc_missing_2\"}}"));
+    accumulator2.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,"
+                + "\"item\":{\"id\":\"fc_item_2\",\"type\":\"function_call\",\"call_id\":\"call_orig_2\",\"name\":\"do_search\",\"arguments\":\"{\\\"q\\\":\\\"test\\\"}\"}}"));
+
+    // 终端 output 缺失 name
+    accumulator2.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fc_missing_2\",\"status\":\"completed\","
+                + "\"output\":[{\"type\":\"function_call\",\"id\":\"fc_item_2\",\"call_id\":\"call_orig_2\",\"arguments\":\"{\\\"q\\\":\\\"test\\\"}\"}]}}"));
+
+    ProviderException ex2 = assertThrows(ProviderException.class, accumulator2::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex2.kind());
+  }
 }
