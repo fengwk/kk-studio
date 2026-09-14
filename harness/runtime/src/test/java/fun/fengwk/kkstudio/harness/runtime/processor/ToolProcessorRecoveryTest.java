@@ -686,7 +686,8 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
-            hooked);
+            hooked,
+            Runnable::run);
     fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(claimed));
@@ -831,7 +832,8 @@ class ToolProcessorRecoveryTest {
                 fixture.sink,
                 null,
                 fixture.clock,
-                fixture.scheduler));
+                fixture.scheduler,
+                Runnable::run));
     new ToolProcessorConfig(
         ToolProcessorTestSupport.LEASE_CONFIG,
         () -> ToolProcessorTestSupport.NO_RETRY,
@@ -861,7 +863,8 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
-            dead);
+            dead,
+            Runnable::run);
     fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
 
     assertEquals(
@@ -1201,6 +1204,7 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
             fixture.scheduler,
+            Runnable::run,
             ignored -> releases.incrementAndGet());
     assertEquals(ProcessResult.STARTED, execution.activate(handle));
 

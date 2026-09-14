@@ -727,7 +727,8 @@ class ToolProcessorPreflightTest {
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
-            dead);
+            dead,
+            Runnable::run);
     fixture.gateway.queuePreflightAllow();
     fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
 

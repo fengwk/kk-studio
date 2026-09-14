@@ -65,6 +65,7 @@ public final class ModelProcessor implements AutoCloseable {
   private final ModelProcessorConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
+  private final Executor heartbeatWorker;
   private final Executor flushExecutor;
   private final ConcurrentHashMap<UUID, ModelExecution> executions = new ConcurrentHashMap<>();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
@@ -78,6 +79,7 @@ public final class ModelProcessor implements AutoCloseable {
       ModelProcessorConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,
+      Executor heartbeatWorker,
       Executor flushExecutor) {
     this.store = Objects.requireNonNull(store, "store");
     this.gateway = Objects.requireNonNull(gateway, "gateway");
@@ -85,6 +87,7 @@ public final class ModelProcessor implements AutoCloseable {
     this.config = Objects.requireNonNull(config, "config");
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.flushExecutor = Objects.requireNonNull(flushExecutor, "flushExecutor");
   }
 
@@ -203,6 +206,7 @@ public final class ModelProcessor implements AutoCloseable {
             config,
             clock,
             scheduler,
+            heartbeatWorker,
             flushExecutor,
             this::release);
     ModelExecution existing = executions.putIfAbsent(invocationId, execution);

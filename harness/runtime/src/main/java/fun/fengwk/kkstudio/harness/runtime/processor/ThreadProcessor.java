@@ -62,6 +62,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -124,6 +125,7 @@ public final class ThreadProcessor {
   private final ThreadProcessorConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
+  private final Executor heartbeatWorker;
   private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
   private final HistoryPayloadMapper payloadMapper = new HistoryPayloadMapper();
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
@@ -138,8 +140,9 @@ public final class ThreadProcessor {
       TurnResolver resolver,
       ThreadProcessorConfig config,
       Clock clock,
-      ScheduledExecutorService scheduler) {
-    this(store, resolver, config, clock, scheduler, null);
+      ScheduledExecutorService scheduler,
+      Executor heartbeatWorker) {
+    this(store, resolver, config, clock, scheduler, heartbeatWorker, null);
   }
 
   /** 注入 Tool outcome 的 durable history 物化端口（可为 null：ToolResult 含 Resource 引用时 fail-closed）。 */
@@ -149,12 +152,14 @@ public final class ThreadProcessor {
       ThreadProcessorConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,
+      Executor heartbeatWorker,
       ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
     this.store = Objects.requireNonNull(store, "store");
     this.resolver = Objects.requireNonNull(resolver, "resolver");
     this.config = Objects.requireNonNull(config, "config");
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
   }
 
@@ -711,7 +716,12 @@ public final class ThreadProcessor {
     AtomicBoolean heartbeatLost = new AtomicBoolean();
     WorkHeartbeat heartbeat =
         new WorkHeartbeat(
-            store, scheduler, config.leaseConfig(), clock, () -> heartbeatLost.set(true));
+            store,
+            scheduler,
+            heartbeatWorker,
+            config.leaseConfig(),
+            clock,
+            () -> heartbeatLost.set(true));
     if (!heartbeat.start(claim)) {
       log.warn("cannot schedule work lease heartbeat for {}; rescheduling", claim.target());
       return rescheduleIfOwned(claim, config.resolveFailureDelay())

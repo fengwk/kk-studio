@@ -293,6 +293,8 @@ flowchart TD
 - 处于超时租约的 DISPATCHING 或 RUNNING 任务同样安全收敛为 `UNKNOWN`，避免对非幂等工具造成重复调用；
 - 工具增量更新仅支持文本与 JSON 格式；执行成功产出的结果与副作用记录在单次事务中更新，最终由 ThreadProcessor 负责将 Entry 写入历史。
 
+三个 Processor 共用两层 `WorkHeartbeat` 执行模型：timer scheduler 只做固定周期检查、单在途合并和非阻塞分派；独立注入的 heartbeat worker 执行 `renewWork` 数据库事务与所有权丢失回调。重叠周期不会积压，`stop()` 返回前等待已开始的续租事务完成，排队任务在停止后不得再开始续租。
+
 ### 对话压缩机制
 
 对话压缩复用现有的 `ModelInvocation`、`MODEL Work`、`ThreadProcessor` 与 `ModelProcessor`：
@@ -333,7 +335,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 ## 配置 / 扩展
 
 - **运行时调度策略**：`ThreadProcessorConfig` 提供租约时长、解析故障策略与压缩配置等运行时策略参数；压缩配置在每个决策点动态从提供方读取。
-- **模型流聚合策略**：`ModelProcessorConfig` 持有 `StreamFlushConfig`，默认最大等待 `200ms`、最多 `256` 个事件、最多 `64KiB` 增量载荷；composition root 提供独立受管 executor 执行 DB flush 与通知发布，heartbeat scheduler 只负责续租与 timer 唤醒。
+- **模型流聚合策略**：`ModelProcessorConfig` 持有 `StreamFlushConfig`，默认最大等待 `200ms`、最多 `256` 个事件、最多 `64KiB` 增量载荷；composition root 分别提供受管 executor 执行 DB flush，以及执行 lease 续租事务与所有权丢失回调。heartbeat scheduler 只负责 timer 唤醒、合并和非阻塞分派。
 - **调用重试策略**：`InvocationRetryPolicyProvider` 在重试决策时提供最大重试次数、退避策略与延迟时长参数，时间参数严格使用毫秒精度的正数值。
 - **外部执行接入**：模型与工具的具体执行能力通过 `ModelGateway`、`ToolGateway` 与 `ConcurrencyAdmission` 抽象端口注入，使运行时领域模型与外部执行实现保持独立。
 - **局部能力端口**：`ToolResultHistoryMaterializer`、`RealtimeEventSink` 与 `HarnessThreadChangeSource` 作为按需装配的扩展端口；缺少资源物化器时，资源结果以 metadata-only 文本降级，Thread 仍可继续推进。
