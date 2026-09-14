@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import { ThinkingBlock } from '@/features/ai/runtime/thread-panel/messages/ThinkingBlock'
+import { normalizeThinkingText } from '@/features/ai/runtime/thread-panel/messages/thinking-text'
 import type { TextDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import { CopyButton } from '@/shared/ui/markdown/CodeBlock'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
@@ -19,7 +20,7 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
   const text = message.text
   const streaming = message.status === 'streaming'
   const hasText = text.length > 0
-  const hasThinking = thinking.length > 0
+  const hasThinking = normalizeThinkingText(thinking).length > 0
   const aborted = message.aborted === true
 
   return (

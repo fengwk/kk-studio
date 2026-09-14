@@ -447,6 +447,123 @@ describe('normalizeEditorDom', () => {
     ])
   })
 
+  it('preserves exact caret position inside nested styled spans after normalization', () => {
+    // 粘贴富文本或深层嵌套 span 规范化后：光标精确保留在对应字符后，不跳跃到起点或末尾。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      const p = document.createElement('p')
+      const span = document.createElement('span')
+      const targetText = textNode('nested')
+      span.appendChild(targetText)
+      p.append(textNode('hello '), span, textNode(' world'))
+      root.appendChild(p)
+
+      // 光标放在 "nested" 的第 4 个字符后（"nest|ed"）
+      setCaret(targetText, 4)
+
+      normalizeEditorDom(root)
+      expectCanonicalDom(root, [{ kind: 'text', text: 'hello nested world' }])
+
+      const selection = document.getSelection()
+      expect(selection?.rangeCount).toBe(1)
+      const range = selection!.getRangeAt(0)
+      expect(range.collapsed).toBe(true)
+      // "hello " 长度为 6，加上 "nest" 4，应为 10
+      expect(range.startContainer).toBe(root.firstChild)
+      expect(range.startOffset).toBe(10)
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('preserves caret at line position after whole-line Backspace and div/br normalization', () => {
+    // 整行删除/退格后规范化：光标保留在逻辑行位置，不发生退回 0 的光标跳跃。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      const line1 = document.createElement('div')
+      line1.appendChild(textNode('line 1'))
+      const line2 = document.createElement('div')
+      // 模拟用户在空行上按下 Backspace 产生空 div
+      root.append(line1, line2)
+
+      // 光标位于空行 line2 的起点
+      setCaret(line2, 0)
+
+      normalizeEditorDom(root)
+      expectCanonicalDom(root, [{ kind: 'text', text: 'line 1\n' }])
+
+      const selection = document.getSelection()
+      expect(selection?.rangeCount).toBe(1)
+      const range = selection!.getRangeAt(0)
+      expect(range.collapsed).toBe(true)
+      // 光标位于 line 1\n 的末尾（字符偏移 7）
+      expect(range.startContainer).toBe(root.firstChild)
+      expect(range.startOffset).toBe(7)
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('preserves caret around attachment pills during normalization', () => {
+    // 附件 pill 邻近位置光标映射：pill 之后插入的光标在规范化后仍位于 pill 之后、后续文本之前。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      const block = document.createElement('div')
+      const pill = attachmentPill('upload-1', 'test.txt')
+      const afterText = textNode('content')
+      block.append(pill, afterText)
+      root.appendChild(block)
+
+      // 光标放在 afterText 起点（pill 紧接着的位置）
+      setCaret(afterText, 0)
+
+      normalizeEditorDom(root)
+      expectCanonicalDom(root, [
+        { kind: 'pill', uploadId: 'upload-1' },
+        { kind: 'text', text: 'content' },
+      ])
+
+      const selection = document.getSelection()
+      const range = selection!.getRangeAt(0)
+      expect(range.collapsed).toBe(true)
+      // 位于 pill 之后的 text 节点起点 0 处
+      expect(range.startContainer).toBe(root.childNodes[1])
+      expect(range.startOffset).toBe(0)
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('preserves non-collapsed selection range across normalization', () => {
+    // 选区（Range）跨块或富文本包装时：规范化后起止字符偏移保持一致。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      const div = document.createElement('div')
+      const t1 = textNode('abcdef')
+      div.appendChild(t1)
+      root.appendChild(div)
+
+      const range = document.createRange()
+      range.setStart(t1, 2)
+      range.setEnd(t1, 5)
+      const selection = document.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+
+      normalizeEditorDom(root)
+      expectCanonicalDom(root, [{ kind: 'text', text: 'abcdef' }])
+
+      const activeRange = document.getSelection()!.getRangeAt(0)
+      expect(activeRange.collapsed).toBe(false)
+      expect(activeRange.startContainer).toBe(root.firstChild)
+      expect(activeRange.startOffset).toBe(2)
+      expect(activeRange.endContainer).toBe(root.firstChild)
+      expect(activeRange.endOffset).toBe(5)
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
   it('rendered round-trip content stays canonical and re-extracts identically', () => {
     // renderPartsToEditor 的输出已是规范形态；normalize 保持不动，extract 得到相同 parts。
     const root = document.createElement('div')

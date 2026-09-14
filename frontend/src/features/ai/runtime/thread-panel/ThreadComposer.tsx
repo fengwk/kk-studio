@@ -10,7 +10,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from 'react'
-import { ArrowUp, Plus } from 'lucide-react'
+import { ArrowUp, Plus, X } from 'lucide-react'
 import {
   ThreadCommandPalette,
 } from '@/features/ai/runtime/thread-panel/ThreadCommandPalette'
@@ -50,6 +50,7 @@ import {
   removePartsForUpload,
   useAttachmentUploads,
   type AttachmentUpload,
+  type AttachmentUploadError,
   type HashFile,
   type StorageService,
 } from '@/features/ai/composer'
@@ -117,13 +118,38 @@ export function ThreadComposer({
   const { t } = useI18n()
   const editorRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const {
-    uploads,
-    addFiles,
-    retryUpload,
-    releaseUpload,
-    markDetached,
-  } = useAttachmentUploads({ storageService, hashFile })
+  const isComposingRef = useRef(false)
+  const pendingFailedUploadIdsRef = useRef<Set<string>>(new Set())
+
+  const [toast, setToast] = useState<string | null>(null)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showToast = useCallback((message: string) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current)
+      toastTimerRef.current = null
+    }
+    setToast(message)
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null)
+      toastTimerRef.current = null
+    }, 5000)
+  }, [])
+
+  const dismissToast = useCallback(() => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current)
+      toastTimerRef.current = null
+    }
+    setToast(null)
+  }, [])
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current)
+    }
+  }, [])
+
   const {
     changeDraft,
     navigate: navigateMessageHistory,
@@ -135,10 +161,67 @@ export function ThreadComposer({
     onHistoryPartsChange,
   })
 
-  const slashQuery = slashQueryOf(parts)
-  const slashMode = slashQuery != null
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
   const [controlMenu, setControlMenu] = useState<ThreadComposerControlMenu>(null)
+
+  /** 从当前 DOM 提取 parts 并回传（输入/粘贴/删除后统一入口）。 */
+  const syncFromDom = useCallback((force = false) => {
+    const el = editorRef.current
+    if (!el) {
+      return
+    }
+    if (plusMenuOpen) {
+      setPlusMenuOpen(false)
+    }
+    if (controlMenu != null) {
+      setControlMenu(null)
+    }
+    normalizeEditorDom(el)
+    const next = mergeTextParts(extractPartsFromEditor(el))
+    if (force || partsKey(next) !== partsKey(parts)) {
+      changeDraft(next)
+    }
+  }, [changeDraft, controlMenu, parts, plusMenuOpen])
+
+  const handleUploadError = useCallback((err: AttachmentUploadError) => {
+    const reasonText = err.reason?.trim()
+    const boundedReason = reasonText
+      ? (reasonText.length > 120 ? `${reasonText.slice(0, 117)}…` : reasonText)
+      : t('ai.runtime.composer.uploadFailed')
+    const message = t('ai.runtime.composer.uploadFailedDetail', {
+      name: err.filename,
+      reason: boundedReason,
+    })
+    showToast(message)
+
+    if (isComposingRef.current) {
+      pendingFailedUploadIdsRef.current.add(err.localId)
+      return
+    }
+
+    const el = editorRef.current
+    if (el) {
+      const pills = el.querySelectorAll<HTMLElement>(
+        `span[data-part-type="attachment"][data-upload-id="${err.localId}"]`,
+      )
+      if (pills.length > 0) {
+        pills.forEach((pill) => pill.remove())
+        // 上传可能在最新 parts effect 生效前失败；以当前 DOM 强制覆盖受控草稿，
+        // 避免旧闭包误判相等后把失败 pill 重新插回。
+        syncFromDom(true)
+      }
+    }
+  }, [showToast, syncFromDom, t])
+
+  const {
+    uploads,
+    addFiles,
+    releaseUpload,
+    markDetached,
+  } = useAttachmentUploads({ storageService, hashFile, onError: handleUploadError })
+
+  const slashQuery = slashQueryOf(parts)
+  const slashMode = slashQuery != null
   const paletteMode = plusMenuOpen ? 'menu' : slashMode ? 'slash' : null
   const paletteOpen = paletteMode != null
   const query = paletteMode === 'slash' ? slashQuery ?? '' : ''
@@ -235,6 +318,9 @@ export function ThreadComposer({
 
   /** DOM 与 props 对齐（外部同步或初始渲染）；重建时保留焦点与光标。 */
   useEffect(() => {
+    if (isComposingRef.current) {
+      return
+    }
     const el = editorRef.current
     if (!el) {
       return
@@ -254,23 +340,35 @@ export function ThreadComposer({
     }
   }, [parts])
 
-  /** 从当前 DOM 提取 parts 并回传（输入/粘贴/删除后统一入口）。 */
-  function syncFromDom() {
+  function handleCompositionStart() {
+    isComposingRef.current = true
+  }
+
+  function handleCompositionEnd() {
+    isComposingRef.current = false
     const el = editorRef.current
-    if (!el) {
+    const hadFailedUploads = pendingFailedUploadIdsRef.current.size > 0
+    if (hadFailedUploads && el) {
+      for (const localId of pendingFailedUploadIdsRef.current) {
+        const pills = el.querySelectorAll<HTMLElement>(
+          `span[data-part-type="attachment"][data-upload-id="${localId}"]`,
+        )
+        pills.forEach((pill) => pill.remove())
+      }
+    }
+    pendingFailedUploadIdsRef.current.clear()
+    syncFromDom(hadFailedUploads)
+  }
+
+  function handleInput(event: FormEvent<HTMLDivElement>) {
+    if (isComposingRef.current) {
       return
     }
-    if (plusMenuOpen) {
-      setPlusMenuOpen(false)
+    const native = event.nativeEvent as InputEvent
+    if (native?.isComposing) {
+      return
     }
-    if (controlMenu != null) {
-      setControlMenu(null)
-    }
-    normalizeEditorDom(el)
-    const next = mergeTextParts(extractPartsFromEditor(el))
-    if (partsKey(next) !== partsKey(parts)) {
-      changeDraft(next)
-    }
+    syncFromDom()
   }
 
   function addFilesToDraft(files: File[]) {
@@ -278,7 +376,7 @@ export function ThreadComposer({
       return
     }
     const added = addFiles(files)
-    const pillParts = added.filter((upload) => upload.status !== 'error').map(partForUpload)
+    const pillParts = added.map(partForUpload)
     if (pillParts.length === 0) {
       return
     }
@@ -345,7 +443,7 @@ export function ThreadComposer({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+    if (event.nativeEvent.isComposing || event.keyCode === 229 || isComposingRef.current) {
       return
     }
     if (event.key === 'Backspace' || event.key === 'Delete') {
@@ -424,7 +522,7 @@ export function ThreadComposer({
   /** Enter 归一化为纯文本 '\n'；IME 组合期间的插入不拦截。 */
   function handleBeforeInput(event: FormEvent<HTMLDivElement>) {
     const native = event.nativeEvent as InputEvent
-    if (native.isComposing) {
+    if (native?.isComposing || isComposingRef.current) {
       return
     }
     const inputType = native.inputType
@@ -443,8 +541,21 @@ export function ThreadComposer({
     if (files.length > 0) {
       event.preventDefault()
       addFilesToDraft(files)
+      return
     }
-    // 无文件时保留浏览器默认粘贴；随后由 onInput 统一回流 ordered parts。
+    const clipboard = event.clipboardData
+    if (clipboard) {
+      event.preventDefault()
+      const rawText = clipboard.getData('text/plain')
+      if (rawText) {
+        const normalized = rawText.replace(/\r\n|\r/g, '\n')
+        const el = editorRef.current
+        if (el) {
+          insertTextAtCaret(el, normalized)
+          syncFromDom()
+        }
+      }
+    }
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
@@ -459,7 +570,7 @@ export function ThreadComposer({
       event.preventDefault()
       const el = editorRef.current
       if (el) {
-        insertTextAtCaret(el, text)
+        insertTextAtCaret(el, text.replace(/\r\n|\r/g, '\n'))
         syncFromDom()
       }
     }
@@ -487,6 +598,23 @@ export function ThreadComposer({
 
   return (
     <div className="thread-composer" hidden={!active} aria-hidden={!active}>
+      {toast ? (
+        <div
+          className="composer-toast"
+          role="alert"
+          aria-live="assertive"
+        >
+          <span className="composer-toast-message">{toast}</span>
+          <button
+            type="button"
+            className="composer-toast-dismiss"
+            aria-label={t('ai.runtime.composer.dismissNotification')}
+            onClick={dismissToast}
+          >
+            <X aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
       <ThreadCommandPalette
         open={paletteOpen}
         query={query}
@@ -501,7 +629,6 @@ export function ThreadComposer({
           parts={parts}
           disabled={disabled}
           onRemove={handleRemoveUpload}
-          onRetry={(upload) => retryUpload(upload.localId)}
         />
         <div
           ref={editorRef}
@@ -513,7 +640,9 @@ export function ThreadComposer({
           aria-disabled={disabled}
           data-placeholder={t('ai.runtime.composer.placeholder')}
           data-placeholder-visible={draftIsEmpty}
-          onInput={syncFromDom}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
+          onInput={handleInput}
           onKeyDown={handleKeyDown}
           onBeforeInput={handleBeforeInput}
           onPaste={handlePaste}

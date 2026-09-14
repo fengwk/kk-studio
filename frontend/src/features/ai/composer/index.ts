@@ -38,6 +38,7 @@ export {
   useAttachmentUploads,
   validateUploadFile,
   type AttachmentUpload,
+  type AttachmentUploadError,
   type AttachmentUploadStatus,
   type HashFile,
   type UploadLimits,

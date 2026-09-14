@@ -520,7 +520,6 @@ describe('ThreadComposer edge interactions', () => {
       sha256: 'a'.repeat(64),
       status: 'ready',
       progress: 1,
-      error: null,
       previewUrl: null,
       detached: false,
     }
@@ -531,7 +530,6 @@ describe('ThreadComposer edge interactions', () => {
           parts={[createTextPart('keep')]}
           disabled={false}
           onRemove={onRemove}
-          onRetry={vi.fn()}
         />
         <pre data-testid="parts">{JSON.stringify([{ type: 'text', text: 'keep' }])}</pre>
       </div>,

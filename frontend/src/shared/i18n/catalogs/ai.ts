@@ -1045,9 +1045,13 @@ export const aiCatalog = {
     'en-US': 'Upload failed',
     'zh-CN': '上传失败',
   },
-  'ai.runtime.composer.retryUpload': {
-    'en-US': 'Retry upload {{name}}',
-    'zh-CN': '重试上传 {{name}}',
+  'ai.runtime.composer.uploadFailedDetail': {
+    'en-US': 'Upload failed for {{name}}: {{reason}}',
+    'zh-CN': '{{name}} 上传失败：{{reason}}',
+  },
+  'ai.runtime.composer.dismissNotification': {
+    'en-US': 'Dismiss notification',
+    'zh-CN': '关闭通知',
   },
   'ai.runtime.composer.removeAttachment': {
     'en-US': 'Remove attachment {{name}}',
