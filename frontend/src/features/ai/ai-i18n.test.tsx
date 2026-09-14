@@ -190,9 +190,11 @@ describe('AI i18n live-switch contracts', () => {
     act(() => setLocale('en-US'))
     renderPage(<EnvironmentsPage />, 'environments')
 
-    expect(await screen.findByText('There are no Environments')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Create Environment' })).toBeInTheDocument()
+    expect(screen.getByText('Register execution environment and capabilities')).toBeInTheDocument()
 
     act(() => setLocale('zh-CN'))
-    expect(screen.getByText('当前没有 Environment')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建环境' })).toBeInTheDocument()
+    expect(screen.getByText('注册执行环境与运行时能力')).toBeInTheDocument()
   })
 })

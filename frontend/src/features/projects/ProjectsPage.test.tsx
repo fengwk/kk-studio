@@ -1,10 +1,34 @@
 import { describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
 import { ProjectsPage } from './ProjectsPage'
 import type { ProjectsApi } from './projects-api'
 import type { ProjectDTO } from './types'
 import { notifyProjectsChanged } from './useProjectsInvalidation'
+
+vi.mock('@/shared/api/agent-service', () => ({
+  agentService: {
+    listAgents: vi.fn().mockResolvedValue({
+      results: [
+        { name: 'coordinator-1' },
+        { name: 'coordinator-2' },
+        { name: 'agent-gamma' },
+      ],
+    }),
+  },
+}))
+
+function renderProjectsPage(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      {ui}
+    </QueryClientProvider>,
+  )
+}
 
 describe('ProjectsPage', () => {
   const mockProjects: ProjectDTO[] = [
@@ -67,7 +91,7 @@ describe('ProjectsPage', () => {
   it('renders project list and filters by search query', async () => {
     // 测试意图：验证项目列表正确加载，并支持通过搜索框客户端过滤
     const api = createMockApi()
-    render(<ProjectsPage api={api} />)
+    renderProjectsPage(<ProjectsPage api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
@@ -84,7 +108,7 @@ describe('ProjectsPage', () => {
   it('toggles includeArchived checkbox to query archived projects', async () => {
     // 测试意图：验证勾选“显示已归档”时，向后端传递 includeArchived=true
     const api = createMockApi()
-    render(<ProjectsPage api={api} />)
+    renderProjectsPage(<ProjectsPage api={api} />)
 
     const checkbox = screen.getByLabelText('显示已归档')
     fireEvent.click(checkbox)
@@ -112,13 +136,13 @@ describe('ProjectsPage', () => {
       createProject: vi.fn().mockResolvedValue(newProj),
     })
 
-    render(<ProjectsPage api={api} onSelectProject={onSelectProject} />)
+    renderProjectsPage(<ProjectsPage api={api} onSelectProject={onSelectProject} />)
 
     await waitFor(() => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
     })
 
-    // Click "新建项目" button in header
+    // Click "新建项目" card
     const createBtn = screen.getByRole('button', { name: '新建项目' })
     fireEvent.click(createBtn)
 
@@ -129,8 +153,11 @@ describe('ProjectsPage', () => {
     const descInput = screen.getByLabelText(/项目描述/i)
     fireEvent.change(descInput, { target: { value: 'Brand new project' } })
 
-    const coordinatorInput = screen.getByLabelText(/Coordinator Agent 名称/i)
-    fireEvent.change(coordinatorInput, { target: { value: 'agent-gamma' } })
+    const coordinatorTrigger = screen.getByRole('button', { name: /Coordinator Agent 名称/i })
+    await waitFor(() => expect(coordinatorTrigger).not.toBeDisabled())
+    fireEvent.click(coordinatorTrigger)
+    const option = await screen.findByRole('option', { name: 'agent-gamma' })
+    fireEvent.click(option)
 
     const submitBtn = screen.getByRole('button', { name: '创建项目' })
     fireEvent.click(submitBtn)
@@ -163,7 +190,7 @@ describe('ProjectsPage', () => {
       getProject: vi.fn().mockResolvedValue(freshProject),
     })
 
-    render(<ProjectsPage api={api} />)
+    renderProjectsPage(<ProjectsPage api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
@@ -179,6 +206,9 @@ describe('ProjectsPage', () => {
 
     // Submit
     const saveBtn = screen.getByRole('button', { name: '保存修改' })
+    await waitFor(() => {
+      expect(saveBtn).not.toBeDisabled()
+    })
     fireEvent.click(saveBtn)
 
     // CAS conflict banner should appear
@@ -200,6 +230,9 @@ describe('ProjectsPage', () => {
     })
 
     // Submit again with updated expectedVersion
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '保存修改' })).not.toBeDisabled()
+    })
     fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
 
     await waitFor(() => {
@@ -215,7 +248,7 @@ describe('ProjectsPage', () => {
   it('deletes project after user confirmation', async () => {
     // 测试意图：验证删除项目弹窗在用户确认后携带 expectedVersion 执行删除
     const api = createMockApi()
-    render(<ProjectsPage api={api} />)
+    renderProjectsPage(<ProjectsPage api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
@@ -238,23 +271,46 @@ describe('ProjectsPage', () => {
   })
 
   it('renders empty state when projects list is empty and allows creating first project', async () => {
-    // 测试意图：验证项目列表为空时的空状态引导视图展示，并可点击新建项目按钮
+    // 测试意图：验证项目列表为空时网格首张卡片即为唯一的新建项目入口，不展示多余的通用空态文本块
     const api = createMockApi({
       listProjects: vi.fn().mockResolvedValue([]),
     })
-    render(<ProjectsPage api={api} />)
+    renderProjectsPage(<ProjectsPage api={api} />)
 
     await waitFor(() => {
-      expect(screen.getByText('暂无项目')).toBeInTheDocument()
-      expect(
-        screen.getByText('创建首个项目以管理 Issue 任务看板和 Coordinator 对话'),
-      ).toBeInTheDocument()
+      const createBtns = screen.getAllByRole('button', { name: '新建项目' })
+      expect(createBtns).toHaveLength(1)
+      expect(createBtns[0]).toHaveClass('create-card')
     })
 
-    const createBtns = screen.getAllByRole('button', { name: '新建项目' })
-    fireEvent.click(createBtns[1])
+    expect(screen.queryByText('暂无项目')).not.toBeInTheDocument()
+    expect(screen.queryByText('暂无匹配项目')).not.toBeInTheDocument()
+
+    const createBtn = screen.getByRole('button', { name: '新建项目' })
+    fireEvent.click(createBtn)
 
     expect(screen.getByText('新建项目', { selector: 'h3' })).toBeInTheDocument()
+  })
+
+  it('renders no-results state when nonblank search yields no matching projects with no duplicate create button', async () => {
+    // 测试意图：验证非空搜索无匹配项时展示有用的无结果提示，且不包含重复的创建按钮
+    const api = createMockApi()
+    renderProjectsPage(<ProjectsPage api={api} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Alpha Project')).toBeInTheDocument()
+    })
+
+    const searchInput = screen.getByPlaceholderText('搜索项目名称或描述...')
+    fireEvent.change(searchInput, { target: { value: 'nonexistent-query-123' } })
+
+    expect(await screen.findByText('暂无匹配项目')).toBeInTheDocument()
+    expect(screen.getByText('没有找到符合搜索条件的项目')).toBeInTheDocument()
+
+    // 验证整个页面仍只有首张 CreateCard 创建入口，无状态块内重复创建按钮
+    const createButtons = screen.getAllByRole('button', { name: '新建项目' })
+    expect(createButtons).toHaveLength(1)
+    expect(createButtons[0]).toHaveClass('create-card')
   })
 
   it('renders error banner when listing projects fails', async () => {
@@ -262,7 +318,7 @@ describe('ProjectsPage', () => {
     const api = createMockApi({
       listProjects: vi.fn().mockRejectedValue(new Error('Network error loading projects')),
     })
-    render(<ProjectsPage api={api} />)
+    renderProjectsPage(<ProjectsPage api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Network error loading projects')).toBeInTheDocument()
@@ -272,7 +328,7 @@ describe('ProjectsPage', () => {
   it('toggles project archive status via card action button', async () => {
     // 测试意图：验证在项目卡片上点击归档与取消归档按钮，分别调用 archiveProject 和 unarchiveProject 接口
     const api = createMockApi()
-    render(<ProjectsPage api={api} />)
+    renderProjectsPage(<ProjectsPage api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
@@ -303,7 +359,7 @@ describe('ProjectsPage', () => {
     // 测试意图：验证点击项目卡片标题或“进入项目”主按钮触发 onSelectProject 回调
     const onSelectProject = vi.fn()
     const api = createMockApi()
-    render(<ProjectsPage api={api} onSelectProject={onSelectProject} />)
+    renderProjectsPage(<ProjectsPage api={api} onSelectProject={onSelectProject} />)
 
     await waitFor(() => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
@@ -322,7 +378,7 @@ describe('ProjectsPage', () => {
   it('reloads project list on refresh button click and on invalidation broadcast', async () => {
     // 测试意图：验证点击标题旁的刷新按钮以及全局发布项目变更通知时，能够触发重新加载列表
     const api = createMockApi()
-    render(<ProjectsPage api={api} />)
+    renderProjectsPage(<ProjectsPage api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
@@ -351,7 +407,7 @@ describe('ProjectsPage', () => {
     const api = createMockApi({
       listProjects: vi.fn().mockReturnValueOnce(initial).mockResolvedValue(latest),
     })
-    render(<ProjectsPage api={api} />)
+    renderProjectsPage(<ProjectsPage api={api} />)
 
     act(() => notifyProjectsChanged())
     expect(await screen.findByText('Latest Project')).toBeInTheDocument()
@@ -362,5 +418,35 @@ describe('ProjectsPage', () => {
     })
     expect(screen.getByText('Latest Project')).toBeInTheDocument()
     expect(screen.queryByText('Stale Project')).not.toBeInTheDocument()
+  })
+
+  /**
+   * 测试意图：验证 UI 一致性规范，包括全局唯张创建卡、项目卡片继承 info-card 以及已归档过滤使用现代 Checkbox
+   */
+  it('enforces UI consistency with single CreateCard as first item, info-card inheritance, and modern checkbox', async () => {
+    const api = createMockApi()
+    renderProjectsPage(<ProjectsPage api={api} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Alpha Project')).toBeInTheDocument()
+    })
+
+    // 验证整个页面仅有唯一个创建入口（即网格首张 CreateCard，header 无重复创建按钮）
+    const createButtons = screen.getAllByRole('button', { name: '新建项目' })
+    expect(createButtons).toHaveLength(1)
+    expect(createButtons[0]).toHaveClass('create-card')
+
+    // 验证项目卡片继承经典 info-card 样式类
+    const projectCards = screen.getAllByRole('article')
+    expect(projectCards).toHaveLength(2)
+    for (const card of projectCards) {
+      expect(card).toHaveClass('info-card')
+      expect(card).toHaveClass('project-card')
+    }
+
+    // 验证“显示已归档”使用基于原生 input 的现代 Checkbox
+    const archiveCheckbox = screen.getByRole('checkbox', { name: '显示已归档' })
+    expect(archiveCheckbox).toBeInTheDocument()
+    expect(archiveCheckbox).toHaveClass('ui-checkbox-input')
   })
 })

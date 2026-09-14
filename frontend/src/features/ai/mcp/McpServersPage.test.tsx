@@ -879,4 +879,25 @@ describe('McpServersPage', () => {
     const textarea = await within(dialog).findByRole('textbox', { name: /配置 JSON/ })
     expect((textarea as HTMLTextAreaElement).value).toContain('https://example.com/retried')
   })
+
+  /**
+   * 测试意图：验证 MCP 列表为空时，网格首项始终为 CreateCard，子工具栏无重复创建按钮，且不展示多余的通用空态文本块。
+   */
+  it('places CreateCard as the first grid item with exactly one creation entry without duplicate empty state block', async () => {
+    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 100,
+      totalCount: 0,
+      results: [],
+    })
+    renderPage()
+
+    // 验证全页面仅有唯一个创建入口（即网格首张 CreateCard，子工具栏无重复创建按钮）
+    const createButton = await screen.findByRole('button', { name: '创建 MCP 服务' })
+    expect(createButton).toHaveClass('create-card')
+    expect(screen.getAllByRole('button', { name: '创建 MCP 服务' })).toHaveLength(1)
+
+    // 验证列表真正为空时不渲染多余的 StateBlock 文本
+    expect(screen.queryByText('暂无配置的 MCP 服务')).not.toBeInTheDocument()
+  })
 })

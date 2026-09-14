@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Box, Check, Copy, KeyRound, Pencil, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { Box, Check, Copy, KeyRound, Pencil, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { filterEnvironments, formatTimestamp } from '@/features/ai/environment/environment-utils'
 import { copyTextToClipboard } from '@/features/ai/environment/clipboard'
 import { EnvironmentManagementModal } from '@/features/ai/environment/EnvironmentManagementModal'
-import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
+import { CreateCard, StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
@@ -278,20 +278,6 @@ export function EnvironmentsPage() {
     <section className="screen active">
       <nav className="subbar">
         <NavigationSlot />
-        <div className="subbar-actions">
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => {
-              setCreateName('')
-              setCreateError(null)
-              setCreateModalOpen(true)
-            }}
-          >
-            <Plus aria-hidden="true" />
-            {t('ai.environment.create')}
-          </button>
-        </div>
       </nav>
       <div className="screen-body">
         {environmentsQuery.isLoading && <StateBlock title={t('ai.environment.loading')} />}
@@ -305,127 +291,130 @@ export function EnvironmentsPage() {
             tone="danger"
           />
         )}
-        {!environmentsQuery.isLoading && !environmentsQuery.error && (
-          <div className="cards-grid environment-list">
-            {environments.length === 0 ? (
-              <StateBlock title={t('ai.environment.empty')} />
-            ) : (
-              environments.map((environment) => {
-                const status = String(environment.status).toUpperCase()
-                const ready = environment.ready === true
-                const displayStatus = status === 'READY' && !ready ? 'UNAVAILABLE' : status
-                const capabilityIds = (environment.capabilities ?? [])
-                  .map((capability) => capability.id)
-                  .filter(Boolean)
-                const lastSeen = formatTimestamp(environment.lastSeen, locale)
-                return (
-                  <article key={environment.id} className="info-card environment-card">
-                    <div className="head">
-                      <div className="head-content">
-                        <div className="icon-box">
-                          <Box aria-hidden="true" />
-                        </div>
-                        <div className="text-content">
-                          <h3 title={environment.name}>{environment.name}</h3>
-                          <p title={environment.id}>
-                            <code>{environment.id}</code>
-                          </p>
-                          {lastSeen ? (
-                            <p title={lastSeen}>
-                              {`${t('ai.environment.lastSeen')} · ${lastSeen}`}
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
-                      <span className={`status-pill${ready ? ' is-ready' : ' is-offline'}`}>
-                        {displayStatus}
+        <div className="cards-grid environment-list">
+          <CreateCard
+            title={t('ai.environment.create')}
+            subtitle={t('ai.environment.createDescription')}
+            onClick={() => {
+              setCreateName('')
+              setCreateError(null)
+              setCreateModalOpen(true)
+            }}
+          />
+          {environments.map((environment) => {
+            const status = String(environment.status).toUpperCase()
+            const ready = environment.ready === true
+            const displayStatus = status === 'READY' && !ready ? 'UNAVAILABLE' : status
+            const capabilityIds = (environment.capabilities ?? [])
+              .map((capability) => capability.id)
+              .filter(Boolean)
+            const lastSeen = formatTimestamp(environment.lastSeen, locale)
+            return (
+              <article key={environment.id} className="info-card environment-card">
+                <div className="head">
+                  <div className="head-content">
+                    <div className="icon-box">
+                      <Box aria-hidden="true" />
+                    </div>
+                    <div className="text-content">
+                      <h3 title={environment.name}>{environment.name}</h3>
+                      <p title={environment.id}>
+                        <code>{environment.id}</code>
+                      </p>
+                      {lastSeen ? (
+                        <p title={lastSeen}>
+                          {`${t('ai.environment.lastSeen')} · ${lastSeen}`}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <span className={`status-pill${ready ? ' is-ready' : ' is-offline'}`}>
+                    {displayStatus}
+                  </span>
+                </div>
+                <div className="meta-block">
+                  {environment.rootPath ? (
+                    <div className="meta-row">
+                      <span className="lbl">{t('ai.environment.rootPath')}</span>
+                      <span className="val" title={environment.rootPath}>
+                        {environment.rootPath}
                       </span>
                     </div>
-                    <div className="meta-block">
-                      {environment.rootPath ? (
-                        <div className="meta-row">
-                          <span className="lbl">{t('ai.environment.rootPath')}</span>
-                          <span className="val" title={environment.rootPath}>
-                            {environment.rootPath}
-                          </span>
-                        </div>
-                      ) : null}
-                      <TagRow label={t('ai.environment.capabilities')} names={capabilityIds} />
-                    </div>
-                    <div className="chat-card-foot split">
-                      <button
-                        type="button"
-                        className="action-enter-btn"
-                        aria-label={`${t('ai.environment.copyToken')} ${environment.name}`}
-                        onClick={() => handleRequestCopyToken(environment)}
-                        disabled={
-                          copyTokenMutation.isPending
-                          && copyTokenMutation.variables?.id === environment.id
-                        }
-                      >
-                        {copied && copiedEnvironmentId === environment.id ? (
-                          <Check aria-hidden="true" />
-                        ) : (
-                          <Copy aria-hidden="true" />
-                        )}
-                        {copied && copiedEnvironmentId === environment.id
-                          ? t('ai.environment.tokenCopied')
-                          : t('ai.environment.copyToken')}
-                      </button>
-                      <button
-                        type="button"
-                        className="action-enter-btn"
-                        aria-label={`${t('ai.environment.manage')} ${environment.name}`}
-                        onClick={() => {
-                          setConflict(null)
-                          setManageTarget(environment)
-                        }}
-                      >
-                        <SlidersHorizontal aria-hidden="true" />
-                        {t('ai.environment.manage')}
-                      </button>
-                      <button
-                        type="button"
-                        className="action-enter-btn"
-                        aria-label={`${t('ai.environment.edit')} ${environment.name}`}
-                        onClick={() => {
-                          setConflict(null)
-                          setEditModal({
-                            environment,
-                            name: environment.name,
-                            error: null,
-                          })
-                        }}
-                      >
-                        <Pencil aria-hidden="true" />
-                        {t('ai.catalog.action.edit')}
-                      </button>
-                      <button
-                        type="button"
-                        className="action-enter-btn danger"
-                        aria-label={`${t('ai.environment.delete')} ${environment.name}`}
-                        onClick={() => {
-                          setConflict(null)
-                          setDeleteError(null)
-                          setDeleteTarget(environment)
-                        }}
-                        disabled={deleteMutation.isPending && deleteTarget?.id === environment.id}
-                      >
-                        <Trash2 aria-hidden="true" />
-                        {t('ai.catalog.action.delete')}
-                      </button>
-                    </div>
-                    {copyError && copyTokenMutation.variables?.id === environment.id ? (
-                      <p className="field-error" role="alert">
-                        {copyError}
-                      </p>
-                    ) : null}
-                  </article>
-                )
-              })
-            )}
-          </div>
-        )}
+                  ) : null}
+                  <TagRow label={t('ai.environment.capabilities')} names={capabilityIds} />
+                </div>
+                <div className="chat-card-foot split">
+                  <button
+                    type="button"
+                    className="action-enter-btn"
+                    aria-label={`${t('ai.environment.copyToken')} ${environment.name}`}
+                    onClick={() => handleRequestCopyToken(environment)}
+                    disabled={
+                      copyTokenMutation.isPending
+                      && copyTokenMutation.variables?.id === environment.id
+                    }
+                  >
+                    {copied && copiedEnvironmentId === environment.id ? (
+                      <Check aria-hidden="true" />
+                    ) : (
+                      <Copy aria-hidden="true" />
+                    )}
+                    {copied && copiedEnvironmentId === environment.id
+                      ? t('ai.environment.tokenCopied')
+                      : t('ai.environment.copyToken')}
+                  </button>
+                  <button
+                    type="button"
+                    className="action-enter-btn"
+                    aria-label={`${t('ai.environment.manage')} ${environment.name}`}
+                    onClick={() => {
+                      setConflict(null)
+                      setManageTarget(environment)
+                    }}
+                  >
+                    <SlidersHorizontal aria-hidden="true" />
+                    {t('ai.environment.manage')}
+                  </button>
+                  <button
+                    type="button"
+                    className="action-enter-btn"
+                    aria-label={`${t('ai.environment.edit')} ${environment.name}`}
+                    onClick={() => {
+                      setConflict(null)
+                      setEditModal({
+                        environment,
+                        name: environment.name,
+                        error: null,
+                      })
+                    }}
+                  >
+                    <Pencil aria-hidden="true" />
+                    {t('ai.catalog.action.edit')}
+                  </button>
+                  <button
+                    type="button"
+                    className="action-enter-btn danger"
+                    aria-label={`${t('ai.environment.delete')} ${environment.name}`}
+                    onClick={() => {
+                      setConflict(null)
+                      setDeleteError(null)
+                      setDeleteTarget(environment)
+                    }}
+                    disabled={deleteMutation.isPending && deleteTarget?.id === environment.id}
+                  >
+                    <Trash2 aria-hidden="true" />
+                    {t('ai.catalog.action.delete')}
+                  </button>
+                </div>
+                {copyError && copyTokenMutation.variables?.id === environment.id ? (
+                  <p className="field-error" role="alert">
+                    {copyError}
+                  </p>
+                ) : null}
+              </article>
+            )
+          })}
+        </div>
       </div>
 
       {createModalOpen && (

@@ -1905,6 +1905,10 @@ export const aiCatalog = {
     'en-US': 'Create Environment',
     'zh-CN': '创建环境',
   },
+  'ai.environment.createDescription': {
+    'en-US': 'Register execution environment and capabilities',
+    'zh-CN': '注册执行环境与运行时能力',
+  },
   'ai.environment.edit': {
     'en-US': 'Edit Environment',
     'zh-CN': '编辑环境',
@@ -2256,6 +2260,10 @@ export const aiCatalog = {
   'ai.mcp.create': {
     'en-US': 'Create MCP Server',
     'zh-CN': '创建 MCP 服务',
+  },
+  'ai.mcp.createDescription': {
+    'en-US': 'Configure Remote or Local MCP Server',
+    'zh-CN': '配置 Remote 或 Local MCP 服务',
   },
   'ai.mcp.edit': {
     'en-US': 'Edit MCP Server',

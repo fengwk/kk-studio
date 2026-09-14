@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Plus, Search, Ban } from 'lucide-react'
+import { Checkbox } from '@/shared/ui/console/Checkbox'
 import type { IssueStatus, ProjectIssueSnapshotDTO } from '../types'
 import { IssueCard } from './IssueCard'
 
@@ -109,14 +110,11 @@ export function IssueBoard({
             />
           </div>
 
-          <label className="projects-checkbox-label">
-            <input
-              type="checkbox"
-              checked={showCanceled}
-              onChange={(e) => setShowCanceled(e.target.checked)}
-            />
-            <span>显示已取消 ({canceledIssues.length})</span>
-          </label>
+          <Checkbox
+            checked={showCanceled}
+            onChange={setShowCanceled}
+            label={`显示已取消 (${canceledIssues.length})`}
+          />
         </div>
 
         <button

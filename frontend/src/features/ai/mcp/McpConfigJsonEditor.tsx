@@ -83,7 +83,7 @@ export function McpConfigJsonEditor({
       <div className="mcp-json-toolbar">
         <button
           type="button"
-          className="ghost-btn btn-sm"
+          className="btn-secondary btn-sm"
           disabled={disabled}
           onClick={() => handleApplyTemplate(REMOTE_CONFIG_TEMPLATE)}
         >
@@ -91,7 +91,7 @@ export function McpConfigJsonEditor({
         </button>
         <button
           type="button"
-          className="ghost-btn btn-sm"
+          className="btn-secondary btn-sm"
           disabled={disabled}
           onClick={() => {
             const firstEnvId = environments[0]?.id
@@ -102,7 +102,7 @@ export function McpConfigJsonEditor({
         </button>
         <button
           type="button"
-          className="ghost-btn btn-sm"
+          className="btn-secondary btn-sm"
           disabled={disabled}
           onClick={handleFormat}
         >
@@ -110,7 +110,7 @@ export function McpConfigJsonEditor({
         </button>
         <button
           type="button"
-          className="ghost-btn btn-sm"
+          className="btn-secondary btn-sm"
           disabled={disabled}
           onClick={handleValidate}
         >

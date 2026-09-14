@@ -5,14 +5,13 @@ import {
   ArrowRight,
   Bot,
   Calendar,
-  Folder,
-  FolderPlus,
   Pencil,
-  Plus,
   RefreshCw,
   Search,
   Trash2,
 } from 'lucide-react'
+import { CreateCard } from '@/shared/ui/console/AiConsoleCommonCards'
+import { Checkbox } from '@/shared/ui/console/Checkbox'
 import { CreateProjectModal } from './components/CreateProjectModal'
 import { DeleteProjectModal } from './components/DeleteProjectModal'
 import { EditProjectModal } from './components/EditProjectModal'
@@ -136,25 +135,11 @@ export function ProjectsPage({
             />
           </div>
 
-          <label className="projects-checkbox-label">
-            <input
-              type="checkbox"
-              checked={includeArchived}
-              onChange={(e) => setIncludeArchived(e.target.checked)}
-            />
-            <span>显示已归档</span>
-          </label>
-
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => setIsCreateOpen(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-            aria-label="新建项目"
-          >
-            <Plus size={14} aria-hidden="true" />
-            <span>新建项目</span>
-          </button>
+          <Checkbox
+            checked={includeArchived}
+            onChange={setIncludeArchived}
+            label="显示已归档"
+          />
         </div>
       </header>
 
@@ -165,153 +150,131 @@ export function ProjectsPage({
         </div>
       )}
 
-      {isLoading && projects.length === 0 ? (
+      {isLoading && projects.length === 0 && (
         <div style={{ textAlign: 'center', padding: '48px', color: 'var(--fg-muted)' }}>
           加载项目中...
         </div>
-      ) : filteredProjects.length === 0 ? (
-        <div
-          style={{
-            textAlign: 'center',
-            padding: '64px 24px',
-            background: 'var(--bg-surface)',
-            border: '1px dashed var(--border)',
-            borderRadius: 'var(--radius-md)',
-          }}
-        >
-          <Folder size={48} style={{ color: 'var(--fg-muted)', marginBottom: '12px' }} aria-hidden="true" />
-          <h3 style={{ margin: '0 0 8px 0', color: 'var(--fg)' }}>暂无项目</h3>
-          <p style={{ margin: '0 0 16px 0', color: 'var(--fg-muted)', fontSize: '0.875rem' }}>
-            {searchQuery ? '没有找到符合搜索条件的项目' : '创建首个项目以管理 Issue 任务看板和 Coordinator 对话'}
-          </p>
-          {!searchQuery && (
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => setIsCreateOpen(true)}
-              aria-label="新建项目"
-            >
-              新建项目
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="projects-grid">
-          {/* Create Card shortcut */}
-          <button
-            type="button"
-            className="create-card"
-            onClick={() => setIsCreateOpen(true)}
-            aria-label="创建新项目卡片"
-            style={{ minHeight: '180px', textAlign: 'center', cursor: 'pointer' }}
-          >
-            <FolderPlus size={32} style={{ color: 'var(--green-primary)', marginBottom: '8px' }} aria-hidden="true" />
-            <strong>新建项目</strong>
-            <small>配置 Coordinator 编排与多 Issue 看板</small>
-          </button>
+      )}
 
-          {filteredProjects.map((project) => (
-            <article
-              key={project.id}
-              className={`project-card ${project.archivedAt ? 'is-archived' : ''}`}
-            >
-              <div>
-                <div className="project-card-head">
-                  <div className="project-card-title-wrap">
-                    <h2
-                      className="project-card-title"
-                      style={{ cursor: onSelectProject ? 'pointer' : 'default' }}
-                      onClick={() => onSelectProject?.(project.id)}
-                    >
-                      {project.title}
-                    </h2>
-                  </div>
-                  {project.archivedAt && (
-                    <span className="badge badge-archived">已归档</span>
-                  )}
-                </div>
-
-                <p className="project-card-desc">
-                  {project.description || '（无项目描述）'}
-                </p>
-
-                <div className="project-meta-list">
-                  <div className="project-meta-row">
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <Bot size={14} aria-hidden="true" />
-                      <span>Coordinator:</span>
-                    </span>
-                    <strong style={{ color: 'var(--fg)' }}>
-                      {project.coordinatorAgentName}
-                    </strong>
-                  </div>
-
-                  <div className="project-meta-row">
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <Calendar size={14} aria-hidden="true" />
-                      <span>更新时间:</span>
-                    </span>
-                    <span>{project.updatedAt}</span>
-                  </div>
-
-                  <div className="project-meta-row">
-                    <span>下一个 Issue 编号:</span>
-                    <code>#{project.nextIssueNumber}</code>
-                  </div>
-                </div>
-              </div>
-
-              <div className="project-card-actions">
-                {onSelectProject ? (
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                    onClick={() => onSelectProject(project.id)}
-                  >
-                    <span>进入项目</span>
-                    <ArrowRight size={14} aria-hidden="true" />
-                  </button>
-                ) : (
-                  <span />
-                )}
-
-                <div className="project-card-actions-right">
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={() => setEditingProject(project)}
-                    title="编辑项目"
-                    aria-label={`编辑项目 ${project.title}`}
-                  >
-                    <Pencil size={14} aria-hidden="true" />
-                  </button>
-
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={() => void handleArchiveToggle(project)}
-                    title={project.archivedAt ? '取消归档' : '归档项目'}
-                    aria-label={`${project.archivedAt ? '取消归档' : '归档'}项目 ${project.title}`}
-                  >
-                    <Archive size={14} aria-hidden="true" />
-                  </button>
-
-                  <button
-                    type="button"
-                    className="ghost-btn danger"
-                    onClick={() => setDeletingProject(project)}
-                    title="删除项目"
-                    aria-label={`删除项目 ${project.title}`}
-                  >
-                    <Trash2 size={14} aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
-            </article>
-          ))}
+      {Boolean(searchQuery.trim()) && filteredProjects.length === 0 && !isLoading && (
+        <div className="state-block" style={{ marginBottom: '20px' }}>
+          <div>
+            <strong>暂无匹配项目</strong>
+            <p style={{ margin: '4px 0 0 0', color: 'var(--fg-dim)', fontSize: '13px' }}>
+              没有找到符合搜索条件的项目
+            </p>
+          </div>
         </div>
       )}
+
+      <div className="cards-grid">
+        <CreateCard
+          title="新建项目"
+          subtitle="配置 Coordinator 编排与多 Issue 看板"
+          onClick={() => setIsCreateOpen(true)}
+        />
+
+        {filteredProjects.map((project) => (
+          <article
+            key={project.id}
+            className={`info-card project-card ${project.archivedAt ? 'is-archived' : ''}`}
+          >
+            <div>
+              <div className="project-card-head">
+                <div className="project-card-title-wrap">
+                  <h2
+                    className="project-card-title"
+                    style={{ cursor: onSelectProject ? 'pointer' : 'default' }}
+                    onClick={() => onSelectProject?.(project.id)}
+                  >
+                    {project.title}
+                  </h2>
+                </div>
+                {project.archivedAt && (
+                  <span className="badge badge-archived">已归档</span>
+                )}
+              </div>
+
+              <p className="project-card-desc">
+                {project.description || '（无项目描述）'}
+              </p>
+
+              <div className="project-meta-list">
+                <div className="project-meta-row">
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Bot size={14} aria-hidden="true" />
+                    <span>Coordinator:</span>
+                  </span>
+                  <strong style={{ color: 'var(--fg)' }}>
+                    {project.coordinatorAgentName}
+                  </strong>
+                </div>
+
+                <div className="project-meta-row">
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Calendar size={14} aria-hidden="true" />
+                    <span>更新时间:</span>
+                  </span>
+                  <span>{project.updatedAt}</span>
+                </div>
+
+                <div className="project-meta-row">
+                  <span>下一个 Issue 编号:</span>
+                  <code>#{project.nextIssueNumber}</code>
+                </div>
+              </div>
+            </div>
+
+            <div className="project-card-actions">
+              {onSelectProject ? (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  onClick={() => onSelectProject(project.id)}
+                >
+                  <span>进入项目</span>
+                  <ArrowRight size={14} aria-hidden="true" />
+                </button>
+              ) : (
+                <span />
+              )}
+
+              <div className="project-card-actions-right">
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => setEditingProject(project)}
+                  title="编辑项目"
+                  aria-label={`编辑项目 ${project.title}`}
+                >
+                  <Pencil size={14} aria-hidden="true" />
+                </button>
+
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => void handleArchiveToggle(project)}
+                  title={project.archivedAt ? '取消归档' : '归档项目'}
+                  aria-label={`${project.archivedAt ? '取消归档' : '归档'}项目 ${project.title}`}
+                >
+                  <Archive size={14} aria-hidden="true" />
+                </button>
+
+                <button
+                  type="button"
+                  className="ghost-btn danger"
+                  onClick={() => setDeletingProject(project)}
+                  title="删除项目"
+                  aria-label={`删除项目 ${project.title}`}
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
 
       {/* Modals */}
       <CreateProjectModal

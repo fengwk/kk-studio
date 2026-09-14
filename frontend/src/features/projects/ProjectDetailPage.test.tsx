@@ -1,10 +1,33 @@
 import { describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
 import { ProjectDetailPage } from './ProjectDetailPage'
 import type { ProjectsApi } from './projects-api'
 import type { IssueDetailDTO, ProjectSnapshotDTO } from './types'
 import { notifyProjectsChanged } from './useProjectsInvalidation'
+
+vi.mock('@/shared/api/agent-service', () => ({
+  agentService: {
+    listAgents: vi.fn().mockResolvedValue({
+      results: [
+        { name: 'coordinator-lead' },
+        { name: 'coordinator-1' },
+      ],
+    }),
+  },
+}))
+
+function renderPage(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      {ui}
+    </QueryClientProvider>,
+  )
+}
 
 describe('ProjectDetailPage', () => {
   const projectId = 'a0000000-0000-0000-0000-000000000001'
@@ -236,7 +259,7 @@ describe('ProjectDetailPage', () => {
   it('renders project header and 6 columns accurately classifying issues', async () => {
     // 测试意图：验证六列看板按 issue.status 与 run.status 正确归类 Issue（如 WAITING_HUMAN 归入等待人类列）
     const api = createMockApi()
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Awesome Platform')).toBeInTheDocument()
@@ -260,7 +283,7 @@ describe('ProjectDetailPage', () => {
   it('shows canceled issues when toggle is enabled', async () => {
     // 测试意图：验证“显示已取消”开关能够展示 CANCELED 规格列
     const api = createMockApi()
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Awesome Platform')).toBeInTheDocument()
@@ -278,7 +301,7 @@ describe('ProjectDetailPage', () => {
   it('changes issue status from board quick actions', async () => {
     // 测试意图：验证看板快捷按钮触发 changeIssueStatus API 投递合法状态流转
     const api = createMockApi()
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Design DB schema')).toBeInTheDocument()
@@ -302,7 +325,7 @@ describe('ProjectDetailPage', () => {
   it('opens IssueDetailModal, navigates tabs and appends input', async () => {
     // 测试意图：验证点击卡片打开详情弹窗，可在输入流标签页追加人类输入
     const api = createMockApi()
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Implement REST API')).toBeInTheDocument()
@@ -362,7 +385,7 @@ describe('ProjectDetailPage', () => {
       getIssue: vi.fn().mockResolvedValue(freshDetail),
     })
 
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Implement REST API')).toBeInTheDocument()
@@ -428,7 +451,7 @@ describe('ProjectDetailPage', () => {
         .mockResolvedValue(refreshedDetail),
       updateIssue: vi.fn().mockResolvedValue(mockIssueDetail.issue),
     })
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await screen.findByText('Implement REST API')
     fireEvent.click(screen.getByLabelText('Issue #2 Implement REST API'))
@@ -456,7 +479,7 @@ describe('ProjectDetailPage', () => {
   it('sends command in CoordinatorConversation with canonical UUID idempotencyKey', async () => {
     // 测试意图：验证 Coordinator 对话框发送命令时构造正确的 UUID 幂等键并调用 sendProjectCommand
     const api = createMockApi()
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText(/Coordinator: coordinator-lead/i)).toBeInTheDocument()
@@ -499,7 +522,7 @@ describe('ProjectDetailPage', () => {
       getIssue: vi.fn().mockResolvedValue(reviewDetail),
     })
 
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Implement REST API')).toBeInTheDocument()
@@ -555,7 +578,7 @@ describe('ProjectDetailPage', () => {
       getIssue: vi.fn().mockResolvedValue(failedDetail),
     })
 
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Implement REST API')).toBeInTheDocument()
@@ -591,7 +614,7 @@ describe('ProjectDetailPage', () => {
   it('creates a new issue from the board toolbar button', async () => {
     // 测试意图：验证从看板工具栏点击“新建 Issue”打开弹窗，输入标题和参数后正确创建 Issue 并刷新看板
     const api = createMockApi()
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Awesome Platform')).toBeInTheDocument()
@@ -630,7 +653,7 @@ describe('ProjectDetailPage', () => {
     // 测试意图：验证点击顶部返回箭头按钮触发 onBack 回调
     const onBack = vi.fn()
     const api = createMockApi()
-    render(<ProjectDetailPage projectId={projectId} onBack={onBack} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={onBack} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Awesome Platform')).toBeInTheDocument()
@@ -649,7 +672,7 @@ describe('ProjectDetailPage', () => {
       getProjectSnapshot: vi.fn().mockRejectedValue(new Error('Snapshot failed to load')),
     })
 
-    render(<ProjectDetailPage projectId={projectId} onBack={onBack} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={onBack} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Snapshot failed to load')).toBeInTheDocument()
@@ -675,7 +698,7 @@ describe('ProjectDetailPage', () => {
         .mockResolvedValueOnce(mockSnapshot)
         .mockResolvedValue(refreshedSnapshot),
     })
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await screen.findByText('Awesome Platform')
     fireEvent.click(screen.getByRole('button', { name: /编辑/i }))
@@ -711,7 +734,7 @@ describe('ProjectDetailPage', () => {
     const api = createMockApi({
       getProjectSnapshot: vi.fn().mockReturnValueOnce(initial).mockResolvedValue(latestSnapshot),
     })
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     act(() => notifyProjectsChanged({ projectId }))
     expect(await screen.findByText('Latest Snapshot')).toBeInTheDocument()
@@ -731,7 +754,7 @@ describe('ProjectDetailPage', () => {
     // 测试意图：验证在详情页顶部直接编辑项目与删除项目（级联触发 onBack）流程
     const onBack = vi.fn()
     const api = createMockApi()
-    render(<ProjectDetailPage projectId={projectId} onBack={onBack} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={onBack} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Awesome Platform')).toBeInTheDocument()
@@ -741,6 +764,9 @@ describe('ProjectDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /编辑/i }))
     expect(screen.getByText('编辑项目', { selector: 'h3' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/项目名称/i), { target: { value: 'Renamed Platform' } })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '保存修改' })).not.toBeDisabled()
+    })
     fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
 
     await waitFor(() => {
@@ -764,7 +790,7 @@ describe('ProjectDetailPage', () => {
   it('manages issue dependencies inside IssueDetailModal (add and remove)', async () => {
     // 测试意图：验证在 Issue 详情弹窗的“依赖关系”标签页中添加与删除依赖项
     const api = createMockApi()
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Implement REST API')).toBeInTheDocument()
@@ -815,7 +841,7 @@ describe('ProjectDetailPage', () => {
   it('cancels an issue from IssueDetailModal with optional reason', async () => {
     // 测试意图：验证在详情弹窗中触发取消 Issue 流程，输入原因并调用 cancelIssue
     const api = createMockApi()
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Implement REST API')).toBeInTheDocument()
@@ -849,7 +875,7 @@ describe('ProjectDetailPage', () => {
     const api = createMockApi({
       sendProjectCommand: vi.fn().mockRejectedValue(new Error('Coordinator offline')),
     })
-    render(<ProjectDetailPage projectId={projectId} api={api} />)
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText(/Coordinator: coordinator-lead/i)).toBeInTheDocument()
