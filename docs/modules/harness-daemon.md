@@ -114,7 +114,7 @@ lsp.goto-definition, lsp.workspace-symbols, lsp.java-decompile
 
 ```text
 DISCONNECTED -> CONNECTING
-  -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=3)
+  -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=4)
   <- WELCOME(environmentId)
   -> READY(capability descriptors, environment + sourceSetVersion + skillSources)
   -> READY + HEARTBEAT
@@ -140,7 +140,14 @@ WELCOME / ACK / ERROR     -> handshake/control
 - 不存在目录明确失败：不自动 mkdir、不回退 HOME、不回退 Environment root，也不沿用前一次调用的目录；
 - 命令与文件系统的业务授权由 Platform permission 判定，Daemon 不提供额外的路径沙箱。
 
-`read` 与 `write`/`edit` 共享统一的文件编码、预览截断与文件修改边界：文本按既有编码、BOM 与行尾表示写回，同一文件的修改通过进程内锁串行化。`grep` 与 `find` 使用 Java NIO 原生遍历与 JGit 规则解析 `.gitignore`（规则基线取检索目标祖先链上的 `.gitignore`），直接在 JVM 内完成检索；LSP 能力通过可选的本地进程桥接（`kkstudio.daemon.lsp-bridge`）承载，当缺少相关工具链时返回明确的不可用提示，其中 `lsp_java_decompile` 对可解析的 class 目标支持回退到 `javap`。参数配置见 [`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java)：
+`fs.read`（版本 `3`）与 `write`/`edit` 共享统一的文件编码、预览截断与文件修改边界：
+- 文本按既有编码、BOM 与行尾表示写回，同一文件的修改通过进程内锁串行化。
+- **纯净编号正文**：`fs.read` 彻底移除正文中的合成截断标记（如 `... (line truncated to 2000 chars)`），`line|` 编号后严格为按 LF 读取协议归一化的真实行片段，可直接完整复制为 `fs.edit` 的 `old_string` 进行精确比对与替换。
+- **长行列分页（`column_offset`）**：单行文本超过 2000 码点时按 Unicode 码点切片，不截断代理对（Surrogate Pairs）；支持可选参数 `column_offset`（1-based 正整数码点偏移量，仅限纯文本文件）。指定 `column_offset` 时 `limit` 缺省为 1 且必须等于 1。
+- **精确有界输出（<= 48 KiB）**：包含 Header 元数据、编号正文、分隔空行、水平切片尾注与垂直续读尾注在内的完整 UTF-8 输出严格受控于 48 KiB（49,152 字节）上限。多行读取时若下一行导致整体超限则有界截断并给出续读 offset，底层设有终态防御断言，杜绝超大载荷逃逸。
+- 越界定位元数据（如 `[Showing 0 lines of N.]` 或 `[Showing 0 columns of N on line X.]`）及续读提示均统一置于非编号尾部，不污染正文编号结构。
+
+`grep` 与 `find` 使用 Java NIO 原生遍历与 JGit 规则解析 `.gitignore`（规则基线取检索目标祖先链上的 `.gitignore`），直接在 JVM 内完成检索；LSP 能力通过可选的本地进程桥接（`kkstudio.daemon.lsp-bridge`）承载，当缺少相关工具链时返回明确的不可用提示，其中 `lsp_java_decompile` 对可解析的 class 目标支持回退到 `javap`。参数配置见 [`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java)：
 
 ```text
 previewMaxLines = 2000

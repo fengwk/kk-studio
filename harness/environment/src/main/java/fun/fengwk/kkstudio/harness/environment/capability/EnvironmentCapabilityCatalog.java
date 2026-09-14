@@ -26,14 +26,17 @@ import java.util.Set;
  */
 public final class EnvironmentCapabilityCatalog {
 
-  /** capability catalog 版本：v3 新增 local MCP 执行与发现能力。 */
-  public static final String CATALOG_VERSION = "3";
+  /** capability catalog 版本：v4 升级 fs.read 为 v3（支持 column_offset 与无损长行读取）。 */
+  public static final String CATALOG_VERSION = "4";
 
   /** 基础 capability 版本。 */
   public static final String VERSION = "1";
 
   /** 引入必填绝对 workdir 的 coding/process/LSP 能力版本。 */
   public static final String WORKDIR_VERSION = "2";
+
+  /** 支持 column_offset 与无损长行切片的 fs.read 能力版本。 */
+  public static final String FS_READ_VERSION = "3";
 
   /** {@code skill.load} 的 arguments 从 {@code {name}} 变为 {@code {sourceId,name,revision}}，属不兼容变更。 */
   public static final String SKILL_LOAD_VERSION = "2";
@@ -90,7 +93,11 @@ public final class EnvironmentCapabilityCatalog {
 
   private static List<EnvironmentCapabilityDescriptor> createDescriptors() {
     return List.of(
-        workdirDescriptor(EnvironmentCapabilityIds.FS_READ, Duration.ofMinutes(1)),
+        new EnvironmentCapabilityDescriptor(
+            EnvironmentCapabilityIds.FS_READ,
+            FS_READ_VERSION,
+            loadSchema(EnvironmentCapabilityIds.FS_READ),
+            Duration.ofMinutes(1)),
         workdirDescriptor(EnvironmentCapabilityIds.FS_WRITE, Duration.ofMinutes(1)),
         workdirDescriptor(EnvironmentCapabilityIds.FS_EDIT, Duration.ofMinutes(1)),
         workdirDescriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofHours(1)),
