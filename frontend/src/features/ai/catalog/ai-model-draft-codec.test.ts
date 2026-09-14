@@ -212,7 +212,9 @@ describe('ai-model-draft-codec', () => {
     expect(create.modelId).toBe('wire-model-a')
     expect(create.config).toEqual(config)
     expect(toEditableModelUpdate(input)).not.toHaveProperty('providerName')
+    expect(toEditableModelUpdate(input).name).toBe('stub')
     expect(toEditableModelUpdate(input).modelId).toBe('wire-model-a')
+    expect(() => toEditableModelUpdate(draft({ name: '   ' }))).toThrow('name must not be blank')
   })
 
   /** 通过不可变数组切换时，永远不会丢失最后一个 input modality。 */
@@ -272,12 +274,10 @@ describe('ai-model-draft-codec', () => {
     )
   })
 
-  /** buildModelConfig 甚至在到达 config 之前就拒绝 name 为空且 providerName 非空的组合。 */
+  /** toEditableModel 与 toEditableModelUpdate 均拒绝 blank name。 */
   it('rejects blank name in toEditableModel and toEditableModelUpdate', () => {
     expect(() => toEditableModel(draft({ name: '   ' }))).toThrow(/name/)
-    expect(toEditableModelUpdate(draft({ name: '' }))).toEqual(
-      expect.objectContaining({ description: null }),
-    )
+    expect(() => toEditableModelUpdate(draft({ name: '   ' }))).toThrow(/name/)
   })
 
   /** toEditableModel 拒绝空的 providerName。 */

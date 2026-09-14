@@ -58,11 +58,12 @@ public class AgentModelServiceImplTest {
     assertThrows(AiResourceNotFoundException.class, () -> service.createModel(create));
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
+    update.setName("model");
     update.setExpectedVersion("0");
     AgentModelUpdateDTO missing = new AgentModelUpdateDTO();
     assertThrows(
         AiValidationException.class, () -> service.updateModel("provider", "model", missing));
-    when(resolver.requireModel("provider", "model")).thenReturn(model);
+    when(resolver.requireModelForUpdate("provider", "model")).thenReturn(model);
     when(repository.updateByName(model, 0L)).thenReturn(false);
     when(repository.getByProviderNameAndName("provider", "model")).thenReturn(null);
     assertThrows(
@@ -75,6 +76,17 @@ public class AgentModelServiceImplTest {
     when(repository.getByProviderNameAndName("provider", "model")).thenReturn(reread);
     assertThrows(
         AiVersionConflictException.class, () -> service.updateModel("provider", "model", update));
+
+    when(repository.updateByName(model, 0L)).thenThrow(new DuplicateKeyException("dup"));
+    assertThrows(
+        AiDuplicateException.class, () -> service.updateModel("provider", "model", update));
+
+    AgentModelUpdateDTO rename = new AgentModelUpdateDTO();
+    rename.setName("renamed-model");
+    rename.setExpectedVersion("0");
+    doThrow(new DuplicateKeyException("dup")).when(repository).rename("model", model, 0L);
+    assertThrows(
+        AiDuplicateException.class, () -> service.updateModel("provider", "model", rename));
 
     when(repository.deleteByName(eq("provider"), eq("model"), anyLong())).thenReturn(false);
     when(repository.getByProviderNameAndName("provider", "model")).thenReturn(null);

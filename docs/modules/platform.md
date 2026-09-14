@@ -84,7 +84,7 @@ Catalog 是名称寻址的全局资源集合，所有变更 service 都使用 `e
 | Model | `(provider_name, name)` | 保存 context/output limit、abilities、variants、pricing 和 default variant |
 | Agent | `agent_definition.name` | 保存 system prompt、Model 引用、variant 覆盖以及 toolIds/skills/subagents 配置 |
 
-Provider、Model、Agent 的名称在记录存续期间不可修改；Model 对 Provider、Agent 对 Model 有数据库外键。删除由
+Model 的 `name` 支持编辑重命名，其 Provider 保持不可变；引用该 Model 的 Agent Definition 在同一数据库事务内由应用层原子同步更新其 Model 引用，并递增 Agent 版本号与单调推进更新时间；Provider 与 Agent 的名称在记录存续期间不可修改。Model 对 Provider、Agent 对 Model 具有非延迟外键约束；重命名时先锁定原模型行、复制创建时间并插入新模型行，随后更新所有引用 Agent 的模型字段，最后删除旧模型行，若发生冲突或并发异常则完整回滚以确保原子性与一致性。删除由
 `AgentProviderGuard`、`AgentModelReferenceResolver`、`AgentDefinitionReferenceResolver` 和对应 service
 拒绝仍被引用的资源，并通过 PostgreSQL integrity classifier 把 FK 约束映射为领域错误。
 

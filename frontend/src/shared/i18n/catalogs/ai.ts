@@ -286,8 +286,8 @@ export const aiCatalog = {
     'zh-CN': 'Name',
   },
   'ai.catalog.form.nameHint': {
-    'en-US': 'Immutable logical identity used by Agents and branch settings.',
-    'zh-CN': '不可变逻辑身份，供 Agent 与 branch settings 引用。',
+    'en-US': 'Logical identity used by Agents and branch settings.',
+    'zh-CN': '逻辑身份，供 Agent 与 branch settings 引用。',
   },
   'ai.catalog.form.modelId': {
     'en-US': 'Model ID',

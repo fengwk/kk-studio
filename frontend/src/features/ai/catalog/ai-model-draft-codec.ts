@@ -273,13 +273,9 @@ export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
   if (!providerName) {
     throw new Error('providerName is required')
   }
-  const name = draft.name.trim()
-  if (!name) {
-    throw new Error('name must not be blank')
-  }
   return {
     providerName,
-    name,
+    name: requireNonBlank(draft.name, 'name'),
     modelId: requireNonBlank(draft.modelId, 'modelId'),
     description: trimToNull(draft.description),
     config: buildModelConfig(draft),
@@ -288,6 +284,7 @@ export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
 
 export function toEditableModelUpdate(draft: ModelDraft): AgentModelEditablePropertiesDTO {
   return {
+    name: requireNonBlank(draft.name, 'name'),
     modelId: requireNonBlank(draft.modelId, 'modelId'),
     description: trimToNull(draft.description),
     config: buildModelConfig(draft),

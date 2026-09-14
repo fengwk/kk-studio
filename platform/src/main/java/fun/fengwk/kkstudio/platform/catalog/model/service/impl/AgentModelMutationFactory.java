@@ -40,7 +40,7 @@ final class AgentModelMutationFactory {
   }
 
   void update(AgentModel model, AgentModelEditablePropertiesDTO properties) {
-    apply(model, newMutation(model.getName(), properties));
+    apply(model, newMutation(properties == null ? null : properties.getName(), properties));
   }
 
   private void apply(AgentModel model, Mutation mutation) {

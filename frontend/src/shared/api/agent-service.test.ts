@@ -88,6 +88,8 @@ describe('agentService', () => {
     }
     const updateProviderBody = { description: 'updated', expectedVersion: '7' }
     const updateModelBody = {
+      name: 'MiniMax-M2.7-renamed',
+      modelId: 'wire-minimax',
       expectedVersion: '8',
       config: {
         limit: { context: 128000, output: 8192 },
