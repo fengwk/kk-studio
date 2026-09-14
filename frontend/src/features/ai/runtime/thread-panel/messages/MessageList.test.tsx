@@ -179,4 +179,27 @@ describe('MessageList tool renderer dispatch', () => {
     )
     expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
   })
+
+  it('renders call without paired result as pending and paired call+result as success', () => {
+    const call: ToolDialogueMessage = {
+      ...message,
+      id: 'tool-call-1',
+      phase: 'call',
+      status: 'done',
+      text: '',
+      arguments: '{"path":"README.md"}',
+    }
+    const { container, rerender } = render(<MessageList messages={[call]} />)
+    expect(container.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
+
+    const result: ToolDialogueMessage = {
+      ...message,
+      id: 'tool-result-1',
+      phase: 'result',
+      status: 'done',
+      text: 'ok',
+    }
+    rerender(<MessageList messages={[call, result]} />)
+    expect(container.querySelector('.thread-turn-tool')).toHaveClass('tool-state-success')
+  })
 })

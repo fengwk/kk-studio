@@ -125,4 +125,81 @@ describe('buildToolMessageView', () => {
     expect(durable.context.argumentsStreaming).toBe(false)
     expect(durable.expandable).toBe(false)
   })
+
+  describe('toolVisualState', () => {
+    it('treats call-only status done or undefined as pending', () => {
+      const doneCall = buildToolMessageView({
+        message: message({ phase: 'call', status: 'done' }),
+        approvalPending: false,
+        requestedExpanded: false,
+        hasCustomRenderer: false,
+      })
+      const undefinedCall = buildToolMessageView({
+        message: message({ phase: 'call', status: undefined }),
+        approvalPending: false,
+        requestedExpanded: false,
+        hasCustomRenderer: false,
+      })
+
+      expect(doneCall.visualState).toBe('pending')
+      expect(undefinedCall.visualState).toBe('pending')
+    })
+
+    it('treats call streaming as pending when no paired result exists', () => {
+      const streamingCall = buildToolMessageView({
+        message: message({ phase: 'call', status: 'streaming' }),
+        approvalPending: false,
+        requestedExpanded: false,
+        hasCustomRenderer: false,
+      })
+
+      expect(streamingCall.visualState).toBe('pending')
+    })
+
+    it('overrides call streaming with success when a paired done result is present', () => {
+      const view = buildToolMessageView({
+        message: message({ phase: 'call', status: 'streaming' }),
+        result: message({
+          id: 'tool-result-1',
+          phase: 'result',
+          status: 'done',
+          text: 'completed successfully',
+        }),
+        approvalPending: false,
+        requestedExpanded: false,
+        hasCustomRenderer: false,
+      })
+
+      expect(view.visualState).toBe('success')
+    })
+
+    it('derives error state when paired with an error result', () => {
+      const view = buildToolMessageView({
+        message: message({ phase: 'call', status: 'streaming' }),
+        result: message({
+          id: 'tool-result-2',
+          phase: 'result',
+          status: 'error',
+          text: 'execution failed',
+          errorMessage: 'execution failed',
+        }),
+        approvalPending: false,
+        requestedExpanded: false,
+        hasCustomRenderer: false,
+      })
+
+      expect(view.visualState).toBe('error')
+    })
+
+    it('derives success from a standalone result with missing status', () => {
+      const view = buildToolMessageView({
+        message: message({ phase: 'result', status: undefined, text: 'ok' }),
+        approvalPending: false,
+        requestedExpanded: false,
+        hasCustomRenderer: false,
+      })
+
+      expect(view.visualState).toBe('success')
+    })
+  })
 })
