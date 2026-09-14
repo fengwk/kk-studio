@@ -16,7 +16,7 @@ import java.util.Set;
 /** 固定 atomic capability ID、descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
 
-  /** 11 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一，并区分 workdir 版本能力。 */
+  /** 11 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
   @Test
   void exposesStableIdsInFixedOrder() {
     List<EnvironmentCapabilityId> expected =
@@ -33,7 +33,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.SKILL_LOAD,
             EnvironmentCapabilityIds.MCP_LOCAL_CALL);
 
-    assertEquals("4", EnvironmentCapabilityCatalog.version());
+    assertEquals("1", EnvironmentCapabilityCatalog.version());
     assertEquals(
         List.of(
             "fs.read",
@@ -62,15 +62,7 @@ class EnvironmentCapabilityCatalogTest {
     assertEquals(
         expected.size(), EnvironmentCapabilityCatalog.descriptors().stream().distinct().count());
     for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
-      String expectedVersion =
-          descriptor.id().equals(EnvironmentCapabilityIds.SKILL_LOAD)
-              ? EnvironmentCapabilityCatalog.SKILL_LOAD_VERSION
-              : descriptor.id().equals(EnvironmentCapabilityIds.MCP_LOCAL_CALL)
-                  ? EnvironmentCapabilityCatalog.VERSION
-                  : descriptor.id().equals(EnvironmentCapabilityIds.FS_READ)
-                      ? EnvironmentCapabilityCatalog.FS_READ_VERSION
-                      : EnvironmentCapabilityCatalog.WORKDIR_VERSION;
-      assertEquals(expectedVersion, descriptor.version(), descriptor.id().value());
+      assertEquals("1", descriptor.version(), descriptor.id().value());
     }
     // workdir 语义由 capability ID 决定，不能从可能被其它能力独立使用的版本号推断。
     assertEquals(
@@ -111,6 +103,10 @@ class EnvironmentCapabilityCatalogTest {
           EnvironmentCapabilityCatalog.descriptors().stream()
               .noneMatch(descriptor -> descriptor.id().equals(id)),
           id.value());
+    }
+    for (EnvironmentCapabilityDescriptor descriptor :
+        EnvironmentCapabilityCatalog.managementDescriptors()) {
+      assertEquals("1", descriptor.version(), descriptor.id().value());
     }
     // 前三个管理能力共享同一份冻结来源配置 schema，禁止出现第二份 wire 形状。
     assertEquals(

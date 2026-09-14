@@ -134,7 +134,7 @@ registerCase({
   level: 'L5',
   title: '双节点租约路由：DB 权威投影跨节点一致',
   requires: ['distributed'],
-  docs: '固定环境 distributed-a=33333333-3333-3333-3333-333333333333 连 app-a，distributed-b=44444444-4444-4444-4444-444444444444 连 app-b；两个 App 都投影两者 READY，且同一 Environment 在两个节点上的 id/name/version/status/ready/rootPath/capabilities 逐项一致（路由事实来自 DB，不依赖本机 websocket），coding capability 为 workdir 版（fs.read@3）',
+  docs: '固定环境 distributed-a=33333333-3333-3333-3333-333333333333 连 app-a，distributed-b=44444444-4444-4444-4444-444444444444 连 app-b；两个 App 都投影两者 READY，且同一 Environment 在两个节点上的 id/name/version/status/ready/rootPath/capabilities 逐项一致（路由事实来自 DB，不依赖本机 websocket），coding capability 为 fs.read@1',
   async run(ctx) {
     assertDistributedContext(ctx)
 
@@ -169,7 +169,7 @@ registerCase({
         fromA.rootPath === fromB.rootPath,
         `${label}: rootPath must come from DB routing, not the caller's local socket`,
       )
-      // live 投影的原子能力来自权威 catalog，因此必然包含 workdir 版（version=2）的 coding capability。
+      // live 投影的原子能力来自权威 catalog，因此必然包含 version=1 的 coding capability。
       const capabilityKey = (card) =>
         (card.capabilities || [])
           .map((capability) => `${capability.id}@${capability.version}`)
@@ -181,9 +181,9 @@ registerCase({
       )
       assert(
         (fromA.capabilities || []).some(
-          (capability) => capability.id === 'fs.read' && capability.version === '3',
+          (capability) => capability.id === 'fs.read' && capability.version === '1',
         ),
-        `${label}: coding capabilities must advertise fs.read@3, got ${capabilityKey(fromA)}`,
+        `${label}: coding capabilities must advertise fs.read@1, got ${capabilityKey(fromA)}`,
       )
     }
 

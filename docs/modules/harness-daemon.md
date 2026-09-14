@@ -114,7 +114,7 @@ lsp.goto-definition, lsp.workspace-symbols, lsp.java-decompile
 
 ```text
 DISCONNECTED -> CONNECTING
-  -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=4)
+  -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=1)
   <- WELCOME(environmentId)
   -> READY(capability descriptors, environment + sourceSetVersion + skillSources)
   -> READY + HEARTBEAT
@@ -140,7 +140,7 @@ WELCOME / ACK / ERROR     -> handshake/control
 - 不存在目录明确失败：不自动 mkdir、不回退 HOME、不回退 Environment root，也不沿用前一次调用的目录；
 - 命令与文件系统的业务授权由 Platform permission 判定，Daemon 不提供额外的路径沙箱。
 
-`fs.read`（版本 `3`）与 `write`/`edit` 共享统一的文件编码、预览截断与文件修改边界：
+`fs.read` 与 `write`/`edit` 共享统一的文件编码、预览截断与文件修改边界：
 - 文本按既有编码、BOM 与行尾表示写回，同一文件的修改通过进程内锁串行化。
 - **纯净编号正文**：`fs.read` 彻底移除正文中的合成截断标记（如 `... (line truncated to 2000 chars)`），`line|` 编号后严格为按 LF 读取协议归一化的真实行片段，可直接完整复制为 `fs.edit` 的 `old_string` 进行精确比对与替换。
 - **长行列分页（`column_offset`）**：单行文本超过 2000 码点时按 Unicode 码点切片，不截断代理对（Surrogate Pairs）；支持可选参数 `column_offset`（1-based 正整数码点偏移量，仅限纯文本文件）。指定 `column_offset` 时 `limit` 缺省为 1 且必须等于 1。
