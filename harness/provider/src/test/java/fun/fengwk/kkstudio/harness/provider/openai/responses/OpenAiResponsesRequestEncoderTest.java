@@ -589,11 +589,11 @@ class OpenAiResponsesRequestEncoderTest {
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt")))),
             cacheControl);
 
-    // 1. AUTOMATIC: 仅发送 runtime 派生的 key，不发送 retention/options/breakpoint
+    // 1. AUTOMATIC: 不发送任何 cache hint，即使 cacheControl 含有 key/retention 也防御性忽略
     OpenAiResponsesEncodedRequest encAuto =
         encoder.encode(request, desc, new OpenAiResponsesConfig(OpenAiPromptCacheMode.AUTOMATIC));
     JsonNode rootAuto = MAPPER.readTree(encAuto.bodyUtf8Bytes());
-    assertEquals("aff_key_999", rootAuto.path("prompt_cache_key").asText());
+    assertFalse(rootAuto.has("prompt_cache_key"));
     assertFalse(rootAuto.has("prompt_cache_retention"));
     assertFalse(rootAuto.has("prompt_cache_options"));
     assertFalse(rootAuto.get("input").get(0).get("content").get(0).has("prompt_cache_breakpoint"));
