@@ -3,9 +3,11 @@ import {
   buildSkillCandidates,
   buildSubagentCandidates,
   buildToolCandidates,
+  filterToolIdsForEnvironment,
   toggleSkillRef,
   withSelectedOrphans,
   withSelectedSkillOrphans,
+  withSelectedToolOrphans,
   type CapabilityOption,
   type SkillCandidateOption,
 } from '@/features/ai/catalog/agent-capability-candidates'
@@ -86,10 +88,6 @@ export function AgentForm({
       : []),
     ...variantOptions.map((variantName) => ({ value: variantName, label: variantName })),
   ]
-  const toolCandidates = withSelectedOrphans(
-    buildToolCandidates(toolCatalog),
-    draft.toolIds,
-  )
 
   const selectedEnvironmentId = (draft.environmentId ?? '').trim()
   const selectedEnvironment = environments.find((env) => env.id === selectedEnvironmentId)
@@ -112,6 +110,14 @@ export function AgentForm({
       label: env.ready ? env.name : `${env.name} (${t('ai.catalog.form.offline')})`,
     })),
   ]
+
+  const toolCandidates = withSelectedToolOrphans(
+    buildToolCandidates(toolCatalog, draft.environmentId),
+    draft.toolIds,
+    toolCatalog,
+  )
+  const visibleToolValues = new Set(toolCandidates.map((option) => option.value))
+  const visibleSelectedToolIds = draft.toolIds.filter((id) => visibleToolValues.has(id.trim()))
 
   const skillCandidates = withSelectedSkillOrphans(
     buildSkillCandidates(inventorySkills),
@@ -200,6 +206,7 @@ export function AgentForm({
                 ...draft,
                 environmentId: newEnvironmentId,
                 skills: [],
+                toolIds: filterToolIdsForEnvironment(draft.toolIds, toolCatalog, newEnvironmentId),
               })
             }
           }}
@@ -219,9 +226,11 @@ export function AgentForm({
         <legend>{t('ai.catalog.form.tools')}</legend>
         <CapabilityChecklist
           options={toolCandidates}
-          selected={draft.toolIds}
+          selected={visibleSelectedToolIds}
           emptyText={t('ai.catalog.form.noCandidateTools')}
-          onToggle={(value) => onChange({ ...draft, toolIds: toggleValue(draft.toolIds, value) })}
+          onToggle={(value) =>
+            onChange({ ...draft, toolIds: toggleValue(visibleSelectedToolIds, value) })
+          }
         />
         {fieldErrors.toolIds ? <span className="field-error">{fieldErrors.toolIds}</span> : null}
       </fieldset>

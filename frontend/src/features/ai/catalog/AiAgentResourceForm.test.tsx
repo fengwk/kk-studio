@@ -127,12 +127,16 @@ describe('AgentForm current contracts', () => {
               name: 'bash',
               version: '1',
               description: longDescription,
+              environmentRequired: false,
+              environmentId: null,
             },
             {
               id: 'environment.lsp',
               name: 'lsp',
               version: '1',
               description: 'lsp',
+              environmentRequired: true,
+              environmentId: null,
             },
           ]}
           onChange={setDraft}
@@ -469,5 +473,201 @@ describe('AgentForm current contracts', () => {
     expect(toEditableAgent(drafts.at(-1)!).description).toBe(
       '执行环境内的 shell 命令\n并返回捕获的输出',
     )
+  })
+
+  /**
+   * 测试意图：验证 Agent 编辑器中环境工具的可见性、切换清理与解绑清理完整行为：
+   * 1. 未绑定环境：仅展示非环境宿主工具，所有已知环境工具均不展示；未知工具保留为 orphan。
+   * 2. 绑定环境 A：展示非环境工具、通用环境工具及属于环境 A 的精确工具，环境 B 的工具不展示。
+   * 3. 切换 A -> B：移除环境 A 精确工具选择，保留宿主工具、通用环境工具及未知工具选择。
+   * 4. 解绑环境：移除所有已知环境工具（通用与精确）的选择与展示，宿主工具与未知工具保持选择。
+   */
+  it('filters tool catalog by environment and cleans incompatible tool selections on change or unbind', async () => {
+    const user = userEvent.setup()
+    const drafts: AgentDraft[] = []
+
+    const tools: ToolCatalogEntryDTO[] = [
+      {
+        id: 'base.bash',
+        name: 'bash',
+        version: '1',
+        description: 'host shell tool',
+        environmentRequired: false,
+        environmentId: null,
+      },
+      {
+        id: 'env.generic',
+        name: 'generic-tool',
+        version: '1',
+        description: 'generic environment tool',
+        environmentRequired: true,
+        environmentId: null,
+      },
+      {
+        id: 'env.exact-a',
+        name: 'exact-a-tool',
+        version: '1',
+        description: 'exact environment A tool',
+        environmentRequired: true,
+        environmentId: 'env-a',
+      },
+      {
+        id: 'env.exact-b',
+        name: 'exact-b-tool',
+        version: '1',
+        description: 'exact environment B tool',
+        environmentRequired: true,
+        environmentId: 'env-b',
+      },
+    ]
+
+    function Harness({ initialDraft }: { initialDraft: AgentDraft }) {
+      const [draft, setDraft] = useState<AgentDraft>(initialDraft)
+      return (
+        <AgentForm
+          draft={draft}
+          models={[modelWithVariants()]}
+          environments={[
+            environmentCard('env-a', 'Environment A'),
+            environmentCard('env-b', 'Environment B'),
+          ]}
+          toolCatalog={tools}
+          onChange={(next) => {
+            drafts.push(next)
+            setDraft(next)
+          }}
+        />
+      )
+    }
+
+    // 阶段 1：未绑定环境（No environment）
+    render(
+      <Harness
+        initialDraft={{
+          ...emptyAgentDraft(modelWithVariants()),
+          environmentId: '',
+          toolIds: ['base.bash', 'unknown.orphan'],
+        }}
+      />,
+    )
+
+    // 仅展示宿主工具与未知 orphan 工具；已知环境工具均不展示
+    expect(screen.getByLabelText(/bash/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/unknown\.orphan/)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/generic-tool/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/exact-a-tool/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/exact-b-tool/)).not.toBeInTheDocument()
+
+    // 阶段 2：选择 Environment A
+    await chooseSelectOption(user, ENV_LABEL, 'Environment A')
+    expect(drafts.at(-1)?.environmentId).toBe('env-a')
+
+    // 此时应展示：宿主工具 + 通用环境工具 + 精确 A 工具；精确 B 工具仍不展示
+    expect(screen.getByLabelText(/bash/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/generic-tool/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/exact-a-tool/)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/exact-b-tool/)).not.toBeInTheDocument()
+
+    // 勾选 generic-tool 和 exact-a-tool
+    await user.click(screen.getByLabelText(/generic-tool/))
+    await user.click(screen.getByLabelText(/exact-a-tool/))
+    expect(drafts.at(-1)?.toolIds).toEqual([
+      'base.bash',
+      'unknown.orphan',
+      'env.generic',
+      'env.exact-a',
+    ])
+
+    // 阶段 3：切换 Environment A -> Environment B
+    await chooseSelectOption(user, ENV_LABEL, 'Environment B')
+    expect(drafts.at(-1)?.environmentId).toBe('env-b')
+    // exact-a-tool 被移除，保留 base.bash、unknown.orphan 与 env.generic
+    expect(drafts.at(-1)?.toolIds).toEqual(['base.bash', 'unknown.orphan', 'env.generic'])
+    // UI 上 exact-a-tool 消失，exact-b-tool 出现且未勾选
+    expect(screen.queryByLabelText(/exact-a-tool/)).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/exact-b-tool/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/exact-b-tool/)).not.toBeChecked()
+
+    // 阶段 4：解绑环境（切换为「（无）」）
+    await chooseSelectOption(user, ENV_LABEL, '（无）')
+    expect(drafts.at(-1)?.environmentId).toBe('')
+    // 所有已知环境工具均被移除，宿主工具与未知 orphan 工具保持勾选
+    expect(drafts.at(-1)?.toolIds).toEqual(['base.bash', 'unknown.orphan'])
+    // UI 上所有环境工具均消失
+    expect(screen.queryByLabelText(/generic-tool/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/exact-a-tool/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/exact-b-tool/)).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/bash/)).toBeChecked()
+    expect(screen.getByLabelText(/unknown\.orphan/)).toBeChecked()
+  })
+
+  /**
+   * 测试意图：验证工具复选框操作基于可见且兼容的已选集合，
+   * 即使 draft 中原本存有陈旧且不兼容的环境工具 ID，在用户进行任意工具操作后也不会存活。
+   */
+  it('ensures tool toggles operate from visible compatible selection and purge stale incompatible IDs', async () => {
+    const user = userEvent.setup()
+    const drafts: AgentDraft[] = []
+
+    const tools: ToolCatalogEntryDTO[] = [
+      {
+        id: 'base.bash',
+        name: 'bash',
+        version: '1',
+        description: 'host tool',
+        environmentRequired: false,
+        environmentId: null,
+      },
+      {
+        id: 'env.generic',
+        name: 'generic-tool',
+        version: '1',
+        description: 'generic env tool',
+        environmentRequired: true,
+        environmentId: null,
+      },
+      {
+        id: 'env.exact-b',
+        name: 'exact-b-tool',
+        version: '1',
+        description: 'exact B tool',
+        environmentRequired: true,
+        environmentId: 'env-b',
+      },
+    ]
+
+    function Harness() {
+      const [draft, setDraft] = useState<AgentDraft>({
+        ...emptyAgentDraft(modelWithVariants()),
+        environmentId: 'env-a', // 当前在环境 A
+        toolIds: ['base.bash', 'env.exact-b'], // draft 中残留了环境 B 的专属工具
+      })
+      return (
+        <AgentForm
+          draft={draft}
+          models={[modelWithVariants()]}
+          environments={[
+            environmentCard('env-a', 'Environment A'),
+            environmentCard('env-b', 'Environment B'),
+          ]}
+          toolCatalog={tools}
+          onChange={(next) => {
+            drafts.push(next)
+            setDraft(next)
+          }}
+        />
+      )
+    }
+
+    render(<Harness />)
+
+    // exact-b-tool 不兼容当前环境 A，因此不展示，且不应作为 orphan 呈现
+    expect(screen.queryByLabelText(/exact-b-tool/)).not.toBeInTheDocument()
+
+    // 勾选 generic-tool
+    await user.click(screen.getByLabelText(/generic-tool/))
+
+    // 此时产出的 toolIds 不应再含有陈旧的 env.exact-b
+    expect(drafts.at(-1)?.toolIds).toEqual(['base.bash', 'env.generic'])
   })
 })

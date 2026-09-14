@@ -4,10 +4,13 @@ import {
   buildSkillCandidates,
   buildSubagentCandidates,
   buildToolCandidates,
+  filterToolIdsForEnvironment,
   isSameSkillRef,
+  isToolCompatibleWithEnvironment,
   toggleSkillRef,
   withSelectedOrphans,
   withSelectedSkillOrphans,
+  withSelectedToolOrphans,
 } from '@/features/ai/catalog/agent-capability-candidates'
 import type { AgentDefinitionDTO, ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
 import type { EnvironmentSkillDTO } from '@/shared/api/contracts/ai-environment'
@@ -48,12 +51,16 @@ function tool(
   name: string,
   description: string,
   version = '1',
+  environmentRequired = false,
+  environmentId: string | null = null,
 ): ToolCatalogEntryDTO {
   return {
     id,
     name,
     version,
     description,
+    environmentRequired,
+    environmentId,
   }
 }
 
@@ -228,5 +235,139 @@ describe('agent-capability-candidates', () => {
         missing: true,
       },
     ])
+  })
+
+  /**
+   * 测试意图：验证工具目录项与环境绑定的兼容性判定规则。
+   * 1. 非环境工具（environmentRequired=false）无论是否绑定环境均可用；
+   * 2. 要求环境的工具在未绑定环境时不可用；
+   * 3. 通用环境工具（environmentRequired=true 且 environmentId=null）在绑定任意非空环境时可用；
+   * 4. 精确环境工具仅在绑定环境 ID 完全相符时可用。
+   */
+  it('determines tool compatibility based on environment requirements and selected environment', () => {
+    const hostTool = tool('base.bash', 'bash', 'shell', '1', false, null)
+    const genericEnvTool = tool('env.lsp', 'lsp', 'lsp tool', '1', true, null)
+    const exactToolA = tool('env.a.fs', 'fs-a', 'fs tool', '1', true, 'env-A')
+
+    // 非环境工具始终可用
+    expect(isToolCompatibleWithEnvironment(hostTool, null)).toBe(true)
+    expect(isToolCompatibleWithEnvironment(hostTool, '')).toBe(true)
+    expect(isToolCompatibleWithEnvironment(hostTool, 'env-A')).toBe(true)
+    expect(isToolCompatibleWithEnvironment(hostTool, 'env-B')).toBe(true)
+
+    // 要求环境的工具在未选环境时不可用
+    expect(isToolCompatibleWithEnvironment(genericEnvTool, null)).toBe(false)
+    expect(isToolCompatibleWithEnvironment(genericEnvTool, '')).toBe(false)
+    expect(isToolCompatibleWithEnvironment(genericEnvTool, '   ')).toBe(false)
+    expect(isToolCompatibleWithEnvironment(exactToolA, null)).toBe(false)
+    expect(isToolCompatibleWithEnvironment(exactToolA, '')).toBe(false)
+
+    // 通用环境工具在选定任意非空环境时可用
+    expect(isToolCompatibleWithEnvironment(genericEnvTool, 'env-A')).toBe(true)
+    expect(isToolCompatibleWithEnvironment(genericEnvTool, 'env-B')).toBe(true)
+
+    // 精确环境工具仅在选定环境 ID 匹配时可用
+    expect(isToolCompatibleWithEnvironment(exactToolA, 'env-A')).toBe(true)
+    expect(isToolCompatibleWithEnvironment(exactToolA, 'env-B')).toBe(false)
+  })
+
+  /**
+   * 测试意图：验证 buildToolCandidates 依据 environmentId 进行候选工具过滤。
+   * - 未指定环境时隐藏所有要求环境的工具；
+   * - 指定环境时仅展示非环境工具、通用环境工具和属于该环境的精确工具。
+   */
+  it('filters tool candidates based on specified environmentId', () => {
+    const tools = [
+      tool('base.bash', 'bash', 'host tool', '1', false, null),
+      tool('env.generic', 'generic', 'generic env tool', '1', true, null),
+      tool('env.a.only', 'tool-a', 'env A tool', '1', true, 'env-A'),
+      tool('env.b.only', 'tool-b', 'env B tool', '1', true, 'env-B'),
+    ]
+
+    // 未绑定环境（null 或 ''）
+    const unboundCandidates = buildToolCandidates(tools, null)
+    expect(unboundCandidates.map((t) => t.value)).toEqual(['base.bash'])
+
+    // 绑定环境 env-A
+    const envACandidates = buildToolCandidates(tools, 'env-A')
+    expect(envACandidates.map((t) => t.value)).toEqual(['base.bash', 'env.generic', 'env.a.only'])
+
+    // 绑定环境 env-B
+    const envBCandidates = buildToolCandidates(tools, 'env-B')
+    expect(envBCandidates.map((t) => t.value)).toEqual(['base.bash', 'env.generic', 'env.b.only'])
+
+    // 未提供 environmentId 参数时保留全部工具（兼容既有未过滤行为）
+    const allCandidates = buildToolCandidates(tools)
+    expect(allCandidates.map((t) => t.value)).toEqual([
+      'base.bash',
+      'env.generic',
+      'env.a.only',
+      'env.b.only',
+    ])
+  })
+
+  /**
+   * 测试意图：验证 withSelectedToolOrphans 仅将真正未知的工具展示为 orphan，
+   * 属于已知 catalog 但因环境不兼容而被过滤的已知环境工具绝不重新作为 orphan 展示。
+   */
+  it('preserves genuinely unknown tool IDs as orphans while excluding known incompatible tools', () => {
+    const catalog = [
+      tool('base.bash', 'bash', 'host tool', '1', false, null),
+      tool('env.generic', 'generic', 'generic env tool', '1', true, null),
+      tool('env.b.only', 'tool-b', 'env B tool', '1', true, 'env-B'),
+    ]
+
+    // 假设当前环境为 null，仅 base.bash 为合法候选
+    const compatibleCandidates = buildToolCandidates(catalog, null)
+    expect(compatibleCandidates.map((c) => c.value)).toEqual(['base.bash'])
+
+    // 已选列表中既有宿主工具、已知不兼容环境工具，也有未知的 orphan 工具
+    const selected = ['base.bash', 'env.generic', 'env.b.only', 'unknown.orphan']
+    const merged = withSelectedToolOrphans(compatibleCandidates, selected, catalog)
+
+    // env.generic 和 env.b.only 属于已知 catalog，但因环境不符被隐藏，绝不应作为 orphan 重新展示
+    // unknown.orphan 真正缺失，应作为 orphan 置灰展示
+    expect(merged).toEqual([
+      { value: 'base.bash', name: 'bash', version: '1', description: 'host tool' },
+      {
+        value: 'unknown.orphan',
+        name: 'unknown.orphan',
+        description: null,
+        offline: true,
+        missing: true,
+      },
+    ])
+  })
+
+  /**
+   * 测试意图：验证 filterToolIdsForEnvironment 在环境切换或解绑时清理不兼容工具。
+   * - 解绑时清除所有环境工具，保留宿主工具与未知工具；
+   * - 跨环境切换时清理旧环境专属精确工具，保留宿主工具、通用环境工具、新环境专属精确工具与未知工具。
+   */
+  it('filters selected tool IDs when environment changes or unbinds', () => {
+    const catalog = [
+      tool('base.bash', 'bash', 'host tool', '1', false, null),
+      tool('env.generic', 'generic', 'generic env tool', '1', true, null),
+      tool('env.a.only', 'tool-a', 'env A tool', '1', true, 'env-A'),
+      tool('env.b.only', 'tool-b', 'env B tool', '1', true, 'env-B'),
+    ]
+
+    const selected = [
+      'base.bash',
+      'env.generic',
+      'env.a.only',
+      'unknown.orphan',
+    ]
+
+    // 切换到 env-B：env.a.only 被移除，保留 base.bash、env.generic 与 unknown.orphan
+    const switchedToB = filterToolIdsForEnvironment(selected, catalog, 'env-B')
+    expect(switchedToB).toEqual(['base.bash', 'env.generic', 'unknown.orphan'])
+
+    // 解绑环境（切换到 '' 或 null）：所有要求环境的已知工具均被移除，保留 base.bash 与 unknown.orphan
+    const unbound = filterToolIdsForEnvironment(selected, catalog, '')
+    expect(unbound).toEqual(['base.bash', 'unknown.orphan'])
+
+    const unboundNull = filterToolIdsForEnvironment(selected, catalog, null)
+    expect(unboundNull).toEqual(['base.bash', 'unknown.orphan'])
   })
 })
