@@ -9,7 +9,13 @@ import { storageService, type StorageService } from '@/shared/api/storage-servic
 import type { StorageMediaKind } from '@/shared/api/contracts/storage'
 import { translate } from '@/shared/i18n'
 
-export type AttachmentUploadStatus = 'uploading' | 'ready' | 'error'
+export type AttachmentUploadStatus = 'uploading' | 'ready'
+
+export interface AttachmentUploadError {
+  filename: string
+  reason: string
+  localId: string
+}
 
 /** 单个上传注册表条目；localId 是客户端稳定 id，uploadId 在 reserve 后填充且 complete 后不变。 */
 export interface AttachmentUpload {
@@ -22,7 +28,6 @@ export interface AttachmentUpload {
   sha256: string | null
   status: AttachmentUploadStatus
   progress: number
-  error: string | null
   /** 本地图片/视频预览 URL；只在 Composer 生命周期内存在。 */
   previewUrl: string | null
   /** 提交后等待发送结果期间隐藏（发送失败恢复时重新挂载）。 */
@@ -116,9 +121,15 @@ const defaultHashFile: HashFile = createWorkerHasher()
 export function useAttachmentUploads(options?: {
   storageService?: StorageService
   hashFile?: HashFile
+  onError?: (error: AttachmentUploadError) => void
 }) {
   const service = options?.storageService ?? storageService
   const hashFile = options?.hashFile ?? defaultHashFile
+  const onErrorRef = useRef(options?.onError)
+  useEffect(() => {
+    onErrorRef.current = options?.onError
+  }, [options?.onError])
+
   const [uploads, setUploads] = useState<AttachmentUpload[]>([])
   const uploadsRef = useRef<AttachmentUpload[]>([])
   const filesRef = useRef(new Map<string, File>())
@@ -189,8 +200,9 @@ export function useAttachmentUploads(options?: {
     async (record: AttachmentUpload, file: File) => {
       const localId = record.localId
       const active = () => activeRef.current.has(localId)
+      let reservedUploadId: string | null = null
       try {
-        patchUpload(localId, { status: 'uploading', progress: 0.1, error: null })
+        patchUpload(localId, { status: 'uploading', progress: 0.1 })
         const sha256 = record.sha256 ?? (await hashFile(file))
         if (!active()) {
           return
@@ -202,6 +214,7 @@ export function useAttachmentUploads(options?: {
           sizeBytes: record.sizeBytes,
           sha256,
         })
+        reservedUploadId = reservation.id
         if (!active()) {
           // 上传途中被移除：尽力清理已预留但未完成的对象。
           void service.deleteUpload(reservation.id).catch(() => undefined)
@@ -212,6 +225,7 @@ export function useAttachmentUploads(options?: {
           // PENDING = 对象尚未落库：必须直传；READY = sha256 命中，跳过直传。
           await service.uploadFile(reservation.presignedPut, file)
           if (!active()) {
+            void service.deleteUpload(reservation.id).catch(() => undefined)
             return
           }
           patchUpload(localId, { progress: 0.8 })
@@ -228,23 +242,32 @@ export function useAttachmentUploads(options?: {
           progress: 1,
         })
       } catch (error) {
+        if (reservedUploadId) {
+          void service.deleteUpload(reservedUploadId).catch(() => undefined)
+        }
         if (!active()) {
           return
         }
-        patchUpload(localId, {
-          status: 'error',
-          error: error instanceof Error ? error.message : String(error),
+        const message = error instanceof Error ? error.message : String(error)
+        revokePreviewUrl(localId, previewUrlsRef.current)
+        filesRef.current.delete(localId)
+        activeRef.current.delete(localId)
+        dropUpload(localId)
+        onErrorRef.current?.({
+          filename: record.filename,
+          reason: message,
+          localId,
         })
       }
     },
-    [hashFile, patchUpload, service],
+    [dropUpload, hashFile, patchUpload, service],
   )
 
   /**
-   * 添加文件；返回创建的注册表条目（超限文件也会以 error 状态进入注册表）。
+   * 添加文件；返回创建的有效注册表条目（校验失败文件直接触发 onError，不产生条目）。
    *
    * 不做客户端去重：元数据相同的不同文件也必须获得各自独立的 upload 句柄
-   * （服务端按 sha256 去重，返回 READY 免直传）。每个文件 = 一个新条目 + 新
+   * （服务端按 sha256 去重，返回 READY 免直传）。每个有效文件 = 一个新条目 + 新
    * attachment part 引用；重复粘贴同一文件会产生两个独立句柄。
    */
   const addFiles = useCallback(
@@ -254,6 +277,14 @@ export function useAttachmentUploads(options?: {
       for (const file of files) {
         const localId = createPartId()
         const validationError = validateUploadFile(file)
+        if (validationError) {
+          onErrorRef.current?.({
+            filename: file.name,
+            reason: validationError,
+            localId,
+          })
+          continue
+        }
         const previewUrl = createPreviewUrl(file)
         if (previewUrl) {
           previewUrlsRef.current.set(localId, previewUrl)
@@ -265,9 +296,8 @@ export function useAttachmentUploads(options?: {
           mediaType: file.type,
           sizeBytes: file.size,
           sha256: null,
-          status: validationError ? 'error' : 'uploading',
+          status: 'uploading',
           progress: 0,
-          error: validationError,
           previewUrl,
           detached: false,
         }
@@ -281,26 +311,13 @@ export function useAttachmentUploads(options?: {
       }
       for (const record of fresh) {
         const file = filesRef.current.get(record.localId)
-        if (file && record.status !== 'error') {
+        if (file) {
           void runPipeline(record, file)
         }
       }
       return created
     },
     [runPipeline, updateUploads],
-  )
-
-  const retryUpload = useCallback(
-    (localId: string) => {
-      const record = uploadsRef.current.find((upload) => upload.localId === localId)
-      const file = filesRef.current.get(localId)
-      if (!record || !file) {
-        return
-      }
-      activeRef.current.add(localId)
-      void runPipeline(record, file)
-    },
-    [runPipeline],
   )
 
   /** 挂起/恢复条目的 detached 标记（发送结果未定时隐藏，恢复时重新显示）。 */
@@ -319,7 +336,6 @@ export function useAttachmentUploads(options?: {
   return {
     uploads,
     addFiles,
-    retryUpload,
     releaseUpload,
     markDetached,
   }

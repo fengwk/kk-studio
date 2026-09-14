@@ -131,12 +131,54 @@ export function renderPartsToEditor(root: HTMLElement, parts: ComposerPart[]): v
   }
 }
 
+function offsetToNormalizedPoint(
+  root: HTMLElement,
+  offset: number,
+): { node: Node; offset: number } {
+  const children = Array.from(root.childNodes)
+  if (children.length === 0) {
+    return { node: root, offset: 0 }
+  }
+  let remaining = offset
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]
+    if (child.nodeType === Node.TEXT_NODE) {
+      const len = child.textContent?.length ?? 0
+      if (remaining < len) {
+        return { node: child, offset: remaining }
+      }
+      if (remaining === len) {
+        return { node: child, offset: len }
+      }
+      remaining -= len
+    } else if (isPillElement(child)) {
+      if (remaining === 0) {
+        return { node: root, offset: i }
+      }
+      if (remaining === 1) {
+        const next = children[i + 1]
+        if (next && next.nodeType === Node.TEXT_NODE) {
+          return { node: next, offset: 0 }
+        }
+        return { node: root, offset: i + 1 }
+      }
+      remaining -= 1
+    }
+  }
+  const last = children[children.length - 1]
+  if (last && last.nodeType === Node.TEXT_NODE) {
+    return { node: last, offset: last.textContent?.length ?? 0 }
+  }
+  return { node: root, offset: children.length }
+}
+
 /**
  * 将浏览器可能产生的 div/p/br 结构折叠回纯文本 + pill 形态：
  * 块边界与 <br> 都变成 '\n' 文本节点，其他元素解包保留文本；嵌套的
  * pill 会按文档顺序保留。相邻块边界只产生一个 '\n'（Chrome div 模型）。
  *
- * 已处于规范形态（仅文本节点与 pill）时不改动 DOM——保存光标。
+ * 重建过程通过规范化字符偏移映射保留活动的 Selection / Caret。
+ * 已处于规范形态（仅文本节点与 pill）时不改动 DOM——天然保留光标。
  */
 export function normalizeEditorDom(root: HTMLElement): void {
   let canonical = true
@@ -156,10 +198,60 @@ export function normalizeEditorDom(root: HTMLElement): void {
   if (canonical) {
     return
   }
+
+  const selection = root.ownerDocument.getSelection()
+  let rangeToPreserve: {
+    startContainer: Node
+    startOffset: number
+    endContainer: Node
+    endOffset: number
+    collapsed: boolean
+  } | null = null
+
+  if (selection && selection.rangeCount > 0) {
+    const activeRange = selection.getRangeAt(0)
+    if (
+      root.contains(activeRange.startContainer)
+      && root.contains(activeRange.endContainer)
+    ) {
+      rangeToPreserve = {
+        startContainer: activeRange.startContainer,
+        startOffset: activeRange.startOffset,
+        endContainer: activeRange.endContainer,
+        endOffset: activeRange.endOffset,
+        collapsed: activeRange.collapsed,
+      }
+    }
+  }
+
   const document = root.ownerDocument
   const normalized: Node[] = []
   // 编辑器起点视为已处于边界：首个块不会产生前导空行。
   let lastWasBoundary = true
+  let currentNormalizedLength = 0
+
+  let savedStart: number | null = null
+  let savedEnd: number | null = null
+
+  const checkPoint = (container: Node, offset: number): void => {
+    if (!rangeToPreserve) {
+      return
+    }
+    if (
+      savedStart === null
+      && container === rangeToPreserve.startContainer
+      && offset === rangeToPreserve.startOffset
+    ) {
+      savedStart = currentNormalizedLength
+    }
+    if (
+      savedEnd === null
+      && container === rangeToPreserve.endContainer
+      && offset === rangeToPreserve.endOffset
+    ) {
+      savedEnd = currentNormalizedLength
+    }
+  }
 
   const pushText = (text: string): void => {
     if (!text) {
@@ -171,6 +263,7 @@ export function normalizeEditorDom(root: HTMLElement): void {
     } else {
       normalized.push(document.createTextNode(text))
     }
+    currentNormalizedLength += text.length
     lastWasBoundary = false
   }
 
@@ -184,28 +277,43 @@ export function normalizeEditorDom(root: HTMLElement): void {
     } else {
       normalized.push(document.createTextNode('\n'))
     }
+    currentNormalizedLength += 1
     lastWasBoundary = true
   }
 
   const walk = (node: Node, atEnd: boolean): void => {
     if (node.nodeType === Node.TEXT_NODE) {
-      pushText(node.textContent ?? '')
+      const text = node.textContent ?? ''
+      if (rangeToPreserve) {
+        if (savedStart === null && node === rangeToPreserve.startContainer) {
+          savedStart = currentNormalizedLength + Math.max(0, Math.min(rangeToPreserve.startOffset, text.length))
+        }
+        if (savedEnd === null && node === rangeToPreserve.endContainer) {
+          savedEnd = currentNormalizedLength + Math.max(0, Math.min(rangeToPreserve.endOffset, text.length))
+        }
+      }
+      pushText(text)
       return
     }
     if (node.nodeType !== Node.ELEMENT_NODE) {
       return
     }
     if (isPillElement(node)) {
+      checkPoint(node, 0)
       normalized.push(node)
       lastWasBoundary = false
+      currentNormalizedLength += 1
+      checkPoint(node, 1)
       return
     }
     const element = node as HTMLElement
     const tag = element.tagName.toLowerCase()
     if (tag === 'br') {
+      checkPoint(node, 0)
       if (!atEnd) {
         pushBoundary()
       }
+      checkPoint(node, 1)
       return
     }
     const block = BLOCK_TAGS.has(tag)
@@ -213,8 +321,10 @@ export function normalizeEditorDom(root: HTMLElement): void {
       pushBoundary()
     }
     const children = Array.from(node.childNodes)
+    checkPoint(node, 0)
     children.forEach((child, index) => {
       walk(child, atEnd && index === children.length - 1)
+      checkPoint(node, index + 1)
     })
     if (block && !atEnd) {
       pushBoundary()
@@ -222,12 +332,34 @@ export function normalizeEditorDom(root: HTMLElement): void {
   }
 
   const children = Array.from(root.childNodes)
+  checkPoint(root, 0)
   children.forEach((child, index) => {
     walk(child, index === children.length - 1)
+    checkPoint(root, index + 1)
   })
 
   root.replaceChildren(...normalized)
   mergeAdjacentTextNodes(root)
+
+  if (rangeToPreserve && savedStart !== null) {
+    const finalStart = savedStart
+    const finalEnd = rangeToPreserve.collapsed ? savedStart : (savedEnd ?? savedStart)
+    const startPoint = offsetToNormalizedPoint(root, finalStart)
+    const endPoint = rangeToPreserve.collapsed ? startPoint : offsetToNormalizedPoint(root, finalEnd)
+    try {
+      const newRange = root.ownerDocument.createRange()
+      newRange.setStart(startPoint.node, startPoint.offset)
+      if (rangeToPreserve.collapsed) {
+        newRange.collapse(true)
+      } else {
+        newRange.setEnd(endPoint.node, endPoint.offset)
+      }
+      selection?.removeAllRanges()
+      selection?.addRange(newRange)
+    } catch {
+      // 容错：个别浏览器对特定节点 Range 约束异常时不阻断规范化
+    }
+  }
 }
 
 function mergeAdjacentTextNodes(root: HTMLElement): void {
@@ -256,7 +388,13 @@ function mergeAdjacentTextNodes(root: HTMLElement): void {
 export function insertTextAtCaret(root: HTMLElement, text: string): void {
   const selection = root.ownerDocument.getSelection()
   if (!selection || selection.rangeCount === 0) {
-    root.appendChild(root.ownerDocument.createTextNode(text))
+    const node = root.ownerDocument.createTextNode(text)
+    root.appendChild(node)
+    const range = root.ownerDocument.createRange()
+    range.setStartAfter(node)
+    range.collapse(true)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
     return
   }
   const range = selection.getRangeAt(0)

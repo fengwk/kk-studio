@@ -7,7 +7,6 @@ import {
   FileText,
   FileVideo,
   Image as ImageIcon,
-  RotateCcw,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -28,13 +27,11 @@ export function AttachmentStrip({
   parts,
   disabled,
   onRemove,
-  onRetry,
 }: {
   uploads: AttachmentUpload[]
   parts: ComposerPart[]
   disabled: boolean
   onRemove: (upload: AttachmentUpload) => void
-  onRetry: (upload: AttachmentUpload) => void
 }) {
   const { t } = useI18n()
   const visible = uploads.filter((upload) => !upload.detached)
@@ -63,9 +60,7 @@ export function AttachmentStrip({
         const status =
           upload.status === 'uploading'
             ? `${t('ai.runtime.composer.uploading')} ${progress}%`
-            : upload.status === 'ready'
-              ? formatFileSize(upload.sizeBytes)
-              : upload.error ?? t('ai.runtime.composer.uploadFailed')
+            : formatFileSize(upload.sizeBytes)
         return (
           <div
             key={upload.localId}
@@ -85,17 +80,6 @@ export function AttachmentStrip({
               </span>
               <span className="attachment-reference-status">{status}</span>
             </span>
-            {upload.status === 'error' ? (
-              <button
-                type="button"
-                className="attachment-reference-retry"
-                aria-label={t('ai.runtime.composer.retryUpload', { name: displayName })}
-                disabled={disabled}
-                onClick={() => onRetry(upload)}
-              >
-                <RotateCcw aria-hidden="true" />
-              </button>
-            ) : null}
             <button
               type="button"
               className="attachment-reference-remove"

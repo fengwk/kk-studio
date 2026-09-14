@@ -70,4 +70,62 @@ describe('AssistantMessageBlock', () => {
     expect(screen.getByText('助手回复失败')).toBeInTheDocument()
     expect(screen.queryByText('…')).not.toBeInTheDocument()
   })
+
+  it('normalizes trailing whitespace and newlines from thinking text while preserving leading and internal blank lines', () => {
+    // 测试意图：只移除思考末尾空白，作者的缩进和内部段落结构必须保持原样。
+    const { container } = render(
+      <AssistantMessageBlock
+        message={message({
+          thinking: '  step 1\n\n  step 2\n\n\n',
+          text: 'answer',
+        })}
+      />,
+    )
+    const thinkingEl = container.querySelector('.thread-thinking-text')
+    expect(thinkingEl).not.toBeNull()
+    expect(thinkingEl?.textContent).toBe('  step 1\n\n  step 2')
+  })
+
+  it('does not render thinking block when thinking contains only whitespace or newlines', () => {
+    // 测试意图：纯空白思考不能生成一个可见的空块或占用正文前的布局间距。
+    const { container } = render(
+      <AssistantMessageBlock
+        message={message({
+          thinking: '   \n\n  \t  ',
+          text: 'answer',
+        })}
+      />,
+    )
+    expect(container.querySelector('.thread-block-thinking')).toBeNull()
+  })
+
+  it('maintains normalized text through streaming transition without extra spacing', () => {
+    // 测试意图：流式和终态使用同一渲染边界规则，状态切换不能重新引入尾随空行。
+    const { container, rerender } = render(
+      <AssistantMessageBlock
+        message={message({
+          thinking: 'reasoning step\n\n',
+          text: '',
+          status: 'streaming',
+        })}
+      />,
+    )
+    let thinkingBlock = container.querySelector('.thread-block-thinking')
+    expect(thinkingBlock).toHaveClass('streaming')
+    expect(container.querySelector('.thread-thinking-text')?.textContent).toBe('reasoning step')
+
+    rerender(
+      <AssistantMessageBlock
+        message={message({
+          thinking: 'reasoning step\n\n',
+          text: 'final answer',
+          status: 'done',
+        })}
+      />,
+    )
+    thinkingBlock = container.querySelector('.thread-block-thinking')
+    expect(thinkingBlock).not.toHaveClass('streaming')
+    expect(container.querySelector('.thread-thinking-text')?.textContent).toBe('reasoning step')
+    expect(screen.getByText('final answer')).toBeInTheDocument()
+  })
 })

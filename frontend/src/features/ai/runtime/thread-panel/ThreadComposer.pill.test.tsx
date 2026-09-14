@@ -23,12 +23,16 @@ function fileOf(name: string, type: string, size = 128): File {
  * - DELETE 目标始终是 upload 句柄。
  */
 function fakeStorage(overrides: {
-  reserve?: (request: Parameters<StorageService['reserveUpload']>[0]) => StorageUploadDTO
+  reserve?: (request: Parameters<StorageService['reserveUpload']>[0]) => Promise<StorageUploadDTO> | StorageUploadDTO
   failReserveTimes?: number
+  failUploadTimes?: number
+  failCompleteTimes?: number
 } = {}) {
   const reservations = new Map<string, Parameters<StorageService['reserveUpload']>[0]>()
   let counter = 0
   let reserveFailures = overrides.failReserveTimes ?? 0
+  let uploadFailures = overrides.failUploadTimes ?? 0
+  let completeFailures = overrides.failCompleteTimes ?? 0
   const reserveUpload = vi.fn(
     async (request: Parameters<StorageService['reserveUpload']>[0]): Promise<StorageUploadDTO> => {
       if (reserveFailures > 0) {
@@ -38,7 +42,7 @@ function fakeStorage(overrides: {
       counter += 1
       const id = `up-${counter}`
       const result = overrides.reserve
-        ? overrides.reserve(request)
+        ? await overrides.reserve(request)
         : {
             id,
             state: 'PENDING' as const,
@@ -51,6 +55,10 @@ function fakeStorage(overrides: {
     },
   )
   const completeUpload = vi.fn(async (uploadId: string): Promise<StorageUploadDTO> => {
+    if (completeFailures > 0) {
+      completeFailures -= 1
+      throw new Error('complete failed')
+    }
     void reservations.get(uploadId)
     // 同一句柄：complete 不产生新 id，blobId 是落库后的持久资源（客户端不使用）。
     return {
@@ -64,7 +72,13 @@ function fakeStorage(overrides: {
   const deleteUpload = vi.fn(async () => undefined)
   const getBlobDownloadUrl = vi.fn(async () => ({ url: 'https://s3.test/orig', expiresAt: null }))
   const getBlobPreviewUrl = vi.fn(async () => ({ url: 'https://s3.test/prev', expiresAt: null }))
-  const uploadFile = vi.fn(async () => undefined)
+  const uploadFile = vi.fn(async () => {
+    if (uploadFailures > 0) {
+      uploadFailures -= 1
+      throw new Error('upload failed')
+    }
+    return undefined
+  })
   const service = {
     reserveUpload,
     completeUpload,
@@ -461,27 +475,53 @@ describe('ThreadComposer attachment pills', () => {
     expect(completeUpload).toHaveBeenCalledWith('dedup-aaaaaaaa')
   })
 
-  it('shows upload failure, retries, and removes the reference', async () => {
+  it('shows localized upload failure toast, rolls back failed pills, and enables text submission without retry UI', async () => {
+    // 测试意图：预留失败必须原子撤销附件、保留文本并解除发送门禁，不留下重试态。
     const user = userEvent.setup()
-    const { service, reserveUpload, deleteUpload } = fakeStorage({ failReserveTimes: 1 })
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:broken.png')
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL')
+    const { service } = fakeStorage({ failReserveTimes: 1 })
     render(<Harness service={service} />)
     const editor = screen.getByLabelText('给 AI 发送消息')
-    await pasteFiles(editor, fileOf('broken.bin', 'application/octet-stream'))
-    await waitFor(() => expect(screen.getByText('reserve unavailable')).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: /重试上传/ })).toBeInTheDocument()
-    // 失败状态阻塞发送。
-    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    await typeInEditor(editor, '保留文本')
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
 
-    // 重试成功。
-    await user.click(screen.getByRole('button', { name: /重试上传/ }))
-    await waitFor(() => expect(reserveUpload).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(screen.queryByText('reserve unavailable')).not.toBeInTheDocument())
-    expect(screen.queryByRole('button', { name: /重试上传/ })).not.toBeInTheDocument()
+    await pasteFiles(editor, fileOf('broken.png', 'image/png'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('broken.png 上传失败：reserve unavailable'))
+    expect(document.querySelectorAll('.composer-pill')).toHaveLength(0)
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+    expect(screen.queryByRole('button', { name: /重试/ })).not.toBeInTheDocument()
+    expect(partsSnapshot()).toEqual([{ type: 'text', text: '保留文本' }])
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:broken.png')
 
-    // 引用后的 X：移除全部 occurrences 并释放 upload 句柄（绝不按 blobId 删除）。
-    await user.click(screen.getByRole('button', { name: /移除附件/ }))
-    await waitFor(() => expect(screen.queryAllByRole('listitem')).toHaveLength(0))
-    expect(partsSnapshot()).toEqual([])
+    await user.click(screen.getByRole('button', { name: '关闭通知' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('cleans up reserved upload and rolls back pills when PUT fails', async () => {
+    // 测试意图：直传失败后必须释放已预留句柄并同步清除 strip、DOM 与草稿引用。
+    const { service, deleteUpload } = fakeStorage({ failUploadTimes: 1 })
+    render(<Harness service={service} />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    await pasteFiles(editor, fileOf('put-fail.bin', 'application/octet-stream'))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('put-fail.bin 上传失败：upload failed'))
+    expect(document.querySelectorAll('.composer-pill')).toHaveLength(0)
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+    await waitFor(() => expect(deleteUpload).toHaveBeenCalledWith('up-1'))
+  })
+
+  it('cleans up reserved upload and rolls back pills when complete fails', async () => {
+    // 测试意图：完成确认失败与直传失败采用相同的句柄清理和草稿回滚语义。
+    const { service, deleteUpload } = fakeStorage({ failCompleteTimes: 1 })
+    render(<Harness service={service} />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    await pasteFiles(editor, fileOf('complete-fail.bin', 'application/octet-stream'))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('complete-fail.bin 上传失败：complete failed'))
+    expect(document.querySelectorAll('.composer-pill')).toHaveLength(0)
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0)
     await waitFor(() => expect(deleteUpload).toHaveBeenCalledWith('up-1'))
   })
 
@@ -528,29 +568,132 @@ describe('ThreadComposer attachment pills', () => {
         getData: (type: string) => type === 'text/plain' ? 'plain text' : '',
       },
     })
-    expect(textPasteAllowed).toBe(true)
-    // jsdom 不执行 contenteditable 的浏览器默认 paste；模拟默认插入后触发 input，
-    // 验证现有 onInput 回流路径保持普通文本。
-    await typeInEditor(editor, 'plain text')
+    expect(textPasteAllowed).toBe(false)
     expect(partsSnapshot()).toEqual([
       expect.objectContaining({ type: 'attachment', filename: 'clipboard.png' }) as Record<string, string>,
       { type: 'text', text: 'plain text' },
     ])
   })
 
-  it('rejects oversized video, audio and generic files with a visible error', async () => {
+  it('rejects oversized video, audio and generic files with localized toast notifications', async () => {
+    // 测试意图：各媒体大小门禁都只展示错误通知，校验失败文件不得进入草稿或注册表。
     const { service } = fakeStorage()
     render(<Harness service={service} />)
     const editor = screen.getByLabelText('给 AI 发送消息')
+
     const bigVideo = new File([new Uint8Array(100 * 1024 * 1024 + 1)], 'huge.mp4', { type: 'video/mp4' })
-    const bigAudio = new File([new Uint8Array(15 * 1024 * 1024 + 1)], 'huge.mp3', { type: 'audio/mpeg' })
-    const bigFile = new File([new Uint8Array(30 * 1024 * 1024 + 1)], 'huge.bin', { type: 'application/octet-stream' })
-    fireEvent.paste(editor, { clipboardData: { files: [bigVideo, bigAudio, bigFile], getData: () => '' } })
-    await waitFor(() => expect(screen.getByText(/huge\.mp4 超过 100\.0 MB/)).toBeInTheDocument())
-    expect(screen.getByText(/huge\.mp3 超过 15\.0 MB/)).toBeInTheDocument()
-    expect(screen.getByText(/huge\.bin 超过 30\.0 MB/)).toBeInTheDocument()
-    // 超限文件不创建 pill。
+    fireEvent.paste(editor, { clipboardData: { files: [bigVideo], getData: () => '' } })
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('huge.mp4 上传失败：huge.mp4 超过 100.0 MB 上传限制'))
     expect(document.querySelectorAll('.composer-pill')).toHaveLength(0)
+
+    const bigAudio = new File([new Uint8Array(15 * 1024 * 1024 + 1)], 'huge.mp3', { type: 'audio/mpeg' })
+    fireEvent.paste(editor, { clipboardData: { files: [bigAudio], getData: () => '' } })
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('huge.mp3 上传失败：huge.mp3 超过 15.0 MB 上传限制'))
+    expect(document.querySelectorAll('.composer-pill')).toHaveLength(0)
+
+    const bigFile = new File([new Uint8Array(30 * 1024 * 1024 + 1)], 'huge.bin', { type: 'application/octet-stream' })
+    fireEvent.paste(editor, { clipboardData: { files: [bigFile], getData: () => '' } })
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('huge.bin 上传失败：huge.bin 超过 30.0 MB 上传限制'))
+    expect(document.querySelectorAll('.composer-pill')).toHaveLength(0)
+  })
+
+  it('preserves active IME composition through upload failure and defers pill rollback until compositionend', async () => {
+    // 测试意图：异步失败不能重建组合态 DOM；附件回滚延迟到汉字完成上屏后执行。
+    let rejectReserve!: (err: Error) => void
+    const reservePromise = new Promise<StorageUploadDTO>((_, reject) => {
+      rejectReserve = reject
+    })
+    const { service } = fakeStorage({
+      reserve: () => reservePromise,
+    })
+    render(<Harness service={service} />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+
+    // 1. 发起上传，此时 pill 节点在 DOM 中且后台开始 reserve
+    await pasteFiles(editor, fileOf('failing.bin', 'application/octet-stream'))
+    expect(document.querySelectorAll('.composer-pill')).toHaveLength(1)
+
+    // 2. 上传期间用户开始中文拼音输入，DOM 中插入未确认拼音节点
+    fireEvent.compositionStart(editor)
+    const imeSpan = document.createElement('span')
+    imeSpan.className = 'ime-unconfirmed'
+    imeSpan.textContent = 'ceshi'
+    editor.appendChild(imeSpan)
+    fireEvent.input(editor, { isComposing: true })
+
+    // 3. 后台上传失败，弹出错误提示，但因 IME 正在组合，DOM pill 回滚被推迟
+    rejectReserve(new Error('reserve unavailable'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('failing.bin 上传失败：reserve unavailable'))
+
+    // 4. 验证组合态期间未确认的 IME DOM 节点完全保留，未被全量重建抹除，pill 此时亦保持原地未变
+    expect(editor.querySelector('.ime-unconfirmed')).toBeInTheDocument()
+    expect(editor.querySelector('.ime-unconfirmed')?.textContent).toBe('ceshi')
+    expect(document.querySelectorAll('.composer-pill')).toHaveLength(1)
+
+    // 5. 组合态结束（上屏最终汉字并结束组合）
+    imeSpan.remove()
+    editor.appendChild(document.createTextNode('测试'))
+    fireEvent.compositionEnd(editor)
+
+    // 6. 最终汉字完整保留且仅出现一次，失败的 pill 此时已被清理
+    expect(partsSnapshot()).toEqual([{ type: 'text', text: '测试' }])
+    expect(document.querySelectorAll('.composer-pill')).toHaveLength(0)
+  })
+
+  it('normalizes CRLF to LF, prevents default HTML insertion, and preserves caret position', async () => {
+    // 测试意图：纯文本粘贴只插入 text/plain，统一换行并把光标留在插入内容之后。
+    render(<Harness initialParts={[{ type: 'text', partId: 'text-1', text: 'ab' }]} />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    editor.focus()
+    placeCaretInText(editor, 1)
+
+    const prevented = fireEvent.paste(editor, {
+      clipboardData: {
+        files: [],
+        items: [],
+        getData: (type: string) => {
+          if (type === 'text/plain') return 'line1\r\nline2\rline3'
+          if (type === 'text/html') return '<p>line1</p><p>line2</p>'
+          return ''
+        },
+      },
+    })
+    expect(prevented).toBe(false)
+    expect(partsSnapshot()).toEqual([{ type: 'text', text: 'aline1\nline2\nline3b' }])
+    expect(editor.querySelector('p')).toBeNull()
+
+    const selection = window.getSelection()
+    expect(selection?.rangeCount).toBe(1)
+    const caret = selection!.getRangeAt(0)
+    expect(caret.collapsed).toBe(true)
+    const beforeCaret = document.createRange()
+    beforeCaret.selectNodeContents(editor)
+    beforeCaret.setEnd(caret.startContainer, caret.startOffset)
+    expect(beforeCaret.toString()).toBe('aline1\nline2\nline3')
+  })
+
+  it('automatically dismisses toast after 5 seconds', async () => {
+    // 测试意图：错误提示无需用户操作也会按约定超时清理，不永久遮挡会话内容。
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const { service } = fakeStorage({ failReserveTimes: 1 })
+      render(<Harness service={service} />)
+      const editor = screen.getByLabelText('给 AI 发送消息')
+      fireEvent.paste(editor, {
+        clipboardData: {
+          files: [fileOf('fail.bin', 'application/octet-stream')],
+          getData: () => '',
+        },
+      })
+
+      await vi.waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+      expect(screen.getByRole('alert')).toHaveTextContent('fail.bin 上传失败')
+
+      vi.advanceTimersByTime(5000)
+      await vi.waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('rebuilds a replaced same-name attachment with a fresh partId', async () => {

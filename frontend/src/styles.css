@@ -3454,6 +3454,59 @@ div.is-error {
   display: none !important;
 }
 
+.composer-toast {
+  position: absolute;
+  top: -6px;
+  left: 16px;
+  right: 16px;
+  transform: translateY(-100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--danger-border);
+  background: var(--surface-active);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  z-index: 20;
+}
+
+.composer-toast-message {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-toast-dismiss {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.composer-toast-dismiss:hover {
+  color: var(--fg);
+  background: var(--stage-dot);
+}
+
+.composer-toast-dismiss svg {
+  width: 14px;
+  height: 14px;
+}
+
 .thread-dock-send {
   display: grid;
   width: 28px;
@@ -3791,11 +3844,6 @@ div.is-error {
   white-space: nowrap;
 }
 
-.attachment-reference.is-error .attachment-reference-status {
-  color: var(--danger);
-}
-
-.attachment-reference-retry,
 .attachment-reference-remove {
   display: grid;
   width: 20px;
@@ -3810,19 +3858,16 @@ div.is-error {
   cursor: pointer;
 }
 
-.attachment-reference-retry:hover:not(:disabled),
 .attachment-reference-remove:hover:not(:disabled) {
   color: var(--fg);
   background: var(--stage-dot);
 }
 
-.attachment-reference-retry:disabled,
 .attachment-reference-remove:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-.attachment-reference-retry svg,
 .attachment-reference-remove svg {
   width: 12px;
   height: 12px;
