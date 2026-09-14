@@ -42,7 +42,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Chat/Canvas 共用的 Harness Session 查询用例。
+ * 产品 owner 共用的 Harness Session 查询用例。
  *
  * <p>owner 关系只负责枚举 Session，Session/Thread 的事实统一从 {@link HarnessRuntime} 读取（Session 名称与创建时间来自
  * durable {@code Session}，Thread 名称来自 durable {@code ThreadState}）；不引入 Session title 或 Thread

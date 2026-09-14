@@ -4,19 +4,16 @@ import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 
 import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
- * durable 消息中的 Resource 内容：携带全局 Blob 存储引用与结构化工件事实，绝不携带 URI / mediaType / sha256。
+ * durable 消息中的 Resource 内容：携带全局 Blob 存储引用与结构化外部化事实，绝不携带 URI / mediaType / sha256。
  *
  * <p>{@code blobId} 引用 {@code storage_blob} 的 ACTIVE 行；{@code name} 是权威文件名（消费 upload 时取自上传行，
- * 工具结果外部化时取自 ResourceRef name）；普通媒体的 {@code artifactPath}、{@code totalBytes}、{@code totalLines} 为
- * null；文本工件上述三字段全部非 null，持有规范的 {@code /.artifacts/tool-results/{threadId}/{invocationId}.txt|json}
- * 路径与确切 UTF-8 字节数与物理行数。{@code preview} 是可空的小型文本预览。
+ * 工具结果外部化时取自 ResourceRef name）；普通媒体的 {@code totalBytes}、{@code totalLines} 为 null； 外部化文本上述两字段全部非
+ * null 且非负，持有确切 UTF-8 字节数与物理行数。{@code preview} 是可空的小型文本预览。
  */
 public record ResourceMessageContent(
-    UUID blobId, String name, String artifactPath, Long totalBytes, Long totalLines, String preview)
+    UUID blobId, String name, Long totalBytes, Long totalLines, String preview)
     implements AgentMessageContent {
 
   /** name 的 UTF-8 字节上限（与 {@link ResourceRef#MAX_NAME_UTF8_BYTES} 一致）。 */
@@ -24,10 +21,6 @@ public record ResourceMessageContent(
 
   /** preview 的 UTF-8 字节上限（与 {@link ResourceRef#MAX_PREVIEW_UTF8_BYTES} 一致）。 */
   public static final int MAX_PREVIEW_UTF8_BYTES = ResourceRef.MAX_PREVIEW_UTF8_BYTES;
-
-  private static final Pattern ARTIFACT_PATH_PATTERN =
-      Pattern.compile(
-          "^/\\.artifacts/tool-results/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\\.(txt|json)$");
 
   public ResourceMessageContent {
     blobId = Objects.requireNonNull(blobId, "blobId");
@@ -45,12 +38,11 @@ public record ResourceMessageContent(
       throw new IllegalArgumentException(
           "preview must not exceed " + MAX_PREVIEW_UTF8_BYTES + " UTF-8 bytes");
     }
-    if (artifactPath != null || totalBytes != null || totalLines != null) {
-      if (artifactPath == null || totalBytes == null || totalLines == null) {
+    if (totalBytes != null || totalLines != null) {
+      if (totalBytes == null || totalLines == null) {
         throw new IllegalArgumentException(
-            "artifact fields (artifactPath, totalBytes, totalLines) must all be present or all be null");
+            "totalBytes and totalLines must both be present or both be null");
       }
-      validateArtifactPath(artifactPath);
       if (totalBytes < 0) {
         throw new IllegalArgumentException("totalBytes must not be negative");
       }
@@ -62,46 +54,22 @@ public record ResourceMessageContent(
 
   /** 普通媒体便利工厂方法（无 preview）。 */
   public static ResourceMessageContent media(UUID blobId, String name) {
-    return new ResourceMessageContent(blobId, name, null, null, null, null);
+    return new ResourceMessageContent(blobId, name, null, null, null);
   }
 
   /** 普通媒体便利工厂方法（带 preview）。 */
   public static ResourceMessageContent media(UUID blobId, String name, String preview) {
-    return new ResourceMessageContent(blobId, name, null, null, null, preview);
+    return new ResourceMessageContent(blobId, name, null, null, preview);
   }
 
-  /** 文本工件便利工厂方法。 */
-  public static ResourceMessageContent artifact(
-      UUID blobId,
-      String name,
-      String artifactPath,
-      long totalBytes,
-      long totalLines,
-      String preview) {
-    return new ResourceMessageContent(blobId, name, artifactPath, totalBytes, totalLines, preview);
+  /** 外部化文本便利工厂方法。 */
+  public static ResourceMessageContent externalizedText(
+      UUID blobId, String name, long totalBytes, long totalLines, String preview) {
+    return new ResourceMessageContent(blobId, name, totalBytes, totalLines, preview);
   }
 
-  /** 是否为文本工件。 */
-  public boolean isTextArtifact() {
-    return artifactPath != null;
-  }
-
-  private static void validateArtifactPath(String path) {
-    Matcher matcher = ARTIFACT_PATH_PATTERN.matcher(path);
-    if (!matcher.matches()) {
-      throw new IllegalArgumentException(
-          "artifactPath must be a canonical tool artifact path: " + path);
-    }
-    try {
-      UUID threadId = UUID.fromString(matcher.group(1));
-      UUID invocationId = UUID.fromString(matcher.group(2));
-      if (!threadId.toString().equals(matcher.group(1))
-          || !invocationId.toString().equals(matcher.group(2))) {
-        throw new IllegalArgumentException(
-            "artifactPath must contain lowercase canonical UUIDs: " + path);
-      }
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("artifactPath must contain valid UUIDs: " + path, error);
-    }
+  /** 是否为外部化文本。 */
+  public boolean isExternalizedText() {
+    return totalBytes != null && totalLines != null;
   }
 }

@@ -28,7 +28,6 @@ import org.springframework.web.socket.adapter.NativeWebSocketSession;
 
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
-import fun.fengwk.kkstudio.platform.cloudfs.event.CloudFilesEventSource;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
@@ -57,7 +56,6 @@ class ApplicationEventWebSocketHandlerTest {
   private RealtimeEventSource realtimeSource;
   private CanvasVersionEventSource canvasVersionSource;
   private ProjectInvalidationHub projectInvalidationHub;
-  private CloudFilesEventSource cloudFilesEventSource;
   private ApplicationEventHub hub;
   private ApplicationEventWebSocketHandler handler;
   private WebSocketSession springSession;
@@ -70,22 +68,15 @@ class ApplicationEventWebSocketHandlerTest {
     realtimeSource = mock(RealtimeEventSource.class);
     canvasVersionSource = mock(CanvasVersionEventSource.class);
     projectInvalidationHub = mock(ProjectInvalidationHub.class);
-    cloudFilesEventSource = mock(CloudFilesEventSource.class);
     when(threadVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(5L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn((AutoCloseable) () -> {});
     when(canvasVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(3L, () -> {}));
     when(projectInvalidationHub.subscribe(any(), any())).thenReturn(() -> {});
-    when(cloudFilesEventSource.subscribe(any())).thenReturn(() -> {});
     hub =
         new ApplicationEventHub(
-            threadVersionSource,
-            realtimeSource,
-            canvasVersionSource,
-            projectInvalidationHub,
-            cloudFilesEventSource,
-            512);
+            threadVersionSource, realtimeSource, canvasVersionSource, projectInvalidationHub, 512);
     rebuildHandler(DEFAULT_SENDER_CAPACITY);
   }
 

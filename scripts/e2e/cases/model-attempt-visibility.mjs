@@ -77,7 +77,6 @@ registerCase({
         config: baseModelConfig({
           limit: { context: 4096, output: 128 },
           abilities: {
-            // Production planning always contributes the CloudFS tool set.
             tools: true,
             reasoning: false,
             inputModalities: ['TEXT'],

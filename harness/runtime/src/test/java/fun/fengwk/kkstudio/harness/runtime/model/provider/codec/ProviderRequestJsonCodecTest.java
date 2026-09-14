@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -111,6 +112,36 @@ class ProviderRequestJsonCodecTest {
     assertEquals(INPUT_SCHEMA_JSON, decoded.tools().get(0).inputSchemaJson());
     assertEquals(
         new BigDecimal("3.000000000000"), decoded.model().pricing().inputPerMillionTokens());
+  }
+
+  @Test
+  void roundTripsExternalizedTextResourceWithTotals() {
+    ProviderRequest base = canonicalRequest();
+    ProviderResourceBlock externalized =
+        ProviderResourceBlock.externalizedText(
+            UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
+            "output.txt",
+            2048L,
+            120L,
+            "preview lines");
+    ProviderRequest request =
+        new ProviderRequest(
+            base.model(),
+            base.variant(),
+            base.outputTokens(),
+            List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(externalized))),
+            base.tools(),
+            base.cacheControl());
+
+    String encoded = codec.encode(request);
+    ProviderRequest decoded = codec.decode(encoded);
+
+    assertEquals(request, decoded);
+    ProviderResourceBlock decodedBlock =
+        (ProviderResourceBlock) decoded.messages().get(0).contents().get(0);
+    assertTrue(decodedBlock.isExternalizedText());
+    assertEquals(2048L, decodedBlock.totalBytes());
+    assertEquals(120L, decodedBlock.totalLines());
   }
 
   /** 所有合法的 cache capability 形态都必须通过同一严格的 request boundary。 */

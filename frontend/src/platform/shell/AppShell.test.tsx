@@ -135,7 +135,6 @@ describe('AppShell platform feature navigation', () => {
   it.each([
     ['/projects', '项目 Projects', '/projects'],
     ['/projects/123', '项目 Projects', '/projects'],
-    ['/files', '文件 Files', '/files'],
   ])('activates the feature link and keeps the brand in that feature for %s', (path, label, href) => {
     render(
       <MemoryRouter initialEntries={[path]}>

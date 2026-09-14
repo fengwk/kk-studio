@@ -507,13 +507,7 @@ final class StopControl {
           };
       ToolOutcomeAppender.Applied applied =
           ToolOutcomeAppender.append(
-              tx,
-              thread.id(),
-              path.root().sessionId(),
-              parentId,
-              terminal,
-              now,
-              toolResultHistoryMaterializer);
+              tx, path.root().sessionId(), parentId, terminal, now, toolResultHistoryMaterializer);
       parentId = applied.headEntryId();
     }
     UUID turnEndId = tx.nextId();

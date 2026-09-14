@@ -36,15 +36,14 @@ registerCase({
 })
 
 registerCase({
-  id: 'events.project_cloud_files_invalidation',
+  id: 'events.project_invalidation',
   level: 'L1',
-  title: 'Project 与 Cloud Files 全局失效事件',
-  docs: '订阅无 synthetic id 的 projects/cloud-files 全局资源；数据库提交后的 Project 创建发 changed(projectId)，CloudFS 目录创建发 resync',
+  title: 'Project 全局失效事件',
+  docs: '订阅无 synthetic id 的 projects 全局资源；数据库提交后的 Project 创建发 changed(projectId)',
   async run(ctx) {
     const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
     const frames = []
     let project
-    const cloudPath = `/uploads/e2e-event-${cid()}`
     const collect = (event) => {
       try {
         frames.push(JSON.parse(String(event.data)))
@@ -70,16 +69,6 @@ registerCase({
       )
       assertGlobalSubscriptionAck(projectsAck, 'projects')
 
-      socket.send(
-        JSON.stringify({ version: 1, type: 'subscribe', resource: { kind: 'cloud-files' } }),
-      )
-      const cloudFilesAck = await takeFrame(
-        frames,
-        (frame) => frame?.type === 'subscribed' && frame?.resource?.kind === 'cloud-files',
-        5_000,
-      )
-      assertGlobalSubscriptionAck(cloudFilesAck, 'cloud-files')
-
       project = envelopeData(
         (
           await ctx.call('POST', '/api/projects', {
@@ -103,22 +92,9 @@ registerCase({
       assertExactKeys(projectEvent.data, ['projectId'], 'project event data')
       assert(projectEvent.version === 1, JSON.stringify(projectEvent))
 
-      await ctx.call('POST', '/api/cloud/directories', {
-        path: cloudPath,
-        recursive: true,
-      })
-      const cloudFilesEvent = await takeFrame(
-        frames,
-        (frame) => frame?.type === 'resync' && frame?.resource?.kind === 'cloud-files',
-        10_000,
-      )
-      assertExactKeys(cloudFilesEvent, ['version', 'type', 'resource'], 'cloud-files event')
-      assertExactKeys(cloudFilesEvent.resource, ['kind'], 'cloud-files event resource')
-      assert(cloudFilesEvent.version === 1, JSON.stringify(cloudFilesEvent))
-
       ctx.writeArtifact(
         'global-invalidation.json',
-        `${JSON.stringify({ projectsAck, cloudFilesAck, projectEvent, cloudFilesEvent }, null, 2)}\n`,
+        `${JSON.stringify({ projectsAck, projectEvent }, null, 2)}\n`,
       )
     } finally {
       socket.removeEventListener('message', collect)
@@ -131,18 +107,6 @@ registerCase({
           'DELETE',
           `/api/projects/${project.id}?expectedVersion=${encodeURIComponent(current.version)}`,
         )
-      }
-      try {
-        const snapshot = envelopeData(
-          (await ctx.call('GET', `/api/cloud/files?path=${encodeURIComponent(cloudPath)}`)).json,
-        )
-        await ctx.call(
-          'DELETE',
-          `/api/cloud/nodes?path=${encodeURIComponent(cloudPath)}`
-            + `&expectedVersion=${encodeURIComponent(snapshot.node.version)}`,
-        )
-      } catch {
-        // The directory may not have been created if the test failed earlier.
       }
     }
   },

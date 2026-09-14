@@ -145,23 +145,21 @@ class ProviderMessageProjectorTest {
   }
 
   @Test
-  void projectArtifactResourceCarriesStructureFacts() {
+  void projectExternalizedTextResourceCarriesStructureFacts() {
     ProviderMessageProjector projector = new ProviderMessageProjector();
-    String path =
-        "/.artifacts/tool-results/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.txt";
     List<ProviderMessage> projected =
         projector.project(
             List.of(
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(
-                        ResourceMessageContent.artifact(
-                            new UUID(0L, 1L), "res.txt", path, 100L, 10L, "preview")))));
+                        ResourceMessageContent.externalizedText(
+                            new UUID(0L, 1L), "res.txt", 100L, 10L, "preview")))));
 
     assertEquals(
         List.of(
-            ProviderResourceBlock.artifact(
-                new UUID(0L, 1L), "res.txt", path, 100L, 10L, "preview")),
+            ProviderResourceBlock.externalizedText(
+                new UUID(0L, 1L), "res.txt", 100L, 10L, "preview")),
         projected.get(0).contents());
   }
 

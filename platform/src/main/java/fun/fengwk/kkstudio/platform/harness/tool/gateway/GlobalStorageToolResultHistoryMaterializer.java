@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryContext;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -17,9 +16,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
-import fun.fengwk.kkstudio.platform.cloudfs.domain.ToolArtifactPath;
-import fun.fengwk.kkstudio.platform.cloudfs.service.CloudArtifactService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobIngestService;
 
 import java.nio.ByteBuffer;
@@ -36,16 +32,14 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 基于全局 Blob 存储与 CFS Tool Artifact 挂载的 {@link ToolResultHistoryMaterializer}。
+ * 基于全局 Blob 存储的 {@link ToolResultHistoryMaterializer}。
  *
  * <p>在 Tool outcome Entry 插入前、同一 store 事务内：
  *
  * <ul>
  *   <li>只通过注入的 Platform {@link ResourceStore} 读取其拥有的 Resource，绝不解析或访问任意外部 URI；
- *   <li>对文本工件严格复核 ref size/sha、UTF-8 编码合法性与 totalBytes/totalLines 计数；
+ *   <li>对外部化文本严格复核 ref size/sha、UTF-8 编码合法性与 totalBytes/totalLines 计数；
  *   <li>摄入全局存储（{@code storage_blob}）并关联 session ref；
- *   <li>对文本工件在同一事务内调用 {@link CloudArtifactService#createToolArtifact} 挂载到 {@code
- *       /.artifacts/tool-results/{threadId}/{invocationId}.txt|json} 并独立 retain；
  *   <li>构造并返回携带完整结构化 facts 的 durable {@link ResourceMessageContent}；
  *   <li>任一项失败整体回滚事务，绝不产生部分 history。
  * </ul>
@@ -53,18 +47,12 @@ import java.util.UUID;
 public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHistoryMaterializer {
 
   private final StorageBlobIngestService ingestService;
-  private final CloudArtifactService cloudArtifactService;
   private final ResourceStore resourceStore;
   private final int resourceMaxBytes;
 
   public GlobalStorageToolResultHistoryMaterializer(
-      StorageBlobIngestService ingestService,
-      CloudArtifactService cloudArtifactService,
-      ResourceStore resourceStore,
-      int resourceMaxBytes) {
+      StorageBlobIngestService ingestService, ResourceStore resourceStore, int resourceMaxBytes) {
     this.ingestService = Objects.requireNonNull(ingestService, "ingestService");
-    this.cloudArtifactService =
-        Objects.requireNonNull(cloudArtifactService, "cloudArtifactService");
     this.resourceStore = Objects.requireNonNull(resourceStore, "resourceStore");
     if (resourceMaxBytes <= 0) {
       throw new IllegalArgumentException("resourceMaxBytes must be positive");
@@ -74,9 +62,9 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
 
   @Override
   @Transactional(propagation = Propagation.MANDATORY)
-  public List<AgentMessageContent> materialize(
-      ToolResultHistoryContext context, ToolResult result) {
-    Objects.requireNonNull(context, "context");
+  public List<AgentMessageContent> materialize(UUID sessionId, String toolName, ToolResult result) {
+    Objects.requireNonNull(sessionId, "sessionId");
+    Objects.requireNonNull(toolName, "toolName");
     Objects.requireNonNull(result, "result");
     List<ResultContent> source = result.contents();
     ResolvedResource[] resolvedResources = new ResolvedResource[source.size()];
@@ -99,7 +87,8 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
       } else if (content instanceof JsonResultContent json) {
         contents.add(new JsonMessageContent(json.json()));
       } else if (content instanceof ResourceResultContent resource) {
-        contents.add(ingestResource(context, index + 1, resource, resolvedResources[index]));
+        contents.add(
+            ingestResource(sessionId, toolName, index + 1, resource, resolvedResources[index]));
       } else {
         throw new IllegalArgumentException(
             "unsupported tool content kind for history materialization: "
@@ -110,7 +99,8 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
   }
 
   private ResourceMessageContent ingestResource(
-      ToolResultHistoryContext context,
+      UUID sessionId,
+      String toolName,
       int index,
       ResourceResultContent resource,
       ResolvedResource resolved) {
@@ -118,23 +108,14 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
     byte[] bytes = resolved.bytes();
 
     if (resource.textMetadata() != null) {
-      UUID blobId = ingestService.ingest(context.sessionId(), bytes, ref.mediaType());
+      UUID blobId = ingestService.ingest(sessionId, bytes, ref.mediaType());
       String ext = "application/json".equals(ref.mediaType()) ? "json" : "txt";
-      cloudArtifactService.createToolArtifact(
-          context.threadId(), context.invocationId(), ext, blobId);
-      CloudPath artifactPath =
-          ToolArtifactPath.format(context.threadId(), context.invocationId(), ext);
-      String name = ref.name() == null ? context.toolName() + "-result." + ext : ref.name();
-      return ResourceMessageContent.artifact(
-          blobId,
-          name,
-          artifactPath.toString(),
-          bytes.length,
-          resolved.totalLines(),
-          resolved.preview());
+      String name = ref.name() == null ? toolName + "-result." + ext : ref.name();
+      return ResourceMessageContent.externalizedText(
+          blobId, name, bytes.length, resolved.totalLines(), resolved.preview());
     }
 
-    UUID blobId = ingestService.ingest(context.sessionId(), bytes, ref.mediaType());
+    UUID blobId = ingestService.ingest(sessionId, bytes, ref.mediaType());
     String name = ref.name() == null ? "resource-" + index : ref.name();
     return ResourceMessageContent.media(blobId, name, resource.preview());
   }

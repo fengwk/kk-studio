@@ -131,18 +131,19 @@ flowchart LR
 
 唯一 Flyway baseline 是
 `schema/src/main/resources/db/migration/V1__schema.sql`。它定义 Catalog、Chat、
-Canvas、Harness、owner relation、System Settings 和全局 Storage 的表、约束及
-PostgreSQL trigger。`schema/src/main/resources/db/seed/**` 提供 dev、e2e、
-canvas-test profile seed。
+Canvas、Project/Issue、Environment/Skill/MCP、Harness、owner relation、System
+Settings 和全局 Storage 的表、约束及 PostgreSQL trigger。
+`schema/src/main/resources/db/seed/**` 提供 dev、e2e、canvas-test profile seed。
 
-PostgreSQL 中的关键事实分为五组：
+PostgreSQL 中的关键事实分为六组：
 
 | 事实组 | 代表内容 |
 | --- | --- |
-| 产品聚合 | `agent_*`、`mcp_*`、`chat`、`canvas_*`、`environment`、`system_setting` |
+| 产品聚合 | `agent_*`、`mcp_*`、`chat`、`canvas_*`、`project`、`issue*`、`system_setting` |
 | Harness 协议 | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work` |
-| Environment 路由 | `environment_connection` route lease |
-| 归属关系 | `chat_session`、`canvas_session`、`session_blob_ref` |
+| Environment | `environment`、`environment_connection`、`environment_inventory`、`environment_skill*`、`environment_operation` |
+| 归属关系 | 单一排他弧 `session_owner` |
+| 调度信箱 | `issue_controller_work` |
 | Blob 元数据 | `storage_blob`、`storage_upload`，以及 Canvas Resource 对 Blob 的引用 |
 
 进程内对象只承担执行中的 reservation、连接、线程和 live projection。它们关闭后

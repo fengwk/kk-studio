@@ -423,7 +423,7 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
     assertEquals(
         0,
         jdbcTemplate.queryForObject(
-            "select count(*) from project_session where project_id = ?", Integer.class, projectId));
+            "select count(*) from session_owner where project_id = ?", Integer.class, projectId));
     assertEquals(
         0,
         jdbcTemplate.queryForObject(

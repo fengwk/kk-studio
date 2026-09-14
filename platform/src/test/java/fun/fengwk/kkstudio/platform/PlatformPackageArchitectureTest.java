@@ -23,7 +23,6 @@ class PlatformPackageArchitectureTest {
             "canvas",
             "catalog",
             "chat",
-            "cloudfs",
             "comfyui",
             "environment",
             "error",
@@ -40,7 +39,7 @@ class PlatformPackageArchitectureTest {
   void sharedContractsUseOnlyExplicitDomainRoots() throws IOException {
     // 共享根保持精确，各子域模型保持隔离。
     assertEquals(
-        Set.of("ai", "canvas", "cloudfs", "comfyui", "project", "storage", "systemsettings"),
+        Set.of("ai", "canvas", "comfyui", "project", "storage", "systemsettings"),
         directDirectoryNames(
             repositoryRoot().resolve("share/src/main/java/fun/fengwk/kkstudio/share")));
   }

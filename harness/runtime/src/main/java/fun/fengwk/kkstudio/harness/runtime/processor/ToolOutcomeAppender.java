@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryContext;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -39,24 +38,21 @@ public final class ToolOutcomeAppender {
   /** 无物化端口的 append：SUCCEEDED Resource 结果安全降级为 metadata-only durable 文本。 */
   public static Applied append(
       HarnessStore.Transaction tx,
-      UUID threadId,
       UUID sessionId,
       UUID parentEntryId,
       ToolInvocation invocation,
       Instant now) {
-    return append(tx, threadId, sessionId, parentEntryId, invocation, now, null);
+    return append(tx, sessionId, parentEntryId, invocation, now, null);
   }
 
   public static Applied append(
       HarnessStore.Transaction tx,
-      UUID threadId,
       UUID sessionId,
       UUID parentEntryId,
       ToolInvocation invocation,
       Instant now,
       ToolResultHistoryMaterializer materializer) {
     Objects.requireNonNull(tx, "tx");
-    Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(sessionId, "sessionId");
     Objects.requireNonNull(invocation, "invocation");
     Objects.requireNonNull(now, "now");
@@ -75,10 +71,8 @@ public final class ToolOutcomeAppender {
     }
     MessagePayload payload;
     if (invocation.status() == ToolInvocationStatus.SUCCEEDED && materializer != null) {
-      ToolResultHistoryContext context =
-          new ToolResultHistoryContext(
-              sessionId, threadId, invocation.id(), invocation.call().toolName());
-      List<AgentMessageContent> contents = materializer.materialize(context, invocation.result());
+      List<AgentMessageContent> contents =
+          materializer.materialize(sessionId, invocation.call().toolName(), invocation.result());
       if (contents == null || contents.isEmpty()) {
         contents = List.of(new TextMessageContent(""));
       }
@@ -98,11 +92,15 @@ public final class ToolOutcomeAppender {
       // materializer 只在 SUCCEEDED 且注入时被调用。
       payload = PAYLOAD_MAPPER.toolResultPayload(invocation);
     }
-    UUID resultEntryId = tx.nextId();
-    tx.insertEntry(new Entry(resultEntryId, sessionId, parent, payload, now));
-    return new Applied(resultEntryId);
+    UUID headEntryId = tx.nextId();
+    tx.insertEntry(new Entry(headEntryId, sessionId, parent, payload, now));
+    return new Applied(headEntryId);
   }
 
-  /** 已追加 outcome 的新的 branch head（即 ToolResult Entry）。 */
-  public record Applied(UUID headEntryId) {}
+  /** append 操作的返回值：包含追加后最新的 head entry id。 */
+  public record Applied(UUID headEntryId) {
+    public Applied {
+      Objects.requireNonNull(headEntryId, "headEntryId");
+    }
+  }
 }

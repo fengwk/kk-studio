@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
 import java.util.List;
 import java.util.UUID;
 
-/** {@code canvas_session} 归属边仓库在真实 PostgreSQL 上的契约：插入/查找/枚举/删除、FK 防悬空与 session_id 单归属互斥。 */
+/** {@code session_owner.canvas_id} 归属仓库在真实 PostgreSQL 上的契约：插入/查找/枚举/删除、FK 防悬空与 session 单归属互斥。 */
 class CanvasSessionRepositoryIntegrationTest extends OwnerTestSupport {
 
   @Autowired private CanvasSessionRepository canvasSessionRepository;
@@ -63,7 +63,11 @@ class CanvasSessionRepositoryIntegrationTest extends OwnerTestSupport {
     assertThrows(
         DataIntegrityViolationException.class,
         () -> canvasSessionRepository.insert(sessionId, canvasB));
-    assertEquals(1L, count("select count(*) from canvas_session where session_id = ?", sessionId));
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from session_owner where session_id = ? and canvas_id is not null",
+            sessionId));
   }
 
   /** FK：canvas 与 harness_session 都必须存在，防止出现悬空归属。 */

@@ -67,8 +67,6 @@ public abstract class PostgresSchemaSupport {
         // suppressClose 保留调用方持有的连接生命周期。
         .dataSource(new SingleConnectionDataSource(conn, true))
         .locations(locations)
-        // Profile seed 使用 R__ repeatable migration，在 baseline 后执行。
-        .outOfOrder(true)
         .validateMigrationNaming(true)
         .load()
         .migrate();

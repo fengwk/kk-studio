@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.orchestration;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Chat/Canvas owner（{@code {CHAT|CANVAS, id}}）。归属授权与深删除都以此为单位，Chat 与 Canvas 必须共用同一份实现。 */
+/** 产品 owner 引用（类型与 UUID）；归属授权、查询和深删除都以此为单位。 */
 public record OwnerRef(OwnerType type, UUID id) {
 
   public OwnerRef {

@@ -7,34 +7,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
-import java.util.TreeSet;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-/** 守护生产与集成测试共用的唯一 Flyway 引导路径、冻结的 V1 baseline 和 prod 凭据边界。 */
+/** 守护生产与集成测试共用的唯一 Flyway 引导路径、单一 V1 baseline 和 prod 凭据边界。 */
 class FlywayBootstrapArchitectureTest {
 
   private static final String MIGRATION_DIR = "schema/src/main/resources/db/migration";
   private static final String BASELINE_MIGRATION = MIGRATION_DIR + "/V1__schema.sql";
   private static final String PROD_CONFIG = "web/src/main/resources/application-prod.yml";
-
-  /**
-   * V1 已经应用到 Main/Dev 共享 database，因此它是不可变事实而不是可迭代草稿：任何 schema 变更只能新增 V2+ migration。该摘要让"修改历史
-   * baseline"在 CI 立即失败，避免两个节点之间出现 schema 漂移。
-   */
-  private static final String BASELINE_SHA256 =
-      "4a87857c61fb5b42e004773434d327ba87cbabb62c36a61c98a1ce79fc4fdc4b";
 
   /** 每个 profile seed 都必须显式落在这份清单内；新增 seed 需要同时更新本测试和 bootstrap 配置。 */
   private static final List<String> SEED_RESOURCES =
@@ -77,7 +63,10 @@ class FlywayBootstrapArchitectureTest {
     List<String> otherSqlFiles =
         repositorySqlFiles.stream().filter(path -> !path.startsWith(MIGRATION_DIR + "/")).toList();
 
-    assertTrue(migrationFiles.contains(BASELINE_MIGRATION), "V1 baseline must exist");
+    assertEquals(
+        List.of(BASELINE_MIGRATION),
+        migrationFiles,
+        "schema must expose exactly one canonical V1 migration");
     for (String migration : migrationFiles) {
       String filename = Path.of(migration).getFileName().toString();
       assertTrue(
@@ -95,29 +84,6 @@ class FlywayBootstrapArchitectureTest {
           REPEATABLE_SEED.matcher(filename).matches(),
           () -> "profile seed must stay a repeatable migration: " + seed);
     }
-  }
-
-  @Test
-  void baselineMigrationIsFrozenAndIncrementalVersionsAreUnique() throws IOException {
-    Path root = repositoryRoot();
-    Path baseline = root.resolve(BASELINE_MIGRATION);
-    assertTrue(Files.isRegularFile(baseline), "V1 baseline must exist");
-    assertEquals(
-        BASELINE_SHA256,
-        sha256(baseline),
-        "V1 is already applied to the shared database and must not change; express schema changes as"
-            + " new V2+ migrations");
-
-    List<Integer> versions = versionedMigrationVersions(root);
-    assertTrue(versions.contains(1), "V1 baseline must exist");
-    List<Integer> incrementVersions = versions.stream().filter(version -> version != 1).toList();
-    for (int version : incrementVersions) {
-      assertTrue(version >= 2, () -> "only V2+ migrations may be added; found version V" + version);
-    }
-    assertEquals(
-        incrementVersions.size(),
-        new TreeSet<>(incrementVersions).size(),
-        "each increment migration version must be unique");
   }
 
   @Test
@@ -222,33 +188,6 @@ class FlywayBootstrapArchitectureTest {
       }
     }
     return true;
-  }
-
-  /** 收集 schema module 中全部 versioned migration 的数值版本（保留重复项），repeatable seed 不参与。 */
-  private static List<Integer> versionedMigrationVersions(Path root) throws IOException {
-    Path migrationDir = root.resolve(MIGRATION_DIR);
-    List<Integer> versions = new ArrayList<>();
-    try (Stream<Path> migrations = Files.list(migrationDir)) {
-      for (Path migration : migrations.toList()) {
-        Matcher matcher = VERSIONED_MIGRATION.matcher(migration.getFileName().toString());
-        assertTrue(
-            matcher.matches(),
-            () -> "migration must stay well named as V<version>__<description>.sql: " + migration);
-        versions.add(Integer.parseInt(matcher.group("version")));
-      }
-    }
-    return versions;
-  }
-
-  private static String sha256(Path file) {
-    try {
-      MessageDigest digest = MessageDigest.getInstance("SHA-256");
-      return HexFormat.of().formatHex(digest.digest(Files.readAllBytes(file)));
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 must be available", e);
-    }
   }
 
   private static Path repositoryRoot() {

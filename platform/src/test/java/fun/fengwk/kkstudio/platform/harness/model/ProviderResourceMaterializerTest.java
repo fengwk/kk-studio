@@ -320,27 +320,27 @@ class ProviderResourceMaterializerTest {
   }
 
   @Test
-  void textArtifactAlwaysProducesModelNoticeWithoutStorageAccess() {
+  void externalizedTextAlwaysProducesModelNoticeWithoutStorageAccess() {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     S3StorageService storageService = mock(S3StorageService.class);
     ProviderResourceMaterializer materializer =
         ProviderResourceMaterializer.withStorage(blobManager, storageService);
 
-    String artifactPath =
-        "/.artifacts/tool-results/00000000-0000-0000-0000-000000000010/00000000-0000-0000-0000-000000000020.txt";
-    ProviderResourceBlock textArtifact =
-        new ProviderResourceBlock(
-            BLOB_ID, "demo.txt", artifactPath, 12345L, 100L, "first 20 lines");
+    ProviderResourceBlock externalizedText =
+        ProviderResourceBlock.externalizedText(BLOB_ID, "demo.txt", 12345L, 100L, "first 20 lines");
 
     List<ProviderMessage> result =
         materializer.materialize(
-            List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(textArtifact))),
+            List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(externalizedText))),
             Set.of(ModelInputModality.IMAGE, ModelInputModality.TEXT));
 
     ProviderTextBlock text =
         assertInstanceOf(ProviderTextBlock.class, result.get(0).contents().get(0));
     String notice = text.text();
-    assertTrue(notice.contains("Full output: " + artifactPath), notice);
+    assertTrue(
+        notice.contains(
+            "complete output has been saved as a downloadable user attachment: demo.txt"),
+        notice);
     assertTrue(notice.contains("Size: 12345 bytes, 100 lines"), notice);
     assertTrue(notice.contains("--- preview ---"), notice);
     assertTrue(notice.contains("first 20 lines"), notice);
