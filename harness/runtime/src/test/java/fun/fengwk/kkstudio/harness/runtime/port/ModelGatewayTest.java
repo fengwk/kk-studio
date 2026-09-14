@@ -9,8 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
@@ -114,7 +114,7 @@ class ModelGatewayTest {
           public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onSucceeded(ProviderResponse response) {}
+          public void onSucceeded(ProviderCompletion completion) {}
 
           @Override
           public void onFailed(ModelInvocationError error) {}
@@ -123,7 +123,7 @@ class ModelGatewayTest {
           public void onUnknown(ModelInvocationError error) {}
         };
     listener.onEvent(new ProviderStreamEvent.TextDelta("hello"));
-    listener.onSucceeded((ProviderResponse) null);
+    listener.onSucceeded((ProviderCompletion) null);
     listener.onFailed(null);
     listener.onUnknown(null);
   }
@@ -163,7 +163,7 @@ class ModelGatewayTest {
       public void onEvent(ProviderStreamEvent event) {}
 
       @Override
-      public void onSucceeded(ProviderResponse response) {}
+      public void onSucceeded(ProviderCompletion completion) {}
 
       @Override
       public void onFailed(ModelInvocationError error) {}

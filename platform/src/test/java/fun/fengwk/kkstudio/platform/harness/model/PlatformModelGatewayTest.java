@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
@@ -28,6 +29,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
@@ -154,6 +158,37 @@ class PlatformModelGatewayTest {
       assertEquals(0, fixture.listener.failedCount.get());
       assertEquals(0, fixture.listener.unknownCount.get());
       assertSame(provider.response, fixture.listener.succeeded.get());
+    }
+  }
+
+  /** 验证 admission lease 包装层原样透传 native replay state，而不是降级为仅含响应的旧回调。 */
+  @Test
+  void preservesProviderReplayStateAcrossAdmissionListener() {
+    ControlledProvider provider = new ControlledProvider();
+    ProviderReplayState replayState = replayState();
+    ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
+    try (Fixture fixture = new Fixture(provider, admission)) {
+      fixture.startAndActivate();
+      provider.awaitStarted();
+
+      provider.complete(new ProviderCompletion(provider.response, replayState));
+      fixture.listener.awaitTerminal();
+
+      assertSame(provider.response, fixture.listener.succeeded.get());
+      assertSame(replayState, fixture.listener.succeededCompletion.get().replayState());
+      assertEquals(
+          "gemini-function-call-signature",
+          fixture
+              .listener
+              .succeededCompletion
+              .get()
+              .replayState()
+              .payload()
+              .path("parts")
+              .path(0)
+              .path("thoughtSignature")
+              .asText());
+      admission.tryAcquire().orElseThrow().close();
     }
   }
 
@@ -1071,6 +1106,19 @@ class PlatformModelGatewayTest {
         "completed", "", List.of(), GenerationStopReason.COMPLETE, usage, cost, null, null, "{}");
   }
 
+  private static ProviderReplayState replayState() {
+    var payload = JsonNodeFactory.instance.objectNode().put("role", "model");
+    var functionCall = payload.putArray("parts").addObject();
+    functionCall.putObject("functionCall").put("name", "bash").putObject("args");
+    functionCall.put("thoughtSignature", "gemini-function-call-signature");
+    return new ProviderReplayState(
+        ProviderReplayFormat.GEMINI_CONTENT,
+        new ProviderReplayAffinity(
+            ProviderType.GOOGLE, "google", CONNECTION_GENERATION_ID, "gemini-3.8-flash"),
+        "0".repeat(64),
+        payload);
+  }
+
   private static void await(CountDownLatch latch, String description) {
     try {
       assertTrue(latch.await(5L, TimeUnit.SECONDS), description);
@@ -1251,6 +1299,10 @@ class PlatformModelGatewayTest {
       handler.get().onComplete(response, stream);
     }
 
+    private void complete(ProviderCompletion completion) {
+      handler.get().onComplete(completion, stream);
+    }
+
     private void fail(ProviderException error) {
       handler.get().onError(error, stream);
     }
@@ -1292,6 +1344,7 @@ class PlatformModelGatewayTest {
 
     private final List<ProviderStreamEvent> events = new CopyOnWriteArrayList<>();
     private final AtomicReference<ProviderResponse> succeeded = new AtomicReference<>();
+    private final AtomicReference<ProviderCompletion> succeededCompletion = new AtomicReference<>();
     private final AtomicReference<ModelInvocationError> failed = new AtomicReference<>();
     private final AtomicReference<ModelInvocationError> unknown = new AtomicReference<>();
     private final AtomicInteger succeededCount = new AtomicInteger();
@@ -1327,9 +1380,10 @@ class PlatformModelGatewayTest {
     }
 
     @Override
-    public void onSucceeded(ProviderResponse response) {
+    public void onSucceeded(ProviderCompletion completion) {
       succeededCount.incrementAndGet();
-      succeeded.set(response);
+      succeededCompletion.set(completion);
+      succeeded.set(completion.response());
       terminal.countDown();
       if (throwOnSucceeded) {
         throw new IllegalStateException("completion persistence failed");

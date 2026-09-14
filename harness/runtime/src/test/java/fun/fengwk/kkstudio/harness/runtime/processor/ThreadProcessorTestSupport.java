@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
@@ -479,6 +480,31 @@ final class ThreadProcessorTestSupport {
       ModelRequestSpec requestSpec,
       ProviderResponse response,
       ModelInvocationError error) {
+    return seedModelInvocation(
+        store,
+        threadId,
+        turnStartEntryId,
+        basisEntryId,
+        status,
+        requestSpec,
+        response,
+        error,
+        null);
+  }
+
+  static UUID seedModelInvocation(
+      InMemoryHarnessStore store,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID basisEntryId,
+      ModelInvocationStatus status,
+      ModelRequestSpec requestSpec,
+      ProviderResponse response,
+      ModelInvocationError error,
+      ProviderReplayState replayState) {
+    if (replayState != null && status != ModelInvocationStatus.SUCCEEDED) {
+      throw new IllegalArgumentException("provider replay state requires SUCCEEDED status");
+    }
     UUID modelId =
         store.transaction(
             tx -> {
@@ -507,7 +533,7 @@ final class ThreadProcessorTestSupport {
       case SUCCEEDED -> {
         transitionModel(store, modelId, m -> m.beginDispatch(NOW));
         transitionModel(store, modelId, m -> m.markRunning(NOW));
-        transitionModel(store, modelId, m -> m.succeed(response, NOW));
+        transitionModel(store, modelId, m -> m.succeed(response, null, replayState, NOW));
       }
       case FAILED -> transitionModel(store, modelId, m -> m.fail(error, NOW));
       case CANCELLED -> transitionModel(store, modelId, m -> m.cancel(error, NOW));
