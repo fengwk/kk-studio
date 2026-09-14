@@ -325,11 +325,6 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   @Override
-  public void onSucceeded(ProviderResponse response) {
-    onSucceeded(new ProviderCompletion(response, null));
-  }
-
-  @Override
   public void onFailed(ModelInvocationError error) {
     if (abandoned.get() || !terminal.compareAndSet(false, true)) {
       return;

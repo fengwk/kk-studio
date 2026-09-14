@@ -114,12 +114,10 @@ public interface ModelGateway {
     /** 交付一个非 terminal Provider delta。 */
     void onEvent(ProviderStreamEvent event);
 
-    /** 交付完整 Provider 响应与可选的 native replay 状态。 */
-    default void onSucceeded(ProviderCompletion completion) {
-      onSucceeded(completion.response());
-    }
+    /** 交付完整 Provider 响应与可选的 native replay 状态。实现类必须显式保留完整 completion。 */
+    void onSucceeded(ProviderCompletion completion);
 
-    /** 交付完整 Provider 响应。 */
+    /** 交付不含 native replay 状态的完整 Provider 响应。 */
     default void onSucceeded(ProviderResponse response) {
       onSucceeded(new ProviderCompletion(response, null));
     }

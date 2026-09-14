@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -53,7 +54,11 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -118,6 +123,39 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
         path.entries().get(4).id(), thread(fixture.store, baseline.threadId()).headEntryId());
     assertEquals(1L, thread(fixture.store, baseline.threadId()).version());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+  }
+
+  /** 验证 terminal model materialization 把完整 native replay state 原样转移到 durable assistant Entry。 */
+  @Test
+  void modelSuccessCopiesProviderReplayStateToAssistantEntry() {
+    Fixture fixture = fixture();
+    var baseline = seedOpenInputTurn(fixture.store);
+    ProviderReplayState replayState = geminiReplayState();
+    seedModelInvocation(
+        fixture.store,
+        baseline.threadId(),
+        baseline.turnStartEntryId(),
+        baseline.userEntryId(),
+        ModelInvocationStatus.SUCCEEDED,
+        plainRequest(),
+        successResponse(List.of(), "bash"),
+        null,
+        replayState);
+    requestThreadWork(fixture.store, baseline.threadId());
+
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    Entry assistant = path(fixture.store, baseline.threadId()).entries().get(3);
+    assertEquals(replayState, assistant.providerReplayState());
+    assertEquals(
+        "gemini-function-call-signature",
+        assistant
+            .providerReplayState()
+            .payload()
+            .path("parts")
+            .path(0)
+            .path("thoughtSignature")
+            .asText());
   }
 
   /** no-tool terminal 关闭 turn 但已有 queued USER：applyModel 同事务先请求 THREAD 再 complete（wake 可被消费）。 */
@@ -809,5 +847,18 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertNull(model(real, modelId).resultEntryId());
     assertEquals(baseline.userEntryId(), thread(real, baseline.threadId()).headEntryId());
     assertEquals(0L, thread(real, baseline.threadId()).version());
+  }
+
+  private static ProviderReplayState geminiReplayState() {
+    var payload = JsonNodeFactory.instance.objectNode().put("role", "model");
+    var functionCall = payload.putArray("parts").addObject();
+    functionCall.putObject("functionCall").put("name", "bash").putObject("args");
+    functionCall.put("thoughtSignature", "gemini-function-call-signature");
+    return new ProviderReplayState(
+        ProviderReplayFormat.GEMINI_CONTENT,
+        new ProviderReplayAffinity(
+            ProviderType.GOOGLE, "google", new UUID(0L, 88L), "gemini-3.8-flash"),
+        "0".repeat(64),
+        payload);
   }
 }

@@ -337,9 +337,9 @@ public final class PlatformModelGateway implements ModelGateway {
     }
 
     @Override
-    public void onSucceeded(ProviderResponse response) {
+    public void onSucceeded(ProviderCompletion completion) {
       try {
-        delegate.onSucceeded(response);
+        delegate.onSucceeded(completion);
       } finally {
         lease.close();
       }

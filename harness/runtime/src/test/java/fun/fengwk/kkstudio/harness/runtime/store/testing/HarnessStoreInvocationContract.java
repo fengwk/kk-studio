@@ -154,6 +154,15 @@ public abstract class HarnessStoreInvocationContract {
 
     Entry foundEntry = store.transaction(tx -> tx.findEntry(assistantEntryId).orElseThrow());
     assertEquals(replayState, foundEntry.providerReplayState());
+    assertEquals(
+        "gemini-function-call-signature",
+        foundEntry
+            .providerReplayState()
+            .payload()
+            .path("parts")
+            .path(0)
+            .path("thoughtSignature")
+            .asText());
 
     var loadedPath = store.transaction(tx -> tx.loadEntryPath(assistantEntryId));
     assertEquals(replayState, loadedPath.head().providerReplayState());
@@ -173,12 +182,16 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   private static ProviderReplayState sampleReplayState() {
+    var payload = JsonNodeFactory.instance.objectNode().put("role", "model");
+    var functionCall = payload.putArray("parts").addObject();
+    functionCall.putObject("functionCall").put("name", "bash").putObject("args");
+    functionCall.put("thoughtSignature", "gemini-function-call-signature");
     return new ProviderReplayState(
-        ProviderReplayFormat.OPENAI_RESPONSES,
+        ProviderReplayFormat.GEMINI_CONTENT,
         new ProviderReplayAffinity(
-            ProviderType.OPENAI_RESPONSES, "openai", UUID.randomUUID(), "gpt-4o"),
+            ProviderType.GOOGLE, "google", UUID.randomUUID(), "gemini-3.8-flash"),
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        JsonNodeFactory.instance.objectNode().put("prompt_tokens", 10));
+        payload);
   }
 
   @Test
