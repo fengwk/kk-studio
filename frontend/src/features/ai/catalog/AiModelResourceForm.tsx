@@ -127,7 +127,6 @@ export function ModelForm({
           value={draft.name}
           onChange={(event) => onChange({ ...draft, name: event.target.value })}
           placeholder="MiniMax-M2.7"
-          readOnly={mode === 'edit'}
           required
         />
         <span className="inline-hint">{t('ai.catalog.form.nameHint')}</span>

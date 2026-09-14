@@ -49,6 +49,30 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
   }
 
   @Override
+  public void rename(String oldName, AgentModel model, long expectedVersion) {
+    AgentModelDO modelDO = convert(model);
+    int inserted = agentModelMapper.insertRenamed(oldName, modelDO, expectedVersion);
+    if (inserted != 1) {
+      throw new IllegalStateException(
+          "insert target model failed during rename: "
+              + oldName
+              + " -> "
+              + model.getName()
+              + ", expectedVersion="
+              + expectedVersion);
+    }
+    agentModelMapper.updateReferencingAgents(model.getProviderName(), oldName, model.getName());
+    int deleted = agentModelMapper.deleteByName(model.getProviderName(), oldName, expectedVersion);
+    if (deleted != 1) {
+      throw new IllegalStateException(
+          "delete old model failed during rename: "
+              + oldName
+              + ", expectedVersion="
+              + expectedVersion);
+    }
+  }
+
+  @Override
   public boolean deleteByName(String providerName, String name, long expectedVersion) {
     return agentModelMapper.deleteByName(providerName, name, expectedVersion) == 1;
   }

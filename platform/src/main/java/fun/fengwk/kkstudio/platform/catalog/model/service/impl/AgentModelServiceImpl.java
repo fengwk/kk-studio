@@ -79,20 +79,31 @@ public class AgentModelServiceImpl implements AgentModelService {
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     ModelRef ref = parseRef(providerName, modelName);
-    AgentModel model = referenceResolver.requireModel(ref.providerName(), ref.modelName());
+    AgentModel model = referenceResolver.requireModelForUpdate(ref.providerName(), ref.modelName());
     ensureExpectedVersion(model, ref, rawExpected, expected);
     modelMutationFactory.update(model, updateDTO);
-    if (!agentModelRepository.updateByName(model, expected)) {
-      AgentModel reread =
-          agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
-      if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE);
+    boolean isRename = !ref.modelName().equals(model.getName());
+    try {
+      if (isRename) {
+        agentModelRepository.rename(ref.modelName(), model, expected);
+      } else {
+        if (!agentModelRepository.updateByName(model, expected)) {
+          AgentModel reread =
+              agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
+          if (reread == null) {
+            throw new AiResourceNotFoundException(RESOURCE);
+          }
+          throw new AiVersionConflictException(
+              RESOURCE, rawExpected, CatalogVersions.format(reread.getVersion()));
+        }
       }
-      throw new AiVersionConflictException(
-          RESOURCE, rawExpected, CatalogVersions.format(reread.getVersion()));
+    } catch (DuplicateKeyException error) {
+      ModelRef targetRef = new ModelRef(model.getProviderName(), model.getName());
+      throw new AiDuplicateException(
+          RESOURCE, RESOURCE + " name already exists under this provider: " + targetRef, error);
     }
     AgentModel reloaded =
-        agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
+        agentModelRepository.getByProviderNameAndName(ref.providerName(), model.getName());
     return agentModelConverter.convert(reloaded);
   }
 

@@ -91,7 +91,7 @@ export interface AgentModelConfigDTO {
 /** 携带单一结构化可执行配置的公开 Agent model 资源。 */
 export interface AgentModelDTO {
   providerName: string
-  /** 模型逻辑名（与 providerName 共同构成不可变资源身份）。 */
+  /** 模型逻辑名。 */
   name: string
   /** 发往上游 Provider 的真实模型标识；与 name 独立且不唯一。 */
   modelId: string
@@ -104,9 +104,11 @@ export interface AgentModelDTO {
 
 /**
  * Agent model 的可编辑部分。前端发送完整替换：发出请求体时 {@code name}、
- * {@code description} 与 {@code config} 均为必需字段。
+ * {@code modelId}、{@code description} 与 {@code config} 均为必需字段。
  */
 export interface AgentModelEditablePropertiesDTO {
+  /** 模型逻辑名。 */
+  name: string
   /** 发往上游 Provider 的真实模型标识。 */
   modelId: string
   description: string | null
@@ -115,7 +117,6 @@ export interface AgentModelEditablePropertiesDTO {
 
 export interface AgentModelCreateDTO extends AgentModelEditablePropertiesDTO {
   providerName: string
-  name: string
 }
 
 export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {

@@ -40,6 +40,7 @@ public class AgentModelMutationFactoryTest {
     assertThrows(
         AiValidationException.class, () -> factory.update(existing, new AgentModelUpdateDTO()));
 
+    create.setName("model");
     create.setConfig(validConfig());
     AgentModel model = factory.newModel("provider", "model", create);
     assertEquals("provider", model.getProviderName());
@@ -79,6 +80,7 @@ public class AgentModelMutationFactoryTest {
     pricing.setReasoningPerMillionTokens(new BigDecimal("4"));
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
+    update.setName(model.getName());
     update.setModelId(model.getModelId());
     update.setDescription("updated");
     update.setConfig(baseline);
@@ -117,6 +119,40 @@ public class AgentModelMutationFactoryTest {
     assertThrows(
         AiValidationException.class,
         () -> factory.newModel("provider", "model", create("model", "d".repeat(513))));
+  }
+
+  @Test
+  public void shouldSupportRenamingModelAndValidateTargetName() {
+    AgentModelMutationFactory factory = factory();
+    AgentModel model = new AgentModel();
+    model.setProviderName("provider");
+    model.setName("old-name");
+    model.setModelId("wire-model");
+
+    AgentModelUpdateDTO rename = new AgentModelUpdateDTO();
+    rename.setName("new-name");
+    rename.setModelId("wire-model");
+    rename.setConfig(validConfig());
+    factory.update(model, rename);
+    assertEquals("new-name", model.getName());
+
+    AgentModelUpdateDTO blankName = new AgentModelUpdateDTO();
+    blankName.setName("   ");
+    blankName.setModelId("wire-model");
+    blankName.setConfig(validConfig());
+    assertThrows(AiValidationException.class, () -> factory.update(model, blankName));
+
+    AgentModelUpdateDTO surroundingWhitespace = new AgentModelUpdateDTO();
+    surroundingWhitespace.setName(" padded-name ");
+    surroundingWhitespace.setModelId("wire-model");
+    surroundingWhitespace.setConfig(validConfig());
+    assertThrows(AiValidationException.class, () -> factory.update(model, surroundingWhitespace));
+
+    AgentModelUpdateDTO tooLong = new AgentModelUpdateDTO();
+    tooLong.setName("n".repeat(129));
+    tooLong.setModelId("wire-model");
+    tooLong.setConfig(validConfig());
+    assertThrows(AiValidationException.class, () -> factory.update(model, tooLong));
   }
 
   private static AgentModelCreateDTO create(String name, String description) {

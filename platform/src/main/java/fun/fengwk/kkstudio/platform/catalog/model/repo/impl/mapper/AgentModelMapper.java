@@ -85,6 +85,43 @@ public interface AgentModelMapper extends BaseMapper {
   int updateByName(
       @Param("model") AgentModelDO model, @Param("expectedVersion") long expectedVersion);
 
+  @Insert(
+      """
+      insert into agent_model (
+          provider_name, name, model_id, description, config,
+          created_at, updated_at, version
+      )
+      select
+          provider_name,
+          #{model.name},
+          #{model.modelId},
+          #{model.description},
+          cast(#{model.configJson} as jsonb),
+          created_at,
+          greatest(updated_at, current_timestamp),
+          version + 1
+      from agent_model
+      where provider_name = #{model.providerName} and name = #{oldName}
+        and version = #{expectedVersion}
+      """)
+  int insertRenamed(
+      @Param("oldName") String oldName,
+      @Param("model") AgentModelDO model,
+      @Param("expectedVersion") long expectedVersion);
+
+  @Update(
+      """
+      update agent_definition
+      set model_name = #{newName},
+          updated_at = greatest(updated_at, current_timestamp),
+          version = version + 1
+      where model_provider_name = #{providerName} and model_name = #{oldName}
+      """)
+  int updateReferencingAgents(
+      @Param("providerName") String providerName,
+      @Param("oldName") String oldName,
+      @Param("newName") String newName);
+
   /** 硬删除 CAS：行消失后同名立即可重建，删除失败只能来自 identity 缺失或 version 不匹配。 */
   @Delete(
       "delete from agent_model where provider_name = #{providerName} and name = #{name}"

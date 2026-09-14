@@ -278,6 +278,22 @@ describe('AiResourceForms', () => {
     expect(screen.getByText('Variant ID 不能重复')).toBeInTheDocument()
   })
 
+  it('allows editing model name in edit mode while keeping provider disabled', async () => {
+    const user = userEvent.setup()
+    render(<EditModelFormHarness />)
+
+    const providerSelect = screen.getByLabelText('Provider')
+    expect(providerSelect).toBeDisabled()
+
+    const nameInput = screen.getByPlaceholderText('MiniMax-M2.7')
+    expect(nameInput).not.toHaveAttribute('readonly')
+
+    await user.clear(nameInput)
+    await user.type(nameInput, 'MiniMax-M2.8')
+
+    expect(nameInput).toHaveValue('MiniMax-M2.8')
+  })
+
   it('edits agent model binding and tools without json editing', async () => {
     const user = userEvent.setup()
     render(<AgentFormHarness />)
@@ -349,6 +365,36 @@ function ModelFormHarness() {
           modelCallIdleTimeoutMillis: 120000,
           createTime: '2026-06-20T02:00:00',
           updateTime: '2026-06-20T02:00:00',
+        },
+      ]}
+      onChange={setDraft}
+    />
+  )
+}
+
+function EditModelFormHarness() {
+  const [draft, setDraft] = useState<ModelDraft>({
+    ...emptyModelDraft(),
+    providerName: 'minimax',
+    name: 'MiniMax-M2.7',
+    modelId: 'wire-minimax',
+  })
+  return (
+    <ModelForm
+      draft={draft}
+      mode="edit"
+      providers={[
+        {
+          name: 'minimax',
+          description: null,
+          providerType: 'openai',
+          baseUrl: null,
+          configured: true,
+          modelCallTimeoutMillis: 1800000,
+          modelCallIdleTimeoutMillis: 120000,
+          version: '1',
+          createTime: null,
+          updateTime: null,
         },
       ]}
       onChange={setDraft}

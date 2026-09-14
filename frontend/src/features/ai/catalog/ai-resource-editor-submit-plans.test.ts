@@ -13,7 +13,7 @@ function drafts() {
 }
 
 describe('ai-resource-editor-submit-plans', () => {
-  it('keeps the edit Model PUT target at the original provider and model identity', () => {
+  it('keeps the edit Model PUT target at the original provider and model identity while placing renamed name in update data', () => {
     const plan = buildResourceSubmitPlan(
       {
         kind: 'model',
@@ -27,7 +27,7 @@ describe('ai-resource-editor-submit-plans', () => {
         modelDraft: {
           ...emptyModelDraft({ name: 'unrelated-provider' }),
           providerName: 'unrelated-provider',
-          name: 'unrelated-model',
+          name: 'renamed-model',
           modelId: 'unrelated-wire-model',
         },
       },
@@ -38,11 +38,11 @@ describe('ai-resource-editor-submit-plans', () => {
       mode: 'edit',
       providerName: 'deleted-provider',
       name: 'original-model',
-      data: { expectedVersion: '7' },
+      data: { expectedVersion: '7', name: 'renamed-model' },
     })
     if (plan.kind !== 'model' || plan.mode !== 'edit') return
     expect(plan.data).not.toHaveProperty('providerName')
-    expect(plan.data).not.toHaveProperty('name')
+    expect(plan.data.name).toBe('renamed-model')
   })
 
   it('puts the edited Agent model in the update body', () => {

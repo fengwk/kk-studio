@@ -11,7 +11,7 @@ public class AgentModel {
   /** 绑定 Provider 名称（必填，复合主键一部分，外键引用 {@code agent_provider.name}）。 */
   private String providerName;
 
-  /** 模型逻辑名（必填，与 {@link #providerName} 组成复合主键，创建后不可变）。 */
+  /** 模型逻辑名（必填，与 {@link #providerName} 组成复合主键；支持重命名）。 */
   private String name;
 
   /** 发往上游 Provider 的真实模型标识（必填，映射 {@code model_id}，不唯一）。 */
