@@ -135,9 +135,13 @@ describe('EnvironmentsPage', () => {
   })
 
   it('shows empty state when no environments configured', async () => {
+    // 测试意图：验证环境列表为空时首项呈现 CreateCard，且不展示多余的空态文本
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
     renderPage()
-    await waitFor(() => expect(screen.getByText('当前没有 Environment')).toBeInTheDocument())
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '创建环境' })).toHaveClass('create-card')
+    })
+    expect(screen.queryByText('当前没有 Environment')).not.toBeInTheDocument()
   })
 
   it('creates an environment and shows the new registration token dialog', async () => {
@@ -497,5 +501,21 @@ describe('EnvironmentsPage', () => {
     await waitFor(() => {
       expect(screen.queryByRole('alertdialog', { name: '持久状态已变化' })).toBeNull()
     })
+  })
+
+  /**
+   * 测试意图：验证环境列表为空时，网格首项始终为 CreateCard，子工具栏无重复创建按钮，且不展示多余的通用空态文本块。
+   */
+  it('places CreateCard as the first grid item with exactly one creation entry without duplicate empty state block', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
+    renderPage()
+
+    // 验证整个页面仅有唯一个创建入口（即网格首张 CreateCard，子工具栏无重复创建按钮）
+    const createButton = await screen.findByRole('button', { name: '创建环境' })
+    expect(createButton).toHaveClass('create-card')
+    expect(screen.getAllByRole('button', { name: '创建环境' })).toHaveLength(1)
+
+    // 验证列表真正为空时不渲染多余的 StateBlock 文本
+    expect(screen.queryByText('当前没有 Environment')).not.toBeInTheDocument()
   })
 })

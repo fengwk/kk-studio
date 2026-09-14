@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, Pencil, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Select } from '@/shared/ui/console/Select'
+import { useCoordinatorAgents } from '../useCoordinatorAgents'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict } from '@/shared/conflict/conflict-presenter'
 import type { ProjectsApi } from '../projects-api'
@@ -33,6 +35,13 @@ export function EditProjectModal({
     detail: string
   } | null>(null)
   const initializedProjectIdRef = useRef<string | null>(null)
+
+  const {
+    options: agentOptions,
+    isLoading: isAgentsLoading,
+    isError: isAgentsError,
+    isCoordinatorValid,
+  } = useCoordinatorAgents(project?.coordinatorAgentName, isOpen && Boolean(project))
 
   useEffect(() => {
     if (!isOpen || !project) {
@@ -109,8 +118,8 @@ export function EditProjectModal({
       return
     }
     const trimmedCoordinatorAgentName = coordinatorAgentName.trim()
-    if (!trimmedCoordinatorAgentName) {
-      setErrorMessage('Coordinator Agent 名称不能为空')
+    if (!trimmedCoordinatorAgentName || !isCoordinatorValid(trimmedCoordinatorAgentName)) {
+      setErrorMessage('请选择有效的 Coordinator Agent')
       return
     }
 
@@ -237,17 +246,35 @@ export function EditProjectModal({
             </div>
 
             <div className="form-group">
-              <label htmlFor="edit-project-coordinator">
+              <label id="edit-project-coordinator-label" htmlFor="edit-project-coordinator">
                 Coordinator Agent 名称 <span style={{ color: 'var(--danger)' }}>*</span>
               </label>
-              <input
+              <Select
                 id="edit-project-coordinator"
-                type="text"
                 value={coordinatorAgentName}
-                onChange={(e) => setCoordinatorAgentName(e.target.value)}
-                placeholder="输入负责编排的 Coordinator Agent 名称"
+                options={agentOptions}
+                onChange={setCoordinatorAgentName}
+                disabled={isSubmitting || isAgentsLoading || isAgentsError}
+                placeholder={
+                  isAgentsLoading
+                    ? '正在加载 Agent 列表...'
+                    : isAgentsError
+                      ? '加载 Agent 列表失败'
+                      : '请选择 Coordinator Agent'
+                }
+                aria-label="Coordinator Agent 名称"
                 required
               />
+              {isAgentsError ? (
+                <p className="field-error" role="alert" style={{ marginTop: '4px' }}>
+                  加载 Agent 列表失败，请稍后重试
+                </p>
+              ) : null}
+              {coordinatorAgentName && !isCoordinatorValid(coordinatorAgentName) ? (
+                <p className="field-error" role="alert" style={{ marginTop: '4px' }}>
+                  当前 Coordinator Agent 不可用，请重新选择有效的 Agent
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -263,7 +290,7 @@ export function EditProjectModal({
             <button
               type="submit"
               className="btn-primary"
-              disabled={isSubmitting || !title.trim() || !coordinatorAgentName.trim()}
+              disabled={isSubmitting || !title.trim() || !isCoordinatorValid(coordinatorAgentName)}
             >
               {isSubmitting ? '保存中...' : '保存修改'}
             </button>

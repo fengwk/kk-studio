@@ -148,4 +148,29 @@ describe('McpConfigJsonEditor', () => {
     expect(screen.getByRole('textbox', { name: '配置 JSON' })).toBeDisabled()
     expect(screen.getByRole('alert')).toHaveTextContent('Sample error')
   })
+
+  /**
+   * 测试意图：验证 MCP JSON 工具栏所有操作按钮应用一致的次级强调样式 (.btn-secondary.btn-sm)。
+   */
+  it('renders all toolbar buttons with consistent btn-secondary btn-sm style', () => {
+    render(
+      <McpConfigJsonEditor
+        value="{}"
+        onChange={vi.fn()}
+        environments={[mockEnvironment]}
+      />,
+    )
+
+    const buttons = [
+      screen.getByRole('button', { name: 'Remote 模板' }),
+      screen.getByRole('button', { name: 'Local 模板' }),
+      screen.getByRole('button', { name: '格式化' }),
+      screen.getByRole('button', { name: '校验' }),
+    ]
+
+    for (const btn of buttons) {
+      expect(btn).toHaveClass('btn-secondary')
+      expect(btn).toHaveClass('btn-sm')
+    }
+  })
 })

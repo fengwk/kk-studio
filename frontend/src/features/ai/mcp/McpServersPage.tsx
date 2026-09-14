@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, RefreshCw } from 'lucide-react'
+import { RefreshCw } from 'lucide-react'
 import { ResourceCardLayout } from '@/features/ai/catalog/AiResourceCardLayout'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
-import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
+import { CreateCard, StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
@@ -362,12 +362,6 @@ export function McpServersPage() {
     <section className="screen active">
       <nav className="subbar">
         <NavigationSlot />
-        <div className="subbar-actions">
-          <button type="button" className="btn-primary" onClick={handleOpenCreate}>
-            <Plus aria-hidden="true" />
-            {t('ai.mcp.create')}
-          </button>
-        </div>
       </nav>
 
       <div className="screen-body">
@@ -382,102 +376,101 @@ export function McpServersPage() {
             tone="danger"
           />
         )}
-        {!serversQuery.isLoading && !serversQuery.error && (
-          <div className="cards-grid">
-            {servers.length === 0 ? (
-              <StateBlock title={t('ai.mcp.empty')} />
-            ) : (
-              servers.map((server: McpServerDTO) => {
-                const updateTime = formatIsoTime(server.updateTime, locale)
-                const envName = server.environmentId
-                  ? environmentsMap.get(server.environmentId)?.name ?? server.environmentId
-                  : null
+        <div className="cards-grid">
+          <CreateCard
+            title={t('ai.mcp.create')}
+            subtitle={t('ai.mcp.createDescription')}
+            onClick={handleOpenCreate}
+          />
+          {servers.map((server: McpServerDTO) => {
+            const updateTime = formatIsoTime(server.updateTime, locale)
+            const envName = server.environmentId
+              ? environmentsMap.get(server.environmentId)?.name ?? server.environmentId
+              : null
 
-                const typeLabel =
-                  server.type === 'local'
-                    ? t('ai.mcp.typeLocal')
-                    : server.type === 'remote'
-                      ? t('ai.mcp.typeRemote')
-                      : String(server.type)
+            const typeLabel =
+              server.type === 'local'
+                ? t('ai.mcp.typeLocal')
+                : server.type === 'remote'
+                  ? t('ai.mcp.typeRemote')
+                  : String(server.type)
 
-                const statusLabel =
-                  server.discoveryStatus === 'AVAILABLE'
-                    ? t('ai.mcp.statusAvailable')
-                    : server.discoveryStatus === 'FAILED'
-                      ? t('ai.mcp.statusFailed')
-                      : server.discoveryStatus === 'UNVERIFIED'
-                        ? t('ai.mcp.statusUnverified')
-                        : String(server.discoveryStatus)
+            const statusLabel =
+              server.discoveryStatus === 'AVAILABLE'
+                ? t('ai.mcp.statusAvailable')
+                : server.discoveryStatus === 'FAILED'
+                  ? t('ai.mcp.statusFailed')
+                  : server.discoveryStatus === 'UNVERIFIED'
+                    ? t('ai.mcp.statusUnverified')
+                    : String(server.discoveryStatus)
 
-                const subtitle =
-                  server.type === 'local'
-                    ? envName
-                      ? `Local · ${envName}`
-                      : 'Local'
-                    : 'Remote'
+            const subtitle =
+              server.type === 'local'
+                ? envName
+                  ? `Local · ${envName}`
+                  : 'Local'
+                : 'Remote'
 
-                const rows: Array<
-                  | [string, string]
-                  | { label: string; value: string; wrap?: boolean }
-                  | { pairs: Array<{ label: string; value: string }> }
-                > = [
+            const rows: Array<
+              | [string, string]
+              | { label: string; value: string; wrap?: boolean }
+              | { pairs: Array<{ label: string; value: string }> }
+            > = [
+              {
+                pairs: [
+                  { label: t('ai.mcp.type'), value: typeLabel },
+                  { label: t('ai.mcp.status'), value: statusLabel },
+                ],
+              },
+              ...(server.type === 'local' && envName
+                ? [{ label: t('ai.mcp.envSelect'), value: envName, wrap: true }]
+                : []),
+              {
+                pairs: [
+                  { label: t('ai.mcp.toolCount'), value: String(server.toolCount) },
+                  { label: t('ai.catalog.card.timeout'), value: `${server.timeoutMillis}ms` },
+                ],
+              },
+              {
+                pairs: [
+                  { label: t('ai.mcp.version'), value: String(server.version) },
                   {
-                    pairs: [
-                      { label: t('ai.mcp.type'), value: typeLabel },
-                      { label: t('ai.mcp.status'), value: statusLabel },
-                    ],
+                    label: t('ai.mcp.enabledState'),
+                    value: server.enabled ? t('ai.mcp.enabled') : t('ai.mcp.disabled'),
                   },
-                  ...(server.type === 'local' && envName
-                    ? [{ label: t('ai.mcp.envSelect'), value: envName, wrap: true }]
-                    : []),
-                  {
-                    pairs: [
-                      { label: t('ai.mcp.toolCount'), value: String(server.toolCount) },
-                      { label: t('ai.catalog.card.timeout'), value: `${server.timeoutMillis}ms` },
-                    ],
-                  },
-                  {
-                    pairs: [
-                      { label: t('ai.mcp.version'), value: String(server.version) },
-                      {
-                        label: t('ai.mcp.enabledState'),
-                        value: server.enabled ? t('ai.mcp.enabled') : t('ai.mcp.disabled'),
-                      },
-                    ],
-                  },
-                  ...(server.discoveredVersion
-                    ? [
-                        {
-                          label: t('ai.mcp.discoveredVersion'),
-                          value: String(server.discoveredVersion),
-                        },
-                      ]
-                    : []),
-                  ...(updateTime ? [[t('ai.mcp.updated'), updateTime] as [string, string]] : []),
-                ]
+                ],
+              },
+              ...(server.discoveredVersion
+                ? [
+                    {
+                      label: t('ai.mcp.discoveredVersion'),
+                      value: String(server.discoveredVersion),
+                    },
+                  ]
+                : []),
+              ...(updateTime ? [[t('ai.mcp.updated'), updateTime] as [string, string]] : []),
+            ]
 
-                return (
-                  <ResourceCardLayout
-                    key={server.id}
-                    icon="server"
-                    title={server.name}
-                    subtitle={subtitle}
-                    rows={rows}
-                    editAriaLabel={`${t('ai.mcp.edit')} ${server.name}`}
-                    deleteAriaLabel={`${t('ai.mcp.delete')} ${server.name}`}
-                    onEdit={() => handleOpenEdit(server)}
-                    onDelete={() => {
-                      setConflict(null)
-                      setDeleteError(null)
-                      setDeleteTarget(server)
-                    }}
-                    deletePending={deleteMutation.isPending && deleteTarget?.id === server.id}
-                  />
-                )
-              })
-            )}
-          </div>
-        )}
+            return (
+              <ResourceCardLayout
+                key={server.id}
+                icon="server"
+                title={server.name}
+                subtitle={subtitle}
+                rows={rows}
+                editAriaLabel={`${t('ai.mcp.edit')} ${server.name}`}
+                deleteAriaLabel={`${t('ai.mcp.delete')} ${server.name}`}
+                onEdit={() => handleOpenEdit(server)}
+                onDelete={() => {
+                  setConflict(null)
+                  setDeleteError(null)
+                  setDeleteTarget(server)
+                }}
+                deletePending={deleteMutation.isPending && deleteTarget?.id === server.id}
+              />
+            )
+          })}
+        </div>
       </div>
 
       {createModal && (

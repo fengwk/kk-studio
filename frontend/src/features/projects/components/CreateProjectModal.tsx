@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X, FolderPlus } from 'lucide-react'
+import { Select } from '@/shared/ui/console/Select'
+import { useCoordinatorAgents } from '../useCoordinatorAgents'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type { ProjectDTO } from '../types'
@@ -22,6 +24,14 @@ export function CreateProjectModal({
   const [coordinatorAgentName, setCoordinatorAgentName] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const {
+    agents,
+    options: agentOptions,
+    isLoading: isAgentsLoading,
+    isError: isAgentsError,
+    isCoordinatorValid,
+  } = useCoordinatorAgents(undefined, isOpen)
 
   useEffect(() => {
     if (isOpen) {
@@ -58,8 +68,8 @@ export function CreateProjectModal({
       return
     }
     const trimmedCoordinatorAgentName = coordinatorAgentName.trim()
-    if (!trimmedCoordinatorAgentName) {
-      setErrorMessage('Coordinator Agent 名称不能为空')
+    if (!trimmedCoordinatorAgentName || !isCoordinatorValid(trimmedCoordinatorAgentName)) {
+      setErrorMessage('请选择有效的 Coordinator Agent')
       return
     }
 
@@ -146,17 +156,37 @@ export function CreateProjectModal({
             </div>
 
             <div className="form-group">
-              <label htmlFor="create-project-coordinator">
+              <label id="create-project-coordinator-label" htmlFor="create-project-coordinator">
                 Coordinator Agent 名称 <span style={{ color: 'var(--danger)' }}>*</span>
               </label>
-              <input
+              <Select
                 id="create-project-coordinator"
-                type="text"
                 value={coordinatorAgentName}
-                onChange={(e) => setCoordinatorAgentName(e.target.value)}
-                placeholder="输入负责编排的 Coordinator Agent 名称"
+                options={agentOptions}
+                onChange={setCoordinatorAgentName}
+                disabled={isSubmitting || isAgentsLoading || isAgentsError || agents.length === 0}
+                placeholder={
+                  isAgentsLoading
+                    ? '正在加载 Agent 列表...'
+                    : isAgentsError
+                      ? '加载 Agent 列表失败'
+                      : agents.length === 0
+                        ? '暂无可用 Agent'
+                        : '请选择 Coordinator Agent'
+                }
+                aria-label="Coordinator Agent 名称"
                 required
               />
+              {isAgentsError ? (
+                <p className="field-error" role="alert" style={{ marginTop: '4px' }}>
+                  加载 Agent 列表失败，请稍后重试
+                </p>
+              ) : null}
+              {!isAgentsLoading && !isAgentsError && agents.length === 0 ? (
+                <p className="field-error" role="alert" style={{ marginTop: '4px' }}>
+                  当前无可用 Agent，请先在 Agent 控制台创建
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -172,7 +202,7 @@ export function CreateProjectModal({
             <button
               type="submit"
               className="btn-primary"
-              disabled={isSubmitting || !title.trim() || !coordinatorAgentName.trim()}
+              disabled={isSubmitting || !title.trim() || !isCoordinatorValid(coordinatorAgentName)}
             >
               {isSubmitting ? '创建中...' : '创建项目'}
             </button>

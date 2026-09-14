@@ -1716,6 +1716,7 @@ div.is-error {
 }
 
 .btn-primary,
+.btn-secondary,
 .ghost-btn {
   height: 32px;
   border-radius: var(--radius-sm);
@@ -1723,6 +1724,12 @@ div.is-error {
   border: 1px solid transparent;
   cursor: pointer;
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .btn-primary {
@@ -1742,10 +1749,38 @@ div.is-error {
   cursor: not-allowed;
 }
 
+.btn-secondary {
+  background: var(--surface-active);
+  color: var(--fg);
+  border-color: var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-hover);
+  color: var(--fg);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .ghost-btn {
   background: transparent;
   color: var(--fg-muted);
   border-color: var(--border);
+}
+
+.ghost-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-hover);
+  color: var(--fg);
+}
+
+.ghost-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .ghost-btn.danger {
@@ -1754,6 +1789,27 @@ div.is-error {
   gap: 6px;
   border-color: var(--danger-border);
   color: var(--danger);
+}
+
+.btn-primary:focus-visible,
+.btn-secondary:focus-visible,
+.ghost-btn:focus-visible {
+  outline: none;
+  border-color: var(--green-primary);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.btn-sm {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  gap: 4px;
+}
+
+.btn-sm svg {
+  width: 13px;
+  height: 13px;
 }
 
 .chat-shell {
@@ -7333,6 +7389,82 @@ select.settings-input option {
 .number-input.is-disabled .number-input-field {
   color: var(--fg-dim);
   cursor: not-allowed;
+}
+
+/* Accessible themed checkbox */
+.ui-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  line-height: 1.4;
+}
+
+.ui-checkbox.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-checkbox-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+.ui-checkbox-box {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ui-checkbox:hover:not(.is-disabled) .ui-checkbox-box {
+  border-color: var(--border-hover);
+  background: var(--surface-hover);
+}
+
+.ui-checkbox-input:focus-visible + .ui-checkbox-box {
+  border-color: var(--green-primary);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.ui-checkbox.is-checked .ui-checkbox-box {
+  background: var(--green-primary);
+  border-color: var(--green-primary);
+}
+
+.ui-checkbox.is-checked:hover:not(.is-disabled) .ui-checkbox-box {
+  background: var(--green-gradient);
+  border-color: var(--green-border);
+}
+
+.ui-checkbox-check {
+  width: 11px;
+  height: 11px;
+  stroke-width: 3;
+  color: var(--green-on);
+}
+
+.ui-checkbox-label {
+  color: var(--fg-muted);
+  transition: color 0.15s ease;
+}
+
+.ui-checkbox:hover:not(.is-disabled) .ui-checkbox-label {
+  color: var(--fg);
 }
 
 .topnav .locale-selector {
