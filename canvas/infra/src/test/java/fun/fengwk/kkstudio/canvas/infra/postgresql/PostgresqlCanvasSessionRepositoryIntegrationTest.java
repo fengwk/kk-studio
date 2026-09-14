@@ -43,7 +43,10 @@ class PostgresqlCanvasSessionRepositoryIntegrationTest extends PostgresCanvasInf
     assertThrows(
         DataIntegrityViolationException.class, () -> sessions.insert(firstSession, secondCanvas));
     assertEquals(
-        1L, count("select count(*) from canvas_session where session_id = ?", firstSession));
+        1L,
+        count(
+            "select count(*) from session_owner where session_id = ? and canvas_id is not null",
+            firstSession));
 
     assertEquals(1, sessions.deleteBySessionId(firstSession));
     assertEquals(0, sessions.deleteBySessionId(firstSession));
@@ -51,12 +54,12 @@ class PostgresqlCanvasSessionRepositoryIntegrationTest extends PostgresCanvasInf
     assertEquals(List.of(secondSession), sessions.listSessionIds(firstCanvas));
   }
 
-  /** 条件插入允许无 owner 的 Session，但必须以 0 行拒绝已由 Chat 持有的 Session。 */
+  /** 普通插入允许无 owner 的 Session，但 session 主键必须拒绝已由 Chat 持有的 Session。 */
   @Test
-  void conditionalInsertRejectsChatOwnedSession() {
+  void insertRejectsChatOwnedSession() {
     UUID canvasId = addDocument();
     UUID freeSession = addHarnessSession();
-    assertEquals(1, sessions.insertIfNotOwnedByOther(freeSession, canvasId));
+    assertTrue(sessions.insert(freeSession, canvasId));
 
     UUID chatOwnedSession = addHarnessSession();
     UUID chatId = UUID.randomUUID();
@@ -66,9 +69,10 @@ class PostgresqlCanvasSessionRepositoryIntegrationTest extends PostgresCanvasInf
         "chat-owner",
         "test-agent");
     jdbc.update(
-        "insert into chat_session (session_id, chat_id) values (?, ?)", chatOwnedSession, chatId);
+        "insert into session_owner (session_id, chat_id) values (?, ?)", chatOwnedSession, chatId);
 
-    assertEquals(0, sessions.insertIfNotOwnedByOther(chatOwnedSession, canvasId));
+    assertThrows(
+        DataIntegrityViolationException.class, () -> sessions.insert(chatOwnedSession, canvasId));
     assertNull(sessions.findBySessionId(chatOwnedSession));
   }
 

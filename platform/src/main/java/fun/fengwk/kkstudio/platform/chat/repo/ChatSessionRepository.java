@@ -7,18 +7,10 @@ import java.util.UUID;
 public interface ChatSessionRepository {
 
   /**
-   * 插入归属边（{@code created_at} 由数据库默认填充）；session 已存在（无论归属本 Chat 还是 Canvas）时抛 {@code
-   * DuplicateKeyException}，由调用方（归属创建事务）负责互斥语义。
+   * 插入归属边（{@code created_at} 由数据库默认填充）；Session 已由任一产品 owner 持有时抛 {@code
+   * DataIntegrityViolationException}。
    */
   boolean insert(UUID sessionId, UUID chatId);
-
-  /**
-   * 单归属互斥插入：单条 SQL 内先确认另一归属方（Canvas）不持有该 Session，再插入 Chat 归属边（{@code guaranteed atomic}）。返回受影响行数：1
-   * 插入成功；0 表示该 Session 已归 Canvas（拒绝）；本表已存在则在 DB 层以 {@code DuplicateKeyException} 冲突。preflight 在
-   * Runtime 建 Thread 之后执行，无法再取 harness SESSION 锁（锁序不容回退），因此互斥由本语句与 {@code harness_session}
-   * 主键唯一性共同保证。
-   */
-  int insertIfNotOwnedByOther(UUID sessionId, UUID chatId);
 
   /** 枚举某 Chat 的全部 Session id（owner listing），按归属时间倒序。 */
   List<UUID> listSessionIds(UUID chatId);

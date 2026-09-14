@@ -29,7 +29,7 @@
     {"role": "SYSTEM", "contents": [{"type": "text", "text": "You are a careful assistant."}]},
     {"role": "USER", "contents": [
       {"type": "text", "text": "What is the capital of France?"},
-      {"type": "resource", "blobId": "0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01", "name": "scan.png", "preview": "tiny preview"},
+      {"type": "resource", "blobId": "0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01", "name": "scan.png", "totalBytes": null, "totalLines": null, "preview": "tiny preview"},
       {"type": "thinking", "thinking": "the user asks geography"},
       {"type": "json", "json": "{\n  \"hint\":\"capital\"\n}"}
     ]},

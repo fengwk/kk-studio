@@ -46,14 +46,14 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Chat/Canvas 共享的 Harness 命令接受事务边界：唯一的产品用户归属入口。
+ * 产品 owner 共享的 Harness 命令接受事务边界：唯一的产品 Session 归属入口。
  *
  * <p>一个 Spring 物理事务内完成：先按 target 完成 owner 授权（NEW_SESSION 确认 owner 存在；NEW_THREAD/THREAD 确认目标 Session
  * 已由该 owner 的归属边持有），再调用 {@link HarnessRuntime#acceptCommands} 把 Runtime store（同一
- * DataSource、PROPAGATION_REQUIRED）加入同一事务。仅在全新接受时调用内部 preflight：NEW_SESSION 原子插入 owner relation （锁
- * harness_session 行 + 检查另一张归属表），所有 target 把 USER_MESSAGE 的瞬时 ATTACHMENT 物化为 durable RESOURCE 并维护
- * Session blob ref，同时只允许 RESOURCE 复用目标 Session 已拥有的 ref。精确 replay 时 Runtime 不调用 preflight，因此不会重复
- * 插入归属、不会重复消费 upload；但本服务在调用 Runtime 前仍完成 owner 授权，不能借 replay 绕过归属。
+ * DataSource、PROPAGATION_REQUIRED）加入同一事务。仅在全新接受时调用内部 preflight：NEW_SESSION 插入 owner relation，由
+ * {@code session_owner} 主键与排他弧约束原子保证四类 owner 全局互斥；所有 target 把 USER_MESSAGE 的瞬时 ATTACHMENT 物化为
+ * durable RESOURCE 并维护 Session blob ref，同时只允许 RESOURCE 复用目标 Session 已拥有的 ref。精确 replay 时 Runtime
+ * 不调用 preflight，因此不会重复插入归属、不会重复消费 upload；但本服务在调用 Runtime 前仍完成 owner 授权，不能借 replay 绕过归属。
  *
  * <p>owner 正常请求使用 KEY SHARE（不阻塞同 owner 的并发接受），owner 删除路径由 {@link SessionDeletionOrchestrator}
  * 走排他锁；本服务绝不暴露 Chat 专属 createThread/submitCommands 或 Canvas first-send 形态的便利方法。
@@ -200,7 +200,7 @@ public class HarnessCommandAcceptanceOrchestrator {
         .orElseThrow(() -> new IllegalArgumentException("Thread does not exist"));
   }
 
-  /** 归属校验：目标 Session 必须已由该 owner 的 relation 行持有（四类互斥由 relation 唯一存在性保证）。 */
+  /** 归属校验：目标 Session 必须已由该 owner 的 relation 行持有。 */
   private void requireOwnedSession(OwnerRef owner, UUID sessionId) {
     switch (owner.type()) {
       case CHAT -> {
@@ -231,34 +231,26 @@ public class HarnessCommandAcceptanceOrchestrator {
   }
 
   /**
-   * 全新接受专用 preflight：NEW_SESSION 时插入 owner relation（锁 Session 行 + 检查另一张归属表），并对所有 target 物化
-   * USER_MESSAGE 附件。精确 replay 时 Runtime 不调用本回调，因此不会产生重复副作用。
+   * 全新接受专用 preflight：NEW_SESSION 时插入 owner relation，并对所有 target 物化 USER_MESSAGE 附件。精确 replay 时
+   * Runtime 不调用本回调，因此不会产生重复副作用。
    */
   private AcceptancePreflight preflight(OwnerRef owner, AcceptCommandsTarget target) {
     return (tx, session, commands) -> {
       if (target instanceof AcceptCommandsTarget.NewSession) {
-        createOwnership(tx, session.id(), owner);
+        createOwnership(session.id(), owner);
       }
       return prepareUserContents(session.id(), commands);
     };
   }
 
-  /**
-   * 归属创建：单条 SQL 内原子地确认另一归属方不持有该 Session 后插入归属边（互斥），与 Runtime 的 Session/Thread/Command 写入
-   * 处于同一事务，任何失败整体回滚。
-   *
-   * <p>preflight 在 Runtime 建 Thread（占 THREAD 锁序位）之后执行，本事务已无法再取 harness SESSION 锁 （SESSION -&gt;
-   * THREAD 锁序不容回退），因此单归属互斥由 {@code insertIfNotOwnedByOther} 的单条语句原子性与 {@code harness_session}
-   * 主键唯一性共同保证，而非额外的行锁。
-   */
-  private void createOwnership(HarnessStore.Transaction tx, UUID sessionId, OwnerRef owner) {
+  /** 插入 owner relation；数据库主键原子保证四类 owner 互斥，且与 Runtime 写入同事务回滚。 */
+  private void createOwnership(UUID sessionId, OwnerRef owner) {
     boolean bound;
     try {
       bound =
           switch (owner.type()) {
-            case CHAT -> chatSessionRepository.insertIfNotOwnedByOther(sessionId, owner.id()) == 1;
-            case CANVAS -> canvasSessionRepository.insertIfNotOwnedByOther(sessionId, owner.id())
-                == 1;
+            case CHAT -> chatSessionRepository.insert(sessionId, owner.id());
+            case CANVAS -> canvasSessionRepository.insert(sessionId, owner.id());
             case PROJECT -> projectSessionRepository.bindSession(owner.id(), sessionId);
             case ISSUE_RUN -> issueRunSessionRepository.bindSession(owner.id(), sessionId);
           };

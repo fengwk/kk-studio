@@ -289,7 +289,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     assertNotNull(spec);
 
     List<ToolBinding> toolBindings = spec.toolBindings();
-    assertEquals(6, toolBindings.size());
+    assertEquals(1, toolBindings.size());
     ToolBinding mcpBinding =
         toolBindings.stream()
             .filter(binding -> binding.definition().id().equals(agentToolId))

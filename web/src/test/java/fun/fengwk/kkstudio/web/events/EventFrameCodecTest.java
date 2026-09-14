@@ -24,8 +24,6 @@ class EventFrameCodecTest {
   private static final ResourceKey THREAD_KEY = new ResourceKey(ResourceKind.THREAD, THREAD);
   private static final ResourceKey CANVAS_KEY = new ResourceKey(ResourceKind.CANVAS, CANVAS);
   private static final ResourceKey PROJECTS_KEY = new ResourceKey(ResourceKind.PROJECTS, null);
-  private static final ResourceKey CLOUD_FILES_KEY =
-      new ResourceKey(ResourceKind.CLOUD_FILES, null);
   private static final EventFrameCodec CODEC = new EventFrameCodec(new RealtimeEventJsonCodec());
 
   @Test
@@ -46,11 +44,6 @@ class EventFrameCodecTest {
         new EventFrameCodec.ClientFrame(EventFrameCodec.ClientFrame.Type.SUBSCRIBE, PROJECTS_KEY),
         CODEC.decode(
             "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"projects\"}}"));
-    assertEquals(
-        new EventFrameCodec.ClientFrame(
-            EventFrameCodec.ClientFrame.Type.UNSUBSCRIBE, CLOUD_FILES_KEY),
-        CODEC.decode(
-            "{\"version\":1,\"type\":\"unsubscribe\",\"resource\":{\"kind\":\"cloud-files\"}}"));
   }
 
   @Test
@@ -235,9 +228,6 @@ class EventFrameCodecTest {
             + CANVAS
             + "\"}}",
         CODEC.resync(CANVAS_KEY));
-    assertEquals(
-        "{\"version\":1,\"type\":\"resync\",\"resource\":{\"kind\":\"cloud-files\"}}",
-        CODEC.resync(CLOUD_FILES_KEY));
     assertEquals("{\"version\":1,\"type\":\"heartbeat\"}", CODEC.heartbeat());
     assertEquals(
         "{\"version\":1,\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"boom\"}",

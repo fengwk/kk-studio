@@ -56,7 +56,6 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.cloudfs.tool.CloudHarnessContributor;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
@@ -102,14 +101,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   /** 所有确定性拒绝共用的稳定 AssistantError code。 */
   public static final String REJECTION_CODE = "PLANNING_FAILED";
-
-  private static final List<AgentToolId> CLOUD_TOOL_IDS =
-      List.of(
-          CloudHarnessContributor.TOOL_ID_READ,
-          CloudHarnessContributor.TOOL_ID_WRITE,
-          CloudHarnessContributor.TOOL_ID_EDIT,
-          CloudHarnessContributor.TOOL_ID_FIND,
-          CloudHarnessContributor.TOOL_ID_GREP);
 
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentModelRepository modelRepository;
@@ -444,7 +435,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
   }
 
-  /** 从最新 Agent 配置派生本 turn 的稳定工具身份；随后注入 Cloud 五工具与 Project 角色工具。 */
+  /** 从最新 Agent 配置派生本 turn 的稳定工具身份；随后注入 Project 角色工具。 */
   private List<AgentToolId> resolveToolIds(
       AgentDefinitionConfigDTO config, EntryPath path, UUID threadId) {
     LinkedHashSet<AgentToolId> toolIds = new LinkedHashSet<>();
@@ -472,9 +463,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (!config.getSubagents().isEmpty()
         && sessionDepth(path) < subagentConfigProvider.subagentConfig().maxDepth()) {
       toolIds.add(BuiltinToolIds.TASK);
-    }
-    for (AgentToolId cloudToolId : CLOUD_TOOL_IDS) {
-      toolIds.add(cloudToolId);
     }
     List<AgentToolId> roleTools =
         Objects.requireNonNull(roleToolSelector.select(threadId), "role tools");

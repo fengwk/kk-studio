@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSourc
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
-import fun.fengwk.kkstudio.platform.cloudfs.event.CloudFilesEventHub;
 import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationDispatcher;
 import fun.fengwk.kkstudio.platform.project.controller.IssueControllerDispatcher;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -70,7 +69,6 @@ public class ApplicationEventConfiguration {
       EnvironmentOperationDispatcher environmentOperationDispatcher,
       ThreadVersionHub threadVersionHub,
       CanvasVersionHub canvasVersionHub,
-      CloudFilesEventHub cloudFilesEventHub,
       ProjectInvalidationHub projectInvalidationHub,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
       PostgresqlRealtimeEventSource realtimeEventSource,
@@ -108,22 +106,17 @@ public class ApplicationEventConfiguration {
                 CanvasVersionHub.CHANNEL,
                 canvasVersionHub::onNotification,
                 canvasVersionHub::broadcastResync),
-            // 7. Cloud Files 失效：任一节点提交 CFS 变更后，通知浏览器事件层回读权威快照
-            new PostgresqlNotificationHandler(
-                CloudFilesEventHub.CHANNEL,
-                cloudFilesEventHub::onNotification,
-                cloudFilesEventHub::broadcastResync),
-            // 8. Project/Issue 失效：数据库事实提交后按 projectId 提示浏览器回读权威 Snapshot
+            // 7. Project/Issue 失效：数据库事实提交后按 projectId 提示浏览器回读权威 Snapshot
             new PostgresqlNotificationHandler(
                 ProjectInvalidationHub.CHANNEL,
                 projectInvalidationHub::onNotification,
                 projectInvalidationHub::broadcastResync),
-            // 9. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
+            // 8. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
             new PostgresqlNotificationHandler(
                 SystemSettingsChangeHandler.CHANNEL,
                 systemSettingsChangeHandler::onNotification,
                 systemSettingsChangeHandler::onResync),
-            // 10. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
+            // 9. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
             new PostgresqlNotificationHandler(
                 PostgresqlRealtimeEventSource.CHANNEL,
                 realtimeEventSource::onNotification,
@@ -138,14 +131,12 @@ public class ApplicationEventConfiguration {
       RealtimeEventSource realtimeSource,
       CanvasVersionEventSource canvasVersionSource,
       ProjectInvalidationHub projectInvalidationHub,
-      CloudFilesEventHub cloudFilesEventHub,
       ApplicationEventSettings settings) {
     return new ApplicationEventHub(
         threadVersionSource,
         realtimeSource,
         canvasVersionSource,
         projectInvalidationHub,
-        cloudFilesEventHub,
         settings.queueCapacity());
   }
 

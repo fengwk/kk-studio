@@ -16,18 +16,7 @@ import java.util.Set;
  */
 final class ToolArgumentAliasNormalizer {
 
-  private static final Set<String> ALLOWLIST =
-      Set.of(
-          "read",
-          "write",
-          "edit",
-          "find",
-          "grep",
-          "cloud_read",
-          "cloud_write",
-          "cloud_edit",
-          "cloud_find",
-          "cloud_grep");
+  private static final Set<String> ALLOWLIST = Set.of("read", "write", "edit", "find", "grep");
 
   private static final List<String> ALIASES = List.of("file", "filePath", "file_path");
 

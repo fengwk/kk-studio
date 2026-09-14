@@ -162,7 +162,6 @@ public final class ProviderMessageProjector {
       return new ProviderResourceBlock(
           value.blobId(),
           value.name(),
-          value.artifactPath(),
           value.totalBytes(),
           value.totalLines(),
           value.preview() == null ? "" : value.preview());

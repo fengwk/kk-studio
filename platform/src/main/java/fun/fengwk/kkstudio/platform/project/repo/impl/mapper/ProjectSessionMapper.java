@@ -19,13 +19,13 @@ public interface ProjectSessionMapper extends BaseMapper {
 
   @Insert(
       """
-      insert into project_session (project_id, session_id, created_at)
+      insert into session_owner (project_id, session_id, created_at)
       values (#{projectId}, #{sessionId}, clock_timestamp())
       """)
   int insert(@Param("projectId") UUID projectId, @Param("sessionId") UUID sessionId);
 
   @Select(
-      "select project_id, session_id, created_at from project_session where project_id = #{projectId}")
+      "select project_id, session_id, created_at from session_owner where project_id = #{projectId}")
   @Results(
       id = "projectSessionResultMap",
       value = {
@@ -36,10 +36,11 @@ public interface ProjectSessionMapper extends BaseMapper {
   ProjectSessionDO findByProjectId(@Param("projectId") UUID projectId);
 
   @Select(
-      "select project_id, session_id, created_at from project_session where session_id = #{sessionId}")
+      "select project_id, session_id, created_at from session_owner"
+          + " where session_id = #{sessionId} and project_id is not null")
   @ResultMap("projectSessionResultMap")
   ProjectSessionDO findBySessionId(@Param("sessionId") UUID sessionId);
 
-  @Delete("delete from project_session where project_id = #{projectId}")
+  @Delete("delete from session_owner where project_id = #{projectId}")
   int deleteByProjectId(@Param("projectId") UUID projectId);
 }

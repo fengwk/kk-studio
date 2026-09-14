@@ -198,7 +198,7 @@ class ToolExecutionGatewayCallbackTest {
   }
 
   @Test
-  void externalizedTextArtifactRemainsFullyVisibleToProviderModel() {
+  void externalizedTextProjectsStructuredFactsToProviderModel() {
     String text = "0123456789".repeat(6000);
     int totalBytes = text.getBytes(StandardCharsets.UTF_8).length;
     assertTrue(totalBytes > ToolResultFinalizer.INLINE_MAX_UTF8_BYTES);
@@ -224,16 +224,14 @@ class ToolExecutionGatewayCallbackTest {
             Instant.EPOCH,
             Instant.EPOCH);
 
-    String artifactPath =
-        "/.artifacts/tool-results/00000000-0000-0000-0000-000000000001/00000000-0000-0000-0000-000000000001.txt";
     String preview = ToolResultFinalizer.extractRawPreview(text);
     MessagePayload payload =
         new HistoryPayloadMapper()
             .toolResultPayload(
                 invocation,
                 List.of(
-                    ResourceMessageContent.artifact(
-                        ID, "demo-result.txt", artifactPath, totalBytes, 1L, preview)));
+                    ResourceMessageContent.externalizedText(
+                        ID, "demo-result.txt", totalBytes, 1L, preview)));
     ProviderToolResultBlock projected =
         assertInstanceOf(
             ProviderToolResultBlock.class,
@@ -243,8 +241,7 @@ class ToolExecutionGatewayCallbackTest {
                 .contents()
                 .getFirst());
     assertEquals(
-        new ProviderResourceBlock(
-            ID, "demo-result.txt", artifactPath, (long) totalBytes, 1L, preview),
+        ProviderResourceBlock.externalizedText(ID, "demo-result.txt", totalBytes, 1L, preview),
         projected.contents().getFirst());
   }
 

@@ -27,7 +27,7 @@ import java.util.TreeSet;
 import java.util.UUID;
 
 /**
- * 断言 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 infra 的七张表，并包含专用 Session 归属守卫表，且结构化载荷使用
+ * 断言 PostgreSQL schema 结构：所有必需的表与列类型都存在，Harness 执行协议恰好是 infra 的七张表，Session 归属由单一排他弧表表达，且结构化载荷使用
  * jsonb。
  *
  * <p>public schema 的相等性校验是严格的：{@code public} 中 {@code BASE TABLE} 的集合必须与期望列表完全一致。
@@ -51,11 +51,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_resource",
           "canvas_command_dedup",
           "canvas_function_resource_pin",
-          "canvas_session",
           "chat",
-          "chat_session",
-          "cloud_node",
-          "cloud_text_revision",
           "environment",
           "environment_connection",
           "environment_inventory",
@@ -63,7 +59,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "environment_skill",
           "environment_skill_source",
           "harness_session",
-          "harness_session_owner_guard",
           "harness_entry",
           "harness_thread",
           "harness_thread_command",
@@ -71,13 +66,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_tool_invocation",
           "harness_work",
           "project",
-          "project_session",
           "issue",
           "issue_dependency",
           "issue_input",
           "issue_run",
-          "issue_run_session",
           "issue_controller_work",
+          "session_owner",
           "session_blob_ref",
           "storage_blob",
           "storage_upload",
@@ -98,7 +92,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   private static final Set<String> HARNESS_PREFIXED_TABLES =
       Set.of(
           "harness_session",
-          "harness_session_owner_guard",
           "harness_entry",
           "harness_thread",
           "harness_thread_command",
@@ -266,8 +259,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "resource_id");
     assertColumns(
         "chat", "id", "title", "agent_name", "yolo_enabled", "created_at", "updated_at", "version");
-    assertColumns("chat_session", "session_id", "chat_id", "created_at");
-    assertColumns("canvas_session", "session_id", "canvas_id", "created_at");
+    assertColumns(
+        "session_owner",
+        "session_id",
+        "chat_id",
+        "canvas_id",
+        "project_id",
+        "issue_run_id",
+        "created_at");
     assertColumns(
         "storage_blob",
         "id",
@@ -307,27 +306,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "last_seen_at",
         "lease_until");
     assertColumns(
-        "cloud_node",
-        "id",
-        "parent_id",
-        "name",
-        "kind",
-        "version",
-        "blob_id",
-        "created_at",
-        "updated_at",
-        "parent_kind");
-    assertColumns(
-        "cloud_text_revision",
-        "node_id",
-        "revision",
-        "content",
-        "size_bytes",
-        "sha256",
-        "is_current",
-        "created_at",
-        "node_kind");
-    assertColumns(
         "project",
         "id",
         "title",
@@ -338,7 +316,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "archived_at",
         "created_at",
         "updated_at");
-    assertColumns("project_session", "project_id", "session_id", "created_at");
     assertColumns(
         "issue",
         "id",
@@ -382,7 +359,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "created_at",
         "updated_at",
         "completed_at");
-    assertColumns("issue_run_session", "run_id", "session_id", "created_at");
     assertColumns(
         "issue_controller_work",
         "issue_id",
@@ -462,7 +438,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   @Test
   void harnessExecutionTablesExposeExactColumnContracts() throws SQLException {
     assertColumns("harness_session", "id", "name", "created_at");
-    assertColumns("harness_session_owner_guard", "session_id");
     assertColumns(
         "harness_entry",
         "id",
@@ -595,8 +570,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "canvas_document", "created_at");
     assertColumnType("timestamp with time zone", "canvas_document", "updated_at");
     assertColumnType("timestamp with time zone", "canvas_resource", "created_at");
-    assertColumnType("timestamp with time zone", "chat_session", "created_at");
-    assertColumnType("timestamp with time zone", "canvas_session", "created_at");
+    assertColumnType("timestamp with time zone", "session_owner", "created_at");
     assertColumnType("timestamp with time zone", "canvas_function_run", "updated_at");
     assertColumnType("timestamp with time zone", "canvas_function_run", "available_at");
     assertColumnType("timestamp with time zone", "canvas_function_run", "lease_until");
@@ -947,7 +921,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   @Test
   void userTriggersAreExactAndVersionNotifiersNeverMutateVersions() throws SQLException {
-    // 精确枚举通知与 Session 归属守卫 trigger，避免迁移留下隐式写入行为。
+    // 精确枚举通知 trigger，避免 schema 留下隐式写入行为。
     Set<String> triggers = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -965,24 +939,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "trg_harness_thread_version_notify",
             "trg_canvas_document_version_notify",
             "trg_canvas_function_work_notify",
-            "trg_cloud_node_changed_notify",
             "trg_project_issue_changed_project",
-            "trg_project_issue_changed_project_session",
+            "trg_project_issue_changed_session_owner",
             "trg_project_issue_changed_issue",
             "trg_project_issue_changed_dependency",
             "trg_project_issue_changed_input",
             "trg_project_issue_changed_run",
-            "trg_project_issue_changed_run_session",
             "trg_project_issue_changed_thread",
-            "trg_issue_controller_work_due",
-            "trg_chat_session_acquire_guard",
-            "trg_chat_session_release_guard",
-            "trg_canvas_session_acquire_guard",
-            "trg_canvas_session_release_guard",
-            "trg_project_session_acquire_guard",
-            "trg_project_session_release_guard",
-            "trg_issue_run_session_acquire_guard",
-            "trg_issue_run_session_release_guard"),
+            "trg_issue_controller_work_due"),
         triggers,
         "public triggers must equal the exact set of user triggers");
 
@@ -1082,7 +1046,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertTrue(canvasWorkFunctionSource.contains("canvas_function_work"));
     assertTrue(canvasWorkFunctionSource.contains("new.status = 'READY'"));
 
-    // public 函数严格限定为通知与 Session 归属守卫辅助函数；version 自增函数已移除。
+    // public 函数严格限定为通知函数；version 自增与 Session guard 函数均不存在。
     Set<String> functions = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -1100,13 +1064,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "harness_thread_version_notify",
             "canvas_document_version_notify",
             "canvas_function_work_notify",
-            "cloud_files_changed_notify",
             "project_issue_changed_notify",
-            "notify_issue_controller_work_due",
-            "acquire_harness_session_owner_guard",
-            "release_harness_session_owner_guard"),
+            "notify_issue_controller_work_due"),
         functions,
-        "only declared notification and ownership-guard helpers may exist");
+        "only declared notification helpers may exist");
 
     // 行为：trigger 在 INSERT 与 version 写入时触发，但绝不修改存储的
     // version 值；非 version 的应用层更新则完全不会动到 version。
@@ -1196,10 +1157,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "mcp_tool", "mcp_server_id");
     assertColumnType("jsonb", "mcp_tool", "input_schema");
     assertColumnType("uuid", "comfyui_workflow_api", "id");
-    assertColumnType("uuid", "chat_session", "session_id");
-    assertColumnType("uuid", "chat_session", "chat_id");
-    assertColumnType("uuid", "canvas_session", "session_id");
-    assertColumnType("uuid", "canvas_session", "canvas_id");
+    assertColumnType("uuid", "session_owner", "session_id");
+    assertColumnType("uuid", "session_owner", "chat_id");
+    assertColumnType("uuid", "session_owner", "canvas_id");
+    assertColumnType("uuid", "session_owner", "project_id");
+    assertColumnType("uuid", "session_owner", "issue_run_id");
     assertColumnType("uuid", "environment_inventory", "environment_id");
     assertColumnType("uuid", "environment_skill_source", "source_id");
     assertColumnType("uuid", "environment_skill_source", "environment_id");
@@ -1411,10 +1373,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_mcp_server_name",
             "uk_mcp_tool_model_name",
             "uk_mcp_tool_server_source_name",
-            "uk_cloud_node_id_kind",
-            "uk_cloud_node_parent_name",
-            "uk_cloud_text_revision_current",
-            "uk_project_session_session",
+            "uk_session_owner_project",
             "uk_issue_project_number",
             "uk_issue_id_project",
             "uk_issue_input_idempotency",
@@ -1422,7 +1381,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_issue_run_id_issue",
             "uk_issue_run_terminal_action",
             "uk_issue_run_single_active",
-            "uk_issue_run_session_session",
+            "uk_session_owner_issue_run",
             "uk_environment_skill_source_environment",
             "uk_environment_skill_source_default",
             "uk_environment_skill_environment_name",
@@ -1448,18 +1407,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " 'fk_canvas_link_target',"
                     + " 'fk_canvas_function_run_node',"
                     + " 'fk_canvas_function_resource_pin_node',"
-                    + " 'fk_chat_session_chat', 'fk_chat_session_session',"
-                    + " 'fk_canvas_session_canvas', 'fk_canvas_session_session', 'fk_mcp_tool_server',"
-                    + " 'fk_cloud_node_parent', 'fk_cloud_node_blob',"
-                    + " 'fk_cloud_text_revision_node',"
-                    + " 'fk_project_coordinator', 'fk_project_session_project',"
-                    + " 'fk_project_session_session', 'fk_issue_project',"
+                    + " 'fk_session_owner_chat', 'fk_session_owner_canvas',"
+                    + " 'fk_session_owner_project', 'fk_session_owner_issue_run',"
+                    + " 'fk_session_owner_session', 'fk_mcp_tool_server',"
+                    + " 'fk_project_coordinator', 'fk_issue_project',"
                     + " 'fk_issue_assignee', 'fk_issue_reviewer',"
                     + " 'fk_issue_dependency_issue', 'fk_issue_dependency_depends_on',"
                     + " 'fk_issue_input_issue', 'fk_issue_run_issue', 'fk_issue_run_agent',"
-                    + " 'fk_issue_run_submission', 'fk_issue_run_session_run',"
-                    + " 'fk_issue_run_session_session', 'fk_issue_controller_work_issue',"
-                    + " 'fk_harness_session_owner_guard_session',"
+                    + " 'fk_issue_run_submission', 'fk_issue_controller_work_issue',"
                     + " 'fk_mcp_server_environment',"
                     + " 'fk_environment_inventory_environment',"
                     + " 'fk_environment_skill_source_environment',"
@@ -1487,17 +1442,13 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_canvas_link_target",
             "fk_canvas_function_run_node",
             "fk_canvas_function_resource_pin_node",
-            "fk_chat_session_chat",
-            "fk_chat_session_session",
-            "fk_canvas_session_canvas",
-            "fk_canvas_session_session",
+            "fk_session_owner_chat",
+            "fk_session_owner_canvas",
+            "fk_session_owner_project",
+            "fk_session_owner_issue_run",
+            "fk_session_owner_session",
             "fk_mcp_tool_server",
-            "fk_cloud_node_parent",
-            "fk_cloud_node_blob",
-            "fk_cloud_text_revision_node",
             "fk_project_coordinator",
-            "fk_project_session_project",
-            "fk_project_session_session",
             "fk_issue_project",
             "fk_issue_assignee",
             "fk_issue_reviewer",
@@ -1507,10 +1458,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_issue_run_issue",
             "fk_issue_run_agent",
             "fk_issue_run_submission",
-            "fk_issue_run_session_run",
-            "fk_issue_run_session_session",
             "fk_issue_controller_work_issue",
-            "fk_harness_session_owner_guard_session",
             "fk_mcp_server_environment",
             "fk_environment_inventory_environment",
             "fk_environment_skill_source_environment",

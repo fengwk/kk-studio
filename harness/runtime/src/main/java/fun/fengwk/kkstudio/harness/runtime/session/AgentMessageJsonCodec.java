@@ -28,8 +28,8 @@ import java.util.UUID;
  * tool_result} 嵌套 {@code tool_call} 或 {@code tool_result}。encode 端同样严格校验 raw JSON 字段。
  *
  * <p>durable 内容类型恰为 6 类：text / thinking / json / tool_call / tool_result / resource（resource 是唯一
- * durable 媒体引用：blobId/name/preview）。瞬时 Provider 投影类型 Image / Audio / Video（携带 attempt-only source）在
- * encode 与 decode 两端都确定性拒绝，绝不进入持久化 JSON。
+ * durable 媒体引用：blobId/name/totalBytes/totalLines/preview）。瞬时 Provider 投影类型 Image / Audio / Video（携带
+ * attempt-only source）在 encode 与 decode 两端都确定性拒绝，绝不进入持久化 JSON。
  *
  * <p>String API 与 node API 都用于组合 codec（如 Entry payload / Thread command payload codec）。
  */
@@ -48,7 +48,7 @@ public final class AgentMessageJsonCodec {
       orderedSet(
           "type", "toolCallId", "toolName", "rendererKey", "contents", "error", "detailsJson");
   private static final Set<String> RESOURCE_FIELDS =
-      orderedSet("type", "blobId", "name", "artifactPath", "totalBytes", "totalLines", "preview");
+      orderedSet("type", "blobId", "name", "totalBytes", "totalLines", "preview");
 
   static {
     MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -181,7 +181,6 @@ public final class AgentMessageJsonCodec {
         node.put("type", "resource");
         node.put("blobId", value.blobId().toString());
         putNullableText(node, "name", value.name());
-        putNullableText(node, "artifactPath", value.artifactPath());
         putNullableLong(node, "totalBytes", value.totalBytes());
         putNullableLong(node, "totalLines", value.totalLines());
         putNullableText(node, "preview", value.preview());
@@ -248,7 +247,6 @@ public final class AgentMessageJsonCodec {
         yield new ResourceMessageContent(
             canonicalUuid(node, "blobId", "content"),
             nullableText(node, "name", "content"),
-            nullableText(node, "artifactPath", "content"),
             nullableLong(node, "totalBytes", "content"),
             nullableLong(node, "totalLines", "content"),
             nullableText(node, "preview", "content"));

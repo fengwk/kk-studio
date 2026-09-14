@@ -25,11 +25,6 @@ public class PostgresqlCanvasSessionRepository implements CanvasSessionRepositor
   }
 
   @Override
-  public int insertIfNotOwnedByOther(UUID sessionId, UUID canvasId) {
-    return mapper.insertIfNotOwnedByOther(sessionId, canvasId);
-  }
-
-  @Override
   public List<UUID> listSessionIds(UUID canvasId) {
     return mapper.listSessionIds(canvasId);
   }

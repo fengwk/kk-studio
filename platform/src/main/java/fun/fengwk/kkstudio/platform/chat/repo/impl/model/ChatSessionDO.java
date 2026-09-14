@@ -4,7 +4,7 @@ import lombok.Data;
 
 import java.util.UUID;
 
-/** {@code chat_session} 行映射。 */
+/** {@code session_owner} 的 Chat 归属行映射。 */
 @Data
 public class ChatSessionDO {
   private UUID sessionId;

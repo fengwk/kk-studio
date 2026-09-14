@@ -6,7 +6,7 @@ import lombok.Data;
 
 import java.time.Instant;
 
-/** Chat/Canvas owner 持有的 Harness Session 摘要。 */
+/** 产品 owner 持有的 Harness Session 摘要。 */
 @Data
 public class HarnessSessionSummaryDTO {
 

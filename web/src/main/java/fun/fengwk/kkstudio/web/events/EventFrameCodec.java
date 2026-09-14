@@ -25,10 +25,9 @@ import java.util.UUID;
  * missing/wrong-type 全部拒绝），服务端帧确定性编码。
  *
  * <p>客户端帧 {@code {version:1, type:'subscribe'|'unsubscribe', resource}} 字段集精确；Thread/Canvas
- * resource 带 canonical UUID id，Projects/Cloud Files 是无 id 的全局 resource。服务端帧 {@code
- * subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code resync{resource}} /
- * {@code heartbeat} / {@code error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code
- * 0|[1-9][0-9]*}，不超 bigint）。
+ * resource 带 canonical UUID id，Projects 是无 id 的全局 resource。服务端帧 {@code subscribed{resource,cursor}}
+ * / {@code event{resource,name,data}} / {@code resync{resource}} / {@code heartbeat} / {@code
+ * error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超 bigint）。
  */
 final class EventFrameCodec {
 
@@ -47,7 +46,6 @@ final class EventFrameCodec {
   private static final String THREAD = ResourceKind.THREAD.name().toLowerCase();
   private static final String CANVAS = ResourceKind.CANVAS.name().toLowerCase();
   private static final String PROJECTS = ResourceKind.PROJECTS.name().toLowerCase();
-  private static final String CLOUD_FILES = "cloud-files";
 
   static {
     MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -98,8 +96,7 @@ final class EventFrameCodec {
     if (cursor < 0) {
       throw new IllegalArgumentException("cursor must be non-negative");
     }
-    if ((resource.kind() == ResourceKind.PROJECTS || resource.kind() == ResourceKind.CLOUD_FILES)
-        && cursor != 0) {
+    if (resource.kind() == ResourceKind.PROJECTS && cursor != 0) {
       throw new IllegalArgumentException("global resource cursor must be zero");
     }
     ObjectNode node = NODES.objectNode();
@@ -238,12 +235,7 @@ final class EventFrameCodec {
       requireExactFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
       return new ResourceKey(ResourceKind.PROJECTS, null);
     }
-    if (CLOUD_FILES.equals(kindName)) {
-      requireExactFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
-      return new ResourceKey(ResourceKind.CLOUD_FILES, null);
-    }
-    throw new IllegalArgumentException(
-        "frame.resource.kind must be thread, canvas, projects, or cloud-files");
+    throw new IllegalArgumentException("frame.resource.kind must be thread, canvas, or projects");
   }
 
   private static ObjectNode resourceNode(ResourceKey resource) {
@@ -252,7 +244,6 @@ final class EventFrameCodec {
       case THREAD -> node.put("kind", THREAD);
       case CANVAS -> node.put("kind", CANVAS);
       case PROJECTS -> node.put("kind", PROJECTS);
-      case CLOUD_FILES -> node.put("kind", CLOUD_FILES);
     }
     if (resource.id() != null) {
       node.put("id", resource.id().toString());

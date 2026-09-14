@@ -186,7 +186,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
         new NewThreadCommand(new SetAgentCommandPayload("assistant"), id(20));
     NewThreadCommand user = user(new TextMessageContent("hello"));
     AcceptCommandsCommand chatCommand = newSession(setAgent, user);
-    when(chatSessionRepository.insertIfNotOwnedByOther(SESSION_ID, CHAT_ID)).thenReturn(1);
+    when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
 
     AcceptancePreflight chatPreflight = acceptAndCapturePreflight(CHAT_OWNER, chatCommand);
     List<NewThreadCommand> chatPrepared =
@@ -199,15 +199,15 @@ class HarnessCommandAcceptanceOrchestratorTest {
     UserMessageCommandPayload mapped =
         assertInstanceOf(UserMessageCommandPayload.class, chatPrepared.get(1).payload());
     assertEquals("hello", ((TextMessageContent) mapped.message().contents().getFirst()).text());
-    verify(chatSessionRepository).insertIfNotOwnedByOther(SESSION_ID, CHAT_ID);
+    verify(chatSessionRepository).insert(SESSION_ID, CHAT_ID);
 
     AcceptCommandsCommand canvasCommand = newSession(user(new TextMessageContent("canvas")));
-    when(canvasSessionRepository.insertIfNotOwnedByOther(SESSION_ID, CANVAS_ID)).thenReturn(1);
+    when(canvasSessionRepository.insert(SESSION_ID, CANVAS_ID)).thenReturn(true);
     AcceptancePreflight canvasPreflight = acceptAndCapturePreflight(CANVAS_OWNER, canvasCommand);
     canvasPreflight.prepare(
         transaction, new Session(SESSION_ID, "session", NOW), canvasCommand.commands());
 
-    verify(canvasSessionRepository).insertIfNotOwnedByOther(SESSION_ID, CANVAS_ID);
+    verify(canvasSessionRepository).insert(SESSION_ID, CANVAS_ID);
   }
 
   @Test
@@ -301,11 +301,11 @@ class HarnessCommandAcceptanceOrchestratorTest {
   }
 
   @Test
-  void rejectsOwnershipInsertConflictsAndUnexpectedRowCounts() {
-    // Relation SQL 必须精确插入一行；另一 owner 已持有或异常行数都回滚 acceptance。
+  void rejectsOwnershipInsertConflicts() {
+    // Relation 未插入或数据库报告 owner 主键冲突时都回滚 acceptance。
     AcceptCommandsCommand command = newSession(user(new TextMessageContent("ownership")));
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
-    when(chatSessionRepository.insertIfNotOwnedByOther(SESSION_ID, CHAT_ID)).thenReturn(0);
+    when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(false);
 
     assertThrows(
         IllegalStateException.class,
@@ -313,7 +313,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
             preflight.prepare(
                 transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
 
-    when(chatSessionRepository.insertIfNotOwnedByOther(SESSION_ID, CHAT_ID)).thenReturn(2);
+    when(chatSessionRepository.insert(SESSION_ID, CHAT_ID))
+        .thenThrow(new DataIntegrityViolationException("owner conflict"));
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -326,7 +327,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     // READY upload 先建立 Session retain，再删除 upload；durable payload 替换但 raw 幂等键不变。
     NewThreadCommand raw = user(new AttachmentMessageContent(UPLOAD_ID));
     AcceptCommandsCommand command = newSession(raw);
-    when(chatSessionRepository.insertIfNotOwnedByOther(SESSION_ID, CHAT_ID)).thenReturn(1);
+    when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
     when(uploadService.lockReady(UPLOAD_ID))
         .thenReturn(new StorageUploadService.ReadyUpload(BLOB_ID, "report.pdf"));
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
@@ -352,7 +353,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   void rejectsAttachmentWhenStorageDependenciesAreMissing() {
     // Upload service 与 Session ref manager 任一缺失都不能消费瞬时 attachment。
     AcceptCommandsCommand command = newSession(user(new AttachmentMessageContent(UPLOAD_ID)));
-    when(chatSessionRepository.insertIfNotOwnedByOther(SESSION_ID, CHAT_ID)).thenReturn(1);
+    when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
 
     when(uploadServices.getIfAvailable()).thenReturn(null);
@@ -376,7 +377,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   void translatesAttachmentLookupAndVerificationFailures() {
     // Storage 的 not-found 与 verification 失败都统一成为非法用户内容，且不得 retain/delete。
     AcceptCommandsCommand command = newSession(user(new AttachmentMessageContent(UPLOAD_ID)));
-    when(chatSessionRepository.insertIfNotOwnedByOther(SESSION_ID, CHAT_ID)).thenReturn(1);
+    when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
     doThrow(new StorageResourceNotFoundException("upload", UPLOAD_ID.toString()))
         .when(uploadService)
@@ -406,7 +407,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     ResourceMessageContent resource =
         ResourceMessageContent.media(BLOB_ID, "existing.txt", "preview");
     AcceptCommandsCommand command = newSession(user(resource));
-    when(chatSessionRepository.insertIfNotOwnedByOther(SESSION_ID, CHAT_ID)).thenReturn(1);
+    when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
 
     when(refManagers.getIfAvailable()).thenReturn(null);
