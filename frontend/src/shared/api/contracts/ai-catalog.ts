@@ -142,6 +142,8 @@ export interface ToolCatalogEntryDTO {
   name: string
   version: string
   description: string
+  environmentRequired: boolean
+  environmentId: string | null
 }
 
 /** 公开的全局 Agent definition；model/variant 与 config 是 Thread 运行时的输入。 */
