@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -56,7 +57,8 @@ class AgentDefinitionConfigValidatorTest {
       new AgentToolId("test.duplicate-second");
 
   @Test
-  void acceptsEnvironmentAndHostToolIds() {
+  void acceptsEnvironmentAndHostToolIdsWhenEnvironmentIsBound() {
+    // 验证任意已绑定 Environment 均可满足通用环境工具要求，且不影响同时选择宿主工具。
     String environmentToolId = BuiltinToolIds.READ.toString();
     try (Fixture fixture = new Fixture(List.of(hostTool("custom_tool", "1")))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
@@ -66,7 +68,45 @@ class AgentDefinitionConfigValidatorTest {
               new AgentSkillRefDTO("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "dev"),
               new AgentSkillRefDTO("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "ops")));
       config.setSubagents(List.of("reviewer"));
-      assertDoesNotThrow(() -> fixture.validator.validate(config));
+      assertDoesNotThrow(() -> fixture.validator.validate(config, UUID.randomUUID()));
+    }
+  }
+
+  @Test
+  void rejectsEnvironmentToolWithoutEnvironment() {
+    // 验证无 Environment 的 Agent 不能保存环境工具，避免将必然执行失败的配置持久化。
+    try (Fixture fixture = new Fixture(List.of())) {
+      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      config.setToolIds(List.of(BuiltinToolIds.READ.toString()));
+      config.setSkills(List.of());
+      config.setSubagents(List.of());
+
+      IllegalArgumentException error =
+          assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config));
+      assertTrue(error.getMessage().contains("agent has no environment"));
+    }
+  }
+
+  @Test
+  void validatesToolBoundToExactEnvironment() {
+    // 验证绑定特定 Environment 的动态工具只允许配置给同一个 Environment。
+    UUID requiredEnvironmentId = UUID.randomUUID();
+    Tool tool =
+        tool(
+            hostDescriptor("custom_tool", "1"),
+            ToolRequirements.environment(new EnvironmentId(requiredEnvironmentId)));
+    try (Fixture fixture = new Fixture(List.of(tool))) {
+      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      config.setToolIds(List.of(CUSTOM_TOOL_ID.toString()));
+      config.setSkills(List.of());
+      config.setSubagents(List.of());
+
+      assertDoesNotThrow(() -> fixture.validator.validate(config, requiredEnvironmentId));
+      IllegalArgumentException error =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> fixture.validator.validate(config, UUID.randomUUID()));
+      assertTrue(error.getMessage().contains("but agent has environment"));
     }
   }
 
@@ -224,10 +264,19 @@ class AgentDefinitionConfigValidatorTest {
   }
 
   private static Tool tool(ToolDescriptor descriptor) {
+    return tool(descriptor, ToolRequirements.none());
+  }
+
+  private static Tool tool(ToolDescriptor descriptor, ToolRequirements requirements) {
     return new Tool() {
       @Override
       public ToolDescriptor descriptor() {
         return descriptor;
+      }
+
+      @Override
+      public ToolRequirements requirements() {
+        return requirements;
       }
 
       @Override

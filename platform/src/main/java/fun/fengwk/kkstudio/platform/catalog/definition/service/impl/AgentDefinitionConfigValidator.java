@@ -51,22 +51,18 @@ public final class AgentDefinitionConfigValidator {
         throw new IllegalArgumentException("internal tool cannot be selected by an Agent: " + id);
       }
       ToolRequirements requirements = contribution.requirements();
+      if (requirements != null && requirements.environmentRequired() && environmentId == null) {
+        throw new IllegalArgumentException(
+            "tool " + id + " requires an environment but agent has no environment");
+      }
       if (requirements != null && requirements.requiredEnvironmentId() != null) {
-        UUID requiredEnv = requirements.requiredEnvironmentId().value();
-        if (environmentId == null) {
+        UUID requiredEnvironmentId = requirements.requiredEnvironmentId().value();
+        if (!requiredEnvironmentId.equals(environmentId)) {
           throw new IllegalArgumentException(
               "tool "
                   + id
                   + " requires environment "
-                  + requiredEnv
-                  + " but agent has no environment");
-        }
-        if (!requiredEnv.equals(environmentId)) {
-          throw new IllegalArgumentException(
-              "tool "
-                  + id
-                  + " requires environment "
-                  + requiredEnv
+                  + requiredEnvironmentId
                   + " but agent has environment "
                   + environmentId);
         }
