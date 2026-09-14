@@ -96,7 +96,7 @@ export function buildToolMessageView({
     context,
     preview,
     summary,
-    visualState: toolVisualState(status),
+    visualState: toolVisualState(resultMessage),
     expandable,
     expanded,
     showResult: shouldRenderResult(
@@ -119,12 +119,12 @@ export function hasToolResultError(context: ToolRenderContext): boolean {
 }
 
 function toolVisualState(
-  status?: ToolDialogueMessage['status'],
+  result?: ToolDialogueMessage,
 ): ToolVisualState {
-  if (status === 'streaming') {
+  if (result == null || result.status === 'streaming') {
     return 'pending'
   }
-  if (status === 'error') {
+  if (result.status === 'error' || Boolean(result.errorMessage)) {
     return 'error'
   }
   return 'success'

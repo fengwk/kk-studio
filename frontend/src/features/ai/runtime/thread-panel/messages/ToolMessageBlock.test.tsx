@@ -97,19 +97,55 @@ describe('ToolMessageBlock', () => {
     expect(screen.queryByRole('button', { name: '展开工具预览' })).not.toBeInTheDocument()
   })
 
-  it('defaults missing statuses to the success color state', () => {
+  it('keeps call-only messages pending while allowing result messages with missing status to default to success', () => {
     const { rerender } = render(
       <ToolMessageBlock
         message={message({ phase: 'call', status: undefined, partial: 'streaming text' })}
       />,
     )
-    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-success')
+    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'true')
     expect(screen.queryByText(/WORKING|DONE|FAILED/)).not.toBeInTheDocument()
     expect(screen.queryByText('streaming text')).not.toBeInTheDocument()
 
     rerender(<ToolMessageBlock message={message({ phase: 'result', status: undefined })} />)
     expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-success')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'false')
     expect(screen.queryByText('无文本输出')).not.toBeInTheDocument()
+  })
+
+  it('renders call-only messages with done or streaming status as pending', () => {
+    const { rerender } = render(
+      <ToolMessageBlock message={message({ phase: 'call', status: 'done' })} />,
+    )
+    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'true')
+
+    rerender(<ToolMessageBlock message={message({ phase: 'call', status: 'streaming' })} />)
+    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'true')
+  })
+
+  it('allows paired done result to override call streaming to success', () => {
+    render(
+      <ToolMessageBlock
+        message={message({ phase: 'call', status: 'streaming' })}
+        result={message({ phase: 'result', status: 'done', text: 'result text' })}
+      />,
+    )
+    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-success')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'false')
+  })
+
+  it('renders paired error result as error state', () => {
+    render(
+      <ToolMessageBlock
+        message={message({ phase: 'call', status: 'streaming' })}
+        result={message({ phase: 'result', status: 'error', errorMessage: 'execution failed' })}
+      />,
+    )
+    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-error')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'false')
   })
 
   it('shows the failed placeholder for an empty error result', () => {
