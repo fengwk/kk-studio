@@ -807,15 +807,24 @@ class EnvironmentOperationDispatcherTest {
   @Test
   void submitDrain_drainExecutorRejects_handlesGracefully() {
     ExecutorService mockDrain = mock(ExecutorService.class);
+    ScheduledExecutorService idlePollScheduler = mock(ScheduledExecutorService.class);
     doThrow(new RejectedExecutionException("drain full")).when(mockDrain).execute(any());
 
     EnvironmentOperationDispatcher customDispatcher =
         new EnvironmentOperationDispatcher(
-            nodeId, repository, transport, coordinator, mockDrain, workerExecutor, pollScheduler);
+            nodeId,
+            repository,
+            transport,
+            coordinator,
+            mockDrain,
+            workerExecutor,
+            idlePollScheduler);
 
     customDispatcher.start();
     customDispatcher.wake();
-    verify(mockDrain).execute(any());
+    customDispatcher.wake();
+    verify(mockDrain, times(2)).execute(any());
+    customDispatcher.stop();
   }
 
   /** 测试意图：验证 worker 线程池拒绝任务时，将本批未执行的操作安全回滚并重新调度（rescheduleUnsent）。 */
