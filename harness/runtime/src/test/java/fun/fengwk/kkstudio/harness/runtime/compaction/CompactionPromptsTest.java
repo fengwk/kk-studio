@@ -144,18 +144,16 @@ class CompactionPromptsTest {
   }
 
   @Test
-  void artifactResourceRetainsCloudPathInCompaction() {
-    String path =
-        "/.artifacts/tool-results/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.txt";
+  void externalizedTextResourceUsesDeterministicPlaceholder() {
     AgentMessage user =
         new AgentMessage(
             AgentMessageRole.USER,
             List.of(
-                ResourceMessageContent.artifact(
-                    new UUID(0L, 1L), "bash-result.txt", path, 1000L, 50L, "preview text")));
+                ResourceMessageContent.externalizedText(
+                    new UUID(0L, 1L), "bash-result.txt", 1000L, 50L, "preview text")));
 
     assertEquals(
-        "[User]: [Resource: bash-result.txt, path:\n" + path + "]",
+        "[User]: [Resource: bash-result.txt]",
         CompactionPrompts.serializeConversation(List.of(user)));
   }
 

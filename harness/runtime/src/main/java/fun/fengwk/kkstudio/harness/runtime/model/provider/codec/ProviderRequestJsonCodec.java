@@ -79,7 +79,7 @@ public final class ProviderRequestJsonCodec {
   private static final Set<String> TOOL_RESULT_BLOCK_FIELDS =
       orderedSet("type", "toolCallId", "toolName", "contents", "error", "detailsJson");
   private static final Set<String> RESOURCE_BLOCK_FIELDS =
-      orderedSet("type", "blobId", "name", "preview");
+      orderedSet("type", "blobId", "name", "totalBytes", "totalLines", "preview");
 
   static {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -304,6 +304,16 @@ public final class ProviderRequestJsonCodec {
       node.put("type", "resource");
       node.put("blobId", value.blobId().toString());
       node.put("name", value.name());
+      if (value.totalBytes() != null) {
+        node.put("totalBytes", value.totalBytes());
+      } else {
+        node.putNull("totalBytes");
+      }
+      if (value.totalLines() != null) {
+        node.put("totalLines", value.totalLines());
+      } else {
+        node.putNull("totalLines");
+      }
       node.put("preview", value.preview());
       return node;
     }
@@ -354,7 +364,11 @@ public final class ProviderRequestJsonCodec {
       case "resource" -> {
         requireFields(node, RESOURCE_BLOCK_FIELDS, "resource content block");
         yield new ProviderResourceBlock(
-            canonicalUuid(node, "blobId"), text(node, "name"), textAllowEmpty(node, "preview"));
+            canonicalUuid(node, "blobId"),
+            text(node, "name"),
+            decodeNullableLong(node, "totalBytes"),
+            decodeNullableLong(node, "totalLines"),
+            textAllowEmpty(node, "preview"));
       }
       default -> throw new IllegalArgumentException("unknown provider content block type: " + type);
     };
@@ -434,6 +448,17 @@ public final class ProviderRequestJsonCodec {
       throw new IllegalArgumentException(field + " must be text or null");
     }
     return value.textValue();
+  }
+
+  private static Long decodeNullableLong(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber()) {
+      throw new IllegalArgumentException(field + " must be integer or null");
+    }
+    return value.longValue();
   }
 
   private static int positiveInt(ObjectNode node, String field) {

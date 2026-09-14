@@ -91,7 +91,7 @@ public class ProjectHarnessSessionBootstrapService {
     ProjectSession existing = projectSessionRepository.findByProjectId(request.projectId());
     if (existing != null && !existing.getSessionId().equals(request.sessionId())) {
       throw new AiValidationException(
-          "project_session", "Project is already bound to a different session");
+          "session_owner", "Project is already bound to a different session");
     }
 
     BranchSettings settings = settingsMaterializer.materialize(project.getCoordinatorAgentName());
@@ -171,7 +171,7 @@ public class ProjectHarnessSessionBootstrapService {
     IssueRunSession existing = issueRunSessionRepository.findByRunId(request.runId());
     if (existing != null && !existing.getSessionId().equals(request.sessionId())) {
       throw new AiValidationException(
-          "issue_run_session", "Issue run is already bound to a different session");
+          "session_owner", "Issue run is already bound to a different session");
     }
 
     BranchSettings settings = settingsMaterializer.materialize(run.getAgentName());

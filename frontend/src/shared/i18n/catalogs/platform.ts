@@ -9,10 +9,6 @@ export const platformCatalog = {
     'en-US': 'Projects',
     'zh-CN': '项目',
   },
-  'platform.nav.files': {
-    'en-US': 'Files',
-    'zh-CN': '文件',
-  },
   'platform.nav.canvas': {
     'en-US': 'Canvas',
     'zh-CN': '画布',
@@ -28,10 +24,6 @@ export const platformCatalog = {
   'platform.nav.projectsAria': {
     'en-US': 'Projects',
     'zh-CN': '项目 Projects',
-  },
-  'platform.nav.filesAria': {
-    'en-US': 'Files',
-    'zh-CN': '文件 Files',
   },
   'platform.nav.canvasAria': {
     'en-US': 'Canvas',
@@ -92,9 +84,5 @@ export const platformCatalog = {
   'platform.loadingProject': {
     'en-US': 'Loading project',
     'zh-CN': '正在加载项目',
-  },
-  'platform.loadingFiles': {
-    'en-US': 'Loading files',
-    'zh-CN': '正在加载文件',
   },
 } satisfies LocaleCatalog

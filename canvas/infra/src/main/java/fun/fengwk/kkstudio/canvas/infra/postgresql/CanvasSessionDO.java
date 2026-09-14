@@ -4,7 +4,7 @@ import lombok.Data;
 
 import java.util.UUID;
 
-/** {@code canvas_session} 行映射。 */
+/** {@code session_owner} 的 Canvas 归属行映射。 */
 @Data
 public class CanvasSessionDO {
   private UUID sessionId;

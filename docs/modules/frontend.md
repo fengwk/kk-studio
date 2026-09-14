@@ -8,8 +8,8 @@ React/Vite/TypeScript 工程；开发时由 Vite 提供页面，发布时由 Mav
 
 ## 1. Goals
 
-- 用统一的 Workbench 宿主承载 AI、Projects、Files、Canvas、ComfyUI 和
-  Settings 六个内置 feature。
+- 用统一的 Workbench 宿主承载 AI、Projects、Canvas、ComfyUI 和 Settings
+  五个内置 feature。
 - 让 durable snapshot、command batch 和 application-event WebSocket 的职责
   清晰分离：snapshot 是事实，事件负责提示，realtime 只作为可丢失的显示
   overlay。
@@ -67,19 +67,16 @@ flowchart LR
   Routes --> Host["ExtensionHost"]
   Host --> AI["AI feature"]
   Host --> Projects["Projects feature"]
-  Host --> Files["Files feature"]
   Host --> Canvas["Canvas feature"]
   Host --> Comfy["ComfyUI feature"]
   Host --> Settings["Settings feature"]
   AI --> API["shared/api + contracts"]
   Projects --> API
-  Files --> API
   Canvas --> API
   Comfy --> API
   Settings --> API
   AI --> WS["/api/events/v1"]
   Projects --> WS
-  Files --> WS
   Canvas --> WS
   API --> Backend["HTTP API"]
 ```
@@ -93,7 +90,7 @@ flowchart LR
 | Bootstrap | 挂载 React、全局 CSS 和 provider | [main.tsx](../../frontend/src/main.tsx)、[App.tsx](../../frontend/src/app/App.tsx) |
 | App | 创建 Query、Extension、Browser preference、Application event 和 Router 上下文 | [providers.tsx](../../frontend/src/app/providers.tsx) |
 | Platform | AppShell、Workbench、贡献点注册和渲染 | [platform/](../../frontend/src/platform/) |
-| Feature | AI、Projects、Files、Canvas、ComfyUI、Settings 的页面、controller、投影和 feature CSS | [features/](../../frontend/src/features/) |
+| Feature | AI、Projects、Canvas、ComfyUI、Settings 的页面、controller、投影和 feature CSS | [features/](../../frontend/src/features/) |
 | Shared | API client、DTO contract、application events、i18n、冲突展示、基础 UI 和纯函数 | [shared/](../../frontend/src/shared/) |
 
 ### 4.2 运行时依赖
@@ -147,7 +144,6 @@ WorkbenchShell 的顺序是 `AppShell`、`header` slot、动态 `StudioRoutes` �
 | AI | `/environments` | Environment 注册、live 状态、Skill 来源、持久 inventory 与异步管理操作 |
 | Projects | `/projects` | Project 搜索、创建、编辑、归档和删除 |
 | Projects | `/projects/:projectId` | Project Snapshot、六列 Issue Board、Issue 操作与 Coordinator 对话 |
-| Files | `/files` | Cloud File System 树、文本编辑、Blob 上传/预览、移动和删除 |
 | Canvas | `/canvas` | Canvas Library |
 | Canvas | `/canvas/:canvasId` | canonical UUID Canvas Editor |
 | ComfyUI | `/comfyui` | Workflow 列表、编辑、运行 |
@@ -160,13 +156,12 @@ topbar；列表和更深路径保留 topbar。
 ### 5.3 ExtensionHost
 
 [createApplicationExtensionHost](../../frontend/src/app/extension-host.ts) 当前
-注册六个内置 extension：
+注册五个内置 extension：
 
 | id | 注册内容 |
 | --- | --- |
 | `builtin.ai` | Chat/Agent/Model/Provider/Environment pages、AI navigation、dialogs、`task` tool renderer |
 | `builtin.projects` | `/projects` 与 `/projects/:projectId` pages、全局 Project invalidation overlay |
-| `builtin.files` | `/files` page、全局 Cloud Files invalidation overlay |
 | `builtin.canvas` | `/canvas` 与 `/canvas/:canvasId` pages，lazy load Canvas |
 | `builtin.comfyui` | `/comfyui` page、workflow editor/delete dialogs |
 | `builtin.settings` | `/settings` page，lazy load Settings |
@@ -211,11 +206,9 @@ errors；`409` 由 `isConflictError` 识别，只有 `errors.reason` 精确匹�
 | [comfyui.ts](../../frontend/src/shared/api/contracts/comfyui.ts) | Workflow、input binding、run、job、cancel |
 | [system-settings.ts](../../frontend/src/shared/api/contracts/system-settings.ts) | schema sections、field types、permission、model selection、apply timing |
 
-Project 与 Cloud Files 的 DTO/codecs 当前由各自 feature 就近持有：
+Project 的 DTO/codecs 当前由 feature 就近持有：
 [projects/types.ts](../../frontend/src/features/projects/types.ts)、
-[projects/codecs.ts](../../frontend/src/features/projects/codecs.ts)、
-[files/types.ts](../../frontend/src/features/files/types.ts) 和
-[files/codecs.ts](../../frontend/src/features/files/codecs.ts)。它们同样严格校验
+[projects/codecs.ts](../../frontend/src/features/projects/codecs.ts)。它们同样严格校验
 canonical UUID、decimal long、枚举、nullability 与嵌套 shape，不把宽松 cast 当成
 wire contract。
 
@@ -237,7 +230,6 @@ wire contract。
 | [comfyui-service.ts](../../frontend/src/shared/api/comfyui-service.ts) | workflow/run、blobId upload | path segment、header 和 upload 安全过滤 |
 | [system-settings-service.ts](../../frontend/src/shared/api/system-settings-service.ts) | `/settings`、`/settings/schema` | 聚合 GET/PUT、`expectedVersion` CAS |
 | [projects-api.ts](../../frontend/src/features/projects/projects-api.ts) | `/projects`、`/issues` | Project/Issue CRUD、Snapshot、Coordinator command、依赖、输入与人工 Run 操作 |
-| [cloud-files-api.ts](../../frontend/src/features/files/cloud-files-api.ts) | `/cloud` + Storage upload | 文件 snapshot、目录/文本/节点 mutation、Blob upload/mount 与 presigned preview/download |
 
 `src/shared` 的 ESLint 规则禁止 import `@/features`；Service、contract 和
 纯函数不依赖 React component。Thread panel 还禁止 Query、API、realtime、
@@ -410,7 +402,7 @@ sequenceDiagram
   conflict、working 和 replay pending；`/compact` 只在 snapshot
   `manualCompaction.available` 时执行，并使用当前 version CAS。
 
-## 8. Projects 与 Files feature
+## 8. Projects feature
 
 ### 8.1 Project Snapshot 与 Issue Board
 
@@ -430,28 +422,13 @@ blocked 状态、当前/最近 Run 和 Coordinator Session/Thread：
   Snapshot，不在 Project feature 复制 Harness durable state；
 - Project 归档不隐式删除，深度删除只在独立确认弹窗中执行。
 
-### 8.2 Cloud Files 树与内容
+### 8.2 全局 invalidation
 
-[FilesPage](../../frontend/src/features/files/FilesPage.tsx) 以 CloudPath 作为树节点
-identity。根目录、已展开目录和当前 selection 分别读取 Snapshot；selection
-使用递增 request id 丢弃迟到响应：
-
-- DIRECTORY 展示 children；TEXT 进入带 revision CAS 的 `TextEditor`；BLOB
-  通过 Storage presigned URL 预览或下载；
-- 新建目录、保存文本、移动和删除调用 `/api/cloud/*`；Blob 先执行
-  Storage reserve/PUT/complete，再以 upload id 挂载到目标 CloudPath；
-- 文本冲突保留本地 draft，用户可放弃 draft 读取最新内容，或明确以最新
-  revision 重试；
-- 普通树不枚举 `/.artifacts`，但宿主可通过 `openPath` 打开精确 artifact path。
-
-### 8.3 全局 invalidation
-
-`ProjectsInvalidationBridge` 与 `CloudFilesInvalidationBridge` 是 ExtensionHost
-overlay。它们分别订阅 `{kind: "projects"}` 和 `{kind: "cloud-files"}`：
+`ProjectsInvalidationBridge` 是 ExtensionHost overlay。它订阅
+`{kind: "projects"}`：
 
 - Project `changed` 将 canonical `projectId` 交给 feature-local hook；列表读取
   全量 Project 列表，详情页只在 id 匹配时读取 Snapshot；
-- Cloud Files `resync` 重新读取根目录、已展开目录与当前 selection；
 - 首次连接与 reconnect 后的每个 `subscribed` ack 都触发一次全局 refresh，覆盖
   初始读取/建连窗口与断线窗口；
 - 资源级 `error` 同样触发权威回读，使本地状态保持 fail-closed；
@@ -627,7 +604,6 @@ owner，Canvas feature 只拥有 Canvas 专属样式；新组件复用 token，�
 | Bootstrap/platform | App redirect、AppShell immersive route、Escape guard、ExtensionHost registry、Workbench slot |
 | AI | catalog form/normalizer、Chat pane target/layout、Composer、command batch、Thread timeline、snapshot/realtime、stop/approval/task、messages/tool renderer |
 | Projects | list/detail、Project CAS、Issue Board/detail/actions、Coordinator conversation、global invalidation |
-| Files | lazy tree、selection race、text CAS/conflict、Blob upload/preview、move/delete、global invalidation |
 | Canvas | page/editor/stage、controller、command queue、entity patch、version events、transform batch、upload、nodes、Function run、viewport |
 | ComfyUI | workflow validation、page/card/panel/editor、run lifecycle、modal |
 | Settings | schema renderer/validation、draft、permission、browser preference、server CAS、extension |

@@ -174,9 +174,6 @@ public final class CompactionPrompts {
     if (label == null || label.isBlank()) {
       label = resource.blobId().toString();
     }
-    if (resource.artifactPath() != null) {
-      return "[Resource: " + label + ", path:\n" + resource.artifactPath() + "]";
-    }
     return "[Resource: " + label + "]";
   }
 

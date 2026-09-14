@@ -27,10 +27,9 @@ class AgentMessageJsonCodecTest {
                     UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
                     "hello.txt",
                     "preview"),
-                ResourceMessageContent.artifact(
+                ResourceMessageContent.externalizedText(
                     UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
                     "tool-result.txt",
-                    "/.artifacts/tool-results/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.txt",
                     100L,
                     5L,
                     "preview")));
@@ -92,11 +91,11 @@ class AgentMessageJsonCodecTest {
                         List.of(new TextMessageContent("ok")),
                         false,
                         "{}")))));
-    // resource 是扁平精确字段：blobId/name 必须显式写出，可空 preview/artifact 字段显式写出为 JSON null。
+    // resource 是扁平精确字段：blobId/name 必须显式写出，可空 totals/preview 字段显式写出为 JSON null。
     assertEquals(
         "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"resource\","
             + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-            + "\"name\":\"a.txt\",\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}",
+            + "\"name\":\"a.txt\",\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}",
         codec.encode(
             new AgentMessage(
                 AgentMessageRole.ASSISTANT,
@@ -249,42 +248,42 @@ class AgentMessageJsonCodecTest {
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\",\"blobId\":\"x\","
-                    + "\"name\":\"a\",\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
+                    + "\"name\":\"a\",\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
                     + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-                    + "\"name\":null,\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
+                    + "\"name\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
                     + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-                    + "\"name\":\"\",\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
+                    + "\"name\":\"\",\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
                     + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-                    + "\"name\":5,\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
+                    + "\"name\":5,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
                     + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-                    + "\"name\":\"a\",\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":5}]}"));
+                    + "\"name\":\"a\",\"totalBytes\":null,\"totalLines\":null,\"preview\":5}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
                     + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-                    + "\"name\":\"a\",\"artifactPath\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null,\"extra\":1}]}"));
+                    + "\"name\":\"a\",\"totalBytes\":null,\"totalLines\":null,\"preview\":null,\"extra\":1}]}"));
     // 遗漏或多余字段
     assertThrows(
         IllegalArgumentException.class,

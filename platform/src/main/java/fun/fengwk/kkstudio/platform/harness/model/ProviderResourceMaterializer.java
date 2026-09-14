@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolArtifactOutputFormatter;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
@@ -103,13 +102,8 @@ public final class ProviderResourceMaterializer {
     if (!(block instanceof ProviderResourceBlock resource)) {
       return block;
     }
-    if (resource.isTextArtifact()) {
-      return new ProviderTextBlock(
-          ToolArtifactOutputFormatter.formatNotice(
-              resource.artifactPath(),
-              resource.totalBytes(),
-              resource.totalLines(),
-              resource.preview()));
+    if (resource.isExternalizedText()) {
+      return new ProviderTextBlock(formatExternalizedText(resource));
     }
     StorageBlob blob = blobManager == null ? null : blobManager.getBlob(resource.blobId());
     String mediaType =
@@ -145,6 +139,26 @@ public final class ProviderResourceMaterializer {
         + blob.getMediaType()
         + ";base64,"
         + Base64.getEncoder().encodeToString(content.getBytes());
+  }
+
+  private static String formatExternalizedText(ProviderResourceBlock resource) {
+    StringBuilder sb = new StringBuilder();
+    sb.append(
+        "[Output externalized. The preview below is incomplete; do not treat it as the full"
+            + " result.\n\n");
+    sb.append("The complete output has been saved as a downloadable user attachment: ")
+        .append(resource.name())
+        .append("\n");
+    sb.append("Size: ")
+        .append(resource.totalBytes())
+        .append(" bytes, ")
+        .append(resource.totalLines())
+        .append(" lines]");
+    sb.append("\n\n--- preview ---");
+    if (resource.preview() != null && !resource.preview().isEmpty()) {
+      sb.append("\n").append(resource.preview());
+    }
+    return sb.toString();
   }
 
   /**

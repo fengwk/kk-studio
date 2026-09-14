@@ -639,13 +639,7 @@ public final class ThreadProcessor {
     for (ToolInvocation sibling : siblings) {
       ToolOutcomeAppender.Applied applied =
           ToolOutcomeAppender.append(
-              tx,
-              thread.id(),
-              sessionId,
-              parentId,
-              sibling,
-              mutationNow,
-              toolResultHistoryMaterializer);
+              tx, sessionId, parentId, sibling, mutationNow, toolResultHistoryMaterializer);
       parentId = applied.headEntryId();
     }
     UUID turnEndId = tx.nextId();

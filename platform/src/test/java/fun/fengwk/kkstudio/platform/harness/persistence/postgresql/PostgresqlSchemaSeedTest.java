@@ -39,7 +39,7 @@ import java.util.Objects;
 class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-  private static final String VERSIONED_MIGRATIONS = "1,2,3,4,5,6,7,8";
+  private static final String VERSIONED_MIGRATIONS = "1";
 
   @BeforeEach
   void setup() throws Exception {
@@ -260,7 +260,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     }
   }
 
-  /** 验证从空库执行 Flyway bootstrap 时，各 profile 应用全部 versioned migrations 与对应 repeatable seeds。 */
+  /** 验证从空库执行 Flyway bootstrap 时，各 profile 应用唯一 baseline 与对应 repeatable seeds。 */
   @Test
   void cleanSlateBootstrapAcrossAllProfiles() throws Exception {
     // 1. 空库 bootstrap dev profile
@@ -317,84 +317,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     }
   }
 
-  /** 验证 V2 从真实 V1 数据提取 Anthropic alias，并把旧 Variant 收敛为 reasoning-only 结构；迁移后不保留第二模型映射源或已删除字段。 */
-  @Test
-  void modelIdentityMigrationConvergesLegacyAliasAndVariants() throws Exception {
-    Path tempDir = Files.createTempDirectory("flyway-model-identity-migration-test");
-    try {
-      Path migrationDir = Files.createDirectories(tempDir.resolve("migration"));
-      Path v1File = migrationDir.resolve("V1__schema.sql");
-      Path v2File = migrationDir.resolve("V2__model_identity_and_variant.sql");
-      Files.writeString(
-          v1File, readResource("db/migration/V1__schema.sql"), StandardCharsets.UTF_8);
-      String migrationLoc = "filesystem:" + migrationDir.toAbsolutePath();
-
-      try (Connection conn = newConnection()) {
-        resetDatabase(conn);
-        migrate(conn, migrationLoc);
-        try (Statement st = conn.createStatement()) {
-          st.executeUpdate(
-              """
-              insert into agent_provider (
-                  name, provider_type, config, connection_generation_id
-              ) values (
-                  'legacy-anthropic',
-                  'anthropic',
-                  '{"modelAliases":{"logical-model":"wire-model"}}'::jsonb,
-                  '00000000-0000-0000-0000-000000000099'::uuid
-              )
-              """);
-          st.executeUpdate(
-              """
-              insert into agent_model (provider_name, name, config)
-              values (
-                  'legacy-anthropic',
-                  'logical-model',
-                  '{
-                    "abilities":{"reasoning":true},
-                    "variants":[
-                      {"id":"default","temperature":0.2},
-                      {"id":"off","reasoningEffort":"none","maxOutputTokens":1024},
-                      {"id":"minimal","reasoningEffort":"minimal","topP":0.9},
-                      {"id":"max","reasoningEffort":"max","stopSequences":["END"]}
-                    ]
-                  }'::jsonb
-              )
-              """);
-        }
-
-        Files.writeString(
-            v2File,
-            readResource("db/migration/V2__model_identity_and_variant.sql"),
-            StandardCharsets.UTF_8);
-        migrate(conn, migrationLoc);
-
-        try (Statement st = conn.createStatement()) {
-          assertEquals(
-              "wire-model",
-              singleString(
-                  st,
-                  "select model_id from agent_model"
-                      + " where provider_name = 'legacy-anthropic' and name = 'logical-model'"));
-          assertEquals(
-              "{}",
-              singleString(
-                  st, "select config::text from agent_provider where name = 'legacy-anthropic'"));
-          assertEquals(
-              "[{\"id\": \"default\"}, {\"id\": \"off\", \"reasoningEffort\": \"off\"},"
-                  + " {\"id\": \"minimal\", \"reasoningEffort\": \"low\"},"
-                  + " {\"id\": \"max\", \"reasoningEffort\": \"high\"}]",
-              singleString(
-                  st,
-                  "select (config -> 'variants')::text from agent_model"
-                      + " where provider_name = 'legacy-anthropic' and name = 'logical-model'"));
-        }
-      }
-    } finally {
-      deleteRecursively(tempDir);
-    }
-  }
-
   /**
    * 验证当 repeatable migration 文件 checksum 发生变化时，Flyway 能够真实重跑该 repeatable migration 并记录第二次 成功执行历史，同时
    * seed 的确定性 replacement 能够将被人为篡改的数据（包括多余行和被修改的属性）彻底收敛恢复为 SQL 最新期望值。
@@ -407,14 +329,11 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       Path seedDir = Files.createDirectories(tempDir.resolve("seed"));
 
       String v1Content = readResource("db/migration/V1__schema.sql");
-      String v2Content = readResource("db/migration/V2__model_identity_and_variant.sql");
       String rDevContent = readResource("db/seed/dev/R__dev_seed.sql");
 
       Path v1File = migrationDir.resolve("V1__schema.sql");
-      Path v2File = migrationDir.resolve("V2__model_identity_and_variant.sql");
       Path rDevFile = seedDir.resolve("R__dev_seed.sql");
       Files.writeString(v1File, v1Content, StandardCharsets.UTF_8);
-      Files.writeString(v2File, v2Content, StandardCharsets.UTF_8);
       Files.writeString(rDevFile, rDevContent, StandardCharsets.UTF_8);
 
       String migrationLoc = "filesystem:" + migrationDir.toAbsolutePath();
@@ -423,7 +342,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       try (Connection conn = newConnection()) {
         resetDatabase(conn);
 
-        // 1. 首次 migrate：应用 V1 baseline、V2 model 身份 migration 与初始 R__dev_seed
+        // 1. 首次 migrate：应用唯一 V1 baseline 与初始 R__dev_seed
         migrate(conn, migrationLoc, seedLoc);
         assertSingleLong(
             conn,

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.web.events;
 
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
-import fun.fengwk.kkstudio.platform.cloudfs.event.CloudFilesEventSource;
 import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
 
 import java.util.ArrayDeque;
@@ -18,9 +17,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 传输无关的事件通道 Hub：按资源维护本地订阅与上游生命周期，供 WebSocket 等传输层使用。
  *
- * <p>每个资源只有一组共享上游：Thread 使用 version + realtime source，Canvas 使用 version source，Projects 与 Cloud
- * Files 使用全局失效 source。首个本地订阅建立上游，最后一个释放时关闭；重复订阅幂等由传输层保证。订阅原子返回建立瞬间的 durable cursor 作为 {@code
- * subscribed} ack 游标（全局失效资源固定为 0）。
+ * <p>每个资源只有一组共享上游：Thread 使用 version + realtime source，Canvas 使用 version source，Projects 使用全局失效
+ * source。首个本地订阅建立上游，最后一个释放时关闭；重复订阅幂等由传输层保证。订阅原子返回建立瞬间的 durable cursor 作为 {@code subscribed} ack
+ * 游标（全局失效资源固定为 0）。
  *
  * <p>同一资源的状态（上游句柄、订阅者集合、early 缓冲）由该状态的监视器串行化；map 只做「生命周期围栏内创建/获取」与「状态锁内的 identity 条件删除」。{@link
  * #lifecycleFence} 只把「{@link #closed} 边界」与「向 map 发布新状态」串在同一把锁上：{@link #close()} 一旦设立 closed，之后的
@@ -35,8 +34,7 @@ final class ApplicationEventHub implements AutoCloseable {
   enum ResourceKind {
     THREAD,
     CANVAS,
-    PROJECTS,
-    CLOUD_FILES
+    PROJECTS
   }
 
   record ResourceKey(ResourceKind kind, UUID id) {
@@ -45,7 +43,7 @@ final class ApplicationEventHub implements AutoCloseable {
       if ((kind == ResourceKind.THREAD || kind == ResourceKind.CANVAS) && id == null) {
         throw new NullPointerException("id");
       }
-      if ((kind == ResourceKind.PROJECTS || kind == ResourceKind.CLOUD_FILES) && id != null) {
+      if (kind == ResourceKind.PROJECTS && id != null) {
         throw new IllegalArgumentException("global resource must not have an id");
       }
     }
@@ -90,7 +88,6 @@ final class ApplicationEventHub implements AutoCloseable {
   private final RealtimeEventSource realtimeSource;
   private final CanvasVersionEventSource canvasVersionSource;
   private final ProjectInvalidationHub projectInvalidationHub;
-  private final CloudFilesEventSource cloudFilesEventSource;
   private final int maxBufferedSignals;
   private final Map<ResourceKey, ResourceState> resources = new ConcurrentHashMap<>();
 
@@ -112,15 +109,12 @@ final class ApplicationEventHub implements AutoCloseable {
       RealtimeEventSource realtimeSource,
       CanvasVersionEventSource canvasVersionSource,
       ProjectInvalidationHub projectInvalidationHub,
-      CloudFilesEventSource cloudFilesEventSource,
       int maxBufferedSignals) {
     this.threadVersionSource = Objects.requireNonNull(threadVersionSource, "threadVersionSource");
     this.realtimeSource = Objects.requireNonNull(realtimeSource, "realtimeSource");
     this.canvasVersionSource = Objects.requireNonNull(canvasVersionSource, "canvasVersionSource");
     this.projectInvalidationHub =
         Objects.requireNonNull(projectInvalidationHub, "projectInvalidationHub");
-    this.cloudFilesEventSource =
-        Objects.requireNonNull(cloudFilesEventSource, "cloudFilesEventSource");
     if (maxBufferedSignals <= 0) {
       throw new IllegalArgumentException("maxBufferedSignals must be positive");
     }
@@ -232,8 +226,6 @@ final class ApplicationEventHub implements AutoCloseable {
           projectInvalidationHub.subscribe(
               projectId -> fanout(state, new Signal.ProjectChanged(projectId)),
               () -> fanout(state, new Signal.Resync()));
-      case CLOUD_FILES -> state.invalidationHandle =
-          cloudFilesEventSource.subscribe(() -> fanout(state, new Signal.Resync()));
     }
   }
 
