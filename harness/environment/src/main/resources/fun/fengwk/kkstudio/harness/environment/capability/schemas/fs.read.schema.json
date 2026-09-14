@@ -15,7 +15,11 @@
     },
     "limit": {
       "type": "integer",
-      "description": "Positive integer maximum number of text lines to return. Defaults to 200 and must not exceed 2000."
+      "description": "Positive integer maximum number of text lines to return. Defaults to 200 and must not exceed 2000. When column_offset is specified, limit defaults to 1 and must equal 1."
+    },
+    "column_offset": {
+      "type": "integer",
+      "description": "Optional positive integer 1-based offset in Unicode code points within the selected text line. Text files only. When specified, limit defaults to 1 and must equal 1."
     }
   },
   "required": [

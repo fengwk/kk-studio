@@ -516,7 +516,7 @@ class DaemonRuntimeTest {
 
       // 省略 workdir：schema 必填校验在构造执行请求时失败 → 直接 FAILED，绝不发出 STARTED。
       transport.receive(
-          invoke("missing-workdir", 1, "fs.read", "2", 100, "{\"path\":\"local.txt\"}"));
+          invoke("missing-workdir", 1, "fs.read", "3", 100, "{\"path\":\"local.txt\"}"));
       List<DaemonEnvelope> missing = transport.takeMessages(2);
       assertMessageTypes(missing, ACK, DaemonMessageType.FAILED);
       String failure = missing.get(1).payloadJson();
@@ -529,7 +529,7 @@ class DaemonRuntimeTest {
               "explicit-workdir",
               2,
               "fs.read",
-              "2",
+              "3",
               100,
               "{\"path\":\"local.txt\",\"workdir\":\"" + jsonEscape(root.toString()) + "\"}"));
       assertMessageTypes(transport.takeMessages(3), ACK, STARTED, DaemonMessageType.COMPLETED);

@@ -25,6 +25,7 @@ public final class ReadCapability extends AbstractCodingCapability {
 
   private static final int DEFAULT_LIMIT = 200;
   private static final int MAX_LIMIT = 2000;
+  private static final int MAX_LINE_CODE_POINTS = 2000;
   private static final long MAX_FILE_BYTES = 64 * 1024 * 1024L;
   private static final int MAX_RESPONSE_BYTES = 48 * 1024;
 
@@ -40,8 +41,12 @@ public final class ReadCapability extends AbstractCodingCapability {
     Path workdir = EnvironmentPaths.workdir(string(args, "workdir"));
     Path path = EnvironmentPaths.existing(rawPath, workdir);
     String displayPath = EnvironmentPaths.displayPath(path, workdir, rawPath);
+    Integer columnOffset = parseOptionalPositiveInt(args, "column_offset");
 
     if (Files.isDirectory(path)) {
+      if (columnOffset != null) {
+        throw new IllegalArgumentException("column_offset is only supported for text files");
+      }
       List<String> names;
       try (var entries = Files.list(path)) {
         names =
@@ -56,34 +61,56 @@ public final class ReadCapability extends AbstractCodingCapability {
       int start = Math.min(offset, totalEntries + 1);
       int end = Math.min(totalEntries, start + limit - 1);
 
-      List<String> output = new ArrayList<>();
-      output.add("path: " + displayPath);
-      output.add("kind: directory");
-      output.add("");
-
-      int currentBytes = 0;
-      for (String headerLine : output) {
-        currentBytes += headerLine.getBytes(StandardCharsets.UTF_8).length + 1;
+      List<String> headers = List.of("path: " + displayPath, "kind: directory", "");
+      if (offset > totalEntries) {
+        List<String> output = new ArrayList<>(headers);
+        output.add("[Showing 0 entries of " + totalEntries + ".]");
+        return textResponse(request.call().id(), String.join("\n", output));
       }
 
       int actualEnd = start - 1;
+      List<String> entriesList = new ArrayList<>();
       if (start <= totalEntries) {
         for (int i = start; i <= end; i++) {
           String entry = names.get(i - 1);
-          int entryBytes = entry.getBytes(StandardCharsets.UTF_8).length + 1;
-          if (currentBytes + entryBytes + 150 > MAX_RESPONSE_BYTES) {
+          List<String> candidateEntries = new ArrayList<>(entriesList);
+          candidateEntries.add(entry);
+
+          List<String> candidateOutput = new ArrayList<>(headers);
+          candidateOutput.addAll(candidateEntries);
+          if (i < totalEntries) {
+            candidateOutput.add("");
+            candidateOutput.add(
+                "[Showing entries "
+                    + start
+                    + "-"
+                    + i
+                    + " of "
+                    + totalEntries
+                    + ". Re-run read with offset="
+                    + (i + 1)
+                    + " to continue.]");
+          }
+          int candidateBytes = responseUtf8Bytes(candidateOutput);
+          if (candidateBytes > MAX_RESPONSE_BYTES) {
+            if (i == start) {
+              throw new IllegalStateException(
+                  "directory read response exceeds "
+                      + MAX_RESPONSE_BYTES
+                      + " bytes on first entry: "
+                      + candidateBytes
+                      + " bytes");
+            }
             break;
           }
-          output.add(entry);
-          currentBytes += entryBytes;
+          entriesList = candidateEntries;
           actualEnd = i;
         }
       }
 
-      if (offset > totalEntries) {
-        output.add("");
-        output.add("[Showing 0 entries of " + totalEntries + ".]");
-      } else if (actualEnd < totalEntries) {
+      List<String> output = new ArrayList<>(headers);
+      output.addAll(entriesList);
+      if (actualEnd < totalEntries && start <= totalEntries) {
         output.add("");
         output.add(
             "[Showing entries "
@@ -97,7 +124,7 @@ public final class ReadCapability extends AbstractCodingCapability {
                 + " to continue.]");
       }
 
-      return EnvironmentCapabilityResult.text(request.call().id(), String.join("\n", output));
+      return textResponse(request.call().id(), String.join("\n", output));
     }
 
     long fileSize = Files.size(path);
@@ -109,6 +136,9 @@ public final class ReadCapability extends AbstractCodingCapability {
 
     String imageMime = detectImageMediaType(bytes);
     if (imageMime != null) {
+      if (columnOffset != null) {
+        throw new IllegalArgumentException("column_offset is only supported for text files");
+      }
       DaemonResourceRef stored = config.resourceStore().store(bytes, imageMime);
       ResourceRef ref =
           new ResourceRef(
@@ -119,7 +149,11 @@ public final class ReadCapability extends AbstractCodingCapability {
 
     TextFileCodec.Decoded decoded = TextFileCodec.decode(bytes);
     int offset = optionalPositiveInt(args, "offset", 1, Integer.MAX_VALUE);
-    int limit = optionalPositiveInt(args, "limit", DEFAULT_LIMIT, MAX_LIMIT);
+    int defaultLimit = columnOffset != null ? 1 : DEFAULT_LIMIT;
+    int limit = optionalPositiveInt(args, "limit", defaultLimit, MAX_LIMIT);
+    if (columnOffset != null && limit != 1) {
+      throw new IllegalArgumentException("limit must be 1 when column_offset is specified");
+    }
     String original = decoded.text();
     boolean endsWithNewline = original.endsWith("\n") || original.endsWith("\r");
     String normalized = original.replace("\r\n", "\n").replace('\r', '\n');
@@ -138,62 +172,62 @@ public final class ReadCapability extends AbstractCodingCapability {
             ? ("supported" + (lang != null ? " (" + lang + ")" : ""))
             : "unsupported";
 
-    List<String> output = new ArrayList<>();
-    output.add("path: " + displayPath);
-    output.add("ends_with_newline: " + (endsWithNewline ? "yes" : "no"));
-    output.add("lsp: " + lspStatus);
-    output.add("");
+    List<String> headers = new ArrayList<>();
+    headers.add("path: " + displayPath);
+    headers.add("ends_with_newline: " + (endsWithNewline ? "yes" : "no"));
+    headers.add("lsp: " + lspStatus);
+    headers.add("");
 
-    int currentBytes = 0;
-    for (String headerLine : output) {
-      currentBytes += headerLine.getBytes(StandardCharsets.UTF_8).length + 1;
+    if (offset > totalLines) {
+      List<String> output = new ArrayList<>(headers);
+      output.add("[Showing 0 lines of " + totalLines + ".]");
+      return textResponse(request.call().id(), String.join("\n", output));
     }
 
     int width = Math.max(1, Integer.toString(Math.max(1, totalLines)).length());
-    boolean hasLineTruncation = false;
     int actualEnd = start - 1;
+    List<String> bodyLines = new ArrayList<>();
+    List<String> columnFooters = new ArrayList<>();
 
     if (start <= totalLines) {
       for (int index = start; index <= end; index++) {
-        String line = lines.get(index - 1).replace("\r", "\\r").replace("\u0000", "\\0");
-        int cpCount = line.codePointCount(0, line.length());
-        if (cpCount > 2000) {
-          int cut = line.offsetByCodePoints(0, 2000);
-          line = line.substring(0, cut) + "... (line truncated to 2000 chars)";
-          hasLineTruncation = true;
+        String line = lines.get(index - 1);
+        LineSlice slice = sliceLine(line, index, width, columnOffset);
+
+        List<String> candidateBody = new ArrayList<>(bodyLines);
+        if (slice.formatted() != null) {
+          candidateBody.add(slice.formatted());
         }
-        String formatted = String.format("%" + width + "d|%s", index, line);
-        int lineBytes = formatted.getBytes(StandardCharsets.UTF_8).length + 1;
-        if (currentBytes + lineBytes + 200 > MAX_RESPONSE_BYTES) {
+        List<String> candidateColumnFooters = new ArrayList<>(columnFooters);
+        if (slice.columnFooter() != null) {
+          candidateColumnFooters.add(slice.columnFooter());
+        }
+        List<String> candidateFooters =
+            buildFooters(start, index, totalLines, columnOffset, candidateColumnFooters);
+        List<String> candidateOutput = assembleOutput(headers, candidateBody, candidateFooters);
+        int candidateBytes = responseUtf8Bytes(candidateOutput);
+
+        if (candidateBytes > MAX_RESPONSE_BYTES) {
+          if (index == start) {
+            throw new IllegalStateException(
+                "read response exceeds "
+                    + MAX_RESPONSE_BYTES
+                    + " bytes on first line: "
+                    + candidateBytes
+                    + " bytes");
+          }
           break;
         }
-        output.add(formatted);
-        currentBytes += lineBytes;
+
+        bodyLines = candidateBody;
+        columnFooters = candidateColumnFooters;
         actualEnd = index;
       }
     }
 
-    if (offset > totalLines) {
-      output.add("");
-      output.add("[Showing 0 lines of " + totalLines + ".]");
-    } else if (actualEnd < totalLines) {
-      output.add("");
-      output.add(
-          "[Showing lines "
-              + start
-              + "-"
-              + actualEnd
-              + " of "
-              + totalLines
-              + ". Re-run read with offset="
-              + (actualEnd + 1)
-              + " to continue.]");
-    }
-    if (hasLineTruncation) {
-      output.add("Note: one or more lines were truncated to 2000 characters.");
-    }
-
-    return EnvironmentCapabilityResult.text(request.call().id(), String.join("\n", output));
+    List<String> footers = buildFooters(start, actualEnd, totalLines, columnOffset, columnFooters);
+    List<String> output = assembleOutput(headers, bodyLines, footers);
+    return textResponse(request.call().id(), String.join("\n", output));
   }
 
   static String detectImageMediaType(byte[] bytes) {
@@ -270,9 +304,122 @@ public final class ReadCapability extends AbstractCodingCapability {
     return null;
   }
 
+  private record LineSlice(String formatted, String columnFooter) {}
+
+  private static LineSlice sliceLine(String line, int index, int width, Integer columnOffset) {
+    int totalLineCodePoints = line.codePointCount(0, line.length());
+    int colStart = columnOffset != null ? columnOffset : 1;
+    if (colStart > totalLineCodePoints) {
+      if (columnOffset != null) {
+        return new LineSlice(
+            null, "[Showing 0 columns of " + totalLineCodePoints + " on line " + index + ".]");
+      }
+      return new LineSlice(String.format("%" + width + "d|", index), null);
+    }
+    int colEnd = Math.min(totalLineCodePoints, colStart + MAX_LINE_CODE_POINTS - 1);
+    int charStart = line.offsetByCodePoints(0, colStart - 1);
+    int charEnd = line.offsetByCodePoints(0, colEnd);
+    String fragment = line.substring(charStart, charEnd);
+    String formatted = String.format("%" + width + "d|%s", index, fragment);
+    String columnFooter;
+    if (colEnd < totalLineCodePoints) {
+      columnFooter =
+          "[Showing columns "
+              + colStart
+              + "-"
+              + colEnd
+              + " of "
+              + totalLineCodePoints
+              + " on line "
+              + index
+              + ". Re-run read with offset="
+              + index
+              + ", limit=1, column_offset="
+              + (colEnd + 1)
+              + " to continue.]";
+    } else if (columnOffset != null) {
+      columnFooter =
+          "[Showing columns "
+              + colStart
+              + "-"
+              + colEnd
+              + " of "
+              + totalLineCodePoints
+              + " on line "
+              + index
+              + ".]";
+    } else {
+      columnFooter = null;
+    }
+    return new LineSlice(formatted, columnFooter);
+  }
+
+  private static Integer parseOptionalPositiveInt(JsonNode args, String name) {
+    JsonNode value = args.get(name);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isInt() || value.intValue() < 1) {
+      throw new IllegalArgumentException(name + " must be a positive integer");
+    }
+    return value.intValue();
+  }
+
   private static String directoryEntryName(Path entry) {
     Path fileName = entry.getFileName();
     String name = fileName == null ? entry.toString() : fileName.toString();
     return name + (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS) ? "/" : "");
+  }
+
+  static EnvironmentCapabilityResult textResponse(String callId, String text) {
+    int bytes = text.getBytes(StandardCharsets.UTF_8).length;
+    if (bytes > MAX_RESPONSE_BYTES) {
+      throw new IllegalStateException(
+          "read response exceeds " + MAX_RESPONSE_BYTES + " bytes invariant: " + bytes + " bytes");
+    }
+    return EnvironmentCapabilityResult.text(callId, text);
+  }
+
+  private static int responseUtf8Bytes(List<String> lines) {
+    if (lines.isEmpty()) {
+      return 0;
+    }
+    int bytes = lines.size() - 1;
+    for (String line : lines) {
+      bytes += line.getBytes(StandardCharsets.UTF_8).length;
+    }
+    return bytes;
+  }
+
+  private static List<String> buildFooters(
+      int start, int actualEnd, int totalLines, Integer columnOffset, List<String> columnFooters) {
+    List<String> footers = new ArrayList<>();
+    if (actualEnd < totalLines && start <= totalLines && columnOffset == null) {
+      footers.add(
+          "[Showing lines "
+              + start
+              + "-"
+              + actualEnd
+              + " of "
+              + totalLines
+              + ". Re-run read with offset="
+              + (actualEnd + 1)
+              + " to continue.]");
+    }
+    footers.addAll(columnFooters);
+    return footers;
+  }
+
+  private static List<String> assembleOutput(
+      List<String> headers, List<String> bodyLines, List<String> footers) {
+    List<String> output = new ArrayList<>(headers);
+    output.addAll(bodyLines);
+    if (!footers.isEmpty()) {
+      if (!bodyLines.isEmpty()) {
+        output.add("");
+      }
+      output.addAll(footers);
+    }
+    return output;
   }
 }

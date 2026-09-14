@@ -33,7 +33,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.SKILL_LOAD,
             EnvironmentCapabilityIds.MCP_LOCAL_CALL);
 
-    assertEquals("3", EnvironmentCapabilityCatalog.version());
+    assertEquals("4", EnvironmentCapabilityCatalog.version());
     assertEquals(
         List.of(
             "fs.read",
@@ -67,7 +67,9 @@ class EnvironmentCapabilityCatalogTest {
               ? EnvironmentCapabilityCatalog.SKILL_LOAD_VERSION
               : descriptor.id().equals(EnvironmentCapabilityIds.MCP_LOCAL_CALL)
                   ? EnvironmentCapabilityCatalog.VERSION
-                  : EnvironmentCapabilityCatalog.WORKDIR_VERSION;
+                  : descriptor.id().equals(EnvironmentCapabilityIds.FS_READ)
+                      ? EnvironmentCapabilityCatalog.FS_READ_VERSION
+                      : EnvironmentCapabilityCatalog.WORKDIR_VERSION;
       assertEquals(expectedVersion, descriptor.version(), descriptor.id().value());
     }
     // workdir 语义由 capability ID 决定，不能从可能被其它能力独立使用的版本号推断。

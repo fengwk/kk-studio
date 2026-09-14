@@ -771,6 +771,12 @@ class EnvironmentDaemonServerTest {
                 + "\",\"capabilityCatalogVersion\":\"999\"}"));
     assertTrue(
         helloRejected(
+            "channel-catalog-v3-mismatch",
+            "{\"protocolVersion\":1,\"registrationToken\":\""
+                + TOKEN
+                + "\",\"capabilityCatalogVersion\":\"3\"}"));
+    assertTrue(
+        helloRejected(
             "channel-unexpected-field",
             "{\"protocolVersion\":1,\"registrationToken\":\""
                 + TOKEN

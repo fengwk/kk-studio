@@ -93,7 +93,7 @@ final class TextFileCodec {
       throw new IllegalArgumentException("file appears to be binary: invalid text encoding", error);
     }
     String text = chars.toString();
-    if (bomLength == 0 && text.indexOf('\u0000') >= 0) {
+    if (text.indexOf('\u0000') >= 0) {
       throw new IllegalArgumentException("file appears to be binary: contains NUL character");
     }
     return new Decoded(text, charset, bomLength);

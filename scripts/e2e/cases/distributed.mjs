@@ -134,7 +134,7 @@ registerCase({
   level: 'L5',
   title: '双节点租约路由：DB 权威投影跨节点一致',
   requires: ['distributed'],
-  docs: '固定环境 distributed-a=33333333-3333-3333-3333-333333333333 连 app-a，distributed-b=44444444-4444-4444-4444-444444444444 连 app-b；两个 App 都投影两者 READY，且同一 Environment 在两个节点上的 id/name/version/status/ready/rootPath/capabilities 逐项一致（路由事实来自 DB，不依赖本机 websocket），coding capability 为 workdir 版（fs.read@2）',
+  docs: '固定环境 distributed-a=33333333-3333-3333-3333-333333333333 连 app-a，distributed-b=44444444-4444-4444-4444-444444444444 连 app-b；两个 App 都投影两者 READY，且同一 Environment 在两个节点上的 id/name/version/status/ready/rootPath/capabilities 逐项一致（路由事实来自 DB，不依赖本机 websocket），coding capability 为 workdir 版（fs.read@3）',
   async run(ctx) {
     assertDistributedContext(ctx)
 
@@ -181,9 +181,9 @@ registerCase({
       )
       assert(
         (fromA.capabilities || []).some(
-          (capability) => capability.id === 'fs.read' && capability.version === '2',
+          (capability) => capability.id === 'fs.read' && capability.version === '3',
         ),
-        `${label}: coding capabilities must advertise the workdir contract version, got ${capabilityKey(fromA)}`,
+        `${label}: coding capabilities must advertise fs.read@3, got ${capabilityKey(fromA)}`,
       )
     }
 
