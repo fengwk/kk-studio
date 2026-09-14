@@ -14,6 +14,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -80,7 +81,7 @@ class EnvironmentOperationDispatcherTest {
 
     drainExecutor = Executors.newSingleThreadExecutor();
     workerExecutor = Executors.newVirtualThreadPerTaskExecutor();
-    pollScheduler = Executors.newSingleThreadScheduledExecutor();
+    pollScheduler = mock(ScheduledExecutorService.class);
 
     dispatcher =
         new EnvironmentOperationDispatcher(
@@ -638,7 +639,7 @@ class EnvironmentOperationDispatcherTest {
 
     dispatcher.runSweeper();
 
-    verify(handle).cancel();
+    verify(handle, timeout(5_000).atLeastOnce()).cancel();
     assertEquals(0, dispatcher.getActiveHandleCount());
   }
 
@@ -681,6 +682,7 @@ class EnvironmentOperationDispatcherTest {
     assertTrue(dispatcher.isRunning());
     dispatcher.start();
     assertTrue(dispatcher.isRunning());
+    verify(pollScheduler, times(1)).scheduleWithFixedDelay(any(), anyLong(), anyLong(), any());
   }
 
   /** 测试意图：验证 dispatcher stop() 之后再次调用 start() 抛出 IllegalStateException。 */
@@ -800,25 +802,18 @@ class EnvironmentOperationDispatcherTest {
         .thenReturn(List.of(new SweptOperationInfo(opId, nodeId, leaseToken)));
 
     dispatcher.runSweeper();
-    verify(faultyHandle).cancel();
+    verify(faultyHandle, timeout(5_000).atLeastOnce()).cancel();
   }
 
   /** 测试意图：验证排空执行器提交失败时安全重置 drainRunning 标志。 */
   @Test
   void submitDrain_drainExecutorRejects_handlesGracefully() {
     ExecutorService mockDrain = mock(ExecutorService.class);
-    ScheduledExecutorService idlePollScheduler = mock(ScheduledExecutorService.class);
     doThrow(new RejectedExecutionException("drain full")).when(mockDrain).execute(any());
 
     EnvironmentOperationDispatcher customDispatcher =
         new EnvironmentOperationDispatcher(
-            nodeId,
-            repository,
-            transport,
-            coordinator,
-            mockDrain,
-            workerExecutor,
-            idlePollScheduler);
+            nodeId, repository, transport, coordinator, mockDrain, workerExecutor, pollScheduler);
 
     customDispatcher.start();
     customDispatcher.wake();
