@@ -837,14 +837,6 @@ export const settingsCatalog = {
     'en-US': 'Expiration period in seconds for temporary upload credentials and upload URLs.',
     'zh-CN': '本地或直传上传凭证及临时上传链接的有效秒数。',
   },
-  'settings.field.storageMedia.s3Enabled': {
-    'en-US': 'S3 enabled',
-    'zh-CN': '启用 S3',
-  },
-  'settings.field.storageMedia.s3Enabled.hint': {
-    'en-US': 'Whether to enable S3-compatible object storage as the persistent media backend.',
-    'zh-CN': '是否启用 S3 兼容对象存储作为媒体与素材的持久化后端。',
-  },
   'settings.field.storageMedia.s3PresignDefaultExpiresSeconds': {
     'en-US': 'S3 presign default expiry (s)',
     'zh-CN': 'S3 预签名默认有效期（秒）',

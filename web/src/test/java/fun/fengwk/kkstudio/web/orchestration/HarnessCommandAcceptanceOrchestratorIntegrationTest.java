@@ -36,9 +36,9 @@ import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
+import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.ai.chat.ChatIntegrationSupport;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
-import fun.fengwk.kkstudio.web.storage.S3WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 
 import java.nio.charset.StandardCharsets;
@@ -61,7 +61,7 @@ import java.util.UUID;
       "kk-studio.storage.s3.access-key=local-test-access-key",
       "kk-studio.storage.s3.secret-key=local-test-secret-key"
     })
-class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresTestSupport {
+class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTestSupport {
 
   @Autowired private ChatService chatService;
   @Autowired private CanvasCommandService canvasCommandService;

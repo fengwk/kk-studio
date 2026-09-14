@@ -156,12 +156,6 @@ public class InMemoryS3StorageService implements S3StorageService {
   }
 
   @Override
-  public String getPublicUrl(String key) {
-    record("getPublicUrl", key);
-    return "http://fake.invalid/" + key;
-  }
-
-  @Override
   public byte[] download(String key) {
     record("download", key);
     byte[] bytes = objects.get(key);

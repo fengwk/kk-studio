@@ -84,7 +84,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
   private final HarnessOneShotService oneShotService;
   private final H3WorkflowBuilder workflowBuilder;
   private final ObjectProvider<StandardComfyuiClient> comfyClients;
-  private final ObjectProvider<StorageBlobIngestService> ingestServices;
+  private final StorageBlobIngestService ingestService;
   private final ObjectMapper mapper;
 
   public MiniMaxH3CanvasFunctionAdapter(
@@ -94,7 +94,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       HarnessOneShotService oneShotService,
       H3WorkflowBuilder workflowBuilder,
       ObjectProvider<StandardComfyuiClient> comfyClients,
-      ObjectProvider<StorageBlobIngestService> ingestServices,
+      StorageBlobIngestService ingestService,
       ObjectMapper mapper) {
     this.settings = Objects.requireNonNull(snapshot, "snapshot").get().integrations().minimaxH3();
     this.mediaPreflight = Objects.requireNonNull(mediaPreflight, "mediaPreflight");
@@ -102,7 +102,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     this.oneShotService = Objects.requireNonNull(oneShotService, "oneShotService");
     this.workflowBuilder = Objects.requireNonNull(workflowBuilder, "workflowBuilder");
     this.comfyClients = Objects.requireNonNull(comfyClients, "comfyClients");
-    this.ingestServices = Objects.requireNonNull(ingestServices, "ingestServices");
+    this.ingestService = Objects.requireNonNull(ingestService, "ingestService");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
   }
 
@@ -291,11 +291,6 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
    */
   private AcceptancePreflight mediaPreflight(
       CanvasFunctionExecutionContext context, H3ReferenceManifest manifest) {
-    StorageBlobIngestService ingestService = ingestServices.getIfAvailable();
-    if (ingestService == null) {
-      throw new IllegalStateException(
-          "global storage is not available; H3 prompt media cannot be externalized");
-    }
     List<H3ReferenceManifest.Item> items = manifest.items();
     return (tx, session, commands) -> {
       List<NewThreadCommand> prepared = new ArrayList<>(commands.size());

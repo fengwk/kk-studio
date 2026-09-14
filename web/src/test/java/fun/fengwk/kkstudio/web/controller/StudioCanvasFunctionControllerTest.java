@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
-import fun.fengwk.kkstudio.web.storage.FixedObjectProvider;
 
 import java.time.Instant;
 import java.util.List;
@@ -58,14 +57,13 @@ class StudioCanvasFunctionControllerTest {
     runtimeService = mock(CanvasFunctionService.class);
     CanvasFunctionAdapter adapter = adapter("fake-image");
     CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
-    FixedObjectProvider<StorageBlobManager> blobManagers =
-        new FixedObjectProvider<>(mock(StorageBlobManager.class));
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
     ObjectMapper mapper = new ObjectMapper();
     mapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     mockMvc =
         standaloneSetup(
                 new StudioCanvasFunctionController(
-                    catalog, runtimeService, new WebDtoMapper(blobManagers)))
+                    catalog, runtimeService, new WebDtoMapper(blobManager)))
             .setControllerAdvice(new ResultResponseBodyAdvice())
             .setMessageConverters(new MappingJackson2HttpMessageConverter(mapper))
             .build();

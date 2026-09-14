@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -51,16 +50,13 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
       AgentProviderRepository providerRepository,
       AgentProviderConfigurationCodec providerConfigurationCodec,
       ProviderFactories providerFactories,
-      ObjectProvider<ProviderResourceMaterializer> resourceMaterializerProvider) {
+      ProviderResourceMaterializer resourceMaterializer) {
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
     this.providerConfigurationCodec =
         Objects.requireNonNull(providerConfigurationCodec, "providerConfigurationCodec");
     this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
-    ProviderResourceMaterializer materializer =
-        resourceMaterializerProvider == null ? null : resourceMaterializerProvider.getIfAvailable();
-    // Storage 不可用（S3 未启用）时降级为 no-op 物化端口：Resource 块只投影为确定性文本回退，模型仍可感知资源存在。
     this.resourceMaterializer =
-        materializer == null ? ProviderResourceMaterializer.withoutStorage() : materializer;
+        Objects.requireNonNull(resourceMaterializer, "resourceMaterializer");
   }
 
   @Override

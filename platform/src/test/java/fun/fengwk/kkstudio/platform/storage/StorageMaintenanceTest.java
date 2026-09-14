@@ -10,7 +10,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -33,7 +32,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Storage Maintenance 的 startup/poll/wake/close 生命周期与 S3-disabled 跳过语义。 */
+/** Storage Maintenance 的 startup/poll/wake/close 生命周期与强依赖语义。 */
 class StorageMaintenanceTest {
 
   @Test
@@ -41,8 +40,7 @@ class StorageMaintenanceTest {
     CountingUploadService uploads = new CountingUploadService(2);
     CountingBlobManager blobs = new CountingBlobManager(2);
     StorageMaintenance maintenance =
-        new StorageMaintenance(
-            provider(uploads), provider(blobs), properties(Duration.ofMillis(20)));
+        new StorageMaintenance(uploads, blobs, properties(Duration.ofMillis(20)));
     try {
       maintenance.start();
 
@@ -76,7 +74,7 @@ class StorageMaintenanceTest {
               return blobResults.remove();
             });
     StorageMaintenance maintenance =
-        new StorageMaintenance(provider(uploads), provider(blobs), properties(Duration.ofHours(1)));
+        new StorageMaintenance(uploads, blobs, properties(Duration.ofHours(1)));
     try {
       maintenance.start();
 
@@ -94,7 +92,7 @@ class StorageMaintenanceTest {
     BlockingUploadService uploads = new BlockingUploadService();
     CountingBlobManager blobs = new CountingBlobManager(2);
     StorageMaintenance maintenance =
-        new StorageMaintenance(provider(uploads), provider(blobs), properties(Duration.ofHours(1)));
+        new StorageMaintenance(uploads, blobs, properties(Duration.ofHours(1)));
     maintenance.start();
     assertTrue(uploads.entered.await(5, TimeUnit.SECONDS));
 
@@ -114,16 +112,13 @@ class StorageMaintenanceTest {
   }
 
   @Test
-  void absentStorageServicesAreSafelySkipped() throws Exception {
-    StorageMaintenance maintenance =
-        new StorageMaintenance(emptyProvider(), emptyProvider(), properties(Duration.ofMillis(20)));
-    maintenance.start();
-    try {
-      maintenance.wake();
-      assertTrue(maintenance.isRunning());
-    } finally {
-      maintenance.close();
-    }
+  void rejectsNullDependenciesInConstructor() {
+    StorageUploadService uploads = mock(StorageUploadService.class);
+    StorageBlobManager blobs = mock(StorageBlobManager.class);
+    StorageMaintenanceProperties props = properties(Duration.ofHours(1));
+    assertThrows(NullPointerException.class, () -> new StorageMaintenance(null, blobs, props));
+    assertThrows(NullPointerException.class, () -> new StorageMaintenance(uploads, null, props));
+    assertThrows(NullPointerException.class, () -> new StorageMaintenance(uploads, blobs, null));
   }
 
   /**
@@ -135,7 +130,7 @@ class StorageMaintenanceTest {
     CountingUploadService uploads = new CountingUploadService(1);
     CountingBlobManager blobs = new CountingBlobManager(1);
     StorageMaintenance maintenance =
-        new StorageMaintenance(provider(uploads), provider(blobs), properties(Duration.ofHours(1)));
+        new StorageMaintenance(uploads, blobs, properties(Duration.ofHours(1)));
     try {
       maintenance.start();
       assertTrue(uploads.await());
@@ -166,7 +161,10 @@ class StorageMaintenanceTest {
   @Test
   void stopCallbackRunsAndServiceFailuresAreIsolated() throws Exception {
     StorageMaintenance stopped =
-        new StorageMaintenance(emptyProvider(), emptyProvider(), properties(Duration.ofHours(1)));
+        new StorageMaintenance(
+            mock(StorageUploadService.class),
+            mock(StorageBlobManager.class),
+            properties(Duration.ofHours(1)));
     AtomicBoolean callbackRan = new AtomicBoolean();
     stopped.stop(() -> callbackRan.set(true));
     assertTrue(callbackRan.get());
@@ -188,7 +186,7 @@ class StorageMaintenanceTest {
               throw new IllegalStateException("blob failed");
             });
     StorageMaintenance maintenance =
-        new StorageMaintenance(provider(uploads), provider(blobs), properties(Duration.ofHours(1)));
+        new StorageMaintenance(uploads, blobs, properties(Duration.ofHours(1)));
     try {
       maintenance.start();
       assertTrue(uploadFailed.await(5, TimeUnit.SECONDS));
@@ -201,17 +199,17 @@ class StorageMaintenanceTest {
 
   @Test
   void drainFailureAndRejectedSubmissionAreContainedForLaterPolls() throws Exception {
-    @SuppressWarnings("unchecked")
-    ObjectProvider<StorageUploadService> failingUploads = mock(ObjectProvider.class);
+    StorageUploadService failingUploads = mock(StorageUploadService.class);
     CountDownLatch failedDrain = new CountDownLatch(1);
-    when(failingUploads.getIfAvailable())
+    when(failingUploads.expireOnce())
         .thenAnswer(
             ignored -> {
               failedDrain.countDown();
-              throw new IllegalStateException("provider failed");
+              throw new IllegalStateException("drain failed");
             });
     StorageMaintenance failing =
-        new StorageMaintenance(failingUploads, emptyProvider(), properties(Duration.ofHours(1)));
+        new StorageMaintenance(
+            failingUploads, mock(StorageBlobManager.class), properties(Duration.ofHours(1)));
     failing.start();
     try {
       assertTrue(failedDrain.await(5, TimeUnit.SECONDS));
@@ -223,9 +221,7 @@ class StorageMaintenanceTest {
     CountingUploadService uploads = new CountingUploadService(1);
     StorageMaintenance maintenance =
         new StorageMaintenance(
-            provider(uploads),
-            provider(new CountingBlobManager(1)),
-            properties(Duration.ofHours(1)));
+            uploads, new CountingBlobManager(1), properties(Duration.ofHours(1)));
     maintenance.start();
     assertTrue(uploads.await());
     ScheduledExecutorService owned = executor(maintenance);
@@ -245,19 +241,18 @@ class StorageMaintenanceTest {
 
   @Test
   void rejectsInvalidPollDurations() {
+    StorageUploadService uploads = mock(StorageUploadService.class);
+    StorageBlobManager blobs = mock(StorageBlobManager.class);
     assertThrows(
         IllegalArgumentException.class,
-        () -> new StorageMaintenance(emptyProvider(), emptyProvider(), properties(Duration.ZERO)));
+        () -> new StorageMaintenance(uploads, blobs, properties(Duration.ZERO)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new StorageMaintenance(uploads, blobs, properties(Duration.ofNanos(1))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new StorageMaintenance(
-                emptyProvider(), emptyProvider(), properties(Duration.ofNanos(1))));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new StorageMaintenance(
-                emptyProvider(), emptyProvider(), properties(Duration.ofSeconds(Long.MAX_VALUE))));
+            new StorageMaintenance(uploads, blobs, properties(Duration.ofSeconds(Long.MAX_VALUE))));
   }
 
   private static StorageMaintenanceProperties properties(Duration pollDelay) {
@@ -278,19 +273,6 @@ class StorageMaintenanceTest {
     Field field = StorageMaintenance.class.getDeclaredField("executor");
     field.setAccessible(true);
     field.set(maintenance, executor);
-  }
-
-  private static <T> ObjectProvider<T> provider(T value) {
-    @SuppressWarnings("unchecked")
-    ObjectProvider<T> provider = mock(ObjectProvider.class);
-    when(provider.getIfAvailable()).thenReturn(value);
-    return provider;
-  }
-
-  private static <T> ObjectProvider<T> emptyProvider() {
-    @SuppressWarnings("unchecked")
-    ObjectProvider<T> provider = mock(ObjectProvider.class);
-    return provider;
   }
 
   private static class CountingUploadService implements StorageUploadService {

@@ -51,7 +51,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
 
   private final ObjectMapper mapper = new ObjectMapper();
   private HarnessOneShotService oneShot;
-  private ObjectProvider<StorageBlobIngestService> ingestServices;
+  private StorageBlobIngestService ingestService;
 
   private StandardComfyuiClient comfy;
   private MiniMaxH3CanvasFunctionAdapter adapter;
@@ -62,6 +62,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   void setUp() {
     oneShot = mock(HarnessOneShotService.class);
     comfy = mock(StandardComfyuiClient.class);
+    ingestService = mock(StorageBlobIngestService.class);
     snapshot = new SystemSettingsSnapshot(settings(h3Settings(true, 1L, 1_000L)));
     adapter = newAdapter(snapshot);
   }
@@ -70,8 +71,6 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   private MiniMaxH3CanvasFunctionAdapter newAdapter(SystemSettingsSnapshot snapshot) {
     ObjectProvider<StandardComfyuiClient> clients = mock(ObjectProvider.class);
     when(clients.getIfAvailable()).thenReturn(comfy);
-    ingestServices = mock(ObjectProvider.class);
-    when(ingestServices.getIfAvailable()).thenReturn(mock(StorageBlobIngestService.class));
     return new MiniMaxH3CanvasFunctionAdapter(
         snapshot,
         new H3MediaPreflight(),
@@ -79,7 +78,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
         oneShot,
         new H3WorkflowBuilder(mapper),
         clients,
-        ingestServices,
+        ingestService,
         mapper);
   }
 
@@ -141,8 +140,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
             MiniMaxH3CanvasFunctionAdapter.COMPLETE),
         context.stages);
     // 媒体外部化已移入入队 preflight（one-shot submit 被 mock，不执行）：prompt 阶段只构建 preflight，
-    // 绝不 presign；ingest 端口在构建时探测（S3 缺失时确定性失败）。
-    verify(ingestServices).getIfAvailable();
+    // 绝不 presign。
     assertNull(context.lastPresign);
     assertEquals(TARGET, context.materializedTarget);
     assertEquals(List.of(9, 8, 7), context.materializedBytes);

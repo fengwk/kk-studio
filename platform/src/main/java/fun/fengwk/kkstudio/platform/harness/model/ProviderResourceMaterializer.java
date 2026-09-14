@@ -32,8 +32,7 @@ import java.util.Set;
  * name/blobId/mediaType/size/preview）。这些瞬时 source 绝不持久化（durable invocation request 只保存 {@link
  * ProviderResourceBlock}）。通用 DOCUMENT 模态保持不支持：不产生任何 media 块。
  *
- * <p>本类由 S3 装配（{@code S3StorageConfiguration}）以 bean 形式提供；Storage 不可用（S3 未启用）时使用 {@link
- * #withoutStorage()} 的 no-op 物化端口：所有 Resource 块降级为不含媒体事实的确定性文本回退，模型仍可感知资源存在，但没有任何 URL / 媒体事实可用。
+ * <p>本类由 S3 装配（{@code S3StorageConfiguration}）以 bean 形式提供。
  */
 public final class ProviderResourceMaterializer {
 
@@ -42,23 +41,16 @@ public final class ProviderResourceMaterializer {
   private final StorageBlobManager blobManager;
   private final S3StorageService storageService;
 
-  private ProviderResourceMaterializer(
+  public ProviderResourceMaterializer(
       StorageBlobManager blobManager, S3StorageService storageService) {
-    this.blobManager = blobManager;
-    this.storageService = storageService;
+    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
+    this.storageService = Objects.requireNonNull(storageService, "storageService");
   }
 
-  /** 基于全局 Blob 存储事实的物化器（S3 启用时装配）。 */
+  /** 基于全局 Blob 存储事实的物化器。 */
   public static ProviderResourceMaterializer withStorage(
       StorageBlobManager blobManager, S3StorageService storageService) {
-    return new ProviderResourceMaterializer(
-        Objects.requireNonNull(blobManager, "blobManager"),
-        Objects.requireNonNull(storageService, "storageService"));
-  }
-
-  /** Storage 不可用时的 no-op 物化端口：全部 Resource 块降级为确定性文本回退。 */
-  public static ProviderResourceMaterializer withoutStorage() {
-    return new ProviderResourceMaterializer(null, null);
+    return new ProviderResourceMaterializer(blobManager, storageService);
   }
 
   /** 把请求消息中的 Resource 块物化为本次 attempt 的有效内容块；消息与块顺序保持不变。 */
@@ -105,7 +97,7 @@ public final class ProviderResourceMaterializer {
     if (resource.isExternalizedText()) {
       return new ProviderTextBlock(formatExternalizedText(resource));
     }
-    StorageBlob blob = blobManager == null ? null : blobManager.getBlob(resource.blobId());
+    StorageBlob blob = blobManager.getBlob(resource.blobId());
     String mediaType =
         blob == null || blob.getState() != StorageBlobState.ACTIVE ? null : blob.getMediaType();
     // 只在媒体类型与所选模态都匹配时才读取/签名；任何回退路径绝不触发存储内容读取或 presign。
@@ -161,10 +153,7 @@ public final class ProviderResourceMaterializer {
     return sb.toString();
   }
 
-  /**
-   * 确定性文本回退：始终包含 name/blobId；durable preview 非空时始终附带（即使 Storage 不可用 / blob 缺失）；mediaType/size 只在存在
-   * ACTIVE storage 事实时附带。
-   */
+  /** 确定性文本回退：始终包含 name/blobId；durable preview 非空时始终附带；mediaType/size 只在存在 ACTIVE storage 事实时附带。 */
   private static String fallbackText(ProviderResourceBlock resource, StorageBlob blob) {
     StringBuilder text = new StringBuilder("[Resource: ").append(resource.name()).append("]");
     text.append("\nblobId: ").append(resource.blobId());

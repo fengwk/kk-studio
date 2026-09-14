@@ -46,7 +46,7 @@ public class SessionDeletionOrchestrator {
   private final IssueRunRepository issueRunRepository;
   private final IssueRunSessionRepository issueRunSessionRepository;
   private final ObjectProvider<HarnessStore> stores;
-  private final ObjectProvider<SessionBlobRefManager> refManagers;
+  private final SessionBlobRefManager refManager;
 
   public SessionDeletionOrchestrator(
       ChatSessionRepository chatSessionRepository,
@@ -59,7 +59,7 @@ public class SessionDeletionOrchestrator {
       IssueRunRepository issueRunRepository,
       IssueRunSessionRepository issueRunSessionRepository,
       ObjectProvider<HarnessStore> stores,
-      ObjectProvider<SessionBlobRefManager> refManagers) {
+      SessionBlobRefManager refManager) {
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
     this.canvasSessionRepository =
@@ -74,7 +74,7 @@ public class SessionDeletionOrchestrator {
     this.issueRunSessionRepository =
         Objects.requireNonNull(issueRunSessionRepository, "issueRunSessionRepository");
     this.stores = Objects.requireNonNull(stores, "stores");
-    this.refManagers = Objects.requireNonNull(refManagers, "refManagers");
+    this.refManager = Objects.requireNonNull(refManager, "refManager");
   }
 
   /**
@@ -125,9 +125,8 @@ public class SessionDeletionOrchestrator {
           // 阶段 2：跨全部 Session 收集并按 UUID 排序 Thread，保证 THREAD rank 全局单调递增。
           deleteThreadsDeep(tx, presentSessions);
           // 阶段 3：blob ref 释放（无 harness 锁）与 relation/Entry/Session 清理（均不取 harness 锁）。
-          SessionBlobRefManager refManager = refManagers.getIfAvailable();
           for (UUID sessionId : presentSessions) {
-            releaseSessionBlobRefs(refManager, sessionId);
+            releaseSessionBlobRefs(sessionId);
             deleteRelation(owner, sessionId);
             tx.deleteEntries(sessionId);
             tx.deleteSession(sessionId);
@@ -182,11 +181,9 @@ public class SessionDeletionOrchestrator {
   }
 
   /** release Session 级 blob 引用（ref_count 对账 + 删除 session_blob_ref 行），先于 Session 删除。 */
-  private void releaseSessionBlobRefs(SessionBlobRefManager refManager, UUID sessionId) {
-    if (refManager != null) {
-      for (UUID blobId : refManager.listBlobIds(sessionId)) {
-        refManager.releaseRef(sessionId, blobId);
-      }
+  private void releaseSessionBlobRefs(UUID sessionId) {
+    for (UUID blobId : refManager.listBlobIds(sessionId)) {
+      refManager.releaseRef(sessionId, blobId);
     }
   }
 

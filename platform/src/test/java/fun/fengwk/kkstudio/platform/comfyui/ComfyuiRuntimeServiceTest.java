@@ -65,9 +65,7 @@ public class ComfyuiRuntimeServiceTest {
     client = mock(ComfyUIClient.class);
     blobContentService = mock(StorageBlobContentService.class);
     ObjectProvider<ComfyUIClient> clientProvider = mock(ObjectProvider.class);
-    ObjectProvider<StorageBlobContentService> blobContentProvider = mock(ObjectProvider.class);
     when(clientProvider.getIfAvailable()).thenReturn(client);
-    when(blobContentProvider.getIfAvailable()).thenReturn(blobContentService);
     snapshot =
         new SystemSettingsSnapshot(
             settings(
@@ -75,7 +73,7 @@ public class ComfyuiRuntimeServiceTest {
                     true, "http://127.0.0.1:8188", 10_000L, 2_000L, 1_800_000L, 1024L)));
     runtimeService =
         new ComfyuiRuntimeService(
-            lookupService, snapshot, clientProvider, blobContentProvider, objectMapper);
+            lookupService, snapshot, clientProvider, blobContentService, objectMapper);
   }
 
   /** 测试意图：验证提交工作流时，按 canonical UUID 获取工作流配置，通过 StorageBlobContentService 读取权威内容并中转至 ComfyUI。 */
@@ -314,7 +312,7 @@ public class ComfyuiRuntimeServiceTest {
                 settings(
                     new SystemSettings.Comfyui(false, null, 10_000L, 2_000L, 1_800_000L, 1024L))),
             clientProvider(),
-            blobContentProvider(),
+            blobContentService,
             objectMapper);
 
     IllegalStateException error =
@@ -328,13 +326,6 @@ public class ComfyuiRuntimeServiceTest {
   private ObjectProvider<ComfyUIClient> clientProvider() {
     ObjectProvider<ComfyUIClient> provider = mock(ObjectProvider.class);
     when(provider.getIfAvailable()).thenReturn(client);
-    return provider;
-  }
-
-  @SuppressWarnings("unchecked")
-  private ObjectProvider<StorageBlobContentService> blobContentProvider() {
-    ObjectProvider<StorageBlobContentService> provider = mock(ObjectProvider.class);
-    when(provider.getIfAvailable()).thenReturn(blobContentService);
     return provider;
   }
 

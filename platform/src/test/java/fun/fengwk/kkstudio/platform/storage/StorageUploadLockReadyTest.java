@@ -24,6 +24,7 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallbackWithoutResult;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -51,7 +52,7 @@ import java.util.UUID;
       "kk-studio.storage.s3.access-key=local-test-access-key",
       "kk-studio.storage.s3.secret-key=local-test-secret-key"
     })
-class StorageUploadLockReadyTest extends S3PostgresSpringTestSupport {
+class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
 
   @Autowired private StorageUploadService storageUploadService;
   @Autowired private InMemoryS3StorageService s3Storage;

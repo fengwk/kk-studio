@@ -9,8 +9,6 @@ public class SystemSettingsStorageMediaDTO {
 
   private Long uploadExpiresSeconds;
 
-  private Boolean s3Enabled;
-
   private Long s3PresignDefaultExpiresSeconds;
 
   private Long s3PresignMaxExpiresSeconds;

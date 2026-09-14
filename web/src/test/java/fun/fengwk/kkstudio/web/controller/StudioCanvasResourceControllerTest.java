@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
-import fun.fengwk.kkstudio.web.storage.FixedObjectProvider;
 
 import java.time.Instant;
 import java.util.List;
@@ -56,9 +55,8 @@ class StudioCanvasResourceControllerTest {
   void setUp() {
     queryService = mock(CanvasQueryService.class);
     blobManager = mock(StorageBlobManager.class);
-    FixedObjectProvider<StorageBlobManager> blobManagers = new FixedObjectProvider<>(blobManager);
     mockMvc =
-        standaloneSetup(new StudioCanvasResourceController(queryService, blobManagers))
+        standaloneSetup(new StudioCanvasResourceController(queryService, blobManager))
             .setMessageConverters(new MappingJackson2HttpMessageConverter(new ObjectMapper()))
             .build();
     when(queryService.findSnapshot(CANVAS)).thenReturn(Optional.of(snapshot()));

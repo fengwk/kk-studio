@@ -22,6 +22,7 @@ import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -63,7 +64,7 @@ import java.util.concurrent.TimeUnit;
       "kk-studio.storage.s3.access-key=local-test-access-key",
       "kk-studio.storage.s3.secret-key=local-test-secret-key"
     })
-class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
+class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private StorageUploadService storageUploadService;
   @Autowired private StorageBlobManager storageBlobManager;

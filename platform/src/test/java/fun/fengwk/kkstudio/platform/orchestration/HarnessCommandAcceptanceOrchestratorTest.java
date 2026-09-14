@@ -12,7 +12,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -100,8 +99,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private IssueRunSessionRepository issueRunSessionRepository;
   private ObjectProvider<HarnessStore> stores;
   private ObjectProvider<HarnessRuntime> runtimes;
-  private ObjectProvider<StorageUploadService> uploadServices;
-  private ObjectProvider<SessionBlobRefManager> refManagers;
   private HarnessStore store;
   private HarnessStore.Transaction transaction;
   private HarnessRuntime runtime;
@@ -124,8 +121,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
     issueRunSessionRepository = mock(IssueRunSessionRepository.class);
     stores = mock(ObjectProvider.class);
     runtimes = mock(ObjectProvider.class);
-    uploadServices = mock(ObjectProvider.class);
-    refManagers = mock(ObjectProvider.class);
     store = mock(HarnessStore.class);
     transaction = mock(HarnessStore.Transaction.class);
     runtime = mock(HarnessRuntime.class);
@@ -135,8 +130,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     when(stores.getIfAvailable()).thenReturn(store);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
-    when(uploadServices.getIfAvailable()).thenReturn(uploadService);
-    when(refManagers.getIfAvailable()).thenReturn(refManager);
     when(store.transaction(any()))
         .thenAnswer(
             invocation -> {
@@ -175,8 +168,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
             issueRunSessionRepository,
             stores,
             runtimes,
-            uploadServices,
-            refManagers);
+            uploadService,
+            refManager);
   }
 
   @Test
@@ -350,27 +343,42 @@ class HarnessCommandAcceptanceOrchestratorTest {
   }
 
   @Test
-  void rejectsAttachmentWhenStorageDependenciesAreMissing() {
-    // Upload service 与 Session ref manager 任一缺失都不能消费瞬时 attachment。
-    AcceptCommandsCommand command = newSession(user(new AttachmentMessageContent(UPLOAD_ID)));
-    when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
-    AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
-
-    when(uploadServices.getIfAvailable()).thenReturn(null);
+  void rejectsNullStorageDependenciesInConstructor() {
+    // 强依赖验证：Upload service 与 Session ref manager 必须非空注入。
     assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () ->
-            preflight.prepare(
-                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
-
-    when(uploadServices.getIfAvailable()).thenReturn(uploadService);
-    when(refManagers.getIfAvailable()).thenReturn(null);
+            new HarnessCommandAcceptanceOrchestrator(
+                chatSessionRepository,
+                canvasSessionRepository,
+                chatRepository,
+                canvasStore,
+                projectRepository,
+                projectSessionRepository,
+                issueRepository,
+                issueRunRepository,
+                issueRunSessionRepository,
+                stores,
+                runtimes,
+                null,
+                refManager));
     assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () ->
-            preflight.prepare(
-                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
-    verifyNoInteractions(uploadService);
+            new HarnessCommandAcceptanceOrchestrator(
+                chatSessionRepository,
+                canvasSessionRepository,
+                chatRepository,
+                canvasStore,
+                projectRepository,
+                projectSessionRepository,
+                issueRepository,
+                issueRunRepository,
+                issueRunSessionRepository,
+                stores,
+                runtimes,
+                uploadService,
+                null));
   }
 
   @Test
@@ -403,21 +411,13 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
   @Test
   void reusesOnlyResourcesAlreadyOwnedByTheSession() {
-    // Durable RESOURCE 不新增 retain；缺 manager 或跨 Session blob 都明确拒绝。
+    // Durable RESOURCE 不新增 retain；跨 Session blob 明确拒绝。
     ResourceMessageContent resource =
         ResourceMessageContent.media(BLOB_ID, "existing.txt", "preview");
     AcceptCommandsCommand command = newSession(user(resource));
     when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
 
-    when(refManagers.getIfAvailable()).thenReturn(null);
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            preflight.prepare(
-                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
-
-    when(refManagers.getIfAvailable()).thenReturn(refManager);
     when(refManager.contains(SESSION_ID, BLOB_ID)).thenReturn(false);
     assertThrows(
         IllegalArgumentException.class,

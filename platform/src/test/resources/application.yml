@@ -21,6 +21,14 @@ mybatis:
 
 
 kk-studio:
+  storage:
+    s3:
+      endpoint: http://minio.test-local:9000
+      public-endpoint: https://cdn.test-local
+      region: auto
+      bucket: test-bucket
+      access-key: test-access-key
+      secret-key: test-secret-key
   harness:
     runtime:
       workers-enabled: false

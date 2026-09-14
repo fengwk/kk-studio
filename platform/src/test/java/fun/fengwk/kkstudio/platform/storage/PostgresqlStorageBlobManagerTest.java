@@ -54,7 +54,7 @@ class PostgresqlStorageBlobManagerTest {
     verify(s3, never()).deleteObject(anyString());
     assertTrue(elapsedMillis < 1_000, "commit callback must return quickly");
 
-    when(provider.getIfAvailable()).thenThrow(new IllegalStateException("wake failed"));
+    when(provider.getObject()).thenThrow(new IllegalStateException("wake failed"));
     synchronizations.forEach(TransactionSynchronization::afterCommit);
   }
 
@@ -93,7 +93,7 @@ class PostgresqlStorageBlobManagerTest {
   private static <T> ObjectProvider<T> provider(T value) {
     @SuppressWarnings("unchecked")
     ObjectProvider<T> provider = mock(ObjectProvider.class);
-    when(provider.getIfAvailable()).thenReturn(value);
+    when(provider.getObject()).thenReturn(value);
     return provider;
   }
 }

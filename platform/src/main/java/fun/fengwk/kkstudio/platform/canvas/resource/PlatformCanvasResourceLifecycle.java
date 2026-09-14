@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.canvas.resource;
 
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
@@ -27,15 +26,15 @@ public class PlatformCanvasResourceLifecycle implements CanvasResourceLifecycle 
 
   private final CanvasResourceRepository resourceRepository;
   private final CanvasFunctionResourcePinRepository pinRepository;
-  private final ObjectProvider<StorageBlobManager> blobManagers;
+  private final StorageBlobManager blobManager;
 
   public PlatformCanvasResourceLifecycle(
       CanvasResourceRepository resourceRepository,
       CanvasFunctionResourcePinRepository pinRepository,
-      ObjectProvider<StorageBlobManager> blobManagers) {
+      StorageBlobManager blobManager) {
     this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository");
     this.pinRepository = Objects.requireNonNull(pinRepository, "pinRepository");
-    this.blobManagers = Objects.requireNonNull(blobManagers, "blobManagers");
+    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
   }
 
   /** 释放指定 Run 的全部 pin，并回收因此失去最后一个 pin 的无 owner Resource。 */
@@ -149,16 +148,8 @@ public class PlatformCanvasResourceLifecycle implements CanvasResourceLifecycle 
     if (!resourceRepository.delete(resource.canvasId(), resource.id())) {
       throw new IllegalStateException("delete canvas resource failed: " + resource.id());
     }
-    if (resource.blobId() != null && !requireBlobManager().release(resource.blobId())) {
+    if (resource.blobId() != null && !blobManager.release(resource.blobId())) {
       throw new IllegalStateException("release canvas resource blob failed: " + resource.blobId());
     }
-  }
-
-  private StorageBlobManager requireBlobManager() {
-    StorageBlobManager blobManager = blobManagers.getIfAvailable();
-    if (blobManager == null) {
-      throw new IllegalStateException("global blob storage is unavailable");
-    }
-    return blobManager;
   }
 }

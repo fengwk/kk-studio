@@ -49,17 +49,17 @@ flowchart LR
   Reliability --> App["app :8080"]
   Reliability --> Daemon["daemon -> ws://app:8080/api/harness/environment-daemon/v1"]
   App --> PG["PostgreSQL"]
-  Test --> S3["MinIO S3-compatible"]
+  App --> S3["MinIO / S3"]
   MainNode --> PG
   DevNode --> PG
 ```
 
 | Stack | 服务 | 宿主暴露 | 用途 |
 | --- | --- | --- | --- |
-| local | `postgres`、`app` | app `127.0.0.1:8080`、PostgreSQL `127.0.0.1:5432` | 本地 UI/API 与 durable PostgreSQL |
+| local | `postgres`、`minio`、`minio-init`、`app` | app `127.0.0.1:8080`、PostgreSQL `127.0.0.1:5432`、MinIO `127.0.0.1:9000` | 本地 UI/API、PostgreSQL 与 MinIO S3 底座 |
 | test | `postgres`、`minio`、`minio-init`、`http-mock`、可选 `app` profile | `15432`、`19000`、`18089`、可选 `18088` | Canvas/Storage/Function/离线 Chat smoke |
 | distributed | `postgres`、`minio`、`minio-init`、`http-mock`、`app-a`、`app-b`、`workspace-init`、`daemon-a`、`daemon-b` | app-a `127.0.0.1:18082`、app-b `127.0.0.1:18083`、`15433`、`19001`、`18090` | 双节点零 App-to-App 网络的分布式 E2E mock topology |
-| reliability | `postgres`、`app`、`workspace-init`、`daemon` | 只有 app `127.0.0.1:18091` | Environment daemon、工具隔离和显式 reliability matrix |
+| reliability | `postgres`、`minio`、`minio-init`、`app`、`workspace-init`、`daemon` | app `127.0.0.1:18091`、MinIO `127.0.0.1:19002` | Environment daemon、工具隔离、S3 与显式 reliability matrix |
 
 每个 stack 使用自己的 Compose project、network 和 named volume；容器内端口
 保持固定，环境变量只改变允许覆盖的宿主 mapping 或职责配置。
@@ -404,7 +404,8 @@ project name 是 `kk-studio-reliability`：
 | 服务 | image/运行用户 | 当前职责 |
 | --- | --- | --- |
 | `postgres` | `postgres:17-alpine` | `kk_studio_reliability` durable database，internal network |
-| `app` | `kk-studio-app:reliability`，App non-root | `e2e` profile，宿主只发布 `127.0.0.1:${RELIABILITY_APP_PORT:-18091}:8080` |
+| `minio` / `minio-init` | pinned MinIO / `mc` | private bucket；S3 API 发布到 `127.0.0.1:${RELIABILITY_MINIO_PORT:-19002}:9000` 供预签名 URL 使用 |
+| `app` | `kk-studio-app:reliability`，App non-root | `e2e` profile，宿主发布 `127.0.0.1:${RELIABILITY_APP_PORT:-18091}:8080` |
 | `workspace-init` | `kk-studio-daemon:reliability`，临时 `0:0` | `chown 10001:10001 /workspace`，完成即退出 |
 | `daemon` | `kk-studio-daemon:reliability`，uid/gid `10001` | Environment gateway client，workspace named volume |
 
@@ -492,10 +493,12 @@ Flyway history 保存在 PostgreSQL；删卷才会回到空库。
 
 ### 10.2 MinIO/S3
 
-MinIO 只属于 `deploy/test`。`minio-init` 负责创建 private
-`canvas-test` bucket；App 使用 `minio:9000` 访问对象，signed URL 的
-public endpoint 是宿主 `127.0.0.1:19000`。Storage API 只接收 upload
-handle 和 presigned URL contract，不把 bucket/key 暴露给 Frontend。
+S3 是所有 App stack 的 required infrastructure。
+`deploy/local`、`deploy/test`、`deploy/distributed` 和 `deploy/reliability` 均包含 pinned MinIO
+与 `minio-init` 服务，由 `minio-init` 使用 `mc` 创建 private bucket 并保持 health。
+App 依赖 PostgreSQL、MinIO 与 minio-init healthy 后启动，启动期严格验证 S3 连接属性并探测
+bucket 可访问性。Storage 与 Canvas Controller 常驻服务，无 disabled 503 状态；Storage API
+只接收 upload handle 和 presigned URL contract，不把 bucket/key 暴露给 Frontend。
 
 ### 10.3 Environment daemon
 
@@ -516,13 +519,13 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
 
 | Stack/用途 | 责任组 | 典型变量 |
 | --- | --- | --- |
-| local | host mapping/database/profile | `KK_STUDIO_APP_*`、`KK_STUDIO_PG_*`、`KK_STUDIO_SPRING_PROFILES_ACTIVE` |
+| local | host mapping/database/S3/profile | `KK_STUDIO_APP_*`、`KK_STUDIO_PG_*`、`KK_STUDIO_S3_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_SPRING_PROFILES_ACTIVE` |
 | local | Harness dispatcher | `KK_STUDIO_HARNESS_DISPATCHER_*` |
 | local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SUBAGENT_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*` |
 | test | ports/build/mock | `CANVAS_TEST_*` |
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_CANVAS_RESOURCE_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED` |
 | distributed | node identity/ports | `DISTRIBUTED_ENV_A_NAME`、`DISTRIBUTED_ENV_B_NAME`、`DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN`、`DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN`、`DISTRIBUTED_APP_A_PORT`、`DISTRIBUTED_APP_B_PORT` |
-| reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_ENV_NAME`、`RELIABILITY_REGISTRATION_TOKEN` |
+| reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_MINIO_PORT`、`RELIABILITY_ENV_NAME`、`RELIABILITY_REGISTRATION_TOKEN` |
 | supply-chain | reports/images/cache | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`TRIVY_SKIP_DB_UPDATE` |
 | explicit `--real` E2E | host-only credential sync | `TEST_GOOGLE_*`、`TEST_OPENAI_*`、`TEST_ANTHROPIC_*`、`TEST_DEEPSEEK_*` |
 | reliability Agent matrix | host-only credential sync | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
@@ -532,8 +535,8 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
 
 - `.dockerignore` 和 `.gitignore` 排除 `.env`、key/cert/credential 文件、
   `credentials*`、service account JSON 和 `secrets/`。
-- local/test 的固定 `kk_studio`、`canvas_test` 和 MinIO test password 只属于
-  disposable local/test compose，不代表生产 credential；宿主绑定地址一旦
+- local/test/reliability/distributed 的固定 PostgreSQL 与 MinIO credentials 只属于
+  disposable compose，不代表生产 credential；宿主绑定地址一旦
   改为非 loopback，就必须显式覆盖这些默认值。
 - `integrations.openCliHub` 默认 disabled 且 `baseUrl=null`；`deploy/test`
   仅由 `canvas-test` seed 将其启用并指向隔离网络内的
@@ -564,7 +567,7 @@ Proxy 只作用于 build、npm/Maven dependency fetch 或显式 Trivy network；
 ## 12. 清理和运行边界
 
 ```bash
-# local：保留或删除 PostgreSQL 数据
+# local：保留或删除 PostgreSQL 与 MinIO 数据
 docker compose -f deploy/local/compose.yaml down
 docker compose -f deploy/local/compose.yaml down -v
 
@@ -574,12 +577,12 @@ docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphan
 # distributed：删除双节点栈的容器、网络和 PostgreSQL/MinIO/daemon workspace volumes
 ./deploy/distributed/run.sh down --volumes
 
-# reliability：保留或删除 PostgreSQL/workspace named volumes
+# reliability：保留或删除 PostgreSQL/MinIO/workspace named volumes
 ./scripts/reliability/stack.sh down
 ./scripts/reliability/stack.sh down --volumes
 
 # 确认宿主端口
-ss -ltnp | grep -E ':8080|:5432|:15432|:15433|:18082|:18083|:18088|:18089|:18090|:19000|:19001|:18091' || true
+ss -ltnp | grep -E ':8080|:5432|:9000|:15432|:15433|:18082|:18083|:18088|:18089|:18090|:19000|:19001|:19002|:18091' || true
 ```
 
 Healthcheck 通过后才能把服务交给上层脚本；任何 app、database、MinIO、

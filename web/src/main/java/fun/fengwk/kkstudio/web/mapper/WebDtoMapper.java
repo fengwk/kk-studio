@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.mapper;
 
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
@@ -53,15 +52,15 @@ import java.util.UUID;
  * Canvas domain 与 share DTO 之间的严格 HTTP 边界映射。
  *
  * <p>媒体资源 DTO 的 kind/mediaType/宽高/时长来自 blob 行（blob 是媒体事实的权威源）；TEXT 资源没有 blob，kind 固定为 TEXT
- * 且媒体事实为空。blob 存储不可用（S3 未启用）或 blob 行缺失时抛出显式错误，绝不静默伪造媒体事实。
+ * 且媒体事实为空。blob 行缺失时抛出显式错误，绝不静默伪造媒体事实。
  */
 @Component
 public class WebDtoMapper {
 
-  private final ObjectProvider<StorageBlobManager> blobManagers;
+  private final StorageBlobManager blobManager;
 
-  public WebDtoMapper(ObjectProvider<StorageBlobManager> blobManagers) {
-    this.blobManagers = Objects.requireNonNull(blobManagers, "blobManagers");
+  public WebDtoMapper(StorageBlobManager blobManager) {
+    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
   }
 
   /** 解析 canonical UUID 实体 id（{@code UUID.fromString} 往返一致）。 */
@@ -358,10 +357,6 @@ public class WebDtoMapper {
   }
 
   private StorageBlob blob(UUID blobId) {
-    StorageBlobManager blobManager = blobManagers.getIfAvailable();
-    if (blobManager == null) {
-      throw new IllegalStateException("global blob storage is unavailable");
-    }
     StorageBlob blob = blobManager.getBlob(blobId);
     if (blob == null) {
       throw new IllegalStateException("resource blob is missing: " + blobId);

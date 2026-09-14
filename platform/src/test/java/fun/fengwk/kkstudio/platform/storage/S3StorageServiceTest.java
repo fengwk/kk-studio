@@ -52,20 +52,8 @@ public class S3StorageServiceTest {
   }
 
   @Test
-  public void testGetPublicUrl() {
-    TestContext context = newTestContext("https://cdn.example.com/{bucket}");
-    try {
-      assertEquals(
-          "https://cdn.example.com/test-bucket/dir/%E6%B5%8B%E8%AF%95%20image.png",
-          context.storageService.getPublicUrl("dir/测试 image.png"));
-    } finally {
-      context.close();
-    }
-  }
-
-  @Test
   public void testPutObject() {
-    TestContext context = newTestContext(null);
+    TestContext context = newTestContext();
     try {
       PutObjectResponse response =
           context.storageService.putObject(
@@ -78,7 +66,7 @@ public class S3StorageServiceTest {
 
   @Test
   public void testExistsAndDownload() {
-    TestContext context = newTestContext(null);
+    TestContext context = newTestContext();
     try {
       assertTrue(context.storageService.exists("dir/demo.txt"));
       assertArrayEquals(new byte[] {1, 2, 3}, context.storageService.download("dir/demo.txt"));
@@ -92,7 +80,6 @@ public class S3StorageServiceTest {
     AtomicBoolean closed = new AtomicBoolean();
     TestContext context =
         newTestContext(
-            null,
             methodName -> {
               if ("getObject".equals(methodName)) {
                 return responseStream(new byte[] {1, 2, 3}, "image/png", closed);
@@ -116,7 +103,7 @@ public class S3StorageServiceTest {
 
   @Test
   public void testBoundedDownloadReturnsMetadata() {
-    TestContext context = newTestContext(null);
+    TestContext context = newTestContext();
     try {
       // 先 HEAD 再读取并复核字节长度，覆盖 ComfyUI 输入文件的大小边界。
       S3ObjectContent content = context.storageService.download("dir/demo.png", 3L);
@@ -133,7 +120,6 @@ public class S3StorageServiceTest {
   public void testBoundedDownloadRejectsOversizedObjectBeforeRead() {
     TestContext context =
         newTestContext(
-            null,
             methodName ->
                 "headObject".equals(methodName)
                     ? HeadObjectResponse.builder().contentLength(4L).build()
@@ -149,7 +135,7 @@ public class S3StorageServiceTest {
 
   @Test
   public void testBoundedDownloadRejectsNegativeLimit() {
-    TestContext context = newTestContext(null);
+    TestContext context = newTestContext();
     try {
       assertThrows(
           IllegalArgumentException.class,
@@ -163,7 +149,6 @@ public class S3StorageServiceTest {
   public void testBoundedDownloadRejectsMissingHeadContentLength() {
     TestContext context =
         newTestContext(
-            null,
             methodName ->
                 "headObject".equals(methodName)
                     ? HeadObjectResponse.builder().contentLength(null).build()
@@ -185,7 +170,6 @@ public class S3StorageServiceTest {
   public void testBoundedDownloadRejectsNegativeHeadContentLength() {
     TestContext context =
         newTestContext(
-            null,
             methodName ->
                 "headObject".equals(methodName)
                     ? HeadObjectResponse.builder().contentLength(-1L).build()
@@ -207,7 +191,6 @@ public class S3StorageServiceTest {
   public void testExistsReturnsFalseForMissingKey() {
     TestContext context =
         newTestContext(
-            null,
             methodName -> {
               if ("headObject".equals(methodName)) {
                 throw NoSuchKeyException.builder().message("missing").build();
@@ -223,9 +206,8 @@ public class S3StorageServiceTest {
 
   @Test
   public void testRejectInvalidArguments() {
-    TestContext context = newTestContext(null);
+    TestContext context = newTestContext();
     try {
-      assertThrows(IllegalArgumentException.class, () -> context.storageService.getPublicUrl(" "));
       assertThrows(
           IllegalArgumentException.class,
           () ->
@@ -248,7 +230,7 @@ public class S3StorageServiceTest {
   @Test
   public void testHeadObjectWithChecksumRequestsChecksumMode() {
     AtomicReference<HeadObjectRequest> captured = new AtomicReference<>();
-    S3StorageProperties properties = newS3Properties(null);
+    S3StorageProperties properties = newS3Properties();
     S3StorageService service =
         new S3StorageServiceImpl(
             properties,
@@ -284,7 +266,7 @@ public class S3StorageServiceTest {
   @Test
   public void testCopyObjectUsesFixedBucket() {
     AtomicReference<CopyObjectRequest> captured = new AtomicReference<>();
-    S3StorageProperties properties = newS3Properties(null);
+    S3StorageProperties properties = newS3Properties();
     S3StorageService service =
         new S3StorageServiceImpl(
             properties,
@@ -307,7 +289,7 @@ public class S3StorageServiceTest {
   @Test
   public void testDeleteObjectIfExistsIsIdempotent() {
     AtomicInteger deletedCalls = new AtomicInteger();
-    S3StorageProperties properties = newS3Properties(null);
+    S3StorageProperties properties = newS3Properties();
     S3StorageService service =
         new S3StorageServiceImpl(
             properties,
@@ -328,7 +310,7 @@ public class S3StorageServiceTest {
   /** deleteObjectIfExists 只吞 404：非 404 的服务端错误必须向上抛出。 */
   @Test
   public void testDeleteObjectIfExistsRethrowsNon404Errors() {
-    S3StorageProperties properties = newS3Properties(null);
+    S3StorageProperties properties = newS3Properties();
     S3StorageService service =
         new S3StorageServiceImpl(
             properties,
@@ -342,24 +324,22 @@ public class S3StorageServiceTest {
     assertThrows(S3Exception.class, () -> service.deleteObjectIfExists("forbidden.bin"));
   }
 
-  private S3StorageProperties newS3Properties(String publicBaseUrl) {
+  private S3StorageProperties newS3Properties() {
     S3StorageProperties properties = new S3StorageProperties();
     properties.setEndpoint("https://example-account-id.r2.cloudflarestorage.com");
     properties.setRegion("auto");
     properties.setBucket("test-bucket");
     properties.setAccessKey("ACCESS_KEY");
     properties.setSecretKey("SECRET_KEY");
-    properties.setPublicBaseUrl(publicBaseUrl);
     return properties;
   }
 
-  private TestContext newTestContext(String publicBaseUrl) {
-    return newTestContext(publicBaseUrl, methodName -> null);
+  private TestContext newTestContext() {
+    return newTestContext(methodName -> null);
   }
 
-  private TestContext newTestContext(String publicBaseUrl, Function<String, Object> override) {
-    return new TestContext(
-        new S3StorageServiceImpl(newS3Properties(publicBaseUrl), newNoopS3Client(override)));
+  private TestContext newTestContext(Function<String, Object> override) {
+    return new TestContext(new S3StorageServiceImpl(newS3Properties(), newNoopS3Client(override)));
   }
 
   private S3Client newNoopS3Client(Function<String, Object> override) {

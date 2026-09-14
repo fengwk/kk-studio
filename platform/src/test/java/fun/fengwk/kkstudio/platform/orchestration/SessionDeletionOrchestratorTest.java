@@ -70,7 +70,6 @@ class SessionDeletionOrchestratorTest {
   private IssueRunRepository issueRunRepository;
   private IssueRunSessionRepository issueRunSessionRepository;
   private ObjectProvider<HarnessStore> stores;
-  private ObjectProvider<SessionBlobRefManager> refManagers;
   private HarnessStore store;
   private HarnessStore.Transaction transaction;
   private SessionBlobRefManager refManager;
@@ -89,13 +88,11 @@ class SessionDeletionOrchestratorTest {
     issueRunRepository = mock(IssueRunRepository.class);
     issueRunSessionRepository = mock(IssueRunSessionRepository.class);
     stores = mock(ObjectProvider.class);
-    refManagers = mock(ObjectProvider.class);
     store = mock(HarnessStore.class);
     transaction = mock(HarnessStore.Transaction.class);
     refManager = mock(SessionBlobRefManager.class);
 
     when(stores.getIfAvailable()).thenReturn(store);
-    when(refManagers.getIfAvailable()).thenReturn(refManager);
     when(store.transaction(any()))
         .thenAnswer(
             invocation -> {
@@ -128,7 +125,7 @@ class SessionDeletionOrchestratorTest {
             issueRunRepository,
             issueRunSessionRepository,
             stores,
-            refManagers);
+            refManager);
   }
 
   @Test
@@ -175,15 +172,15 @@ class SessionDeletionOrchestratorTest {
   }
 
   @Test
-  void deletesOnlyPresentCanvasSessionsWithoutBlobManager() {
-    // 并发消失的 Session 被跳过；禁用全局 storage 时仍删除无 blob ref 的 Canvas Session。
+  void deletesOnlyPresentCanvasSessions() {
+    // 并发消失的 Session 被跳过。
     when(canvasSessionRepository.listSessionIds(CANVAS_ID))
         .thenReturn(List.of(SESSION_2, SESSION_1));
     when(transaction.lockSessionForUpdate(SESSION_1)).thenReturn(Optional.empty());
     when(transaction.lockSessionForUpdate(SESSION_2))
         .thenReturn(Optional.of(new Session(SESSION_2, "session-2", NOW)));
     when(transaction.listThreadsBySession(SESSION_2)).thenReturn(List.of());
-    when(refManagers.getIfAvailable()).thenReturn(null);
+    when(refManager.listBlobIds(SESSION_2)).thenReturn(List.of());
 
     service.deleteSessionsByOwner(CANVAS_OWNER);
 
@@ -193,6 +190,26 @@ class SessionDeletionOrchestratorTest {
     verify(transaction).deleteEntries(SESSION_2);
     verify(transaction).deleteSession(SESSION_2);
     verifyNoInteractions(chatSessionRepository);
+  }
+
+  @Test
+  void rejectsNullBlobRefManagerInConstructor() {
+    // 验证 SessionBlobRefManager 作为强依赖不可为 null。
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new SessionDeletionOrchestrator(
+                chatSessionRepository,
+                canvasSessionRepository,
+                chatRepository,
+                canvasStore,
+                projectRepository,
+                projectSessionRepository,
+                issueRepository,
+                issueRunRepository,
+                issueRunSessionRepository,
+                stores,
+                null));
   }
 
   @Test

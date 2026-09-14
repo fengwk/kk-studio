@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationDi
 
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -68,23 +67,6 @@ public abstract class WebPostgresTestSupport {
     try (Connection conn = newConnection()) {
       resetAndMigrateDevDatabase(conn);
       verifyDevSeed(conn);
-    }
-  }
-
-  /**
-   * 供 S3 场景测试在 Spring 上下文创建前把 {@code system_setting} 的 {@code storageMedia.s3Enabled} 置为 true， 使 S3
-   * 服务族 flush 装配（而非返回 null）。
-   */
-  public static void enableS3InSystemSettings() throws SQLException {
-    try (Connection conn = newConnection();
-        PreparedStatement statement =
-            conn.prepareStatement(
-                "update system_setting set config ="
-                    + " jsonb_set(config, '{storageMedia,s3Enabled}', 'true'::jsonb)"
-                    + " where id = 1")) {
-      if (statement.executeUpdate() != 1) {
-        throw new IllegalStateException("system_setting baseline row is missing");
-      }
     }
   }
 

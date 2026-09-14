@@ -54,7 +54,6 @@ import fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasTransformDTO;
 import fun.fengwk.kkstudio.share.canvas.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
-import fun.fengwk.kkstudio.web.storage.FixedObjectProvider;
 
 import java.time.Instant;
 import java.util.List;
@@ -91,7 +90,6 @@ class StudioCanvasControllerTest {
     commandService = mock(CanvasCommandService.class);
     harnessQueryService = mock(HarnessOwnerQueryService.class);
     blobManager = mock(StorageBlobManager.class);
-    FixedObjectProvider<StorageBlobManager> blobManagers = new FixedObjectProvider<>(blobManager);
     StorageBlob blob = new StorageBlob();
     blob.setId(BLOB_1);
     blob.setMediaType("image/png");
@@ -105,7 +103,7 @@ class StudioCanvasControllerTest {
                     queryService,
                     commandService,
                     harnessQueryService,
-                    new WebDtoMapper(blobManagers)))
+                    new WebDtoMapper(blobManager)))
             .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
             .build();
   }

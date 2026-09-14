@@ -8,7 +8,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess.BlobFacts;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
@@ -24,13 +23,14 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.UUID;
 
-/** Platform BlobAccess 必须冻结最小 facts，并保留 original 长度、关闭与预签名语义。 */
+/** Platform BlobAccess 必须冻结最小 facts，并保留 original 长度、关闭与预签名语义；强依赖 S3 与 BlobManager。 */
 class PlatformCanvasFunctionBlobAccessTest {
 
   private static final UUID BLOB = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
   @Test
   void mapsFactsAndDelegatesPresignWithoutLeakingPlatformTypes() {
+    // 测试意图：验证通过强依赖注入的 S3StorageService 和 StorageBlobManager 正确映射 facts 与预签名。
     StorageBlobManager manager = mock(StorageBlobManager.class);
     StorageBlob blob = new StorageBlob();
     blob.setId(BLOB);
@@ -42,8 +42,7 @@ class PlatformCanvasFunctionBlobAccessTest {
     when(manager.presignOriginalUrl(BLOB))
         .thenReturn(StoragePresignedUrlDTO.builder().url("https://s3.example/original").build());
     PlatformCanvasFunctionBlobAccess access =
-        new PlatformCanvasFunctionBlobAccess(
-            provider(mock(S3StorageService.class)), provider(manager));
+        new PlatformCanvasFunctionBlobAccess(mock(S3StorageService.class), manager);
 
     assertEquals(
         new BlobFacts(BLOB, "image/png", 3L, 1L, 2L, null), access.findFacts(BLOB).orElseThrow());
@@ -53,13 +52,13 @@ class PlatformCanvasFunctionBlobAccessTest {
 
   @Test
   void closesMismatchedOriginalBeforeRejectingIt() {
+    // 测试意图：验证 S3 对象长度与预期不一致时，流在报错前被正确关闭。
     S3StorageService storage = mock(S3StorageService.class);
     TrackingInputStream content = new TrackingInputStream(new byte[] {1, 2});
     when(storage.readObject(StorageObjectKeys.blobOriginal(BLOB)))
         .thenReturn(new S3ObjectStream(content, new S3ObjectMetadata(2L, "image/png", null)));
     PlatformCanvasFunctionBlobAccess access =
-        new PlatformCanvasFunctionBlobAccess(
-            storageProvider(storage), provider(mock(StorageBlobManager.class)));
+        new PlatformCanvasFunctionBlobAccess(storage, mock(StorageBlobManager.class));
 
     IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, () -> access.openOriginal(BLOB, 3L));
@@ -69,36 +68,26 @@ class PlatformCanvasFunctionBlobAccessTest {
   }
 
   @Test
-  void returnsClosableOriginalAndFailsWithStableUnavailableMessages() throws Exception {
+  void rejectsNullDependenciesInConstructorAndOpensClosableOriginal() throws Exception {
+    // 测试意图：验证构造器强依赖注入非空拒绝，以及正常打开可关闭的 S3 原件流。
     S3StorageService storage = mock(S3StorageService.class);
+    StorageBlobManager manager = mock(StorageBlobManager.class);
+
+    assertThrows(
+        NullPointerException.class, () -> new PlatformCanvasFunctionBlobAccess(null, manager));
+    assertThrows(
+        NullPointerException.class, () -> new PlatformCanvasFunctionBlobAccess(storage, null));
+
     ByteArrayInputStream content = new ByteArrayInputStream(new byte[] {1, 2, 3});
     when(storage.readObject(StorageObjectKeys.blobOriginal(BLOB)))
         .thenReturn(new S3ObjectStream(content, new S3ObjectMetadata(3L, "image/png", null)));
     PlatformCanvasFunctionBlobAccess access =
-        new PlatformCanvasFunctionBlobAccess(storageProvider(storage), provider(null));
+        new PlatformCanvasFunctionBlobAccess(storage, manager);
 
     try (CanvasFunctionResourceStream stream = access.openOriginal(BLOB, 3L)) {
       assertEquals(3L, stream.size());
       assertEquals(1, stream.content().read());
     }
-    IllegalStateException factsError =
-        assertThrows(IllegalStateException.class, () -> access.findFacts(BLOB));
-    assertEquals("global blob storage is unavailable", factsError.getMessage());
-    NullPointerException urlError =
-        assertThrows(NullPointerException.class, () -> access.originalUrl(BLOB, 120L));
-    assertEquals(
-        "StorageBlobManager is required for Canvas Function runtime", urlError.getMessage());
-  }
-
-  @SuppressWarnings("unchecked")
-  private static <T> ObjectProvider<T> provider(T value) {
-    ObjectProvider<T> provider = mock(ObjectProvider.class);
-    when(provider.getIfAvailable()).thenReturn(value);
-    return provider;
-  }
-
-  private static ObjectProvider<S3StorageService> storageProvider(S3StorageService storage) {
-    return provider(storage);
   }
 
   private static final class TrackingInputStream extends ByteArrayInputStream {

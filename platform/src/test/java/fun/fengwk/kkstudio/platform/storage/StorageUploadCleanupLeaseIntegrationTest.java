@@ -17,6 +17,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -52,7 +53,7 @@ import java.util.concurrent.TimeUnit;
       "kk-studio.storage.s3.secret-key=local-test-secret-key",
       "kk-studio.storage.maintenance.cleanup-lease=100ms"
     })
-class StorageUploadCleanupLeaseIntegrationTest extends S3PostgresSpringTestSupport {
+class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private StorageUploadRepository uploadRepository;
   @Autowired private StorageUploadService uploadService;

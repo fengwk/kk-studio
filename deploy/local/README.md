@@ -1,6 +1,6 @@
 # 本地一键启动栈
 
-`kk-studio` 的本地一键启动栈：`app + postgres`。
+`kk-studio` 的本地一键启动栈：`app + postgres + minio + minio-init`。
 
 默认 Compose 由仓库根目录构建：
 
@@ -8,12 +8,17 @@
   `mvn -Pdistribution -pl web -am -DskipTests clean package`，把 React 产物
   嵌入 `BOOT-INF/classes/static`，运行时由 Spring 直接服务 UI / API / SPA
   fallback；不加 Nginx，也不另起前端容器。容器内端口固定为 `8080`。
+  依赖 PostgreSQL、MinIO 与 minio-init healthy 后启动；启动时自动验证 S3 连接属性与 bucket 可用性。
 - `postgres:17-alpine` —— 唯一 durable 数据库，命名为 `kk_studio`，默认用户
   `kk_studio`。空库由 app 在 `dev` profile 通过 Flyway 执行
   [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 和
   [`R__dev_seed.sql`](../../schema/src/main/resources/db/seed/dev/R__dev_seed.sql)；
   已执行版本由 `flyway_schema_history` 记录。Harness Work、version 与 realtime 的低延迟
   提示也复用 PostgreSQL `LISTEN/NOTIFY`；通知丢失时由 durable snapshot 与 periodic poll 恢复。
+- `minio:RELEASE.2025-04-22T22-12-26Z` —— 基础 S3 兼容对象存储，为 Blob 与 Storage 提供本地持久化存储。
+  宿主端口默认绑定 `127.0.0.1:9000`，数据保存于命名卷 `kk-studio-minio`。
+- `minio-init:RELEASE.2025-04-16T18-13-26Z` —— 初始化容器，等待 MinIO healthy 后自动使用 `mc`
+  创建私有 bucket 并设置安全权限，保持健康守护。
 
 > Harness Daemon 不在当前栈内。
 
@@ -23,8 +28,9 @@
 docker compose -f deploy/local/compose.yaml up -d --build --wait
 ```
 
-`--wait` 会一直等到两个服务的 healthcheck 全部 `healthy`（PostgreSQL 用
-`pg_isready`，app 用 `curl http://127.0.0.1:8080/actuator/health`）。
+`--wait` 会一直等到四个服务的 healthcheck 全部 `healthy`（PostgreSQL 用
+`pg_isready`，MinIO 用 `/minio/health/live`，minio-init 用 `mc stat`，app 用
+`curl http://127.0.0.1:8080/actuator/health`）。
 
 查看状态与日志：
 
@@ -32,6 +38,7 @@ docker compose -f deploy/local/compose.yaml up -d --build --wait
 docker compose -f deploy/local/compose.yaml ps
 docker compose -f deploy/local/compose.yaml logs -f app
 docker compose -f deploy/local/compose.yaml logs -f postgres
+docker compose -f deploy/local/compose.yaml logs -f minio
 ```
 
 ## 统一地址
@@ -42,17 +49,20 @@ docker compose -f deploy/local/compose.yaml logs -f postgres
 | Harness API | <http://localhost:8080/api/harness/threads> 等 |
 | Health | <http://localhost:8080/actuator/health> |
 | PostgreSQL | `jdbc:postgresql://localhost:5432/kk_studio`（用户 / 密码：`kk_studio`） |
+| MinIO API | <http://localhost:9000> |
 
 `localhost` 默认绑定 `127.0.0.1`；通过环境变量 `KK_STUDIO_APP_HOST` /
-`KK_STUDIO_PG_HOST` 可改为 `0.0.0.0` 等地址。
+`KK_STUDIO_PG_HOST` / `KK_STUDIO_S3_HOST` 可改为 `0.0.0.0` 等绑定地址。
+此时还需将 `KK_STUDIO_S3_PUBLIC_HOST` 设为浏览器实际可访问的主机名或 IP；
+预签名 URL 不会使用不可路由的 bind 地址。
 
 ## 停止与清理
 
 ```bash
-# 停止：删除容器与宿主端口映射，仅 PostgreSQL 命名卷 kk-studio-postgres 保留。
+# 停止：删除容器与宿主端口映射，PostgreSQL 与 MinIO 命名卷保留。
 docker compose -f deploy/local/compose.yaml down
 
-# 彻底清理：额外删除命名卷，回到空数据库；下次 app 启动会重新执行 Flyway migrations。
+# 彻底清理：额外删除命名卷，回到空数据库与空对象桶；下次 app 启动会重新初始化。
 docker compose -f deploy/local/compose.yaml down -v
 ```
 
@@ -73,6 +83,13 @@ docker compose -f deploy/local/compose.yaml down -v
 | `KK_STUDIO_PG_DATABASE` | `kk_studio` | 初始数据库名 |
 | `KK_STUDIO_PG_USER` | `kk_studio` | 初始用户名 |
 | `KK_STUDIO_PG_PASSWORD` | `kk_studio` | 初始密码 |
+| `KK_STUDIO_S3_PORT` | `9000` | MinIO **宿主**端口（映射到容器内 `9000`） |
+| `KK_STUDIO_S3_HOST` | `127.0.0.1` | MinIO 宿主绑定地址 |
+| `KK_STUDIO_S3_PUBLIC_HOST` | `127.0.0.1` | 预签名 URL 对浏览器发布的 MinIO 主机名或 IP |
+| `KK_STUDIO_S3_BUCKET` | `kk-studio` | 初始 S3 存储桶名 |
+| `KK_STUDIO_S3_ACCESS_KEY` | `kk-studio` | MinIO / S3 access key（固定 disposable 本地凭据） |
+| `KK_STUDIO_S3_SECRET_KEY` | `kk-studio` | MinIO / S3 secret key（固定 disposable 本地凭据） |
+| `KK_STUDIO_S3_REGION` | `us-east-1` | S3 region |
 | `KK_STUDIO_SPRING_PROFILES_ACTIVE` | `dev` | 传递给 `SPRING_PROFILES_ACTIVE` |
 | `KK_STUDIO_HARNESS_DISPATCHER_MAX_DISPATCH_TASKS` | `64` | 本地 queued/running Processor handoff 总量上限 |
 | `KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION` | `30s` | Work 初始 claim 租约时长 |
@@ -132,5 +149,5 @@ seed 或仓库。
 ```bash
 docker compose -f deploy/local/compose.yaml ps -a
 docker compose -f deploy/local/compose.yaml down -v
-ss -ltnp | grep -E ':8080|:5432' || true
+ss -ltnp | grep -E ':8080|:5432|:9000' || true
 ```

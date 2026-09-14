@@ -328,7 +328,6 @@ public class SystemSettingsCodec {
     }
     return new SystemSettings.StorageMedia(
         requiredMillis(dto.getUploadExpiresSeconds(), "storageMedia.uploadExpiresSeconds"),
-        requiredBoolean(dto.getS3Enabled(), "storageMedia.s3Enabled"),
         requiredMillis(
             dto.getS3PresignDefaultExpiresSeconds(), "storageMedia.s3PresignDefaultExpiresSeconds"),
         requiredMillis(
@@ -554,7 +553,6 @@ public class SystemSettingsCodec {
       SystemSettings.StorageMedia storageMedia) {
     SystemSettingsStorageMediaDTO dto = new SystemSettingsStorageMediaDTO();
     dto.setUploadExpiresSeconds(storageMedia.uploadExpiresSeconds());
-    dto.setS3Enabled(storageMedia.s3Enabled());
     dto.setS3PresignDefaultExpiresSeconds(storageMedia.s3PresignDefaultExpiresSeconds());
     dto.setS3PresignMaxExpiresSeconds(storageMedia.s3PresignMaxExpiresSeconds());
     dto.setCanvasMediaProcessTimeoutMillis(storageMedia.canvasMediaProcessTimeoutMillis());
