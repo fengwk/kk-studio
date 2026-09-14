@@ -99,6 +99,7 @@ final class ModelExecution implements ModelGateway.Listener {
       ModelProcessorConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,
+      Executor heartbeatWorker,
       Executor flushExecutor,
       Consumer<ModelExecution> ownerRelease) {
     this.store = Objects.requireNonNull(store, "store");
@@ -114,8 +115,9 @@ final class ModelExecution implements ModelGateway.Listener {
     this.flushExecutor = Objects.requireNonNull(flushExecutor, "flushExecutor");
     this.heartbeat =
         new WorkHeartbeat(
-            Objects.requireNonNull(store, "store"),
+            this.store,
             this.scheduler,
+            Objects.requireNonNull(heartbeatWorker, "heartbeatWorker"),
             config.leaseConfig(),
             this.clock,
             this::abandon);

@@ -408,7 +408,8 @@ class HarnessWorkDispatcherHandoffTest {
             new ThreadProcessorConfig(
                 leaseConfig, Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT),
             clock,
-            processorScheduler);
+            processorScheduler,
+            Runnable::run);
     ModelProcessor modelProcessor =
         new ModelProcessor(
             store,
@@ -417,6 +418,7 @@ class HarnessWorkDispatcherHandoffTest {
             new ModelProcessorConfig(leaseConfig, () -> noRetry, Duration.ofSeconds(5)),
             clock,
             processorScheduler,
+            Runnable::run,
             Runnable::run);
     ToolProcessor toolProcessor =
         new ToolProcessor(
@@ -426,7 +428,8 @@ class HarnessWorkDispatcherHandoffTest {
             new ToolProcessorConfig(
                 leaseConfig, () -> noRetry, Duration.ofSeconds(7), Duration.ofSeconds(9)),
             clock,
-            processorScheduler);
+            processorScheduler,
+            Runnable::run);
     HarnessWorkDispatcher dispatcher =
         new HarnessWorkDispatcher(
             store,

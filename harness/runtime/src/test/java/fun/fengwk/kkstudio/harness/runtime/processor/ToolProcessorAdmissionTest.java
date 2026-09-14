@@ -432,7 +432,8 @@ class ToolProcessorAdmissionTest {
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixtureA.clock,
-            ToolProcessorTestSupport.newScheduler());
+            ToolProcessorTestSupport.newScheduler(),
+            Runnable::run);
     assertEquals(ProcessResult.TERMINATED, processorB.process(claimedB));
 
     release.countDown();
@@ -639,7 +640,8 @@ class ToolProcessorAdmissionTest {
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixtureA.clock,
-            ToolProcessorTestSupport.newScheduler());
+            ToolProcessorTestSupport.newScheduler(),
+            Runnable::run);
     assertEquals(ProcessResult.TERMINATED, processorB.process(claimedB));
 
     release.countDown();

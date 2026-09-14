@@ -54,6 +54,7 @@ import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -144,6 +145,14 @@ class HarnessRuntimeConfigurationTest {
   @Qualifier("harnessModelFlushExecutor")
   private ExecutorService flushExecutor;
 
+  @Autowired
+  @Qualifier("harnessProcessorScheduler")
+  private ScheduledExecutorService processorScheduler;
+
+  @Autowired
+  @Qualifier("harnessHeartbeatWorkerExecutor")
+  private ExecutorService heartbeatWorkerExecutor;
+
   @Test
   void composesTheFullRuntimeBeanGraph() {
     assertInstanceOf(PostgresqlHarnessStore.class, harnessStore);
@@ -153,6 +162,8 @@ class HarnessRuntimeConfigurationTest {
     assertNotNull(threadProcessor);
     assertNotNull(modelProcessor);
     assertNotNull(toolProcessor);
+    assertNotNull(processorScheduler);
+    assertNotNull(heartbeatWorkerExecutor);
     assertNotNull(harnessRuntime);
     assertNotNull(systemPromptPreviewService);
     assertNotNull(harnessWorkDispatcher);
@@ -253,5 +264,38 @@ class HarnessRuntimeConfigurationTest {
         });
     assertTrue(latch.await(5, TimeUnit.SECONDS));
     assertTrue(isVirtual.get(), "flush executor must use virtual threads");
+  }
+
+  @Test
+  void processorSchedulerRunsOnPlatformDaemonThreads() throws Exception {
+    AtomicReference<Thread> threadRef = new AtomicReference<>();
+    CountDownLatch latch = new CountDownLatch(1);
+    processorScheduler.execute(
+        () -> {
+          threadRef.set(Thread.currentThread());
+          latch.countDown();
+        });
+    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    Thread thread = threadRef.get();
+    assertNotNull(thread);
+    assertFalse(thread.isVirtual(), "processor scheduler must use platform threads");
+    assertTrue(thread.isDaemon(), "processor scheduler must use daemon threads");
+    assertTrue(thread.getName().startsWith("harness-processor-timer-"));
+  }
+
+  @Test
+  void heartbeatWorkerExecutorRunsOnNamedVirtualThreads() throws Exception {
+    AtomicReference<Thread> threadRef = new AtomicReference<>();
+    CountDownLatch latch = new CountDownLatch(1);
+    heartbeatWorkerExecutor.execute(
+        () -> {
+          threadRef.set(Thread.currentThread());
+          latch.countDown();
+        });
+    assertTrue(latch.await(5, TimeUnit.SECONDS));
+    Thread thread = threadRef.get();
+    assertNotNull(thread);
+    assertTrue(thread.isVirtual(), "heartbeat worker executor must use virtual threads");
+    assertTrue(thread.getName().startsWith("harness-heartbeat-worker-"));
   }
 }

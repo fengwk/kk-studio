@@ -189,15 +189,25 @@ public class HarnessRuntimeConfiguration {
   }
 
   /**
-   * Model / Tool / Thread-resolve 共用的 lease heartbeat 调度池。
+   * Model / Tool / Thread-resolve 共用的 lease heartbeat 定时分发调度池。
    *
-   * <p>心跳任务本身只是一次 {@code harness_work} 单行 renew，1 个线程足够正常续期。第 2 个线程只兜底极端情况：某次 renew 等行锁，或
-   * lost-ownership 回调里同步 {@code handle.cancel()} 时，不把其余 claim 的续期堵在同一条线程上。
+   * <p>回调仅负责非阻塞状态检查与任务分派，绝不执行数据库事务或所有权取消操作。
    */
   @Bean(name = "harnessProcessorScheduler", destroyMethod = "shutdown")
   public ScheduledExecutorService harnessProcessorScheduler() {
     return Executors.newScheduledThreadPool(
-        2, Thread.ofPlatform().name("harness-processor-", 0L).daemon(true).factory());
+        2, Thread.ofPlatform().name("harness-processor-timer-", 0L).daemon(true).factory());
+  }
+
+  /**
+   * Model / Tool / Thread-resolve 心跳续租事务与失联取消执行器。
+   *
+   * <p>采用命名虚拟线程，与阻塞 Provider / Tool I/O 严格隔离，避免长耗时调用阻塞续租。
+   */
+  @Bean(name = "harnessHeartbeatWorkerExecutor", destroyMethod = "close")
+  public ExecutorService harnessHeartbeatWorkerExecutor() {
+    return Executors.newThreadPerTaskExecutor(
+        Thread.ofVirtual().name("harness-heartbeat-worker-", 0L).factory());
   }
 
   @Bean
@@ -207,9 +217,16 @@ public class HarnessRuntimeConfiguration {
       ThreadProcessorConfig config,
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
+      @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
       ObjectProvider<ToolResultHistoryMaterializer> materializerProvider) {
     return new ThreadProcessor(
-        store, turnResolver, config, clock, scheduler, materializerProvider.getIfAvailable());
+        store,
+        turnResolver,
+        config,
+        clock,
+        scheduler,
+        heartbeatWorker,
+        materializerProvider.getIfAvailable());
   }
 
   @Bean(destroyMethod = "close")
@@ -225,9 +242,17 @@ public class HarnessRuntimeConfiguration {
       ModelProcessorConfig config,
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
+      @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
       @Qualifier("harnessModelFlushExecutor") ExecutorService flushExecutor) {
     return new ModelProcessor(
-        store, modelGateway, realtimeEventSink, config, clock, scheduler, flushExecutor);
+        store,
+        modelGateway,
+        realtimeEventSink,
+        config,
+        clock,
+        scheduler,
+        heartbeatWorker,
+        flushExecutor);
   }
 
   @Bean(destroyMethod = "close")
@@ -237,8 +262,10 @@ public class HarnessRuntimeConfiguration {
       RealtimeEventSink realtimeEventSink,
       ToolProcessorConfig config,
       Clock clock,
-      @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler) {
-    return new ToolProcessor(store, toolGateway, realtimeEventSink, config, clock, scheduler);
+      @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
+      @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker) {
+    return new ToolProcessor(
+        store, toolGateway, realtimeEventSink, config, clock, scheduler, heartbeatWorker);
   }
 
   @Bean

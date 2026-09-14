@@ -642,6 +642,7 @@ class ModelExecutionStreamFlushTest {
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
+            Runnable::run,
             e -> {});
 
     // 填满 maxEvents (2 个事件)
@@ -945,6 +946,7 @@ class ModelExecutionStreamFlushTest {
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
+            Runnable::run,
             e -> {});
     executionHolder[0] = execution;
 
@@ -1011,6 +1013,7 @@ class ModelExecutionStreamFlushTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
+            Runnable::run,
             Runnable::run,
             e -> {});
     executionHolder[0] = execution;
@@ -1079,6 +1082,7 @@ class ModelExecutionStreamFlushTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
+            Runnable::run,
             Runnable::run,
             e -> {});
     executionHolder[0] = execution;
@@ -1155,6 +1159,7 @@ class ModelExecutionStreamFlushTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
             Clock.fixed(NOW.plusSeconds(10), ZoneOffset.UTC),
             scheduler,
+            Runnable::run,
             Runnable::run,
             e -> {});
 
@@ -1240,6 +1245,7 @@ class ModelExecutionStreamFlushTest {
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
+            Runnable::run,
             e -> {});
     executionHolder[0] = execution;
 
@@ -1299,6 +1305,7 @@ class ModelExecutionStreamFlushTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
+            Runnable::run,
             Runnable::run,
             e -> {});
 
@@ -1372,6 +1379,7 @@ class ModelExecutionStreamFlushTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
             Clock.fixed(NOW, ZoneOffset.UTC),
             rejectingScheduler,
+            Runnable::run,
             Runnable::run,
             e -> {});
     executionHolder[0] = execution;
@@ -1463,6 +1471,7 @@ class ModelExecutionStreamFlushTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
             Clock.fixed(NOW, ZoneOffset.UTC),
             mockScheduler,
+            Runnable::run,
             rejectingExecutor,
             e -> {});
 
@@ -1586,6 +1595,7 @@ class ModelExecutionStreamFlushTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
             Clock.fixed(NOW, ZoneOffset.UTC),
             mockScheduler,
+            Runnable::run,
             rejectingExecutor,
             e -> {});
 
@@ -1640,6 +1650,7 @@ class ModelExecutionStreamFlushTest {
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
+            Runnable::run,
             e -> {});
     exec1.onEvent(new ProviderStreamEvent.TextDelta("012345678901234")); // 15 字节 > 10
     assertFalse(
@@ -1660,6 +1671,7 @@ class ModelExecutionStreamFlushTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
             Clock.fixed(NOW.plusSeconds(10), ZoneOffset.UTC),
             scheduler,
+            Runnable::run,
             Runnable::run,
             e -> {});
     exec2.onEvent(new ProviderStreamEvent.TextDelta("123456")); // 6 bytes <= 10
@@ -1684,6 +1696,7 @@ class ModelExecutionStreamFlushTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
             Clock.fixed(NOW.plusSeconds(20), ZoneOffset.UTC),
             scheduler,
+            Runnable::run,
             Runnable::run,
             e -> {});
     exec3.onEvent(new ProviderStreamEvent.TextDelta("012345678901234")); // 15 字节独占
@@ -1741,6 +1754,7 @@ class ModelExecutionStreamFlushTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
+            Runnable::run,
             Runnable::run,
             e -> {});
 
@@ -1807,6 +1821,7 @@ class ModelExecutionStreamFlushTest {
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
+            Runnable::run,
             e -> {});
 
     assertEquals(ProcessResult.STARTED, execution.activate(handle));
@@ -1864,6 +1879,7 @@ class ModelExecutionStreamFlushTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
+            Runnable::run,
             Runnable::run,
             e -> {});
 
@@ -1993,6 +2009,7 @@ class ModelExecutionStreamFlushTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> retryPolicy, FALLBACK_DELAY, flushConfig),
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
+            Runnable::run,
             flushExecutor);
 
     return new Fixture(store, baseline, invocationId, gateway, sink, processor, flushConfig);

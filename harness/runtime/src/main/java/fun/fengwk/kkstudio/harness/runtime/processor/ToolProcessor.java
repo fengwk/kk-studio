@@ -25,6 +25,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BiFunction;
 
@@ -61,6 +62,7 @@ public final class ToolProcessor implements AutoCloseable {
   private final ToolProcessorConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
+  private final Executor heartbeatWorker;
   private final ConcurrentHashMap<UUID, ToolExecution> executions = new ConcurrentHashMap<>();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private volatile boolean closed;
@@ -71,13 +73,15 @@ public final class ToolProcessor implements AutoCloseable {
       RealtimeEventSink realtimeEventSink,
       ToolProcessorConfig config,
       Clock clock,
-      ScheduledExecutorService scheduler) {
+      ScheduledExecutorService scheduler,
+      Executor heartbeatWorker) {
     this.store = Objects.requireNonNull(store, "store");
     this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
     this.config = Objects.requireNonNull(config, "config");
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
   }
 
   /**
@@ -635,6 +639,7 @@ public final class ToolProcessor implements AutoCloseable {
         config,
         clock,
         scheduler,
+        heartbeatWorker,
         this::release);
   }
 

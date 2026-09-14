@@ -1026,6 +1026,7 @@ class ModelProcessorTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> retryPolicy, FALLBACK_DELAY),
             clock,
             newScheduler(),
+            Runnable::run,
             Runnable::run);
     // 与生产一致的最小链：ROOT + TURN_START(INPUT) + USER，Thread head 与 invocation requestHead 指向 USER。
     UserBasis baseline = seedUserBasis(store);
@@ -1083,7 +1084,8 @@ class ModelProcessorTest {
             new ThreadProcessorConfig(
                 LEASE_CONFIG, FALLBACK_DELAY, () -> new CompactionConfig(20_000, null)),
             clock,
-            newScheduler());
+            newScheduler(),
+            Runnable::run);
     assertEquals(
         ThreadProcessResult.COMPLETED,
         threadProcessor.process(
@@ -2558,6 +2560,7 @@ class ModelProcessorTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixtureA.clock,
             newScheduler(),
+            Runnable::run,
             Runnable::run);
     assertEquals(ProcessResult.TERMINATED, processorB.process(claimedB));
 
@@ -2595,6 +2598,7 @@ class ModelProcessorTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixture.clock,
             newScheduler(),
+            Runnable::run,
             Runnable::run);
 
     assertEquals(
@@ -2638,6 +2642,7 @@ class ModelProcessorTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixture.clock,
             hooked,
+            Runnable::run,
             Runnable::run);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle())); // 不应被消费
 
@@ -2698,7 +2703,8 @@ class ModelProcessorTest {
     UUID invocationId = seedInvocation(store, baseline, requestSpec(), NOW);
     ClaimedWork claimed = claim(store, invocationId, NOW);
     WorkHeartbeat heartbeat =
-        new WorkHeartbeat(store, newScheduler(), LEASE_CONFIG, Clock.systemUTC(), () -> {});
+        new WorkHeartbeat(
+            store, newScheduler(), Runnable::run, LEASE_CONFIG, Clock.systemUTC(), () -> {});
     assertTrue(heartbeat.start(claimed));
     heartbeat.stop();
     assertFalse(heartbeat.start(claimed));
@@ -2728,6 +2734,7 @@ class ModelProcessorTest {
                 null,
                 fixture.clock,
                 newScheduler(),
+                Runnable::run,
                 Runnable::run));
     assertThrows(
         NullPointerException.class,
@@ -2739,6 +2746,19 @@ class ModelProcessorTest {
                 new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
                 fixture.clock,
                 newScheduler(),
+                null,
+                Runnable::run));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ModelProcessor(
+                fixture.store,
+                fixture.gateway,
+                fixture.sink,
+                new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+                fixture.clock,
+                newScheduler(),
+                Runnable::run,
                 null));
   }
 
@@ -2841,6 +2861,7 @@ class ModelProcessorTest {
                 FALLBACK_DELAY),
             Clock.systemUTC(),
             newScheduler(),
+            Runnable::run,
             Runnable::run);
     gateway.queue(new ModelGateway.Started(handle));
     ClaimedWork claimed =
@@ -2885,6 +2906,7 @@ class ModelProcessorTest {
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixture.clock,
             dead,
+            Runnable::run,
             Runnable::run);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
 
@@ -3128,6 +3150,7 @@ class ModelProcessorTest {
                   LEASE_CONFIG, () -> retryPolicy, FALLBACK_DELAY, flushConfig),
               clock,
               scheduler,
+              Runnable::run,
               flushExecutor);
     }
   }

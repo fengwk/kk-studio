@@ -84,8 +84,10 @@ composition 子根：
 - `LocalFileResourceStore`使用 `environment-root/.kkstudio/resources/`作为 content-addressed resource root，
   单对象上限取 `SystemSettings.Advanced.resourceMaxBytes`；
 - `PostgresqlRealtimeEventSink`和 `PostgresqlRealtimeEventSource`把 Model/Tool realtime 连接到 PostgreSQL；
-- `ThreadProcessor`、`ModelProcessor`和 `ToolProcessor`共享 lease/heartbeat 配置；Model checkpoint timer 只复用
-  scheduler 计时，实际批次 DB flush 与通知发布由独立、受 Spring 生命周期管理的虚拟线程 executor 执行；
+- `ThreadProcessor`、`ModelProcessor`和 `ToolProcessor`共享 lease/heartbeat 配置；`harnessProcessorScheduler`
+  只执行 timer 检查、合并和非阻塞分派，`harnessHeartbeatWorkerExecutor`以独立命名虚拟线程执行续租事务与
+  所有权丢失回调；Model checkpoint timer 只复用 scheduler 计时，实际批次 DB flush 与通知发布由另一个受管
+  虚拟线程 executor 执行；
 - `HarnessWorkDispatcher`使用单线程 drain、bounded worker executor、poll scheduler 和 `harness_work` claim；
 - `HarnessRuntimeLifecycle`只控制 dispatcher 是否启动，Runtime control/query beans 始终由 context 持有。
 
@@ -488,7 +490,7 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 | Browser heartbeat | `applicationEventHeartbeatScheduler` | Spring destroy `shutdown`，handler `@PreDestroy`先发 1012 `SEND_FAILED` |
 | Application Event Hub | `ApplicationEventHub`，destroy `close` | 关闭 resource upstream、标记 subscriptions closed |
 | PostgreSQL notifications | `PostgresqlNotificationLoop`，`MAX_VALUE` | abort connection、interrupt、bounded 5s join |
-| Harness processors/RT source | `modelProcessor`、`toolProcessor`、`realtimeEventSource` | Spring destroy `close`，executors 使用 `shutdown` |
+| Harness processors/RT source | `modelProcessor`、`toolProcessor`、`realtimeEventSource` | Spring destroy `close`；heartbeat timer 使用 `shutdown`，heartbeat worker 与 model flush executor 使用 `close` |
 | Trusted contributor | `TrustedJarContributorLoader` | destroy `close` child classloader，列表不可再使用 |
 
 ## 测试与源码入口

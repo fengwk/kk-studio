@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
@@ -89,6 +90,7 @@ final class ToolExecution implements ToolGateway.Listener {
       ToolProcessorConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,
+      Executor heartbeatWorker,
       Consumer<ToolExecution> ownerRelease) {
     this.store = Objects.requireNonNull(store, "store");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
@@ -101,8 +103,9 @@ final class ToolExecution implements ToolGateway.Listener {
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.heartbeat =
         new WorkHeartbeat(
-            Objects.requireNonNull(store, "store"),
+            this.store,
             Objects.requireNonNull(scheduler, "scheduler"),
+            Objects.requireNonNull(heartbeatWorker, "heartbeatWorker"),
             config.leaseConfig(),
             this.clock,
             this::abandon);

@@ -197,6 +197,7 @@ class ToolExecutionFailureTest {
             ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
         fixture.clock,
         fixture.scheduler,
+        Runnable::run,
         ignored -> {});
   }
 

@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -29,15 +30,18 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 /** WorkHeartbeat 线程安全测试：可控 fake scheduler 确定性验证 start/stop 交错后不会留下未 cancel 的 periodic task。 */
 class WorkHeartbeatTest {
@@ -110,62 +114,83 @@ class WorkHeartbeatTest {
   }
 
   /**
-   * beat 与 stop 同锁互斥：在途 beat（renew 事务被 store monitor 阻塞）期间 stop 必须等待；stop 返回后手动再触发 periodic task
-   * 也绝不再 renew lease。
+   * beat 与 stop 同锁互斥：在途 renew 事务（已获取 renewalLock 并进入 store 事务）执行期间， stop() 必须阻塞等待该事务完成释放锁；事务释放后
+   * stop() 顺利返回； stop() 返回后手动触发 tick 也绝不再开始任何 renewal 事务。
    */
   @Test
   void stopWaitsForInFlightBeatAndNoRenewAfterStopReturns() throws Exception {
     Fixture fixture = new Fixture();
-    assertTrue(fixture.heartbeat.start(fixture.claimed));
-    Runnable beat = fixture.scheduler.periodicTasks.get(0);
+    CountDownLatch renewalInsideTx = new CountDownLatch(1);
+    CountDownLatch releaseTx = new CountDownLatch(1);
 
-    // 一个线程持 store monitor（事务回调内阻塞），使 beat 的 renew 事务卡在锁外。
-    CountDownLatch holding = new CountDownLatch(1);
-    CountDownLatch release = new CountDownLatch(1);
-    Thread holdStore =
-        new Thread(
-            () ->
-                fixture.store.transaction(
-                    ignored -> {
-                      holding.countDown();
-                      try {
-                        release.await(10, TimeUnit.SECONDS);
-                      } catch (InterruptedException failure) {
-                        Thread.currentThread().interrupt();
-                      }
-                      return null;
-                    }));
-    holdStore.start();
-    assertTrue(holding.await(5, TimeUnit.SECONDS));
+    HarnessStore blockingStore =
+        new HarnessStore() {
+          @Override
+          public <T> T transaction(Function<Transaction, T> callback) {
+            return fixture.store.transaction(
+                tx -> {
+                  renewalInsideTx.countDown();
+                  try {
+                    releaseTx.await(10, TimeUnit.SECONDS);
+                  } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                  }
+                  return callback.apply(tx);
+                });
+          }
+        };
 
-    // 在途 beat：已进入 beat（持 WorkHeartbeat 锁）并阻塞在 store 事务等待。
-    Thread beatThread = new Thread(beat);
-    beatThread.start();
-    assertFalse(fixture.scheduler.scheduled.get(0).isCancelled());
-    Thread.sleep(100);
+    WorkHeartbeat heartbeat =
+        new WorkHeartbeat(
+            blockingStore,
+            fixture.scheduler,
+            Runnable::run,
+            LEASE_CONFIG,
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            () -> {});
+    assertTrue(heartbeat.start(fixture.claimed));
+    Runnable tick = fixture.scheduler.periodicTasks.get(0);
 
-    AtomicBoolean stopReturned = new AtomicBoolean();
+    // 1. 在单独线程中启动 tick（异步执行 renew）
+    Thread renewThread = new Thread(tick);
+    renewThread.start();
+
+    CountDownLatch stopStarted = new CountDownLatch(1);
+    CountDownLatch stopReturned = new CountDownLatch(1);
     Thread stopThread =
         new Thread(
             () -> {
-              fixture.heartbeat.stop();
-              stopReturned.set(true);
+              stopStarted.countDown();
+              heartbeat.stop();
+              stopReturned.countDown();
             });
-    stopThread.start();
-    Thread.sleep(100);
-    assertFalse(stopReturned.get(), "stop must block while a beat is in flight");
 
-    release.countDown();
-    holdStore.join(5000);
-    beatThread.join(5000);
-    stopThread.join(5000);
-    assertTrue(stopReturned.get(), "stop returns once the in-flight beat finished");
+    try {
+      // 2. 严格等待 renew 已获取 renewalLock 并已进入 blockingStore.transaction
+      assertTrue(
+          renewalInsideTx.await(5, TimeUnit.SECONDS),
+          "renew must have entered blockingStore transaction before stop");
+
+      // 3. 此时发起 stop()，并等待线程确定阻塞在 renewalLock。
+      stopThread.start();
+      assertTrue(stopStarted.await(5, TimeUnit.SECONDS));
+      awaitBlocked(stopThread);
+      assertEquals(1L, stopReturned.getCount());
+    } finally {
+      // 4. 放行 renew 事务，并安全收敛线程
+      releaseTx.countDown();
+      renewThread.join(5000);
+      stopThread.join(5000);
+    }
+
+    // 5. 验证 stop() 此时已顺利返回，scheduler future 已取消
+    assertTrue(stopReturned.await(5, TimeUnit.SECONDS));
     assertTrue(fixture.scheduler.scheduled.get(0).isCancelled());
 
-    // stop 返回后：periodic task 即使被手动触发也绝不再 renew lease。
+    // 6. stop 返回后：periodic task 即使再次触发，也绝不调用 store.transaction 续租
     Instant before = leaseUntil(fixture);
-    beat.run();
-    assertEquals(before, leaseUntil(fixture));
+    tick.run();
+    assertEquals(before, leaseUntil(fixture), "no renew after stop returns");
   }
 
   /** renew 失败（work 行被删）：锁内标记停止并 cancel，lost ownership 通知在锁外执行且只发生一次。 */
@@ -177,6 +202,7 @@ class WorkHeartbeatTest {
         new WorkHeartbeat(
             fixture.store,
             fixture.scheduler,
+            Runnable::run,
             LEASE_CONFIG,
             Clock.fixed(NOW, ZoneOffset.UTC),
             notifications::incrementAndGet);
@@ -196,6 +222,318 @@ class WorkHeartbeatTest {
     // 已标记停止：再次触发不再 renew（也不再通知）。
     beat.run();
     assertEquals(1, notifications.get());
+  }
+
+  /** 隔离性：一个 claim 的续租被阻塞（如等数据库行锁）时，定时调度线程绝不被占用或阻塞， 另一个 claim 的心跳定时任务仍可正常触发并执行续租。 */
+  @Test
+  void blockedRenewalDoesNotBlockTimerAndAllowsOtherHeartbeatDispatch() throws Exception {
+    Fixture fixtureA = new Fixture();
+    Fixture fixtureB = new Fixture();
+
+    CountDownLatch blockA = new CountDownLatch(1);
+    CountDownLatch workerAStarted = new CountDownLatch(1);
+    CountDownLatch renewedB = new CountDownLatch(1);
+    try (ExecutorService worker = Executors.newVirtualThreadPerTaskExecutor()) {
+      WorkHeartbeat heartbeatA =
+          new WorkHeartbeat(
+              fixtureA.store,
+              fixtureA.scheduler,
+              command ->
+                  worker.execute(
+                      () -> {
+                        workerAStarted.countDown();
+                        try {
+                          blockA.await(10, TimeUnit.SECONDS);
+                        } catch (InterruptedException failure) {
+                          Thread.currentThread().interrupt();
+                        }
+                        command.run();
+                      }),
+              LEASE_CONFIG,
+              Clock.fixed(NOW, ZoneOffset.UTC),
+              () -> {});
+      assertTrue(heartbeatA.start(fixtureA.claimed));
+      WorkHeartbeat heartbeatB =
+          new WorkHeartbeat(
+              fixtureB.store,
+              fixtureB.scheduler,
+              command ->
+                  worker.execute(
+                      () -> {
+                        command.run();
+                        renewedB.countDown();
+                      }),
+              LEASE_CONFIG,
+              Clock.fixed(NOW, ZoneOffset.UTC),
+              () -> {});
+      assertTrue(heartbeatB.start(fixtureB.claimed));
+
+      Runnable tickA = fixtureA.scheduler.periodicTasks.get(0);
+      Runnable tickB = fixtureB.scheduler.periodicTasks.get(0);
+
+      try {
+        // A 的 worker 被阻塞后，timer 仍可立即继续分派 B。
+        tickA.run();
+        assertTrue(workerAStarted.await(5, TimeUnit.SECONDS), "workerA must receive dispatch");
+
+        Instant beforeB = leaseUntil(fixtureB);
+        tickB.run();
+        assertTrue(
+            renewedB.await(5, TimeUnit.SECONDS),
+            "heartbeat B must complete renewal without blocking on A");
+        Instant afterB = leaseUntil(fixtureB);
+        assertTrue(
+            afterB.isAfter(beforeB), "heartbeat B must renew even while heartbeat A is blocked");
+      } finally {
+        blockA.countDown();
+        heartbeatA.stop();
+        heartbeatB.stop();
+      }
+    }
+  }
+
+  /** 合并机制：当一次续租处于在途（queued 或 running）状态时，后续重复到达的定时 tick 会被合并丢弃， 至多创建一个续租任务，绝不无界堆积。 */
+  @Test
+  void repeatedTicksWhileRenewalIsActiveAreCoalesced() throws Exception {
+    Fixture fixture = new Fixture();
+    List<Runnable> queuedTasks = new CopyOnWriteArrayList<>();
+
+    WorkHeartbeat heartbeat =
+        new WorkHeartbeat(
+            fixture.store,
+            fixture.scheduler,
+            queuedTasks::add,
+            LEASE_CONFIG,
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            () -> {});
+    assertTrue(heartbeat.start(fixture.claimed));
+
+    Runnable tick = fixture.scheduler.periodicTasks.get(0);
+
+    // 第一项仍在 worker 队列中时，后续 tick 被合并。
+    tick.run();
+    assertEquals(1, queuedTasks.size());
+    tick.run();
+    tick.run();
+    tick.run();
+    assertEquals(1, queuedTasks.size(), "active renewal must coalesce overlapping ticks");
+
+    queuedTasks.get(0).run();
+    tick.run();
+    assertEquals(2, queuedTasks.size(), "a completed renewal permits the next dispatch");
+    queuedTasks.get(1).run();
+    heartbeat.stop();
+  }
+
+  /** scheduler 拒绝启动：视为所有权无法维系，start 返回 false 并恰好一次通知 onLostOwnership。 */
+  @Test
+  void schedulerRejectionMarksStoppedAndNotifiesLostOwnershipOnce() throws Exception {
+    Fixture fixture = new Fixture();
+    fixture.scheduler.reject.set(true);
+    AtomicInteger notifications = new AtomicInteger();
+    CountDownLatch lostLatch = new CountDownLatch(1);
+
+    WorkHeartbeat heartbeat =
+        new WorkHeartbeat(
+            fixture.store,
+            fixture.scheduler,
+            Runnable::run,
+            LEASE_CONFIG,
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            () -> {
+              notifications.incrementAndGet();
+              lostLatch.countDown();
+            });
+    assertFalse(heartbeat.start(fixture.claimed));
+    assertTrue(lostLatch.await(5, TimeUnit.SECONDS));
+    assertEquals(1, notifications.get());
+
+    // 再次 start 仍返回 false，且不再重复通知
+    assertFalse(heartbeat.start(fixture.claimed));
+    assertEquals(1, notifications.get());
+  }
+
+  /** worker 拒绝分派：视为所有权无法维系，恰好一次通知 onLostOwnership 并取消后续 tick。 */
+  @Test
+  void workerRejectionMarksStoppedCancelsFutureAndNotifiesLostOwnershipOnce() throws Exception {
+    Fixture fixture = new Fixture();
+    AtomicInteger notifications = new AtomicInteger();
+    CountDownLatch lostLatch = new CountDownLatch(1);
+    Executor rejectingWorker =
+        task -> {
+          throw new RejectedExecutionException("worker saturated");
+        };
+
+    WorkHeartbeat heartbeat =
+        new WorkHeartbeat(
+            fixture.store,
+            fixture.scheduler,
+            rejectingWorker,
+            LEASE_CONFIG,
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            () -> {
+              notifications.incrementAndGet();
+              lostLatch.countDown();
+            });
+    assertTrue(heartbeat.start(fixture.claimed));
+
+    Runnable tick = fixture.scheduler.periodicTasks.get(0);
+    tick.run();
+
+    assertTrue(
+        lostLatch.await(5, TimeUnit.SECONDS),
+        "lost ownership must be notified on worker rejection");
+    assertEquals(1, notifications.get());
+    assertTrue(
+        fixture.scheduler.scheduled.get(0).isCancelled(), "future must be cancelled on rejection");
+
+    // 再次触发 tick 为 no-op，不再重复通知
+    tick.run();
+    assertEquals(1, notifications.get());
+  }
+
+  /** 停止不变量：在 renewal 已分派入队但尚未开始执行期间调用 stop()， 待该任务稍后执行时绝不得再次 renew lease，亦不触发失联通知。 */
+  @Test
+  void stopDuringQueuedRenewalPreventsLeaseRenewal() {
+    Fixture fixture = new Fixture();
+    List<Runnable> queuedTasks = new CopyOnWriteArrayList<>();
+    Executor queuedWorker = queuedTasks::add;
+    AtomicInteger lostNotifications = new AtomicInteger();
+
+    WorkHeartbeat heartbeat =
+        new WorkHeartbeat(
+            fixture.store,
+            fixture.scheduler,
+            queuedWorker,
+            LEASE_CONFIG,
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            lostNotifications::incrementAndGet);
+    assertTrue(heartbeat.start(fixture.claimed));
+
+    Runnable tick = fixture.scheduler.periodicTasks.get(0);
+    tick.run();
+    assertEquals(1, queuedTasks.size(), "tick must enqueue renewal task to worker");
+
+    Instant before = leaseUntil(fixture);
+
+    // 在排队任务执行前调用 stop()
+    heartbeat.stop();
+    assertTrue(fixture.scheduler.scheduled.get(0).isCancelled());
+
+    // 随后执行排队的 renewal 任务
+    queuedTasks.get(0).run();
+
+    // 验证 lease 未被更新且无 lost ownership 通知
+    assertEquals(before, leaseUntil(fixture), "queued renewal must not renew lease after stop()");
+    assertEquals(0, lostNotifications.get(), "normal stop does not notify lost ownership");
+  }
+
+  /** Executor 的非拒绝型运行时异常也必须 fail closed，不能让 periodic task 静默终止。 */
+  @Test
+  void workerRuntimeFailureMarksStoppedAndNotifiesLostOwnership() {
+    Fixture fixture = new Fixture();
+    AtomicInteger lostNotifications = new AtomicInteger();
+    AtomicInteger dispatches = new AtomicInteger();
+    Executor failingWorker =
+        task -> {
+          if (dispatches.getAndIncrement() == 0) {
+            throw new IllegalStateException("worker unavailable");
+          }
+          task.run();
+        };
+
+    WorkHeartbeat heartbeat =
+        new WorkHeartbeat(
+            fixture.store,
+            fixture.scheduler,
+            failingWorker,
+            LEASE_CONFIG,
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            lostNotifications::incrementAndGet);
+    assertTrue(heartbeat.start(fixture.claimed));
+
+    Runnable tick = fixture.scheduler.periodicTasks.get(0);
+    tick.run();
+
+    assertEquals(1, lostNotifications.get());
+    assertEquals(2, dispatches.get());
+    assertTrue(fixture.scheduler.scheduled.get(0).isCancelled());
+  }
+
+  /**
+   * 竞态消除：当 tick 分派已进入 worker.execute 期间并发触发正常 stop()， worker 随后抛出拒绝异常时必须静默抑制，断言失联通知发生次数严格为 0
+   * 且无线程泄漏。
+   */
+  @Test
+  void concurrentStopDuringWorkerRejectionLeavesNoSpuriousLostOwnership() throws Exception {
+    Fixture fixture = new Fixture();
+    AtomicInteger lostNotifications = new AtomicInteger();
+    CountDownLatch executeEntered = new CountDownLatch(1);
+    CountDownLatch stopInvoked = new CountDownLatch(1);
+
+    CountDownLatch allowRejection = new CountDownLatch(1);
+    Executor controlledWorker =
+        task -> {
+          executeEntered.countDown();
+          try {
+            allowRejection.await(5, TimeUnit.SECONDS);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+          throw new RejectedExecutionException("worker saturated during concurrent stop");
+        };
+
+    WorkHeartbeat heartbeat =
+        new WorkHeartbeat(
+            fixture.store,
+            fixture.scheduler,
+            controlledWorker,
+            LEASE_CONFIG,
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            lostNotifications::incrementAndGet);
+    assertTrue(heartbeat.start(fixture.claimed));
+
+    Runnable tick = fixture.scheduler.periodicTasks.get(0);
+    Thread tickThread = new Thread(tick);
+    Thread stopThread =
+        new Thread(
+            () -> {
+              stopInvoked.countDown();
+              heartbeat.stop();
+            });
+
+    try {
+      // 1. tickThread 启动并在 stateLock 内调用 controlledWorker.execute
+      tickThread.start();
+      assertTrue(executeEntered.await(5, TimeUnit.SECONDS));
+
+      // stop() 已设置正常停止标记，并确定阻塞在 tick 持有的 stateLock。
+      stopThread.start();
+      assertTrue(stopInvoked.await(5, TimeUnit.SECONDS));
+      awaitBlocked(stopThread);
+      allowRejection.countDown();
+    } finally {
+      allowRejection.countDown();
+      tickThread.join(5000);
+      stopThread.join(5000);
+    }
+
+    assertEquals(
+        0,
+        lostNotifications.get(),
+        "normal stop racing worker rejection must not trigger lost ownership");
+    assertFalse(tickThread.isAlive());
+    assertFalse(stopThread.isAlive());
+  }
+
+  private static void awaitBlocked(Thread thread) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (thread.isAlive()
+        && thread.getState() != Thread.State.BLOCKED
+        && System.nanoTime() < deadline) {
+      Thread.onSpinWait();
+    }
+    assertEquals(Thread.State.BLOCKED, thread.getState(), "thread must block on heartbeat monitor");
   }
 
   private static Instant leaseUntil(Fixture fixture) {
@@ -253,7 +591,12 @@ class WorkHeartbeatTest {
               .orElseThrow();
       this.heartbeat =
           new WorkHeartbeat(
-              store, scheduler, LEASE_CONFIG, Clock.fixed(NOW, ZoneOffset.UTC), () -> {});
+              store,
+              scheduler,
+              Runnable::run,
+              LEASE_CONFIG,
+              Clock.fixed(NOW, ZoneOffset.UTC),
+              () -> {});
     }
   }
 
@@ -261,10 +604,14 @@ class WorkHeartbeatTest {
   static final class FakeScheduler implements ScheduledExecutorService {
     final List<FakeScheduledFuture> scheduled = new CopyOnWriteArrayList<>();
     final List<Runnable> periodicTasks = new CopyOnWriteArrayList<>();
+    final AtomicBoolean reject = new AtomicBoolean();
 
     @Override
     public ScheduledFuture<?> scheduleAtFixedRate(
         Runnable command, long initialDelay, long period, TimeUnit unit) {
+      if (reject.get()) {
+        throw new RejectedExecutionException("scheduler saturated");
+      }
       FakeScheduledFuture future = new FakeScheduledFuture();
       scheduled.add(future);
       periodicTasks.add(command);

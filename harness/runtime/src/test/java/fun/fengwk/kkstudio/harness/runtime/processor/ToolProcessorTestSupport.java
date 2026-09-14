@@ -151,7 +151,8 @@ final class ToolProcessorTestSupport {
               new ToolProcessorConfig(
                   LEASE_CONFIG, () -> retryPolicy, PREFLIGHT_FAILURE_DELAY, BUSY_FALLBACK_DELAY),
               clock,
-              scheduler);
+              scheduler,
+              Runnable::run);
     }
 
     /** 额外种子第二条完整 Tool 链（复用同一 request 的 call-1）。 */
