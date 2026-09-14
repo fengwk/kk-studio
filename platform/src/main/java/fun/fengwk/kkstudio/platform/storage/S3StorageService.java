@@ -44,24 +44,11 @@ public interface S3StorageService {
   /**
    * 以 checksum mode（{@code x-amz-checksum-mode: ENABLED}）HEAD 对象，返回带 {@code checksumSha256}
    * 的元数据，用于服务端校验浏览器直传内容的完整性。
-   *
-   * <p>未实现的实现会抛出 {@link UnsupportedOperationException}。
    */
-  default S3ObjectMetadata headObjectWithChecksum(String key) {
-    throw new UnsupportedOperationException(
-        "headObjectWithChecksum is not supported by this implementation");
-  }
+  S3ObjectMetadata headObjectWithChecksum(String key);
 
-  /**
-   * 在同一固定 bucket 内复制对象（保留源对象元数据）。目标 key 已存在时按内容幂等覆盖。
-   *
-   * <p>未实现的实现会抛出 {@link UnsupportedOperationException}。
-   */
-  default void copyObject(String sourceKey, String targetKey) {
-    throw new UnsupportedOperationException("copyObject is not supported by this implementation");
-  }
-
-  String getPublicUrl(String key);
+  /** 在同一固定 bucket 内复制对象（保留源对象元数据）。目标 key 已存在时按内容幂等覆盖。 */
+  void copyObject(String sourceKey, String targetKey);
 
   byte[] download(String key);
 

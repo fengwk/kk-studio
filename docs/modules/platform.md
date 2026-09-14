@@ -279,7 +279,7 @@ skill 正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.lo
 也不存在环境级容量或排队。唯一拒绝重复的规则是同一 Environment 内重用相同的活动 `invocationId`（调用方错误）。发送前按该连接
 READY 中冻结的目标 Daemon OS 对 `arguments.workdir` 做纯词法校验；真实存在性、目录类型与可访问性由 Daemon 判定。
 
-会话核心只接受 protocol v3 HELLO、capability catalog `"2"` 与 READY capabilities v2。INVOKE payload 使用
+会话核心只接受 protocol v3 HELLO、capability catalog `"1"` 与 READY capabilities v2。INVOKE payload 使用
 `capabilityId`、`capabilityVersion`、`arguments`、`timeoutMillis`，不携带 model
 Tool name，也不携带第二份目录字段；所有结果通过通用 `STARTED/PARTIAL/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
 `invocationId` 关联。发送不确定时关闭连接并把在途 invocation 收敛为 uncertain，不重发可能已经产生副作用的请求。
@@ -296,7 +296,7 @@ virtual-thread-per-task executor，Model admission 默认容量来自 `kk-studio
 2. 以当前 factory 读取 endpoint、credential、timeout policy 并创建 adapter。
 3. 根据当前 Provider cache capability 规范化 durable cache control。
 4. 通过 `ProviderResourceMaterializer`物化当前 attempt 的 Resource：图片在 30 MiB 内联为 data URI，audio/video
-   使用 signed URL；Storage 不可用时 Resource 变为确定性文本回退。
+   使用 signed URL；blob 不存在或 model 不支持对应模态时 Resource 变为确定性文本回退。
 
 四个 Provider（OpenAI Chat、OpenAI Responses、Anthropic、Google）均使用 [`harness-provider`](harness-provider.md)
 的原生协议适配器，共享 `modelExecutionTransport`（基于 JDK 21 `HttpClient`、受管虚拟线程 worker 与 Watchdog 调度器）。
@@ -555,13 +555,14 @@ Function dispatcher claim + RUNNING lease
 | `integrations.comfyui` | disabled；connect 10s、read 30s、WebSocket 1800s、input 50 MiB | client topology 由启动快照决定 |
 | `integrations.openCliHub` | disabled、base URL 未配置；request 120s、long poll 130s、JSON 512 KiB、error 4 KiB | adapter 创建与执行参数 |
 | `integrations.seedance/gptImage2/minimaxH3` | 各自 enabled/paid 开关、workspace、prompt/ComfyUI timeout 和 polling 约束 | adapter 的启动快照与执行读取点 |
-| `storageMedia` | S3 disabled；upload 3600s；presign 600s/3600s；media process 30s；thumbnail 512/quality 80 | S3 bean topology 和媒体处理 |
+| `storageMedia` | upload 3600s；presign 600s/3600s；media process 30s；thumbnail 512/quality 80 | 上传与预签名生命周期、媒体处理预算 |
 | `advanced` | resource 16 MiB；processor lease/heartbeat 30s/10s、失败/回退 1s；event queue 512、2 MiB、10s、heartbeat 20s；notification poll/reconnect 5s/1s | 组合根装配的 restart-required 软策略 |
 
 SystemSettings 永不承载 Dispatcher 容量与调度节奏、数据库连接、filesystem
 root/workdir/temp、ffmpeg binary、Daemon token/identity、Provider credential、ComfyUI API
-key、H3 bearer token 或 OpenCLI instance identity。启用 S3 或 ComfyUI 时，启动快照要求对应 endpoint
-等 bootstrap property 完整，否则明确启动失败；禁用时对应 bean 不装配。
+key、H3 bearer token 或 OpenCLI instance identity。S3 作为应用必配基础设施，启动时严格验证 properties
+与 bucket 可访问性；启用 ComfyUI 时，启动快照要求对应 endpoint 等 bootstrap property 完整，
+否则明确启动失败；禁用时对应 ComfyUI bean 不装配。
 
 ### 部署级 `@ConfigurationProperties`
 
@@ -572,7 +573,7 @@ key、H3 bearer token 或 OpenCLI instance identity。启用 S3 或 ComfyUI 时�
 | `kk-studio.harness.runtime.{workers-enabled,environment-root,workdir}` | worker 开关与本地工作目录；`workdir`必须位于 root 内 |
 | `kk-studio.harness.environment-gateway.{max-message-bytes,queue-capacity,max-bytes,send-timeout}` | WebSocket 安全边界；默认 `16MiB/256/16MiB/10s` |
 | `kk-studio.project.controller.*` | Issue Controller lease/poll/retry/blocked/run timeout、continuation 上限与 bounded worker；默认 lease 30s、poll 1s、run 30m、worker `8 + queue 64` |
-| `kk-studio.storage.s3.{endpoint,public-endpoint,region,bucket,access-key,secret-key,public-base-url}` | S3/MinIO 服务端和 presign endpoint；bucket 只能由服务端配置 |
+| `kk-studio.storage.s3.{endpoint,public-endpoint,region,bucket,access-key,secret-key}` | S3/MinIO 服务端和 presign endpoint；bucket 只能由服务端配置 |
 | `kk-studio.storage.maintenance.{poll-delay,cleanup-lease}` | maintenance 唤醒轮询与 cleanup lease，默认 `30s/5m` |
 | `kk-studio.comfyui.api-key` | ComfyUI secret；非 SystemSettings |
 | `kk-studio.opencli-hub.instance-id` | OpenCLI Hub 部署身份 |
@@ -609,7 +610,7 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/PlatformTestApplication.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/persistence/test/PostgresSpringTestSupport.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresSchemaSupport.java`
-- `platform/src/test/java/fun/fengwk/kkstudio/platform/storage/S3PostgresSpringTestSupport.java`
+- `platform/src/test/java/fun/fengwk/kkstudio/platform/storage/StorageS3TestConfiguration.java`
 
 ### 领域与 integration tests
 

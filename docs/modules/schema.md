@@ -174,7 +174,7 @@ erDiagram
 | --- | --- | --- |
 | dev | `db/seed/dev/R__dev_seed.sql` | stub Provider/Model/Agent |
 | e2e | `db/seed/e2e/R__e2e_seed.sql` | E2E Catalog、Settings、Environment、inventory 与缺省 Skill 来源 |
-| canvas-test | `db/seed/canvas-test/R__canvas_test_seed.sql` | S3 与 Canvas Function integration 测试开关 |
+| canvas-test | `db/seed/canvas-test/R__canvas_test_seed.sql` | Canvas Function 与集成测试配置 |
 
 ```text
 Flyway locations

@@ -193,29 +193,21 @@ class ProviderResourceMaterializerTest {
   }
 
   @Test
-  void withoutStorageDegradesAllResourceBlocksToText() {
-    ProviderResourceMaterializer materializer = ProviderResourceMaterializer.withoutStorage();
-    List<ProviderMessage> materialized =
-        materializer.materialize(
-            List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(RESOURCE))),
-            Set.of(ModelInputModality.IMAGE));
-
-    ProviderTextBlock text =
-        assertInstanceOf(ProviderTextBlock.class, materialized.get(0).contents().get(0));
-    assertTrue(text.text().contains("[Resource: scan.png]"), text.text());
-    assertTrue(text.text().contains("blobId: " + BLOB_ID), text.text());
-    assertTrue(
-        !text.text().contains("mediaType:"), "no storage facts without storage: " + text.text());
-    assertTrue(!text.text().contains("https://"), "no URLs without storage: " + text.text());
-    assertTrue(
-        text.text().contains("preview: tiny preview"),
-        "durable preview must survive without storage: " + text.text());
+  void rejectsNullDependenciesInConstructor() {
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    S3StorageService storageService = mock(S3StorageService.class);
+    assertThrows(
+        NullPointerException.class, () -> new ProviderResourceMaterializer(null, storageService));
+    assertThrows(
+        NullPointerException.class, () -> new ProviderResourceMaterializer(blobManager, null));
   }
 
   @Test
   void nonResourceBlocksPassThroughUnchanged() {
     ProviderTextBlock original = new ProviderTextBlock("plain text");
-    ProviderResourceMaterializer materializer = ProviderResourceMaterializer.withoutStorage();
+    ProviderResourceMaterializer materializer =
+        new ProviderResourceMaterializer(
+            mock(StorageBlobManager.class), mock(S3StorageService.class));
     List<ProviderMessage> materialized =
         materializer.materialize(
             List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(original))), Set.of());
@@ -306,7 +298,8 @@ class ProviderResourceMaterializerTest {
     ProviderToolResultBlock materialized =
         assertInstanceOf(
             ProviderToolResultBlock.class,
-            ProviderResourceMaterializer.withoutStorage()
+            new ProviderResourceMaterializer(
+                    mock(StorageBlobManager.class), mock(S3StorageService.class))
                 .materialize(
                     List.of(new ProviderMessage(ProviderMessageRole.TOOL, List.of(original))),
                     Set.of())

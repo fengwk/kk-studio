@@ -32,8 +32,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
-import fun.fengwk.kkstudio.platform.storage.S3PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
 
@@ -65,7 +65,7 @@ import java.util.concurrent.atomic.AtomicInteger;
       "kk-studio.storage.s3.access-key=local-test-access-key",
       "kk-studio.storage.s3.secret-key=local-test-secret-key"
     })
-class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTestSupport {
+class GlobalStorageToolResultHistoryMaterializerTest extends PostgresSpringTestSupport {
 
   private static final UUID SESSION = new UUID(0L, 1L);
 

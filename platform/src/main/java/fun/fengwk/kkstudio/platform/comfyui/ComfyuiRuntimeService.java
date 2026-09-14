@@ -74,14 +74,14 @@ public class ComfyuiRuntimeService {
   private final ComfyuiWorkflowApiLookupService workflowApiLookupService;
   private final SystemSettings.Comfyui settings;
   private final ObjectProvider<ComfyUIClient> comfyUIClientProvider;
-  private final ObjectProvider<StorageBlobContentService> blobContentServiceProvider;
+  private final StorageBlobContentService blobContentService;
   private final ObjectMapper objectMapper;
 
   public ComfyuiRuntimeService(
       ComfyuiWorkflowApiLookupService workflowApiLookupService,
       SystemSettingsSnapshot snapshot,
       ObjectProvider<ComfyUIClient> comfyUIClientProvider,
-      ObjectProvider<StorageBlobContentService> blobContentServiceProvider,
+      StorageBlobContentService blobContentService,
       ObjectMapper objectMapper) {
     this.workflowApiLookupService =
         Objects.requireNonNull(
@@ -89,9 +89,8 @@ public class ComfyuiRuntimeService {
     this.settings = Objects.requireNonNull(snapshot, "snapshot").get().integrations().comfyui();
     this.comfyUIClientProvider =
         Objects.requireNonNull(comfyUIClientProvider, "comfyUIClientProvider must not be null");
-    this.blobContentServiceProvider =
-        Objects.requireNonNull(
-            blobContentServiceProvider, "blobContentServiceProvider must not be null");
+    this.blobContentService =
+        Objects.requireNonNull(blobContentService, "blobContentService must not be null");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
   }
 
@@ -122,7 +121,6 @@ public class ComfyuiRuntimeService {
         (binding, value) ->
             workflow.getNode(binding.nodeId()).setInput(binding.inputName(), value));
     if (!plannedFiles.isEmpty()) {
-      StorageBlobContentService blobContentService = requireBlobContentService();
       long maxSizeBytes = maxInputFileSizeBytes();
       for (PlannedFile plannedFile : plannedFiles) {
         StorageBlobContent blobContent =
@@ -455,15 +453,6 @@ public class ComfyuiRuntimeService {
       throw new IllegalStateException("ComfyUI client is unavailable");
     }
     return client;
-  }
-
-  private StorageBlobContentService requireBlobContentService() {
-    StorageBlobContentService service = blobContentServiceProvider.getIfAvailable();
-    if (service == null) {
-      throw new IllegalStateException(
-          "storage blob content service is unavailable; enable SystemSettings storageMedia.s3Enabled for ComfyUI file inputs");
-    }
-    return service;
   }
 
   private long maxInputFileSizeBytes() {

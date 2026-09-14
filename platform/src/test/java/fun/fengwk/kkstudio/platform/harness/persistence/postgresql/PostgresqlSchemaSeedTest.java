@@ -234,7 +234,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
         settings = new SystemSettingsCodec().decode(rs.getString(1));
       }
 
-      assertTrue(settings.storageMedia().s3Enabled());
       assertEquals(900L, settings.storageMedia().uploadExpiresSeconds());
       assertTrue(settings.integrations().openCliHub().enabled());
       assertEquals("http://opencli-hub:8080", settings.integrations().openCliHub().baseUrl());

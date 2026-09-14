@@ -561,14 +561,6 @@ public class SystemSettingsSchemaProvider {
                         1,
                         null),
                     field(
-                        "storageMedia.s3Enabled",
-                        "settings.field.storageMedia.s3Enabled",
-                        null,
-                        FieldType.BOOLEAN,
-                        false,
-                        null,
-                        null),
-                    field(
                         "storageMedia.s3PresignDefaultExpiresSeconds",
                         "settings.field.storageMedia.s3PresignDefaultExpiresSeconds",
                         null,

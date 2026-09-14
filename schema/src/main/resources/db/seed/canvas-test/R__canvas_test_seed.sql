@@ -8,7 +8,7 @@ set config =
                     config,
                     '{storageMedia}',
                     config -> 'storageMedia'
-                        || '{"s3Enabled":true,"uploadExpiresSeconds":900}'::jsonb
+                        || '{"uploadExpiresSeconds":900}'::jsonb
                 ),
                 '{integrations,openCliHub}',
                 config #> '{integrations,openCliHub}'

@@ -23,11 +23,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 /**
  * S3 存储服务实现.
@@ -149,15 +145,6 @@ public class S3StorageServiceImpl implements S3StorageService {
   }
 
   @Override
-  public String getPublicUrl(String key) {
-    Assert.hasText(
-        properties.getPublicBaseUrl(),
-        "kk-studio.storage.s3.public-base-url must not be blank when resolving public url");
-    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
-    return normalizePublicBaseUrl(properties.getPublicBaseUrl()) + "/" + encodeKey(normalizedKey);
-  }
-
-  @Override
   public byte[] download(String key) {
     try (S3ObjectStream object = readObject(key)) {
       return object.inputStream().readAllBytes();
@@ -186,19 +173,5 @@ public class S3StorageServiceImpl implements S3StorageService {
     } catch (IOException e) {
       throw new UncheckedIOException("Failed to read S3 object: " + key, e);
     }
-  }
-
-  private String normalizePublicBaseUrl(String publicBaseUrl) {
-    String normalized = publicBaseUrl.strip().replace("{bucket}", properties.getBucket());
-    while (normalized.endsWith("/")) {
-      normalized = normalized.substring(0, normalized.length() - 1);
-    }
-    return normalized;
-  }
-
-  private String encodeKey(String key) {
-    return Arrays.stream(key.split("/", -1))
-        .map(segment -> URLEncoder.encode(segment, StandardCharsets.UTF_8).replace("+", "%20"))
-        .collect(Collectors.joining("/"));
   }
 }

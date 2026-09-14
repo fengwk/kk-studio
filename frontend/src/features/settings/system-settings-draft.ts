@@ -113,7 +113,6 @@ export interface SystemSettingsIntegrationsDraft {
 
 export interface SystemSettingsStorageMediaDraft {
   uploadExpiresSeconds: DraftNumericField
-  s3Enabled: boolean
   s3PresignDefaultExpiresSeconds: DraftNumericField
   s3PresignMaxExpiresSeconds: DraftNumericField
   canvasMediaProcessTimeoutMillis: DraftNumericField
@@ -188,7 +187,6 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
     integrations: integrationsToDraft(dto.integrations),
     storageMedia: {
       uploadExpiresSeconds: dto.storageMedia.uploadExpiresSeconds,
-      s3Enabled: dto.storageMedia.s3Enabled,
       s3PresignDefaultExpiresSeconds: dto.storageMedia.s3PresignDefaultExpiresSeconds,
       s3PresignMaxExpiresSeconds: dto.storageMedia.s3PresignMaxExpiresSeconds,
       canvasMediaProcessTimeoutMillis: dto.storageMedia.canvasMediaProcessTimeoutMillis,
@@ -431,7 +429,6 @@ export function assembleSettingsUpdate(
     },
     storageMedia: {
       uploadExpiresSeconds: requiredLong(draft.storageMedia.uploadExpiresSeconds),
-      s3Enabled: draft.storageMedia.s3Enabled,
       s3PresignDefaultExpiresSeconds: requiredLong(
         draft.storageMedia.s3PresignDefaultExpiresSeconds,
       ),

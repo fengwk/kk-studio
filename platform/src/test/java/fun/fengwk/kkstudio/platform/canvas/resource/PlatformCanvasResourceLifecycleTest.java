@@ -8,7 +8,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
@@ -32,6 +31,7 @@ class PlatformCanvasResourceLifecycleTest {
 
   @Test
   void releaseRunPinsCollectsOnlyTheLastUnownedReference() {
+    // 测试意图：验证释放最后一个引用的 pin 时，触发 resource 物理删除并调用 blobManager.release。
     CanvasResourceRepository resources = mock(CanvasResourceRepository.class);
     CanvasFunctionResourcePinRepository pins = mock(CanvasFunctionResourcePinRepository.class);
     StorageBlobManager blobs = mock(StorageBlobManager.class);
@@ -45,7 +45,7 @@ class PlatformCanvasResourceLifecycleTest {
     when(resources.delete(CANVAS, RESOURCE)).thenReturn(true);
     when(blobs.release(BLOB)).thenReturn(true);
     PlatformCanvasResourceLifecycle lifecycle =
-        new PlatformCanvasResourceLifecycle(resources, pins, provider(blobs));
+        new PlatformCanvasResourceLifecycle(resources, pins, blobs);
 
     lifecycle.releaseRunPins(CANVAS, NODE, REQUEST);
 
@@ -56,6 +56,7 @@ class PlatformCanvasResourceLifecycleTest {
 
   @Test
   void pinnedOwnedResourceIsDetachedWithoutReleasingBlob() {
+    // 测试意图：验证若 resource 仍被 pin 引用，仅解绑 owner，绝不删除资源或释放 blob。
     CanvasResourceRepository resources = mock(CanvasResourceRepository.class);
     CanvasFunctionResourcePinRepository pins = mock(CanvasFunctionResourcePinRepository.class);
     StorageBlobManager blobs = mock(StorageBlobManager.class);
@@ -64,7 +65,7 @@ class PlatformCanvasResourceLifecycleTest {
     when(pins.countByResource(CANVAS, RESOURCE)).thenReturn(1);
     when(resources.detachOwner(CANVAS, RESOURCE, NODE)).thenReturn(true);
     PlatformCanvasResourceLifecycle lifecycle =
-        new PlatformCanvasResourceLifecycle(resources, pins, provider(blobs));
+        new PlatformCanvasResourceLifecycle(resources, pins, blobs);
 
     lifecycle.deleteOwnedResources(CANVAS, NODE);
 
@@ -74,29 +75,25 @@ class PlatformCanvasResourceLifecycleTest {
   }
 
   @Test
-  void missingBlobManagerKeepsStableFailureAfterResourceDelete() {
+  void releaseFailureThrowsIllegalStateException() {
+    // 测试意图：验证 blobManager.release 返回 false 时抛出明确的 IllegalStateException。
     CanvasResourceRepository resources = mock(CanvasResourceRepository.class);
     CanvasFunctionResourcePinRepository pins = mock(CanvasFunctionResourcePinRepository.class);
+    StorageBlobManager blobs = mock(StorageBlobManager.class);
     when(resources.findByCanvasId(CANVAS)).thenReturn(List.of(resource(null, null)));
     when(resources.delete(CANVAS, RESOURCE)).thenReturn(true);
+    when(blobs.release(BLOB)).thenReturn(false);
     PlatformCanvasResourceLifecycle lifecycle =
-        new PlatformCanvasResourceLifecycle(resources, pins, provider(null));
+        new PlatformCanvasResourceLifecycle(resources, pins, blobs);
 
     IllegalStateException error =
         assertThrows(IllegalStateException.class, () -> lifecycle.deleteCanvasResources(CANVAS));
 
-    assertEquals("global blob storage is unavailable", error.getMessage());
+    assertEquals("release canvas resource blob failed: " + BLOB, error.getMessage());
   }
 
   private static CanvasResource resource(UUID ownerNodeId, Integer resourceIndex) {
     return new CanvasResource(
         RESOURCE, CANVAS, ownerNodeId, resourceIndex, BLOB, "resource.png", null, Instant.EPOCH);
-  }
-
-  @SuppressWarnings("unchecked")
-  private static <T> ObjectProvider<T> provider(T value) {
-    ObjectProvider<T> provider = mock(ObjectProvider.class);
-    when(provider.getIfAvailable()).thenReturn(value);
-    return provider;
   }
 }

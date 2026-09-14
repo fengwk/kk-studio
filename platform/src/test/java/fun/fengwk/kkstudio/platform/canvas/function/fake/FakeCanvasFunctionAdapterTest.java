@@ -13,8 +13,6 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -35,11 +33,7 @@ class FakeCanvasFunctionAdapterTest {
   void exposesExactModelsAndExecutesMainResourceFixture() {
     FakeCanvasFunctionAdapter adapter = new FakeCanvasFunctionAdapter();
     assertEquals(
-        2,
-        new FakeCanvasFunctionConfiguration()
-            .fakeCanvasFunctionAdapter(s3EnabledSnapshot())
-            .models()
-            .size());
+        2, new FakeCanvasFunctionConfiguration().fakeCanvasFunctionAdapter().models().size());
     CanvasFunctionModel image = adapter.models().get(0);
     CanvasFunctionModel video = adapter.models().get(1);
     assertEquals("fake-image", image.key());
@@ -107,17 +101,6 @@ class FakeCanvasFunctionAdapterTest {
             "QUEUED",
             Map.of());
     assertThrows(IllegalArgumentException.class, () -> adapter.preflight(unsupportedRun));
-  }
-
-  private static SystemSettingsSnapshot s3EnabledSnapshot() {
-    return new SystemSettingsSnapshot(
-        new SystemSettings(
-            SystemSettings.Tool.DEFAULT,
-            SystemSettings.AiRuntime.DEFAULT,
-            SystemSettings.Environment.DEFAULT,
-            SystemSettings.Integrations.DEFAULT,
-            new SystemSettings.StorageMedia(3_600L, true, 600L, 3_600L, 30_000L, 512, 80),
-            SystemSettings.Advanced.DEFAULT));
   }
 
   private static final class RecordingContext implements CanvasFunctionExecutionContext {

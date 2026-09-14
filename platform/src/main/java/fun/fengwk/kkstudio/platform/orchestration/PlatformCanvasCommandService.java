@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -74,9 +73,9 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
   private final CanvasResourceRepository resourceRepository;
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasResourceLifecycle resourceLifecycle;
-  private final ObjectProvider<StorageUploadService> uploadServices;
-  private final ObjectProvider<StorageBlobManager> blobManagers;
-  private final ObjectProvider<CanvasBlobPreviewService> previewServices;
+  private final StorageUploadService uploadService;
+  private final StorageBlobManager blobManager;
+  private final CanvasBlobPreviewService previewService;
   private final CanvasFunctionConfigCodecPort functionConfigCodec;
   private final CanvasFunctionCatalog functionCatalog;
   private final ObjectMapper objectMapper;
@@ -87,9 +86,9 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
       CanvasResourceRepository resourceRepository,
       CanvasFunctionRunRepository runRepository,
       CanvasResourceLifecycle resourceLifecycle,
-      ObjectProvider<StorageUploadService> uploadServices,
-      ObjectProvider<StorageBlobManager> blobManagers,
-      ObjectProvider<CanvasBlobPreviewService> previewServices,
+      StorageUploadService uploadService,
+      StorageBlobManager blobManager,
+      CanvasBlobPreviewService previewService,
       CanvasFunctionConfigCodecPort functionConfigCodec,
       CanvasFunctionCatalog functionCatalog,
       ObjectMapper objectMapper,
@@ -98,9 +97,9 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository");
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
-    this.uploadServices = Objects.requireNonNull(uploadServices, "uploadServices");
-    this.blobManagers = Objects.requireNonNull(blobManagers, "blobManagers");
-    this.previewServices = Objects.requireNonNull(previewServices, "previewServices");
+    this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
+    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
+    this.previewService = Objects.requireNonNull(previewService, "previewService");
     this.functionConfigCodec = Objects.requireNonNull(functionConfigCodec, "functionConfigCodec");
     this.functionCatalog = Objects.requireNonNull(functionCatalog, "functionCatalog");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
@@ -514,13 +513,8 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
   /** 锁定并消费就绪上传；Blob retain 与上传所有权释放属于当前事务。 */
   private CanvasResource consumeUpload(
       UUID canvasId, UUID nodeId, int resourceIndex, UUID uploadId, String nodeName) {
-    StorageUploadService uploadService = uploadServices.getIfAvailable();
-    if (uploadService == null) {
-      throw new IllegalStateException("global storage upload service is unavailable");
-    }
     StorageUploadService.ReadyUpload upload = uploadService.lockReady(uploadId);
     UUID blobId = upload.blobId();
-    StorageBlobManager blobManager = requireBlobManager();
     blobManager.retain(blobId);
     // 删除上传记录会释放 upload owner；对象清理由维护任务处理。
     uploadService.delete(uploadId);
@@ -541,16 +535,8 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     if (resource.blobId() == null) {
       return;
     }
-    StorageBlobManager blobManager = blobManagers.getIfAvailable();
-    if (blobManager == null) {
-      return;
-    }
     StorageBlob blob = blobManager.getBlob(resource.blobId());
     if (blob == null || !isPreviewable(blob.getMediaType())) {
-      return;
-    }
-    CanvasBlobPreviewService previewService = previewServices.getIfAvailable();
-    if (previewService == null) {
       return;
     }
     UUID blobId = resource.blobId();
@@ -573,14 +559,6 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
 
   private static boolean isPreviewable(String mediaType) {
     return mediaType != null && (mediaType.startsWith("image/") || mediaType.startsWith("video/"));
-  }
-
-  private StorageBlobManager requireBlobManager() {
-    StorageBlobManager blobManager = blobManagers.getIfAvailable();
-    if (blobManager == null) {
-      throw new IllegalStateException("global blob storage is unavailable");
-    }
-    return blobManager;
   }
 
   private CanvasResourceNode projectNode(

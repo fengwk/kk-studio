@@ -256,9 +256,9 @@ public class StorageUploadServiceImpl implements StorageUploadService {
         if (finalizeClaimed(row, cleanupToken)) {
           finalized++;
         }
-      } catch (RuntimeException error) {
+      } catch (RuntimeException ignored) {
         // 对象或 finalize 失败时保留 lease；过期后由任意节点幂等重试。
-        log.warn("storage expiry failed for upload {}: {}", row.getId(), error.getMessage());
+        log.warn("storage expiry failed for upload {}", row.getId());
       }
     }
     return finalized;
@@ -391,13 +391,11 @@ public class StorageUploadServiceImpl implements StorageUploadService {
           @Override
           public void afterCommit() {
             try {
-              StorageMaintenanceWakeup wakeup = maintenanceWakeups.getIfAvailable();
-              if (wakeup != null) {
-                wakeup.wake();
-              }
-            } catch (RuntimeException error) {
+              StorageMaintenanceWakeup wakeup = maintenanceWakeups.getObject();
+              wakeup.wake();
+            } catch (RuntimeException ignored) {
               // API 事务已经提交：本地唤醒只是低延迟提示，失败由 periodic poll 恢复且绝不向调用方冒泡。
-              log.warn("storage upload maintenance wake failed", error);
+              log.warn("storage upload maintenance wake failed");
             }
           }
         });

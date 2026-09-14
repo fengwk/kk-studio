@@ -72,8 +72,8 @@ public class HarnessCommandAcceptanceOrchestrator {
   private final IssueRunSessionRepository issueRunSessionRepository;
   private final ObjectProvider<HarnessStore> stores;
   private final ObjectProvider<HarnessRuntime> runtimes;
-  private final ObjectProvider<StorageUploadService> uploadServices;
-  private final ObjectProvider<SessionBlobRefManager> refManagers;
+  private final StorageUploadService uploadService;
+  private final SessionBlobRefManager refManager;
 
   public HarnessCommandAcceptanceOrchestrator(
       ChatSessionRepository chatSessionRepository,
@@ -87,8 +87,8 @@ public class HarnessCommandAcceptanceOrchestrator {
       IssueRunSessionRepository issueRunSessionRepository,
       ObjectProvider<HarnessStore> stores,
       ObjectProvider<HarnessRuntime> runtimes,
-      ObjectProvider<StorageUploadService> uploadServices,
-      ObjectProvider<SessionBlobRefManager> refManagers) {
+      StorageUploadService uploadService,
+      SessionBlobRefManager refManager) {
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
     this.canvasSessionRepository =
@@ -104,8 +104,8 @@ public class HarnessCommandAcceptanceOrchestrator {
         Objects.requireNonNull(issueRunSessionRepository, "issueRunSessionRepository");
     this.stores = Objects.requireNonNull(stores, "stores");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
-    this.uploadServices = Objects.requireNonNull(uploadServices, "uploadServices");
-    this.refManagers = Objects.requireNonNull(refManagers, "refManagers");
+    this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
+    this.refManager = Objects.requireNonNull(refManager, "refManager");
   }
 
   /** 接受 owner 的一次命令批：授权 + 归属/附件物化 + Runtime 入队在同一事务内原子完成。 */
@@ -299,12 +299,6 @@ public class HarnessCommandAcceptanceOrchestrator {
    */
   private ResourceMessageContent consumeAttachment(
       UUID sessionId, AttachmentMessageContent attachment) {
-    StorageUploadService uploadService = uploadServices.getIfAvailable();
-    SessionBlobRefManager refManager = refManagers.getIfAvailable();
-    if (uploadService == null || refManager == null) {
-      throw new IllegalArgumentException(
-          "global storage is not enabled; attachment content is unavailable");
-    }
     UUID uploadId = attachment.uploadId();
     StorageUploadService.ReadyUpload ready;
     try {
@@ -320,11 +314,6 @@ public class HarnessCommandAcceptanceOrchestrator {
   /** RESOURCE 只复用当前 Session 已持有的 durable ref，不新增 retain，也不信任跨 Session blob id。 */
   private ResourceMessageContent requireOwnedResource(
       UUID sessionId, ResourceMessageContent resource) {
-    SessionBlobRefManager refManager = refManagers.getIfAvailable();
-    if (refManager == null) {
-      throw new IllegalArgumentException(
-          "global storage is not enabled; resource content is unavailable");
-    }
     if (!refManager.contains(sessionId, resource.blobId())) {
       throw new IllegalArgumentException("Resource is not owned by the current session");
     }

@@ -93,7 +93,6 @@ class SystemSettingsTest {
 
     SystemSettings.StorageMedia storageMedia = defaults.storageMedia();
     assertEquals(3_600L, storageMedia.uploadExpiresSeconds());
-    assertEquals(false, storageMedia.s3Enabled());
     assertEquals(600L, storageMedia.s3PresignDefaultExpiresSeconds());
     assertEquals(3_600L, storageMedia.s3PresignMaxExpiresSeconds());
     assertEquals(30_000L, storageMedia.canvasMediaProcessTimeoutMillis());
@@ -262,7 +261,6 @@ class SystemSettingsTest {
         () ->
             new SystemSettings.StorageMedia(
                 base.uploadExpiresSeconds(),
-                base.s3Enabled(),
                 3_601L,
                 3_600L,
                 base.canvasMediaProcessTimeoutMillis(),
@@ -273,7 +271,6 @@ class SystemSettingsTest {
         () ->
             new SystemSettings.StorageMedia(
                 base.uploadExpiresSeconds(),
-                base.s3Enabled(),
                 base.s3PresignDefaultExpiresSeconds(),
                 base.s3PresignMaxExpiresSeconds(),
                 0L,
@@ -284,7 +281,6 @@ class SystemSettingsTest {
         () ->
             new SystemSettings.StorageMedia(
                 base.uploadExpiresSeconds(),
-                base.s3Enabled(),
                 base.s3PresignDefaultExpiresSeconds(),
                 base.s3PresignMaxExpiresSeconds(),
                 base.canvasMediaProcessTimeoutMillis(),

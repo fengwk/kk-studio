@@ -169,7 +169,7 @@ public class S3PresignServiceTest {
   public void testRejectsExpiresOverMax() {
     S3StorageProperties props = newS3Properties(PUBLIC_ENDPOINT, false);
     SystemSettings.StorageMedia storageMedia =
-        new SystemSettings.StorageMedia(3_600L, true, 600L, 7_200L, 30_000L, 512, 80);
+        new SystemSettings.StorageMedia(3_600L, 600L, 7_200L, 30_000L, 512, 80);
     try (TestContext context = new TestContext(props, storageMedia)) {
       assertThrows(
           IllegalArgumentException.class,

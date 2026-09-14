@@ -81,13 +81,11 @@ public class PostgresqlStorageBlobManager implements StorageBlobManager {
             @Override
             public void afterCommit() {
               try {
-                StorageMaintenanceWakeup wakeup = maintenanceWakeups.getIfAvailable();
-                if (wakeup != null) {
-                  wakeup.wake();
-                }
-              } catch (RuntimeException error) {
+                StorageMaintenanceWakeup wakeup = maintenanceWakeups.getObject();
+                wakeup.wake();
+              } catch (RuntimeException ignored) {
                 // API 事务已经提交：本地唤醒只是低延迟提示，失败由 periodic poll 恢复且绝不向调用方冒泡。
-                log.warn("storage maintenance wake failed for deleting blob {}", blobId, error);
+                log.warn("storage maintenance wake failed for deleting blob {}", blobId);
               }
             }
           });
@@ -126,8 +124,8 @@ public class PostgresqlStorageBlobManager implements StorageBlobManager {
       try {
         deleteObjectsAndRow(blobId);
         swept++;
-      } catch (RuntimeException error) {
-        log.warn("storage blob sweep failed for blob {}: {}", blobId, error.getMessage());
+      } catch (RuntimeException ignored) {
+        log.warn("storage blob sweep failed for blob {}", blobId);
       }
     }
     return swept;

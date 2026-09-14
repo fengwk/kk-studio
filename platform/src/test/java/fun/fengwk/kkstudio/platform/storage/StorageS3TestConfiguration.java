@@ -10,8 +10,6 @@ import org.springframework.context.annotation.Primary;
  * <p>测试配置在自动配置之后处理，无法用 {@code @ConditionalOnMissingBean} 抑制真实实现， 因此假件使用独立 bean 名并声明
  * {@code @Primary} 覆盖注入；真实 S3 客户端只构造不联网，无副作用。
  *
- * <p>S3 启用的 {@code system_setting} 基线由 {@link S3PostgresSpringTestSupport} 在上下文创建前置位。
- *
  * @author fengwk
  */
 @TestConfiguration

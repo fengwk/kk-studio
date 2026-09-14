@@ -19,7 +19,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -47,6 +46,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.storage.S3StorageService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 
 import java.math.BigDecimal;
 import java.util.EnumSet;
@@ -843,11 +844,11 @@ class DatabaseProviderResolutionServiceTest {
   // ---------- 测试基座 ----------
 
   private DatabaseProviderResolutionService resolution(ProviderFactory... factories) {
-    @SuppressWarnings("unchecked")
-    ObjectProvider<ProviderResourceMaterializer> materializers = mock(ObjectProvider.class);
-    when(materializers.getIfAvailable()).thenReturn(ProviderResourceMaterializer.withoutStorage());
+    ProviderResourceMaterializer materializer =
+        new ProviderResourceMaterializer(
+            mock(StorageBlobManager.class), mock(S3StorageService.class));
     return new DatabaseProviderResolutionService(
-        repository, configurationCodec, new ProviderFactories(List.of(factories)), materializers);
+        repository, configurationCodec, new ProviderFactories(List.of(factories)), materializer);
   }
 
   private static ProviderFactory openAiFactory(PromptCacheCapability capability) {

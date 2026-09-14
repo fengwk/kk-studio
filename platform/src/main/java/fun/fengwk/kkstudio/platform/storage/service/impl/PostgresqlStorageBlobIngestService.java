@@ -158,15 +158,12 @@ public class PostgresqlStorageBlobIngestService implements StorageBlobIngestServ
               try {
                 cleanupTransaction.executeWithoutResult(
                     ignored -> blobRepository.insertDeletingCandidate(candidate));
-                StorageMaintenanceWakeup wakeup = maintenanceWakeups.getIfAvailable();
-                if (wakeup != null) {
-                  wakeup.wake();
-                }
-              } catch (RuntimeException error) {
+                StorageMaintenanceWakeup wakeup = maintenanceWakeups.getObject();
+                wakeup.wake();
+              } catch (RuntimeException ignored) {
                 log.warn(
-                    "storage ingest candidate maintenance enqueue failed for {}: {}",
-                    candidate.getId(),
-                    error.getMessage());
+                    "storage ingest candidate maintenance enqueue failed for {}",
+                    candidate.getId());
               }
             }
           }

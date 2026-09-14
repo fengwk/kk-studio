@@ -55,13 +55,13 @@ public class ComfyuiConfiguration {
       ComfyuiWorkflowApiLookupService workflowApiLookupService,
       SystemSettingsSnapshot snapshot,
       ObjectProvider<ComfyUIClient> comfyUIClientProvider,
-      ObjectProvider<StorageBlobContentService> blobContentServiceProvider,
+      StorageBlobContentService blobContentService,
       ObjectMapper objectMapper) {
     return new ComfyuiRuntimeService(
         workflowApiLookupService,
         snapshot,
         comfyUIClientProvider,
-        blobContentServiceProvider,
+        blobContentService,
         objectMapper);
   }
 }

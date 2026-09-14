@@ -402,7 +402,6 @@ public record SystemSettings(
   /** storageMedia section：上传/S3 预签名与 Canvas 媒体处理的非敏感预算。 */
   public record StorageMedia(
       long uploadExpiresSeconds,
-      boolean s3Enabled,
       long s3PresignDefaultExpiresSeconds,
       long s3PresignMaxExpiresSeconds,
       long canvasMediaProcessTimeoutMillis,
@@ -410,7 +409,7 @@ public record SystemSettings(
       int thumbnailQuality) {
 
     public static final StorageMedia DEFAULT =
-        new StorageMedia(3_600L, false, 600L, 3_600L, 30_000L, 512, 80);
+        new StorageMedia(3_600L, 600L, 3_600L, 30_000L, 512, 80);
 
     public StorageMedia {
       SystemSettingsValidation.requirePositive(

@@ -218,15 +218,9 @@ public class HarnessRuntimeConfiguration {
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
       @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
-      ObjectProvider<ToolResultHistoryMaterializer> materializerProvider) {
+      ToolResultHistoryMaterializer materializer) {
     return new ThreadProcessor(
-        store,
-        turnResolver,
-        config,
-        clock,
-        scheduler,
-        heartbeatWorker,
-        materializerProvider.getIfAvailable());
+        store, turnResolver, config, clock, scheduler, heartbeatWorker, materializer);
   }
 
   @Bean(destroyMethod = "close")
@@ -276,13 +270,13 @@ public class HarnessRuntimeConfiguration {
       CompactionConfigProvider compactionConfigProvider,
       ModelProcessor modelProcessor,
       ToolProcessor toolProcessor,
-      ObjectProvider<ToolResultHistoryMaterializer> materializerProvider) {
+      ToolResultHistoryMaterializer materializer) {
     return new HarnessRuntime(
         store,
         clock,
         turnResolver,
         compactionConfigProvider,
-        materializerProvider.getIfAvailable(),
+        materializer,
         modelProcessor,
         toolProcessor);
   }

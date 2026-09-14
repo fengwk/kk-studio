@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.storage;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.SmartLifecycle;
 
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
@@ -29,8 +28,8 @@ public final class StorageMaintenance
 
   private static final long SHUTDOWN_WAIT_MILLIS = 5_000;
 
-  private final ObjectProvider<StorageUploadService> uploadServices;
-  private final ObjectProvider<StorageBlobManager> blobManagers;
+  private final StorageUploadService uploadService;
+  private final StorageBlobManager blobManager;
   private final long pollDelayMillis;
   private final Object lifecycleLock = new Object();
   private final AtomicBoolean wakeRequested = new AtomicBoolean();
@@ -42,11 +41,11 @@ public final class StorageMaintenance
   private volatile ScheduledFuture<?> pollFuture;
 
   public StorageMaintenance(
-      ObjectProvider<StorageUploadService> uploadServices,
-      ObjectProvider<StorageBlobManager> blobManagers,
+      StorageUploadService uploadService,
+      StorageBlobManager blobManager,
       StorageMaintenanceProperties properties) {
-    this.uploadServices = Objects.requireNonNull(uploadServices, "uploadServices");
-    this.blobManagers = Objects.requireNonNull(blobManagers, "blobManagers");
+    this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
+    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     Objects.requireNonNull(properties, "properties");
     this.pollDelayMillis = requirePositiveWholeMillis(properties.getPollDelay(), "pollDelay");
   }
@@ -172,8 +171,8 @@ public final class StorageMaintenance
         wakeRequested.set(false);
         drainUntilIdle();
       } while (running && wakeRequested.get());
-    } catch (RuntimeException error) {
-      log.warn("storage maintenance drain failed; next wake or poll will retry", error);
+    } catch (RuntimeException ignored) {
+      log.warn("storage maintenance drain failed; next wake or poll will retry");
     } finally {
       drainRunning.set(false);
       if (running && wakeRequested.get() && drainRunning.compareAndSet(false, true)) {
@@ -183,11 +182,6 @@ public final class StorageMaintenance
   }
 
   private void drainUntilIdle() {
-    StorageUploadService uploadService = uploadServices.getIfAvailable();
-    StorageBlobManager blobManager = blobManagers.getIfAvailable();
-    if (uploadService == null || blobManager == null) {
-      return;
-    }
     int expired;
     int swept;
     do {
@@ -201,8 +195,8 @@ public final class StorageMaintenance
   private int expire(StorageUploadService uploadService) {
     try {
       return uploadService.expireOnce();
-    } catch (RuntimeException error) {
-      log.warn("storage upload maintenance failed; next wake or poll will retry", error);
+    } catch (RuntimeException ignored) {
+      log.warn("storage upload maintenance failed; next wake or poll will retry");
       return 0;
     }
   }
@@ -210,8 +204,8 @@ public final class StorageMaintenance
   private int sweep(StorageBlobManager blobManager) {
     try {
       return blobManager.sweepDeleting();
-    } catch (RuntimeException error) {
-      log.warn("storage blob maintenance failed; next wake or poll will retry", error);
+    } catch (RuntimeException ignored) {
+      log.warn("storage blob maintenance failed; next wake or poll will retry");
       return 0;
     }
   }

@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.platform.PlatformTestApplication;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.SQLException;
 
 /**
@@ -77,23 +76,6 @@ public abstract class PostgresSpringTestSupport {
     }
     if (storageMaintenance != null) {
       storageMaintenance.start();
-    }
-  }
-
-  /**
-   * 供 S3 场景测试在 Spring 上下文创建前把 {@code system_setting} 的 {@code storageMedia.s3Enabled} 置为 true， 使 S3
-   * 服务族 flush 装配（而非返回 null）。
-   */
-  public static void enableS3InSystemSettings() throws SQLException {
-    try (Connection conn = newConnection();
-        PreparedStatement statement =
-            conn.prepareStatement(
-                "update system_setting set config ="
-                    + " jsonb_set(config, '{storageMedia,s3Enabled}', 'true'::jsonb)"
-                    + " where id = 1")) {
-      if (statement.executeUpdate() != 1) {
-        throw new IllegalStateException("system_setting baseline row is missing");
-      }
     }
   }
 

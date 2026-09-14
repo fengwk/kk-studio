@@ -369,7 +369,7 @@ realtime source，Canvas 只使用 version source，Projects 连接数据库失�
 1. 在 Spring WebSocket 和 native JSR-356 session 两侧设置 `max-message-bytes`；
 2. 创建 `SpringWebSocketConnection`和每连接 `DaemonOutboundSender`；
 3. 把 open/receive/close 委托给会话核心的 `DaemonEndpoint`（`harness/environment-server` 的 `EnvironmentDaemonServer`）；
-4. 会话核心只接受 protocol v3 HELLO、capability catalog `"2"` 与 READY capabilities v2，并负责校验通用 capability INVOKE payload；
+4. 会话核心只接受 protocol v3 HELLO、capability catalog `"1"` 与 READY capabilities v2，并负责校验通用 capability INVOKE payload；
 5. 会话核心先解绑 registry、在途 invocation 和 pending request，再关闭 sender。
 
 `SpringWebSocketConnection`只实现核心的 `DaemonChannel`；web 层不解释协议，也不保存任何会话状态。
@@ -441,7 +441,7 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
    classloader。
 10. strict JSON field、canonical UUID、canonical decimal、DTO discriminator 和 duplicate detection 在 Web boundary
     拒绝不确定输入；error advice 不改变 domain fact，只映射 status、stable code、context 和 locale message。
-11. Storage/S3 未启用时 Controller 仍注册，但依赖 bean 缺失明确返回 503；ComfyUI disabled 返回 503，enabled workflow
+11. S3 作为必需基础设施在应用启动时验证 properties 与 bucket，Storage/Canvas Controller 依赖常驻且正常服务；ComfyUI disabled 返回 503，enabled workflow
     不存在返回 404，参数/selector/binding 错误返回 400。
 
 ## 配置与安全边界

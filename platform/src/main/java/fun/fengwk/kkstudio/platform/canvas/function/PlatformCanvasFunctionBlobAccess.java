@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.canvas.function;
 
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
@@ -20,19 +19,18 @@ import java.util.UUID;
 @Component
 public final class PlatformCanvasFunctionBlobAccess implements CanvasFunctionBlobAccess {
 
-  private final ObjectProvider<S3StorageService> storageServices;
-  private final ObjectProvider<StorageBlobManager> blobManagers;
+  private final S3StorageService storageService;
+  private final StorageBlobManager blobManager;
 
   public PlatformCanvasFunctionBlobAccess(
-      ObjectProvider<S3StorageService> storageServices,
-      ObjectProvider<StorageBlobManager> blobManagers) {
-    this.storageServices = Objects.requireNonNull(storageServices, "storageServices");
-    this.blobManagers = Objects.requireNonNull(blobManagers, "blobManagers");
+      S3StorageService storageService, StorageBlobManager blobManager) {
+    this.storageService = Objects.requireNonNull(storageService, "storageService");
+    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
   }
 
   @Override
   public Optional<BlobFacts> findFacts(UUID blobId) {
-    StorageBlob blob = requireGlobalBlobManager().getBlob(Objects.requireNonNull(blobId, "blobId"));
+    StorageBlob blob = blobManager.getBlob(Objects.requireNonNull(blobId, "blobId"));
     if (blob == null) {
       return Optional.empty();
     }
@@ -48,8 +46,7 @@ public final class PlatformCanvasFunctionBlobAccess implements CanvasFunctionBlo
 
   @Override
   public CanvasFunctionResourceStream openOriginal(UUID blobId, long expectedSizeBytes) {
-    S3ObjectStream object =
-        requireStorageService().readObject(StorageObjectKeys.blobOriginal(blobId));
+    S3ObjectStream object = storageService.readObject(StorageObjectKeys.blobOriginal(blobId));
     if (object.metadata().contentLength() != expectedSizeBytes) {
       try {
         object.close();
@@ -64,27 +61,6 @@ public final class PlatformCanvasFunctionBlobAccess implements CanvasFunctionBlo
 
   @Override
   public String originalUrl(UUID blobId, long expiresSeconds) {
-    return requireRuntimeBlobManager()
-        .presignOriginalUrl(Objects.requireNonNull(blobId, "blobId"))
-        .getUrl();
-  }
-
-  private S3StorageService requireStorageService() {
-    return Objects.requireNonNull(
-        storageServices.getIfAvailable(), "S3 storage is required for Canvas Function runtime");
-  }
-
-  private StorageBlobManager requireRuntimeBlobManager() {
-    return Objects.requireNonNull(
-        blobManagers.getIfAvailable(),
-        "StorageBlobManager is required for Canvas Function runtime");
-  }
-
-  private StorageBlobManager requireGlobalBlobManager() {
-    StorageBlobManager blobManager = blobManagers.getIfAvailable();
-    if (blobManager == null) {
-      throw new IllegalStateException("global blob storage is unavailable");
-    }
-    return blobManager;
+    return blobManager.presignOriginalUrl(Objects.requireNonNull(blobId, "blobId")).getUrl();
   }
 }

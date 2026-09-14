@@ -19,6 +19,7 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallbackWithoutResult;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobIngestService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -43,7 +44,7 @@ import java.util.UUID;
       "kk-studio.storage.s3.access-key=local-test-access-key",
       "kk-studio.storage.s3.secret-key=local-test-secret-key"
     })
-class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSupport {
+class StorageBlobIngestServiceIntegrationTest extends PostgresSpringTestSupport {
 
   private static final UUID SESSION_A = new UUID(0L, 1L);
   private static final UUID SESSION_B = new UUID(0L, 2L);

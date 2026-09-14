@@ -109,7 +109,6 @@ export interface SystemSettingsIntegrationsDTO {
 
 export interface SystemSettingsStorageMediaDTO {
   uploadExpiresSeconds: DecimalLong
-  s3Enabled: boolean
   s3PresignDefaultExpiresSeconds: DecimalLong
   s3PresignMaxExpiresSeconds: DecimalLong
   canvasMediaProcessTimeoutMillis: DecimalLong
