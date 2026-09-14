@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>验证 PROJECT 与 ISSUE_RUN 会话在单一数据库事务内原子创建 Session、ROOT Entry、Initial Thread Command 与关系行；
  *   <li>验证幂等 exact replay 语义，不重复写入行，版本/序号不推进，且准确返回 replayed=true；
  *   <li>验证绑定冲突、无效所有者、终态运行等校验失败时的完全事务回滚（无悬挂 Harness 或关系孤儿行）；
- *   <li>验证 harness_session_owner_guard 单一所有权互斥约束，跨 OwnerType（如 PROJECT 与 ISSUE_RUN）互斥无孤儿。
+ *   <li>验证 session_owner 主键单一所有权互斥约束，跨 OwnerType（如 PROJECT 与 ISSUE_RUN）互斥无孤儿。
  * </ul>
  */
 class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSupport {
@@ -88,9 +88,8 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
         initialMessage, ((TextMessageContent) payload.message().contents().getFirst()).text());
 
     // 验证数据库内所有行的原子持久化
-    assertEquals(1, count("project_session", "project_id", projectId));
-    assertEquals(1, count("project_session", "session_id", sessionId));
-    assertEquals(1, count("harness_session_owner_guard", "session_id", sessionId));
+    assertEquals(1, count("session_owner", "project_id", projectId));
+    assertEquals(1, count("session_owner", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_entry", "session_id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));
@@ -140,8 +139,8 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
         nextCmdSeq1, nextCmdSeq2, "Thread next_command_sequence must not advance on exact replay");
 
     // 表内行数不重复膨胀
-    assertEquals(1, count("project_session", "project_id", projectId));
-    assertEquals(1, count("harness_session_owner_guard", "session_id", sessionId));
+    assertEquals(1, count("session_owner", "project_id", projectId));
+    assertEquals(1, count("session_owner", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_entry", "session_id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));
@@ -169,15 +168,13 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
                     projectId, session2, UUID.randomUUID(), UUID.randomUUID(), "Second session")));
 
     // session1 正常存在且不受影响
-    assertEquals(1, count("project_session", "project_id", projectId));
-    assertEquals(1, count("project_session", "session_id", session1));
-    assertEquals(1, count("harness_session_owner_guard", "session_id", session1));
+    assertEquals(1, count("session_owner", "project_id", projectId));
+    assertEquals(1, count("session_owner", "session_id", session1));
     assertEquals(1, count("harness_session", "id", session1));
 
     // session2 无任何数据写入
-    assertEquals(0, count("project_session", "session_id", session2));
+    assertEquals(0, count("session_owner", "session_id", session2));
     assertEquals(0, count("harness_session", "id", session2));
-    assertEquals(0, count("harness_session_owner_guard", "session_id", session2));
   }
 
   @Test
@@ -202,9 +199,8 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
                     "Should fail on archived project")));
 
     // 验证事务完全回滚，无残留孤儿行
-    assertEquals(0, count("project_session", "project_id", project.getId()));
-    assertEquals(0, count("project_session", "session_id", sessionId));
-    assertEquals(0, count("harness_session_owner_guard", "session_id", sessionId));
+    assertEquals(0, count("session_owner", "project_id", project.getId()));
+    assertEquals(0, count("session_owner", "session_id", sessionId));
     assertEquals(0, count("harness_session", "id", sessionId));
     assertEquals(0, count("harness_entry", "session_id", sessionId));
     assertEquals(0, count("harness_thread", "id", threadId));
@@ -241,9 +237,8 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
     assertEquals(1, result.acceptedCommands().size());
 
     // 验证原子持久化
-    assertEquals(1, count("issue_run_session", "run_id", runId));
-    assertEquals(1, count("issue_run_session", "session_id", sessionId));
-    assertEquals(1, count("harness_session_owner_guard", "session_id", sessionId));
+    assertEquals(1, count("session_owner", "issue_run_id", runId));
+    assertEquals(1, count("session_owner", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_entry", "session_id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));
@@ -296,8 +291,8 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
     assertEquals(
         nextCmdSeq1, nextCmdSeq2, "Thread next_command_sequence must not advance on exact replay");
 
-    assertEquals(1, count("issue_run_session", "run_id", runId));
-    assertEquals(1, count("harness_session_owner_guard", "session_id", sessionId));
+    assertEquals(1, count("session_owner", "issue_run_id", runId));
+    assertEquals(1, count("session_owner", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_entry", "session_id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));
@@ -332,14 +327,12 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
                     runId, session2, UUID.randomUUID(), UUID.randomUUID(), "Second run session")));
 
     // session1 正常保留
-    assertEquals(1, count("issue_run_session", "run_id", runId));
-    assertEquals(1, count("issue_run_session", "session_id", session1));
-    assertEquals(1, count("harness_session_owner_guard", "session_id", session1));
+    assertEquals(1, count("session_owner", "issue_run_id", runId));
+    assertEquals(1, count("session_owner", "session_id", session1));
 
     // session2 无任何数据写入
-    assertEquals(0, count("issue_run_session", "session_id", session2));
+    assertEquals(0, count("session_owner", "session_id", session2));
     assertEquals(0, count("harness_session", "id", session2));
-    assertEquals(0, count("harness_session_owner_guard", "session_id", session2));
   }
 
   @Test
@@ -369,9 +362,8 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
                     runId, sessionId, threadId, idempotencyKey, "Should fail on terminal run")));
 
     // 验证事务回滚，无残留 Harness 行或关系行
-    assertEquals(0, count("issue_run_session", "run_id", runId));
-    assertEquals(0, count("issue_run_session", "session_id", sessionId));
-    assertEquals(0, count("harness_session_owner_guard", "session_id", sessionId));
+    assertEquals(0, count("session_owner", "issue_run_id", runId));
+    assertEquals(0, count("session_owner", "session_id", sessionId));
     assertEquals(0, count("harness_session", "id", sessionId));
     assertEquals(0, count("harness_entry", "session_id", sessionId));
     assertEquals(0, count("harness_thread", "id", threadId));
@@ -380,7 +372,7 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
   }
 
   @Test
-  void singleOwnerGuardEnforcementAcrossOwnerTypesNoOrphan() {
+  void singleOwnerEnforcementAcrossOwnerTypesLeavesNoOrphan() {
     String agentName = createTestAgent();
     Project proj = projectService.createProject("Project Owner", "Desc", agentName);
     Issue issue =
@@ -401,11 +393,10 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
             UUID.randomUUID(),
             "Project initial prompt"));
 
-    assertEquals(1, count("project_session", "project_id", proj.getId()));
-    assertEquals(1, count("project_session", "session_id", sharedSessionId));
-    assertEquals(1, count("harness_session_owner_guard", "session_id", sharedSessionId));
+    assertEquals(1, count("session_owner", "project_id", proj.getId()));
+    assertEquals(1, count("session_owner", "session_id", sharedSessionId));
 
-    // 跨 OwnerType: IssueRun 尝试占用同一个 sharedSessionId，被互斥锁/guard 拦截
+    // 跨 OwnerType: IssueRun 尝试占用同一个 sharedSessionId，被 session 主键拦截
     assertThrows(
         Exception.class,
         () ->
@@ -418,13 +409,11 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
                     "Conflicting run prompt")));
 
     // 验证 IssueRun 关联行绝未创建（无孤儿关系）
-    assertEquals(0, count("issue_run_session", "run_id", run.getId()));
-    assertEquals(0, count("issue_run_session", "session_id", sharedSessionId));
+    assertEquals(0, count("session_owner", "issue_run_id", run.getId()));
 
     // sharedSessionId 依然唯一且安全地归属于 Project
-    assertEquals(1, count("harness_session_owner_guard", "session_id", sharedSessionId));
-    assertEquals(1, count("project_session", "project_id", proj.getId()));
-    assertEquals(1, count("project_session", "session_id", sharedSessionId));
+    assertEquals(1, count("session_owner", "session_id", sharedSessionId));
+    assertEquals(1, count("session_owner", "project_id", proj.getId()));
   }
 
   @Test
@@ -448,7 +437,7 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
             "select id from issue_run where issue_id = ?", UUID.class, issue.getId());
     UUID sessionId =
         jdbcTemplate.queryForObject(
-            "select session_id from issue_run_session where run_id = ?", UUID.class, runId);
+            "select session_id from session_owner where issue_run_id = ?", UUID.class, runId);
     UUID threadId =
         jdbcTemplate.queryForObject(
             "select id from harness_thread where session_id = ?", UUID.class, sessionId);
@@ -457,8 +446,8 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
         jdbcTemplate.queryForObject(
             "select status from issue where id = ?", String.class, issue.getId()));
     assertEquals(1, count("issue_run", "id", runId));
-    assertEquals(1, count("issue_run_session", "run_id", runId));
-    assertEquals(1, count("harness_session_owner_guard", "session_id", sessionId));
+    assertEquals(1, count("session_owner", "issue_run_id", runId));
+    assertEquals(1, count("session_owner", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_entry", "session_id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));

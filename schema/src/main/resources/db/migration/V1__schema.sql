@@ -1,7 +1,7 @@
 -- Flyway PostgreSQL baseline schema for kk-studio.
 --
 -- Applied by Flyway to an empty database as version 1.
--- Each table is created without `IF NOT EXISTS` so migration drift fails loudly.
+-- Each table is created without `IF NOT EXISTS` so schema drift fails loudly.
 -- Time fields use `timestamptz(3)` (millisecond precision, with time zone).
 -- Structured payloads use `jsonb`; flags use `boolean`; file blobs are never
 -- stored in the database.
@@ -13,9 +13,8 @@
 -- the durable Harness protocol schema. There is no separate infra
 -- schema file; this block is the only copy. HarnessRuntime owns every execution
 -- id via the injected Supplier<UUID> (production: UUID::randomUUID) and owns
--- `version`; the database never mutates them. The only V1 additions around it
--- are the application business tables and the thread version NOTIFY hint
--- trigger (section 4).
+-- `version`; the database never mutates them. Application-owned relation tables
+-- and NOTIFY hints surround this protocol without duplicating its state machine.
 --
 -- Canvas is fully UUID: every Canvas-generated id is allocated by the
 -- application (client for node/group/request/command ids, server for
@@ -92,6 +91,7 @@ create table agent_provider (
 create table agent_model (
     provider_name   varchar(64)   not null,
     name            varchar(128)  not null,
+    model_id        varchar(256)  not null,
     description     varchar(512),
     config          jsonb         not null,
     created_at      timestamptz(3) not null default current_timestamp,
@@ -103,10 +103,18 @@ create table agent_model (
         and name !~ '[[:space:]]$'
         and char_length(name) > 0
     ),
+    constraint ck_agent_model_model_id check (
+        model_id !~ '^[[:space:]]'
+        and model_id !~ '[[:space:]]$'
+        and char_length(model_id) > 0
+    ),
     constraint fk_agent_model_provider foreign key (provider_name)
         references agent_provider (name),
     constraint ck_agent_model_version_nonneg check (version >= 0)
 );
+
+comment on column agent_model.model_id is
+    '发往上游 Provider 的真实 wire 模型标识：非空白、无环绕空白、≤256；与逻辑身份 (provider_name, name) 独立且不唯一';
 
 create table agent_definition (
     name            varchar(64)   primary key,
@@ -138,26 +146,68 @@ create table agent_definition (
 create index idx_agent_definition_model
     on agent_definition (model_provider_name, model_name);
 
--- Platform MCP Streamable HTTP server 持久配置。name 是产品侧唯一路由身份且创建后不可变；
--- url/bearer_token/timeout 是 per-call MCP client 的全部连接配置（Authorization: Bearer header）。
--- version 是乐观锁 CAS 令牌（非负，每次写操作 +1）；bearer_token 只写不读出（响应绝不回显）。
+-- Platform MCP Server 配置。name 是产品侧唯一路由身份且创建后不可变；
+-- connection_config 只保存与 connection_type 对应的传输参数。
 create table mcp_server (
-    id              uuid          primary key,
-    name            varchar(32)   not null,
-    url             varchar(2048) not null,
-    bearer_token    varchar(2048),
-    timeout_millis  bigint        not null,
-    created_at      timestamptz(3) not null default current_timestamp,
-    updated_at      timestamptz(3) not null default current_timestamp,
-    version         bigint        not null default 0,
+    id                  uuid          primary key,
+    name                varchar(32)   not null,
+    connection_type     varchar(16)   not null,
+    environment_id      uuid,
+    connection_config   jsonb         not null,
+    enabled             boolean       not null default true,
+    timeout_millis      bigint        not null,
+    discovery_status    varchar(16)   not null default 'UNVERIFIED',
+    discovered_version  bigint,
+    created_at          timestamptz(3) not null default current_timestamp,
+    updated_at          timestamptz(3) not null default current_timestamp,
+    version             bigint        not null default 0,
+    constraint fk_mcp_server_environment foreign key (environment_id)
+        references environment (id) on delete restrict,
     constraint ck_mcp_server_name check (
         name ~ '^[a-z][a-z0-9_]*$'
     ),
-    constraint ck_mcp_server_url_nonblank check (
-        char_length(url) > 0
+    constraint ck_mcp_server_connection_type check (
+        connection_type in ('REMOTE', 'LOCAL')
     ),
-    constraint ck_mcp_server_timeout_positive check (
-        timeout_millis > 0
+    constraint ck_mcp_server_local_environment check (
+        connection_type not in ('REMOTE', 'LOCAL')
+        or (connection_type = 'LOCAL' and environment_id is not null)
+        or (connection_type = 'REMOTE' and environment_id is null)
+    ),
+    constraint ck_mcp_server_connection_config_object check (
+        jsonb_typeof(connection_config) = 'object'
+    ),
+    constraint ck_mcp_server_connection_config_shape check (
+        connection_type not in ('REMOTE', 'LOCAL')
+        or (
+            connection_type = 'REMOTE'
+            and connection_config ? 'url'
+            and connection_config ? 'headers'
+            and jsonb_typeof(connection_config -> 'url') = 'string'
+            and jsonb_typeof(connection_config -> 'headers') = 'object'
+            and not (connection_config ? 'command')
+            and not (connection_config ? 'cwd')
+            and not (connection_config ? 'env')
+        ) or (
+            connection_type = 'LOCAL'
+            and connection_config ? 'command'
+            and connection_config ? 'cwd'
+            and connection_config ? 'env'
+            and jsonb_typeof(connection_config -> 'command') = 'array'
+            and jsonb_array_length(connection_config -> 'command') > 0
+            and jsonb_typeof(connection_config -> 'cwd') = 'string'
+            and jsonb_typeof(connection_config -> 'env') = 'object'
+            and not (connection_config ? 'url')
+            and not (connection_config ? 'headers')
+        )
+    ),
+    constraint ck_mcp_server_timeout_positive check (timeout_millis > 0),
+    constraint ck_mcp_server_discovery_status check (
+        discovery_status in ('UNVERIFIED', 'AVAILABLE', 'FAILED')
+    ),
+    constraint ck_mcp_server_discovered_version check (
+        discovered_version is null
+        or (discovered_version >= 0 and discovered_version <= version)
     ),
     constraint ck_mcp_server_version_nonneg check (version >= 0),
     constraint ck_mcp_server_time_order check (updated_at >= created_at)
@@ -166,39 +216,45 @@ create table mcp_server (
 create unique index uk_mcp_server_name
     on mcp_server (name);
 
-comment on table mcp_server is 'Platform MCP server 持久配置：仅 Streamable HTTP；per-call client 每次从行配置新建，绝不缓存';
+create index idx_mcp_server_environment
+    on mcp_server (environment_id)
+    where environment_id is not null;
+
+comment on table mcp_server is 'Platform MCP Server 持久配置：REMOTE 由 Backend 直连 Streamable HTTP，LOCAL 由绑定的 Environment Daemon 启动 stdio 进程';
 comment on column mcp_server.id is 'Server 的全局唯一 UUID（应用侧生成）';
 comment on column mcp_server.name is '唯一名（创建后不可变）：^[a-z][a-z0-9_]*$，≤32 字符；同时作为模型工具名 mcp_<server_name>_<tool> 的组成段';
-comment on column mcp_server.url is 'Streamable HTTP MCP endpoint URL（≤2048 字符）；错误信息绝不回显该值';
-comment on column mcp_server.bearer_token is '可空 Bearer token：非空时以 Authorization: Bearer header 发送；只写敏感字段，任何 API 响应不回显';
-comment on column mcp_server.timeout_millis is '正整数毫秒超时：连接、initialize/tools/list 发现与 tools/call 共用';
+comment on column mcp_server.connection_type is '连接类型：REMOTE（Backend 直连 Streamable HTTP）或 LOCAL（Daemon stdio）';
+comment on column mcp_server.environment_id is '关联 Environment UUID：LOCAL 必填且受 restrict 保护；REMOTE 为 null';
+comment on column mcp_server.connection_config is '仅含传输参数的 JSON：Remote 含 url/headers，Local 含 command/cwd/env';
+comment on column mcp_server.enabled is '公共启用开关：默认 true；false 时即使 AVAILABLE 也不可被 Agent 选择';
+comment on column mcp_server.timeout_millis is '正整数毫秒超时：连接、发现与 tools/call 共用';
+comment on column mcp_server.discovery_status is '发现状态：UNVERIFIED（未验证）、AVAILABLE（可用）、FAILED（失败）';
+comment on column mcp_server.discovered_version is '最近一次成功验证的配置版本：<= version，未成功或变更后为 null';
 comment on column mcp_server.created_at is '创建时间（毫秒精度）';
 comment on column mcp_server.updated_at is '最后更新时间（毫秒精度），应用侧维护，不得早于 created_at';
 comment on column mcp_server.version is '乐观锁行版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据';
 
--- 从远端 MCP server 发现并冻结的工具行：source_name 是远端原始工具名（同一 server 内唯一，写入后不可变）；
--- model_name 是全局唯一模型可见工具名（规范化生成，发现冲突/超长直接拒绝）。mcp_tool 随父 server 硬删除级联删除。
+-- 从 MCP Server 发现并冻结的工具行。下线工具以 available=false 保留稳定身份。
 create table mcp_tool (
-    id              uuid          primary key,
-    mcp_server_id   uuid          not null,
-    source_name     varchar(128)  not null,
-    model_name      varchar(64)   not null,
-    description     text          not null,
-    input_schema    jsonb         not null,
+    id               uuid          primary key,
+    mcp_server_id    uuid          not null,
+    source_name      varchar(128)  not null,
+    model_name       varchar(64)   not null,
+    description      text          not null,
+    input_schema     jsonb         not null,
+    schema_revision  bigint        not null default 0,
+    available        boolean       not null default true,
     constraint fk_mcp_tool_server foreign key (mcp_server_id)
         references mcp_server (id) on delete cascade,
-    constraint ck_mcp_tool_source_name check (
-        char_length(source_name) > 0
-    ),
+    constraint ck_mcp_tool_source_name check (char_length(source_name) > 0),
     constraint ck_mcp_tool_model_name check (
         model_name ~ '[A-Za-z][A-Za-z0-9_-]*'
     ),
-    constraint ck_mcp_tool_description_nonblank check (
-        btrim(description) <> ''
-    ),
+    constraint ck_mcp_tool_description_nonblank check (btrim(description) <> ''),
     constraint ck_mcp_tool_input_schema_object check (
         jsonb_typeof(input_schema) = 'object'
-    )
+    ),
+    constraint ck_mcp_tool_schema_revision_nonneg check (schema_revision >= 0)
 );
 
 create unique index uk_mcp_tool_server_source_name
@@ -207,13 +263,18 @@ create unique index uk_mcp_tool_server_source_name
 create unique index uk_mcp_tool_model_name
     on mcp_tool (model_name);
 
-comment on table mcp_tool is 'MCP server 发现的远端工具冻结行：稳定 UUID/model_name 支撑 AgentToolId 引用；硬删除随父 server 级联';
-comment on column mcp_tool.id is '工具的全局唯一稳定 UUID（refresh/update 按 (mcp_server_id, source_name) 保留，新工具重新生成）';
-comment on column mcp_tool.mcp_server_id is '所属 MCP server；随父行删除级联硬删除';
-comment on column mcp_tool.source_name is '远端 MCP 工具原始名（同一 server 内唯一，既有行不可变）';
+create index idx_mcp_tool_server_available
+    on mcp_tool (mcp_server_id, available);
+
+comment on table mcp_tool is 'MCP Server 发现的工具冻结行：稳定 UUID/model_name 支撑 AgentToolId 引用；父 Server 删除时级联清理';
+comment on column mcp_tool.id is '工具的全局唯一稳定 UUID（按 (mcp_server_id, source_name) 跨发现保留）';
+comment on column mcp_tool.mcp_server_id is '所属 MCP Server；随父行删除级联硬删除';
+comment on column mcp_tool.source_name is 'MCP 工具原始名（同一 Server 内唯一，既有行不可变）';
 comment on column mcp_tool.model_name is '全局唯一模型可见工具名：mcp_<server_name>_<normalized_source_tool_name>，须满足 ToolDescriptor name 语法且 ≤64';
-comment on column mcp_tool.description is '远端工具描述（非空白），冻结进 ToolDescriptor';
-comment on column mcp_tool.input_schema is '远端工具 JSON input schema（JSON object），冻结进 ToolDescriptor';
+comment on column mcp_tool.description is '工具描述（非空白），冻结进 ToolDescriptor';
+comment on column mcp_tool.input_schema is '工具 JSON input schema（JSON object），冻结进 ToolDescriptor';
+comment on column mcp_tool.schema_revision is '模式修订版本：非负，从 0 开始；schema/description 变更或下线重现时递增';
+comment on column mcp_tool.available is '是否可用：true 表示在当前发现结果中；false 表示已消失的 tombstone';
 
 create table comfyui_workflow_api (
     id                uuid          primary key,
@@ -242,7 +303,7 @@ create table canvas_document (
     constraint ck_canvas_document_version_nonneg check (version >= 0)
 );
 
-comment on table canvas_document is 'Canvas 聚合头：version 是单调递增的 graph 版本（command expected 游标与 patch 坐标系的公共基准）；Harness 会话归属由 canvas_session 表持有';
+comment on table canvas_document is 'Canvas 聚合头：version 是单调递增的 graph 版本（command expected 游标与 patch 坐标系的公共基准）；Harness 会话归属由 session_owner 表持有';
 comment on column canvas_document.id is 'Canvas 全局唯一 UUID（服务端生成）';
 comment on column canvas_document.title is '规范化标题（NFKC trim 后非空，<= 256 字符）';
 comment on column canvas_document.version is 'graph 版本：任何成功命令批或 Function Run 状态前进恰好 +1';
@@ -469,9 +530,6 @@ create table chat (
     -- agent_name 故意不加 FK：它只按名称引用 Agent。Agent 硬删除期间该引用失效
     -- （turn/attempt fail closed），同名重建后既有 Chat 引用解析到当前 AgentDefinition。
     agent_name          varchar(64)   not null,
-    -- 新空面板/线程草稿的默认分支 workspace path（可空；用户发送前可显式更改或清空）。
-    -- 值为 Environment Root 下 canonical 相对 wire 路径，由应用层 EnvironmentWorkspacePath 校验。
-    workspace_path      varchar(2048),
     yolo_enabled        boolean       not null default false,
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
@@ -488,7 +546,7 @@ create table chat (
 create index idx_chat_modified on chat (updated_at, created_at);
 
 ------------------------------------------------------------------------------
--- 1b. Environment connections and directory query mailbox
+-- 1b. Environment connections, Skill inventory and operations
 ------------------------------------------------------------------------------
 
 create table environment_connection (
@@ -529,49 +587,462 @@ create index idx_environment_connection_lease_until
 create index idx_environment_connection_owner
     on environment_connection (owner_node_id);
 
-create table environment_directory_query (
-    id                  uuid           primary key,
-    environment_id      uuid           not null,
-    path                varchar(2048)  not null,
-    status              varchar(32)    not null,
-    result              jsonb,
-    failure_code        varchar(64),
-    failure_message     text,
-    deadline_at         timestamptz(3) not null,
-    created_at          timestamptz(3) not null default current_timestamp,
-    constraint fk_environment_directory_query_environment foreign key (environment_id)
+-- -----------------------------------------------------------------------------
+-- Environment inventory
+--
+-- 每个 Environment 恰一行当前事实（不是历史头）：source_set_version 是 Platform 期望的
+-- 活跃来源集合代际，只有它前进后才会把该代际下发给 Daemon；applied_source_set_version 是
+-- 最近一次被围栏接受的 READY 集合版本，永远不超过期望值。报告列（capabilities/OS/时区/备注/
+-- root/持有节点/租约/上报时间）同生同灭：没有已接受报告时全空，有报告时全非空。
+-- -----------------------------------------------------------------------------
+
+create table environment_inventory (
+    environment_id              uuid          primary key,
+    source_set_version          bigint        not null default 0,
+    applied_source_set_version  bigint,
+    capabilities_version        integer,
+    operating_system            varchar(16),
+    time_zone                   varchar(64),
+    note                        varchar(512),
+    root_path                   varchar(4096),
+    owner_node_id               uuid,
+    lease_token                 uuid,
+    reported_at                 timestamptz(3),
+    created_at                  timestamptz(3) not null default current_timestamp,
+    updated_at                  timestamptz(3) not null default current_timestamp,
+    constraint fk_environment_inventory_environment foreign key (environment_id)
         references environment (id) on delete cascade,
-    constraint ck_environment_directory_query_status check (
-        status in ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED')
+    constraint ck_environment_inventory_versions_nonneg check (
+        source_set_version >= 0
+        and (applied_source_set_version is null or applied_source_set_version >= 0)
     ),
-    constraint ck_environment_directory_query_state check (
-        (status = 'PENDING' and result is null and failure_code is null and failure_message is null)
-        or (status = 'RUNNING' and result is null and failure_code is null and failure_message is null)
-        or (status = 'SUCCEEDED' and result is not null and jsonb_typeof(result) = 'object' and failure_code is null and failure_message is null)
-        or (status = 'FAILED' and result is null and failure_code is not null and btrim(failure_code) <> '')
+    constraint ck_environment_inventory_applied_fence check (
+        applied_source_set_version is null
+        or applied_source_set_version <= source_set_version
     ),
-    constraint ck_environment_directory_query_deadline check (
-        deadline_at >= created_at
+    constraint ck_environment_inventory_report_shape check (
+        case
+            when applied_source_set_version is null then
+                capabilities_version is null
+                and operating_system is null
+                and time_zone is null
+                and note is null
+                and root_path is null
+                and owner_node_id is null
+                and lease_token is null
+                and reported_at is null
+            else
+                capabilities_version = 2
+                and operating_system in ('windows', 'wsl', 'linux', 'macos')
+                and time_zone is not null
+                and time_zone = btrim(time_zone)
+                and char_length(time_zone) > 0
+                and note is not null
+                and note = btrim(note)
+                and char_length(note) > 0
+                and root_path is not null
+                and root_path = btrim(root_path)
+                and char_length(root_path) > 0
+                and owner_node_id is not null
+                and lease_token is not null
+                and reported_at is not null
+        end
+    ),
+    constraint ck_environment_inventory_time_order check (
+        updated_at >= created_at
+        and (reported_at is null or reported_at >= created_at)
     )
 );
 
-comment on table environment_directory_query is '跨节点弱交付目录查询信箱：requester 插入 PENDING；owner 认领为 RUNNING 并回填 SUCCEEDED/FAILED；requester 以 DELETE RETURNING 原子领取；过期或 crash 直接 DELETE';
-comment on column environment_directory_query.id is '查询请求 UUID（调用方生成）';
-comment on column environment_directory_query.environment_id is '目标 Environment 的全局唯一 UUID';
-comment on column environment_directory_query.path is '待查询的目标相对路径';
-comment on column environment_directory_query.status is '查询生命周期：PENDING / RUNNING / SUCCEEDED / FAILED';
-comment on column environment_directory_query.result is 'SUCCEEDED 状态下的目录列表 JSON object';
-comment on column environment_directory_query.failure_code is 'FAILED 状态下的失败分类码（非空）';
-comment on column environment_directory_query.failure_message is 'FAILED 状态下的错误描述信息';
-comment on column environment_directory_query.deadline_at is '查询硬超时截止时间（毫秒精度）';
-comment on column environment_directory_query.created_at is '创建时间（毫秒精度）';
+comment on table environment_inventory is '每个 Environment 恰一行的 Skill inventory 期望/已应用事实：期望来源集合代际与最近一次被围栏接受的 READY 报告（Platform 独占写入）';
+comment on column environment_inventory.environment_id is 'Environment 的全局唯一 UUID（PK，FK cascade）';
+comment on column environment_inventory.source_set_version is 'Platform 期望的活跃来源集合代际（非负，从 0 开始，每次来源集合变更 +1）';
+comment on column environment_inventory.applied_source_set_version is '最近一次被 READY 围栏接受的来源集合代际；必须不超过 source_set_version';
+comment on column environment_inventory.capabilities_version is '已接受 READY 的 capabilities 协议版本（当前恒为 2）';
+comment on column environment_inventory.operating_system is '已接受 READY 报告的宿主系统 wire 值：windows/wsl/linux/macos';
+comment on column environment_inventory.time_zone is '已接受 READY 报告的 IANA 时区 ID（非空白、无环绕空白）';
+comment on column environment_inventory.note is '已接受 READY 报告的可信操作者备注（非空白、无环绕空白）';
+comment on column environment_inventory.root_path is '已接受 READY 报告的 Daemon canonical Environment root（仅展示）';
+comment on column environment_inventory.owner_node_id is '接受该报告的 App 节点实例 UUID';
+comment on column environment_inventory.lease_token is '接受该报告时的路由租约代币，用于识别陈旧报告';
+comment on column environment_inventory.reported_at is '该 READY 报告被接受的时间（毫秒精度）';
+comment on column environment_inventory.created_at is '创建时间（毫秒精度）';
+comment on column environment_inventory.updated_at is '最后更新时间（毫秒精度），应用侧维护';
 
-create index idx_environment_directory_query_claim
-    on environment_directory_query (environment_id, status, deadline_at)
+-- -----------------------------------------------------------------------------
+-- Environment Skill sources
+--
+-- Platform 唯一的来源配置事实。version 同时承担两个职责：行级 CAS 乐观锁，以及下发给
+-- Daemon 的 sourceVersion；不存在第二个版本维度。default_source 每个 Environment 至多一个。
+-- applied_* 三元组只在来源被 Daemon 成功应用后出现，因此 UNAPPLIED 允许保留旧的已应用事实
+-- （配置刚改、Daemon 还没重新应用），但绝不允许残留 last error。
+-- -----------------------------------------------------------------------------
+
+create table environment_skill_source (
+    source_id           uuid          primary key,
+    environment_id      uuid          not null,
+    source_type         varchar(16)   not null,
+    path                varchar(4096),
+    default_source      boolean       not null default false,
+    git_url             varchar(4096),
+    git_ref             varchar(1024),
+    scan_path           varchar(4096),
+    version             bigint        not null default 0,
+    status              varchar(16)   not null default 'UNAPPLIED',
+    applied_version     bigint,
+    applied_revision    varchar(64),
+    diagnostics         jsonb         not null default '[]',
+    last_error_code     varchar(64),
+    last_error_message  text,
+    last_applied_at     timestamptz(3),
+    created_at          timestamptz(3) not null default current_timestamp,
+    updated_at          timestamptz(3) not null default current_timestamp,
+    constraint uk_environment_skill_source_environment unique (environment_id, source_id),
+    constraint fk_environment_skill_source_environment foreign key (environment_id)
+        references environment (id) on delete cascade,
+    constraint ck_environment_skill_source_type check (
+        source_type in ('path', 'git')
+    ),
+    constraint ck_environment_skill_source_type_shape check (
+        (
+            source_type = 'path'
+            and path is not null
+            and git_url is null
+            and git_ref is null
+            and scan_path is null
+        )
+        or (
+            source_type = 'git'
+            and path is null
+            and default_source = false
+            and git_url is not null
+        )
+    ),
+    constraint ck_environment_skill_source_path check (
+        path is null or (path = btrim(path) and char_length(path) > 0)
+    ),
+    constraint ck_environment_skill_source_git_url check (
+        git_url is null or (git_url = btrim(git_url) and char_length(git_url) > 0)
+    ),
+    constraint ck_environment_skill_source_git_ref check (
+        git_ref is null or (git_ref = btrim(git_ref) and char_length(git_ref) > 0)
+    ),
+    constraint ck_environment_skill_source_scan_path check (
+        scan_path is null or (scan_path = btrim(scan_path) and char_length(scan_path) > 0)
+    ),
+    constraint ck_environment_skill_source_version_nonneg check (
+        version >= 0 and (applied_version is null or applied_version >= 0)
+    ),
+    constraint ck_environment_skill_source_applied_fence check (
+        applied_version is null or applied_version <= version
+    ),
+    constraint ck_environment_skill_source_applied_tuple check (
+        (
+            applied_version is null
+            and applied_revision is null
+            and last_applied_at is null
+        )
+        or (
+            applied_version is not null
+            and applied_revision is not null
+            and last_applied_at is not null
+        )
+    ),
+    constraint ck_environment_skill_source_applied_revision check (
+        applied_revision is null
+        or applied_revision ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'
+    ),
+    constraint ck_environment_skill_source_diagnostics check (
+        jsonb_typeof(diagnostics) = 'array'
+    ),
+    constraint ck_environment_skill_source_status check (
+        status in ('UNAPPLIED', 'READY', 'FAILED')
+    ),
+    constraint ck_environment_skill_source_state check (
+        (status = 'UNAPPLIED' and last_error_code is null and last_error_message is null)
+        or (
+            status = 'READY'
+            and applied_version is not null
+            and applied_version = version
+            and last_error_code is null
+            and last_error_message is null
+        )
+        or (
+            status = 'FAILED'
+            and last_error_code is not null
+            and last_error_code = btrim(last_error_code)
+            and char_length(last_error_code) > 0
+            and last_error_message is not null
+            and last_error_message = btrim(last_error_message)
+            and char_length(last_error_message) > 0
+        )
+    ),
+    constraint ck_environment_skill_source_time_order check (
+        updated_at >= created_at
+        and (last_applied_at is null or last_applied_at >= created_at)
+    )
+);
+
+comment on table environment_skill_source is 'Platform 唯一的 Skill 来源配置：每个来源一行，version 既是 CAS 乐观锁也是下发给 Daemon 的 sourceVersion';
+comment on column environment_skill_source.source_id is '来源的全局唯一 UUID（应用生成，永不变更）';
+comment on column environment_skill_source.environment_id is '所属 Environment 的全局唯一 UUID（FK cascade）';
+comment on column environment_skill_source.source_type is '来源类型 wire 值：path / git';
+comment on column environment_skill_source.path is 'PATH 来源的宿主目录（仅 path 类型非空；Daemon 以自己的文件系统解析）';
+comment on column environment_skill_source.default_source is '是否该 Environment 的缺省来源；每个 Environment 至多一个（仅 path 类型可为 true）';
+comment on column environment_skill_source.git_url is 'GIT 来源的仓库 URL（仅 git 类型非空；绝不回显到错误或列表摘要）';
+comment on column environment_skill_source.git_ref is 'GIT 来源可选 ref：为空表示跟踪远端默认 HEAD，非空固定到该 ref';
+comment on column environment_skill_source.scan_path is 'GIT 来源可选的仓库内相对扫描目录（仅 git 类型可非空）';
+comment on column environment_skill_source.version is '行版本与 Daemon sourceVersion（非负，从 0 开始，每次配置更新 +1）';
+comment on column environment_skill_source.status is '应用状态：UNAPPLIED / READY / FAILED';
+comment on column environment_skill_source.applied_version is '最近一次成功应用的配置版本；必须不超过 version';
+comment on column environment_skill_source.applied_revision is '最近一次成功应用的内容 revision（小写 40 位 SHA-1 commit 或 64 位 SHA-256 聚合）';
+comment on column environment_skill_source.diagnostics is '最近一次扫描的有界诊断（JSON array，可为空数组）';
+comment on column environment_skill_source.last_error_code is 'FAILED 状态下的失败分类码（非空、无环绕空白）';
+comment on column environment_skill_source.last_error_message is 'FAILED 状态下的失败描述（非空、无环绕空白）';
+comment on column environment_skill_source.last_applied_at is '最近一次成功应用的时间（毫秒精度，与 applied_version/revision 成对）';
+comment on column environment_skill_source.created_at is '创建时间（毫秒精度）';
+comment on column environment_skill_source.updated_at is '最后更新时间（毫秒精度），应用侧维护';
+
+-- 每个 Environment 至多一个缺省来源：缺省发现不能有两个权威目录。
+create unique index uk_environment_skill_source_default
+    on environment_skill_source (environment_id)
+    where default_source;
+
+comment on index uk_environment_skill_source_default is '每个 Environment 至多一个缺省 PATH 来源';
+
+-- -----------------------------------------------------------------------------
+-- Environment Skill inventory
+--
+-- 每个来源最新一次成功扫描的持久 inventory，正文永不入库（正文由 Daemon 按 revision 持有）。
+-- 复合 FK 让来源删除级联清理其 inventory；同一 Environment 内 Skill name 全局唯一，因此
+-- Platform 无需优先级即可唯一定位目标。
+-- -----------------------------------------------------------------------------
+
+create table environment_skill (
+    environment_id    uuid          not null,
+    source_id         uuid          not null,
+    name              varchar(128)  not null,
+    source_version    bigint        not null,
+    description       varchar(1024) not null,
+    base_directory    varchar(4096) not null,
+    content_revision  char(64)      not null,
+    discovered_at     timestamptz(3) not null,
+    constraint pk_environment_skill primary key (source_id, name),
+    constraint uk_environment_skill_environment_name unique (environment_id, name),
+    constraint fk_environment_skill_source foreign key (environment_id, source_id)
+        references environment_skill_source (environment_id, source_id) on delete cascade,
+    constraint ck_environment_skill_name check (
+        name = btrim(name) and char_length(name) > 0
+    ),
+    constraint ck_environment_skill_description check (
+        description = btrim(description) and char_length(description) > 0
+    ),
+    constraint ck_environment_skill_base_directory check (
+        base_directory = btrim(base_directory) and char_length(base_directory) > 0
+    ),
+    constraint ck_environment_skill_source_version_nonneg check (source_version >= 0),
+    constraint ck_environment_skill_content_revision check (
+        content_revision ~ '^[0-9a-f]{64}$'
+    )
+);
+
+comment on table environment_skill is '每个来源最新一次成功扫描的持久 Skill inventory；正文永不入库，只保存可唯一定位的身份与描述';
+comment on column environment_skill.environment_id is '所属 Environment（与 source_id 一起构成指向来源配置的复合 FK）';
+comment on column environment_skill.source_id is '所属来源的全局唯一 UUID';
+comment on column environment_skill.name is 'Skill canonical 名（同一 Environment 内全局唯一）';
+comment on column environment_skill.source_version is '发现该 Skill 时的来源行版本（对齐 Daemon READY 的 sourceVersion）';
+comment on column environment_skill.description is 'Skill 描述（非空、无环绕空白；正文不在此表）';
+comment on column environment_skill.base_directory is 'Daemon 宿主上的 Skill 目录（仅事实记录，不在 SQL 解析路径）';
+comment on column environment_skill.content_revision is '内容 revision（小写 64 位 SHA-256）';
+comment on column environment_skill.discovered_at is '最近一次发现该 Skill 的时间（毫秒精度）';
+
+create index idx_environment_skill_source
+    on environment_skill (environment_id, source_id);
+
+comment on index idx_environment_skill_source is '按 Environment 与来源列出持久 inventory';
+
+-- -----------------------------------------------------------------------------
+-- Environment operations
+--
+-- 跨节点管理信箱与不可变历史。resource_id 故意不建 FK：删除或改写资源配置不得抹掉操作历史，
+-- 陈旧操作由 Platform 依据资源是否存在/版本是否变化收敛为 RESOURCE_CHANGED。
+-- arguments 是冻结的私有执行参数（可能含凭据或敏感配置），errors/list 摘要绝不回显它；
+-- parameter_summary 是可以安全公开的摘要。
+-- -----------------------------------------------------------------------------
+
+create table environment_operation (
+    id                  uuid           primary key,
+    environment_id      uuid           not null,
+    resource_type       varchar(32)    not null,
+    resource_id         uuid           not null,
+    operation_type      varchar(32)    not null,
+    status              varchar(16)    not null,
+    resource_version    bigint         not null,
+    arguments           jsonb          not null,
+    parameter_summary   jsonb          not null,
+    deadline_at         timestamptz(3) not null,
+    owner_node_id       uuid,
+    lease_token         uuid,
+    started_at          timestamptz(3),
+    finished_at         timestamptz(3),
+    result_summary      jsonb,
+    failure_code        varchar(64),
+    failure_message     text,
+    created_at          timestamptz(3) not null default current_timestamp,
+    updated_at          timestamptz(3) not null default current_timestamp,
+    constraint fk_environment_operation_environment foreign key (environment_id)
+        references environment (id) on delete cascade,
+    constraint ck_environment_operation_type check (
+        operation_type in ('SKILL_REFRESH', 'SKILL_INSTALL', 'SKILL_UPDATE', 'MCP_SERVER_DISCOVER')
+    ),
+    constraint ck_environment_operation_resource_type check (
+        resource_type in ('SKILL_SOURCE', 'MCP_SERVER')
+    ),
+    constraint ck_environment_operation_type_resource_pair check (
+        (operation_type in ('SKILL_REFRESH', 'SKILL_INSTALL', 'SKILL_UPDATE') and resource_type = 'SKILL_SOURCE')
+        or (operation_type = 'MCP_SERVER_DISCOVER' and resource_type = 'MCP_SERVER')
+    ),
+    constraint ck_environment_operation_status check (
+        status in ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'UNKNOWN', 'CANCELLED')
+    ),
+    constraint ck_environment_operation_version_nonneg check (
+        resource_version >= 0
+    ),
+    constraint ck_environment_operation_arguments_object check (
+        jsonb_typeof(arguments) = 'object'
+    ),
+    constraint ck_environment_operation_parameter_summary_object check (
+        jsonb_typeof(parameter_summary) = 'object'
+    ),
+    constraint ck_environment_operation_result_summary_object check (
+        result_summary is null or jsonb_typeof(result_summary) = 'object'
+    ),
+    constraint ck_environment_operation_state check (
+        (
+            status = 'PENDING'
+            and owner_node_id is null
+            and lease_token is null
+            and started_at is null
+            and finished_at is null
+            and result_summary is null
+            and failure_code is null
+            and failure_message is null
+        )
+        or (
+            status = 'RUNNING'
+            and owner_node_id is not null
+            and lease_token is not null
+            and started_at is not null
+            and finished_at is null
+            and result_summary is null
+            and failure_code is null
+            and failure_message is null
+        )
+        or (
+            status = 'SUCCEEDED'
+            and owner_node_id is not null
+            and lease_token is not null
+            and started_at is not null
+            and finished_at is not null
+            and result_summary is not null
+            and failure_code is null
+            and failure_message is null
+        )
+        or (
+            status = 'FAILED'
+            and finished_at is not null
+            and result_summary is null
+            and failure_code is not null
+            and failure_code = btrim(failure_code)
+            and char_length(failure_code) > 0
+            and failure_message is not null
+            and failure_message = btrim(failure_message)
+            and char_length(failure_message) > 0
+            and (
+                (owner_node_id is null and lease_token is null and started_at is null)
+                or (
+                    owner_node_id is not null
+                    and lease_token is not null
+                    and started_at is not null
+                )
+            )
+        )
+        or (
+            status = 'UNKNOWN'
+            and owner_node_id is not null
+            and lease_token is not null
+            and started_at is not null
+            and finished_at is not null
+            and result_summary is null
+            and failure_code is not null
+            and failure_code = btrim(failure_code)
+            and char_length(failure_code) > 0
+            and failure_message is not null
+            and failure_message = btrim(failure_message)
+            and char_length(failure_message) > 0
+        )
+        or (
+            status = 'CANCELLED'
+            and owner_node_id is null
+            and lease_token is null
+            and started_at is null
+            and finished_at is not null
+            and result_summary is null
+            and failure_code is null
+            and failure_message is null
+        )
+    ),
+    constraint ck_environment_operation_time_order check (
+        deadline_at >= created_at
+        and updated_at >= created_at
+        and (started_at is null or started_at >= created_at)
+        and (finished_at is null or finished_at >= coalesce(started_at, created_at))
+    )
+);
+
+comment on table environment_operation is '跨节点管理操作信箱与不可变历史：PENDING 可被任一合格节点认领，终态不可回退；resource_id 故意不建 FK 以保留资源删除后的历史';
+comment on column environment_operation.id is '操作 UUID（调用方生成，永不重用）';
+comment on column environment_operation.environment_id is '目标 Environment 的全局唯一 UUID（FK cascade）';
+comment on column environment_operation.resource_type is '目标资源类型：SKILL_SOURCE / MCP_SERVER';
+comment on column environment_operation.resource_id is '目标资源的全局唯一 UUID（故意不建 FK：资源删除后操作历史仍然存在）';
+comment on column environment_operation.operation_type is '操作类型：SKILL_REFRESH / SKILL_INSTALL / SKILL_UPDATE / MCP_SERVER_DISCOVER';
+comment on column environment_operation.status is '生命周期：PENDING / RUNNING / SUCCEEDED / FAILED / UNKNOWN / CANCELLED';
+comment on column environment_operation.resource_version is '发起时的目标资源版本；过期操作必须收敛为 RESOURCE_CHANGED';
+comment on column environment_operation.arguments is '冻结的私有调用参数（JSON object；错误与列表摘要绝不回显）';
+comment on column environment_operation.parameter_summary is '可公开的参数摘要（JSON object，不含 URL/凭证）';
+comment on column environment_operation.deadline_at is '认领与执行的硬超时（毫秒精度，不得早于 created_at）';
+comment on column environment_operation.owner_node_id is '认领该操作的 App 节点实例 UUID（PENDING 为空）';
+comment on column environment_operation.lease_token is '认领租约代币，用于围栏被接管的旧执行者';
+comment on column environment_operation.started_at is '认领时间（毫秒精度）';
+comment on column environment_operation.finished_at is '终态时间（毫秒精度，不得早于 started_at）';
+comment on column environment_operation.result_summary is 'SUCCEEDED 状态下的结果摘要（JSON object，可空）';
+comment on column environment_operation.failure_code is '失败分类码（FAILED/UNKNOWN 状态下非空、无环绕空白）';
+comment on column environment_operation.failure_message is '失败描述（FAILED/UNKNOWN 状态下非空、无环绕空白）';
+comment on column environment_operation.created_at is '创建时间（毫秒精度）';
+comment on column environment_operation.updated_at is '最后更新时间（毫秒精度），应用侧维护';
+
+-- 同一目标资源同时至多一个未终结操作：重复触发不能产生两个竞争执行者。
+create unique index uk_environment_operation_active
+    on environment_operation (environment_id, resource_type, resource_id)
+    where status in ('PENDING', 'RUNNING');
+
+comment on index uk_environment_operation_active is '同一 (environment, resource_type, resource_id) 至多一个未终结操作';
+
+create index idx_environment_operation_claim
+    on environment_operation (status, deadline_at, environment_id)
     where status = 'PENDING';
 
-create index idx_environment_directory_query_deadline
-    on environment_directory_query (deadline_at);
+comment on index idx_environment_operation_claim is 'PENDING 认领扫描：按截止时间取最早可执行操作';
+
+create index idx_environment_operation_deadline
+    on environment_operation (deadline_at);
+
+comment on index idx_environment_operation_deadline is '过期操作清扫索引：不区分状态即可按截止时间收敛';
+
+create index idx_environment_operation_environment
+    on environment_operation (environment_id, created_at, id);
+
+comment on index idx_environment_operation_environment is '按 Environment 读取操作历史（created_at, id 稳定序）';
 
 ------------------------------------------------------------------------------
 -- 1c. Singleton system settings (id=1)
@@ -602,7 +1073,7 @@ comment on column system_setting.updated_at is '最后更新时间（毫秒精�
 
 insert into system_setting (id, config) values (
     1,
-     '{"advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},"aiRuntime":{"compactionKeepRecentTokens":20000,"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentIdleTimeoutMillis":0,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},"environment":{"directoryListTimeoutMillis":10000,"heartbeatTimeoutMillis":60000,"maxResourceBytes":8388608},"integrations":{"comfyui":{"connectTimeoutMillis":10000,"enabled":false,"maxInputFileBytes":52428800,"readTimeoutMillis":30000,"websocketTimeoutMillis":1800000},"gptImage2":{"askTimeoutSeconds":900,"hubExecutionTimeoutMillis":960000,"maxWaitMillis":1200000,"paidEnabled":false},"minimaxH3":{"comfyConnectTimeoutMillis":10000,"comfyMaxWaitMillis":1800000,"comfyPollIntervalMillis":2000,"comfyRequestTimeoutMillis":30000,"enabled":false,"promptMaxWaitMillis":600000},"openCliHub":{"baseUrl":null,"connectTimeoutMillis":5000,"enabled":false,"longPollTimeoutMillis":130000,"maxErrorResponseBytes":4096,"maxJsonResponseBytes":524288,"maxOutputChars":65535,"requestTimeoutMillis":120000,"streamBufferBytes":16384},"seedance":{"enabled":false,"hubExecutionTimeoutMillis":600000,"maxWaitMillis":1800000,"retry":0,"statusPollIntervalMillis":30000}},"storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3Enabled":false,"s3PresignDefaultExpiresSeconds":600,"s3PresignMaxExpiresSeconds":3600,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":3600},"tool":{"defaultYolo":false,"modelGatewayBusyRetryMillis":5000,"permission":{"base.bash":[{"action":"ask","pattern":"*"}],"base.edit":[{"action":"ask","pattern":"*"}],"base.write":[{"action":"ask","pattern":"*"}]},"skillLoadTimeoutMillis":30000,"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}}'::jsonb
+     '{"advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},"aiRuntime":{"compactionKeepRecentTokens":20000,"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentIdleTimeoutMillis":0,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},"environment":{"heartbeatTimeoutMillis":60000,"maxResourceBytes":8388608},"integrations":{"comfyui":{"connectTimeoutMillis":10000,"enabled":false,"maxInputFileBytes":52428800,"readTimeoutMillis":30000,"websocketTimeoutMillis":1800000},"gptImage2":{"askTimeoutSeconds":900,"hubExecutionTimeoutMillis":960000,"maxWaitMillis":1200000,"paidEnabled":false},"minimaxH3":{"comfyConnectTimeoutMillis":10000,"comfyMaxWaitMillis":1800000,"comfyPollIntervalMillis":2000,"comfyRequestTimeoutMillis":30000,"enabled":false,"promptMaxWaitMillis":600000},"openCliHub":{"baseUrl":null,"connectTimeoutMillis":5000,"enabled":false,"longPollTimeoutMillis":130000,"maxErrorResponseBytes":4096,"maxJsonResponseBytes":524288,"maxOutputChars":65535,"requestTimeoutMillis":120000,"streamBufferBytes":16384},"seedance":{"enabled":false,"hubExecutionTimeoutMillis":600000,"maxWaitMillis":1800000,"retry":0,"statusPollIntervalMillis":30000}},"storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3Enabled":false,"s3PresignDefaultExpiresSeconds":600,"s3PresignMaxExpiresSeconds":3600,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":3600},"tool":{"defaultYolo":false,"modelGatewayBusyRetryMillis":5000,"permission":{"base.bash":[{"action":"ask","pattern":"*"}],"base.edit":[{"action":"ask","pattern":"*"}],"base.write":[{"action":"ask","pattern":"*"}]},"skillLoadTimeoutMillis":30000,"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}}'::jsonb
 );
 
 -- System settings version NOTIFY hint.
@@ -782,8 +1253,7 @@ create table harness_thread_command (
             'USER_MESSAGE',
             'CUSTOM_MESSAGE',
             'SET_AGENT',
-            'SET_MODEL',
-            'SET_ENVIRONMENT'
+            'SET_MODEL'
         )
     ),
     constraint ck_harness_thread_command_request_hash check (
@@ -1005,54 +1475,489 @@ comment on index idx_harness_work_available is 'claimNextWork 按 (available_at,
 comment on index idx_harness_work_lease_until is '过期 lease 扫描索引';
 
 ------------------------------------------------------------------------------
--- 3. Application-owned tables binding Chat/Canvas owners to harness_session
+-- 3. Project / Issue orchestration and global Session ownership
+------------------------------------------------------------------------------
+
+------------------------------------------------------------------------------
+-- Project
+------------------------------------------------------------------------------
+create table project (
+    id                     uuid          not null,
+    title                  varchar(255)  not null,
+    description            text          not null default '',
+    coordinator_agent_name varchar(128)  not null,
+    next_issue_number      bigint        not null default 1,
+    version                bigint        not null default 0,
+    archived_at            timestamptz(3),
+    created_at             timestamptz(3) not null default clock_timestamp(),
+    updated_at             timestamptz(3) not null default clock_timestamp(),
+    constraint pk_project primary key (id),
+    constraint fk_project_coordinator foreign key (coordinator_agent_name)
+        references agent_definition (name) on delete restrict,
+    constraint chk_project_title_not_blank check (length(trim(title)) > 0 and title = btrim(title)),
+    constraint chk_project_description_len check (octet_length(description) <= 65536),
+    constraint chk_project_coordinator_not_blank check (length(trim(coordinator_agent_name)) > 0 and coordinator_agent_name = btrim(coordinator_agent_name)),
+    constraint chk_project_next_issue_number check (next_issue_number >= 1),
+    constraint chk_project_version check (version >= 0)
+);
+
+comment on table project is 'Project 核心实体：目标、约束、Coordinator 配置与 Issue 编号单调分配器';
+comment on column project.id is '项目 UUID 主键（应用生成）';
+comment on column project.title is '展示标题，非空';
+comment on column project.description is '自洽目标、约束与验收规范描述';
+comment on column project.coordinator_agent_name is 'Coordinator 引用现存 AgentDefinition 名称（RESTRICT）';
+comment on column project.next_issue_number is '项目内单调递增 Issue 编号分配器，>= 1';
+comment on column project.version is '乐观锁版本号，>= 0';
+comment on column project.archived_at is '归档时间戳，为空表示活跃';
+comment on column project.created_at is '创建时间戳（毫秒精度）';
+comment on column project.updated_at is '更新时间戳（毫秒精度）';
+
+------------------------------------------------------------------------------
+-- Issue
+------------------------------------------------------------------------------
+create table issue (
+    id                  uuid          not null,
+    project_id          uuid          not null,
+    number              bigint        not null,
+    title               varchar(255)  not null,
+    description         text          not null default '',
+    status              varchar(32)   not null,
+    assignee_agent_name varchar(128),
+    reviewer_agent_name varchar(128),
+    version             bigint        not null default 0,
+    spec_revision       bigint        not null default 0,
+    input_sequence      bigint        not null default 0,
+    archived_at         timestamptz(3),
+    created_at          timestamptz(3) not null default clock_timestamp(),
+    updated_at          timestamptz(3) not null default clock_timestamp(),
+    constraint pk_issue primary key (id),
+    constraint fk_issue_project foreign key (project_id)
+        references project (id) on delete restrict,
+    constraint fk_issue_assignee foreign key (assignee_agent_name)
+        references agent_definition (name) on delete restrict,
+    constraint fk_issue_reviewer foreign key (reviewer_agent_name)
+        references agent_definition (name) on delete restrict,
+    constraint uk_issue_project_number unique (project_id, number),
+    constraint uk_issue_id_project unique (id, project_id),
+    constraint chk_issue_title_not_blank check (length(trim(title)) > 0 and title = btrim(title)),
+    constraint chk_issue_description_len check (octet_length(description) <= 65536),
+    constraint chk_issue_assignee_not_blank check (assignee_agent_name is null or (length(trim(assignee_agent_name)) > 0 and assignee_agent_name = btrim(assignee_agent_name))),
+    constraint chk_issue_reviewer_not_blank check (reviewer_agent_name is null or (length(trim(reviewer_agent_name)) > 0 and reviewer_agent_name = btrim(reviewer_agent_name))),
+    constraint chk_issue_number check (number >= 1),
+    constraint chk_issue_status check (status in ('BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE', 'CANCELED')),
+    constraint chk_issue_version check (version >= 0),
+    constraint chk_issue_spec_revision check (spec_revision >= 0),
+    constraint chk_issue_input_sequence check (input_sequence >= 0),
+    constraint chk_issue_archived_status check (archived_at is null or status in ('DONE', 'CANCELED'))
+);
+
+create index idx_issue_project on issue (project_id);
+create index idx_issue_project_status on issue (project_id, status);
+
+comment on table issue is 'Issue 核心实体：六态生命周期、执行/评审分配及游标版本';
+comment on column issue.id is 'Issue UUID 主键（应用生成）';
+comment on column issue.project_id is '归属项目 UUID';
+comment on column issue.number is '项目内单调递增编号，>= 1';
+comment on column issue.title is 'Issue 标题';
+comment on column issue.description is 'Issue 规格说明与验收要求描述';
+comment on column issue.status is '状态：BACKLOG, TODO, IN_PROGRESS, IN_REVIEW, DONE, CANCELED';
+comment on column issue.assignee_agent_name is '分配执行者 Agent 名称（可空）';
+comment on column issue.reviewer_agent_name is '分配评审者 Agent 名称（可空，空表示人工评审）';
+comment on column issue.version is '乐观锁行版本，>= 0';
+comment on column issue.spec_revision is '规格版本游标，>= 0';
+comment on column issue.input_sequence is '输入序列游标，>= 0';
+comment on column issue.archived_at is '归档时间戳（仅允许终态 Issue 归档）';
+
+------------------------------------------------------------------------------
+-- Issue dependencies
+------------------------------------------------------------------------------
+create table issue_dependency (
+    issue_id            uuid          not null,
+    depends_on_issue_id uuid          not null,
+    project_id          uuid          not null,
+    created_at          timestamptz(3) not null default clock_timestamp(),
+    constraint pk_issue_dependency primary key (issue_id, depends_on_issue_id),
+    constraint fk_issue_dependency_issue foreign key (issue_id, project_id)
+        references issue (id, project_id) on delete restrict,
+    constraint fk_issue_dependency_depends_on foreign key (depends_on_issue_id, project_id)
+        references issue (id, project_id) on delete restrict,
+    constraint chk_issue_dependency_no_self check (issue_id <> depends_on_issue_id)
+);
+
+create index idx_issue_dependency_depends_on on issue_dependency (depends_on_issue_id);
+create index idx_issue_dependency_project on issue_dependency (project_id);
+
+comment on table issue_dependency is 'Issue 间依赖边：复合外键保障同项目，禁止自环';
+comment on column issue_dependency.issue_id is '被阻塞 Issue UUID';
+comment on column issue_dependency.depends_on_issue_id is '前提 Issue UUID';
+comment on column issue_dependency.project_id is '冗余项目 UUID，保证依赖两端必须归属同一项目';
+
+------------------------------------------------------------------------------
+-- Issue inputs
+------------------------------------------------------------------------------
+create table issue_input (
+    issue_id        uuid          not null,
+    sequence        bigint        not null,
+    kind            varchar(32)   not null,
+    body            text          not null,
+    idempotency_key varchar(128),
+    created_at      timestamptz(3) not null default clock_timestamp(),
+    constraint pk_issue_input primary key (issue_id, sequence),
+    constraint fk_issue_input_issue foreign key (issue_id)
+        references issue (id) on delete restrict,
+    constraint uk_issue_input_idempotency unique (issue_id, idempotency_key),
+    constraint chk_issue_input_sequence check (sequence >= 1),
+    constraint chk_issue_input_kind check (kind in ('HUMAN', 'REVIEW_FEEDBACK', 'RETRY', 'SYSTEM')),
+    constraint chk_issue_input_body_not_blank check (length(trim(body)) > 0),
+    constraint chk_issue_input_body_len check (octet_length(body) <= 1048576),
+    constraint chk_issue_input_idempotency_not_blank check (idempotency_key is null or (length(trim(idempotency_key)) > 0 and idempotency_key = btrim(idempotency_key)))
+);
+
+comment on table issue_input is 'Issue 追加输入流：人类输入、评审反馈、重试标记与系统指令';
+comment on column issue_input.issue_id is '关联 Issue UUID';
+comment on column issue_input.sequence is 'Issue 内单调递增序号，>= 1';
+comment on column issue_input.kind is '输入类别：HUMAN, REVIEW_FEEDBACK, RETRY, SYSTEM';
+comment on column issue_input.body is '输入正文纯文本（最大 1 MiB）';
+comment on column issue_input.idempotency_key is '同 Issue 幂等键';
+
+------------------------------------------------------------------------------
+-- Issue runs
+------------------------------------------------------------------------------
+create table issue_run (
+    id                      uuid          not null,
+    issue_id                uuid          not null,
+    ordinal                 bigint        not null,
+    role                    varchar(32)   not null,
+    actor_type              varchar(32)   not null,
+    agent_name              varchar(128),
+    submission_run_id       uuid,
+    status                  varchar(32)   not null,
+    outcome                 varchar(32),
+    observed_spec_revision  bigint        not null default 0,
+    observed_input_sequence bigint        not null default 0,
+    continuation_count      int           not null default 0,
+    max_continuations       int           not null default 10,
+    deadline                timestamptz(3),
+    waiting_reason          text,
+    result                  jsonb,
+    terminal_action_id      varchar(255),
+    version                 bigint        not null default 0,
+    created_at              timestamptz(3) not null default clock_timestamp(),
+    updated_at              timestamptz(3) not null default clock_timestamp(),
+    completed_at            timestamptz(3),
+    constraint pk_issue_run primary key (id),
+    constraint fk_issue_run_issue foreign key (issue_id)
+        references issue (id) on delete restrict,
+    constraint fk_issue_run_agent foreign key (agent_name)
+        references agent_definition (name) on delete restrict,
+    constraint uk_issue_run_issue_ordinal unique (issue_id, ordinal),
+    constraint uk_issue_run_id_issue unique (id, issue_id),
+    constraint fk_issue_run_submission foreign key (submission_run_id, issue_id)
+        references issue_run (id, issue_id) on delete restrict,
+    constraint uk_issue_run_terminal_action unique (terminal_action_id),
+    constraint chk_issue_run_ordinal check (ordinal >= 1),
+    constraint chk_issue_run_role check (
+        (role = 'EXECUTOR' and actor_type = 'AGENT' and submission_run_id is null) or
+        (role = 'REVIEWER' and submission_run_id is not null and (actor_type <> 'HUMAN' or status = 'COMPLETED'))
+    ),
+    constraint chk_issue_run_actor_agent check (
+        (actor_type = 'AGENT' and agent_name is not null and length(trim(agent_name)) > 0 and agent_name = btrim(agent_name)) or
+        (actor_type = 'HUMAN' and agent_name is null)
+    ),
+    constraint chk_issue_run_status check (status in ('RUNNING', 'WAITING_HUMAN', 'COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN')),
+    constraint chk_issue_run_outcome check (outcome is null or outcome in ('SUBMITTED', 'APPROVED', 'CHANGES_REQUESTED')),
+    constraint chk_issue_run_observed_spec check (observed_spec_revision >= 0),
+    constraint chk_issue_run_observed_input check (observed_input_sequence >= 0),
+    constraint chk_issue_run_continuation_limit check (
+        continuation_count >= 0 and max_continuations >= 0 and continuation_count <= max_continuations
+    ),
+    constraint chk_issue_run_version check (version >= 0),
+    constraint chk_issue_run_terminal_action_not_blank check (
+        terminal_action_id is null or (length(trim(terminal_action_id)) > 0 and terminal_action_id = btrim(terminal_action_id))
+    ),
+    constraint chk_issue_run_waiting_reason_len check (
+        waiting_reason is null or (length(trim(waiting_reason)) > 0 and octet_length(waiting_reason) <= 16384 and waiting_reason = btrim(waiting_reason))
+    ),
+    constraint chk_issue_run_result_len check (result is null or octet_length(result::text) <= 65536),
+    constraint chk_issue_run_lifecycle check (
+        (
+            status = 'RUNNING' and
+            waiting_reason is null and
+            completed_at is null and
+            terminal_action_id is null and
+            outcome is null and
+            result is null
+        ) or
+        (
+            status = 'WAITING_HUMAN' and
+            waiting_reason is not null and
+            length(trim(waiting_reason)) > 0 and
+            waiting_reason = btrim(waiting_reason) and
+            completed_at is null and
+            terminal_action_id is null and
+            outcome is null and
+            result is null
+        ) or
+        (
+            status = 'COMPLETED' and
+            waiting_reason is null and
+            completed_at is not null and
+            terminal_action_id is not null and
+            length(trim(terminal_action_id)) > 0 and
+            terminal_action_id = btrim(terminal_action_id) and
+            outcome is not null and
+            result is not null and
+            jsonb_typeof(result) = 'object' and
+            (
+                (role = 'EXECUTOR' and outcome = 'SUBMITTED') or
+                (role = 'REVIEWER' and outcome in ('APPROVED', 'CHANGES_REQUESTED'))
+            )
+        ) or
+        (
+            status in ('FAILED', 'CANCELLED', 'UNKNOWN') and
+            waiting_reason is not null and
+            length(trim(waiting_reason)) > 0 and
+            waiting_reason = btrim(waiting_reason) and
+            completed_at is not null and
+            outcome is null and
+            terminal_action_id is null and
+            result is null
+        )
+    )
+);
+
+create unique index uk_issue_run_single_active on issue_run (issue_id)
+    where status in ('RUNNING', 'WAITING_HUMAN');
+create index idx_issue_run_issue on issue_run (issue_id);
+
+comment on table issue_run is 'IssueRun 运行实体：执行/评审周期记录与围栏状态';
+comment on column issue_run.id is 'Run UUID 主键（应用生成）';
+comment on column issue_run.issue_id is '归属 Issue UUID';
+comment on column issue_run.ordinal is 'Issue 内单调运行编号，>= 1';
+comment on column issue_run.role is '角色：EXECUTOR, REVIEWER';
+comment on column issue_run.actor_type is '行为者类型：AGENT, HUMAN';
+comment on column issue_run.agent_name is '冻结的 AgentDefinition 名称（AGENT 必填，HUMAN 为空）';
+comment on column issue_run.submission_run_id is 'REVIEWER 必填，指向被评审的 EXECUTOR Run（同 Issue 约束）';
+comment on column issue_run.status is '状态：RUNNING, WAITING_HUMAN, COMPLETED, FAILED, CANCELLED, UNKNOWN';
+comment on column issue_run.outcome is '终态结果：SUBMITTED, APPROVED, CHANGES_REQUESTED';
+comment on column issue_run.observed_spec_revision is '观察到的 spec revision 游标';
+comment on column issue_run.observed_input_sequence is '观察到的 input sequence 游标';
+comment on column issue_run.continuation_count is '已投递 continuation 计数';
+comment on column issue_run.max_continuations is '允许最大 continuation 计数';
+comment on column issue_run.deadline is 'Run 绝对截止时间戳';
+comment on column issue_run.waiting_reason is '等待或失败原因说明（最大 16 KiB）';
+comment on column issue_run.result is '终态结构化结果 JSONB（最大 64 KiB）';
+comment on column issue_run.terminal_action_id is '终态动作唯一幂等标识';
+
+------------------------------------------------------------------------------
+-- Session ownership
 --
--- chat_session / canvas_session 是 owner 与 Harness Session 的一对一归属边：
--- session_id 是主键（一个 Session 至多被一个 owner 持有）。Chat 与 Canvas 的互斥
--- 由应用在归属创建事务内强制（锁定 harness_session 行后检查另一张归属表），数据库 FK
--- 只作为末道防线（说明 Session 与 owner 都必须存在），不引入多态 owner 表。
+-- 一行只允许一个非空 owner 外键，以关系约束直接表达排他弧；session_id 主键保证
+-- Chat、Canvas、Project、IssueRun 四类 owner 全局互斥。Project 和 IssueRun 额外
+-- 唯一，分别至多绑定一个长期 Session；Chat 和 Canvas 可以持有多个 Session。
 ------------------------------------------------------------------------------
-create table chat_session (
-    session_id  uuid          not null,
-    chat_id     uuid          not null,
-    created_at  timestamptz(3) not null default current_timestamp,
-    constraint pk_chat_session primary key (session_id),
-    constraint fk_chat_session_session foreign key (session_id)
+create table session_owner (
+    session_id   uuid          not null,
+    chat_id      uuid,
+    canvas_id    uuid,
+    project_id   uuid,
+    issue_run_id uuid,
+    created_at   timestamptz(3) not null default clock_timestamp(),
+    constraint pk_session_owner primary key (session_id),
+    constraint fk_session_owner_session foreign key (session_id)
         references harness_session (id) on delete restrict,
-    constraint fk_chat_session_chat foreign key (chat_id)
-        references chat (id) on delete restrict
+    constraint fk_session_owner_chat foreign key (chat_id)
+        references chat (id) on delete restrict,
+    constraint fk_session_owner_canvas foreign key (canvas_id)
+        references canvas_document (id) on delete restrict,
+    constraint fk_session_owner_project foreign key (project_id)
+        references project (id) on delete restrict,
+    constraint fk_session_owner_issue_run foreign key (issue_run_id)
+        references issue_run (id) on delete restrict,
+    constraint uk_session_owner_project unique (project_id),
+    constraint uk_session_owner_issue_run unique (issue_run_id),
+    constraint ck_session_owner_exactly_one check (
+        num_nonnulls(chat_id, canvas_id, project_id, issue_run_id) = 1
+    )
 );
 
-create index idx_chat_session_chat
-    on chat_session (chat_id, session_id);
+create index idx_session_owner_chat
+    on session_owner (chat_id, created_at desc, session_id desc)
+    where chat_id is not null;
 
-comment on table chat_session is 'Chat 持有的 Harness Session 归属边：每个 Session 至多关联一个 Chat';
-comment on column chat_session.session_id is 'Harness Session 的全局唯一 UUID（PK，同 canvas_session 互斥）';
-comment on column chat_session.chat_id is '所属 Chat（owner listing 索引）';
-comment on column chat_session.created_at is '归属创建时间（毫秒精度）';
+create index idx_session_owner_canvas
+    on session_owner (canvas_id, created_at desc, session_id desc)
+    where canvas_id is not null;
 
-create table canvas_session (
-    session_id  uuid          not null,
-    canvas_id   uuid          not null,
-    created_at  timestamptz(3) not null default current_timestamp,
-    constraint pk_canvas_session primary key (session_id),
-    constraint fk_canvas_session_session foreign key (session_id)
-        references harness_session (id) on delete restrict,
-    constraint fk_canvas_session_canvas foreign key (canvas_id)
-        references canvas_document (id) on delete restrict
+comment on table session_owner is 'Harness Session 的产品归属排他弧：每行恰有一个 Chat、Canvas、Project 或 IssueRun owner';
+comment on column session_owner.session_id is 'Harness Session UUID（主键，全局至多一个 owner）';
+comment on column session_owner.chat_id is 'Chat owner；非空时其他 owner 列必须为空';
+comment on column session_owner.canvas_id is 'Canvas owner；非空时其他 owner 列必须为空';
+comment on column session_owner.project_id is 'Project owner；非空时其他 owner 列必须为空，且每 Project 至多一行';
+comment on column session_owner.issue_run_id is 'IssueRun owner；非空时其他 owner 列必须为空，且每 IssueRun 至多一行';
+comment on column session_owner.created_at is '归属边建立时间（毫秒精度）';
+comment on index idx_session_owner_chat is '按 Chat 枚举 Session，覆盖最近归属优先排序';
+comment on index idx_session_owner_canvas is '按 Canvas 枚举 Session，覆盖最近归属优先排序';
+
+------------------------------------------------------------------------------
+-- Issue Controller work
+------------------------------------------------------------------------------
+create table issue_controller_work (
+    issue_id     uuid          not null,
+    wake_version bigint        not null default 1,
+    due_at       timestamptz(3) not null default clock_timestamp(),
+    lease_token  varchar(128),
+    lease_until  timestamptz(3),
+    updated_at   timestamptz(3) not null default clock_timestamp(),
+    constraint pk_issue_controller_work primary key (issue_id),
+    constraint fk_issue_controller_work_issue foreign key (issue_id)
+        references issue (id) on delete restrict,
+    constraint chk_issue_controller_work_wake check (wake_version > 0),
+    constraint chk_issue_controller_work_lease check (
+        (lease_token is null and lease_until is null) or
+        (lease_token is not null and lease_until is not null and length(trim(lease_token)) > 0 and length(trim(lease_token)) <= 128 and lease_token = btrim(lease_token))
+    )
 );
 
-create index idx_canvas_session_canvas
-    on canvas_session (canvas_id, session_id);
+create index idx_issue_controller_work_due on issue_controller_work (due_at);
 
-comment on table canvas_session is 'Canvas 持有的 Harness Session 归属边：每个 Session 至多关联一个 Canvas';
-comment on column canvas_session.session_id is 'Harness Session 的全局唯一 UUID（PK，同 chat_session 互斥）';
-comment on column canvas_session.canvas_id is '所属 Canvas（owner listing 索引）';
-comment on column canvas_session.created_at is '归属创建时间（毫秒精度）';
+comment on table issue_controller_work is 'Issue Controller 调度工作：每 Issue 最多单行，确定性 lease/wake 围栏';
+comment on column issue_controller_work.issue_id is '所属 Issue UUID（主键）';
+comment on column issue_controller_work.wake_version is '唤醒版本号，每次请求唤醒递增，> 0';
+comment on column issue_controller_work.due_at is '下次可调度时间戳';
+comment on column issue_controller_work.lease_token is '当前持有节点租约令牌';
+comment on column issue_controller_work.lease_until is '租约截止时间戳';
+comment on column issue_controller_work.updated_at is '更新时间戳';
+
+------------------------------------------------------------------------------
+-- Issue Controller due-work notification hint
+------------------------------------------------------------------------------
+create or replace function notify_issue_controller_work_due()
+returns trigger as $$
+begin
+    if new.due_at <= clock_timestamp() and (new.lease_until is null or new.lease_until <= clock_timestamp()) then
+        perform pg_notify('issue_controller_work_due', new.issue_id::text);
+    end if;
+    return new;
+end;
+$$ language plpgsql;
+
+create trigger trg_issue_controller_work_due
+    after insert or update on issue_controller_work
+    for each row execute function notify_issue_controller_work_due();
+
+------------------------------------------------------------------------------
+-- 4. Project/Issue snapshot invalidation hint
+------------------------------------------------------------------------------
+
+-- Project/Issue facts notify browser-facing listeners only after transaction commit.
+-- The payload is a refetch hint, never an event log.
+create or replace function project_issue_changed_notify()
+returns trigger as $$
+declare
+    target_project_id uuid;
+    target_issue_id uuid;
+    target_run_id uuid;
+    target_session_id uuid;
+begin
+    if tg_table_name = 'project' then
+        if tg_op = 'DELETE' then
+            target_project_id := old.id;
+        else
+            target_project_id := new.id;
+        end if;
+    elsif tg_table_name in ('issue', 'issue_dependency') then
+        if tg_op = 'DELETE' then
+            target_project_id := old.project_id;
+        else
+            target_project_id := new.project_id;
+        end if;
+    elsif tg_table_name in ('issue_input', 'issue_run') then
+        if tg_op = 'DELETE' then
+            target_issue_id := old.issue_id;
+        else
+            target_issue_id := new.issue_id;
+        end if;
+        select project_id into target_project_id
+        from issue
+        where id = target_issue_id;
+    elsif tg_table_name = 'session_owner' then
+        if tg_op = 'DELETE' then
+            if old.project_id is not null then
+                target_project_id := old.project_id;
+            else
+                target_run_id := old.issue_run_id;
+            end if;
+        else
+            if new.project_id is not null then
+                target_project_id := new.project_id;
+            else
+                target_run_id := new.issue_run_id;
+            end if;
+        end if;
+        if target_project_id is null and target_run_id is not null then
+            select i.project_id into target_project_id
+            from issue_run r
+            join issue i on i.id = r.issue_id
+            where r.id = target_run_id;
+        end if;
+    elsif tg_table_name = 'harness_thread' then
+        if tg_op = 'DELETE' then
+            target_session_id := old.session_id;
+        else
+            target_session_id := new.session_id;
+        end if;
+        select project_id into target_project_id
+        from session_owner
+        where session_id = target_session_id;
+
+        if target_project_id is null then
+            select i.project_id into target_project_id
+            from session_owner so
+            join issue_run r on r.id = so.issue_run_id
+            join issue i on i.id = r.issue_id
+            where so.session_id = target_session_id;
+        end if;
+    end if;
+
+    if target_project_id is not null then
+        perform pg_notify('project_issue_changed', target_project_id::text);
+    end if;
+    return null;
+end;
+$$ language plpgsql;
+
+create trigger trg_project_issue_changed_project
+    after insert or update or delete on project
+    for each row execute function project_issue_changed_notify();
+
+create trigger trg_project_issue_changed_issue
+    after insert or update or delete on issue
+    for each row execute function project_issue_changed_notify();
+
+create trigger trg_project_issue_changed_dependency
+    after insert or update or delete on issue_dependency
+    for each row execute function project_issue_changed_notify();
+
+create trigger trg_project_issue_changed_input
+    after insert or update or delete on issue_input
+    for each row execute function project_issue_changed_notify();
+
+create trigger trg_project_issue_changed_run
+    after insert or update or delete on issue_run
+    for each row execute function project_issue_changed_notify();
+
+create trigger trg_project_issue_changed_session_owner
+    after insert or update or delete on session_owner
+    for each row execute function project_issue_changed_notify();
+
+create trigger trg_project_issue_changed_thread
+    after insert or update or delete on harness_thread
+    for each row execute function project_issue_changed_notify();
 
 
 ------------------------------------------------------------------------------
--- 4. Thread version NOTIFY hint
+-- 5. Thread version NOTIFY hint
 --
 -- version is owned by HarnessRuntime; PostgreSQL never bumps it. This trigger
 -- is only a wake-up hint for in-process projection listeners: it notifies when
@@ -1079,12 +1984,12 @@ create trigger trg_harness_thread_version_notify
     for each row execute function harness_thread_version_notify();
 
 ------------------------------------------------------------------------------
--- 5. Canvas ownership, same-canvas composite FKs and version
+-- 6. Canvas ownership, same-canvas composite FKs and version
 --    NOTIFY hint.
 --
 -- All Canvas ownership FKs are ON DELETE RESTRICT: deletion is always driven
 -- by the application in explicit order (pins -> runs -> resources -> links ->
--- nodes -> groups -> dedup -> sessions -> document), never by cascades that could bypass
+-- nodes -> groups -> dedup -> Session ownership -> document), never by cascades that could bypass
 -- StorageBlobManager refcounts.
 ------------------------------------------------------------------------------
 
@@ -1175,7 +2080,7 @@ create trigger trg_canvas_function_work_notify
     after insert or update on canvas_function_run
     for each row execute function canvas_function_work_notify();
 
--- 6. Global blob storage
+-- 7. Global blob storage
 --
 -- storage_blob is the deduplicated immutable content address of the global
 -- storage foundation. sha256+size_bytes uniquely identify one content in the
@@ -1353,7 +2258,7 @@ comment on column session_blob_ref.created_at is '引用创建时间（timestamp
 comment on index idx_session_blob_ref_blob is '按 blob 反向枚举持有它的 Session（深删除与对账）';
 
 ------------------------------------------------------------------------------
--- 7. Canvas resource blob FK (must follow the global blob storage section)
+-- 8. Canvas resource blob FK (must follow the global blob storage section)
 ------------------------------------------------------------------------------
 
 alter table canvas_resource

@@ -61,24 +61,20 @@ class FlywayAutoConfigurationIntegrationTest {
       try (ResultSet history =
           st.executeQuery(
               "select count(*) from flyway_schema_history"
-                  + " where success = true and ((version in ('1', '2', '3', '4', '5', '6', '7', '8'))"
+                  + " where success = true and ((version = '1')"
                   + " or (version is null and description = 'dev seed'))")) {
         assertTrue(history.next());
         assertEquals(
-            9L,
-            history.getLong(1),
-            "all eight baseline migrations and the dev seed must be recorded");
+            2L, history.getLong(1), "the canonical V1 baseline and dev seed must be recorded");
       }
       try (ResultSet unexpectedMigration =
           st.executeQuery(
               "select count(*) from flyway_schema_history"
                   + " where version is not null"
-                  + " and version not in ('1', '2', '3', '4', '5', '6', '7', '8')")) {
+                  + " and version <> '1'")) {
         assertTrue(unexpectedMigration.next());
         assertEquals(
-            0L,
-            unexpectedMigration.getLong(1),
-            "only the current V1 through V8 migrations are known");
+            0L, unexpectedMigration.getLong(1), "only the canonical V1 migration is known");
       }
       try (ResultSet modelIdColumn =
           st.executeQuery(
@@ -87,7 +83,7 @@ class FlywayAutoConfigurationIntegrationTest {
                   + " and table_name = 'agent_model'"
                   + " and column_name = 'model_id' and is_nullable = 'NO'")) {
         assertTrue(modelIdColumn.next());
-        assertEquals(1L, modelIdColumn.getLong(1), "V2 must add the required model_id column");
+        assertEquals(1L, modelIdColumn.getLong(1), "V1 must declare the required model_id column");
       }
       try (ResultSet seed =
           st.executeQuery(
@@ -95,28 +91,26 @@ class FlywayAutoConfigurationIntegrationTest {
         assertTrue(seed.next());
         assertEquals(1L, seed.getLong(1), "dev seed must be visible through the data-source");
       }
-      try (ResultSet ownerSessionTables =
+      try (ResultSet ownerSessionTable =
           st.executeQuery(
               "select count(*) from information_schema.tables"
                   + " where table_schema = 'public'"
-                  + " and table_name in ('chat_session', 'canvas_session')")) {
-        assertTrue(ownerSessionTables.next());
+                  + " and table_name = 'session_owner'")) {
+        assertTrue(ownerSessionTable.next());
         assertEquals(
-            2L,
-            ownerSessionTables.getLong(1),
-            "Chat/Canvas owner-to-Session tables must be part of V1");
+            1L, ownerSessionTable.getLong(1), "the product Session owner arc must be part of V1");
       }
       try (ResultSet ownerSessionForeignKeys =
           st.executeQuery(
               "select count(*) from information_schema.table_constraints"
                   + " where table_schema = 'public'"
-                  + " and table_name in ('chat_session', 'canvas_session')"
+                  + " and table_name = 'session_owner'"
                   + " and constraint_type = 'FOREIGN KEY'")) {
         assertTrue(ownerSessionForeignKeys.next());
         assertEquals(
-            4L,
+            5L,
             ownerSessionForeignKeys.getLong(1),
-            "owner-to-Session relations must retain real owner and Harness Session FKs");
+            "the owner arc must retain four owner FKs and the Harness Session FK");
       }
     }
   }

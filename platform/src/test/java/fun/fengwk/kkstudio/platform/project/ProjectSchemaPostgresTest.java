@@ -18,7 +18,7 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
-/** 验证 V7 Project/Issue schema 在真实 PostgreSQL 上的迁移、8 张核心表、约束与外键围栏。 */
+/** 验证 Project/Issue schema 的核心表、约束与外键围栏。 */
 class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
 
   @FunctionalInterface
@@ -67,17 +67,16 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void allEightProjectIssueTablesAreCreated() throws SQLException {
+  void allProjectIssueTablesAreCreated() throws SQLException {
     Set<String> expectedTables =
         Set.of(
             "project",
-            "project_session",
             "issue",
             "issue_dependency",
             "issue_input",
             "issue_run",
-            "issue_run_session",
-            "issue_controller_work");
+            "issue_controller_work",
+            "session_owner");
 
     Set<String> actualTables = new HashSet<>();
     try (Connection conn = newConnection();
@@ -91,8 +90,7 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
       }
     }
 
-    assertTrue(
-        actualTables.containsAll(expectedTables), "All 8 V7 tables must exist in public schema");
+    assertTrue(actualTables.containsAll(expectedTables), "all Project/Issue tables must exist");
   }
 
   @Test
@@ -440,104 +438,6 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
               stmt.executeUpdate();
             }
           });
-    }
-  }
-
-  @Test
-  void testHarnessSessionSingleOwnerGuard() throws SQLException {
-    String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
-    insertAgentDefinition(agentName);
-    UUID proj = UUID.randomUUID();
-    insertProject(proj, agentName);
-    UUID issueId = UUID.randomUUID();
-    insertIssue(issueId, proj, 1, "IN_PROGRESS");
-    UUID runId = UUID.randomUUID();
-    try (Connection conn = newConnection();
-        PreparedStatement stmt =
-            conn.prepareStatement(
-                "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status) "
-                    + "values (?, ?, 1, 'EXECUTOR', 'AGENT', ?, 'RUNNING')")) {
-      stmt.setObject(1, runId);
-      stmt.setObject(2, issueId);
-      stmt.setString(3, agentName);
-      assertEquals(1, stmt.executeUpdate());
-    }
-
-    UUID sessionId = UUID.randomUUID();
-    try (Connection conn = newConnection();
-        PreparedStatement stmt =
-            conn.prepareStatement(
-                "insert into harness_session (id, name, created_at) values (?, 'session-1', current_timestamp)")) {
-      stmt.setObject(1, sessionId);
-      assertEquals(1, stmt.executeUpdate());
-    }
-
-    // 1. 绑定 project_session
-    try (Connection conn = newConnection();
-        PreparedStatement stmt =
-            conn.prepareStatement(
-                "insert into project_session (project_id, session_id) values (?, ?)")) {
-      stmt.setObject(1, proj);
-      stmt.setObject(2, sessionId);
-      assertEquals(1, stmt.executeUpdate());
-    }
-
-    // 2. 尝试将相同 session_id 绑定到 issue_run_session，必须触发 chk_harness_session_single_owner 冲突
-    try (Connection conn = newConnection()) {
-      assertConstraintViolation(
-          conn,
-          "chk_harness_session_single_owner",
-          () -> {
-            try (PreparedStatement stmt =
-                conn.prepareStatement(
-                    "insert into issue_run_session (run_id, session_id) values (?, ?)")) {
-              stmt.setObject(1, runId);
-              stmt.setObject(2, sessionId);
-              stmt.executeUpdate();
-            }
-          });
-    }
-
-    // 3. 禁止直接 UPDATE session_id
-    UUID otherSessionId = UUID.randomUUID();
-    try (Connection conn = newConnection();
-        PreparedStatement stmt =
-            conn.prepareStatement(
-                "insert into harness_session (id, name, created_at) values (?, 'session-2', current_timestamp)")) {
-      stmt.setObject(1, otherSessionId);
-      assertEquals(1, stmt.executeUpdate());
-    }
-
-    try (Connection conn = newConnection()) {
-      assertConstraintViolation(
-          conn,
-          "chk_harness_session_no_session_update",
-          () -> {
-            try (PreparedStatement stmt =
-                conn.prepareStatement(
-                    "update project_session set session_id = ? where project_id = ?")) {
-              stmt.setObject(1, otherSessionId);
-              stmt.setObject(2, proj);
-              stmt.executeUpdate();
-            }
-          });
-    }
-
-    // 4. 删除 project_session 后，guard 记录被释放，允许 issue_run_session 绑定该 sessionId
-    try (Connection conn = newConnection();
-        PreparedStatement stmt =
-            conn.prepareStatement("delete from project_session where project_id = ?")) {
-      stmt.setObject(1, proj);
-      assertEquals(1, stmt.executeUpdate());
-    }
-
-    try (Connection conn = newConnection();
-        PreparedStatement stmt =
-            conn.prepareStatement(
-                "insert into issue_run_session (run_id, session_id) values (?, ?)")) {
-      stmt.setObject(1, runId);
-      stmt.setObject(2, sessionId);
-      assertEquals(1, stmt.executeUpdate());
     }
   }
 

@@ -105,11 +105,11 @@ class SessionDeletionOrchestratorIntegrationTest extends S3WebPostgresTestSuppor
 
     deletionService.deleteSessionsByOwner(new OwnerRef(OwnerType.CHAT, chatId));
 
-    assertEquals(0, count("chat_session", "session_id", chatSession));
+    assertEquals(0, count("session_owner", "session_id", chatSession));
     assertEquals(0, count("harness_session", "id", chatSession));
     assertEquals(0, count("harness_thread", "id", chatThread));
     assertEquals(0, count("session_blob_ref", "session_id", chatSession));
-    assertEquals(1, count("canvas_session", "session_id", canvasSession));
+    assertEquals(1, count("session_owner", "session_id", canvasSession));
     assertEquals(1, count("harness_session", "id", canvasSession));
     assertEquals(1, count("harness_thread", "id", canvasThread));
     assertEquals(1, count("session_blob_ref", "session_id", canvasSession));
@@ -133,11 +133,11 @@ class SessionDeletionOrchestratorIntegrationTest extends S3WebPostgresTestSuppor
 
     // 归属枚举顺序刻意与 UUID 锁顺序相反；删除服务必须先收集并锁完 Session，再进入 Thread 阶段。
     jdbc.update(
-        "update chat_session set created_at = ? where session_id = ?",
+        "update session_owner set created_at = ? where session_id = ?",
         Timestamp.from(Instant.parse("2026-08-20T00:01:00Z")),
         firstSession);
     jdbc.update(
-        "update chat_session set created_at = ? where session_id = ?",
+        "update session_owner set created_at = ? where session_id = ?",
         Timestamp.from(Instant.parse("2026-08-20T00:00:00Z")),
         secondSession);
 
@@ -146,7 +146,7 @@ class SessionDeletionOrchestratorIntegrationTest extends S3WebPostgresTestSuppor
         List.of(firstSession, secondSession), chatSessionRepository.listSessionIds(chatId));
     deletionService.deleteSessionsByOwner(new OwnerRef(OwnerType.CHAT, chatId));
 
-    assertEquals(0, count("chat_session", "chat_id", chatId));
+    assertEquals(0, count("session_owner", "chat_id", chatId));
     assertEquals(0, count("harness_session", "id", firstSession));
     assertEquals(0, count("harness_session", "id", secondSession));
     assertEquals(0, count("harness_thread", "id", firstThread));

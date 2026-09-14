@@ -94,7 +94,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresT
         new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")))));
 
-    assertEquals(1, count("chat_session", "session_id", chatSessionId));
+    assertEquals(1, count("session_owner", "session_id", chatSessionId));
     assertEquals(1, count("harness_session", "id", chatSessionId));
     assertEquals(1, count("harness_entry", "session_id", chatSessionId));
     assertEquals(1, count("harness_thread", "id", chatThreadId));
@@ -110,7 +110,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresT
         canvasThreadId,
         new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("canvas")))));
-    assertEquals(1, count("canvas_session", "session_id", canvasSessionId));
+    assertEquals(1, count("session_owner", "session_id", canvasSessionId));
     assertEquals(1, count("harness_thread", "id", canvasThreadId));
   }
 
@@ -181,7 +181,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresT
         () -> accept(new OwnerRef(OwnerType.CHAT, chatId), sessionId, threadId, payload));
 
     assertEquals(1, count("storage_upload", "id", UUID.fromString(pending.getId())));
-    assertEquals(0, count("chat_session", "session_id", sessionId));
+    assertEquals(0, count("session_owner", "session_id", sessionId));
     assertEquals(0, count("harness_session", "id", sessionId));
     assertEquals(0, count("harness_entry", "session_id", sessionId));
     assertEquals(0, count("session_blob_ref", "session_id", sessionId));
@@ -256,7 +256,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresT
                             new UserMessageCommandPayload(
                                 new AgentMessage(AgentMessageRole.USER, List.of(resource))),
                             UUID.randomUUID())))));
-    assertEquals(0, count("chat_session", "session_id", foreignSessionId));
+    assertEquals(0, count("session_owner", "session_id", foreignSessionId));
     assertEquals(0, count("harness_session", "id", foreignSessionId));
     assertEquals(0, count("harness_thread", "id", foreignThreadId));
     assertEquals(
@@ -318,7 +318,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresT
     assertThrows(
         IllegalArgumentException.class,
         () -> acceptanceService.accept(new OwnerRef(OwnerType.CHAT, chatId), command));
-    assertEquals(0, count("chat_session", "session_id", sessionId));
+    assertEquals(0, count("session_owner", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));
   }

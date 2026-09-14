@@ -29,7 +29,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Chat/Canvas 共享的 Harness Session 深删除：owner 删除在该 owner 对应仓库的排他行锁保护下（调用方已锁定或本服务自取），按 relation 枚举
+ * 产品 owner 共享的 Harness Session 深删除：owner 删除在该 owner 对应仓库的排他行锁保护下（调用方已锁定或本服务自取），按 relation 枚举
  * Session，逐 Session 以规范的 Session -&gt; Thread 锁序原子删除 Thread 执行事实、release Session blob ref、删
  * relation/Entry/Session，绝不误删其他 owner 的 Session。
  */
@@ -78,8 +78,8 @@ public class SessionDeletionOrchestrator {
   }
 
   /**
-   * 深删除某 owner 的全部 Session（含 relation 行）。owner 行以排他锁锁定（Chat/Canvas 通用），锁序 consistent 于接受路径 （Owner
-   * -&gt; Session -&gt; Thread），与 Harness Session 锁序一致；任何失败整体回滚。owner 行不存在视为已删，整个操作无副作用。
+   * 深删除某 owner 的全部 Session（含 relation 行）。owner 行以排他锁锁定，锁序 consistent 于接受路径（Owner -&gt; Session
+   * -&gt; Thread），与 Harness Session 锁序一致；任何失败整体回滚。owner 行不存在视为已删，整个操作无副作用。
    */
   @Transactional
   public void deleteSessionsByOwner(OwnerRef owner) {

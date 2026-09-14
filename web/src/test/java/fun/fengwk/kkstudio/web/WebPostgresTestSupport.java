@@ -118,7 +118,6 @@ public abstract class WebPostgresTestSupport {
         // suppressClose 用于保留调用方管理的 JDBC 连接。
         .dataSource(new SingleConnectionDataSource(conn, true))
         .locations("classpath:db/migration", "classpath:db/seed/dev")
-        .outOfOrder(true)
         .validateMigrationNaming(true)
         .load()
         .migrate();

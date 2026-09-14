@@ -14,39 +14,34 @@ import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import java.util.UUID;
 
 /**
- * ResourceMessageContent：durable blob 引用（blobId/name/artifactPath/totalBytes/totalLines/preview）。
- * 普通媒体三项 artifact 字段为 null；文本工件三项必须全部非 null 且满足规范路径与非负计数。
+ * ResourceMessageContent：durable blob 引用（blobId/name/totalBytes/totalLines/preview）。 普通媒体的 totals 为
+ * null；外部化文本的 totals 必须成对出现且非负。
  */
 class ResourceMessageContentTest {
 
   private static final UUID BLOB_ID = new UUID(0L, 1L);
-  private static final String CANONICAL_PATH =
-      "/.artifacts/tool-results/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.txt";
 
   @Test
   void mediaFactoryCreatesValidMediaResource() {
     ResourceMessageContent content = ResourceMessageContent.media(BLOB_ID, "image.png");
     assertEquals(BLOB_ID, content.blobId());
     assertEquals("image.png", content.name());
-    assertNull(content.artifactPath());
     assertNull(content.totalBytes());
     assertNull(content.totalLines());
     assertNull(content.preview());
-    assertFalse(content.isTextArtifact());
+    assertFalse(content.isExternalizedText());
   }
 
   @Test
-  void artifactFactoryCreatesValidTextArtifactResource() {
+  void externalizedTextFactoryCreatesValidResource() {
     ResourceMessageContent content =
-        ResourceMessageContent.artifact(
-            BLOB_ID, "result.txt", CANONICAL_PATH, 1024L, 50L, "preview text");
+        ResourceMessageContent.externalizedText(BLOB_ID, "result.txt", 1024L, 50L, "preview text");
     assertEquals(BLOB_ID, content.blobId());
     assertEquals("result.txt", content.name());
-    assertEquals(CANONICAL_PATH, content.artifactPath());
     assertEquals(1024L, content.totalBytes());
     assertEquals(50L, content.totalLines());
     assertEquals("preview text", content.preview());
-    assertTrue(content.isTextArtifact());
+    assertTrue(content.isExternalizedText());
   }
 
   @Test
@@ -95,50 +90,21 @@ class ResourceMessageContentTest {
   }
 
   @Test
-  void rejectsPartialOrInvalidArtifactFields() {
-    // 缺失部分工件字段
+  void rejectsPartialOrInvalidExternalizedTextTotals() {
+    // 外部化文本 totals 必须成对出现。
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ResourceMessageContent(BLOB_ID, "a.txt", CANONICAL_PATH, 100L, null, "x"));
+        () -> new ResourceMessageContent(BLOB_ID, "a.txt", 100L, null, "x"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ResourceMessageContent(BLOB_ID, "a.txt", CANONICAL_PATH, null, 10L, "x"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ResourceMessageContent(BLOB_ID, "a.txt", null, 100L, 10L, "x"));
+        () -> new ResourceMessageContent(BLOB_ID, "a.txt", null, 10L, "x"));
 
-    // 负数字节或行数
+    // totals 不允许负数。
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ResourceMessageContent(BLOB_ID, "a.txt", CANONICAL_PATH, -1L, 10L, "x"));
+        () -> new ResourceMessageContent(BLOB_ID, "a.txt", -1L, 10L, "x"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ResourceMessageContent(BLOB_ID, "a.txt", CANONICAL_PATH, 100L, -1L, "x"));
-
-    // 非法工件路径
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ResourceMessageContent(BLOB_ID, "a.txt", "/wrong/path/result.txt", 100L, 10L, "x"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ResourceMessageContent(
-                BLOB_ID,
-                "a.txt",
-                "/.artifacts/tool-results/not-uuid/22222222-2222-2222-2222-222222222222.txt",
-                100L,
-                10L,
-                "x"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ResourceMessageContent(
-                BLOB_ID,
-                "a.txt",
-                "/.artifacts/tool-results/11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.bin",
-                100L,
-                10L,
-                "x"));
+        () -> new ResourceMessageContent(BLOB_ID, "a.txt", 100L, -1L, "x"));
   }
 }

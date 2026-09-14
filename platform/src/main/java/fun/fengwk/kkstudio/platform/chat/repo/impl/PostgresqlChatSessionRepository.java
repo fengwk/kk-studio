@@ -27,11 +27,6 @@ public class PostgresqlChatSessionRepository implements ChatSessionRepository {
   }
 
   @Override
-  public int insertIfNotOwnedByOther(UUID sessionId, UUID chatId) {
-    return mapper.insertIfNotOwnedByOther(sessionId, chatId);
-  }
-
-  @Override
   public List<UUID> listSessionIds(UUID chatId) {
     return mapper.listSessionIds(chatId);
   }

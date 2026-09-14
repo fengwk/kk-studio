@@ -229,21 +229,9 @@ class ToolExecutionNormalizationTest {
     assertEquals("{\"path\":\"a.txt\"}", call2.argumentsJson());
   }
 
-  /** 全部十个内建文件工具（Environment 与 Cloud FS）均支持单 alias 归一化。 */
+  /** 全部五个内建文件工具（Environment）均支持单 alias 归一化。 */
   @ParameterizedTest
-  @ValueSource(
-      strings = {
-        "read",
-        "write",
-        "edit",
-        "find",
-        "grep",
-        "cloud_read",
-        "cloud_write",
-        "cloud_edit",
-        "cloud_find",
-        "cloud_grep"
-      })
+  @ValueSource(strings = {"read", "write", "edit", "find", "grep"})
   void validateForRewritesAliasAcrossAllAllowlistTools(String toolName) {
     ToolDescriptor descriptor =
         new ToolDescriptor(

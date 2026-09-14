@@ -80,7 +80,7 @@ class CanvasDtoContractTest {
     assertThrows(
         NoSuchFieldException.class,
         () -> CanvasDocumentDTO.class.getDeclaredField("threadId"),
-        "Canvas document ownership is represented by canvas_session relations");
+        "Canvas document ownership is represented by session_owner relations");
   }
 
   private static Field field(String ownerAndField) throws NoSuchFieldException {

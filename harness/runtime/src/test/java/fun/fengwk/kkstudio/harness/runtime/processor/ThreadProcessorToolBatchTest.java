@@ -319,12 +319,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             fixture.store.transaction(
                 tx ->
                     ToolOutcomeAppender.append(
-                        tx,
-                        chain.turn().threadId(),
-                        before.root().sessionId(),
-                        chain.assistantEntryId(),
-                        ready,
-                        NOW)));
+                        tx, before.root().sessionId(), chain.assistantEntryId(), ready, NOW)));
     assertEquals(before, path(fixture.store, chain.turn().threadId()));
   }
 

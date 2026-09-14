@@ -1,6 +1,5 @@
 import {
   Bot,
-  Files,
   FolderKanban,
   Grid2X2,
   Menu,
@@ -52,7 +51,6 @@ export function AppShell({ children }: PropsWithChildren) {
   const { t } = useI18n()
   const canvasMode = location.pathname.startsWith('/canvas')
   const projectsMode = location.pathname.startsWith('/projects')
-  const filesMode = location.pathname.startsWith('/files')
   const toolsMode = isToolsRoute(location.pathname)
   const settingsMode = location.pathname.startsWith('/settings')
   const chatWorkspaceMode = isChatWorkspaceRoute(location.pathname)
@@ -61,19 +59,16 @@ export function AppShell({ children }: PropsWithChildren) {
   const aiActive =
     !canvasMode
     && !projectsMode
-    && !filesMode
     && !toolsMode
     && !settingsMode
     && isAiRoute(location.pathname)
   const homePath = projectsMode
     ? '/projects'
-    : filesMode
-      ? '/files'
-      : canvasMode
-        ? '/canvas'
-        : toolsMode
-          ? '/comfyui'
-          : '/chats'
+    : canvasMode
+      ? '/canvas'
+      : toolsMode
+        ? '/comfyui'
+        : '/chats'
   const [navOpen, setNavOpen] = useState(false)
   const navToggleRef = useRef<HTMLButtonElement>(null)
 
@@ -164,16 +159,6 @@ export function AppShell({ children }: PropsWithChildren) {
                 <FolderKanban aria-hidden="true" />
                 <span>{t('platform.nav.projects')}</span>
                 <small aria-hidden="true">Projects</small>
-              </Link>
-              <Link
-                className={filesMode ? 'active' : undefined}
-                to="/files"
-                aria-label={t('platform.nav.filesAria')}
-                onClick={() => setNavOpen(false)}
-              >
-                <Files aria-hidden="true" />
-                <span>{t('platform.nav.files')}</span>
-                <small aria-hidden="true">Files</small>
               </Link>
               <Link
                 className={canvasMode ? 'active' : undefined}

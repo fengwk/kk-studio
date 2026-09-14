@@ -85,7 +85,7 @@ PostgreSQL、Flyway、Testcontainers 和 schema 只在测试 scope。生产源�
 - `CanvasCommandDedupMapper`：`(canvas_id, idempotency_key)` request hash；
 - `CanvasFunctionRunMapper`、`CanvasFunctionResourcePinMapper`：Run、pin 和
   terminal/active 生命周期；
-- `CanvasSessionMapper`：Canvas owner relation 的 conditional insert；
+- `CanvasSessionMapper`：统一 Session owner 排他弧中的 Canvas 归属读写；
 - `PostgresqlCanvasQueryService`：聚合 Snapshot 投影。
 
 SQL 由 mapper 注解直接定义。所有 ownership foreign key 的删除行为由 schema

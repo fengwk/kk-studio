@@ -19,12 +19,14 @@ public interface IssueRunSessionMapper extends BaseMapper {
 
   @Insert(
       """
-      insert into issue_run_session (run_id, session_id, created_at)
+      insert into session_owner (issue_run_id, session_id, created_at)
       values (#{runId}, #{sessionId}, clock_timestamp())
       """)
   int insert(@Param("runId") UUID runId, @Param("sessionId") UUID sessionId);
 
-  @Select("select run_id, session_id, created_at from issue_run_session where run_id = #{runId}")
+  @Select(
+      "select issue_run_id as run_id, session_id, created_at"
+          + " from session_owner where issue_run_id = #{runId}")
   @Results(
       id = "issueRunSessionResultMap",
       value = {
@@ -35,10 +37,11 @@ public interface IssueRunSessionMapper extends BaseMapper {
   IssueRunSessionDO findByRunId(@Param("runId") UUID runId);
 
   @Select(
-      "select run_id, session_id, created_at from issue_run_session where session_id = #{sessionId}")
+      "select issue_run_id as run_id, session_id, created_at from session_owner"
+          + " where session_id = #{sessionId} and issue_run_id is not null")
   @ResultMap("issueRunSessionResultMap")
   IssueRunSessionDO findBySessionId(@Param("sessionId") UUID sessionId);
 
-  @Delete("delete from issue_run_session where run_id = #{runId}")
+  @Delete("delete from session_owner where issue_run_id = #{runId}")
   int deleteByRunId(@Param("runId") UUID runId);
 }

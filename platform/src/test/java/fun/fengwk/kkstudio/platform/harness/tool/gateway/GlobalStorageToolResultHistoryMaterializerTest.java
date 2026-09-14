@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -27,16 +26,12 @@ import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryContext;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudNode;
-import fun.fengwk.kkstudio.platform.cloudfs.domain.CloudPath;
-import fun.fengwk.kkstudio.platform.cloudfs.service.CloudFileSystemService;
 import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.platform.storage.S3PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
@@ -55,7 +50,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Tool Resource 在 durable history 插入前的全局存储物化契约：只读取注入的 Platform ResourceStore， 全量预检后摄入
- * storage_blob/session ref，并在同一事务挂载文本 Artifact。
+ * storage_blob/session ref，并返回 Blob-backed durable 内容。
  */
 @Import({
   StorageS3TestConfiguration.class,
@@ -73,17 +68,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTestSupport {
 
   private static final UUID SESSION = new UUID(0L, 1L);
-  private static final UUID THREAD = UUID.fromString("00000000-0000-0000-0000-000000000010");
-  private static final UUID INVOCATION = UUID.fromString("00000000-0000-0000-0000-000000000020");
-  private static final CloudPath ARTIFACT_PATH =
-      CloudPath.of(
-          "/.artifacts/tool-results/00000000-0000-0000-0000-000000000010/"
-              + "00000000-0000-0000-0000-000000000020.txt");
-  private static final ToolResultHistoryContext CONTEXT =
-      new ToolResultHistoryContext(SESSION, THREAD, INVOCATION, "demo_tool");
 
   @Autowired private GlobalStorageToolResultHistoryMaterializer materializer;
-  @Autowired private CloudFileSystemService cloudFileSystemService;
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private ManagedResourceStore resourceStore;
   @Autowired private JdbcTemplate jdbc;
@@ -122,7 +108,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
     assertEquals(3, contents.size());
     assertEquals("first", assertInstanceOf(TextMessageContent.class, contents.get(0)).text());
     ResourceMessageContent media = assertInstanceOf(ResourceMessageContent.class, contents.get(1));
-    assertFalse(media.isTextArtifact());
+    assertFalse(media.isExternalizedText());
     assertEquals("image.png", media.name());
     assertEquals("image preview", media.preview());
     assertArrayEquals(bytes, s3Storage.objectBytes(StorageObjectKeys.blobOriginal(media.blobId())));
@@ -138,7 +124,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
   }
 
   @Test
-  void textArtifactIsStrictlyVerifiedMountedAndUsesDerivedPreview() {
+  void externalizedTextIsStrictlyVerifiedAndUsesDerivedPreview() {
     String text = "hello\nworld\nline 3";
     byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
     ResourceRef ref = resourceStore.put("text/plain", "demo_tool-result.txt", bytes);
@@ -149,26 +135,24 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
     List<AgentMessageContent> contents =
         inTransaction(new ToolResult("call-1", List.of(resource), false, "{}"));
 
-    ResourceMessageContent artifact =
+    ResourceMessageContent externalized =
         assertInstanceOf(ResourceMessageContent.class, contents.get(0));
-    assertTrue(artifact.isTextArtifact());
-    assertEquals("demo_tool-result.txt", artifact.name());
-    assertEquals(ARTIFACT_PATH.toString(), artifact.artifactPath());
-    assertEquals(bytes.length, artifact.totalBytes());
-    assertEquals(3, artifact.totalLines());
-    assertEquals(text, artifact.preview());
-    CloudNode node = cloudFileSystemService.findNode(ARTIFACT_PATH).orElse(null);
-    assertNotNull(node);
-    assertEquals(artifact.blobId(), node.getBlobId());
+    assertTrue(externalized.isExternalizedText());
+    assertEquals("demo_tool-result.txt", externalized.name());
+    assertEquals(bytes.length, externalized.totalBytes());
+    assertEquals(3, externalized.totalLines());
+    assertEquals(text, externalized.preview());
+    assertArrayEquals(
+        bytes, s3Storage.objectBytes(StorageObjectKeys.blobOriginal(externalized.blobId())));
   }
 
   @Test
-  void jsonTextArtifactUsesJsonExtension() {
+  void unnamedJsonTextUsesToolNameAndJsonExtension() {
     String json = "{\"data\":\"value\"}";
     byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-    ResourceRef ref = resourceStore.put("application/json", "result.json", bytes);
+    ResourceRef ref = resourceStore.put("application/json", null, bytes);
 
-    ResourceMessageContent artifact =
+    ResourceMessageContent externalized =
         assertInstanceOf(
             ResourceMessageContent.class,
             inTransaction(
@@ -181,9 +165,9 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
                         "{}"))
                 .get(0));
 
-    assertTrue(artifact.isTextArtifact());
-    assertTrue(artifact.artifactPath().endsWith(".json"));
-    assertEquals(json, artifact.preview());
+    assertTrue(externalized.isExternalizedText());
+    assertEquals("demo_tool-result.json", externalized.name());
+    assertEquals(json, externalized.preview());
   }
 
   @Test
@@ -304,7 +288,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
   }
 
   @Test
-  void invalidUtf8OrTextMetadataRollsBackWithoutArtifact() {
+  void invalidUtf8OrTextMetadataRollsBackWithoutBlob() {
     byte[] invalidUtf8 = new byte[] {(byte) 0xFF, (byte) 0xFF};
     ResourceRef invalidUtf8Ref = resourceStore.put("text/plain", "invalid.txt", invalidUtf8);
     byte[] text = "hello\nworld".getBytes(StandardCharsets.UTF_8);
@@ -326,7 +310,6 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
     }
 
     assertEquals(0, s3Storage.objectCount());
-    assertTrue(cloudFileSystemService.findNode(ARTIFACT_PATH).isEmpty());
   }
 
   @Test
@@ -350,12 +333,13 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
         IllegalTransactionStateException.class,
         () ->
             materializer.materialize(
-                CONTEXT,
+                SESSION,
+                "demo_tool",
                 new ToolResult("call-1", List.of(new ResourceResultContent(ref)), false, "{}")));
   }
 
   private List<AgentMessageContent> inTransaction(ToolResult result) {
-    return tx.execute(status -> materializer.materialize(CONTEXT, result));
+    return tx.execute(status -> materializer.materialize(SESSION, "demo_tool", result));
   }
 
   private static void assertNoThrowableMessageContains(Throwable error, String value) {

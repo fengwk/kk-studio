@@ -14,18 +14,12 @@ import fun.fengwk.kkstudio.platform.chat.repo.impl.model.ChatSessionDO;
 import java.util.List;
 import java.util.UUID;
 
-/** {@code chat_session} 归属边的原子 SQL 入口。 */
+/** {@code session_owner.chat_id} 归属边的 SQL 入口。 */
 @Mapper
 public interface ChatSessionMapper extends BaseMapper {
 
-  @Insert("insert into chat_session (session_id, chat_id) values (#{sessionId}, #{chatId})")
+  @Insert("insert into session_owner (session_id, chat_id) values (#{sessionId}, #{chatId})")
   int insert(@Param("sessionId") UUID sessionId, @Param("chatId") UUID chatId);
-
-  @Insert(
-      "insert into chat_session (session_id, chat_id) "
-          + "select #{sessionId}, #{chatId} "
-          + "where not exists (select 1 from canvas_session where session_id = #{sessionId})")
-  int insertIfNotOwnedByOther(@Param("sessionId") UUID sessionId, @Param("chatId") UUID chatId);
 
   @Results(
       id = "chatSessionMap",
@@ -33,14 +27,16 @@ public interface ChatSessionMapper extends BaseMapper {
         @Result(column = "session_id", property = "sessionId"),
         @Result(column = "chat_id", property = "chatId")
       })
-  @Select("select session_id, chat_id from chat_session where session_id = #{sessionId}")
+  @Select(
+      "select session_id, chat_id from session_owner"
+          + " where session_id = #{sessionId} and chat_id is not null")
   ChatSessionDO findBySessionId(@Param("sessionId") UUID sessionId);
 
   @Select(
-      "select session_id from chat_session where chat_id = #{chatId}"
+      "select session_id from session_owner where chat_id = #{chatId}"
           + " order by created_at desc, session_id desc")
   List<UUID> listSessionIds(@Param("chatId") UUID chatId);
 
-  @Delete("delete from chat_session where session_id = #{sessionId}")
+  @Delete("delete from session_owner where session_id = #{sessionId} and chat_id is not null")
   int deleteBySessionId(@Param("sessionId") UUID sessionId);
 }

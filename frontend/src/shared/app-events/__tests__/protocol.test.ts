@@ -9,7 +9,6 @@ const CANVAS_ID = 'cccccccc-0000-4000-8000-000000000001'
 const threadResource = { kind: 'thread', id: THREAD_ID } as const
 const canvasResource = { kind: 'canvas', id: CANVAS_ID } as const
 const projectsResource = { kind: 'projects' } as const
-const cloudFilesResource = { kind: 'cloud-files' } as const
 
 describe('encodeClientMessage', () => {
   it('encodes subscribe/unsubscribe frames with version=1 and the resource', () => {
@@ -55,27 +54,12 @@ describe('decodeServerMessage', () => {
         }),
       ),
     ).toEqual({ type: 'subscribed', resource: projectsResource, cursor: '0' })
-    expect(
-      decodeServerMessage(
-        JSON.stringify({
-          version: 1,
-          type: 'subscribed',
-          resource: cloudFilesResource,
-          cursor: '1',
-        }),
-      ),
-    ).toBeNull()
   })
 
   it('decodes resync frames', () => {
     expect(
       decodeServerMessage(JSON.stringify({ version: 1, type: 'resync', resource: canvasResource })),
     ).toEqual({ type: 'resync', resource: canvasResource })
-    expect(
-      decodeServerMessage(
-        JSON.stringify({ version: 1, type: 'resync', resource: cloudFilesResource }),
-      ),
-    ).toEqual({ type: 'resync', resource: cloudFilesResource })
   })
 
   it('decodes event frames with strict per-name data shapes and mandatory matching cursor', () => {
@@ -442,7 +426,7 @@ describe('decodeServerMessage', () => {
     ).toBeNull()
   })
 
-  it('rejects invalid global-resource event combinations and project payloads', () => {
+  it('rejects unknown resources and invalid project payloads', () => {
     const projectChanged = {
       version: 1,
       type: 'event',
@@ -465,7 +449,7 @@ describe('decodeServerMessage', () => {
     ).toBeNull()
     expect(
       decodeServerMessage(
-        JSON.stringify({ ...projectChanged, resource: cloudFilesResource }),
+        JSON.stringify({ ...projectChanged, resource: { kind: 'unknown' } }),
       ),
     ).toBeNull()
   })

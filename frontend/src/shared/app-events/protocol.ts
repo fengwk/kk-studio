@@ -3,7 +3,7 @@
  *
  * client -> server（JSON 文本，所有帧带 version=1）：
  * - {"version":1,"type":"subscribe","resource":{"kind":"thread"|"canvas","id":"<UUID>"}}
- * - {"version":1,"type":"subscribe","resource":{"kind":"projects"|"cloud-files"}}
+ * - {"version":1,"type":"subscribe","resource":{"kind":"projects"}}
  * - {"version":1,"type":"unsubscribe","resource":{...}}
  *
  * server -> client（JSON 文本，所有帧带 version=1）：
@@ -22,19 +22,18 @@
  *
  * 解码是真正严格的：version 必须为 1、每种 type/name 只接受精确字段集、
  * 多余/未知字段一律拒绝；resource 精确只有 kind+id 且 id 必须是 canonical
- * UUID（小写十六进制）；全局 projects/cloud-files resource 不带 id；resource/name
+ * UUID（小写十六进制）；全局 projects resource 不带 id；resource/name
  * 组合必须合法（thread 仅 version|realtime，canvas 仅 version，projects 仅
- * changed，cloud-files 只接收 resync）；cursor 与 version data 必须是 canonical 非负
+ * changed）；cursor 与 version data 必须是 canonical 非负
  * 十进制字符串，durable 事件的 cursor 必须存在且与 data 值完全相等；realtime
  * data 必须是非数组 JSON 对象且不得携带 cursor。畸形消息永远不会到达 listeners。
  */
 
-export type ApplicationEventResourceKind = 'thread' | 'canvas' | 'projects' | 'cloud-files'
+export type ApplicationEventResourceKind = 'thread' | 'canvas' | 'projects'
 
 export type ApplicationEventResource =
   | { kind: 'thread' | 'canvas'; id: string }
   | { kind: 'projects' }
-  | { kind: 'cloud-files' }
 
 export type ApplicationEventName = 'version' | 'realtime' | 'changed'
 
@@ -125,7 +124,7 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
       if (cursor == null) {
         return null
       }
-      if ((resource.kind === 'projects' || resource.kind === 'cloud-files') && cursor !== '0') {
+      if (resource.kind === 'projects' && cursor !== '0') {
         return null
       }
       return { type: 'subscribed', resource, cursor }
@@ -233,8 +232,8 @@ function parseResource(value: unknown): ApplicationEventResource | null {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     return null
   }
-  if (value.kind === 'projects' || value.kind === 'cloud-files') {
-    return hasExactFields(value, ['kind']) ? { kind: value.kind } : null
+  if (value.kind === 'projects') {
+    return hasExactFields(value, ['kind']) ? { kind: 'projects' } : null
   }
   if (
     (value.kind !== 'thread' && value.kind !== 'canvas')
