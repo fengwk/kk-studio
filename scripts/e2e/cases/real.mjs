@@ -1732,7 +1732,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影固定 11 个模型可见 capabilities + skills + rootPath（daemon canonical Environment Root），coding (fs.read@3, 其余@2)/process/LSP 与精确 revision skill.load 为 version=2，mcp.local.call 为 version=1，且不公开管理 capabilities、旧 tools 或 READY environment metadata',
+  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影固定 11 个模型可见 capabilities + skills + rootPath（daemon canonical Environment Root），11 个 capability 均为 version=1，且不公开管理 capabilities、旧 tools 或 READY environment metadata',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -1742,9 +1742,8 @@ registerCase({
       typeof match.rootPath === 'string' && match.rootPath.length > 0,
       safeDiagnosticJson(match),
     )
-    // 具体工具 arguments 必须携带显式绝对 workdir，因此 coding/process/LSP 能力版本升为 2；
     // 目录浏览能力已随产品 Workspace 删除，不再是 catalog 的一部分。
-    const workdirCapabilityIds = [
+    const modelCapabilityIds = [
       'fs.read',
       'fs.write',
       'fs.edit',
@@ -1754,12 +1753,10 @@ registerCase({
       'lsp.goto-definition',
       'lsp.workspace-symbols',
       'lsp.java-decompile',
+      'skill.load',
+      'mcp.local.call',
     ]
-    const expectedCapabilities = [
-      ...workdirCapabilityIds.map((id) => ({ id, version: id === 'fs.read' ? '3' : '2' })),
-      { id: 'skill.load', version: '2' },
-      { id: 'mcp.local.call', version: '1' },
-    ]
+    const expectedCapabilities = modelCapabilityIds.map((id) => ({ id, version: '1' }))
     const actualCapabilities = match.capabilities || []
     const actualIdentity = actualCapabilities.map(({ id, version }) => ({ id, version }))
     const ids = actualIdentity.map(({ id }) => id)

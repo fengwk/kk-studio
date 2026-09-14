@@ -169,7 +169,7 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             toolName,
-            // tool descriptor 版本与 capability 输入契约同步：workdir 变更为必填即升版。
+            // tool descriptor 版本与 capability 输入契约同步。
             capability.version(),
             EnvironmentPrompts.load(toolName + ".md"),
             toolName,

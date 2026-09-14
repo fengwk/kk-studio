@@ -740,7 +740,7 @@ topology、两个 backend URL 和双 app/daemon 容器日志（进 `logs/`，写
    使用 `finally` 尽力清理，禁止将一次性 registrationToken 写入 artifact/log。
 2. **租约投影一致性（`distributed.lease_routing`）**：固定 Environment 分别连接 app-a 与 app-b，
    两个 App 都必须把两者投影为 READY；同一 Environment 的身份、状态、`rootPath` 与 capability
-   列表在两个节点逐项一致，并包含 workdir 版 `fs.read@3`。
+   列表在两个节点逐项一致，且 coding capability 为 `fs.read@1`。
 3. **DB loss fail-closed 与 recovery（`distributed.db_loss_fail_closed`）**：断开 node A 的 DB
    网络后，其 DB 权威 Environment 读取必须失败而不能回退本机 WebSocket；`finally` 无条件恢复网络，
    随后有界等待两个节点重新投影相同的 READY route。

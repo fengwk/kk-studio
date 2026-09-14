@@ -26,20 +26,8 @@ import java.util.Set;
  */
 public final class EnvironmentCapabilityCatalog {
 
-  /** capability catalog 版本：v4 升级 fs.read 为 v3（支持 column_offset 与无损长行读取）。 */
-  public static final String CATALOG_VERSION = "4";
-
-  /** 基础 capability 版本。 */
+  /** 基础 capability 与 catalog 版本。 */
   public static final String VERSION = "1";
-
-  /** 引入必填绝对 workdir 的 coding/process/LSP 能力版本。 */
-  public static final String WORKDIR_VERSION = "2";
-
-  /** 支持 column_offset 与无损长行切片的 fs.read 能力版本。 */
-  public static final String FS_READ_VERSION = "3";
-
-  /** {@code skill.load} 的 arguments 从 {@code {name}} 变为 {@code {sourceId,name,revision}}，属不兼容变更。 */
-  public static final String SKILL_LOAD_VERSION = "2";
 
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/environment/capability/schemas/";
@@ -69,7 +57,7 @@ public final class EnvironmentCapabilityCatalog {
 
   /** 返回当前 capability catalog 版本，用于 HELLO 与 Platform 对齐判定。 */
   public static String version() {
-    return CATALOG_VERSION;
+    return VERSION;
   }
 
   /** 返回按固定 canonical 顺序排列的不可变 capability descriptor 列表。 */
@@ -93,25 +81,16 @@ public final class EnvironmentCapabilityCatalog {
 
   private static List<EnvironmentCapabilityDescriptor> createDescriptors() {
     return List.of(
-        new EnvironmentCapabilityDescriptor(
-            EnvironmentCapabilityIds.FS_READ,
-            FS_READ_VERSION,
-            loadSchema(EnvironmentCapabilityIds.FS_READ),
-            Duration.ofMinutes(1)),
-        workdirDescriptor(EnvironmentCapabilityIds.FS_WRITE, Duration.ofMinutes(1)),
-        workdirDescriptor(EnvironmentCapabilityIds.FS_EDIT, Duration.ofMinutes(1)),
-        workdirDescriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofHours(1)),
-        workdirDescriptor(EnvironmentCapabilityIds.FS_GREP, Duration.ofHours(1)),
-        workdirDescriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofHours(1)),
-        workdirDescriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
-        workdirDescriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),
-        workdirDescriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)),
-        // skill.load 的 arguments 形状已不兼容变更，因此使用自己的能力版本而不是共享的 VERSION。
-        new EnvironmentCapabilityDescriptor(
-            EnvironmentCapabilityIds.SKILL_LOAD,
-            SKILL_LOAD_VERSION,
-            loadSchema(EnvironmentCapabilityIds.SKILL_LOAD),
-            Duration.ofMinutes(1)),
+        descriptor(EnvironmentCapabilityIds.FS_READ, Duration.ofMinutes(1)),
+        descriptor(EnvironmentCapabilityIds.FS_WRITE, Duration.ofMinutes(1)),
+        descriptor(EnvironmentCapabilityIds.FS_EDIT, Duration.ofMinutes(1)),
+        descriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofHours(1)),
+        descriptor(EnvironmentCapabilityIds.FS_GREP, Duration.ofHours(1)),
+        descriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofHours(1)),
+        descriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
+        descriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),
+        descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)),
+        descriptor(EnvironmentCapabilityIds.SKILL_LOAD, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.MCP_LOCAL_CALL, Duration.ofHours(1)));
   }
 
@@ -159,12 +138,6 @@ public final class EnvironmentCapabilityCatalog {
   private static EnvironmentCapabilityDescriptor descriptor(
       EnvironmentCapabilityId id, Duration timeout) {
     return new EnvironmentCapabilityDescriptor(id, VERSION, loadSchema(id), timeout);
-  }
-
-  /** 使用引入必填 workdir 的能力版本构造 descriptor。 */
-  private static EnvironmentCapabilityDescriptor workdirDescriptor(
-      EnvironmentCapabilityId id, Duration timeout) {
-    return new EnvironmentCapabilityDescriptor(id, WORKDIR_VERSION, loadSchema(id), timeout);
   }
 
   /** 该能力是否要求具体 arguments 携带目标 Daemon 上的显式绝对 workdir。 */

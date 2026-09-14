@@ -762,28 +762,35 @@ class EnvironmentDaemonServerTest {
             "channel-version-mismatch",
             "{\"protocolVersion\":9,\"registrationToken\":\""
                 + TOKEN
-                + "\",\"capabilityCatalogVersion\":\"1\"}"));
+                + "\",\"capabilityCatalogVersion\":\""
+                + EnvironmentCapabilityCatalog.version()
+                + "\"}"));
     assertTrue(
         helloRejected(
             "channel-catalog-mismatch",
-            "{\"protocolVersion\":1,\"registrationToken\":\""
+            "{\"protocolVersion\":"
+                + DaemonProtocol.VERSION
+                + ",\"registrationToken\":\""
                 + TOKEN
                 + "\",\"capabilityCatalogVersion\":\"999\"}"));
     assertTrue(
         helloRejected(
-            "channel-catalog-v3-mismatch",
-            "{\"protocolVersion\":1,\"registrationToken\":\""
-                + TOKEN
-                + "\",\"capabilityCatalogVersion\":\"3\"}"));
-    assertTrue(
-        helloRejected(
             "channel-unexpected-field",
-            "{\"protocolVersion\":1,\"registrationToken\":\""
+            "{\"protocolVersion\":"
+                + DaemonProtocol.VERSION
+                + ",\"registrationToken\":\""
                 + TOKEN
-                + "\",\"capabilityCatalogVersion\":\"1\",\"extra\":true}"));
+                + "\",\"capabilityCatalogVersion\":\""
+                + EnvironmentCapabilityCatalog.version()
+                + "\",\"extra\":true}"));
     assertTrue(
         helloRejected(
-            "channel-missing-token", "{\"protocolVersion\":1,\"capabilityCatalogVersion\":\"1\"}"));
+            "channel-missing-token",
+            "{\"protocolVersion\":"
+                + DaemonProtocol.VERSION
+                + ",\"capabilityCatalogVersion\":\""
+                + EnvironmentCapabilityCatalog.version()
+                + "\"}"));
   }
 
   /** 直接发送一个 HELLO 帧并返回该连接是否被协议错误关闭。 */

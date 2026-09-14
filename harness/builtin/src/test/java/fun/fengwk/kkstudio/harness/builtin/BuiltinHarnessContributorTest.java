@@ -378,7 +378,7 @@ class BuiltinHarnessContributorTest {
 
     ToolDescriptor descriptor = tool.definition().descriptor();
     assertEquals(toolName, descriptor.name());
-    // environment tool 的 model contract 版本跟随 capability descriptor 版本（workdir 能力为 "2"）。
+    // environment tool 的 model contract 版本跟随 capability descriptor 版本。
     EnvironmentCapabilityDescriptor capability = EnvironmentCapabilityCatalog.require(capabilityId);
     assertEquals(capability.version(), descriptor.version());
     assertEquals(toolName, descriptor.rendererKey());

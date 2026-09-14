@@ -70,7 +70,7 @@ harness-environment
 capabilityId / capabilityVersion / inputSchema / timeout
 ```
 
-[`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 的目录版本固定为 `"3"`。模型可见 descriptor 按确定性顺序维护 11 项原子能力：
+[`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 的目录版本固定为 `"1"`。模型可见 descriptor 按确定性顺序维护 11 项原子能力：
 
 ```text
 fs.read
@@ -95,7 +95,7 @@ skill.source.update
 mcp.local.discover
 ```
 
-需要目录的 coding/process/LSP 能力版本为 `WORKDIR_VERSION = "2"`（其中 `fs.read` 为支持 `column_offset` 与无损长行切片的 `FS_READ_VERSION = "3"`），schema 要求显式提供目标 Daemon 文件系统上的绝对 `workdir`。`skill.load` 的不兼容身份协议使用 `SKILL_LOAD_VERSION = "2"`，只接受 `{sourceId, name, revision}`。基础和管理能力使用 `VERSION = "1"`；三个来源管理能力共享同一冻结来源配置 schema，包含 `sourceId`、`sourceVersion`、`sourceSetVersion`、类型字段和 `activeSourceIds`。`mcp.local.call` 与 `mcp.local.discover` 接收各自的冻结 MCP 配置和调用/发现参数。四项管理能力都不接受 `workdir`。`EnvironmentCapabilityCatalog.requiresWorkdir(id)` 按 capability ID 判定，不能从版本号推断。
+所有 15 项能力描述符（11 项模型可见 + 4 项管理专用）统一使用单一基础版本 `VERSION = "1"`。需要目录的 coding/process/LSP 能力 schema 要求显式提供目标 Daemon 文件系统上的绝对 `workdir`；`skill.load` 接收 `{sourceId, name, revision}`；三个来源管理能力共享同一冻结来源配置 schema，包含 `sourceId`、`sourceVersion`、`sourceSetVersion`、类型字段和 `activeSourceIds`；`mcp.local.call` 与 `mcp.local.discover` 接收各自的冻结 MCP 配置和调用/发现参数。四项管理能力都不接受 `workdir`。`EnvironmentCapabilityCatalog.requiresWorkdir(id)` 按 capability ID 判定，不从版本号推断。
 
 能力描述符聚焦底层执行契约，独立于模型层的 Prompt 提示词、界面渲染、可见性或副作用标记。模型层调用由 Contributor 模块通过具体的 `Tool` 映射到对应的底层能力；Daemon 则依据相同的能力标识与版本注册本地执行实现。
 
@@ -159,7 +159,7 @@ invocationId? / sequence / payload
 握手与主执行时序：
 
 ```text
-Daemon -> HELLO(protocolVersion=3, registrationToken, catalog version=4)
+Daemon -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=1)
 Gateway -> WELCOME(environmentId)
 Daemon -> READY(capability descriptors)
 Daemon -> HEARTBEAT*
