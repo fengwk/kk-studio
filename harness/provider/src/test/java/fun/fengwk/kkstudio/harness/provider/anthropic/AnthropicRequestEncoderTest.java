@@ -694,9 +694,20 @@ class AnthropicRequestEncoderTest {
     assertFalse(offRoot.path("thinking").has("budget_tokens"));
     assertFalse(offRoot.has("output_config"));
 
-    // 4 态之外的 effort 在构造期即被拒绝，不可能到达编码器
+    // BUDGET 模式仅支持 low/medium/high，其他厂商自定义 effort 在编码阶段被拒绝
     for (String unsupportedEffort : List.of("xhigh", "max", "arbitrary", "ultra")) {
-      assertThrows(IllegalArgumentException.class, () -> new ModelVariant("v", unsupportedEffort));
+      ProviderRequest unsupportedRequest =
+          new ProviderRequest(
+              reasoningModel,
+              new ModelVariant("v", unsupportedEffort),
+              65536,
+              List.of(userMsg(new ProviderTextBlock("hi"))),
+              List.of(),
+              ProviderCacheControl.none());
+      ProviderException ex =
+          assertThrows(
+              ProviderException.class, () -> budgetEncoder.encode(unsupportedRequest, descriptor));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
     }
   }
 

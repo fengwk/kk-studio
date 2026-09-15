@@ -202,15 +202,15 @@ class OpenAiResponsesRequestEncoderTest {
     assertFalse(rootOff.path("reasoning").has("summary"));
     assertFalse(rootOff.has("include"));
 
-    // 2. effort = "high" -> emit reasoning:{effort:"high", summary:"auto"} and
+    // 2. 厂商定义值原样下发，并附带 summary 与 encrypted content
     // include:["reasoning.encrypted_content"]
-    ProviderRequest reqEnabled = request(new ModelVariant("v1", "high"));
+    ProviderRequest reqEnabled = request(new ModelVariant("v1", "xhigh"));
     JsonNode rootEnabled =
         MAPPER.readTree(
             encoder
                 .encode(reqEnabled, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
                 .bodyUtf8Bytes());
-    assertEquals("high", rootEnabled.path("reasoning").path("effort").asText());
+    assertEquals("xhigh", rootEnabled.path("reasoning").path("effort").asText());
     assertEquals("auto", rootEnabled.path("reasoning").path("summary").asText());
     assertEquals(1, rootEnabled.path("include").size());
     assertEquals("reasoning.encrypted_content", rootEnabled.path("include").get(0).asText());
@@ -224,11 +224,6 @@ class OpenAiResponsesRequestEncoderTest {
                 .bodyUtf8Bytes());
     assertFalse(rootNull.has("reasoning"));
     assertFalse(rootNull.has("include"));
-
-    // 4. 4 态之外的 effort 在构造期即被拒绝，不可能到达编码器
-    for (String unsupported : List.of("none", "minimal", "xhigh", "")) {
-      assertThrows(IllegalArgumentException.class, () -> new ModelVariant("v1", unsupported));
-    }
   }
 
   /** wire 根字段 model 始终取 ModelDescriptor.modelId，与逻辑名相互独立。 */

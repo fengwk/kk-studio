@@ -93,8 +93,8 @@ class ModelContractTest {
   }
 
   /**
-   * Variant 只承载 id 与可空 reasoningEffort：id 必须无前后空白且非空；effort 仅接受 4 个规范值，大小写与空白被归一化； {@code off}
-   * 是显式关闭、{@code null} 是不声明，二者绝不互相静默映射。
+   * Variant 只承载 id 与可空 reasoningEffort：id 必须无前后空白且非空；effort 为厂商自定义字符串，大小写与空白被归一化； 允许 max、xhigh
+   * 等任意非空且不超过 64 字符的值；空白与超长（>64）被拒绝；{@code off} 是显式关闭、{@code null} 是不声明，二者绝不互相静默映射。
    */
   @Test
   void enforcesVariantIdentityAndReasoningEffort() {
@@ -103,16 +103,20 @@ class ModelContractTest {
     assertEquals("high", new ModelVariant("default", "high").reasoningEffort());
     assertEquals("off", new ModelVariant("default", "off").reasoningEffort());
     assertEquals("off", new ModelVariant("default", "  OFF ").reasoningEffort());
+    assertEquals("max", new ModelVariant("default", "MAX").reasoningEffort());
+    assertEquals("xhigh", new ModelVariant("default", "  xHigh ").reasoningEffort());
     assertTrue(new ModelVariant("default", "off").reasoningOff());
     assertFalse(new ModelVariant("default").reasoningOff());
     assertFalse(new ModelVariant("default", "high").reasoningOff());
+    assertFalse(new ModelVariant("default", "max").reasoningOff());
 
     assertThrows(IllegalArgumentException.class, () -> new ModelVariant(" default "));
     assertThrows(IllegalArgumentException.class, () -> new ModelVariant(" "));
     assertThrows(IllegalArgumentException.class, () -> new ModelVariant(null));
-    assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", "none"));
-    assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", "extreme"));
+    assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", ""));
     assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", " "));
+    assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", "   "));
+    assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", "a".repeat(65)));
   }
 
   /** 不同 Provider 用量类别必须分别按其适用单价计费。 */

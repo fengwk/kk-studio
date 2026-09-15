@@ -185,7 +185,7 @@ describe('ai-resource-form-validation additional branches', () => {
     [model({ contextWindow: '0' }), 'contextWindow'],
     [model({ maxOutputTokens: '999999' }), 'maxOutputTokens'],
     [model({ modelId: '   ' }), 'modelId'],
-    [model({ reasoning: true, variants: [{ ...model().variants[0]!, reasoningEffort: 'invalid-effort' }] }), 'variants'],
+    [model({ reasoning: true, variants: [{ ...model().variants[0]!, reasoningEffort: 'a'.repeat(65) }] }), 'variants'],
     [model({ pricing: { ...model().pricing, inputPerMillionTokens: '-1' } }), 'pricing'],
   ] as Array<[ModelDraft, string]>)('maps invalid model body %# to %s', (modelDraft, field) => {
     const result = validate({ kind: 'model', mode: 'create' }, { modelDraft })

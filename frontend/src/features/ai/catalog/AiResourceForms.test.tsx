@@ -81,8 +81,10 @@ describe('AiResourceForms', () => {
     expect(secondNameInput).toHaveValue('variant-2')
     await user.clear(secondNameInput)
     await user.type(secondNameInput, 'creative')
-    await user.selectOptions(screen.getByLabelText('Reasoning Effort 2'), 'high')
-    expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('high')
+    const secondEffortInput = screen.getByLabelText('Reasoning Effort 2')
+    expect(secondEffortInput).toHaveAttribute('maxLength', '64')
+    await user.type(secondEffortInput, 'max')
+    expect(secondEffortInput).toHaveValue('max')
     expect(screen.getByDisplayValue('creative')).toBeInTheDocument()
 
     await selectFormOption(user, 'Default Variant', 'creative')
@@ -177,7 +179,7 @@ describe('AiResourceForms', () => {
     // 新增 variant 的思考强度默认为空（协议默认），且提示文案说明空值语义
     await user.click(screen.getByRole('button', { name: '添加 Variant' }))
     expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('')
-    expect(screen.getByText(/留空表示不覆盖 Provider 协议默认/)).toBeInTheDocument()
+    expect(screen.getByText(/留空保持 Provider 协议默认/)).toBeInTheDocument()
 
     await user.click(screen.getByLabelText('Reasoning'))
     expect(screen.queryByLabelText('Reasoning Effort 1')).not.toBeInTheDocument()

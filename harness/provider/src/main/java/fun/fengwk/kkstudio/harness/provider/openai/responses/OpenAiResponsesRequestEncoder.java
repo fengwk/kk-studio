@@ -142,7 +142,7 @@ final class OpenAiResponsesRequestEncoder {
 
   /**
    * reasoning effort 编码：{@code off} 映射为协议关闭值 {@code none}（仅发送 effort，不带 summary/encrypted content），
-   * {@code high/medium/low} 原样下发并请求摘要；null 不发送推理字段，由服务端默认决定。
+   * 其他厂商定义值原样下发并请求摘要；null 不发送推理字段，由服务端默认决定。
    */
   private static void applyReasoningParameters(ObjectNode root, ModelVariant variant) {
     if (variant == null || variant.reasoningEffort() == null) {

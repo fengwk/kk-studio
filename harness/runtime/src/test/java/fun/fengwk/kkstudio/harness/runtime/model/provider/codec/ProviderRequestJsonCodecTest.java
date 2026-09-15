@@ -300,7 +300,6 @@ class ProviderRequestJsonCodecTest {
         root ->
             model(root).set("providerName", NODES.numberNode(BigInteger.valueOf(Long.MAX_VALUE))));
     assertRejected(root -> ((ArrayNode) model(root).path("inputModalities")).removeAll());
-    assertRejected(root -> variant(root).put("reasoningEffort", "extreme"));
     assertRejected(root -> variant(root).put("reasoningEffort", 1));
     assertRejected(root -> variant(root).put("reasoningEffort", " "));
     assertRejected(root -> pricing(root).put("serviceTierMultiplier", "bad"));

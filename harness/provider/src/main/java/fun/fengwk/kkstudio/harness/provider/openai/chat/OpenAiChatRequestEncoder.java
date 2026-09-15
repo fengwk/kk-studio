@@ -119,9 +119,9 @@ final class OpenAiChatRequestEncoder {
   }
 
   /**
-   * reasoning effort 编码：未声明（null）表示不覆盖服务端默认，不发送任何推理字段；{@code off} 表示显式关闭推理，{@code high/medium/low}
-   * 表示对应强度。STANDARD 格式下显式关闭映射为本协议关闭值 {@code none}；DEEPSEEK 格式改用显式 {@code thinking} 开关，且仅在启用推理时附带
-   * {@code reasoning_effort}。非 reasoning 模型不发送推理字段。
+   * reasoning effort 编码：未声明（null）表示不覆盖服务端默认，不发送任何推理字段；{@code off} 表示显式关闭推理，其他厂商定义值原样下发。 STANDARD
+   * 格式下显式关闭映射为本协议关闭值 {@code none}；DEEPSEEK 格式改用显式 {@code thinking} 开关，且仅在启用推理时附带 {@code
+   * reasoning_effort}。非 reasoning 模型不发送推理字段。
    */
   private static void applyReasoningParameters(
       ObjectNode root,

@@ -243,10 +243,10 @@ class GeminiRequestEncoderTest {
     assertFalse(gen.has("stopSequences"));
   }
 
-  /** 验证 reasoning effort 正确映射到官方 thinkingConfig 的 thinkingLevel 与 includeThoughts。 */
+  /** 验证厂商定义的 reasoning effort 原样映射到 thinkingLevel。 */
   @Test
-  void encodesThinkingConfigLowMediumHigh() throws Exception {
-    for (String effort : List.of("low", "medium", "high")) {
+  void encodesProviderDefinedThinkingLevels() throws Exception {
+    for (String effort : List.of("low", "medium", "high", "max", "xhigh")) {
       ModelVariant variant = new ModelVariant("v-" + effort, effort);
       ProviderRequest request =
           new ProviderRequest(
@@ -290,14 +290,6 @@ class GeminiRequestEncoderTest {
     assertFalse(thinkingConfig.path("includeThoughts").asBoolean());
     assertEquals(0, thinkingConfig.path("thinkingBudget").asInt());
     assertFalse(thinkingConfig.has("thinkingLevel"));
-  }
-
-  /** 验证 4 态之外的 reasoning effort 在构造期即被拒绝，不可能到达编码器。 */
-  @Test
-  void rejectsUnknownReasoningEffort() {
-    for (String unsupported : List.of("extreme", "xhigh", "max", "none", "")) {
-      assertThrows(IllegalArgumentException.class, () -> new ModelVariant("v1", unsupported));
-    }
   }
 
   /** 验证当模型不支持推理且无 reasoning effort 时，不生成 thinkingConfig。 */

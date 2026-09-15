@@ -23,10 +23,6 @@ const AGENT_MODEL_MODALITIES: AgentModelInputModality[] = [
 ]
 const AGENT_MODEL_MODALITY_SET = new Set<string>(AGENT_MODEL_MODALITIES)
 
-/** 与后端 `ModelVariant.REASONING_EFFORTS` 一致的合法 reasoning effort 取值。 */
-export const REASONING_EFFORT_VALUES = ['high', 'medium', 'low', 'off'] as const
-const REASONING_EFFORTS = new Set<string>(REASONING_EFFORT_VALUES)
-
 /**
  * 新建 model 的默认 pricing 元数据。表单不展示这些字段；
  * 已有 model 保留其之前持久化的元数据。
@@ -173,10 +169,8 @@ function serializeVariants(
     const payload: AgentModelVariantDTO = { id }
     const reasoningEffort = variant.reasoningEffort.trim().toLowerCase()
     if (reasoningEnabled && reasoningEffort) {
-      if (!REASONING_EFFORTS.has(reasoningEffort)) {
-        throw new Error(
-          `variant ${id} reasoningEffort must be one of ${REASONING_EFFORT_VALUES.join('/')}`,
-        )
+      if (reasoningEffort.length > 64) {
+        throw new Error(`variant ${id} reasoningEffort must not exceed 64 characters`)
       }
       payload.reasoningEffort = reasoningEffort
     }

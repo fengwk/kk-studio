@@ -199,14 +199,14 @@ export function modelConfigMatrix() {
         }),
     },
     {
-      id: 'invalid.unknown_reasoning_effort',
+      id: 'invalid.oversized_reasoning_effort',
       ok: false,
       expectStatus: 400,
       messageIncludes: /reasoningEffort|variant/i,
-      title: 'reasoningEffort 非法取值',
+      title: 'reasoningEffort 超过长度限制',
       build: () =>
         baseModelConfig({
-          variants: [{ id: 'default', reasoningEffort: 'extreme' }],
+          variants: [{ id: 'default', reasoningEffort: 'x'.repeat(65) }],
         }),
     },
   ]

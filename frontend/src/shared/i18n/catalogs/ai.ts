@@ -421,6 +421,10 @@ export const aiCatalog = {
     'en-US': 'Reasoning Effort',
     'zh-CN': '思考强度',
   },
+  'ai.catalog.form.reasoningEffortPlaceholder': {
+    'en-US': 'e.g. high, max, off',
+    'zh-CN': '例如 high、max、off',
+  },
   'ai.catalog.form.reasoningEffortAria': {
     'en-US': 'Reasoning Effort',
     'zh-CN': 'Reasoning Effort',
@@ -500,9 +504,9 @@ export const aiCatalog = {
   },
   'ai.catalog.form.reasoningHint': {
     'en-US':
-      ' Leave empty to keep the provider protocol default; off = explicitly disable reasoning; high/medium/low map to the provider levels.',
+      ' Leave empty to keep provider protocol default; off = explicitly disable reasoning; provider-defined values (e.g. low, medium, high, max) are passed through.',
     'zh-CN':
-      ' 留空表示不覆盖 Provider 协议默认；off=显式关闭推理；high/medium/low 映射到厂商级别。',
+      ' 留空保持 Provider 协议默认；off=显式关闭推理；支持厂商自定义值（如 low、medium、high、max 等）。',
   },
   'ai.catalog.form.reasoningDisabledHint': {
     'en-US': ' To configure reasoning effort, enable Reasoning above first.',
@@ -574,8 +578,8 @@ export const aiCatalog = {
   },
   'ai.catalog.validation.reasoningEnabled': {
     'en-US':
-      'Reasoning effort must be high / medium / low / off; leave it empty to keep the provider default.',
-    'zh-CN': '思考强度只能为 high / medium / low / off；留空表示不覆盖 Provider 协议默认。',
+      'Reasoning effort must not exceed 64 characters; leave empty to keep provider default.',
+    'zh-CN': '思考强度不能超过 64 个字符；留空保持 Provider 协议默认。',
   },
   'ai.catalog.validation.variantRequired': {
     'en-US': 'Select a valid Variant',

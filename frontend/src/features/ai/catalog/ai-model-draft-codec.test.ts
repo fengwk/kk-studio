@@ -194,12 +194,50 @@ describe('ai-model-draft-codec', () => {
     )
     expect(() =>
       buildModelConfig(
-        draft({ reasoning: true, variants: [{ ...base, reasoningEffort: 'invalid-effort' }] }),
+        draft({ reasoning: true, variants: [{ ...base, reasoningEffort: 'a'.repeat(65) }] }),
       ),
-    ).toThrow(/reasoningEffort must be one of/)
+    ).toThrow(/reasoningEffort must not exceed 64 characters/)
     expect(() =>
       buildModelConfig(draft({ inputModalities: ['TEXT', 'TEXT'] })),
     ).toThrow('contains duplicate value')
+  })
+
+  /** 厂商自定义 reasoningEffort（如 max、xhigh）被正常保留并归一化小写，空白被省略。 */
+  it('accepts and normalizes arbitrary provider reasoning efforts like max and xhigh', () => {
+    const base = emptyModelDraft().variants[0]
+    const input = draft({
+      reasoning: true,
+      variants: [
+        { ...base, id: 'v1', reasoningEffort: '  MAX ' },
+        { ...base, id: 'v2', reasoningEffort: 'xHigh' },
+        { ...base, id: 'v3', reasoningEffort: '   ' },
+      ],
+      defaultVariant: 'v1',
+    })
+    const config = buildModelConfig(input)
+    expect(config.variants).toEqual([
+      { id: 'v1', reasoningEffort: 'max' },
+      { id: 'v2', reasoningEffort: 'xhigh' },
+      { id: 'v3' },
+    ])
+  })
+
+  /** 自定义 reasoningEffort 在 toModelDraft -> buildModelConfig 往返中完整保留。 */
+  it('round-trips custom reasoning effort across toModelDraft -> buildModelConfig', () => {
+    const source = model({
+      ...fullConfig(),
+      variants: [
+        { id: 'max-variant', reasoningEffort: 'max' },
+        { id: 'xhigh-variant', reasoningEffort: 'xhigh' },
+      ],
+      defaultVariant: 'max-variant',
+    })
+    const draftFromModel = toModelDraft(source)
+    const rebuilt = buildModelConfig(draftFromModel)
+    expect(rebuilt.variants).toEqual([
+      { id: 'max-variant', reasoningEffort: 'max' },
+      { id: 'xhigh-variant', reasoningEffort: 'xhigh' },
+    ])
   })
 
   /** 创建/更新 DTO 不使用字符串编码的 JSON 构建。 */

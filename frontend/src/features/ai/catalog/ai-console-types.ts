@@ -23,7 +23,7 @@ export interface VariantDraft {
   /** 仅客户端使用的 React key。 */
   draftId: string
   id: string
-  /** 合法取值 high/medium/low/off；空串表示协议默认。 */
+  /** 厂商定义的思考强度；off 表示显式关闭，空串表示协议默认。 */
   reasoningEffort: string
 }
 
