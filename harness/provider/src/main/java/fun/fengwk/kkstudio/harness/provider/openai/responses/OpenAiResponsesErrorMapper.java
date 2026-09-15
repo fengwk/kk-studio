@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.provider.openai.responses;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderErrorHelper;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportErrorKind;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -11,10 +12,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import java.util.Locale;
 
 /**
- * OpenAI Responses 异常映射与脱敏器。
+ * OpenAI Responses 异常映射器。
  *
- * <p>只读取 HTTP 状态码与 error envelope 中的 code/message/type 字段进行确定性分类， 绝不向外暴露原始 URL、API 密钥、响应
- * body、底层异常堆栈或敏感数据。
+ * <p>读取 HTTP 状态码与 error envelope 进行确定性分类，直接向外保留上游原始 HTTP 响应正文与完整 SSE error envelope， 绝不附加 request
+ * URI、请求标头、请求凭证或原始底层异常原因。
  */
 final class OpenAiResponsesErrorMapper {
 
@@ -30,7 +31,7 @@ final class OpenAiResponsesErrorMapper {
   private OpenAiResponsesErrorMapper() {}
 
   /**
-   * 将传输层异常转换为脱敏的 {@link ProviderException}。
+   * 将传输层异常转换为 {@link ProviderException}。
    *
    * @param exception 传输层异常
    * @return 映射后的 ProviderException；若为 CANCELLED、EXECUTOR_REJECTED 或 CALLBACK_FAILED 则返回 null 表示静默
@@ -39,9 +40,7 @@ final class OpenAiResponsesErrorMapper {
     if (exception == null) {
       return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
     }
-    if (exception.kind() == TransportErrorKind.CANCELLED
-        || exception.kind() == TransportErrorKind.EXECUTOR_REJECTED
-        || exception.kind() == TransportErrorKind.CALLBACK_FAILED) {
+    if (ProviderErrorHelper.isSilentTransportKind(exception.kind())) {
       return null;
     }
     if (exception.kind() == TransportErrorKind.TIMEOUT) {
@@ -57,43 +56,28 @@ final class OpenAiResponsesErrorMapper {
     if (exception.kind() == TransportErrorKind.HTTP_STATUS) {
       int status = exception.statusCode();
       String errorCodeOrType = extractErrorCodeOrType(exception.errorBodyBytes());
-      return mapStatusAndType(status, errorCodeOrType);
+      ProviderErrorKind kind = classify(status, errorCodeOrType);
+      String fallback = fallbackForKind(kind);
+      String message = ProviderErrorHelper.formatHttpErrorMessage(exception, fallback);
+      return new ProviderException(kind, message);
     }
     return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
   }
 
-  /** 将 SSE 接收到的 error 或 failed 事件 envelope 进行脱敏映射。 */
+  /** 将 SSE 接收到的 error 或 failed 事件 envelope 进行映射。 */
   static ProviderException mapSseErrorEnvelope(JsonNode errorEventNode) {
-    if (errorEventNode == null || !errorEventNode.isObject()) {
+    if (errorEventNode == null) {
       return new ProviderException(ProviderErrorKind.INVALID_RESPONSE, MSG_INVALID_RESPONSE);
     }
-    String codeOrType = null;
-    JsonNode errorNode = errorEventNode.get("error");
-    if (errorNode == null && errorEventNode.has("response")) {
-      JsonNode respNode = errorEventNode.get("response");
-      if (respNode.isObject() && respNode.has("error")) {
-        errorNode = respNode.get("error");
-      }
+    if (!errorEventNode.isObject()) {
+      return new ProviderException(ProviderErrorKind.INVALID_RESPONSE, errorEventNode.toString());
     }
-
-    if (errorNode != null && errorNode.isObject()) {
-      if (errorNode.has("code") && errorNode.get("code").isTextual()) {
-        codeOrType = errorNode.get("code").asText();
-      } else if (errorNode.has("type") && errorNode.get("type").isTextual()) {
-        codeOrType = errorNode.get("type").asText();
-      } else if (errorNode.has("message") && errorNode.get("message").isTextual()) {
-        codeOrType = errorNode.get("message").asText();
-      }
-    } else if (errorEventNode.has("code") && errorEventNode.get("code").isTextual()) {
-      codeOrType = errorEventNode.get("code").asText();
-    } else if (errorEventNode.has("type") && errorEventNode.get("type").isTextual()) {
-      codeOrType = errorEventNode.get("type").asText();
-    }
-
-    return mapStatusAndType(0, codeOrType);
+    String codeOrType = extractErrorCodeOrType(errorEventNode);
+    ProviderErrorKind kind = classify(0, codeOrType);
+    return new ProviderException(kind, errorEventNode.toString());
   }
 
-  private static ProviderException mapStatusAndType(int status, String codeOrType) {
+  private static ProviderErrorKind classify(int status, String codeOrType) {
     String lower = codeOrType != null ? codeOrType.toLowerCase(Locale.ROOT) : "";
 
     if (lower.contains("auth")
@@ -101,26 +85,26 @@ final class OpenAiResponsesErrorMapper {
         || lower.contains("api_key")
         || status == 401
         || status == 403) {
-      return new ProviderException(ProviderErrorKind.AUTHENTICATION, MSG_AUTH);
+      return ProviderErrorKind.AUTHENTICATION;
     }
     if (lower.contains("billing")
         || lower.contains("credit")
         || lower.contains("quota")
         || status == 402) {
-      return new ProviderException(ProviderErrorKind.BILLING, MSG_BILLING);
+      return ProviderErrorKind.BILLING;
     }
     if (lower.contains("context_length_exceeded")
         || lower.contains("model_context_window_exceeded")
         || lower.contains("tokens exceeded")
         || (lower.contains("context") && lower.contains("overflow"))) {
-      return new ProviderException(ProviderErrorKind.OVERFLOW, MSG_OVERFLOW);
+      return ProviderErrorKind.OVERFLOW;
     }
     if (lower.contains("request_too_large")
         || lower.contains("invalid_request")
         || status == 400
         || status == 413
         || status == 422) {
-      return new ProviderException(ProviderErrorKind.INVALID_REQUEST, MSG_INVALID_REQUEST);
+      return ProviderErrorKind.INVALID_REQUEST;
     }
     if (lower.contains("overloaded")
         || lower.contains("rate_limit")
@@ -128,15 +112,26 @@ final class OpenAiResponsesErrorMapper {
         || lower.contains("tokens exceeded")
         || status == 429
         || (status >= 500 && status <= 599)) {
-      return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
+      return ProviderErrorKind.TRANSIENT;
     }
     if (status >= 400 && status < 500) {
-      return new ProviderException(ProviderErrorKind.INVALID_REQUEST, MSG_INVALID_REQUEST);
+      return ProviderErrorKind.INVALID_REQUEST;
     }
     if (status >= 500) {
-      return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
+      return ProviderErrorKind.TRANSIENT;
     }
-    return new ProviderException(ProviderErrorKind.INVALID_RESPONSE, MSG_INVALID_RESPONSE);
+    return ProviderErrorKind.INVALID_RESPONSE;
+  }
+
+  private static String fallbackForKind(ProviderErrorKind kind) {
+    return switch (kind) {
+      case AUTHENTICATION -> MSG_AUTH;
+      case BILLING -> MSG_BILLING;
+      case OVERFLOW -> MSG_OVERFLOW;
+      case INVALID_REQUEST -> MSG_INVALID_REQUEST;
+      case TRANSIENT -> MSG_TRANSIENT;
+      case INVALID_RESPONSE, CANCELLED -> MSG_INVALID_RESPONSE;
+    };
   }
 
   private static String extractErrorCodeOrType(byte[] bodyBytes) {
@@ -145,28 +140,40 @@ final class OpenAiResponsesErrorMapper {
     }
     try {
       JsonNode node = OBJECT_MAPPER.readTree(bodyBytes);
-      if (node != null && node.isObject()) {
-        JsonNode errorNode = node.get("error");
-        if (errorNode != null && errorNode.isObject()) {
-          if (errorNode.has("code") && errorNode.get("code").isTextual()) {
-            return errorNode.get("code").asText();
-          }
-          if (errorNode.has("type") && errorNode.get("type").isTextual()) {
-            return errorNode.get("type").asText();
-          }
-          if (errorNode.has("message") && errorNode.get("message").isTextual()) {
-            return errorNode.get("message").asText();
-          }
-        }
-        if (node.has("code") && node.get("code").isTextual()) {
-          return node.get("code").asText();
-        }
-        if (node.has("type") && node.get("type").isTextual()) {
-          return node.get("type").asText();
-        }
-      }
+      return extractErrorCodeOrType(node);
     } catch (Exception ignored) {
-      // 保持脱敏，不打印非法响应
+      return null;
+    }
+  }
+
+  private static String extractErrorCodeOrType(JsonNode node) {
+    if (node == null || !node.isObject()) {
+      return null;
+    }
+    JsonNode errorNode = node.get("error");
+    if (errorNode == null && node.has("response")) {
+      JsonNode respNode = node.get("response");
+      if (respNode.isObject() && respNode.has("error")) {
+        errorNode = respNode.get("error");
+      }
+    }
+
+    if (errorNode != null && errorNode.isObject()) {
+      if (errorNode.has("code") && errorNode.get("code").isTextual()) {
+        return errorNode.get("code").asText();
+      }
+      if (errorNode.has("type") && errorNode.get("type").isTextual()) {
+        return errorNode.get("type").asText();
+      }
+      if (errorNode.has("message") && errorNode.get("message").isTextual()) {
+        return errorNode.get("message").asText();
+      }
+    }
+    if (node.has("code") && node.get("code").isTextual()) {
+      return node.get("code").asText();
+    }
+    if (node.has("type") && node.get("type").isTextual()) {
+      return node.get("type").asText();
     }
     return null;
   }

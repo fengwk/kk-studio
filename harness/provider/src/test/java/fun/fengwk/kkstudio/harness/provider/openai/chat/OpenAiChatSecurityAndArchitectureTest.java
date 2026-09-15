@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.AfterEach;
@@ -90,23 +92,25 @@ class OpenAiChatSecurityAndArchitectureTest {
   }
 
   @Test
-  @DisplayName("异常脱敏：绝不将敏感响应 body 或授权信息暴露在 ProviderException 中")
+  @DisplayName("错误透传与安全防护：完整保留上游响应 body，且绝不上抛请求凭证、内部 transport 消息与底层 cause")
   void testExceptionDoesNotLeakErrorBody() {
-    String sensitiveBody =
-        "{\"error\":{\"message\":\"Invalid authorization bearer sk-secret-abc-123456\",\"type\":\"invalid_request_error\"}}";
+    String upstreamBody =
+        "{\"error\":{\"message\":\"Invalid authorization fake-token-123456\",\"type\":\"invalid_request_error\"}}";
     TransportException tex =
         new TransportException(
             TransportErrorKind.HTTP_STATUS,
-            "status",
+            "internal transport failure with key fake-token-123456",
             401,
-            sensitiveBody.getBytes(StandardCharsets.UTF_8),
+            upstreamBody.getBytes(StandardCharsets.UTF_8),
+            false,
             null,
-            null);
+            new RuntimeException("underlying secret cause"));
 
     ProviderException pe = OpenAiChatErrorMapper.mapTransportException(tex);
     assertNotNull(pe);
-    assertFalse(pe.getMessage().contains("sk-secret"));
-    assertFalse(pe.getMessage().contains("123456"));
+    assertEquals("HTTP 401\n" + upstreamBody, pe.getMessage());
+    assertFalse(pe.getMessage().contains("internal transport failure"));
+    assertNull(pe.getCause());
   }
 
   @Test
