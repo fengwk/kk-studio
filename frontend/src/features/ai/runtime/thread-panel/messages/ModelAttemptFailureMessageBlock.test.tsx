@@ -100,4 +100,41 @@ describe('ModelAttemptFailureMessageBlock', () => {
       retryCountdownSeconds('2026-07-28T10:00:05Z', Date.parse('2026-07-28T10:00:05Z')),
     ).toBe(0)
   })
+
+  it('renders long (>128 chars) multiline JSON and HTML error text safely escaped and untruncated', () => {
+    // 验证超长多行 JSON、请求 ID 与 HTML 片段在 pre 中原样展示且不被解析为 HTML DOM
+    const rawError = [
+      'HTTP 400',
+      '{',
+      '  "error": {',
+      '    "message": "context length exceeded by 132450 tokens. 详情：上下文超限",',
+      '    "type": "invalid_request_error",',
+      '    "param": "messages.[4].content",',
+      '    "code": "context_length_exceeded",',
+      '    "request_id": "req_vendor_987654321_abc_xyz",',
+      '    "html_snippet": "<html><body><script>alert(\\"xss\\")</script>502 Gateway Error</body></html>"',
+      '  }',
+      '}',
+    ].join('\n')
+    expect(rawError.length).toBeGreaterThan(128)
+
+    const { container } = render(
+      <ModelAttemptFailureMessageBlock
+        message={message({
+          errorCode: 'INVALID_REQUEST',
+          errorMessage: rawError,
+        })}
+      />,
+    )
+
+    const errorPre = container.querySelector('.thread-error-raw')
+    expect(errorPre).not.toBeNull()
+    expect(errorPre?.textContent).toBe(rawError)
+    // 验证文本转义：HTML 字符串绝不能作为真实 DOM 元素挂载
+    expect(container.querySelector('script')).toBeNull()
+    expect(container.querySelector('html')).toBeNull()
+    expect(container.querySelector('body')).toBeNull()
+    expect(screen.getByText(/req_vendor_987654321_abc_xyz/)).toBeInTheDocument()
+    expect(screen.getByText(/messages\.\[4\]\.content/)).toBeInTheDocument()
+  })
 })
