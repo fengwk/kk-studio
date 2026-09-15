@@ -442,7 +442,10 @@ final class OpenAiResponsesRequestEncoder {
 
     JsonNode payload = replayState.payload();
     ArrayNode outputArray = extractOutputArray(payload);
-    validateReplayOutputAgainstDurable(outputArray, durableContents);
+    boolean replayUsable = validateReplayOutputAgainstDurable(outputArray, durableContents);
+    if (!replayUsable) {
+      return false;
+    }
 
     // 代际/前缀校验：失配回退到语义编码
     if (!replayState.affinity().equals(descriptor.affinity(requestedModel))) {
@@ -470,11 +473,22 @@ final class OpenAiResponsesRequestEncoder {
     return (ArrayNode) outputNode;
   }
 
-  private static void validateReplayOutputAgainstDurable(
+  /**
+   * 完成 native replay 的结构、白名单与 durable 一致性校验，并返回该 replay 是否可原位回放。
+   *
+   * <p>结构性损坏、与 durable 消息文本/工具调用矛盾、以及“有密文但无摘要”的 opaque reasoning 替换另一段 durable 思考，都属于必须在
+   * affinity/前缀校验之前失败的情形。唯一例外是无 {@code encrypted_content} 且没有任何可用摘要文本的空 reasoning
+   * 占位符：它是上游“原生推理不可用”的合法形态，本身不是损坏请求；当它无法承载 durable 语义思考时返回 {@code false}，由调用方回退语义编码，而不是让后续轮次永远失败。
+   */
+  private static boolean validateReplayOutputAgainstDurable(
       ArrayNode outputArray, List<ProviderContentBlock> durableContents) {
     StringBuilder replayText = new StringBuilder();
     StringBuilder replayThinking = new StringBuilder();
     List<ProviderToolCall> replayToolCalls = new ArrayList<>();
+    int reasoningItemCount = 0;
+    int emptyReasoningPlaceholderCount = 0;
+    // 仅当 replay 完全无法承载 durable 语义思考（所有 reasoning 都是空占位符）时才置位；其余不一致仍立即失败。
+    boolean replayCannotCarryThinkingFallback = false;
 
     for (JsonNode item : outputArray) {
       if (!item.isObject()) {
@@ -561,7 +575,7 @@ final class OpenAiResponsesRequestEncoder {
             }
             itemHasEncrypted = true;
           }
-          boolean itemHasSummary = false;
+          boolean itemHasUsableSummary = false;
           if (item.has("summary")) {
             JsonNode summary = item.get("summary");
             if (!summary.isArray()) {
@@ -587,14 +601,17 @@ final class OpenAiResponsesRequestEncoder {
                     ProviderErrorKind.INVALID_REQUEST,
                     "replay reasoning summary block must have string text");
               }
-              replayThinking.append(s.get("text").textValue());
-              itemHasSummary = true;
+              String summaryText = s.get("text").textValue();
+              replayThinking.append(summaryText);
+              if (!summaryText.isBlank()) {
+                itemHasUsableSummary = true;
+              }
             }
           }
-          if (!itemHasEncrypted && !itemHasSummary) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST,
-                "replay reasoning must contain either encrypted_content or non-empty summary");
+          reasoningItemCount++;
+          if (!itemHasEncrypted && !itemHasUsableSummary) {
+            // 无密文且无可用摘要文本：结构合法的空占位符（上游声明原生推理不可用），而不是损坏请求。
+            emptyReasoningPlaceholderCount++;
           }
         }
         case "function_call" -> {
@@ -669,9 +686,18 @@ final class OpenAiResponsesRequestEncoder {
     }
     if (!durableThinking.isEmpty()) {
       if (!replayThinking.toString().equals(durableThinking.toString())) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "replay thinking content mismatch with durable message thinking");
+        // 历史不完整 replay：全部 reasoning item 都是“无密文且无可用摘要”的空占位符时，replay 本身不具备
+        // 承载原生推理的能力——这属于上游未提供原生推理，而不是与 durable 思考相矛盾，必须回退语义编码而非让
+        // 后续轮次永远失败。含密文（opaque）或存在可用摘要文本时仍按失配拒绝。
+        if (replayThinking.isEmpty()
+            && reasoningItemCount > 0
+            && emptyReasoningPlaceholderCount == reasoningItemCount) {
+          replayCannotCarryThinkingFallback = true;
+        } else {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "replay thinking content mismatch with durable message thinking");
+        }
       }
     } else {
       if (!replayThinking.isEmpty()) {
@@ -696,6 +722,9 @@ final class OpenAiResponsesRequestEncoder {
             "replay tool call mismatch with durable tool call at index " + i);
       }
     }
+
+    // 全部结构、白名单与一致性强校验通过后，才允许把“无法承载 semantic thinking 的空占位符”判定为不可用回放。
+    return !replayCannotCarryThinkingFallback;
   }
 
   private static void validateAllowedFields(

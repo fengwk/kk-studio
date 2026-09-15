@@ -1,0 +1,24 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_empty_summary","model":"MiniMax-M2","status":"in_progress","output":[]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_empty_summary","type":"reasoning","summary":[]}}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"Weigh the tradeoffs of "}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"bounded replay repair"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","output_index":1,"content_index":0,"delta":"The fix is bounded."}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_empty_summary","type":"reasoning","summary":[]}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":1,"item":{"id":"msg_empty_summary","type":"message","role":"assistant","content":[{"type":"output_text","text":"The fix is bounded."}]}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_empty_summary","model":"MiniMax-M2","status":"completed","usage":{"input_tokens":100,"output_tokens":40,"total_tokens":140,"output_tokens_details":{"reasoning_tokens":20}},"output":[{"id":"rs_empty_summary","type":"reasoning","summary":[]},{"id":"msg_empty_summary","type":"message","role":"assistant","content":[{"type":"output_text","text":"The fix is bounded."}]}]}}
+
