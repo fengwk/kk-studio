@@ -103,8 +103,8 @@ describe('AssistantMessageBlock', () => {
     expect(screen.queryByText('…')).not.toBeInTheDocument()
   })
 
-  it('normalizes trailing whitespace and newlines from thinking text while preserving leading and internal blank lines', () => {
-    // 测试意图：只移除思考末尾空白，作者的缩进和内部段落结构必须保持原样。
+  it('normalizes trailing whitespace and newlines from thinking text while preserving paragraph structure', () => {
+    // 测试意图：移除思考末尾多余空白，内部段落结构经 Markdown 渲染为标准段落元素，消除冗余空行。
     const { container } = render(
       <AssistantMessageBlock
         message={message({
@@ -115,7 +115,38 @@ describe('AssistantMessageBlock', () => {
     )
     const thinkingEl = container.querySelector('.thread-thinking-text')
     expect(thinkingEl).not.toBeNull()
-    expect(thinkingEl?.textContent).toBe('  step 1\n\n  step 2')
+    const paragraphs = thinkingEl?.querySelectorAll('p')
+    expect(paragraphs).toHaveLength(2)
+    expect(paragraphs?.[0]?.textContent).toBe('step 1')
+    expect(paragraphs?.[1]?.textContent).toBe('step 2')
+  })
+
+  it('renders markdown thinking from triple newlines, bold, lists, and code without modifying raw error pre', () => {
+    // 测试意图：思考内容支持 Markdown 渲染（多空行折叠为段落、加粗、列表、代码块），同时保持 error 状态下 raw pre 不被转义。
+    const { container } = render(
+      <AssistantMessageBlock
+        message={message({
+          thinking: 'A\n\n\nB\n\n* item 1\n* item 2\n\n**bold logic**\n\n```ts\nconst x = 1;\n```',
+          text: 'raw error { "code": 500 }',
+          status: 'error',
+        })}
+      />,
+    )
+    const thinkingEl = container.querySelector('.thread-thinking-text')
+    expect(thinkingEl).not.toBeNull()
+    const paragraphs = thinkingEl?.querySelectorAll('p')
+    expect(paragraphs?.length).toBeGreaterThanOrEqual(2)
+    expect(paragraphs?.[0]?.textContent).toBe('A')
+    expect(paragraphs?.[1]?.textContent).toBe('B')
+    expect(thinkingEl?.querySelector('strong')?.textContent).toBe('bold logic')
+    expect(thinkingEl?.querySelectorAll('li')).toHaveLength(2)
+    expect(thinkingEl?.querySelector('.md-code-shell')).not.toBeNull()
+
+    // 错误正文 pre 原样保留未被 Markdown 篡改
+    const rawError = container.querySelector('.thread-error-raw')
+    expect(rawError).not.toBeNull()
+    expect(rawError?.tagName).toBe('PRE')
+    expect(rawError?.textContent).toBe('raw error { "code": 500 }')
   })
 
   it('does not render thinking block when thinking contains only whitespace or newlines', () => {
