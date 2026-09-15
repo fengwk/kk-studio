@@ -47,6 +47,7 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.harness.provider.ProviderErrorHelper</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.transport.HttpSseStreamExecution</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParser</include>

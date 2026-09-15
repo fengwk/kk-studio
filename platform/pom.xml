@@ -110,6 +110,10 @@
             <artifactId>apache-client</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+        <dependency>
             <groupId>fun.fengwk.convention4j</groupId>
             <artifactId>convention4j-spring-boot-starter-test</artifactId>
             <scope>test</scope>
@@ -168,6 +172,8 @@
                                     <includes>
                                         <include>fun/fengwk/kkstudio/platform/environment/gateway/EnvironmentDaemonGateway</include>
                                         <include>fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer*</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.model.ProviderInlineBlobReader*</include>
                                         <include>fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway</include>
                                         <include>fun/fengwk/kkstudio/platform/catalog/mcp/McpStableIds</include>
                                         <include>fun/fengwk/kkstudio/platform/catalog/mcp/discovery/McpInputSchemaConverter</include>

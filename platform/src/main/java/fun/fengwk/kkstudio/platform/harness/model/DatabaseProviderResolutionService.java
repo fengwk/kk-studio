@@ -141,8 +141,10 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
             request.model(),
             request.variant(),
             request.outputTokens(),
-            // 每次 attempt 物化 durable Resource：durable 请求只含 blobId/name/preview，media URL 仅存在于有效请求。
-            resourceMaterializer.materialize(request.messages(), request.model().inputModalities()),
+            // 每次 attempt 物化 durable Resource：durable 请求只含 blobId/name/preview，内联 media 仅存在于有效请求。
+            // 内联位置能力来自当前 adapter：协议或连接配置不支持的媒体一律退化为文本回退。
+            resourceMaterializer.materialize(
+                request.messages(), request.model().inputModalities(), adapter.mediaCapabilities()),
             request.tools(),
             normalizeCacheControl(request, promptCacheCapability));
     return new ResolvedExecution(

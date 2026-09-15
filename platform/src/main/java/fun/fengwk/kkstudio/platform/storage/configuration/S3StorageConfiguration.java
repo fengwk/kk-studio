@@ -205,11 +205,11 @@ public class S3StorageConfiguration {
         transactionManager);
   }
 
-  /** Provider attempt 的 Resource 物化端口（图片内联、其它媒体按需签名，瞬时 source 绝不持久化）。 */
+  /** Provider attempt 的 Resource 物化端口（支持的媒体有界内联为 Base64，绝不产生 URL，瞬时 source 绝不持久化）。 */
   @Bean
   public ProviderResourceMaterializer providerResourceMaterializer(
-      StorageBlobManager storageBlobManager, S3StorageService s3StorageService) {
-    return new ProviderResourceMaterializer(storageBlobManager, s3StorageService);
+      StorageBlobManager storageBlobManager, StorageBlobContentService blobContentService) {
+    return new ProviderResourceMaterializer(storageBlobManager, blobContentService);
   }
 
   /** Tool outcome 的 durable history 物化端口：瞬时 Resource 引用外部化为全局 blob 后进入 history。 */

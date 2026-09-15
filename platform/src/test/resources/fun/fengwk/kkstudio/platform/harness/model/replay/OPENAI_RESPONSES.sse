@@ -1,0 +1,6 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"response"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"response","status":"completed","output":[{"id":"reasoning","type":"reasoning","encrypted_content":"opaque-encrypted","summary":[{"type":"summary_text","text":"synthetic reasoning"}]},{"id":"message","type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic answer"}]}]}}
+

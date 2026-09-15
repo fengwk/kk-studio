@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
@@ -36,6 +37,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMediaCapabilities;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
@@ -51,8 +54,11 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.math.BigDecimal;
 import java.util.EnumSet;
@@ -915,14 +921,121 @@ class DatabaseProviderResolutionServiceTest {
     assertEquals(ProviderCacheControl.none(), resolved.effectiveRequest().cacheControl());
   }
 
+  // ---------- adapter 内联媒体能力 ----------
+
+  /** 意图：resolve 必须把当前 adapter 声明的内联媒体能力传入物化边界，让模型模态与位置能力共同决定是否内联；否则资源 只能在文本回退与媒体块之间做出与协议无关的错误选择。 */
+  @Test
+  void resolveMaterializesUserResourceUsingAdapterMediaCapabilities() {
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    UUID blobId = new UUID(0L, 1L);
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setMediaType("image/png");
+    blob.setSizeBytes(3L);
+    blob.setState(StorageBlobState.ACTIVE);
+    when(blobManager.getBlob(blobId)).thenReturn(blob);
+    when(contentService.readBlobContent(
+            blobId, ProviderInlineBlobReader.Limits.DEFAULT.maxBlobBytes()))
+        .thenReturn(new StorageBlobContent(blobId, new byte[] {0, 1, 2}, "image/png", 3L));
+    ProviderMediaCapabilities capabilities =
+        new ProviderMediaCapabilities(
+            Set.of(ModelInputModality.IMAGE), Set.of(ModelInputModality.IMAGE));
+    ProviderAdapter adapter = adapter(ProviderType.OPENAI, mock(ModelProvider.class), capabilities);
+    DatabaseProviderResolutionService resolution =
+        resolution(
+            blobManager,
+            contentService,
+            new ProviderFactories(
+                List.of(
+                    factory(
+                        ProviderType.OPENAI,
+                        PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+                        adapter))));
+    ProviderRequest persisted =
+        request(
+            ProviderCacheControl.none(),
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER,
+                    List.of(new ProviderResourceBlock(blobId, "scan.png", "tiny")))),
+            List.of(),
+            Set.of(ModelInputModality.IMAGE));
+
+    ProviderResolutionService.ResolvedExecution resolved =
+        resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted);
+
+    ProviderImageBlock image =
+        assertInstanceOf(
+            ProviderImageBlock.class,
+            resolved.effectiveRequest().messages().get(0).contents().get(0));
+    assertEquals("data:image/png;base64,AAEC", image.source());
+  }
+
+  /** 意图：adapter 未声明能力时 Resource 必须是确定性文本回退，且不读取任何存储内容。 */
+  @Test
+  void resolveFallsBackToTextWhenAdapterDeclaresNoMediaCapability() {
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    UUID blobId = new UUID(0L, 1L);
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setMediaType("image/png");
+    blob.setSizeBytes(3L);
+    blob.setState(StorageBlobState.ACTIVE);
+    when(blobManager.getBlob(blobId)).thenReturn(blob);
+    DatabaseProviderResolutionService resolution =
+        resolution(
+            blobManager,
+            contentService,
+            new ProviderFactories(
+                List.of(
+                    factory(
+                        ProviderType.OPENAI,
+                        PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+                        adapter(ProviderType.OPENAI, mock(ModelProvider.class))))));
+    ProviderRequest persisted =
+        request(
+            ProviderCacheControl.none(),
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER,
+                    List.of(new ProviderResourceBlock(blobId, "scan.png", "tiny")))),
+            List.of(),
+            Set.of(ModelInputModality.IMAGE));
+
+    ProviderResolutionService.ResolvedExecution resolved =
+        resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted);
+
+    ProviderTextBlock fallback =
+        assertInstanceOf(
+            ProviderTextBlock.class,
+            resolved.effectiveRequest().messages().get(0).contents().get(0));
+    assertTrue(fallback.text().contains("blobId: " + blobId), fallback.text());
+    verify(contentService, never()).readBlobContent(any(), anyLong());
+    verify(blobManager, never()).presignOriginalUrl(any());
+  }
+
   // ---------- 测试基座 ----------
 
   private DatabaseProviderResolutionService resolution(ProviderFactory... factories) {
-    ProviderResourceMaterializer materializer =
-        new ProviderResourceMaterializer(
-            mock(StorageBlobManager.class), mock(S3StorageService.class));
+    return resolution(
+        mock(StorageBlobManager.class),
+        mock(StorageBlobContentService.class),
+        new ProviderFactories(List.of(factories)));
+  }
+
+  private DatabaseProviderResolutionService resolution(
+      StorageBlobManager blobManager,
+      StorageBlobContentService contentService,
+      ProviderFactories factories) {
     return new DatabaseProviderResolutionService(
-        repository, configurationCodec, new ProviderFactories(List.of(factories)), materializer);
+        repository,
+        configurationCodec,
+        factories,
+        new ProviderResourceMaterializer(blobManager, contentService));
   }
 
   private static ProviderFactory openAiFactory(PromptCacheCapability capability) {
@@ -941,8 +1054,18 @@ class DatabaseProviderResolutionServiceTest {
   }
 
   private static ProviderAdapter adapter(ProviderType type, ModelProvider modelProvider) {
+    return adapter(type, modelProvider, ProviderMediaCapabilities.NONE);
+  }
+
+  /**
+   * 测试意图：显式声明 adapter 的内联媒体能力，避免 mock 默认返回 {@link ProviderMediaCapabilities#NONE}
+   * 造成物化路径静默退化为文本，从而掩盖真实断言。
+   */
+  private static ProviderAdapter adapter(
+      ProviderType type, ModelProvider modelProvider, ProviderMediaCapabilities mediaCapabilities) {
     ProviderAdapter adapter = mock(ProviderAdapter.class);
     when(adapter.providerType()).thenReturn(type);
+    when(adapter.mediaCapabilities()).thenReturn(mediaCapabilities);
     when(adapter.create(any(ProviderDescriptor.class))).thenReturn(modelProvider);
     return adapter;
   }
@@ -966,12 +1089,20 @@ class DatabaseProviderResolutionServiceTest {
       ProviderCacheControl cacheControl,
       List<ProviderMessage> messages,
       List<ProviderToolDefinition> tools) {
+    return request(cacheControl, messages, tools, Set.of(ModelInputModality.TEXT));
+  }
+
+  private static ProviderRequest request(
+      ProviderCacheControl cacheControl,
+      List<ProviderMessage> messages,
+      List<ProviderToolDefinition> tools,
+      Set<ModelInputModality> inputModalities) {
     return new ProviderRequest(
         new ModelDescriptor(
             PROVIDER_NAME,
             "model",
             "model",
-            Set.of(ModelInputModality.TEXT),
+            inputModalities,
             false,
             false,
             new ModelPricing(
