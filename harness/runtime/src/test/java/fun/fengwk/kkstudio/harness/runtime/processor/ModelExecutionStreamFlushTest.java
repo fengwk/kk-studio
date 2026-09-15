@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
@@ -83,6 +84,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -151,7 +153,10 @@ class ModelExecutionStreamFlushTest {
     }
   }
 
-  /** 意图：量化验证容量足够时，1/100/1000 条 delta 在同一窗口内都保持 flush 前零 UPDATE、flush 后单 UPDATE。 */
+  /**
+   * 意图：量化验证容量足够时，1/100/1000 条 delta 在同一窗口内都保持 flush 前零数据库开销（零事务、零行锁、零 UPDATE）、flush 后单事务单
+   * UPDATE，且全部 N 条已提交 delta 仅通过一次批量派发发布、sequence 完整且严格递增。
+   */
   @Test
   void oneHundredAndThousandDeltasWithinOneWindowFlushWithSingleUpdate() {
     for (int eventCount : List.of(1, 100, 1000)) {
@@ -169,12 +174,34 @@ class ModelExecutionStreamFlushTest {
       }
       assertEquals(1, scheduleCount.get());
       assertEquals(0, fixture.store.modelInvocationUpdateCount());
+      assertEquals(
+          0,
+          fixture.store.transactionCount(),
+          eventCount + " buffered deltas must not open any transaction");
+      assertEquals(0, fixture.store.modelInvocationLockCount());
+      assertEquals(0, fixture.store.claimedWorkLockCount());
       assertTrue(fixture.sink.deltas().isEmpty());
+      assertEquals(0, fixture.sink.appendCalls());
+      assertEquals(0, fixture.sink.appendAllCalls());
 
       capturedTask.get().run();
       assertEquals(1, fixture.store.modelInvocationUpdateCount());
+      assertEquals(
+          1,
+          fixture.store.transactionCount(),
+          eventCount + " deltas must flush inside exactly one transaction");
+      assertEquals(1, fixture.store.modelInvocationLockCount());
+      assertEquals(1, fixture.store.claimedWorkLockCount());
       assertEquals(eventCount, fixture.sink.deltas().size());
       assertEquals(eventCount, fixture.currentModel().streamCheckpoint().text().length());
+      // 单次已提交有界批次只派发一次批量发布，而不是 N 次单条发布；顺序保持 1..N
+      assertEquals(
+          1, fixture.sink.appendAllCalls(), "one committed batch must dispatch one appendAll");
+      assertEquals(0, fixture.sink.appendCalls(), "committed deltas must not use per-event append");
+      List<RealtimeEvent.ModelDelta> deltas = fixture.sink.deltas();
+      for (int i = 0; i < deltas.size(); i++) {
+        assertEquals(i + 1, deltas.get(i).sequence());
+      }
       fixture.processor.close();
     }
   }
@@ -528,16 +555,22 @@ class ModelExecutionStreamFlushTest {
     assertEquals(2, deltas.get(1).sequence());
   }
 
-  /** 意图：验证 Claim Loss 竞态下（以合法锁序删除 MODEL work），未提交或事务失败的批次绝对不发布。 */
+  /**
+   * 意图：验证 Claim Loss 竞态下（以合法锁序删除 MODEL work），缓冲中的 delta 既不写库也不发布， 检测只在下一个围栏边界发生：fenced flush 失败即以
+   * LOST 收敛为 abandon，缓冲事件整体丢弃。
+   */
   @Test
   void claimLossAtFencingSuppressesPublicationAndAbandons() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
-    // 进 batch 1 个事件（未刷）
+    // 进 batch 1 个事件（未刷）：per-delta 零数据库开销
     fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("first"));
     assertEquals(0, fixture.store.modelInvocationUpdateCount());
+    assertEquals(0, fixture.store.transactionCount(), "buffered delta must not open a transaction");
+    assertEquals(0, fixture.store.modelInvocationLockCount());
+    assertEquals(0, fixture.store.claimedWorkLockCount());
     assertTrue(fixture.sink.deltas().isEmpty());
 
     // 模拟 claim lost（按合法锁序：先锁 Thread，再删除 MODEL work）
@@ -551,12 +584,220 @@ class ModelExecutionStreamFlushTest {
               return null;
             });
 
-    // 再次发送事件触发 fence
+    // 第 2 个事件到达容量上界，触发 fenced flush（该边界重新校验 RUNNING + attempt + claimed lease）
     fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("second"));
 
     // 校验：fence 失败，绝不发布任何未提交 delta，execution 安全收敛为 abandoned
     assertTrue(fixture.sink.deltas().isEmpty(), "claim loss must not publish uncommitted delta");
     assertTrue(fixture.execution.abandoned(), "execution must be abandoned on claim loss");
+  }
+
+  /**
+   * 意图：验证 lease 丢失（Stop / 另一实例 recovery 后 MODEL Work 被删除）发生在定时器、容量与 terminal 三个提交边界之前时， 缓冲 delta
+   * 一律不发布、不写库，durable 行保持 RUNNING 供 lease recovery 收敛。 这是「围栏只在提交边界重校验」的安全性证据：检测时机从 per-delta
+   * 后移到边界，但任何边界都绝不放行失去所有权的批次。
+   */
+  @Test
+  void leaseLossBeforeTimerCapacityAndTerminalNeverPublishesBufferedDeltas() {
+    assertLeaseLossBoundary("timer", (fixture, timerTask) -> timerTask.run());
+    assertLeaseLossBoundary(
+        "capacity", (fixture, timerTask) -> fixture.listener().onEvent(delta("second")));
+    assertLeaseLossBoundary(
+        "terminal", (fixture, timerTask) -> fixture.listener().onSucceeded(response("first")));
+  }
+
+  /**
+   * 意图：验证 attempt 已被另一 attempt 接管（durable RUNNING attempt 前进）时，定时器、容量与 terminal 三个提交边界都会因 attempt
+   * 不匹配而拒绝提交，缓冲 delta 零发布、零写入。
+   */
+  @Test
+  void attemptChangeBeforeTimerCapacityAndTerminalNeverPublishesBufferedDeltas() {
+    assertAttemptChangeBoundary("timer", (fixture, timerTask) -> timerTask.run());
+    assertAttemptChangeBoundary(
+        "capacity", (fixture, timerTask) -> fixture.listener().onEvent(delta("second")));
+    assertAttemptChangeBoundary(
+        "terminal", (fixture, timerTask) -> fixture.listener().onSucceeded(response("first")));
+  }
+
+  /** 意图：验证本地取消（Stop / cancel 到 abandon）后，任何缓冲 delta 都绝不发布、绝不写库：围栏与心跳共享同一 abandon 收敛路径。 */
+  @Test
+  void cancellationBeforeFlushDiscardsBufferedDeltasWithoutWrites() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+    Fixture fixture = createFixture(flushConfig, NO_RETRY);
+    fixture.start();
+
+    fixture.listener().onEvent(delta("first"));
+    assertEquals(0, fixture.store.transactionCount(), "buffered delta must not touch the store");
+
+    fixture.processor.cancel(fixture.invocationId);
+    fixture.store.resetUpdateCount();
+
+    // 取消后到达的容量边界与后续 delta 都必须 no-op
+    fixture.listener().onEvent(delta("second"));
+    fixture.listener().onSucceeded(response("firstsecond"));
+
+    assertEquals(0, fixture.store.transactionCount(), "cancelled execution must not write");
+    assertEquals(0, fixture.store.modelInvocationUpdateCount());
+    assertEquals(0, fixture.sink.appendAllCalls());
+    assertTrue(fixture.sink.deltas().isEmpty(), "cancelled execution must not publish");
+    assertEquals(ModelInvocationStatus.RUNNING, fixture.currentModel().status());
+  }
+
+  /**
+   * 意图：验证 terminal 补齐 gap 时产生的大量 delta 严格按 {@link StreamFlushConfig} 上界分块批量派发： 每个分块恰好一次 {@code
+   * appendAll}，全部 sequence 连续且保序，既不是 N 次单条发布，也不是一次无界批量调用。
+   */
+  @Test
+  void terminalGapDeltasAreDispatchedInBoundedBatchesPreservingOrder() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+    Fixture fixture = createFixture(flushConfig, NO_RETRY, requestWithTool());
+    fixture.start();
+
+    // 流中不产生任何 delta，terminal 一次补齐 text gap + 5 个 tool gap = 6 条
+    List<ProviderToolCall> toolCalls =
+        List.of(
+            new ProviderToolCall("call_1", "bash", "{}"),
+            new ProviderToolCall("call_2", "bash", "{}"),
+            new ProviderToolCall("call_3", "bash", "{}"),
+            new ProviderToolCall("call_4", "bash", "{}"),
+            new ProviderToolCall("call_5", "bash", "{}"));
+    fixture.listener().onSucceeded(response("answer", toolCalls, GenerationStopReason.COMPLETE));
+
+    assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
+    assertEquals(6, fixture.sink.deltas().size(), "terminal must publish every gap delta");
+    assertEquals(
+        List.of(2, 2, 2),
+        fixture.sink.batchSizes(),
+        "gap deltas must be dispatched in bounded chunks of maxEvents");
+    assertEquals(3, fixture.sink.appendAllCalls());
+    assertEquals(0, fixture.sink.appendCalls(), "committed deltas must not use per-event append");
+    for (int i = 0; i < 6; i++) {
+      assertEquals(i + 1, fixture.sink.deltas().get(i).sequence());
+    }
+  }
+
+  /**
+   * 意图：验证批量发布的分块失败隔离语义：单个分块抛错只丢弃该分块及其之后的投影，已成功投递的前缀保持投递， 且 durable 终态与调用方返回值完全不受影响（best-effort）。
+   */
+  @Test
+  void publishChunkFailureIsIsolatedAndDoesNotChangeTerminal() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+    Fixture fixture = createFixture(flushConfig, NO_RETRY);
+    fixture.start();
+
+    // 第 2 个分块（sequence 3,4）失败；第 1 个分块（sequence 1,2）必须先成功投递
+    fixture.sink.failAppendAllOnCall.set(2);
+    for (int i = 0; i < 4; i++) {
+      fixture.listener().onEvent(delta("d" + i));
+    }
+
+    // durable checkpoint 仍在运行期内正确推进，不受投影失败影响
+    assertEquals(ModelInvocationStatus.RUNNING, fixture.currentModel().status());
+    assertEquals(4, fixture.currentModel().streamCheckpoint().sequence());
+    assertEquals(2, fixture.sink.appendAllCalls());
+    assertEquals(List.of(2, 2), fixture.sink.batchSizes());
+    List<RealtimeEvent.ModelDelta> deltas = fixture.sink.deltas();
+    assertEquals(2, deltas.size(), "only the successful chunk prefix is delivered");
+    assertEquals(1, deltas.get(0).sequence());
+    assertEquals(2, deltas.get(1).sequence());
+
+    // 后续 terminal 仍必须成功收敛为 durable SUCCEEDED
+    fixture.listener().onSucceeded(response("d0d1d2d3"));
+    assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
+    assertEquals("d0d1d2d3", fixture.currentModel().result().text());
+  }
+
+  /** lease 丢失边界断言：缓冲 1 条 delta 后删除 MODEL Work，再触发指定边界，断言零发布、零写入且 durable 保持 RUNNING。 */
+  private void assertLeaseLossBoundary(String boundary, BiConsumer<Fixture, Runnable> trigger) {
+    Fixture fixture = boundaryFixture();
+    fixture
+        .store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+              tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+              return null;
+            });
+    fixture.store.resetUpdateCount();
+
+    trigger.accept(fixture, fixture.capturedTimerTask);
+
+    assertFenceRejectedWithoutWrites(fixture, "lease loss before " + boundary);
+  }
+
+  /** attempt 不匹配边界断言：缓冲 1 条 delta 后把 durable attempt 推进到 2，再触发边界，断言零发布、零写入。 */
+  private void assertAttemptChangeBoundary(String boundary, BiConsumer<Fixture, Runnable> trigger) {
+    Fixture fixture = boundaryFixture();
+    advanceToSecondAttempt(fixture);
+    fixture.store.resetUpdateCount();
+
+    trigger.accept(fixture, fixture.capturedTimerTask);
+
+    assertFenceRejectedWithoutWrites(fixture, "attempt change before " + boundary);
+  }
+
+  private void assertFenceRejectedWithoutWrites(Fixture fixture, String scenario) {
+    assertEquals(0, fixture.store.modelInvocationUpdateCount(), scenario + ": must not UPDATE");
+    assertEquals(0, fixture.sink.appendAllCalls(), scenario + ": must not dispatch appendAll");
+    assertEquals(0, fixture.sink.appendCalls(), scenario + ": must not dispatch append");
+    assertTrue(fixture.sink.deltas().isEmpty(), scenario + ": must not publish buffered delta");
+    assertTrue(fixture.execution.abandoned(), scenario + ": execution must be abandoned");
+    assertEquals(
+        ModelInvocationStatus.RUNNING,
+        fixture.currentModel().status(),
+        scenario + ": durable row must stay RUNNING for lease recovery");
+    assertTrue(fixture.handle.isCancelled(), scenario + ": handle must be cancelled");
+  }
+
+  /** 带受控 timer 的 fixture：缓冲 1 条 delta（未达 maxEvents=2），并暴露被捕获的 timer 任务。 */
+  private Fixture boundaryFixture() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMillis(100), 2, 1024 * 1024);
+    AtomicInteger scheduleCount = new AtomicInteger();
+    AtomicReference<Runnable> capturedTask = new AtomicReference<>();
+    ScheduledExecutorService controlledScheduler =
+        createControlledScheduler(scheduleCount, capturedTask);
+    Fixture fixture = createFixture(flushConfig, NO_RETRY, controlledScheduler, Runnable::run);
+    fixture.start();
+
+    fixture.listener().onEvent(delta("first"));
+    assertEquals(1, scheduleCount.get(), "first buffered delta must schedule the batch timer");
+    assertEquals(0, fixture.store.transactionCount(), "buffered delta must not touch the store");
+    fixture.capturedTimerTask = capturedTask.get();
+    assertNotNull(fixture.capturedTimerTask);
+    return fixture;
+  }
+
+  /**
+   * 以合法状态机把 durable 行推进到 RUNNING attempt=2，模拟同一 invocation 已被下一次 attempt 接管： RUNNING(1) -> READY(1,
+   * retry) -> DISPATCHING -> RUNNING(2)。
+   *
+   * <p>Store 的 {@code updateModelInvocation} 始终以**已存储行**为基准调用 {@code validateTransition}，
+   * 因此每一步合法转换都必须单独 update 落地，不能只把局部表达式拆开。
+   */
+  private static void advanceToSecondAttempt(Fixture fixture) {
+    fixture
+        .store
+        .delegate()
+        .transaction(
+            tx -> {
+              tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+              ModelInvocation model = tx.lockModelInvocation(fixture.invocationId).orElseThrow();
+              ModelInvocationError error =
+                  new ModelInvocationError(ProviderErrorKind.TRANSIENT, "superseded");
+              model =
+                  model.retryReady(new ModelAttemptFailure(1, 0L, "", "", error, NOW, NOW), NOW);
+              tx.updateModelInvocation(model);
+              model = model.beginDispatch(NOW);
+              tx.updateModelInvocation(model);
+              model = model.markRunning(NOW);
+              tx.updateModelInvocation(model);
+              return null;
+            });
+  }
+
+  private static ProviderStreamEvent delta(String text) {
+    return new ProviderStreamEvent.TextDelta(text);
   }
 
   /**
@@ -1393,12 +1634,12 @@ class ModelExecutionStreamFlushTest {
   }
 
   /**
-   * 意图：验证 timer rejection CAS 竞态：terminal callback CAS claim 后阻塞在 drainLock，此时执行 rejecting timer 为
-   * stale no-op，释放 drainLock 后 terminal 顺利落地为 durable SUCCEEDED。
+   * 意图：验证单 drain owner 覆盖 post-commit publish：批次已提交并正在发布（drainLock 被持有）时， terminal 信号只能先 CAS 再将
+   * durable 提交排在 publish 之后；此时仍指向上一代际的 timer 必须是 no-op，绝不 abandon 正在被 terminal 收敛的 execution。
    */
   @Test
   void timerRejectionAfterTerminalClaimIsStaleNoOpAndDoesNotBlockTerminalCommit() throws Exception {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMillis(100), 10, 1024 * 1024);
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMillis(100), 2, 1024 * 1024);
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
@@ -1438,31 +1679,24 @@ class ModelExecutionStreamFlushTest {
           throw new RejectedExecutionException("flush executor busy");
         };
 
-    CountDownLatch holdDrainLockLatch = new CountDownLatch(1);
-    CountDownLatch insideDrainLockLatch = new CountDownLatch(1);
-    AtomicBoolean shouldBlockTransaction = new AtomicBoolean(false);
-
-    HarnessStore controlledStore =
-        (HarnessStore)
-            Proxy.newProxyInstance(
-                HarnessStore.class.getClassLoader(),
-                new Class<?>[] {HarnessStore.class},
-                (proxy, method, args) -> {
-                  if ("transaction".equals(method.getName()) && shouldBlockTransaction.get()) {
-                    insideDrainLockLatch.countDown();
-                    try {
-                      holdDrainLockLatch.await(5, TimeUnit.SECONDS);
-                    } catch (InterruptedException e) {
-                      Thread.currentThread().interrupt();
-                    }
-                  }
-                  return method.invoke(store, args);
-                });
+    CountDownLatch publishingLatch = new CountDownLatch(1);
+    CountDownLatch releasePublishLatch = new CountDownLatch(1);
+    sink.blockingHook =
+        delta -> {
+          if (delta.sequence() == 2) {
+            publishingLatch.countDown();
+            try {
+              releasePublishLatch.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException error) {
+              Thread.currentThread().interrupt();
+            }
+          }
+        };
 
     FakeHandle handle = new FakeHandle();
     ModelExecution execution =
         new ModelExecution(
-            controlledStore,
+            store,
             sink,
             claim,
             baseline.threadId(),
@@ -1492,13 +1726,12 @@ class ModelExecutionStreamFlushTest {
     assertTrue(scheduledLatch.await(1, TimeUnit.SECONDS));
     assertNotNull(capturedTimerTask.get());
 
-    // 2. 启动异步线程 T1 发送第二个事件，并在其持住 drainLock 时阻断
-    shouldBlockTransaction.set(true);
+    // 2. 启动异步线程 T1 发送第二个事件：到达 maxEvents 触发容量 flush，提交成功后阻塞在 post-commit publish
     ExecutorService asyncExecutor = Executors.newFixedThreadPool(2);
     executorsToClose.add(asyncExecutor);
 
     asyncExecutor.submit(() -> execution.onEvent(new ProviderStreamEvent.TextDelta(" world")));
-    assertTrue(insideDrainLockLatch.await(2, TimeUnit.SECONDS));
+    assertTrue(publishingLatch.await(5, TimeUnit.SECONDS));
 
     // 3. 在 drainLock 正被 T1 持有时，启动异步线程 T2 调用 onSucceeded：
     //    T2 首先成功原子完成 terminal.compareAndSet(false, true)，随后阻塞在 drainLock.lock()
@@ -1518,14 +1751,20 @@ class ModelExecutionStreamFlushTest {
                     || t2Holder[0].getState() == Thread.State.BLOCKED),
         Duration.ofSeconds(2));
 
-    // 4. 此时 terminal 已经 CAS 为 true，执行 rejecting timer：应当由于 terminal 已被 claim 判定为 stale no-op，绝不
-    // abandon！
+    // 4. 此时 terminal 已经 CAS 为 true，而 timer 仍指向已被容量 flush 推进的旧代际：必须是 no-op，绝不 abandon！
     capturedTimerTask.get().run();
-    assertFalse(execution.abandoned(), "timer rejection after terminal claim must be stale no-op");
+    assertFalse(execution.abandoned(), "stale timer after terminal claim must be no-op");
+    assertEquals(
+        ModelInvocationStatus.RUNNING,
+        store
+            .delegate()
+            .transaction(tx -> tx.findModelInvocation(invocationId))
+            .orElseThrow()
+            .status(),
+        "terminal must not commit before the in-flight publish completes");
 
-    // 5. 释放 T1，让 T1 退出 drainLock，T2 随后获取 drainLock 并成功落地 SUCCEEDED
-    shouldBlockTransaction.set(false);
-    holdDrainLockLatch.countDown();
+    // 5. 释放 T1 的 publish，T2 随后获取 drainLock 并成功落地 SUCCEEDED
+    releasePublishLatch.countDown();
     await(
         () ->
             store
@@ -1534,12 +1773,17 @@ class ModelExecutionStreamFlushTest {
                 .orElseThrow()
                 .status()
                 .isTerminal(),
-        Duration.ofSeconds(2));
+        Duration.ofSeconds(5));
 
     ModelInvocation finalModel =
         store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
     assertEquals(
         ModelInvocationStatus.SUCCEEDED, finalModel.status(), "terminal must commit successfully");
+    // 容量 flush 已将 2 条 delta 按序提交并发布；final text 与累积文本一致，因此 terminal 不产生 gap delta
+    List<RealtimeEvent.ModelDelta> deltas = sink.deltas();
+    assertEquals(2, deltas.size());
+    assertEquals(1, deltas.get(0).sequence());
+    assertEquals(2, deltas.get(1).sequence());
   }
 
   /** 意图：验证已失效旧代际 timer 遭遇 executor rejection 时，为 stale no-op，不误伤当前批。 */
@@ -2025,6 +2269,7 @@ class ModelExecutionStreamFlushTest {
     final StreamFlushConfig flushConfig;
     final FakeHandle handle = new FakeHandle();
     ModelExecution execution;
+    Runnable capturedTimerTask;
 
     Fixture(
         CountingStore store,
@@ -2292,10 +2537,22 @@ class ModelExecutionStreamFlushTest {
     }
   }
 
+  /**
+   * 记录型 sink：既能统计单条 {@code append}，也能统计批量 {@link #appendAll} 的调用次数与每次批量大小，用于断言「N 个已提交 delta
+   * 恰好一次批量派发、而不是 N 次单条发布」。
+   *
+   * <p>覆写 {@code appendAll} 但保持与默认实现等价的逐条语义，保证既覆盖批量路径，也不改变 observable 顺序。
+   */
   private static final class RecordingSink implements RealtimeEventSink {
     private final List<RealtimeEvent.ModelDelta> deltas = new CopyOnWriteArrayList<>();
     private final AtomicReference<String> threadRecord;
+    private final AtomicInteger appendCalls = new AtomicInteger();
+    private final AtomicInteger appendAllCalls = new AtomicInteger();
+    private final List<Integer> batchSizes = new CopyOnWriteArrayList<>();
     volatile Consumer<RealtimeEvent.ModelDelta> blockingHook;
+
+    /** 第 N 次 {@code appendAll} 调用（1-based）抛错；0 表示不注入失败。 */
+    final AtomicInteger failAppendAllOnCall = new AtomicInteger();
 
     RecordingSink() {
       this(null);
@@ -2307,6 +2564,23 @@ class ModelExecutionStreamFlushTest {
 
     @Override
     public void append(RealtimeEvent event) {
+      appendCalls.incrementAndGet();
+      record(event);
+    }
+
+    @Override
+    public void appendAll(List<RealtimeEvent> events) {
+      int call = appendAllCalls.incrementAndGet();
+      batchSizes.add(events.size());
+      if (failAppendAllOnCall.get() == call) {
+        throw new IllegalStateException("notification channel unavailable on call " + call);
+      }
+      for (RealtimeEvent event : events) {
+        record(event);
+      }
+    }
+
+    private void record(RealtimeEvent event) {
       if (threadRecord != null) {
         threadRecord.set(Thread.currentThread().getName());
       }
@@ -2321,12 +2595,33 @@ class ModelExecutionStreamFlushTest {
     List<RealtimeEvent.ModelDelta> deltas() {
       return List.copyOf(deltas);
     }
+
+    int appendCalls() {
+      return appendCalls.get();
+    }
+
+    int appendAllCalls() {
+      return appendAllCalls.get();
+    }
+
+    List<Integer> batchSizes() {
+      return List.copyOf(batchSizes);
+    }
   }
 
-  /** 测试专用 Store 代理：拦截 updateModelInvocation 并进行精确调用计数与失败注入，同时解包异常保证 delegate 原样抛出。 */
+  /**
+   * 测试专用 Store 代理：精确计数事务、行锁查询（{@code lockModelInvocation} / {@code lockClaimedWork}）与 {@code
+   * updateModelInvocation}（对应真实实现中的 UPDATE / SELECT ... FOR UPDATE SQL 次数），并支持失败注入，同时解包异常保证
+   * delegate 原样抛出。
+   *
+   * <p>只统计 UPDATE 次数不足以证明「每个 buffered delta 零数据库开销」：必须同时证明零事务、零行锁查询、零 SQL 执行。
+   */
   static final class CountingStore implements HarnessStore {
     private final InMemoryHarnessStore delegate;
     private final AtomicInteger modelInvocationUpdateCount = new AtomicInteger();
+    private final AtomicInteger transactionCount = new AtomicInteger();
+    private final AtomicInteger modelInvocationLockCount = new AtomicInteger();
+    private final AtomicInteger claimedWorkLockCount = new AtomicInteger();
     private final AtomicReference<String> threadRecord;
     volatile RuntimeException updateInvocationFailure;
     volatile RuntimeException transactionFailure;
@@ -2348,8 +2643,23 @@ class ModelExecutionStreamFlushTest {
       return modelInvocationUpdateCount.get();
     }
 
+    int transactionCount() {
+      return transactionCount.get();
+    }
+
+    int modelInvocationLockCount() {
+      return modelInvocationLockCount.get();
+    }
+
+    int claimedWorkLockCount() {
+      return claimedWorkLockCount.get();
+    }
+
     void resetUpdateCount() {
       modelInvocationUpdateCount.set(0);
+      transactionCount.set(0);
+      modelInvocationLockCount.set(0);
+      claimedWorkLockCount.set(0);
     }
 
     @Override
@@ -2357,6 +2667,7 @@ class ModelExecutionStreamFlushTest {
       if (transactionFailure != null) {
         throw transactionFailure;
       }
+      transactionCount.incrementAndGet();
       return delegate.transaction(
           tx -> {
             Transaction proxyTx =
@@ -2373,6 +2684,10 @@ class ModelExecutionStreamFlushTest {
                             if (updateInvocationFailure != null) {
                               throw updateInvocationFailure;
                             }
+                          } else if ("lockModelInvocation".equals(method.getName())) {
+                            modelInvocationLockCount.incrementAndGet();
+                          } else if ("lockClaimedWork".equals(method.getName())) {
+                            claimedWorkLockCount.incrementAndGet();
                           }
                           try {
                             return method.invoke(tx, args);
