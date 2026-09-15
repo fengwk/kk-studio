@@ -60,9 +60,12 @@ public final class ProviderResourceMaterializer {
     Objects.requireNonNull(inputModalities, "inputModalities");
     List<ProviderMessage> result = new ArrayList<>(messages.size());
     for (ProviderMessage message : messages) {
+      // 物化只替换 Resource 块：assistant 的 native replay state 必须原样穿过本边界（本类不解析其 payload）。
       result.add(
           new ProviderMessage(
-              message.role(), materializeContents(message.contents(), inputModalities)));
+              message.role(),
+              materializeContents(message.contents(), inputModalities),
+              message.replayState()));
     }
     return List.copyOf(result);
   }
