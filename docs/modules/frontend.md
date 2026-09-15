@@ -371,8 +371,8 @@ sequenceDiagram
   `MODEL_DELTA`/`TOOL_PARTIAL`。MODEL delta 只接受
   `TEXT_DELTA`、`THINKING_DELTA`、`TOOL_CALL_DELTA`，按连续 sequence 追加；
   tool partial 按 `thread:invocation:attempt` 做有界精确去重。
-- `useHarnessThreadRealtime` 即时消费并归约每条 delta 到 refs 中，以保证 sequence
-  连续性校验、缺口检测（gap recovery）与去重指纹的微秒级准确；React model/tool
+- `useHarnessThreadRealtime` 即时消费并归约每条 delta 到 refs 中，使 sequence
+  连续性校验、缺口检测（gap recovery）与去重不依赖 React 刷新时机；React model/tool
   overlay 发布合并至单个 `requestAnimationFrame` 执行，每帧发布当前累积的全部内容，
   绝不进行字符级缓动或打字机延时。流式期间通过 cheap identity check 避免对每条 delta
   重复解析快照 JSON。

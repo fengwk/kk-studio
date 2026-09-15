@@ -282,7 +282,7 @@ flowchart TD
 - 认领到有效的 MODEL Work 后，从冻结的 Spec 物化中立的 ProviderRequest；
 - 将持久化状态从 `READY` 跃迁为 `DISPATCHING`，启动租约心跳，随后调用外部 Gateway；
 - 外部网关返回 `Started` 状态后，本地事务将状态更新为 `RUNNING`，随后调用 `activate` 打开回调门控；
-- 流式增量由 `ModelExecution` 有界聚合，timer 只在共享 scheduler 上计时并将实际 flush 投递到独立 executor；批次提交后在提交边界重校验所有权，再通过 RealtimeSink 按 sequence 有界分块批量广播；
+- 流式增量由 `ModelExecution` 有界聚合，timer 只在共享 scheduler 上计时并将实际 flush 投递到独立 executor；在批次事务内重校验所有权，提交成功后再通过 RealtimeSink 按 sequence 有界分块批量广播；
 - 终态结果或错误信息与未刷安全 partial 合并为一次 Invocation UPDATE，并在同一事务内触发 THREAD Work 调度请求；
 - 对于租约已过期的 `DISPATCHING` 或 `RUNNING` 任务，状态统一收敛为 `UNKNOWN`，不执行重放以防止重复调用。
 
