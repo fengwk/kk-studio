@@ -77,4 +77,56 @@ describe('ThreadEventDetail', () => {
     expect(document.querySelector('.thread-event-detail-rows')).toBeNull()
     expect(document.querySelector('.thread-event-detail-payload')).not.toBeNull()
   })
+
+  it('renders long (>128 chars) multiline JSON error details and full rawJson payload untruncated in debug view', () => {
+    // 意图：验证 /debug 详情面板中，结构化详情行与 rawJson 区域完整展示超长多行原始错误体（含请求 ID、供应商错误码、自定义参数），即使摘要在列表中被截断，详情区仍全量可见
+    const rawError = [
+      'HTTP 400',
+      '{',
+      '  "error": {',
+      '    "message": "upstream context length exceeded: tokens=145000 max=128000. 详情：超过上下文限制",',
+      '    "type": "invalid_request_error",',
+      '    "param": "prompt_tokens",',
+      '    "code": "context_exceeded",',
+      '    "request_id": "req_debug_trace_8877665544_vendor_xyz"',
+      '  }',
+      '}',
+    ].join('\n')
+    expect(rawError.length).toBeGreaterThan(128)
+
+    const rawJson = JSON.stringify(
+      {
+        attempt: 1,
+        sequence: '0',
+        error: {
+          code: 'HTTP_400',
+          message: rawError,
+        },
+      },
+      null,
+      2,
+    )
+
+    const record = createRecord({
+      kind: 'MODEL_ATTEMPT_FAILURE',
+      title: 'MODEL_ATTEMPT_FAILURE',
+      summary: 'attempt 1 · HTTP_400', // 列表预览摘要仅简短文字
+      details: [
+        { label: '错误代码', value: 'HTTP_400' },
+        { label: '错误信息', value: rawError },
+      ],
+      rawJson,
+    })
+
+    const { container } = render(<ThreadEventDetail record={record} onClose={vi.fn()} />)
+
+    // 验证 dl/dd 中结构化呈现未被截断的超长错误信息
+    expect(screen.getByText('错误信息')).toBeInTheDocument()
+    const ddElements = container.querySelectorAll('dd')
+    expect(ddElements[1]?.textContent).toBe(rawError)
+
+    // 验证 pre 区域精确呈现 rawJson
+    const payloadPre = container.querySelector('.thread-event-detail-payload')
+    expect(payloadPre?.textContent).toBe(record.rawJson)
+  })
 })
